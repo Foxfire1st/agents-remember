@@ -435,6 +435,33 @@ export interface ReviewSubmission {
   none_is_approval: boolean;
 }
 
+// One attempt's recorded judgment about one record (MIK-R43): a history row that is a
+// step. `effect` is absent only for a changed family row written before the effect
+// label became required, which reads `effect not recorded`; `revision` is absent only
+// for the same rows, which read `family revision not recorded`.
+export interface RecordedMeaningStep {
+  attempt: number;
+  row_id: string;
+  history_path: string;
+  closed: boolean;
+  reason: string;
+  effect?: string;
+  revision?: number;
+}
+// One record's answer (MIK-R43): its steps in attempt order, or why there are none.
+// `detail` is the `none` text for `none`, the unavailable reason for `unavailable`.
+export interface RecordMeaningEffects {
+  record: string;
+  kind: 'invariant' | 'family';
+  state: 'steps' | 'none' | 'unavailable';
+  detail: string;
+  steps: RecordedMeaningStep[];
+}
+// The steps field of one subject review (MIK-R43): every covered record's answer.
+export interface ReviewMeaningEffects {
+  records: RecordMeaningEffects[];
+}
+
 export interface ReviewPayload {
   surface_version: string;
   candidate: ReviewCandidateRef;
@@ -453,6 +480,14 @@ export interface ReviewPayload {
   // and it is never shown as `no_family_recorded`, which asserts the recorded scope was read and
   // held no family.
   family_context?: ReviewFamilyContext;
+  // The recorded effect of this leaf's meaning changes (MIK-R43): the steps of the
+  // selected record and of the families and members the family context returns, in
+  // attempt order, or why there are none. Absent means the body did not come from a
+  // current build of this route (a capture recorded before this field existed, a
+  // hand-written body): that is its own fact and the workspace renders it as a
+  // failure. It is never shown as `none`, which asserts the recorded history was
+  // read and held no step.
+  meaning_effects?: ReviewMeaningEffects;
   staleness: ReviewStaleness;
   submission: ReviewSubmission;
   // The one bounded collection this response rendered as a page of (ICR-R10). `null` -- or absent on
@@ -702,10 +737,20 @@ export interface ReviewEntry {
 }
 
 export type ReviewOutlineChange = 'added' | 'removed' | 'changed' | 'unchanged' | 'unknown';
+// One outline row's recorded effects (MIK-R43): the labels in attempt order and the
+// rule-8 state. `labels` holds display tokens -- effect labels, or `effect not
+// recorded` for an old family row. Absent on captures predating the field: those rows
+// show no badge, because an effect no answer measured must not be claimed.
+export interface ReviewOutlineMeaning {
+  state: 'steps' | 'none' | 'unavailable';
+  labels: string[];
+  detail?: string;
+}
 export interface ReviewOutlineMember {
   selector_id: string;
   id: string;
   membership: 'both' | 'joined' | 'left';
+  meaning?: ReviewOutlineMeaning;
 }
 export interface ReviewOutlineFamily {
   selector_id: string;
@@ -713,12 +758,14 @@ export interface ReviewOutlineFamily {
   title: string;
   change: ReviewOutlineChange;
   members: ReviewOutlineMember[];
+  meaning?: ReviewOutlineMeaning;
 }
 export interface ReviewOutlineInvariant {
   selector_id: string;
   id: string;
   summary: string;
   change: ReviewOutlineChange;
+  meaning?: ReviewOutlineMeaning;
 }
 export interface ReviewOutline {
   state: 'outlined' | 'unavailable';

@@ -24,6 +24,7 @@ from __future__ import annotations
 from agents_remember.models.base import ResponseEnvelope
 from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import ServerInfoResponse
+from agents_remember.models.direct_execution_grant import DirectExecutionGrantResponse
 from agents_remember.models.direct_landing import DirectLandingResponse
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceResponse
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
@@ -163,6 +164,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "curator_coherence": CuratorCoherenceResponse,
     "closeout_queue": CloseoutQueueResponse,
     "direct_landing": DirectLandingResponse,
+    "direct_execution_grant": DirectExecutionGrantResponse,
     "lifecycle_gate_internal": InternalLifecycleGateResponse,
     "gate_create": GateCreateResponse,
     "gate_decide_internal": InternalGateDecideResponse,

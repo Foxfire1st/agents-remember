@@ -132,13 +132,19 @@ def test_a_sprint_that_lost_its_last_master_is_read_as_a_sprint_by_every_tool(wo
             repo_name=REPOSITORY,
             coordination_root=world.coord,
             workflow_kind="light-task",
-            memory_mode="disabled",
+            memory_mode="external",
         ),
         code=RepoBranchPlan(
             repo_path=world.code,
             source_branch="main",
             work_branch="ar/another-task",
             base_commit=world.base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=world.memory,
+            source_branch="main",
+            work_branch="ar/another-task",
+            base_commit=world.memory_base,
         ),
     )
     owned = {

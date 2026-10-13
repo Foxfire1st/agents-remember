@@ -250,6 +250,7 @@ consumers = [
   "mcp/tests/test_paseo_install_no_stop.py",
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_role_agents.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -261,6 +262,7 @@ consumers = [
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_structural_dispatch_recovery.py",
   "mcp/tests/test_tool_answer_log.py",
@@ -334,6 +336,7 @@ consumers = [
   "mcp/tests/test_review_family_context_population.py",
   "mcp/tests/test_review_family_member_sources.py",
   "mcp/tests/test_review_intent_summary.py",
+  "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
@@ -386,6 +389,7 @@ consumers = [
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
+  "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_tool_entry_point_valid_progression.py",
 ]
 
@@ -507,6 +511,7 @@ consumers = [
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_closeout_queue_abandoned_rows.py",
   "mcp/tests/test_compact_content.py",
+  "mcp/tests/test_completed_direct_landing_disposition.py",
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_converted_onboarding_drift.py",
@@ -514,8 +519,11 @@ consumers = [
   "mcp/tests/test_curator_coherence_closed_out.py",
   "mcp/tests/test_curator_coherence_file_transport.py",
   "mcp/tests/test_curator_review_assessment_publication.py",
+  "mcp/tests/test_direct_execution_grants.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_direct_landing_leaf_identity.py",
+  "mcp/tests/test_direct_leaf_integration_refusal.py",
+  "mcp/tests/test_direct_leaf_role_start.py",
   "mcp/tests/test_emptied_sprint.py",
   "mcp/tests/test_evidence_dependency_bounds.py",
   "mcp/tests/test_integration_branch_authority.py",
@@ -525,6 +533,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_landing_report.py",
   "mcp/tests/test_leaf_agent_archive.py",
   "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_lifecycle_finalize.py",
@@ -542,6 +551,7 @@ consumers = [
   "mcp/tests/test_memory_opt_out_refused_start.py",
   "mcp/tests/test_memory_quality_coherence_takeover.py",
   "mcp/tests/test_missing_master_tool_answers.py",
+  "mcp/tests/test_no_grant_closeout_parity.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_pause_stop_only_end_to_end.py",
   "mcp/tests/test_post_integration_cleanup_guidance.py",
@@ -564,6 +574,7 @@ consumers = [
   "mcp/tests/test_sprint_archive_custody.py",
   "mcp/tests/test_sprint_archive_phases.py",
   "mcp/tests/test_standalone_master_retirement.py",
+  "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_reopen_series_extension.py",
@@ -866,6 +877,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -889,6 +901,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -912,6 +925,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -935,6 +949,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -958,6 +973,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -981,6 +997,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -1004,6 +1021,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -1027,6 +1045,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -1050,8 +1069,45 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l43_l37_attempt-1.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_review_meaning_effects.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "rows for INV-9NCBGQSY, INV-1XKX9ERN and FAM-7B6N3Y4Q extracted from the real 260928-MIK-L37 history file at memory base ec67a42ff210cdccbc3696ee628881aa220d9476"
+introduced_by = "260928-MIK-L43"
+lifetime = "permanent"
+permanence_rationale = "The L37 real-case regression reads these rows as the packet's recorded sequences."
+replacement_contract = "node:mcp/tests/test_review_meaning_effects.py::test_the_l37_sequences_from_the_real_history_files"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_review_meaning_effects.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/l43_l37_attempt-2.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/test_review_meaning_effects.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "rows for INV-9NCBGQSY, INV-1XKX9ERN and FAM-7B6N3Y4Q extracted from the real 260928-MIK-L37-attempt-2 history file at memory base ec67a42ff210cdccbc3696ee628881aa220d9476"
+introduced_by = "260928-MIK-L43"
+lifetime = "permanent"
+permanence_rationale = "The L37 real-case regression reads these rows as the packet's recorded sequences."
+replacement_contract = "node:mcp/tests/test_review_meaning_effects.py::test_the_l37_sequences_from_the_real_history_files"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_review_meaning_effects.py",
 ]
 
 [[artifact]]
@@ -1177,6 +1233,7 @@ consumers = [
   "mcp/tests/test_cold_start.py",
   "mcp/tests/test_compact_content.py",
   "mcp/tests/test_comparison_changeset.py",
+  "mcp/tests/test_completed_direct_landing_disposition.py",
   "mcp/tests/test_completion_relay_single_owner.py",
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_packet.py",
@@ -1211,8 +1268,12 @@ consumers = [
   "mcp/tests/test_dependency_facts_store.py",
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
   "mcp/tests/test_developer_question_wording.py",
+  "mcp/tests/test_direct_execution_grant_dashboard.py",
+  "mcp/tests/test_direct_execution_grants.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_direct_landing_leaf_identity.py",
+  "mcp/tests/test_direct_leaf_integration_refusal.py",
+  "mcp/tests/test_direct_leaf_role_start.py",
   "mcp/tests/test_dispatch_agent_ambient.py",
   "mcp/tests/test_dispatch_brief.py",
   "mcp/tests/test_durable_store_contract.py",
@@ -1300,6 +1361,7 @@ consumers = [
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
@@ -1337,6 +1399,7 @@ consumers = [
   "mcp/tests/test_knowledge_worklist.py",
   "mcp/tests/test_knowledge_worklist_leaf.py",
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_landing_report.py",
   "mcp/tests/test_landing_unreadable_inputs.py",
   "mcp/tests/test_layering.py",
   "mcp/tests/test_leaf_agent_archive.py",
@@ -1384,6 +1447,7 @@ consumers = [
   "mcp/tests/test_models.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_next_step_address_binding.py",
+  "mcp/tests/test_no_grant_closeout_parity.py",
   "mcp/tests/test_notes_folder.py",
   "mcp/tests/test_observer.py",
   "mcp/tests/test_observer_no_computed_counter.py",
@@ -1405,6 +1469,7 @@ consumers = [
   "mcp/tests/test_paseo_launch_repeat.py",
   "mcp/tests/test_paseo_no_harness_name.py",
   "mcp/tests/test_paseo_node.py",
+  "mcp/tests/test_paseo_role_agents.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -1472,6 +1537,7 @@ consumers = [
   "mcp/tests/test_review_git_trees.py",
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_limit_wording.py",
+  "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_review_route_refusals.py",
@@ -1492,6 +1558,8 @@ consumers = [
   "mcp/tests/test_role_instruction_corpus.py",
   "mcp/tests/test_role_instruction_wording.py",
   "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_role_message_files.py",
+  "mcp/tests/test_role_message_wording.py",
   "mcp/tests/test_role_report.py",
   "mcp/tests/test_role_single_server.py",
   "mcp/tests/test_role_start_set.py",
@@ -1527,6 +1595,7 @@ consumers = [
   "mcp/tests/test_suite_load_independence.py",
   "mcp/tests/test_sync_dashboard.py",
   "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_sync_reapply_merge.py",
   "mcp/tests/test_sync_runtime.py",
   "mcp/tests/test_sync_scripts.py",
   "mcp/tests/test_task_decision_product_records.py",
@@ -1542,6 +1611,7 @@ consumers = [
   "mcp/tests/test_task_execution_topology.py",
   "mcp/tests/test_task_execution_topology_segments.py",
   "mcp/tests/test_task_intent_identity.py",
+  "mcp/tests/test_task_page_skeleton_projection.py",
   "mcp/tests/test_task_projection.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_reopen_series_extension.py",
@@ -1787,6 +1857,7 @@ consumers = [
   "mcp/tests/test_knowledge_index_inserts.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
+  "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
 ]
 
@@ -1839,6 +1910,7 @@ consumers = [
   "mcp/tests/test_knowledge_views.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
@@ -1947,6 +2019,7 @@ consumers = [
   "mcp/tests/test_review_family_context_population.py",
   "mcp/tests/test_review_family_member_sources.py",
   "mcp/tests/test_review_intent_summary.py",
+  "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
@@ -1976,6 +2049,7 @@ consumers = [
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
 ]
@@ -2061,6 +2135,7 @@ consumers = [
   "mcp/tests/test_enclosure_adoption.py",
   "mcp/tests/test_enclosure_adoption_in_place.py",
   "mcp/tests/test_enclosure_without_remains.py",
+  "mcp/tests/test_master_retirement_readiness.py",
   "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_reopen_series_extension.py",
@@ -2113,10 +2188,10 @@ owner = "paseo-launch-given-to-agent-cases"
 category = "unit-regression"
 fidelity = "in-process"
 cadence = "affected"
-source_version_or_generator = "the expectations of what one launch gives its agent, derived in the test from the launch fixture alone: the handover artifact and the first message that names it, the tool-server definition with its binding variables, and the recovery note"
+source_version_or_generator = "a hand-written stand-in for the bridge's calls to the Paseo runtime (`FakeRuntime` and its catalog), which records every call and keeps the agents and workspaces a runtime would hold, and the expectations of what one launch gives its agent, derived in the test from the launch fixture alone: the handover artifact and the first message that names it, the tool-server definition with its binding variables, and the recovery note"
 introduced_by = "261001-PNT-L5"
 lifetime = "permanent"
-permanence_rationale = "What a launch gives an agent is asserted for every role class through the dispatch route, and each expectation is built from the fixture independently of the launch code, so that a change to that code cannot move both sides at once. It is a module of its own because the launch test module would exceed the file-size limit with it; the modules that build on the launch fixture inherit it from there."
+permanence_rationale = "What a launch gives an agent is asserted for every role class through the dispatch route, and each expectation is built from the fixture independently of the launch code, so that a change to that code cannot move both sides at once. The stand-in is the one runtime every launch, status and document-chat case runs against, so a case judges a launch by what the runtime holds afterwards. Both are in a module of their own because the launch test module would exceed the file-size limit with them; the modules that build on the launch fixture inherit them from there."
 replacement_contract = "contract:paseo-launch-given-to-agent-cases"
 consumer_scope = "exact"
 consumers = [
@@ -2132,6 +2207,7 @@ consumers = [
   "mcp/tests/test_paseo_status.py",
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_role_document_chats.py",
+  "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_start_set.py",
 ]
 
@@ -2164,6 +2240,7 @@ consumers = [
   "mcp/tests/test_paseo_install_no_stop.py",
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_role_agents.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -2174,6 +2251,7 @@ consumers = [
   "mcp/tests/test_previous_host_removed.py",
   "mcp/tests/test_role_document_chats.py",
   "mcp/tests/test_role_launch_routes.py",
+  "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_start_set.py",
 ]
 

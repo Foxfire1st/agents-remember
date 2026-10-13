@@ -11,7 +11,7 @@ const architect: DocumentAgent = { agentId: "architect", workspaceId: "projects"
 const worker: DocumentAgent = { agentId: "worker", workspaceId: "leaf-workspace", archivedAt: null, createdAt: "2026-01-02", labels: { "ar.role": "worker", "ar.task-ref": "repo/master/leaf.json" } };
 
 describe("the document's native chat and the shared bound launcher", () => {
-  it("keeps an unreadable host distinct from no agent and offers the shared Retry notice", async () => {
+  it("keeps an unreadable host distinct from no agent and offers Retry in one line", async () => {
     let unavailable = true;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       const value = url.endsWith("/frame") ? { available: true, frameBaseUrl: "https://host.example", serverId: "server", projectsWorkspaceId: "projects" }
@@ -20,7 +20,9 @@ describe("the document's native chat and the shared bound launcher", () => {
       return new Response(JSON.stringify(value));
     }));
     const { findByTestId, getByRole, queryByRole } = render(<DocumentChat active taskDocuments={[sprint, master, leaf]} series={chatSeries} />);
-    expect((await findByTestId("paseo-frame-unavailable")).getAttribute("data-reason")).toBe("unreachable");
+    const notice = await findByTestId("document-chat-unreadable");
+    expect(notice.getAttribute("data-reason")).toBe("unreachable");
+    expect(notice.textContent).toContain("host lookup failed");
     expect(queryByRole("button", { name: "Start role" })).toBeNull();
     unavailable = false;
     fireEvent.click(getByRole("button", { name: "Retry" }));

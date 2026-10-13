@@ -196,7 +196,9 @@ def _write_evidence_files(contract: WorktreeContract, count: int) -> None:
     for index in range(count):
         path = contract.task_root / f"notes/reports/fixture-evidence-{index:04d}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"# Fixture evidence {index:04d}\n\nBounded payload byte.\n", encoding="utf-8")
+        path.write_text(
+            f"# Fixture evidence {index:04d}\n\nBounded payload byte.\n", encoding="utf-8"
+        )
 
 
 def _publish_max(
@@ -281,9 +283,7 @@ def test_maximum_coherence_publication_validates_at_capacity(
     _write_evidence_files(contract, 1)
     first = _publish_max(contract, sprint, judgments=1, assessments=0, attempt="A000")
     assert first["state"] in ("published", "already-current"), first["state"]
-    write_curator_evidence(
-        contract, caller_ref=sprint, source_candidates=_candidates(2048)
-    )
+    write_curator_evidence(contract, caller_ref=sprint, source_candidates=_candidates(2048))
     _write_evidence_files(contract, 2048)
     published = _publish_max(contract, sprint, judgments=2048, assessments=256)
     assert published["state"] in ("published", "already-current"), published["state"]

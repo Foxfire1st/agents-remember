@@ -34,14 +34,17 @@ def _register_identity_tools(
 ) -> None:
     """What this server is and how it was configured."""
 
-    @server.tool()
+    @server.tool(
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        )
+    )
     def server_info() -> dict[str, Any]:
         """Report the resolved configuration: build, roots, allowed repos, provider keys left
         unused, and, on a role-launched server, the tool server name and agent binding.
         Read-only; reflects the settings and runtime loaded at startup. Longer explanation:
         docs/tool-details.md."""
         return server_info_payload(config, serving_build)
-
 
 
 def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:

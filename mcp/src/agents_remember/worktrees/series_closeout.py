@@ -287,11 +287,7 @@ def landed_chain_refusal(
         OSError,
     ) as error:
         return str(error)
-    landed = {
-        leaf_id: leaf
-        for leaf_id, leaf in contracts.items()
-        if _leaf_landed(series, leaf)
-    }
+    landed = {leaf_id: leaf for leaf_id, leaf in contracts.items() if _leaf_landed(series, leaf)}
     if require_all:
         unlanded = sorted(set(contracts) - set(landed))
         if unlanded:
@@ -718,9 +714,7 @@ def _merge_admission(
 ) -> _MergeAdmission:
     """The merge admission for one spine side, from the chain's own sync evidence."""
 
-    landings, bases, _recorded_base, _repository, _branch = _spine_facts(
-        series, ordered, side=side
-    )
+    landings, bases, _recorded_base, _repository, _branch = _spine_facts(series, ordered, side=side)
     positions = _landing_source_positions(series, ordered, side=side)
     key = "codeHeadTo" if side == "code" else "memoryHeadTo"
     heads: list[str] = []
@@ -783,7 +777,9 @@ def _require_admitted_merges(
     if earlier == later:
         return
     try:
-        listed = require_git(repository, ["rev-list", "--merges", "--full-history", later, "--not", earlier])
+        listed = require_git(
+            repository, ["rev-list", "--merges", "--full-history", later, "--not", earlier]
+        )
     except (RuntimeError, subprocess.SubprocessError) as error:
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",
@@ -813,9 +809,7 @@ def _require_admitted_merges(
         if merge not in admission.heads
         and not any(
             _chain_ancestry(repository, base, merge, step=step, what=f"the merge {merge}")
-            and _chain_ancestry(
-                repository, merge, integrated, step=step, what=f"the merge {merge}"
-            )
+            and _chain_ancestry(repository, merge, integrated, step=step, what=f"the merge {merge}")
             for _leaf_id, base, integrated in admission.leaf_ranges
         )
         and not any(
@@ -933,9 +927,7 @@ def _positions_inside_the_step(
         and _chain_ancestry(
             repository, earlier, position, step=step, what=f"the position {position}"
         )
-        and _chain_ancestry(
-            repository, position, later, step=step, what=f"the position {position}"
-        )
+        and _chain_ancestry(repository, position, later, step=step, what=f"the position {position}")
     )
 
 

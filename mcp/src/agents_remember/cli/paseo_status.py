@@ -4,7 +4,8 @@ A refresh reads the agent once through the bridge (``agent-state``) and maps the
 one ordered, first-match table (:data:`STATUS_TABLE`: PNT-R07 item 1, followed by the two rows
 ruled for the states that table does not name). The read has no effect on
 the agent. Revive is the one call here that changes anything (``agent-resume``): it opens the
-closed session of the same agent and returns the same kind of answer.
+closed session of the same agent and returns the same kind of answer. A listing
+(``agents-live``) names in one call every agent the runtime holds unarchived.
 """
 
 from __future__ import annotations
@@ -66,6 +67,22 @@ class AgentReading:
         return self.error is not None or (
             self.lifecycle == "idle" and self.attention == "error" and self.last_turn == "unreplied"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class LiveAgents:
+    """The agents the runtime holds that are not archived, from one listing.
+
+    ``reachable`` is false when there is no usable answer; ``unreachable_reason`` then says why.
+    ``complete`` is true only when the runtime said that the listing ended. Otherwise (the
+    bridge's bound was reached, or a page announced more agents without naming where) an agent
+    that is absent from ``agent_ids`` is unknown, not gone.
+    """
+
+    reachable: bool = True
+    unreachable_reason: str | None = None
+    agent_ids: frozenset[str] = frozenset()
+    complete: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +224,28 @@ def read_agent(config: McpRuntimeConfig, agent_id: str) -> AgentReading:
     except PaseoBridgeFailure as error:
         return _no_answer(f"{error.code}: {error}")
     return _reading(reply, agent_id)
+
+
+def read_live_agents(config: McpRuntimeConfig) -> LiveAgents:
+    """Ask the runtime once which agents it holds unarchived: one bridge call, nothing changes."""
+
+    try:
+        reply = bridge_call(config, "agents-live", {})
+    except PaseoBridgeFailure as error:
+        return LiveAgents(
+            reachable=False, unreachable_reason=f"{error.code}: {error}"[:_TEXT_LIMIT]
+        )
+    agent_ids = reply.get("agentIds")
+    complete = reply.get("complete")
+    if (
+        not isinstance(agent_ids, list)
+        or not all(isinstance(agent_id, str) for agent_id in agent_ids)
+        or not isinstance(complete, bool)
+    ):
+        return LiveAgents(
+            reachable=False, unreachable_reason="the bridge returned an unreadable agent listing"
+        )
+    return LiveAgents(agent_ids=frozenset(agent_ids), complete=complete)
 
 
 @dataclass(frozen=True, slots=True)

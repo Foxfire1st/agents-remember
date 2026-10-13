@@ -5,7 +5,6 @@ import { ReviewSurface } from './ReviewSurface';
 import { captured, serve, target } from './l86.test-utils';
 import type { ReviewUnexplainedLane } from '../../data/reviewLane';
 import { treeViewStore } from './triageViewPreference';
-vi.setConfig({ testTimeout: 30000 });
 beforeEach(() => treeViewStore.getState().setView('changed'));
 afterEach(() => {
   cleanup();

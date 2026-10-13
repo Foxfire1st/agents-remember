@@ -130,6 +130,16 @@ def test_leaf_owner_relation_keeps_peer_results_and_named_parent_occasions() -> 
                 "agentId": parent.agent_id,
                 "role": parent.role,
                 "task": parent.subject,
+                "sprintDocumentRef": None,
+                "masterDocumentRef": None,
+                "taskDocumentRef": None,
+                # A return goes to the parent's role with its task references, so a
+                # leaf's return still reaches the role after a replacement (rule 10).
+                "returnAddress": {
+                    "role": "manager",
+                    "sprint_document_ref": {"repository": "repo", "path": "sprint/task.json"},
+                    "master_document_ref": {"repository": "repo", "path": "master/task.json"},
+                },
             }
             assert f"Agent {parent.agent_id} ({parent.role} · {parent.subject})" in relation
             assert "developer's decision or a decision above the leaf" in relation

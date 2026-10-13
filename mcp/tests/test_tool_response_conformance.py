@@ -222,8 +222,9 @@ def advertised_tool_names() -> set[str]:
 # `knowledge_project`, removed upstream by MIK-R26 rule 5), and the leaf removes the 11
 # provider/code-search tools and the 23 table tools (all of rule 5 except
 # `dispatch_agent`), 73 - 11 - 23 = 39. MIK-R100 adds `role_start_set` (rule 1) and
-# restores `retire_child` (rule 8): 39 + 2 = 41.
-ROSTER_SIZE = 41
+# restores `retire_child` (rule 8), and MIK-R94 rule 2 adds `direct_execution_grant`:
+# 39 + 2 + 1 = 42.
+ROSTER_SIZE = 42
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
@@ -237,9 +238,10 @@ ROSTER_SIZE = 41
 # called. (A `*_payload`-suffixed helper that only shapes a dict, such as
 # the install compactor, is not a handler: it never reaches the choke point.)
 # MIK-R100 adds the `role_start_set` and restores the `retire_child` payload
-# builders: 63 + 2 = 65.
-TOOL_MODULE_COUNT = 19
-TOOL_HANDLER_COUNT = 65
+# builders, and MIK-R94 rule 2 adds the `direct_execution` adapter module and
+# its handler: 19 + 1 = 20 modules, 63 + 2 + 1 = 66 handlers.
+TOOL_MODULE_COUNT = 20
+TOOL_HANDLER_COUNT = 66
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:

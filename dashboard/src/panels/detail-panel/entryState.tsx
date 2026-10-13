@@ -5,10 +5,10 @@
 // entry control is what turned the task header into a wall of backend prose. So a control carries a
 // one- or two-word state, and the whole explanation sits in a `<details>` beside it -- outside the
 // button, because interactive content inside a button is not a disclosure a keyboard can open.
-import type { ReactNode } from "react";
+import type { ReactNode } from 'react';
 
-import type { ReviewFailure } from "../../data/review";
-import { entryStateBody, entryStateDetails, entryStateSummary } from "./styles";
+import type { ReviewFailure } from '../../data/review';
+import { entryStateBody, entryStateDetails, entryStateSummary } from './styles';
 
 export function EntryStateDetails({
   testId,
@@ -34,16 +34,16 @@ export function EntryStateDetails({
 // entry and the review surface cannot come to call the same code two different things.
 export function briefProblem(problem: ReviewFailure): string {
   switch (problem.token) {
-    case "not-initialized":
-      return "no knowledge yet";
-    case "network":
-      return "offline";
-    case "unreadable":
-      return "unreadable";
-    case "not-found":
-      return "not found";
+    case 'not-initialized':
+      return 'no knowledge yet';
+    case 'network':
+      return 'offline';
+    case 'unreadable':
+      return 'unreadable';
+    case 'not-found':
+      return 'not found';
     default:
-      return "unavailable";
+      return 'unavailable';
   }
 }
 
@@ -52,9 +52,9 @@ export function briefProblem(problem: ReviewFailure): string {
 export function problemSentence(problem: ReviewFailure): string {
   return [
     `${problem.code}: ${problem.detail}`,
-    problem.offendingInput ? `offending input: ${problem.offendingInput}` : "",
-    problem.nextAction ? `next: ${problem.nextAction}` : "",
+    problem.offendingInput ? `offending input: ${problem.offendingInput}` : '',
+    problem.nextAction ? `next: ${problem.nextAction}` : '',
   ]
     .filter(Boolean)
-    .join(" — ");
+    .join(' — ');
 }

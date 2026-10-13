@@ -475,7 +475,11 @@ def _census_on(tmp_path: Path, extra: dict[str, bytes]) -> tuple[CensusWriter, d
 
 def test_routes_whose_slug_ends_like_a_pinned_file_still_append(tmp_path: Path) -> None:
     extra = {
-        f"onboarding/{route}/{name}": f"# {route}\n".encode()
+        f"onboarding/{route}/{name}": (
+            f"# {route}\n\n## What This Area Is\n\nThe {route} route.\n".encode()
+            if name == "overview.md"
+            else f"# {route}\n".encode()
+        )
         for route in LOOKALIKE_ROUTES
         for name in ("overview.md", "card.md")
     }

@@ -21,6 +21,14 @@ A converted card is two files at the mirrored path:
   - A `code` or `test` target is an **anchor**: the blob, the `content` hash and a locator. The locator kinds are
     `symbol`, `line_range` and `file` (the whole file).
 - A route's `overview.md` has the same shape. Its sidecar is `overview.json`, and every anchor names its path.
+- **An overview reads from its purpose (MIK-R80).** Title; the governing overview; what the area is
+  for; how it is built; its invariants and boundaries; and last, all citation lines together. The
+  purpose section carries one of the fixed headings `## What This Repo Is` (the root overview),
+  `## What This Area Is` (a route overview) or `## Purpose`. A change goes into the section its
+  change belongs to: never add a section named after a leaf or a date. The knowledge validator
+  refuses an overview whose first section after the title and the governing overview is not its
+  purpose, one holding a leaf- or date-named section, and one whose citation lines do not stand
+  together at its end.
 - **Never write sidecar JSON by hand.** The fixer authors `references` (below). The writer
   (`knowledge-ingest`, the hand-off's `entries` section) authors `realizes` and `proves`.
 

@@ -78,6 +78,7 @@ from typing import Any
 from unittest import mock
 
 import anyio
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.registration import core as core_registration
@@ -372,7 +373,7 @@ class EntryPointWorld:
         self.root = Path(self._temporary.name)
         self.coord = self.root / "coord"
         self.coord.mkdir(parents=True)
-        self.code = self.coord / "repo"
+        self.code = self.root / REPO
         _init_repo(self.code)
         self.memory = self.coord / "memory-repos" / f"ar-{REPO}"
         _init_repo(self.memory)
@@ -430,8 +431,13 @@ class EntryPointWorld:
             encoding="utf-8",
         )
         # The documented home for the delegation policy (the MCP authority file rejects it).
-        (self.coord / "system").mkdir()
-        (self.coord / "system" / "settings.json").write_text(
+        # Since MIK-R71 the user's settings live outside the coordination root; seeding
+        # the removed coord/system location trips the location upgrade refusal on every
+        # tool that loads agentic settings, so the policy is seeded where the product
+        # reads it, through the same guard as the shared world.
+        user_settings = user_settings_path_for_write()
+        user_settings.parent.mkdir(parents=True, exist_ok=True)
+        user_settings.write_text(
             json.dumps(
                 {
                     "version": 1,
@@ -744,7 +750,15 @@ class EntryPointWorld:
             "direct_landing": {
                 "contract_path": absent,
                 "code_commit": "deadbeef",
+                "leaf_task_document_ref": {
+                    "repository": REPO,
+                    "path": f"{MASTER}/absent.json",
+                },
                 "dry_run": True,
+            },
+            "direct_execution_grant": {
+                "task_document_ref": {"repository": REPO, "path": f"{MASTER}/absent.json"},
+                "action": "give",
             },
             "worktree_start": {
                 "repo_id": REPO,
@@ -1335,13 +1349,14 @@ class ChokePointControlTests(unittest.TestCase):
     def test_an_invalid_argument_lands_in_its_own_arm_and_names_the_callers_side(self) -> None:
         """The two validation refusals share a message shape; only the model separates them.
 
-        ``citation_fix`` requires a ``contract_path``, so calling it without one is refused by
+        ``citation_fix`` requires a ``repo_id`` (``contract_path`` is optional since the
+        MIK-R45 pre-baseline admission), so calling it without one is refused by
         the generated ``citation_fixArguments`` input model. That must NOT be reported as the
         tool's own response model refusing its payload — the fix exists so the diagnosis stays
         right the first time a benign argument stops being accepted.
         """
 
-        kind, payload = self.world.call("citation_fix", {"repo_id": REPO})
+        kind, payload = self.world.call("citation_fix", {})
         arm, detail = classify("citation_fix", (kind, payload))
         self.assertEqual("argument-validation", arm, detail)
         self.assertIn("citation_fixArguments", detail, "the detail must name the input model")

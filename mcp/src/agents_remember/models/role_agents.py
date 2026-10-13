@@ -81,7 +81,12 @@ class RoleStartSetCall:
 
 @dataclass(frozen=True, slots=True)
 class RoleMessageCall:
-    """The inputs of one message: the text, and the recipient by agent id or by selection."""
+    """The inputs of one message: the text, and the recipient by agent id or by selection.
+
+    ``text`` is the wake-up: at most the settings' limit of characters. ``body``
+    takes the full text of any length for the message file, and ``attach`` the
+    paths of files the message file records (MIK-R117).
+    """
 
     text: str
     agent_id: str | None = None
@@ -89,6 +94,8 @@ class RoleMessageCall:
     sprint_document_ref: TaskDocumentRef | None = None
     master_document_ref: TaskDocumentRef | None = None
     task_document_ref: TaskDocumentRef | None = None
+    body: str | None = None
+    attach: list[str] | None = None
     wait: bool = False
     timeout_seconds: int = DEFAULT_WAIT_SECONDS
     # One held message of this sender for this recipient to end as withdrawn
@@ -129,6 +136,9 @@ RoleMessageRefusal = Literal[
     "caller-has-no-binding",
     "no-paseo-runtime-configured",
     "host-unreachable",
+    "message-too-long",
+    "message-file-failed",
+    "settings-invalid",
 ]
 
 
@@ -183,6 +193,9 @@ class RoleMessageResponse(ToolResponse):
     ``heldReason`` says why, ``heldMessageId`` names the waiting message, and
     ``waitingMine``/``waitingTotal`` say how many messages of this sender, and in all,
     wait for the recipient.
+    ``messageFile``/``messageFileSha256`` name the message file (MIK-R117): the delivered
+    message's file, a refused delivery's ``.undelivered.md`` file, or the file of a wait
+    reply cut at the message limit.
     """
 
     operation: Literal["role_message"] = "role_message"
@@ -197,6 +210,17 @@ class RoleMessageResponse(ToolResponse):
     resumed: bool | None = None
     text: str | None = None
     textTruncated: bool | None = None
+    # MIK-R117: the message file of a delivered message (rule 4), of a refused
+    # delivery (rule 2, ending in .undelivered.md), or of a cut wait reply
+    # (rule 6). The delivered/wait text names the same file and hash in words.
+    messageFile: str | None = None
+    messageFileSha256: str | None = None
+    # MIK-R117: every producer-owned refusal field the tool can return. The
+    # strict contract must name them all, or the registered path throws
+    # instead of refusing (L117-C1-F07).
+    messageLength: int | None = None
+    messageLimit: int | None = None
+    successorAgentId: str | None = None
     permission: str | None = None
     waitedSeconds: int | None = None
     warning: str | None = None

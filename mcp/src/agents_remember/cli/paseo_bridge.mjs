@@ -101,6 +101,15 @@
 //            with an open session: reading the timeline of a closed session makes the runtime
 //            resume it.
 //
+//   agents-live  {}
+//            -> {serverId, agentIds: string[], complete: boolean}
+//            The ids of the agents the runtime holds that are not archived, from one listing read
+//            in pages (at most LIVE_PAGES pages of LIVE_PAGE_LIMIT). `complete` is true only when
+//            the runtime said that the listing ended. It is false when the listing did not end
+//            within those pages, and when a page announced further agents without naming the page
+//            that holds them: an id that is absent then says nothing about its agent. A read with
+//            no effect on any agent.
+//
 //   agent-resume  {agentId: string}
 //            -> {serverId, agent: STATE | null, resume: {attempted: boolean, resumed: boolean,
 //                error?: string}}
@@ -215,6 +224,7 @@ const COMMANDS = {
   'agent-get': getAgent,
   'agent-archive': archiveAgent,
   'agent-state': readAgentState,
+  'agents-live': listLiveAgents,
   'agent-resume': resumeAgent,
   'agent-send': sendToAgent,
   'agent-wait': waitForAgent
@@ -229,6 +239,11 @@ const CLOSE_TIMEOUT_MS = 1000
 const LISTING_RESERVE_MS = 10000
 const REPLY_RESERVE_MS = 2000
 const MESSAGE_LIMIT = 800
+// agents-live: the runtime refuses a page above 200 entries; ten pages bound the read at 2,000
+// agents. Only the runtime's own word that no agents follow ends a listing: a read that stops
+// at the bound, or at a page that names no next page, answers that the listing did not end.
+const LIVE_PAGE_LIMIT = 200
+const LIVE_PAGES = 10
 // agent-state and agent-resume: the runtime's word for an agent without a running harness
 // process, the timeline entries that mark the end of a turn, how many entries are read from the
 // end, and the length of the reply text that is returned.
@@ -238,8 +253,8 @@ const TIMELINE_TAIL = 20
 const FINAL_TEXT_LIMIT = 3000
 // agent-send and agent-wait: the provider entries of the runtime's configuration that cannot
 // take a message into a running turn, the default and the reserve of one wait, the timeline
-// entries read for the reply, the length of the reply that is returned, and the runtime's
-// events that end a turn.
+// entries read for the reply, and the runtime's events that end a turn. The reply comes back
+// whole; the role-message tool cuts it at the settings' limit (MIK-R117).
 const DRIVER_WITHOUT_STEERING = 'acp'
 const WAIT_DEFAULT_MS = 30000
 const WAIT_RESERVE_MS = 6000
@@ -249,7 +264,6 @@ const WAIT_POLL_MS = 1000
 const TURN_GAP_MS = 5000
 const TURN_GAP_POLL_MS = 250
 const REPLY_TAIL = 200
-const REPLY_TEXT_LIMIT = 20000
 const TURN_ENDS = { turn_completed: 'finished', turn_failed: 'failed', turn_canceled: 'cancelled' }
 // agent-create and agent-send: how long an agent with tool servers is given between the opening
 // of its session and a message, and what makes the first message's id out of the idempotency
@@ -716,6 +730,27 @@ async function readAgentState({ api, daemon }, input) {
   return { serverId: serverIdOf(daemon), agent: agent ? await agentState(api, agent) : null }
 }
 
+async function listLiveAgents({ daemon }) {
+  const agentIds = []
+  let cursor = null
+  let complete = false
+  for (let page = 0; page < LIVE_PAGES; page += 1) {
+    const listed = await daemon.fetchAgents({
+      page: { limit: LIVE_PAGE_LIMIT, ...(cursor ? { cursor } : {}) }
+    })
+    for (const entry of listed.entries ?? []) {
+      const agent = entry?.agent
+      if (nonEmpty(agent?.id) && !nonEmpty(agent.archivedAt)) agentIds.push(agent.id)
+    }
+    // The listing has ended when the runtime says that no agents follow, and only then. A page
+    // without a next page ends the read, not the listing.
+    complete = listed.pageInfo?.hasMore === false
+    cursor = nonEmpty(listed.pageInfo?.nextCursor) ? listed.pageInfo.nextCursor : null
+    if (complete || cursor === null) break
+  }
+  return { serverId: serverIdOf(daemon), agentIds, complete }
+}
+
 async function resumeAgent({ api, daemon }, input) {
   const agentId = requiredText(input, 'agentId')
   const serverId = serverIdOf(daemon)
@@ -1017,8 +1052,9 @@ async function messageView(api, agentId, messageId) {
   }
 }
 
-// The agent's text behind the last message or tool call of these items, at most REPLY_TEXT_LIMIT
-// characters of it.
+// The agent's text behind the last message or tool call of these items, whole: the
+// role-message tool cuts a longer reply at the settings' limit and files it (MIK-R117),
+// so the bridge no longer owns a bound of its own.
 function closingText(items) {
   let first = items.length
   while (first > 0 && items[first - 1].type === 'assistant_message') first -= 1
@@ -1028,11 +1064,7 @@ function closingText(items) {
     .join('')
     .trim()
   if (!reply) return { text: null, textTruncated: false }
-  const points = Array.from(reply.slice(0, 2 * REPLY_TEXT_LIMIT))
-  return {
-    text: points.slice(0, REPLY_TEXT_LIMIT).join(''),
-    textTruncated: points.length > REPLY_TEXT_LIMIT || reply.length > 2 * REPLY_TEXT_LIMIT
-  }
+  return { text: reply, textTruncated: false }
 }
 
 // The turn an agent runs, as the runtime reports it.

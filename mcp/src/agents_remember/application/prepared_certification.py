@@ -9,7 +9,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from agents_remember.application.knowledge_worklist import leaf_onboarding_trace_sides
-from agents_remember.application.memory_quality.converted_base import context_check_base
+from agents_remember.application.memory_quality.converted_base import (
+    context_check_base,
+    leaf_base_port,
+    leaf_base_request_for_context,
+)
 from agents_remember.certification.certificate_authority import compile_gate_certificate
 from agents_remember.certification.certificate_models import (
     GateCertificateIssuanceContext,
@@ -518,6 +522,7 @@ def _run(request: PreparedMemoryCertificationRequest) -> FinalCertificationResul
             prior_results=(),
         )
     _current(request)
+    leaf_request = leaf_base_request_for_context(context)
     quality = run_memory_quality_check(
         onboarding,
         checks=AVAILABLE_CHECKS,
@@ -528,6 +533,7 @@ def _run(request: PreparedMemoryCertificationRequest) -> FinalCertificationResul
             include_rows=True,
             write_report=False,
             knowledge_base=context_check_base(physical_code, context),
+            landing_base=(None if leaf_request is None else leaf_base_port(leaf_request)),
         ),
         include_report_only_findings=True,
     )

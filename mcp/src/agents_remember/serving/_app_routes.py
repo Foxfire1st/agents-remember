@@ -51,6 +51,10 @@ from agents_remember.serving.actions import (
     GateDecisionIntent,
     evaluate_action,
 )
+from agents_remember.serving.direct_execution_grants import (
+    DeveloperGrantRequest,
+    developer_grant_tool,
+)
 from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.operator_inbox_posts import (
@@ -425,3 +429,22 @@ def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     )
     def api_operator_inbox_dismiss(entry_id: str) -> Response:
         return _inbox_dismiss_response(runtime, entry_id)
+
+    # The developer's direct-execution grant control (MIK-R94 rule 2): giving and
+    # taking back a leaf's grant from the dashboard. The handler returns a
+    # ``Response`` it built itself, so this is a declaration only and moves no
+    # bytes; the payload mirrors the architect's ``direct_execution_grant``
+    # function shape (``ok``/``state``/``changed``/``grant``).
+    @app.post(
+        "/api/direct-execution-grant",
+        status_code=200,
+    )
+    def api_direct_execution_grant(request: DeveloperGrantRequest) -> Response:
+        return JSONResponse(
+            content=developer_grant_tool(
+                runtime.config,
+                request.repository,
+                request.path,
+                request.action,
+            )
+        )

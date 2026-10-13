@@ -1,0 +1,206 @@
+{
+  "closed": true,
+  "leaf": "260928-MIK-L37",
+  "rows": [
+    {
+      "because": [
+        {
+          "id": "MIK-R12",
+          "packet": "requirements/MIK-R12-v2-curator-writer-for-all-knowledge-kinds.md",
+          "task": {
+            "path": "260928_maintained-invariant-knowledge",
+            "repository": "agents-remember"
+          },
+          "version": "v2"
+        },
+        {
+          "id": "MIK-R37",
+          "packet": "requirements/MIK-R37-v1-cutover-to-text-storage.md",
+          "task": {
+            "path": "260928_maintained-invariant-knowledge",
+            "repository": "agents-remember"
+          },
+          "version": "v1"
+        },
+        "DEC-YZA7E4"
+      ],
+      "covers": [
+        {
+          "after": {
+            "blob": "21d1479aea3a4a461bb8b3e63cf53bc5c2fa2e31",
+            "content": "sha256:3b6fe5185a2b640c3284f85aba451b53060a107a21f021326c4141f072351e10",
+            "locator": {
+              "kind": "symbol",
+              "name": "test_the_database_writer_is_frozen_on_a_converted_tree_and_names_the_file_writer"
+            },
+            "path": "mcp/tests/test_knowledge_cutover.py"
+          },
+          "before": "absent",
+          "id": "PRF-TMK4N3"
+        },
+        {
+          "after": {
+            "blob": "5dd8b04a0ac5cc0a5ba63ede47b7a6ead7a860ba",
+            "content": "sha256:199fd749c8d68e4c9fe056cecbe19f15e263505227e16733da828a1bc153b05f",
+            "locator": {
+              "kind": "symbol",
+              "name": "run"
+            },
+            "path": "mcp/src/agents_remember/cli/knowledge_ingest.py"
+          },
+          "before": {
+            "blob": "baa1b88669772f349fa4058515b44353754cfd9c",
+            "content": "sha256:4693eb13999aec20a51eb4f64e8554adc3ff333d065343d17d6da01685a6321a",
+            "locator": {
+              "kind": "symbol",
+              "name": "run"
+            },
+            "path": "mcp/src/agents_remember/cli/knowledge_ingest.py"
+          },
+          "id": "RLZ-6HAWT71R"
+        },
+        {
+          "after": {
+            "blob": "6c264ad4baa933504af480b247b65dd3c5a52ea3",
+            "content": "sha256:1e68e38b1d88e42cbf232455a533b8ff42545fd09694ebe83890024f9cd1ccb8",
+            "locator": {
+              "kind": "symbol",
+              "name": "ingest_curator_list"
+            },
+            "path": "mcp/src/agents_remember/application/knowledge_curator_ingest.py"
+          },
+          "before": {
+            "blob": "8738f61cb917f267705795176cd64d91017a6fb4",
+            "content": "sha256:49df5cc753f2eb8a23e6342f5e153c00306c2a57fa8ee4e17e0950df0dd5d1b4",
+            "locator": {
+              "kind": "symbol",
+              "name": "ingest_curator_list"
+            },
+            "path": "mcp/src/agents_remember/application/knowledge_curator_ingest.py"
+          },
+          "id": "RLZ-6X7QPYQ5"
+        },
+        {
+          "after": {
+            "blob": "32e12e6260e6ac8d919a555b2802d33ea4a26afd",
+            "content": "sha256:ec3c06ac2e930c4375dc7574d34a4dd945a1dff5cd26c632d47b45f4312ba879",
+            "locator": {
+              "kind": "symbol",
+              "name": "frozen_database_refusal"
+            },
+            "path": "mcp/src/agents_remember/memory/knowledge/publication.py"
+          },
+          "before": "absent",
+          "id": "RLZ-CW5BZG"
+        },
+        {
+          "after": {
+            "blob": "73eecf58061cb3ef3f87695242319bb9d426e63c",
+            "content": "sha256:0fd1011447c58683e2f8903a3e6e6afaaf079b83579e9e1028228d4cf63719c1",
+            "locator": {
+              "kind": "symbol",
+              "name": "_run"
+            },
+            "path": "mcp/src/agents_remember/cli/knowledge_bootstrap.py"
+          },
+          "before": {
+            "blob": "5fd8eca6ebe605204f7d89c4df54f3aa45ccf146",
+            "content": "sha256:66400cb968340f627a5dc7d7374dc9da0ac59e0cf04870e0dd479e3e994e91b9",
+            "locator": {
+              "kind": "symbol",
+              "name": "run"
+            },
+            "path": "mcp/src/agents_remember/cli/knowledge_bootstrap.py"
+          },
+          "id": "RLZ-Y766ENWA"
+        },
+        {
+          "after": {
+            "blob": "f1835f850e272e93c572dee8c07d07f8680882af",
+            "content": "sha256:53a8af530313c38a96cbfea5c9104fa1b680e214c37b33760bf32b1619f74071",
+            "locator": {
+              "kind": "symbol",
+              "name": "_require_unfrozen_database"
+            },
+            "path": "mcp/src/agents_remember/application/knowledge_write_admission.py"
+          },
+          "before": "absent",
+          "id": "RLZ-Y9GSNQ"
+        }
+      ],
+      "disposition": "changed",
+      "effect": "replace",
+      "id": "ROW-A2NA0E",
+      "items": [],
+      "reason": "Both command lines now route by the memory tree (MIK-R12): a converted tree is written by the curator file writer. This leaf freezes the database batch writer on converted trees and locks it for unconverted memory in a repository that holds converted memory (MIK-R37 rule 3). So 'one batch writer for every write' no longer holds. The two entry points, the absence of an MCP writer and the process-loading rule are unchanged. RLZ-Y766ENWA is re-anchored from run, which no longer binds exactly once in knowledge_bootstrap.py, to _run, where the writer is selected. The freeze itself is attached as two new realizations: the database writer's front door and the publication sink. Evidence (L37-frozen-database): mcp/tests/test_knowledge_cutover.py::test_the_database_writer_is_frozen_on_a_converted_tree_and_names_the_file_writer",
+      "revision": 3,
+      "subject": "INV-1XKX9ERN"
+    },
+    {
+      "disposition": "changed",
+      "examined": [
+        {
+          "id": "INV-1XKX9ERN",
+          "revision": 3
+        },
+        {
+          "id": "INV-753SKJFF",
+          "revision": 1
+        },
+        {
+          "id": "INV-QN53GPRB",
+          "revision": 1
+        }
+      ],
+      "id": "ROW-FQSRA9",
+      "items": [],
+      "reason": "Examined all 3 members. Text storage (D18) replaces the one batch writer and the one dataset location: INV-1XKX9ERN now states the writer per memory-tree format, and this leaf stops selecting the frozen database of a converted tree (INV-753SKJFF). INV-QN53GPRB is unchanged. The guarantee is restated for both formats. Routes assigned as four local trees (D12): the two command lines, the application's admission and publication owners, the publication sink in the knowledge store, and the checkout confinement primitive.",
+      "subject": "FAM-7B6N3Y4Q"
+    },
+    {
+      "because": [
+        {
+          "id": "MIK-R25",
+          "packet": "requirements/MIK-R25-v1-reviewer-on-git-trees.md",
+          "task": {
+            "path": "260928_maintained-invariant-knowledge",
+            "repository": "agents-remember"
+          },
+          "version": "v1"
+        },
+        "DEC-YZA7E4"
+      ],
+      "covers": [
+        {
+          "after": {
+            "blob": "f1950eaa1da83687a4057e31a07d75638b1400ed",
+            "content": "sha256:7dcac80a8b8df7ac06900093814815776479539dfcb1e54347cbf683c7babbe7",
+            "locator": {
+              "kind": "symbol",
+              "name": "resolve_committed_leaf_review"
+            },
+            "path": "mcp/src/agents_remember/application/review_committed_leaf.py"
+          },
+          "before": {
+            "blob": "a5375e4feefde13ed3e25da4820c417b91514b0a",
+            "content": "sha256:8bfeccdef8a8f71f97bca79d1edaec96d0f3a846cb25153cb211b99b21f7e4b9",
+            "locator": {
+              "kind": "symbol",
+              "name": "resolve_committed_leaf_review"
+            },
+            "path": "mcp/src/agents_remember/application/review_committed_leaf.py"
+          },
+          "id": "RLZ-8S8VDEJ3"
+        }
+      ],
+      "disposition": "changed",
+      "effect": "weaken",
+      "id": "ROW-VT6B4T",
+      "items": [],
+      "reason": "resolve_committed_leaf_review now asks the converted-repository resolution before the generation reopen (MIK-R25 rule 4): a recorded tree comparison reopens from its tree ids, and on a converted official line a dataset-only leaf reports its knowledge sides legacy-unavailable instead of reading the retained dataset. The dataset path of an unconverted repository is unchanged.",
+      "revision": 3,
+      "subject": "INV-9NCBGQSY"
+    }
+  ],
+  "schema": "ar-history/v1"
+}

@@ -147,13 +147,18 @@ def _run_converted_summary(
 
     The legacy classification is never called for a converted tree (MIK-R44 rule 1):
     a converted card has no metadata table, so legacy discovery would answer an
-    unread "checked, 0" instead of measuring the tree's reference anchors.
+    unread "checked, 0" instead of measuring the tree's reference anchors. The
+    landing report is likewise not computed here: this summary surfaces stale
+    anchors and validator findings only, and the landing census belongs to the
+    quality check that carries the leaf's admitted base.
     """
 
     memory_root = Path(getattr(context, "memory_root", None) or context.onboarding_root.parent)
     output = output or DriftSummaryOutput()
     try:
-        result = converted_knowledge_check(memory_root, code_repository_root, base=base)
+        result = converted_knowledge_check(
+            memory_root, code_repository_root, base=base, include_landing=False
+        )
     except (KnowledgeTreeReadError, ValueError, OSError) as error:
         return {
             "status": "error",

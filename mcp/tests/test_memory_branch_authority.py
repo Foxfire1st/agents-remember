@@ -72,6 +72,8 @@ from test_worktree_support import git, init_repo
 
 REPO_ID = "repo"
 
+ROOT_OVERVIEW = "# Overview\n\n## What This Repo Is\n\nThe repository root route.\n"
+
 
 def _run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=False)
@@ -276,7 +278,7 @@ def test_baseline_adoption_follows_the_configured_branch(
     # The foundation is the code branch the memory is verified against, so it exists.
     git(code, "checkout", "-q", "-b", "spear/2026-q3")
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
-    (memory / "onboarding" / "overview.md").write_text("# Overview\n", encoding="utf-8")
+    (memory / "onboarding" / "overview.md").write_text(ROOT_OVERVIEW, encoding="utf-8")
 
     assert _baseline_default_branch(memory) == "spear/2026-q3"
 
@@ -304,7 +306,7 @@ def test_baseline_adoption_refuses_a_branch_the_memory_repository_does_not_recor
     memory = _memory_root(config)
     git(code, "checkout", "-q", "-b", "spear/2026-q3")
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
-    (memory / "onboarding" / "overview.md").write_text("# Overview\n", encoding="utf-8")
+    (memory / "onboarding" / "overview.md").write_text(ROOT_OVERVIEW, encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="bootstrap-only exception"):
         memory_baseline_adopt_tool(
@@ -497,7 +499,7 @@ def _adoptable_memory(config, *, bootstrap_file: str = "bootstrap/state.md") -> 
     memory_init_tool(config, repo_id=REPO_ID, initial_branch="spear/2026-q3")
     memory = _memory_root(config)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
-    (memory / "onboarding" / "overview.md").write_text("# Overview\n", encoding="utf-8")
+    (memory / "onboarding" / "overview.md").write_text(ROOT_OVERVIEW, encoding="utf-8")
     target = memory / bootstrap_file
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("transient scaffolding\n", encoding="utf-8")

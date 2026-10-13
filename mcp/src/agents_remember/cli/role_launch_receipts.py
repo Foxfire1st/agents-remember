@@ -785,9 +785,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
     return _public_instruction_fields(public)
 
 
-def _apply_leaf_holder(
-    public: dict[str, Any], receipt: dict[str, Any], status: Any
-) -> None:
+def _apply_leaf_holder(public: dict[str, Any], receipt: dict[str, Any], status: Any) -> None:
     """Name the leaf seat's holder while it holds the seat (MIK-R100 rule 9).
 
     The launcher shows the holder and offers the replacing start.
@@ -844,7 +842,9 @@ def _read_receipt(path: Path) -> dict[str, Any] | None:
         )
     try:
         receipt = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, RecursionError) as error:
+        # Bytes that are not UTF-8 or not JSON, a number too long to convert (all ValueError),
+        # and a nesting beyond the parser's depth are one answer: the record cannot be read.
         raise HTTPException(
             status_code=409,
             detail="The role execution receipt is unreadable; reconcile it before launching.",

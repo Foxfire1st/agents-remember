@@ -1,9 +1,6 @@
-import {
-  taskDocsForLifecycle,
-  taskLabel,
-} from "../../data/taskIdentity";
-import { parentTaskLinkForDoc } from "../../data/taskHierarchy";
-import { Panel } from "../../grammar/Panel";
+import { taskDocsForLifecycle, taskLabel } from '../../data/taskIdentity';
+import { parentTaskLinkForDoc } from '../../data/taskHierarchy';
+import { Panel } from '../../grammar/Panel';
 import type {
   Analytics,
   EnclosureNode,
@@ -11,17 +8,15 @@ import type {
   Phase,
   SeriesNode,
   TaskDocNode,
-} from "../../types/projection";
-import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
-import { GateResponder } from "../GateResponder";
-import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../../data/taskArtifacts";
-import { ChangeSetButton } from "./changeSetBar";
-import {
-  seriesAsMasterDoc,
-  seriesSliceDocs,
-  sliceForSlug,
-} from "./model";
-import type { useDetailPanelState } from "./state";
+  TaskDocumentRef,
+} from '../../types/projection';
+import type { TaskDocumentBodyState } from '../../data/useTaskDocumentBody';
+import type { ChangeSetTarget } from '../changeset/ChangeSetViewer';
+import { GateResponder } from '../GateResponder';
+import type { TaskArtifactReaderTarget as NotesReaderTarget } from '../../data/taskArtifacts';
+import { ChangeSetButton } from './changeSetBar';
+import { seriesAsMasterDoc, seriesSliceDocs, sliceForSlug, type MasterDocView } from './model';
+import type { useDetailPanelState } from './state';
 import {
   changeSetBar,
   crumb,
@@ -32,24 +27,20 @@ import {
   step,
   stepper,
   where,
-} from "./styles";
-import {
-  MasterOverview,
-  SpineLane,
-  TaskContent,
-  TaskReader,
-} from "./taskReader";
+} from './styles';
+import { MasterOverview, SpineLane, SprintOverview, TaskContent, TaskReader } from './taskReader';
+import { docForm } from './model';
 
 type DetailState = ReturnType<typeof useDetailPanelState>;
 
 // the current as done — mc2's Request→Close mini-map.
 const PHASES: Phase[] = [
-  "request",
-  "trust-checkpoint",
-  "reframe-research",
-  "decide",
-  "build",
-  "close",
+  'request',
+  'trust-checkpoint',
+  'reframe-research',
+  'decide',
+  'build',
+  'close',
 ];
 
 interface PanelCallbacks {
@@ -58,10 +49,10 @@ interface PanelCallbacks {
 }
 
 function resolveMasterAndSlices(docs: TaskDocNode[], allDocs: TaskDocNode[]) {
-  const master = docs.find((doc) => doc.kind === "master");
+  const master = docs.find((doc) => doc.kind === 'master');
   const slices = master
     ? seriesSliceDocs(allDocs, master.docPath)
-    : docs.filter((doc) => doc.kind !== "master");
+    : docs.filter((doc) => doc.kind !== 'master');
   return { master, slices };
 }
 
@@ -71,9 +62,7 @@ function resolveSeriesView(
   fullTaskDoc: (doc: TaskDocNode) => TaskDocNode,
 ) {
   if (!selectedSeries) return { seriesDoc: undefined, seriesSlices: [] };
-  const selectedSeriesTaskDoc = allDocs.find(
-    (doc) => doc.docPath === selectedSeries.docPath,
-  );
+  const selectedSeriesTaskDoc = allDocs.find((doc) => doc.docPath === selectedSeries.docPath);
   const seriesDoc = selectedSeriesTaskDoc
     ? fullTaskDoc(selectedSeriesTaskDoc)
     : seriesAsMasterDoc(selectedSeries);
@@ -92,10 +81,7 @@ function resolveParentLink(
   return parentTaskLinkForDoc(docs[0], allDocs, analytics?.series ?? []);
 }
 
-function useLifecycleDetail(
-  state: DetailState,
-  lifecycle: LifecycleProjection,
-) {
+function useLifecycleDetail(state: DetailState, lifecycle: LifecycleProjection) {
   const {
     selectedTaskDoc,
     selectedSeries,
@@ -113,24 +99,14 @@ function useLifecycleDetail(
       : taskDocsForLifecycle(lifecycle, allDocs);
   const title = taskLabel(lifecycle, directDocs, selectedEnclosure);
   const groupName = selectedEnclosure
-    ? (selectedEnclosure.worktreeGroup.split("/").filter(Boolean).pop() ?? "")
-    : "";
+    ? (selectedEnclosure.worktreeGroup.split('/').filter(Boolean).pop() ?? '')
+    : '';
   const { master, slices } = resolveMasterAndSlices(docs, allDocs);
-  const { seriesDoc, seriesSlices } = resolveSeriesView(
-    selectedSeries,
-    allDocs,
-    fullTaskDoc,
-  );
+  const { seriesDoc, seriesSlices } = resolveSeriesView(selectedSeries, allDocs, fullTaskDoc);
   const contentSlices = seriesDoc ? seriesSlices : slices;
   const openDoc = openSlug ? sliceForSlug(contentSlices, openSlug) : undefined;
   const heading = selectedSeries?.title ?? title;
-  const parentLink = resolveParentLink(
-    selectedSeries,
-    master,
-    docs,
-    allDocs,
-    analytics,
-  );
+  const parentLink = resolveParentLink(selectedSeries, master, docs, allDocs, analytics);
   return {
     currentIdx,
     docs,
@@ -156,39 +132,77 @@ function DetailHead({
 }) {
   const { setOpenSlug, jump } = state;
   const { openDoc, selectedSeries, master, parentLink, heading } = derived;
+  // The panel heading names the lifecycle/series context — except where a
+  // drilled slice or series overview draws its own title below, which would
+  // repeat the same document.
+  const showHeading = !openDoc && !selectedSeries;
   return (
     <>
-      <h2>{heading}</h2>
-      {openDoc ? (
-        <button
-          type="button"
-          className={crumb}
-          onClick={() => setOpenSlug(null)}
-          data-testid="series-breadcrumb"
-        >
-          ← {selectedSeries?.title ?? (master ? master.title : "series")}
-        </button>
-      ) : !selectedSeries && master?.masterLifecycleId ? (
-        <button
-          type="button"
-          className={crumb}
-          onClick={() => jump(master.masterLifecycleId as string)}
-          data-testid="master-parent-link"
-        >
-          ↑ {master.masterLifecycleId}
-        </button>
-      ) : parentLink ? (
-        <button
-          type="button"
-          className={crumb}
-          onClick={() => jump(parentLink.targetKey)}
-          data-testid="master-parent-link"
-        >
-          ↑ {parentLink.title}
-        </button>
-      ) : null}
+      {showHeading ? <h2>{heading}</h2> : null}
+      <DetailCrumbs
+        openDoc={openDoc}
+        selectedSeries={selectedSeries}
+        master={master}
+        parentLink={parentLink}
+        setOpenSlug={setOpenSlug}
+        jump={jump}
+      />
     </>
   );
+}
+
+function DetailCrumbs({
+  openDoc,
+  selectedSeries,
+  master,
+  parentLink,
+  setOpenSlug,
+  jump,
+}: {
+  openDoc: TaskDocNode | undefined;
+  selectedSeries: SeriesNode | undefined;
+  master: TaskDocNode | undefined;
+  parentLink: { title: string; targetKey: string } | undefined;
+  setOpenSlug: (slug: string | null) => void;
+  jump: (id: string) => void;
+}) {
+  if (openDoc) {
+    return (
+      <button
+        type="button"
+        className={crumb}
+        onClick={() => setOpenSlug(null)}
+        data-testid="series-breadcrumb"
+      >
+        ← {selectedSeries?.title ?? (master ? master.title : 'series')}
+      </button>
+    );
+  }
+  if (!selectedSeries && master?.masterLifecycleId) {
+    return (
+      <button
+        type="button"
+        className={crumb}
+        onClick={() => jump(master.masterLifecycleId as string)}
+        data-testid="master-parent-link"
+      >
+        ↑ {master.masterLifecycleId}
+      </button>
+    );
+  }
+  if (parentLink) {
+    return (
+      <button
+        type="button"
+        className={crumb}
+        onClick={() => jump(parentLink.targetKey)}
+        data-testid="master-parent-link"
+      >
+        ↑ {parentLink.title}
+      </button>
+    );
+  }
+  return null;
 }
 
 function PhaseStepper({ currentIdx }: { currentIdx: number }) {
@@ -198,7 +212,7 @@ function PhaseStepper({ currentIdx }: { currentIdx: number }) {
         <li
           key={phase}
           className={step({
-            state: i < currentIdx ? "done" : i === currentIdx ? "current" : "todo",
+            state: i < currentIdx ? 'done' : i === currentIdx ? 'current' : 'todo',
           })}
         >
           {phase}
@@ -219,6 +233,110 @@ function GateSection({ lifecycle }: { lifecycle: LifecycleProjection }) {
   ) : null;
 }
 
+function SeriesBranch({
+  seriesDoc,
+  seriesSlices,
+  taskDocumentBodyState,
+  setOpenSlug,
+  jump,
+  onOpenChangeSet,
+  onOpenNotes,
+  docPathForRef,
+  pool,
+}: {
+  seriesDoc: MasterDocView;
+  seriesSlices: TaskDocNode[];
+  taskDocumentBodyState: TaskDocumentBodyState | undefined;
+  setOpenSlug: (slug: string) => void;
+  jump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
+  pool: { allDocs: TaskDocNode[]; seriesList: SeriesNode[] };
+}) {
+  // The lifecycle-bound series branch dispatches on the same form as every
+  // other production branch: a sprint series renders the sprint skeleton.
+  if (docForm(seriesDoc) === 'sprint') {
+    return (
+      <SprintOverview
+        doc={seriesDoc}
+        bodyState={taskDocumentBodyState}
+        pool={pool}
+        onJump={jump}
+        onOpen={setOpenSlug}
+        onOpenChangeSet={onOpenChangeSet}
+        onOpenNotes={onOpenNotes}
+        docPathForRef={docPathForRef}
+      />
+    );
+  }
+  return (
+    <MasterOverview
+      doc={seriesDoc}
+      bodyState={taskDocumentBodyState}
+      sliceDocs={seriesSlices}
+      pool={pool}
+      onOpen={setOpenSlug}
+      onJump={jump}
+      onOpenChangeSet={onOpenChangeSet}
+      onOpenNotes={onOpenNotes}
+      docPathForRef={docPathForRef}
+    />
+  );
+}
+
+function MasterBranch({
+  master,
+  fullTaskDoc,
+  taskDocumentBodyState,
+  pool,
+  setOpenSlug,
+  jump,
+  onOpenChangeSet,
+  onOpenNotes,
+  docPathForRef,
+  slices,
+}: {
+  master: TaskDocNode;
+  fullTaskDoc: (doc: TaskDocNode) => TaskDocNode;
+  taskDocumentBodyState: TaskDocumentBodyState | undefined;
+  pool: { allDocs: TaskDocNode[]; seriesList: SeriesNode[] };
+  setOpenSlug: (slug: string) => void;
+  jump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
+  slices: TaskDocNode[];
+}) {
+  if (docForm(master) === 'sprint') {
+    return (
+      <SprintOverview
+        doc={fullTaskDoc(master)}
+        bodyState={taskDocumentBodyState}
+        pool={pool}
+        onJump={jump}
+        onOpen={setOpenSlug}
+        onOpenChangeSet={onOpenChangeSet}
+        onOpenNotes={onOpenNotes}
+        docPathForRef={docPathForRef}
+      />
+    );
+  }
+  return (
+    <MasterOverview
+      doc={fullTaskDoc(master)}
+      bodyState={taskDocumentBodyState}
+      sliceDocs={slices}
+      pool={pool}
+      onOpen={setOpenSlug}
+      onJump={jump}
+      onOpenChangeSet={onOpenChangeSet}
+      onOpenNotes={onOpenNotes}
+      docPathForRef={docPathForRef}
+    />
+  );
+}
+
 function DetailBody({
   state,
   derived,
@@ -228,18 +346,16 @@ function DetailBody({
   state: DetailState;
   derived: ReturnType<typeof useLifecycleDetail>;
 } & PanelCallbacks) {
-  const {
-    setOpenSlug,
-    fullTaskDoc,
-    taskDocumentBodyState,
-    jump,
-  } = state;
+  const { setOpenSlug, fullTaskDoc, taskDocumentBodyState, jump } = state;
   const { docs, master, slices, seriesDoc, seriesSlices, openDoc } = derived;
+  const pool = { allDocs: state.allDocs, seriesList: state.analytics?.series ?? [] };
   if (openDoc) {
     return (
       <TaskReader
         doc={fullTaskDoc(openDoc)}
         bodyState={taskDocumentBodyState}
+        pool={pool}
+        onJump={jump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
       />
@@ -247,29 +363,32 @@ function DetailBody({
   }
   if (seriesDoc) {
     return (
-      <MasterOverview
-        doc={seriesDoc}
-        bodyState={taskDocumentBodyState}
-        sliceDocs={seriesSlices}
-        onOpen={setOpenSlug}
-        onJump={jump}
+      <SeriesBranch
+        seriesDoc={seriesDoc}
+        seriesSlices={seriesSlices}
+        taskDocumentBodyState={taskDocumentBodyState}
+        setOpenSlug={setOpenSlug}
+        jump={jump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
         docPathForRef={state.docPathForRef}
+        pool={pool}
       />
     );
   }
   if (master) {
     return (
-      <MasterOverview
-        doc={fullTaskDoc(master)}
-        bodyState={taskDocumentBodyState}
-        sliceDocs={slices}
-        onOpen={setOpenSlug}
-        onJump={jump}
+      <MasterBranch
+        master={master}
+        fullTaskDoc={fullTaskDoc}
+        taskDocumentBodyState={taskDocumentBodyState}
+        pool={pool}
+        setOpenSlug={setOpenSlug}
+        jump={jump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
         docPathForRef={state.docPathForRef}
+        slices={slices}
       />
     );
   }
@@ -282,6 +401,8 @@ function DetailBody({
       onOpenChangeSet={onOpenChangeSet}
       onOpenNotes={onOpenNotes}
       docPathForRef={state.docPathForRef}
+      allDocs={state.allDocs}
+      seriesList={state.analytics?.series ?? []}
     />
   );
 }
@@ -296,20 +417,20 @@ function WorktreeSpine({
   state: DetailState;
   enclosure: EnclosureNode | undefined;
   groupName: string;
-  taskDocumentBodyState: DetailState["taskDocumentBodyState"];
+  taskDocumentBodyState: DetailState['taskDocumentBodyState'];
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
   const { activeWorktreeGroups, providers } = state;
   const engines = groupName
     ? Object.values(providers).filter(
-        (p) => p.scope === "worktree" && p.worktreeGroup === groupName,
+        (p) => p.scope === 'worktree' && p.worktreeGroup === groupName,
       )
     : [];
   if (!enclosure) return null;
   return (
     <div className={spine}>
       <div className={spineHead}>worktree · {groupName || enclosure.repoName}</div>
-      {onOpenChangeSet && taskDocumentBodyState !== "loading" ? (
+      {onOpenChangeSet && taskDocumentBodyState !== 'loading' ? (
         <div className={changeSetBar}>
           {activeWorktreeGroups.includes(groupName) ? (
             <ChangeSetButton
@@ -332,13 +453,13 @@ function WorktreeSpine({
           kind="code"
           title="code → CGC"
           repo={enclosure.repoName}
-          engines={engines.filter((engine) => engine.role === "code")}
+          engines={engines.filter((engine) => engine.role === 'code')}
         />
         <SpineLane
           kind="memory"
           title="memory → GrepAI"
           repo={`ar-${enclosure.repoName}`}
-          engines={engines.filter((engine) => engine.role === "memory")}
+          engines={engines.filter((engine) => engine.role === 'memory')}
         />
       </div>
     </div>
@@ -363,9 +484,9 @@ export function LifecycleDetailBody({
     >
       <div className={where}>
         {lifecycle.fleeting
-          ? "fleeting · no worktree"
-          : `persistent worktree · ${lifecycle.repoId ?? "—"}`}
-        {lifecycle.inferred ? " · inferred" : ""}
+          ? 'fleeting · no worktree'
+          : `persistent worktree · ${lifecycle.repoId ?? '—'}`}
+        {lifecycle.inferred ? ' · inferred' : ''}
       </div>
 
       <PhaseStepper currentIdx={derived.currentIdx} />

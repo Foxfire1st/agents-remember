@@ -20,8 +20,10 @@ from agents_remember.models.lifecycles.operation_kinds import (
     LifecycleControlAction,
     LifecycleOperationKind,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 from ..tools import (
+    direct_execution_grant_payload,
     direct_landing_payload,
     worktree_abandon_payload,
     worktree_checkpoint_landing_payload,
@@ -46,30 +48,38 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
     @server.tool()
     def direct_landing(
         contract_path: str,
-        code_commit: str,
+        leaf_task_document_ref: TaskDocumentRef,
         *,
+        code_commit: str | None = None,
+        code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
         intent_note: str = "",
         candidate_tree: str | None = None,
         dry_run: bool = False,
         leaf_id: str | None = None,
     ) -> dict[str, Any]:
-        """Verify one series code commit and durably serialize its memory + ledger writes.
+        """Verify or create one series code commit and durably serialize its memory + ledger writes.
 
         The direct landing is the branch-addressed counterpart of the worktree closeout
-        commit phase for a sanctioned leaf implemented without a leaf worktree enclosure.
+        commit phase for a granted leaf implemented without a leaf worktree enclosure.
         It is not ordinary master/series closeout or master-to-parent integration, and
-        those routes never require directExecutionEnabled. Direct landing binds the
-        task-root series contract (series-contract.md), verifies the exact code commit is
+        those routes never need a direct-execution grant. Direct landing binds the
+        task-root series contract (series-contract.md), names the leaf it lands with
+        leaf_task_document_ref, verifies the exact code commit is
         the current series branch HEAD, commits external-memory content, and prepends the
         code-to-memory ledger row with the same ledger semantics as the worktree path.
         Message intent is normalized before lane authority. Apply persists one synchronous
         direct-landing lifecycle generation before memory or ledger mutation, records Git
         intent/proof per leg, and resumes the exact generation through the task-addressed
         recover control after interruption. A transient landing lock and the closeout queue are
-        never recovery evidence. Policy-gated:
-        directExecutionEnabled must be set in the MCP
-        authority settings. The code commit is verified, never created. Pass
+        never recovery evidence. Grant-gated:
+        the named leaf must hold a direct-execution grant. Without code_commit,
+        the call takes the uncommitted changes in the checkout holding the
+        master's branch and creates the code commit on that branch with
+        code_commit_message; the preview lists every path the commit would hold
+        and names the candidate tree, and the apply refuses when the checkout no
+        longer matches it. With code_commit, that commit is verified, never
+        created, and no code-commit message is given. Pass
         candidate_tree (the exact candidate tree admitted by the closeout journal) to keep
         a moved branch from being committed after admission.
         The landing judges what it lands (MIK-R52): the invariant gate judges the exact
@@ -86,6 +96,8 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
             DirectLandingRequest(
                 contract_path=contract_path,
                 code_commit=code_commit,
+                leaf_task_document_ref=leaf_task_document_ref,
+                code_commit_message=code_commit_message,
                 memory_commit_message=memory_commit_message,
                 intent_note=intent_note,
                 candidate_tree=candidate_tree,
@@ -93,6 +105,30 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
                 leaf_id=leaf_id,
             ),
         )
+
+    @server.tool()
+    def direct_execution_grant(
+        task_document_ref: TaskDocumentRef,
+        action: str,
+    ) -> dict[str, Any]:
+        """Give, take back, or reclaim direct-execution grants, as an architect.
+
+        A leaf is executed directly on its master's branch only while a grant
+        for it exists. The grant names the leaf by its canonical task
+        reference, who gave it and when; it is given for a leaf only. Only a
+        caller whose launch is bound to the architect role may call this --
+        every other role, and a caller without a role binding, is refused. The
+        developer gives a grant with the control on the task in the dashboard.
+
+        ``action`` is ``give``, ``revoke`` or ``reclaim``. A grant for a started leaf is
+        refused; giving a grant that exists, or taking back one that does not,
+        changes nothing and says so. Reclaim takes back one task's grants that
+        no leaf still requires (terminal leaves with a clean checkout) and
+        reports what was preserved and why. The grant is read at the
+        moment of every call, so no server is started again.
+        MUTATING (grant record only).
+        """
+        return direct_execution_grant_payload(config, task_document_ref, action)
 
 
 def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -131,24 +167,24 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
     ) -> dict[str, Any]:
         """Start or observe an approved task-bound worktree closeout. A mutating call
-        returns promptly with queued/running/current-phase state; the plane-owned worker
-        survives this MCP request and server process, and worktree_status observes it by
-        task context without a job id. The worker validates the admitted candidate and
-        source refs, commits code, refreshes and commits external memory, prepends the
-        exact code-to-memory ledger mapping, and finalizes the contract. Git mutation
-        journals preserve recovery at each irreversible boundary. MUTATING and commit-gated:
-        preview and approval precede apply. Requires intent_note.
-        Every contract-enabled commit leg requires its explicit, nonblank message; typed
-        not-applicable legs may be omitted.
-        Repeat the same task input to observe/recover it; conflicting input refuses. Queue
- invalidation or absence does not affect the accepted journal generation.
+               returns promptly with queued/running/current-phase state; the plane-owned worker
+               survives this MCP request and server process, and worktree_status observes it by
+               task context without a job id. The worker validates the admitted candidate and
+               source refs, commits code, refreshes and commits external memory, prepends the
+               exact code-to-memory ledger mapping, and finalizes the contract. Git mutation
+               journals preserve recovery at each irreversible boundary. MUTATING and commit-gated:
+               preview and approval precede apply. Requires intent_note.
+               Every contract-enabled commit leg requires its explicit, nonblank message; typed
+               not-applicable legs may be omitted.
+               Repeat the same task input to observe/recover it; conflicting input refuses. Queue
+        invalidation or absence does not affect the accepted journal generation.
 
- Delivered against reviewed: after the closeout has committed, the result says whether
- the code and the memory that were delivered are exactly what the leaf's latest recorded
- review showed: the same, different (and on which side), or no review was recorded. It
- never blocks. Both compare trees, not branch history. A rebase, cherry-pick or revert
- that ends in the same tree reads as the same. How a branch got there is not measured.
- """
+        Delivered against reviewed: after the closeout has committed, the result says whether
+        the code and the memory that were delivered are exactly what the leaf's latest recorded
+        review showed: the same, different (and on which side), or no review was recorded. It
+        never blocks. Both compare trees, not branch history. A rebase, cherry-pick or revert
+        that ends in the same tree reads as the same. How a branch got there is not measured.
+        """
         return worktree_closeout_apply_payload(
             config,
             contract_path,

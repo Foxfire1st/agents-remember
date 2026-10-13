@@ -58,6 +58,11 @@ from agents_remember.kernel.coordination_context.paths import (
     memory_roots_from_settings,
 )
 from agents_remember.kernel.coordination_context.resolver import detect_coordination_selection
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grant_path_for,
+    write_grant_file,
+)
 from agents_remember.kernel.memory_mode import (
     REMOVED_MEMORY_MODES,
     SUPPORTED_MEMORY_MODES,
@@ -74,7 +79,8 @@ from agents_remember.memory.baseline import _normalize_topology
 from agents_remember.memory_quality.integrity.check_missing_onboarding import (
     main as check_missing_onboarding_main,
 )
-from agents_remember.tasks import SubTaskRef
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
 from agents_remember.worktrees.direct_landing import DirectLandingRequest
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cli import build_parser
@@ -651,7 +657,7 @@ def remove_contract_mode(contract_path: Path, written: str) -> None:
     )
 
 
-def _config(root: Path, contract: WorktreeContract, *, direct_execution: bool = False):
+def _config(root: Path, contract: WorktreeContract):
     path = root / "mcp-settings.json"
     document: dict[str, object] = {
         "version": 1,
@@ -662,10 +668,64 @@ def _config(root: Path, contract: WorktreeContract, *, direct_execution: bool = 
         "timeoutCaps": {"toolSeconds": 30, "providerSetupSeconds": 1800},
         "benchmarksEnabled": False,
     }
-    if direct_execution:
-        document["directExecutionEnabled"] = True
     path.write_text(json.dumps(document, indent=2), encoding="utf-8")
     return load_config(path)
+
+
+def _grant_fixture_leaf(contract: WorktreeContract) -> TaskDocumentRef:
+    """Publish the fixture's canonical leaf and the grant it started with."""
+    task_root = contract.task_root
+    task_root.mkdir(parents=True, exist_ok=True)
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "TEST-DEMO-MASTER",
+                "slug": "260698_demo-series",
+                "title": "Demo series",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": REPO_NAME,
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "executionNature": "atomic",
+                "subTasks": [
+                    SubTaskRef(
+                        number=_LEAF_ID,
+                        name="Demo leaf",
+                        file="01-demo-leaf.md",
+                        status="planning",
+                    ).model_dump(mode="json"),
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": _LEAF_ID,
+                "slug": "01-demo-leaf",
+                "title": "Demo leaf",
+                "kind": "subTask",
+                "status": "planning",
+                "repo": REPO_NAME,
+                "createdAt": "2026-10-06T00:00:00+00:00",
+                "objective": "Exercise the opt-out refusal.",
+                "requirements": ["The fixture leaf is refused at admission."],
+            }
+        ),
+    )
+    ref = TaskDocumentRef(repository=REPO_NAME, path="260698_demo-series/01-demo-leaf.json")
+    write_grant_file(
+        grant_path_for(contract.coordination_root, ref),
+        DirectExecutionGrant(
+            leaf=ref,
+            granted_by="architect",
+            granted_at="2026-10-06T00:00:00+00:00",
+            granter_agent_id="fixture",
+        ),
+    )
+    return ref
 
 
 def _assert_operator_payload(payload: Mapping[str, Any], *, artifact: str) -> None:
@@ -745,9 +805,14 @@ def test_terminal_admission_reports_the_removed_mode_on_a_surviving_contract(
 @pytest.mark.integration
 def test_direct_landing_reports_the_removed_mode_to_the_operator(tmp_path: Path) -> None:
     contract, contract_path = _published_fixture(tmp_path)
+    leaf_ref = _grant_fixture_leaf(contract)
     payload = direct_landing_tool(
-        _config(tmp_path, contract, direct_execution=True),
-        DirectLandingRequest(contract_path=contract_path.as_posix(), code_commit="a" * 40),
+        _config(tmp_path, contract),
+        DirectLandingRequest(
+            contract_path=contract_path.as_posix(),
+            code_commit="a" * 40,
+            leaf_task_document_ref=leaf_ref,
+        ),
     )
     _assert_operator_payload(payload, artifact=contract_path.as_posix())
 
@@ -756,7 +821,7 @@ def test_direct_landing_reports_the_removed_mode_to_the_operator(tmp_path: Path)
 def test_the_direct_landing_reader_answers_with_the_refusal(tmp_path: Path) -> None:
     """The deeper net behind admission: the ``:152`` catch itself, reached directly."""
     contract, contract_path = _published_fixture(tmp_path)
-    config = _config(tmp_path, contract, direct_execution=True)
+    config = _config(tmp_path, contract)
 
     answer = _read_direct_contract(config, contract_path)
     assert isinstance(answer, dict)

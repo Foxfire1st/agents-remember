@@ -774,6 +774,26 @@
       "title": "CommitRefNode",
       "type": "object"
     },
+    "DirectGrantNode": {
+      "additionalProperties": false,
+      "description": "A leaf's direct-execution grant as the dashboard shows it (MIK-R94 rule 4).\n\nRead from the one grant record at projection time, never stored twice.\n``None`` on the parent node distinguishes a leaf with no grant.",
+      "properties": {
+        "grantedAt": {
+          "title": "Grantedat",
+          "type": "string"
+        },
+        "grantedBy": {
+          "title": "Grantedby",
+          "type": "string"
+        }
+      },
+      "required": [
+        "grantedBy",
+        "grantedAt"
+      ],
+      "title": "DirectGrantNode",
+      "type": "object"
+    },
     "DiscardUnstartedProofNode": {
       "additionalProperties": false,
       "description": "Persisted proof facts retained after an unstarted leaf source is discarded.",
@@ -3048,6 +3068,17 @@
           "default": null,
           "title": "Createdat"
         },
+        "directGrant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectGrantNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "file": {
           "default": "",
           "title": "File",
@@ -3552,6 +3583,17 @@
           "default": null,
           "title": "Design"
         },
+        "directGrant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectGrantNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "discardedCount": {
           "anyOf": [
             {
@@ -3632,9 +3674,50 @@
           "title": "Executionwaves",
           "type": "array"
         },
+        "form": {
+          "default": "task",
+          "enum": [
+            "sprint",
+            "master",
+            "task"
+          ],
+          "title": "Form",
+          "type": "string"
+        },
+        "headerNotes": {
+          "items": {
+            "$ref": "#/$defs/TaskHeaderNoteNode"
+          },
+          "title": "Headernotes",
+          "type": "array"
+        },
+        "headerNotesTotal": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Headernotestotal"
+        },
         "id": {
           "title": "Id",
           "type": "string"
+        },
+        "integrationBranch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Integrationbranch"
         },
         "kind": {
           "title": "Kind",
@@ -3701,6 +3784,17 @@
           "title": "Requirements",
           "type": "array"
         },
+        "reviewState": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskReviewStateNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "seats": {
           "items": {
             "$ref": "#/$defs/TaskSeatNode"
@@ -3718,6 +3812,23 @@
         "status": {
           "title": "Status",
           "type": "string"
+        },
+        "statusNote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Statusnote"
+        },
+        "statusNoteTruncated": {
+          "default": false,
+          "title": "Statusnotetruncated",
+          "type": "boolean"
         },
         "steps": {
           "items": {
@@ -3745,6 +3856,11 @@
         },
         "title": {
           "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "default": "",
+          "title": "Type",
           "type": "string"
         }
       },
@@ -3839,7 +3955,7 @@
     },
     "TaskDocumentRef": {
       "additionalProperties": false,
-      "description": "One JSON-primary task document under ``tasks/<repository>``.\n\n``path`` is coordination-root-relative *inside* the repository task root.  Keeping\nthe root out of the value makes the reference stable when the same coordination\ntree is mounted at another absolute location, while ``repository`` prevents two\nrepositories with the same task-folder layout from colliding.",
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
       "properties": {
         "path": {
           "title": "Path",
@@ -4100,6 +4216,26 @@
       "title": "TaskExecutionPredecessorNode",
       "type": "object"
     },
+    "TaskHeaderNoteNode": {
+      "additionalProperties": false,
+      "description": "One extra header metadata line of a task document (MIK-R127 rule 9).\n\nRendered as ``label: value`` in the head strip; at most six on the page, with a\nlink to all where there are more.",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "title": "TaskHeaderNoteNode",
+      "type": "object"
+    },
     "TaskIntentIdentity": {
       "additionalProperties": false,
       "description": "Canonical task-intent schema plus its exact projection digest.",
@@ -4120,6 +4256,88 @@
         "digest"
       ],
       "title": "TaskIntentIdentity",
+      "type": "object"
+    },
+    "TaskReviewFindingNode": {
+      "additionalProperties": false,
+      "description": "One review finding of a task document (MIK-R127 rule 9).\n\nEvery baseline finding is projected with its open flag: the Review block\ndraws the open ones, and the findings view draws the whole round.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "descriptionTruncated": {
+          "default": false,
+          "title": "Descriptiontruncated",
+          "type": "boolean"
+        },
+        "findingId": {
+          "title": "Findingid",
+          "type": "string"
+        },
+        "open": {
+          "default": true,
+          "title": "Open",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "findingId",
+        "description"
+      ],
+      "title": "TaskReviewFindingNode",
+      "type": "object"
+    },
+    "TaskReviewStateNode": {
+      "additionalProperties": false,
+      "description": "The review round of a task document (MIK-R127 rule 9), bounded as shown.\n\n``findings`` carries the round's baseline findings with their descriptions\n(what the Review block and the findings view draw); ``totalFindings`` names\nthe whole round for the link, and ``openFindings`` counts the open ones of\nthe whole round: a summary carries only the first findings, so a reader\nmust not count their open flags for the round.",
+      "properties": {
+        "additionalRounds": {
+          "default": 0,
+          "title": "Additionalrounds",
+          "type": "integer"
+        },
+        "developerApproval": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Developerapproval"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/TaskReviewFindingNode"
+          },
+          "title": "Findings",
+          "type": "array"
+        },
+        "openFindings": {
+          "default": 0,
+          "title": "Openfindings",
+          "type": "integer"
+        },
+        "pending": {
+          "default": false,
+          "title": "Pending",
+          "type": "boolean"
+        },
+        "round": {
+          "default": 0,
+          "title": "Round",
+          "type": "integer"
+        },
+        "totalFindings": {
+          "default": 0,
+          "title": "Totalfindings",
+          "type": "integer"
+        }
+      },
+      "title": "TaskReviewStateNode",
       "type": "object"
     },
     "TaskSeatNode": {
@@ -4247,6 +4465,40 @@
           "title": "Id",
           "type": "string"
         },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "noteTruncated": {
+          "default": false,
+          "title": "Notetruncated",
+          "type": "boolean"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "outcomeTruncated": {
+          "default": false,
+          "title": "Outcometruncated",
+          "type": "boolean"
+        },
         "status": {
           "title": "Status",
           "type": "string"
@@ -4289,6 +4541,18 @@
         "id": {
           "title": "Id",
           "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
         },
         "status": {
           "title": "Status",

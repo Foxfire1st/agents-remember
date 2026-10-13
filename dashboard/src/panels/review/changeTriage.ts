@@ -11,6 +11,7 @@ import type {
   ReviewFamilyMember,
   ReviewMemberChange,
 } from '../../data/reviewFamily';
+import type { ReviewOutlineMeaning } from '../../data/review';
 import type { TreeOrder } from './triageOrderPreference';
 
 // Precedence and sort weight (ICR-R32 rule 2): intent > implementation > membership > unknown >
@@ -213,6 +214,10 @@ export interface OutlineRow {
   badge?: OutlineBadge;
   familyId?: string;
   revisionId?: string;
+  // The row's recorded effects (MIK-R43): the labels in attempt order and the state.
+  // The tree badge joins the labels when the row's change badge is added, removed or
+  // changed; `none` shows no badge.
+  meaning?: ReviewOutlineMeaning;
 }
 export interface OutlineGroup {
   family?: OutlineRow;
@@ -266,6 +271,20 @@ function walkedMember(walked: readonly ReviewFamilyContextEntry[], id: string, f
   if (!row) return {};
   return { revisionId: row.invariant_revision_id, fact: memberChanges(context).get(row.member_id) };
 }
+// The member's own recorded effects: the family's member row when the member is
+// listed under its family, else the invariant's own row. Both are the same values.
+function memberMeaning(
+  outline: Outline,
+  id: string,
+  familyId: string | undefined,
+): ReviewOutlineMeaning | undefined {
+  const fromFamily = outline.families
+    .find((entry) => entry.selector_id === familyId)
+    ?.members.find((item) => item.selector_id === id)?.meaning;
+  if (fromFamily !== undefined) return fromFamily;
+  return outline.invariants.find((entry) => entry.selector_id === id)?.meaning;
+}
+
 function outlineMember(
   outline: Outline,
   walked: readonly ReviewFamilyContextEntry[],
@@ -276,6 +295,7 @@ function outlineMember(
   const invariant = outline.invariants.find((entry) => entry.selector_id === id);
   const { revisionId, fact } = walkedMember(walked, id, familyId);
   const label = invariant?.id ?? id;
+  const meaning = memberMeaning(outline, id, familyId);
   return {
     kind: 'invariant',
     id: label,
@@ -284,6 +304,7 @@ function outlineMember(
     title: `${label} ${invariant?.summary ?? ''}`.trim(),
     badge: memberBadge(invariant?.change ?? 'unknown', fact, membership),
     revisionId,
+    meaning,
   };
 }
 function groupWeight(group: OutlineGroup): number {
@@ -314,7 +335,14 @@ export function outlineGroups(
       entry.change === 'unchanged' && count ? `${count} changed` : entry.change;
     const title = entry.title.includes(' ') ? entry.title : entry.title.replaceAll('-', ' ');
     return {
-      family: { kind: 'family', id: entry.id, selectorId: entry.selector_id, title, badge },
+      family: {
+        kind: 'family',
+        id: entry.id,
+        selectorId: entry.selector_id,
+        title,
+        badge,
+        meaning: entry.meaning,
+      },
       members,
     };
   });

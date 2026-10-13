@@ -126,9 +126,7 @@ def test_an_admitted_sync_merge_passes(line: Path, ports: None) -> None:
     _git(line, "checkout", "-q", "line")
     _git(line, "merge", "-q", "--no-ff", "-m", "synced merge", "side")
     tip = _git(line, "rev-parse", "HEAD")
-    _require_admitted_step(
-        line, base, tip, STEP, _admission(heads=(tip,), positions=(side,))
-    )
+    _require_admitted_step(line, base, tip, STEP, _admission(heads=(tip,), positions=(side,)))
 
 
 def test_a_step_inside_a_landed_leaf_range_passes(line: Path, ports: None) -> None:

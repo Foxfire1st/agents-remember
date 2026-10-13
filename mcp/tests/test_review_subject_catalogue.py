@@ -84,7 +84,9 @@ def _extra(label: str, statement: str) -> ExtraInvariantSeed:
 def _retired_before(directory: Path) -> ReadScopeFixture:
     """A baseline-topology tree holding one retired before-only invariant."""
 
-    return build_read_scope_fixture(directory, extra_invariants=(_extra(RETIRED_LABEL, RETIRED_STATEMENT),))
+    return build_read_scope_fixture(
+        directory, extra_invariants=(_extra(RETIRED_LABEL, RETIRED_STATEMENT),)
+    )
 
 
 def _added_after(directory: Path):
@@ -143,9 +145,7 @@ def test_the_catalogue_stays_kind_grouped_when_retired_subjects_exist(
     retired = _retired_before(tmp_path / "retired-before")
     retired_id = retired.extra_invariants[0].invariant_id
 
-    offered = read_subject_catalogue(
-        resolution_for(fixture, before_database=retired.database_path)
-    )
+    offered = read_subject_catalogue(resolution_for(fixture, before_database=retired.database_path))
 
     kinds = [entry.selector_kind for entry in offered]
     assert kinds == sorted(kinds, key=lambda kind: (kind != "invariant",)), (
@@ -170,9 +170,7 @@ def test_a_retired_before_only_subject_stays_listed_and_reviewable(
     retired = _retired_before(tmp_path / "retired-before")
     retired_id = retired.extra_invariants[0].invariant_id
 
-    offered = read_subject_catalogue(
-        resolution_for(fixture, before_database=retired.database_path)
-    )
+    offered = read_subject_catalogue(resolution_for(fixture, before_database=retired.database_path))
     by_id = {entry.selector_id: entry for entry in offered}
     assert by_id[retired_id].presence == "before_only"
     # The catalogue labels a text record with the record's own ID: the authored label names no
@@ -198,9 +196,7 @@ def test_a_newly_added_after_only_subject_is_listed_beside_the_retired_half(
     added = _added_after(tmp_path / "added-after")
     added_id = added.extra_invariants[0].invariant_id
 
-    offered = read_subject_catalogue(
-        resolution_for(fixture, after_database=added.database_path)
-    )
+    offered = read_subject_catalogue(resolution_for(fixture, after_database=added.database_path))
     by_id = {entry.selector_id: entry for entry in offered}
     assert by_id[added_id].presence == "after_only"
 
@@ -271,7 +267,9 @@ def test_every_catalogue_row_opens_through_the_normal_review(
 # identity with no authored content is not a shape a text tree can express. The bare-identity
 # case below names its removal rather than asserting it; the retired and added subjects above
 # still pin the listed-but-one-sided population.
-_REMOVED_BARE_IDENTITY_CASE = "test_a_recorded_but_unselectable_subject_is_listed_and_its_open_carries_the_reason"
+_REMOVED_BARE_IDENTITY_CASE = (
+    "test_a_recorded_but_unselectable_subject_is_listed_and_its_open_carries_the_reason"
+)
 
 
 def test_the_entry_route_carries_labelled_totals_for_the_whole_catalogue(tmp_path: Path) -> None:

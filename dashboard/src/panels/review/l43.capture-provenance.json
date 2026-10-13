@@ -1,0 +1,104 @@
+{
+  "captured_at": "2026-10-11T16:42:30.016741+00:00",
+  "captured_source_tree": "23cb164fa24dcbc4a98a56fa1324e1fb42c1bf41",
+  "command": "mcp/.venv/bin/python /tmp/mik-run3/L43/work/l43_capture.py (XDG_CONFIG_HOME=/tmp/mik-run3/L43/config)",
+  "fixtures": {
+    "l43.entries.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember"
+      },
+      "sha256": "485a975c6153c2879e79c6a3dc4a7e64bc27e27cf581bc08b5e135dc5a380546"
+    },
+    "l43.family.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember",
+        "selectorId": "c651d020-ae81-58f7-a62b-8e4cc9cc24fe",
+        "selectorKind": "family"
+      },
+      "sha256": "f934f02a4071fde26bef88fb5021a2baae1cfcb28600bb3daeb26d6907ed2dc3"
+    },
+    "l43.invariant1.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember",
+        "selectorId": "ff9e5633-4d36-5c4a-b856-77098b5bedfc",
+        "selectorKind": "invariant"
+      },
+      "sha256": "3b735b2b8c8dddb3c74065da515d0b0b75140c85e5ee90992632b500de6fec4f"
+    },
+    "l43.invariant2.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember",
+        "selectorId": "a99f21b1-63af-569e-94c6-4ecbc65e34ca",
+        "selectorKind": "invariant"
+      },
+      "sha256": "d2436adca0aec6b1430131996743758f76c719ce161bf7ad39482f481399077d"
+    },
+    "l43.invariant4.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember",
+        "selectorId": "2faaf5a7-1dfc-50aa-98fe-6b16cb14b43b",
+        "selectorKind": "invariant"
+      },
+      "sha256": "0e1ba7019d1f292c2843ab30a0f1dee65dd8e642ceaee60f666e20b42b2391d4"
+    },
+    "l43.none.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember",
+        "selectorId": "52593890-ca5b-5683-b9e3-37b83b68048e",
+        "selectorKind": "invariant"
+      },
+      "sha256": "a632c63d4b88253ba7cb6c1174f456d9fae77f2b26711e8944e687783d7abb76"
+    },
+    "l43.oldfamily.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember",
+        "selectorId": "a5362441-9eb7-539d-bbf8-ed1d52b11c23",
+        "selectorKind": "family"
+      },
+      "sha256": "725f17658b1e098159c07dcb6ffc53ab76b75378ab44f95c265297eb9c04ff53"
+    },
+    "l43.task.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember"
+      },
+      "sha256": "3032d5e0dd2f5b0cef55127cafcb4586f50c087d42fcfe09a8669b5d55813f9a"
+    },
+    "l43.trees.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "repo": "agents-remember"
+      },
+      "sha256": "8c7dae294f96d7cbeaf084c480d20684a81545c10119f656f8b1f07b4d4ff6f7"
+    },
+    "l43.unavailable.captured.json": {
+      "params": {
+        "leaf": "260101-TRV-L1",
+        "master": "260101_tree_review",
+        "partial": true,
+        "repo": "agents-remember"
+      },
+      "sha256": "c6ad41f42341a287166ca1bcf2aa197c8b39f997af88f36bba881b15ce41c441"
+    }
+  },
+  "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators",
+  "route": "GET /api/review/intent(+/entries) and /api/review/trees over TestClient; ports call read_knowledge_review/list_knowledge_review_entries/read_review_trees with the world's McpRuntimeConfig",
+  "scope": "Real review-route bodies over disposable enclosures built by the repository's own test builders (test_review_git_trees.build_world); test evidence, not product knowledge. Fixture worlds are rebuilt on every run under /tmp/mik-run3/L43/work/captures/ with fresh Git repositories.",
+  "selection_rule": "attempt files 1,2,3,10 about one invariant (four steps); one step about a second invariant; a family with its effect; an old family row without effect or revision; one invariant with no rows; one partial-index world for the unavailable capture"
+}

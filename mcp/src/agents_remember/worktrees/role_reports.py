@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from agents_remember.cli.role_message_files import MESSAGES_LINK
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.atomic_write import atomic_replace
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -230,6 +231,30 @@ def remove_group_role_folders(
             "path": str(path),
             "would_remove" if dry_run else "removed": present,
             "reason": None if present else "already-absent",
+        }
+    # MIK-R117: cleanup of a workspace removes the messages link. No cleanup
+    # deletes a message file: a real directory or file at the link's name is
+    # left alone and reported.
+    link = contract.worktree_group / MESSAGES_LINK
+    if link.is_symlink():
+        if not dry_run:
+            link.unlink()
+        result[MESSAGES_LINK] = {
+            "path": str(link),
+            "would_remove" if dry_run else "removed": True,
+            "reason": None,
+        }
+    elif link.exists():
+        result[MESSAGES_LINK] = {
+            "path": str(link),
+            "would_remove" if dry_run else "removed": False,
+            "reason": "not-a-link-preserved",
+        }
+    else:
+        result[MESSAGES_LINK] = {
+            "path": str(link),
+            "would_remove" if dry_run else "removed": False,
+            "reason": "already-absent",
         }
     return result
 

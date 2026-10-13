@@ -275,7 +275,27 @@ minversion = "9.0"
 #     unbounded, and `test_suite_budget.py` still proves both failure directions -- over-unit and
 #     over-integration -- at whatever pair is declared.  Only the numbers moved, and no case,
 #     module, registration or lane member was deleted, deselected, consolidated away or weakened.
-unit_case_budget = 4000
+# 2026-10-11 -- unit ceiling raised, **4000 -> 5000**, by the 260928-MIK-L146 leaf under the
+# developer's direct word D226 ("you can increase test budgedt to 5000 so we don't run into
+# issues").  Like the paragraph above it, this raise is a POLICY and is recorded as one: no
+# increment below is earned from a projection, and this change set adds no case of its own.
+#   * the pair it replaces is `4000 / 1000` -- `260918-TSIP-L13`'s policy raise of 2026-09-20.
+#     The measured populations at this leaf's base, code `42201818`, are **4299 unit / 774
+#     integration** (`pytest --collect-only` for the unit lane under the default selection and
+#     `pytest mcp/tests -m "integration" --collect-only`), so the unit ceiling carries 701 cases
+#     of headroom where the pair it replaces carried none.  Headroom, never a target: a successor
+#     measures both populations rather than filling them.
+#   * what grew the unit lane is the work of this master (`260928_maintained-invariant-knowledge`):
+#     the lane stood at 4,012/4,068 at marks 29/44 and at 4,099 at the base of L109, and the tasks
+#     landed since carried it past the 4,000 rail.  No case is removed, merged or skipped to fit.
+#   * runtime is not measured here (D55): no run of the whole suite.  The whole lane's runtime is
+#     measured by the one full suite of the master, not in this task.
+#   * what is NOT relaxed: `pytest_collection_finish` still refuses a population over the ceiling
+#     by name, an absent declaration still resolves to `0` and still refuses rather than running
+#     unbounded, and `test_suite_budget.py` still proves both failure directions -- over-unit and
+#     over-integration -- at whatever pair is declared.  Only the number moved.
+#   * integration is NOT raised: measured 774 collected against 1000, unchanged by this leaf.
+unit_case_budget = 5000
 integration_case_budget = 1000
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this

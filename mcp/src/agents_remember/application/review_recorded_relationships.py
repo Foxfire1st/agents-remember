@@ -91,9 +91,7 @@ class RecordedIdentityIndex:
     families: Mapping[str, str]
 
 
-def recorded_snapshot(
-    side: str, database: Path, connection: apsw.Connection
-) -> RecordedSnapshot:
+def recorded_snapshot(side: str, database: Path, connection: apsw.Connection) -> RecordedSnapshot:
     """Hold one snapshot's file and connection beside its side name."""
 
     return RecordedSnapshot(

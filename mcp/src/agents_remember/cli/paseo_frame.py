@@ -33,6 +33,7 @@ from agents_remember.cli.role_launch_workspace import workspace_folder
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.user_settings_location import user_settings_path
+from agents_remember.serving.paseo.paseo_remedy import provision_command
 
 REASON_NOT_CONFIGURED = "not-configured"
 REASON_ORIGIN_NOT_LISTED = "origin-not-listed"
@@ -195,6 +196,8 @@ def frame_descriptor(
         else (facts.detail or "the runtime named no workspace for the Projects folder")[
             :_DETAIL_LIMIT
         ],
+        # Named in the frame's notice where the plug-in on the host is older than the dashboard.
+        "provisionCommand": provision_command(settings),
     }
 
 

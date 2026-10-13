@@ -22,21 +22,25 @@
 // attribution is unknown. It is its own element after `+N −N`, never added to it. A partially measured
 // change set says `· attribution partial` (the unmeasured scope is in the disclosure), an unmeasured
 // one `· attribution unknown`; zero of both, a dataset comparison and a pending read show nothing.
-import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
-import { type IntentSummaryRead, useIntentReviewSummary } from "../../data/reviewIntentSummary";
-import type { ReviewLaneSummary } from "../../data/reviewLane";
-import { EntryStateDetails, briefProblem, problemSentence } from "./entryState";
-import { changeSetBtn, changeSetCounts } from "./styles";
+import type { ChangeSetTarget } from '../changeset/ChangeSetViewer';
+import { type IntentSummaryRead, useIntentReviewSummary } from '../../data/reviewIntentSummary';
+import type { ReviewLaneSummary } from '../../data/reviewLane';
+import { EntryStateDetails, briefProblem, problemSentence } from './entryState';
+import { changeSetBtn, changeSetCounts } from './styles';
 
 function IntentCounts({ read }: { read: IntentSummaryRead }) {
-  if (read.phase === "loading") {
+  if (read.phase === 'loading') {
     return (
-      <span className={changeSetCounts} data-testid="intent-review-state" data-review-state="loading">
+      <span
+        className={changeSetCounts}
+        data-testid="intent-review-state"
+        data-review-state="loading"
+      >
         …
       </span>
     );
   }
-  if (read.phase === "unavailable") {
+  if (read.phase === 'unavailable') {
     return (
       <span
         className={changeSetCounts}
@@ -58,8 +62,12 @@ function IntentCounts({ read }: { read: IntentSummaryRead }) {
       >
         +{read.counts.added} −{read.counts.removed}
       </span>
-      {read.phase === "partial" ? (
-        <span className={changeSetCounts} data-testid="intent-review-state" data-review-state="partial">
+      {read.phase === 'partial' ? (
+        <span
+          className={changeSetCounts}
+          data-testid="intent-review-state"
+          data-review-state="partial"
+        >
           partial
         </span>
       ) : null}
@@ -69,8 +77,8 @@ function IntentCounts({ read }: { read: IntentSummaryRead }) {
 
 // The lane's entry count, or nothing: `null` for zero of both, a pending read and a dataset comparison.
 function attributionText(attribution: ReviewLaneSummary): string | null {
-  if (attribution.state === "partial") return "· attribution partial";
-  if (attribution.state === "unavailable") return "· attribution unknown";
+  if (attribution.state === 'partial') return '· attribution partial';
+  if (attribution.state === 'unavailable') return '· attribution unknown';
   const unexplained = attribution.unexplained ?? 0;
   const unknown = attribution.attribution_unknown ?? 0;
   if (unknown > 0) return `· ${unexplained} unexplained · ${unknown} unknown`;
@@ -78,7 +86,7 @@ function attributionText(attribution: ReviewLaneSummary): string | null {
 }
 
 function AttributionCount({ read }: { read: IntentSummaryRead }) {
-  const attribution = read.phase === "loading" ? undefined : read.attribution;
+  const attribution = read.phase === 'loading' ? undefined : read.attribution;
   const text = attribution ? attributionText(attribution) : null;
   if (!attribution || text === null) return null;
   return (
@@ -95,29 +103,29 @@ function AttributionCount({ read }: { read: IntentSummaryRead }) {
 }
 
 function AttributionDetails({ read }: { read: IntentSummaryRead }) {
-  const attribution = read.phase === "loading" ? undefined : read.attribution;
-  if (!attribution || attribution.state === "counted") return null;
+  const attribution = read.phase === 'loading' ? undefined : read.attribution;
+  if (!attribution || attribution.state === 'counted') return null;
   const scope = attribution.unmeasured.length
-    ? ` Not measured: ${attribution.unmeasured.join(", ")}.`
-    : "";
+    ? ` Not measured: ${attribution.unmeasured.join(', ')}.`
+    : '';
   return (
     <EntryStateDetails testId="intent-review-attribution-details" label="Attribution">
-      {attribution.state === "partial"
-        ? `The change set was measured with some paths not reportable whole, so no unexplained count is given. ${attribution.detail ?? ""}${scope}`
-        : `The attribution of the changed files could not be measured: ${attribution.detail ?? "no reason was given"}.`}
+      {attribution.state === 'partial'
+        ? `The change set was measured with some paths not reportable whole, so no unexplained count is given. ${attribution.detail ?? ''}${scope}`
+        : `The attribution of the changed files could not be measured: ${attribution.detail ?? 'no reason was given'}.`}
     </EntryStateDetails>
   );
 }
 
 function IntentDetails({ read }: { read: IntentSummaryRead }) {
-  if (read.phase === "unavailable") {
+  if (read.phase === 'unavailable') {
     return (
       <EntryStateDetails testId="intent-review-details" label="Intent review">
         {problemSentence(read.problem)}
       </EntryStateDetails>
     );
   }
-  if (read.phase === "partial") {
+  if (read.phase === 'partial') {
     return (
       <EntryStateDetails testId="intent-review-details" label="Intent review">
         {read.counts.unresolved} subject(s) have no single current revision on one side, so they are
@@ -160,7 +168,7 @@ export function IntentReviewEntry({
         data-testid="open-intent-review"
         data-intent-state={read.phase}
       >
-        ⇄ {live ? "Intent review" : "Intent review (recorded)"}
+        ⇄ {live ? 'Intent review' : 'Intent review (recorded)'}
         <IntentCounts read={read} />
         <AttributionCount read={read} />
       </button>

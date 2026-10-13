@@ -526,6 +526,10 @@ class TaskSubStepNode(BaseModel):
     title: str
     status: str
     disposition: TaskStepDispositionNode | None = None
+    # Free prose about this unit (MIK-R127 rule 9): the Steps block shows it as one
+    # muted line under the step and opens it in place. Summaries carry a bounded
+    # preview (rule 9); the on-demand body carries the whole note.
+    note: str | None = None
 
 
 class TaskStepNode(BaseModel):
@@ -542,6 +546,15 @@ class TaskStepNode(BaseModel):
     status: str
     disposition: TaskStepDispositionNode | None = None
     substeps: list[TaskSubStepNode] = Field(default_factory=list)
+    # The checkbox line (the deliverable) and free prose about this unit (MIK-R127
+    # rule 9): the Steps block shows one of them as a muted line under the step.
+    # Summaries carry bounded previews (rule 9); the on-demand body carries whole
+    # strings. The flags tell the page a preview is shown; older readers ignore
+    # them and render the preview as the value.
+    outcome: str | None = None
+    note: str | None = None
+    outcomeTruncated: bool = False
+    noteTruncated: bool = False
 
 
 class TaskDecisionNode(BaseModel):
@@ -556,6 +569,57 @@ class TaskDecisionNode(BaseModel):
     # decision — MIK-R126 rule 6 under the lifecycle-records ruling). The server marks
     # it from the writers' own constants; the stored entry keeps its shape.
     product_record: bool = False
+
+
+class TaskHeaderNoteNode(BaseModel):
+    """One extra header metadata line of a task document (MIK-R127 rule 9).
+
+    Rendered as ``label: value`` in the head strip; at most six on the page, with a
+    link to all where there are more.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    value: str = ""
+
+
+class TaskReviewFindingNode(BaseModel):
+    """One review finding of a task document (MIK-R127 rule 9).
+
+    Every baseline finding is projected with its open flag: the Review block
+    draws the open ones, and the findings view draws the whole round.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    findingId: str
+    description: str
+    open: bool = True
+    # True when a summary carries only a preview of the description (rule 9);
+    # the on-demand body carries the whole string.
+    descriptionTruncated: bool = False
+
+
+class TaskReviewStateNode(BaseModel):
+    """The review round of a task document (MIK-R127 rule 9), bounded as shown.
+
+    ``findings`` carries the round's baseline findings with their descriptions
+    (what the Review block and the findings view draw); ``totalFindings`` names
+    the whole round for the link, and ``openFindings`` counts the open ones of
+    the whole round: a summary carries only the first findings, so a reader
+    must not count their open flags for the round.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    round: int = 0
+    pending: bool = False
+    additionalRounds: int = 0
+    findings: list[TaskReviewFindingNode] = Field(default_factory=list)
+    totalFindings: int = 0
+    openFindings: int = 0
+    developerApproval: str | None = None
 
 
 class TaskCodeExampleNode(BaseModel):
@@ -734,6 +798,31 @@ class TaskDocNode(BaseModel):
     title: str
     status: str
     kind: str
+    # The document's form by the model's own rule (MIK-R127 rule 1): a master that
+    # commands masters is a sprint, any other master is a master, anything else a
+    # task. The page shows that word and chooses the skeleton by it.
+    form: Literal["sprint", "master", "task"] = "task"
+    # The document's declared type (e.g. "SubTask (role instructions)") for the
+    # head strip (MIK-R127 rule 2).
+    type: str = ""
+    # A sprint's declared branch identity (MIK-R127 rule 2); master-only like the
+    # document field it mirrors.
+    integrationBranch: str | None = None
+    # Descriptive status suffix beside the strict enum (MIK-R127 rule 2): one line
+    # that opens in place. Summaries carry a bounded preview (rule 9); the
+    # on-demand body carries the whole note.
+    statusNote: str | None = None
+    statusNoteTruncated: bool = False
+    # Extra header metadata lines (MIK-R127 rule 2): label/value lines, at most six
+    # on the page with a link to all. Summaries carry the first
+    # _SUMMARY_HEADER_NOTES with the whole count (rule 9); the on-demand body
+    # carries every note. None names an older cache, which the page reads as the
+    # shown length.
+    headerNotes: list[TaskHeaderNoteNode] = Field(default_factory=list)
+    headerNotesTotal: int | None = None
+    # The recorded review round (MIK-R127 rule 9): the Review block and the master
+    # Now block read it from the always-on summary, never from a body fetch.
+    reviewState: TaskReviewStateNode | None = None
     stepsDone: int = 0
     stepsTotal: int = 0
     currentStep: str | None = None
@@ -783,6 +872,22 @@ class TaskDocNode(BaseModel):
     # Render-ready per-node sprint graph (L12-R4): the dashboard renders this view directly and
     # never joins raw refs to titles or re-derives waves/frontier state from the persisted graph.
     executionGraphView: TaskExecutionGraphView | None = None
+    # The leaf's direct-execution grant with who gave it (MIK-R94 rule 4); None
+    # when the leaf has no grant. Read from the one record at projection time.
+    directGrant: DirectGrantNode | None = None
+
+
+class DirectGrantNode(BaseModel):
+    """A leaf's direct-execution grant as the dashboard shows it (MIK-R94 rule 4).
+
+    Read from the one grant record at projection time, never stored twice.
+    ``None`` on the parent node distinguishes a leaf with no grant.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    grantedBy: str
+    grantedAt: str
 
 
 class SeriesSubTaskNode(BaseModel):
@@ -801,6 +906,9 @@ class SeriesSubTaskNode(BaseModel):
     status: str
     scope: str = ""
     createdAt: str | None = None
+    # The leaf's direct-execution grant with who gave it (MIK-R94 rule 4); None
+    # when the leaf has no grant. Read from the one record at projection time.
+    directGrant: DirectGrantNode | None = None
 
 
 class SeriesSectionNode(BaseModel):

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -480,6 +483,23 @@ describe("workspace rollup — the handoff reaches the header", () => {
   });
 });
 
+describe("no scanline layer over the cockpit (MIK-R127, D223)", () => {
+  // The fixed layer of dark lines over the whole application cut every letter on each third
+  // pixel row. It is removed with its rule and its animation; nothing brings it back.
+  it("draws no layer over the application and keeps no rule for one", () => {
+    seed("calm");
+    const { container } = render(<CockpitShell initialView="operations" />);
+    expect(container.querySelector(".crt-overlay")).toBeNull();
+    const css = readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
+    expect(css).not.toContain(".crt-overlay");
+    expect(css).not.toMatch(/@keyframes\s+flicker/);
+    expect(css).not.toContain("repeating-linear-gradient");
+    // the alarm pulse and the calm freeze are not the layer's and stay
+    expect(css).toMatch(/@keyframes\s+pulse\b/);
+    expect(css).toContain('html[data-effects="off"]');
+  });
+});
+
 describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)", () => {
   it("renders the muted stamp from the snapshot's servingBuild (commit-first)", () => {
     const fixture = GALLERY.find((entry) => entry.name === "engine-fleet");
@@ -850,16 +870,50 @@ describe("persistent layers are exported memoized (260721 tab-switch CPU)", () =
   });
 });
 
+describe("the attention queue behind the bell, on the gallery states the browser tests read", () => {
+  // e2e/cockpit.spec.ts opens the bell on `/dev/bench`, which renders this shell from these
+  // gallery states, and asserts the same on the same test ids. Those tests run in the Dagger
+  // suite alone; these run here.
+  function openBell(stateName: string) {
+    seed(stateName);
+    const view = render(<CockpitShell initialView="operations" />);
+    fireEvent.click(view.getByTestId("attention-bell"));
+    return view;
+  }
+
+  it("ranks alarms first (state=alarm)", () => {
+    const view = openBell("alarm");
+    expect(view.getByTestId("attention-queue").textContent).toContain("waiting");
+    expect(view.getAllByTestId("attn-item")[0].textContent).toContain("down");
+  });
+
+  it("keeps the projected gate ask in the queue (state=blocked)", () => {
+    const queue = openBell("blocked").getByTestId("attention-queue");
+    expect(queue.textContent).toContain("Approve the plan?");
+    expect(queue.textContent).toContain("Gate — input needed");
+  });
+
+  it("renders the empty state without items (state=empty)", () => {
+    const view = openBell("empty");
+    expect(view.getByTestId("attention-queue").textContent).toContain("nothing waiting");
+    expect(view.queryAllByTestId("attn-item")).toHaveLength(0);
+    fireEvent.keyDown(view.getByTestId("attention-queue"), { key: "Escape" });
+    expect(view.queryByTestId("attention-queue")).toBeNull();
+    expect(view.getByRole("heading", { name: "Detail" })).toBeTruthy();
+  });
+});
+
 describe("the left rail shows lifecycle states and attention severities at the same time", () => {
   // Dot.tsx used to justify `warn` and `awaiting-developer` sharing amber on the grounds that
   // "AttentionQueue renders only severities and LifecycleList renders only states, so no list can
-  // show both". True per LIST and false per VIEW: the two panels are siblings inside the same
-  // always-visible left rail, so a developer reads both grammars in one glance — and they are
-  // different facts about different objects (the reducer builds no attention row for an
-  // `awaiting-developer` lifecycle, so an amber dot in one panel says nothing about the other).
+  // show both". True per LIST and false per VIEW: the queue's layer opens over the tree of the
+  // same left rail (MIK-R144 rule 3a: a bell in the task list's head), so a developer reads both
+  // grammars in one glance — and they are different facts about different objects (the reducer
+  // builds no attention row for an `awaiting-developer` lifecycle, so an amber mark in the layer
+  // says nothing about one in the tree).
   //
-  // This renders the whole shell rather than the two panels, because the panels being siblings in
-  // one view is exactly the claim under test.
+  // This renders the whole shell rather than the two parts, because the layer lying over the
+  // tree in one view is exactly the claim under test.
   function railProjection(attentionQueue: Analytics["attentionQueue"]): WorkspaceProjection {
     const handoff: LifecycleProjection = {
       id: "LC-HANDOFF",
@@ -924,6 +978,8 @@ describe("the left rail shows lifecycle states and attention severities at the s
     dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
     const { getByTestId } = render(<CockpitShell initialView="operations" />);
 
+    // The bell of the rail's head opens the queue's layer over the tree.
+    fireEvent.click(getByTestId("attention-bell"));
     const stateDot = getByTestId("task-state").firstElementChild;
     const severityDot = getByTestId("attn-severity").firstElementChild;
     expect(stateDot, "no lifecycle state dot in the rail").toBeTruthy();
@@ -939,26 +995,79 @@ describe("the left rail shows lifecycle states and attention severities at the s
     // reader user got nothing. Queried BY ROLE AND NAME here, which is the computed tree, and
     // backed by axe, which fails the prohibited attribute outright.
     dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
-    const { getByRole, container } = render(<CockpitShell initialView="operations" />);
-    expect(getByRole("img", { name: "Severity: warn" })).toBe(
-      container.querySelector('[data-testid="attn-severity"]'),
+    const { getByRole, getByTestId, baseElement } = render(
+      <CockpitShell initialView="operations" />,
     );
     // The state dot's label reaches the tree a different way: React Aria gives the row
     // `role="option"`, whose name comes from its content, so the span's label is absorbed into it.
-    expect(
-      getByRole("option", { name: /Task progress: awaiting-developer; phase: build/ }),
-    ).toBeTruthy();
+    // Read before the layer opens: an open layer takes the rest of the page out of the tree.
+    expect(getByRole("option", { name: /Task progress: your turn; phase: build/ })).toBeTruthy();
+    // The bell speaks the queue, and opens the layer the severity lives in.
+    fireEvent.click(getByRole("button", { name: "Attention: 1 waiting" }));
+    expect(getByRole("img", { name: "Severity: warn" })).toBe(
+      baseElement.querySelector('[data-testid="attn-severity"]'),
+    );
+    expect(getByTestId("attention-queue").getAttribute("role")).toBe("dialog");
   });
 
-  it("passes axe on the panel the severity label lives in", async () => {
-    // The panel rather than the whole shell: axe walks every node it is given, and this is the
-    // subtree the label is on. `aria-prohibited-attr` is `serious` and would fail here.
+  it("passes axe on the bell and on the layer the severity label lives in", async () => {
+    // The bell and its layer rather than the whole shell: axe walks every node it is given, and
+    // these are the subtrees the labels are on. `aria-prohibited-attr` is `serious` and would
+    // fail here.
     dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
-    const { container } = render(<AttentionQueue onSelect={vi.fn()} />);
-    const results = await axe.run(container, {
-      // jsdom has no layout engine, so skip the rules that need rendered geometry.
-      rules: { "color-contrast": { enabled: false }, region: { enabled: false } },
-    });
-    expect(results.violations.map((violation) => violation.id)).toEqual([]);
+    const { container, getByTestId } = render(<AttentionQueue onSelect={vi.fn()} />);
+    // jsdom has no layout engine, so skip the rules that need rendered geometry.
+    const rules = { "color-contrast": { enabled: false }, region: { enabled: false } };
+    const bell = await axe.run(container, { rules });
+    expect(bell.violations.map((violation) => violation.id)).toEqual([]);
+
+    fireEvent.click(getByTestId("attention-bell"));
+    // The whole layer: the popover's outer box, which carries attributes of its own, and the
+    // dialog inside it.
+    const popover = getByTestId("attention-queue").closest("[data-trigger='DialogTrigger']");
+    if (!popover) throw new Error("the layer has no popover around it");
+    const layer = await axe.run(popover, { rules });
+    expect(layer.violations.map((violation) => violation.id)).toEqual([]);
+  });
+
+  it("opens an entry in this shell: its row is marked, brought into view and focused", async () => {
+    // The shell stores the choice as the lifecycle's selection, not as the bare id the layer
+    // hands over (`open`); the list has to know its request again in that form.
+    dashboardStore.getState().applySnapshot(
+      railProjection([
+        {
+          id: "stale-session:LC-HANDOFF",
+          kind: "stale-session",
+          severity: "info",
+          lane: "lifecycle",
+          title: "Session gone quiet",
+          waitSeconds: 600,
+          lifecycleId: "LC-HANDOFF",
+          repoId: "repo-a",
+        },
+      ]),
+    );
+    const shown = vi.fn();
+    Element.prototype.scrollIntoView = shown;
+    // jsdom has no CSS.escape, which React Aria calls once a row has the keyboard's focus.
+    vi.stubGlobal("CSS", { escape: (value: string) => value });
+    try {
+      const view = render(<CockpitShell initialView="operations" />);
+      fireEvent.click(view.getByTestId("attention-bell"));
+      const link = view.getByTestId("attn-open");
+      expect(link.textContent).toBe("01 Handoff Leaf");
+      fireEvent.click(link);
+      expect(view.queryByTestId("attention-queue")).toBeNull();
+
+      await waitFor(() => expect(shown).toHaveBeenCalledTimes(1));
+      const row = shown.mock.instances[0] as unknown as HTMLElement;
+      expect(row.getAttribute("role")).toBe("option");
+      expect(row.textContent).toContain("Handoff Leaf");
+      expect(row.hasAttribute("data-chosen")).toBe(true);
+      expect(document.activeElement).toBe(row);
+    } finally {
+      Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+      vi.unstubAllGlobals();
+    }
   });
 });

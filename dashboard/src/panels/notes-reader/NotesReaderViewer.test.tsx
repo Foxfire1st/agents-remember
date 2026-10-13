@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CockpitShell } from "../../cockpit/Cockpit";
@@ -398,6 +398,33 @@ describe("NotesReaderViewer tree rail (the shared ExplorerTree)", () => {
     ).length;
     expect(keepFetches).toBe(1);
   });
+
+  it("refetches nothing on an unrelated rerender and still loads on demand", async () => {
+    const urls = stubNotesApi(
+      { "": [entry("a.md"), entry("reports/")], reports: [entry("reports/r.md")] },
+      { "a.md": content("a.md") },
+    );
+    const onSelectNote = vi.fn();
+    const view = render(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={onSelectNote} onBack={vi.fn()} />,
+    );
+    await view.findByTitle("a.md");
+    const loaded = urls.filter((url) => url.startsWith("/api/notes/folder")).length;
+    expect(loaded).toBeGreaterThan(0);
+    // The same props again: the loaded folders answer from the cache, no second fetch.
+    view.rerender(
+      <NotesReaderViewer kind="notes" repo={REPO} master={MASTER} path="a.md" onSelectNote={onSelectNote} onBack={vi.fn()} />,
+    );
+    // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
+    await act(async () => {});
+    expect(urls.filter((url) => url.startsWith("/api/notes/folder"))).toHaveLength(loaded);
+    // Demand still loads: opening the closed folder fetches exactly its level.
+    fireEvent.click(view.getByTitle("reports"));
+    expect(await view.findByTitle("r.md")).toBeTruthy();
+    expect(
+      urls.filter((url) => url.startsWith("/api/notes/folder") && url.includes("path=reports")).length,
+    ).toBe(1);
+  });
 });
 
 describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () => {
@@ -515,6 +542,10 @@ function masterDoc(): TaskDocNode {
     title: "Agent Orchestration",
     status: "inProgress",
     kind: "master",
+    form: "master",
+    type: "",
+    headerNotes: [],
+    statusNoteTruncated: false,
     docPath: `/tasks/${REPO}/${MASTER}/task.json`,
     bodyRevision: "",
     createdAt: "2026-07-07T09:00:00+00:00",
@@ -665,12 +696,15 @@ describe("decision whole-log page", () => {
 });
 
 describe("task report target", () => {
+  // The role scope the report is recorded under: the viewer is given it and the request names it.
+  const REPORT_ROLE = "worker";
+
   it("fetches the recorded report for its role scope and renders it", async () => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       if (url === "/api/role-launch/report") {
         const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
         expect(body).toEqual({
-          role: "worker",
+          role: REPORT_ROLE,
           taskDocumentRef: { repository: REPO, path: `${MASTER}/09_x.json` },
           requestId: "req-1",
         });
@@ -688,7 +722,7 @@ describe("task report target", () => {
         kind="task-report"
         repo={REPO}
         master={MASTER}
-        role="worker"
+        role={REPORT_ROLE}
         requestId="req-1"
         taskRepository={REPO}
         taskPath={`${MASTER}/09_x.json`}

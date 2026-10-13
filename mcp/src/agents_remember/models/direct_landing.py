@@ -37,6 +37,9 @@ class DirectLandingResponse(ToolResponse):
     )
     codeCommit: str | None = None
     memoryContentCommit: str | None = None
+    candidateTree: str | None = None
+    candidatePaths: list[str] | None = Field(default=None, max_length=4096)
+    codeCommitMessage: str | None = None
     ledgerCache: dict[str, Any] | None = None
     dryRun: bool = False
     memory: dict[str, Any] | None = None

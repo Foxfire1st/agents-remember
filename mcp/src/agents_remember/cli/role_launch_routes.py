@@ -47,6 +47,7 @@ from agents_remember.cli.paseo_launch import (
 )
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_answers import alias_response
+from agents_remember.cli.role_document_chat_tree import register_document_chat_tree_route
 from agents_remember.cli.role_document_chats import register_document_chat_route
 from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
 from agents_remember.cli.role_instructions import launch_choice_metadata
@@ -140,6 +141,7 @@ def register_role_launch_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
         "/api/role-launch/progress/{request_id}", role_launch_progress.read, methods=["GET"]
     )
     register_document_chat_route(app, config)
+    register_document_chat_tree_route(app, config)
     register_role_report_route(app, config)
 
 
@@ -366,7 +368,10 @@ def _reserve_message_binding_projection(
     else:
         replaces_agent_id = None
     prior = _reconcile_prior_execution(
-        config, path, request, request_digest,
+        config,
+        path,
+        request,
+        request_digest,
         _Replacement(
             reservation.started_by,
             request.replaces_agent_id,
@@ -458,7 +463,10 @@ def _start_execution(
     if _receipt_carries_request(path, request):
         _refuse_another_starter(path, request, started_by)
         prior = _reconcile_prior_execution(
-            config, path, request, request_digest,
+            config,
+            path,
+            request,
+            request_digest,
             _Replacement(
                 started_by,
                 request.replaces_agent_id,
@@ -626,7 +634,10 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         try:
             _refuse_another_starter(start.receipt_path, request, start.started_by)
             prior = _reconcile_prior_execution(
-                start.config, start.receipt_path, request, start.request_digest,
+                start.config,
+                start.receipt_path,
+                request,
+                start.request_digest,
                 _Replacement(
                     start.started_by,
                     request.replaces_agent_id,
@@ -667,7 +678,7 @@ def _revive_execution(config: McpRuntimeConfig, request: RoleDispatchRequest) ->
             detail="This execution has no agent in the Paseo runtime, so there is nothing to revive.",
         )
     if request.role in LEAF_ROLES:
-        _verify_leaf_revival_scope(resolve_role_launch_context(config, request), receipt)
+        _verify_leaf_revival_scope(config, resolve_role_launch_context(config, request), receipt)
     return _revive_agent(config, path, receipt, agent_id)
 
 

@@ -24,6 +24,11 @@ const authoredFields = new Set([
   'joint_guarantee',
 ]);
 
+// A changed field's value as the technical details name it (ICR-L6): an unrecorded side is the
+// named absence, a recorded empty string is named as recorded — neither ever prints as blank.
+const fieldValue = (value?: string) =>
+  value === undefined ? '(absent)' : value === '' ? '(recorded empty)' : value;
+
 function RecordFacts({ payload }: { payload: ReviewPayload }) {
   const { knowledge, source, evidence } = payload;
   const fields = knowledge.field_changes.filter((change) => !authoredFields.has(change.field));
@@ -40,8 +45,7 @@ function RecordFacts({ payload }: { payload: ReviewPayload }) {
         <ul data-testid="review-field-changes" data-review-content="changed-field">
           {fields.map((change) => (
             <li key={`${change.item_id}:${change.field}`}>
-              {change.field}: {change.before_value ?? '(absent)'} →{' '}
-              {change.after_value ?? '(absent)'}
+              {change.field}: {fieldValue(change.before_value)} → {fieldValue(change.after_value)}
             </li>
           ))}
         </ul>

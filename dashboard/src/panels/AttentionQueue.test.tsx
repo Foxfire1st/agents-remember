@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { postAttentionDismiss } from "../data/actions";
@@ -36,6 +37,10 @@ const taskDoc: TaskDocNode = {
   title: "Gate interaction polish",
   status: "inProgress",
   kind: "subTask",
+  form: "task",
+  type: "",
+  headerNotes: [],
+  statusNoteTruncated: false,
   stepsDone: 1,
   stepsTotal: 4,
   docPath: "/tasks/agents-remember/260610_browser-dashboard/19_gate-interaction-polish.json",
@@ -64,6 +69,22 @@ function seed(queue: AttentionItem[], docs: TaskDocNode[] = []) {
   });
 }
 
+// The queue is a bell; its entries are in the layer the bell opens.
+function renderOpen(onSelect: (lifecycleId: string) => void = () => {}) {
+  const view = render(<AttentionQueue onSelect={onSelect} />);
+  fireEvent.click(view.getByTestId("attention-bell"));
+  return view;
+}
+
+const quietSession = (lifecycleId: string): AttentionItem => ({
+  id: `stale-session:${lifecycleId}`,
+  kind: "stale-session",
+  severity: "info",
+  lane: "lifecycle",
+  title: "Session gone quiet",
+  lifecycleId,
+});
+
 afterEach(() => {
   cleanup();
   dashboardStore.getState().reset();
@@ -73,10 +94,14 @@ afterEach(() => {
 describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
   it("renders a §9 blocked-start attention item", () => {
     seed([blockedStart]);
-    const { getAllByTestId, getByText } = render(<AttentionQueue onSelect={() => {}} />);
+    const { getAllByTestId, getByRole } = renderOpen();
     const items = getAllByTestId("attn-item");
-    expect(items.some((el) => el.textContent?.includes("Worktree start blocked"))).toBe(true);
-    expect(getByText("no exact ledger mapping for selected code base commit")).not.toBeNull();
+    // The cause is one line: the title, then the detail. The lane stands where a task would.
+    expect(items[0].textContent).toContain(
+      "Worktree start blocked · no exact ledger mapping for selected code base commit",
+    );
+    expect(items[0].textContent).toContain("worktree");
+    expect(getByRole("img", { name: "Severity: warn" })).toBeTruthy();
   });
 
   it("renders lifecycle attention through the bound task document when available", () => {
@@ -95,9 +120,17 @@ describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
       ],
       [taskDoc],
     );
-    const { getByText } = render(<AttentionQueue onSelect={() => {}} />);
-    expect(getByText("Task 19: Gate interaction polish")).toBeTruthy();
+    const onSelect = vi.fn();
+    const { getByText, getByTestId, queryByTestId } = renderOpen(onSelect);
     expect(getByText("Gate - closeout-approval · awaiting your decision")).toBeTruthy();
+    // The task is the entry's second line and its link: it opens the entry's lifecycle, as
+    // "Open" did, and closes the layer.
+    const link = getByText("19 Gate interaction polish");
+    expect(link.tagName).toBe("BUTTON");
+    fireEvent.click(link);
+    expect(onSelect).toHaveBeenCalledWith("LC19");
+    expect(queryByTestId("attention-queue")).toBeNull();
+    expect(getByTestId("attention-bell").getAttribute("aria-expanded")).toBe("false");
   });
 });
 
@@ -115,7 +148,7 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
       },
     ]);
 
-    const { getByTestId } = render(<AttentionQueue onSelect={() => {}} />);
+    const { getByTestId } = renderOpen();
     fireEvent.click(getByTestId("attn-dismiss"));
 
     await waitFor(() =>
@@ -132,10 +165,16 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
     vi.mocked(postAttentionDismiss).mockResolvedValue("dismissed");
     seed([actionableDrift]);
 
-    const view = render(<AttentionQueue onSelect={() => {}} />);
+    const view = renderOpen();
     fireEvent.click(view.getByTestId("attn-dismiss"));
 
-    expect(view.queryByText("1 actionable drift in agents-remember")).toBeNull();
+    expect(view.queryByText(/1 actionable drift in agents-remember/)).toBeNull();
+    // The entry goes, the layer stays and says that nothing waits; the bell loses its number.
+    expect(view.getByTestId("attention-queue").textContent).toContain("nothing waiting");
+    expect(view.getByTestId("attention-bell").getAttribute("aria-label")).toBe(
+      "Attention: nothing waiting",
+    );
+    expect(view.getByTestId("attention-bell").textContent).toBe("");
     await waitFor(() =>
       expect(postAttentionDismiss).toHaveBeenCalledWith({
         itemId: "actionable-drift:agents-remember:ar/260610-browser-dashboard",
@@ -170,9 +209,12 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
       blockedStart,
     ]);
 
-    const { getByTestId } = render(<AttentionQueue onSelect={() => {}} />);
+    const { getByTestId, getAllByTestId } = renderOpen();
     fireEvent.click(getByTestId("attn-clear"));
 
+    // What cannot be dismissed stays listed in the open layer.
+    expect(getAllByTestId("attn-item")).toHaveLength(1);
+    expect(getAllByTestId("attn-item")[0].textContent).toContain("Worktree start blocked");
     await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(3));
     expect(postAttentionDismiss).toHaveBeenCalledWith({
       itemId: "gate:G19",
@@ -196,9 +238,83 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
 
   it("does not offer dismiss or Open controls on a non-lifecycle item", () => {
     seed([blockedStart]);
-    const { queryByTestId, queryByText } = render(<AttentionQueue onSelect={() => {}} />);
+    const { queryByTestId } = renderOpen();
     expect(queryByTestId("attn-dismiss")).toBeNull();
     expect(queryByTestId("attn-clear")).toBeNull();
-    expect(queryByText("Open")).toBeNull();
+    expect(queryByTestId("attn-open")).toBeNull();
+  });
+});
+
+describe("AttentionQueue bell (MIK-R144 rule 3a)", () => {
+  it("is a bell without a number while nothing waits, and its layer says so", () => {
+    seed([]);
+    const view = render(<AttentionQueue onSelect={() => {}} />);
+    const bell = view.getByTestId("attention-bell");
+    expect(bell.getAttribute("aria-label")).toBe("Attention: nothing waiting");
+    expect(bell.textContent).toBe("");
+    // The entries are no part of the column until the bell is asked.
+    expect(view.queryByTestId("attention-queue")).toBeNull();
+
+    fireEvent.click(bell);
+    expect(view.getByTestId("attention-queue").textContent).toBe("Attention · nothing waiting");
+    expect(view.queryByTestId("attn-item")).toBeNull();
+  });
+
+  it("carries the number that waits and the most pressing kind, and opens the entries", () => {
+    seed([
+      quietSession("LC7"),
+      { ...blockedStart, id: "provider-down:cgc", kind: "provider-down", severity: "alarm" },
+      quietSession("LC8"),
+    ]);
+    const view = render(<AttentionQueue onSelect={() => {}} />);
+    const bell = view.getByTestId("attention-bell");
+    expect(bell.getAttribute("aria-label")).toBe("Attention: 3 waiting");
+    expect(bell.textContent).toBe("3");
+    expect(bell.querySelector("[title]")?.getAttribute("title")).toBe(
+      "Attention: 3 waiting (1 alarm, 2 information)",
+    );
+    // The colour is the most pressing entry's, whatever its place in the queue.
+    expect(bell.getAttribute("data-tone")).toBe("alarm");
+    expect(bell.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(bell);
+    expect(bell.getAttribute("aria-expanded")).toBe("true");
+    const layer = view.getByRole("dialog", { name: "Attention" });
+    expect(layer.textContent).toContain("Attention · 3 waiting");
+    // The server's order is kept.
+    expect(view.getAllByTestId("attn-severity").map((mark) => mark.getAttribute("aria-label"))).toEqual([
+      "Severity: info",
+      "Severity: alarm",
+      "Severity: info",
+    ]);
+  });
+
+  it("opens an entry's lifecycle also where no task document names it, and closes by Escape", () => {
+    const onSelect = vi.fn();
+    seed([quietSession("LC7")]);
+    const view = renderOpen(onSelect);
+
+    fireEvent.keyDown(view.getByRole("dialog", { name: "Attention" }), { key: "Escape" });
+    expect(view.queryByTestId("attention-queue")).toBeNull();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByTestId("attention-bell"));
+    fireEvent.click(view.getByTestId("attn-open"));
+    expect(onSelect).toHaveBeenCalledWith("LC7");
+  });
+
+  it("closes by a press outside the layer and keeps what waits", async () => {
+    seed([quietSession("LC7")]);
+    const view = renderOpen(() => {});
+    // An open layer lays a sheet over the rest of the page, the bell included: a press anywhere
+    // outside the layer lands on it. (That a press at the bell's place closes the layer too is
+    // tried in a browser: notes/run3/operations-sidebar-proposal/comparison/behave.json.)
+    const sheet = view.baseElement.querySelector("[data-testid='underlay']");
+    if (!sheet) throw new Error("an open layer has no sheet under it");
+    await userEvent.click(sheet);
+    expect(view.queryByTestId("attention-queue")).toBeNull();
+    expect(view.getByTestId("attention-bell").getAttribute("aria-expanded")).toBe("false");
+    expect(view.getByTestId("attention-bell").textContent).toBe("1");
+    expect(postAttentionDismiss).not.toHaveBeenCalled();
   });
 });

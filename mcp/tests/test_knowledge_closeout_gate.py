@@ -360,8 +360,8 @@ def build_gated(tmp_path: Path) -> Gated:
             ),
             f"onboarding/{B}.md": "# b\n",
             f"onboarding/{B}.json": sidecar(B, [entry("RLZ-B00001", anchors["RLZ-B00001"])]),
-            "onboarding/pkg/overview.md": "# pkg\n",
-            "onboarding/overview.md": "# root\n",
+            "onboarding/pkg/overview.md": "# pkg\n\n## What This Area Is\n\nThe package route.\n",
+            "onboarding/overview.md": "# root\n\n## What This Repo Is\n\nThe repository root route.\n",
         },
         trailer=code_base,
     )

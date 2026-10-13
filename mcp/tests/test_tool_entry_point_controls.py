@@ -61,7 +61,7 @@ class ChokePointControlTests(unittest.TestCase):
         cls.addClassCleanup(cls.world.close)
         world = cls.world
         declare_test_process()
-        cls.good = (world.call("ping", {})[1]) or {}
+        cls.good = (world.call("server_info", {})[1]) or {}
 
     def test_a_tool_that_never_answers_fails_by_name_and_closes_its_handler(self) -> None:
         handler_closed: list[bool] = []
@@ -79,29 +79,29 @@ class ChokePointControlTests(unittest.TestCase):
             ),
             mock.patch("tool_entry_point_world.TOOL_RESPONSE_WAIT_SECONDS", 3),
             self.assertRaisesRegex(
-                _ToolCallTimeout, "'ping' tool response did not finish within 3 seconds"
+                _ToolCallTimeout, "'server_info' tool response did not finish within 3 seconds"
             ),
         ):
-            self.world.call("ping", {})
+            self.world.call("server_info", {})
         self.assertEqual(handler_closed, [True])
-        self.assertEqual("payload", classify("ping", self.world.call("ping", {}))[0])
+        self.assertEqual("payload", classify("server_info", self.world.call("server_info", {}))[0])
 
     def test_a_payload_its_model_forbids_is_refused_by_the_choke_point(self) -> None:
         self.assertTrue(self.good, "the control needs a real payload to corrupt")
-        self.assertEqual("payload", classify("ping", ("RETURNED", self.good))[0])
+        self.assertEqual("payload", classify("server_info", ("RETURNED", self.good))[0])
         corrupted = {**self.good, "undeclaredControlKey": 1}
         with self.assertRaises(ValidationError):
-            finalize_tool_response("ping", corrupted)
+            finalize_tool_response("server_info", corrupted)
         self.assertEqual(
             "unvalidatable",
-            classify("ping", ("RETURNED", corrupted))[0],
+            classify("server_info", ("RETURNED", corrupted))[0],
             "the choke point validated but the sweep's classifier did not notice",
         )
 
     def test_a_raising_entry_point_is_classified_as_losing_the_envelope(self) -> None:
-        self.assertEqual("error", classify("ping", ("RAISED ToolError", None))[0])
-        self.assertEqual("unvalidatable", classify("ping", ("RETURNED", None))[0])
-        bare = classify("ping", ("RETURNED", {**self.good, "ok": False}))[0]
+        self.assertEqual("error", classify("server_info", ("RAISED ToolError", None))[0])
+        self.assertEqual("unvalidatable", classify("server_info", ("RETURNED", None))[0])
+        bare = classify("server_info", ("RETURNED", {**self.good, "ok": False}))[0]
         self.assertNotEqual("refusal", bare, "a bare ok:false must not pass as a typed refusal")
         self.assertEqual("bare-not-ok", bare)
 
@@ -116,18 +116,22 @@ class ChokePointControlTests(unittest.TestCase):
         # Patch where the handler LOOKS IT UP: the registrar imports the builder by name, so
         # patching the defining module would leave the registered handler untouched and the
         # case would pass on an uncorrupted payload.
-        original = core_registration.ping_payload
+        original = core_registration.server_info_payload
 
-        def through_the_choke_point() -> dict[str, Any]:
-            return _tool_payload("ping", {**original(), "undeclaredControlKey": 1})
+        def through_the_choke_point(config, serving_build) -> dict[str, Any]:
+            return _tool_payload(
+                "server_info", {**original(config, serving_build), "undeclaredControlKey": 1}
+            )
 
-        with mock.patch.object(core_registration, "ping_payload", through_the_choke_point):
-            kind, payload = self.world.call("ping", {})
-        arm, detail = classify("ping", (kind, payload))
+        with mock.patch.object(core_registration, "server_info_payload", through_the_choke_point):
+            kind, payload = self.world.call("server_info", {})
+        arm, detail = classify("server_info", (kind, payload))
         self.assertEqual("boundary-validation", arm, detail)
-        self.assertIn("PingResponse", detail, "the detail must name the model that refused")
+        self.assertIn("ServerInfoResponse", detail, "the detail must name the model that refused")
         self.assertEqual(
-            "payload", classify("ping", self.world.call("ping", {}))[0], "the patch leaked"
+            "payload",
+            classify("server_info", self.world.call("server_info", {}))[0],
+            "the patch leaked",
         )
 
     def test_a_handler_that_bypasses_the_choke_point_arrives_as_unvalidatable(self) -> None:
@@ -140,14 +144,14 @@ class ChokePointControlTests(unittest.TestCase):
         case measures what it costs the caller, and is why the sweep asserts the arm empty.
         """
 
-        original = core_registration.ping_payload
+        original = core_registration.server_info_payload
 
-        def bypassing() -> dict[str, Any]:
-            return {**original(), "undeclaredControlKey": 1}
+        def bypassing(config, serving_build) -> dict[str, Any]:
+            return {**original(config, serving_build), "undeclaredControlKey": 1}
 
-        with mock.patch.object(core_registration, "ping_payload", bypassing):
-            kind, payload = self.world.call("ping", {})
-        arm, detail = classify("ping", (kind, payload))
+        with mock.patch.object(core_registration, "server_info_payload", bypassing):
+            kind, payload = self.world.call("server_info", {})
+        arm, detail = classify("server_info", (kind, payload))
         self.assertEqual("unvalidatable", arm, detail)
         self.assertIn("undeclaredControlKey", detail)
 
@@ -163,7 +167,7 @@ class ChokePointControlTests(unittest.TestCase):
         for field in ENVELOPE_STRIPPED_FIELDS:
             with self.subTest(field=field):
                 answer = {**self.good, field: "stowaway"}
-                arm, detail = classify("ping", ("RETURNED", answer))
+                arm, detail = classify("server_info", ("RETURNED", answer))
                 self.assertEqual("unvalidatable", arm, detail)
                 self.assertIn(field, detail)
 
@@ -178,11 +182,11 @@ class ChokePointControlTests(unittest.TestCase):
         """
 
         nameless = {key: value for key, value in self.good.items() if key != "log"}
-        arm, detail = classify("ping", ("RETURNED", nameless))
+        arm, detail = classify("server_info", ("RETURNED", nameless))
         self.assertEqual("unvalidatable", arm, detail)
         self.assertIn("names no whole-result file", detail)
         missing = {**self.good, "log": "does-not-exist/no-such-detail.json"}
-        arm, detail = classify("ping", ("RETURNED", missing))
+        arm, detail = classify("server_info", ("RETURNED", missing))
         self.assertEqual("unvalidatable", arm, detail)
         self.assertIn("cannot be read", detail)
 
@@ -221,7 +225,7 @@ class ChokePointControlTests(unittest.TestCase):
         kind, answer = world.call("task_doc", world.benign()["task_doc"])
         self.assertEqual("RETURNED", kind)
         assert answer is not None
-        steps = answer.get("steps")
+        steps = answer["steps"]
         self.assertIsInstance(steps, list)
         self.assertTrue(
             steps and isinstance(steps[0], dict), "the control needs a real retained item"
@@ -257,7 +261,7 @@ class ChokePointControlTests(unittest.TestCase):
 
         answer = {**self.good, "ok": False, "code": "entry-point-probe"}
         self.assertIn("code", refusal_marks(answer))
-        arm, detail = classify("ping", ("RETURNED", answer))
+        arm, detail = classify("server_info", ("RETURNED", answer))
         self.assertEqual("refusal", arm, detail)
 
     def test_a_next_only_refusal_carries_its_next_action(self) -> None:
@@ -265,7 +269,7 @@ class ChokePointControlTests(unittest.TestCase):
 
         answer = {**self.good, "ok": False, "next": {"tool": "server_info", "args": {}}}
         self.assertIn("next", refusal_marks(answer))
-        arm, detail = classify("ping", ("RETURNED", answer))
+        arm, detail = classify("server_info", ("RETURNED", answer))
         self.assertEqual("refusal", arm, detail)
 
     def test_an_empty_or_guidance_only_next_refusal_stays_bare(self) -> None:
@@ -285,11 +289,11 @@ class ChokePointControlTests(unittest.TestCase):
             with self.subTest(next_value=next_value):
                 answer = {**self.good, "ok": False, "next": next_value}
                 self.assertEqual([], refusal_marks(answer))
-                arm, detail = classify("ping", ("RETURNED", answer))
+                arm, detail = classify("server_info", ("RETURNED", answer))
                 self.assertEqual("bare-not-ok", arm, detail)
         answer = {**self.good, "ok": False, "code": "   "}
         self.assertEqual([], refusal_marks(answer))
-        self.assertEqual("bare-not-ok", classify("ping", ("RETURNED", answer))[0])
+        self.assertEqual("bare-not-ok", classify("server_info", ("RETURNED", answer))[0])
 
     def test_an_invalid_argument_lands_in_its_own_arm_and_names_the_callers_side(self) -> None:
         """The two validation refusals share a message shape; only the model separates them.

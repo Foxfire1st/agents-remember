@@ -11,8 +11,13 @@ cut, measured bounds, production-bound equality).
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import shutil
+import tempfile
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -74,6 +79,40 @@ from tool_answer_l110_rows import (
 )
 
 REPO_ID = "repo-a"
+
+
+# R1-05 (v2): row bounds govern authored dimensions, so the row cases author
+# their fixture root width instead of inheriting ambient TMPDIR length.
+# mkdtemp appends 8 random chars: constant width, unique per case. The XDG
+# roots the answers embed are patched to the same fixture. The asserted
+# bytes are exactly what the producers emitted — no rewriting, no raised
+# bounds, no capped roots; the density floors still forbid hiding a real
+# overflow behind shrinking.
+_ROW_CASE_ROOT_PREFIX = "rowcase-ambient-width-fixed-for-row-bounds-"
+
+
+@contextlib.contextmanager
+def _fixed_width_case_root() -> Iterator[Path]:
+    """A hermetic fixture root of authored, constant width under /tmp."""
+    root = Path(tempfile.mkdtemp(prefix=_ROW_CASE_ROOT_PREFIX, dir="/tmp"))
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _case_xdg(root: Path) -> Any:
+    """Point the XDG roots the answers embed at the same owned fixture."""
+    xdg = root / "xdg"
+    xdg.mkdir(exist_ok=True)
+    return patch.dict(
+        os.environ,
+        {
+            "XDG_CONFIG_HOME": xdg.as_posix(),
+            "XDG_DATA_HOME": xdg.as_posix(),
+            "XDG_CACHE_HOME": xdg.as_posix(),
+        },
+    )
 
 
 def _scoped_pair(root: Path) -> tuple[Any, McpRuntimeConfig, McpRuntimeConfig]:
@@ -321,8 +360,7 @@ class InitBaselineProductionTests(unittest.TestCase):
     def test_init_and_baseline_paths_derive_the_row_cases(self) -> None:
         """A real init scaffolds, status reads ready, adopt records the ledger."""
 
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        with _fixed_width_case_root() as root, _case_xdg(root):
             _code, path = _world(root)
             preview = memory_init_tool(
                 load_config(path), repo_id=REPO_ID, initial_branch="main", dry_run=True
@@ -351,10 +389,8 @@ class CarryoverProductionTests(unittest.TestCase):
     def test_plan_and_apply_derive_the_row_cases(self) -> None:
         """A real carryover plan and apply over the landed-branch world."""
 
-        with TemporaryDirectory() as temporary:
-            fixture, contract, old_base, _official_head, source_memory = _carryover_world(
-                Path(temporary)
-            )
+        with _fixed_width_case_root() as root, _case_xdg(root):
+            fixture, contract, old_base, _official_head, source_memory = _carryover_world(root)
             selection = CarryoverSelection(
                 repo_id=contract.repo_name,
                 contract_path=contract.contract_path.as_posix(),
@@ -417,8 +453,7 @@ class IntegrityProductionTests(unittest.TestCase):
     def test_reported_and_refused_paths_derive_the_row_cases(self) -> None:
         """A real integrity check reports the validator's listing; legacy refuses."""
 
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        with _fixed_width_case_root() as root, _case_xdg(root):
             memory = root / "memory"
             init_repository(memory)
             write_review_tree(memory)

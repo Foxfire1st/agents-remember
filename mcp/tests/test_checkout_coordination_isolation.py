@@ -53,13 +53,12 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
             marker.mkdir()
         return checkout, source
 
-    def _settings(self, path: Path, *, direct_execution_enabled: bool = False) -> None:
+    def _settings(self, path: Path) -> None:
         payload = {
             "coordinationRoot": str(self.root / "live-ar-coordination"),
             "workspaceRoot": str(self.root / "workspace"),
             "repositories": {"agents-remember": {}},
             "providers": {},
-            "directExecutionEnabled": direct_execution_enabled,
         }
         path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -190,7 +189,7 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         operation record. The two predicates that decide everything test `is not None`
         (`:118` `checkout_cli_location`, `:142-143` `require_durable_write_target`), and
         `runtime_config._config_for_execution` (`:757-769`) then loads the LIVE authority settings
-        instead of the synthetic non-authority config (`:803` `direct_execution_enabled=False`).
+        instead of the synthetic non-authority config.
 
         Arm A is the plane's real refusal and is the positive control: without it, a case that
         "passes" after the declaration could be passing because the refusal never fired at all.
@@ -202,7 +201,7 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         _checkout, source = self._checkout(linked=False)
         self._undeclared_checkout(source)
         settings = self.root / "live-settings.json"
-        self._settings(settings, direct_execution_enabled=True)
+        self._settings(settings)
         outside = self.root / "outside-any-checkout" / "rows.jsonl"
 
         with self.assertRaisesRegex(ConfigError, "primary checkout is refused"):
@@ -214,7 +213,7 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
 
         config = load_config(settings)
         self.assertEqual(config.coordination_root, self.root / "live-ar-coordination")
-        self.assertTrue(config.direct_execution_enabled)
+        self.assertFalse(hasattr(config, "direct_execution_enabled"))
         checkout_coordination.require_durable_write_target(outside)
 
     def test_the_reserved_lifecycle_operation_mode_is_declarable_by_any_caller(self) -> None:

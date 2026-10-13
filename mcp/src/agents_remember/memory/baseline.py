@@ -690,9 +690,7 @@ def baseline_status(request: BaselineRequest) -> dict[str, object]:
     context = resolve_request_context(request)
     # A status read files nothing (rule 6): only an explicit report path is a
     # report producer.
-    summary, report = run_drift(
-        context, request.report, write_report=request.report is not None
-    )
+    summary, report = run_drift(context, request.report, write_report=request.report is not None)
     return base_payload(context, summary, report)
 
 
@@ -745,9 +743,7 @@ def baseline_adopt(
         raise RuntimeError("adoption requires external topology")
     # A dry-run preview files nothing (rule 6); the mutating adoption keeps
     # full report behavior.
-    summary, report = run_drift(
-        context, request.report, write_report=not dry_run
-    )
+    summary, report = run_drift(context, request.report, write_report=not dry_run)
     payload = base_payload(context, summary, report)
     if payload["state"] == "already-adopted":
         return 0, payload

@@ -42,6 +42,7 @@ from agents_remember.application.tool_caller import (
 )
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.cli import paseo_role_tools
+from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_tools import _Recipient
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.kernel.primitives.runtime_config import (
@@ -86,6 +87,10 @@ from l114_e4_river_scale import _drain_once
 
 REPO = "agents-remember"
 
+# The message tests address recipients by agent id; the product validates the
+# shape (MIK-R117), so the fixture ids are UUIDs, one per test recipient.
+_AGENT_2 = "22222222-2222-4222-8222-222222222222"
+
 
 def _leaf_binding() -> AgentBinding:
     return AgentBinding(
@@ -99,8 +104,20 @@ def _leaf_binding() -> AgentBinding:
     )
 
 
-def _ping_payload() -> dict:
-    return {"ok": True, "server": "Agents Remember", "version": "v", "transport": "stdio"}
+def _server_info_payload() -> dict:
+    # The smallest call of a server (MIK-R112: `ping` is removed, `server_info`
+    # answers the same and more): the fields its response model requires.
+    return {
+        "ok": True,
+        "server": "Agents Remember",
+        "version": "1",
+        "transport": "stdio",
+        "configPath": "c",
+        "coordinationRoot": "r",
+        "workspaceRoot": "w",
+        "transcriptRoot": "t",
+        "servingBuild": {"version": "1", "bootedAt": "2026-10-10T00:00:00+00:00"},
+    }
 
 
 class ToolEventRiverTests(unittest.TestCase):
@@ -146,8 +163,10 @@ class ToolEventRiverTests(unittest.TestCase):
             workspace_root=self.root,
             transcript_root=self.root / "logs" / "mcp",
         )
-        with tool_call_context("ping", {}, config=log_config):
-            answered = complete_tool_response("ping", _ping_payload(), config=log_config)
+        with tool_call_context("server_info", {}, config=log_config):
+            answered = complete_tool_response(
+                "server_info", _server_info_payload(), config=log_config
+            )
 
         self.assertTrue(answered["ok"])
         rows = self._workspace_lines()
@@ -157,7 +176,7 @@ class ToolEventRiverTests(unittest.TestCase):
         self.assertEqual("observed", event["trust"])
         self.assertEqual("ar-observer-event/v1", event["schema"])
         data = event["data"]
-        self.assertEqual("ping", data["tool"])
+        self.assertEqual("server_info", data["tool"])
         self.assertTrue(data["ok"])
         # The delivered answer carries no token metadata; the count
         # lives on the log line (guard/retry-adjusted) and in river facts.
@@ -183,8 +202,8 @@ class ToolEventRiverTests(unittest.TestCase):
                 config_path=self.root / "mcp" / "settings.json",
             )
             self._install(caller)
-            complete_tool_response("ping", _ping_payload())
-            complete_tool_response("ping", _ping_payload())
+            complete_tool_response("server_info", _server_info_payload())
+            complete_tool_response("server_info", _server_info_payload())
             topology.return_value.resolve.assert_called_once_with(binding.task_ref)
 
     def test_bound_task_title_is_read_once_at_snapshot(self) -> None:
@@ -202,7 +221,7 @@ class ToolEventRiverTests(unittest.TestCase):
         self.assertEqual("260928-MIK-L114", caller.task_id)
         self.assertEqual("River Leaf", caller.task_title)
         self.assertIsNone(caller.task_path)
-        event = build_tool_event("ping", {"ok": True}, caller, delivered_tokens=1)
+        event = build_tool_event("server_info", {"ok": True}, caller, delivered_tokens=1)
         self.assertEqual("260928-MIK-L114", event.data["taskId"])
         self.assertEqual("River Leaf", event.data["taskTitle"])
         self.assertNotIn("taskPath", event.data)
@@ -216,7 +235,7 @@ class ToolEventRiverTests(unittest.TestCase):
         self.assertEqual(".codex", caller.harness)
         self._install(caller)
 
-        complete_tool_response("ping", _ping_payload())
+        complete_tool_response("server_info", _server_info_payload())
 
         (data,) = [row["data"] for row in self._workspace_lines()]
         self.assertEqual("chat", data["role"])
@@ -307,7 +326,7 @@ class ToolEventRiverTests(unittest.TestCase):
         install_ambient(ambient)
         current = ambient.start()
 
-        complete_tool_response("ping", _ping_payload())
+        complete_tool_response("server_info", _server_info_payload())
 
         lifecycle_rows = self.store.read(current.id)
         tool_rows = [row for row in lifecycle_rows if row.kind == "tool.completed"]
@@ -323,13 +342,13 @@ class ToolEventRiverTests(unittest.TestCase):
         with mock.patch.object(
             retention_module, "admit_workspace_river_row", side_effect=OSError("disk refused")
         ):
-            answered = complete_tool_response("ping", _ping_payload())
+            answered = complete_tool_response("server_info", _server_info_payload())
             self.assertTrue(answered["ok"])
-            self.assertFalse(writer.record("ping", {"ok": True}, delivered_tokens=1))
+            self.assertFalse(writer.record("server_info", {"ok": True}, delivered_tokens=1))
         self.assertEqual(2, writer.dropped)
 
-        complete_tool_response("ping", _ping_payload())
-        complete_tool_response("ping", _ping_payload())
+        complete_tool_response("server_info", _server_info_payload())
+        complete_tool_response("server_info", _server_info_payload())
 
         first, second = [row["data"] for row in self._workspace_lines()]
         self.assertEqual(2, first["dropped"])
@@ -350,7 +369,7 @@ class ToolEventRiverTests(unittest.TestCase):
                 retention_module, "_compact_under_lock", side_effect=OSError("trim failed")
             ),
         ):
-            self.assertFalse(writer.record("ping", {"ok": True}, delivered_tokens=1))
+            self.assertFalse(writer.record("server_info", {"ok": True}, delivered_tokens=1))
         self.assertEqual(1, writer.dropped)
         self.assertEqual(before, path.stat().st_size)
         # The next append tries the removal again and the file fits afterwards.
@@ -358,7 +377,7 @@ class ToolEventRiverTests(unittest.TestCase):
             mock.patch.object(retention_module, "WORKSPACE_EVENT_MAX_BYTES", 4096),
             mock.patch.object(retention_module, "WORKSPACE_EVENT_TRIM_TO_BYTES", 1024),
         ):
-            self.assertTrue(writer.record("ping", {"ok": True}, delivered_tokens=1))
+            self.assertTrue(writer.record("server_info", {"ok": True}, delivered_tokens=1))
         self.assertLessEqual(path.stat().st_size, 4096)
         last = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
         self.assertEqual(1, last["data"]["dropped"])
@@ -372,7 +391,7 @@ class ToolEventRiverTests(unittest.TestCase):
             mock.patch.object(retention_module, "WORKSPACE_EVENT_TRIM_TO_BYTES", 1024),
         ):
             for _ in range(200):
-                complete_tool_response("ping", _ping_payload())
+                complete_tool_response("server_info", _server_info_payload())
             path = self.root / "workspace" / "events.jsonl"
             # Without the cut the file would hold ~200 rows (~43 KiB).
             self.assertLess(path.stat().st_size, 200 * 200)
@@ -437,7 +456,7 @@ class ToolEventRiverTests(unittest.TestCase):
             "kind": "tool.completed",
             "trust": "observed",
             "actor": "model",
-            "data": {"tool": "ping", "ok": True},
+            "data": {"tool": "server_info", "ok": True},
         }
         fresh = dict(old, id="fresh", ts="2026-10-08T19:00:00+00:00")
         lines = [json.dumps(old)] + [json.dumps(dict(fresh, id=f"fresh-{i}")) for i in range(4)]
@@ -492,7 +511,7 @@ class ToolEventRiverTests(unittest.TestCase):
                     "kind": "tool.completed",
                     "trust": "observed",
                     "actor": "model",
-                    "data": {"tool": "ping", "ok": True},
+                    "data": {"tool": "server_info", "ok": True},
                 }
             )
             + "\n",
@@ -546,7 +565,7 @@ class ToolEventRiverTests(unittest.TestCase):
                     "kind": "tool.completed",
                     "trust": "observed",
                     "actor": "model",
-                    "data": {"tool": "ping", "ok": True},
+                    "data": {"tool": "server_info", "ok": True},
                 }
             ).encode("utf-8")
             + b"\n"
@@ -609,7 +628,7 @@ class ToolEventRiverTests(unittest.TestCase):
             trust="observed",
             actor="model",
             lifecycleId="lc-1",
-            data={"tool": "ping", "ok": True},
+            data={"tool": "server_info", "ok": True},
         )
         store.append(event)
         lifecycle_path = self.root / "lifecycles" / "lc-1" / "events.jsonl"
@@ -635,15 +654,22 @@ class ToolEventRiverTests(unittest.TestCase):
     ) -> dict[str, Any]:
         self._install(ToolCaller(role="manager", agent_id="agent-1"))
         resolve: Any = (
-            receipt if isinstance(receipt, BaseException) else _Recipient("agent-2", receipt)
+            receipt if isinstance(receipt, BaseException) else _Recipient(_AGENT_2, receipt)
         )
+        # Since MIK-R71/R117 the send path reads the caller's launch binding
+        # (role plus task references) and addresses the sender line from the
+        # started agent (role, subject, agent id): the fakes carry the current
+        # shapes, a taskless manager serving Projects.
+        caller_binding = AgentBinding(
+            agent_id="agent-1",
+            role="manager",
+            request_id="agent-1-request",
+            report_path="/scratch/report.md",
+        )
+        caller_sender = StartingAgent(agent_id="agent-1", role="manager", subject="Projects")
         with (
-            mock.patch.object(
-                paseo_role_tools, "_caller", return_value=SimpleNamespace(agent_id="agent-1")
-            ),
-            mock.patch.object(
-                paseo_role_tools, "starting_agent", return_value=SimpleNamespace(agent_id="agent-1")
-            ),
+            mock.patch.object(paseo_role_tools, "_caller", return_value=caller_binding),
+            mock.patch.object(paseo_role_tools, "starting_agent", return_value=caller_sender),
             mock.patch.object(paseo_role_tools, "_resolve_recipient", return_value=resolve)
             if not isinstance(receipt, BaseException)
             else mock.patch.object(paseo_role_tools, "_resolve_recipient", side_effect=receipt),
@@ -654,8 +680,8 @@ class ToolEventRiverTests(unittest.TestCase):
     def test_id_addressed_message_records_the_receipt_role(self) -> None:
         marker = "MARKER-SECRET"
         answered = self._send_as(
-            RoleMessageCall(agent_id="agent-2", text=f"hello {marker}"),
-            {"agentId": "agent-2", "role": "worker", "status": "running"},
+            RoleMessageCall(agent_id=_AGENT_2, text=f"hello {marker}"),
+            {"agentId": _AGENT_2, "role": "worker", "status": "running"},
             {
                 "ok": True,
                 "operation": "role_message",
@@ -672,7 +698,7 @@ class ToolEventRiverTests(unittest.TestCase):
     def test_selection_addressed_message_records_the_selection_role(self) -> None:
         answered = self._send_as(
             RoleMessageCall(role="reviewer", text="hello"),
-            {"agentId": "agent-2", "role": "reviewer", "status": "running"},
+            {"agentId": _AGENT_2, "role": "reviewer", "status": "running"},
             {
                 "ok": True,
                 "operation": "role_message",
@@ -724,7 +750,7 @@ class ToolEventRiverTests(unittest.TestCase):
                     "kind": "tool.completed",
                     "trust": "observed",
                     "actor": "model",
-                    "data": {"tool": "ping", "ok": True},
+                    "data": {"tool": "server_info", "ok": True},
                 }
             )
             + "\n",
@@ -853,11 +879,11 @@ class ToolEventRiverTests(unittest.TestCase):
             os.environ.update(self._bound_env(agent_id))
             # The exact startup create_server runs: no manual writer install.
             initialize_mcp_application(self._startup_config())
-            answered = complete_tool_response("ping", _ping_payload())
+            answered = complete_tool_response("server_info", _server_info_payload())
         self.assertTrue(answered["ok"])
         (event,) = self._observer_lines(self.root)
         data = event["data"]
-        self.assertEqual("ping", data["tool"])
+        self.assertEqual("server_info", data["tool"])
         self.assertEqual("worker", data["role"])
         self.assertEqual(agent_id, data["agentId"])
         self.assertEqual(f"{REPO}/master/leaf.json", data["taskPath"])
@@ -866,7 +892,7 @@ class ToolEventRiverTests(unittest.TestCase):
         with mock.patch.dict(os.environ, clear=False):
             self._clear_binding_env()
             initialize_mcp_application(self._startup_config())
-            complete_tool_response("ping", _ping_payload())
+            complete_tool_response("server_info", _server_info_payload())
         (event,) = self._observer_lines(self.root)
         self.assertEqual("chat", event["data"]["role"])
 
@@ -877,8 +903,8 @@ class ToolEventRiverTests(unittest.TestCase):
             os.environ.update(self._bound_env(agent_id))
             initialize_mcp_application(self._startup_config())
             os.environ["AR_ROLE"] = "reviewer"
-            complete_tool_response("ping", _ping_payload())
-            complete_tool_response("ping", _ping_payload())
+            complete_tool_response("server_info", _server_info_payload())
+            complete_tool_response("server_info", _server_info_payload())
         rows = self._observer_lines(self.root)
         self.assertEqual(2, len(rows))
         for row in rows:
@@ -900,9 +926,9 @@ class ToolEventRiverTests(unittest.TestCase):
             "root = Path(os.environ['L114_CHILD_ROOT'])\n"
             "config = McpRuntimeConfig(config_path=root / 'mcp' / 'settings.json', coordination_root=root, workspace_root=root, transcript_root=root / 'logs' / 'mcp')\n"
             "initialize_mcp_application(config)\n"
-            "first = complete_tool_response('ping', {'ok': True, 'server': 'Agents Remember', 'version': 'v', 'transport': 'stdio'})\n"
+            "first = complete_tool_response('server_info', {'ok': True, 'server': 'Agents Remember', 'version': '1', 'transport': 'stdio', 'configPath': 'c', 'coordinationRoot': 'r', 'workspaceRoot': 'w', 'transcriptRoot': 't', 'servingBuild': {'version': '1', 'bootedAt': '2026-10-10T00:00:00+00:00'}})\n"
             "os.environ['AR_ROLE'] = 'reviewer'\n"
-            "second = complete_tool_response('ping', {'ok': True, 'server': 'Agents Remember', 'version': 'v', 'transport': 'stdio'})\n"
+            "second = complete_tool_response('server_info', {'ok': True, 'server': 'Agents Remember', 'version': '1', 'transport': 'stdio', 'configPath': 'c', 'coordinationRoot': 'r', 'workspaceRoot': 'w', 'transcriptRoot': 't', 'servingBuild': {'version': '1', 'bootedAt': '2026-10-10T00:00:00+00:00'}})\n"
             "assert first['ok'] and second['ok']\n"
             "print('child-wrote-two-rows')\n        "
         )

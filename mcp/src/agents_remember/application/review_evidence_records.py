@@ -72,6 +72,7 @@ _COLLECTION_NAMES: tuple[ReviewRecordClassName, ...] = (
     "evidence_claims",
 )
 
+
 def review_records_for(
     config: McpRuntimeConfig, request: ReviewSurfaceRequest
 ) -> ReviewRecordInputs:

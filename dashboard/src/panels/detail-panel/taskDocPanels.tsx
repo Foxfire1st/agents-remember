@@ -1,17 +1,14 @@
-import { parentTaskLinkForDoc } from "../../data/taskHierarchy";
-import { Panel } from "../../grammar/Panel";
-import type { TaskDocNode } from "../../types/projection";
-import { EmptyStateBackdrop } from "../EmptyStateBackdrop";
-import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
-import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../../data/taskArtifacts";
-import {
-  seriesAsMasterDoc,
-  seriesSliceDocs,
-  sliceForSlug,
-} from "./model";
-import type { useDetailPanelState } from "./state";
-import { crumb, sizing, where } from "./styles";
-import { MasterOverview, TaskReader } from "./taskReader";
+import { parentTaskLinkForDoc } from '../../data/taskHierarchy';
+import { Panel } from '../../grammar/Panel';
+import type { TaskDocNode } from '../../types/projection';
+import { EmptyStateBackdrop } from '../EmptyStateBackdrop';
+import type { ChangeSetTarget } from '../changeset/ChangeSetViewer';
+import type { TaskArtifactReaderTarget as NotesReaderTarget } from '../../data/taskArtifacts';
+import { seriesAsMasterDoc, seriesSliceDocs, sliceForSlug } from './model';
+import { docForm } from './model';
+import type { useDetailPanelState } from './state';
+import { crumb, sizing, where } from './styles';
+import { MasterOverview, SprintOverview, TaskReader } from './taskReader';
 
 type DetailState = ReturnType<typeof useDetailPanelState>;
 
@@ -33,24 +30,41 @@ function TaskDocBody({
   openDoc: TaskDocNode | undefined;
   sliceDocs: TaskDocNode[];
 } & PanelCallbacks) {
-  const { fullTaskDoc, taskDocumentBodyState, jump, setOpenSlug, docPathForRef } =
-    state;
-  if (selectedTaskDoc.kind === "master" && openDoc) {
+  const { fullTaskDoc, taskDocumentBodyState, jump, setOpenSlug, docPathForRef } = state;
+  const pool = { allDocs: state.allDocs, seriesList: state.analytics?.series ?? [] };
+  if (selectedTaskDoc.kind === 'master' && openDoc) {
     return (
       <TaskReader
         doc={fullTaskDoc(openDoc)}
         bodyState={taskDocumentBodyState}
+        pool={pool}
+        onJump={jump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
       />
     );
   }
-  if (selectedTaskDoc.kind === "master") {
+  if (selectedTaskDoc.kind === 'master') {
+    if (docForm(selectedTaskDoc) === 'sprint') {
+      return (
+        <SprintOverview
+          doc={fullTaskDoc(selectedTaskDoc)}
+          bodyState={taskDocumentBodyState}
+          pool={pool}
+          onJump={jump}
+          onOpen={setOpenSlug}
+          onOpenChangeSet={onOpenChangeSet}
+          onOpenNotes={onOpenNotes}
+          docPathForRef={docPathForRef}
+        />
+      );
+    }
     return (
       <MasterOverview
         doc={fullTaskDoc(selectedTaskDoc)}
         bodyState={taskDocumentBodyState}
         sliceDocs={sliceDocs}
+        pool={pool}
         onOpen={setOpenSlug}
         onJump={jump}
         onOpenChangeSet={onOpenChangeSet}
@@ -63,6 +77,8 @@ function TaskDocBody({
     <TaskReader
       doc={fullTaskDoc(selectedTaskDoc)}
       bodyState={taskDocumentBodyState}
+      pool={pool}
+      onJump={jump}
       onOpenChangeSet={onOpenChangeSet}
       onOpenNotes={onOpenNotes}
     />
@@ -76,26 +92,14 @@ export function TaskDocumentPanel({
 }: {
   state: DetailState;
 } & PanelCallbacks) {
-  const {
-    selectedTaskDoc,
-    allDocs,
-    analytics,
-    openSlug,
-    setOpenSlug,
-    jump,
-  } = state;
+  const { selectedTaskDoc, allDocs, analytics, openSlug, setOpenSlug, jump } = state;
   if (!selectedTaskDoc) return null;
   const seriesList = analytics?.series ?? [];
   const sliceDocs = seriesSliceDocs(allDocs, selectedTaskDoc.docPath);
   const openDoc = openSlug ? sliceForSlug(sliceDocs, openSlug) : undefined;
-  const parentLink = parentTaskLinkForDoc(
-    selectedTaskDoc,
-    allDocs,
-    seriesList,
-  );
+  const parentLink = parentTaskLinkForDoc(selectedTaskDoc, allDocs, seriesList);
   const head = (
     <>
-      <h2>{selectedTaskDoc.title}</h2>
       {openDoc ? (
         <button
           type="button"
@@ -150,18 +154,11 @@ export function SeriesDetailPanel({
 }: {
   state: DetailState;
 } & PanelCallbacks) {
-  const {
-    selectedSeries,
-    allDocs,
-    openSlug,
-    setOpenSlug,
-    fullTaskDoc,
-    taskDocumentBodyState,
-  } = state;
+  const { selectedSeries, allDocs, openSlug, setOpenSlug, fullTaskDoc, taskDocumentBodyState } =
+    state;
   if (!selectedSeries) return null;
-  const selectedSeriesTaskDoc = allDocs.find(
-    (doc) => doc.docPath === selectedSeries.docPath,
-  );
+  const pool = { allDocs, seriesList: state.analytics?.series ?? [] };
+  const selectedSeriesTaskDoc = allDocs.find((doc) => doc.docPath === selectedSeries.docPath);
   const seriesDoc = selectedSeriesTaskDoc
     ? fullTaskDoc(selectedSeriesTaskDoc)
     : seriesAsMasterDoc(selectedSeries);
@@ -169,7 +166,6 @@ export function SeriesDetailPanel({
   const openDoc = openSlug ? sliceForSlug(seriesSlices, openSlug) : undefined;
   const head = (
     <>
-      <h2>{selectedSeries.title}</h2>
       {openDoc ? (
         <button
           type="button"
@@ -190,14 +186,28 @@ export function SeriesDetailPanel({
         <TaskReader
           doc={fullTaskDoc(openDoc)}
           bodyState={taskDocumentBodyState}
+          pool={pool}
+          onJump={state.jump}
           onOpenChangeSet={onOpenChangeSet}
           onOpenNotes={onOpenNotes}
+        />
+      ) : selectedSeriesTaskDoc && docForm(selectedSeriesTaskDoc) === 'sprint' ? (
+        <SprintOverview
+          doc={fullTaskDoc(selectedSeriesTaskDoc)}
+          bodyState={taskDocumentBodyState}
+          pool={pool}
+          onOpen={setOpenSlug}
+          onJump={state.jump}
+          onOpenChangeSet={onOpenChangeSet}
+          onOpenNotes={onOpenNotes}
+          docPathForRef={state.docPathForRef}
         />
       ) : (
         <MasterOverview
           doc={seriesDoc}
           bodyState={taskDocumentBodyState}
           sliceDocs={seriesSlices}
+          pool={pool}
           onOpen={setOpenSlug}
           onJump={state.jump}
           onOpenChangeSet={onOpenChangeSet}

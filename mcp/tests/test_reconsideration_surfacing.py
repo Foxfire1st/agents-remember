@@ -1170,3 +1170,54 @@ def test_an_anchor_link_re_authored_to_other_code_is_refused(world: World) -> No
             _write(world, [row], None, worklist=worklist), "links.2: the link was re-authored"
         )
     assert (world.memory / D18_PATH).read_bytes() == before
+
+
+# --------------------------------------------------------------------------------------------------
+# Architect ruling a3d79e94: succession from the candidate silences the base decision
+# --------------------------------------------------------------------------------------------------
+
+
+def _candidate_successor(world: World, decision_id: str, *supersedes: str) -> None:
+    """Commit one successor decision into the candidate (HEAD), past the base."""
+
+    successor = json.loads(d18(world))
+    successor.update(id=decision_id, supersedes=list(supersedes), links=successor["links"][:1])
+    world.memory_commit(
+        {f"knowledge/decisions/{decision_id}-successor.json": canonical_text(successor)},
+        world.code_base,
+    )
+
+
+def test_a_candidate_successor_silences_its_base_decision(world: World) -> None:
+    """Changed target + successor in the candidate: no item, summary names the successor."""
+
+    _revise_assumption(world)
+    _candidate_successor(world, "DEC-CAND18", D18)
+    document = world.worklist(world.code_base)
+    assert S18 not in _candidates(document)
+    link = _links(document)[(S18, 1)]
+    assert (link["skipped"], link["trigger"]) == ("superseded", None)
+    assert link["successors"] == ["DEC-CAND18"]
+    # The stored-item rule says the same as the run: closed without a row.
+    assert not reconsideration_item_open({"subject": S18}, {}, {"DEC-D18TXT"})
+    assert reconsideration_item_open({"subject": S18}, {})
+
+
+def test_a_changed_target_without_a_successor_still_raises(world: World) -> None:
+    """Same changed target, no successor anywhere: the item as before."""
+
+    _revise_assumption(world)
+    document = world.worklist(world.code_base)
+    item = _candidates(document)[S18]
+    assert _triggers(item) == [(ASSUMPTION, "record_file")]
+    assert reconsideration_item_open(item, {})
+
+
+def test_a_candidate_decision_that_supersedes_nothing_keeps_the_item(world: World) -> None:
+    """A candidate decision that supersedes nothing: the base item stays, and it raises nothing."""
+
+    _revise_assumption(world)
+    _candidate_successor(world, "DEC-CAND19", "DEC-9Z7Q2M")
+    document = world.worklist(world.code_base)
+    assert S18 in _candidates(document)
+    assert not any(subject.startswith("reconsider:DEC-CAND19") for subject in _candidates(document))

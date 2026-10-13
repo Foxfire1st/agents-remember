@@ -106,7 +106,9 @@ def runtime_install_payload(
     )
 
 
-def compact_runtime_install_payload(full: dict[str, Any], report_path: str | None) -> dict[str, Any]:
+def compact_runtime_install_payload(
+    full: dict[str, Any], report_path: str | None
+) -> dict[str, Any]:
     """Project the whole install result onto the row's final answer fields.
 
     Only the row's fields ride (``operation`` and any undeclared field stay

@@ -40,7 +40,7 @@ def test_a_real_unauthorized_object_write_fails_the_oracle(tmp_path: Path) -> No
     git(repo, "add", "tracked.txt")
     git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
     before = _snapshot({"repo": repo})
-    blob = (repo / "foreign.txt")
+    blob = repo / "foreign.txt"
     blob.write_text("an object no review touched\n", encoding="utf-8")
     sha = git(repo, "hash-object", "-w", str(blob)).strip()
     blob.unlink()
@@ -159,10 +159,7 @@ def test_transitive_alternate_chains_are_followed_and_cycles_terminate(tmp_path:
         f"a read created a directory: b@alternate2/{foreign_sha[:2]}",
     ], attributed
     (middle_info / "alternates").write_text(
-        str(lender / ".git" / "objects")
-        + "\n"
-        + str(borrower / ".git" / "objects")
-        + "\n",
+        str(lender / ".git" / "objects") + "\n" + str(borrower / ".git" / "objects") + "\n",
         encoding="utf-8",
     )
     cycled = _snapshot({"b": borrower})
@@ -216,21 +213,15 @@ def test_inside_root_chain_to_outside_lender_is_inventoried(tmp_path: Path) -> N
         coordination_roots=("coord",),
         reviewed_prefixes=("b",),
     )
-    assert (
-        f"object changed with no attributed comparison: {foreign_key}" in findings
-    ), findings
+    assert f"object changed with no attributed comparison: {foreign_key}" in findings, findings
 
 
 def test_an_empty_directory_fails_the_oracle_even_where_caches_are_allowed() -> None:
     """An empty directory is a finding -- even under runtime/ -- unless it holds a file."""
 
     before = _WorldState(git=_bare_repo(), files={}, dirs=set())
-    empty = _WorldState(
-        git=_bare_repo(), files={}, dirs={"coord/runtime/emptydir"}
-    )
-    findings = _classify(
-        before, empty, coordination_roots=("coord",), reviewed_prefixes=()
-    )
+    empty = _WorldState(git=_bare_repo(), files={}, dirs={"coord/runtime/emptydir"})
+    findings = _classify(before, empty, coordination_roots=("coord",), reviewed_prefixes=())
     assert findings == ["a read created a directory: coord/runtime/emptydir"], findings
 
     holding = _WorldState(
@@ -238,10 +229,7 @@ def test_an_empty_directory_fails_the_oracle_even_where_caches_are_allowed() -> 
         files={"coord/runtime/d/cache.json": b"{}"},
         dirs={"coord/runtime", "coord/runtime/d"},
     )
-    assert (
-        _classify(before, holding, coordination_roots=("coord",), reviewed_prefixes=())
-        == []
-    )
+    assert _classify(before, holding, coordination_roots=("coord",), reviewed_prefixes=()) == []
 
 
 def test_an_unauthorized_object_fails_the_oracle_without_an_attributed_comparison() -> None:
@@ -283,7 +271,10 @@ def test_an_unauthorized_object_fails_the_oracle_without_an_attributed_compariso
     )
     assert (
         _classify(
-            before, beside_an_empty_record, coordination_roots=("coord",), reviewed_prefixes=("repo",)
+            before,
+            beside_an_empty_record,
+            coordination_roots=("coord",),
+            reviewed_prefixes=("repo",),
         )
         == findings
     )
@@ -294,9 +285,7 @@ def test_a_nested_git_admin_directory_fails_the_oracle() -> None:
 
     before = _WorldState(git=_bare_repo(), files={}, dirs=set())
     after = _WorldState(git=_bare_repo(), files={}, dirs={"repo/.git/refs/heads/stale"})
-    findings = _classify(
-        before, after, coordination_roots=("coord",), reviewed_prefixes=("repo",)
-    )
+    findings = _classify(before, after, coordination_roots=("coord",), reviewed_prefixes=("repo",))
     assert findings == ["a read created a directory: repo/.git/refs/heads/stale"], findings
 
 
@@ -323,9 +312,7 @@ def test_refs_are_keyed_by_name_so_a_shared_object_never_collapses_two_refs() ->
         files={},
         dirs=set(),
     )
-    findings = _classify(
-        before, after, coordination_roots=("coord",), reviewed_prefixes=("repo",)
-    )
+    findings = _classify(before, after, coordination_roots=("coord",), reviewed_prefixes=("repo",))
     assert findings == ["repo: ref appeared: refs/heads/b"], findings
 
 
@@ -333,26 +320,16 @@ def test_a_moved_pin_is_a_finding_but_an_attested_pin_is_allowed() -> None:
     """Pins need both halves: a record name pointing at an attributed object."""
 
     old = _WorldState(
-        git={
-            "repo": _GitState(
-                refs="refs/ar/review/x aaa", head="0" * 40
-            )
-        },
+        git={"repo": _GitState(refs="refs/ar/review/x aaa", head="0" * 40)},
         files={},
         dirs=set(),
     )
     moved = _WorldState(
-        git={
-            "repo": _GitState(
-                refs="refs/ar/review/x bbb", head="0" * 40
-            )
-        },
+        git={"repo": _GitState(refs="refs/ar/review/x bbb", head="0" * 40)},
         files={},
         dirs=set(),
     )
-    findings = _classify(
-        old, moved, coordination_roots=("coord",), reviewed_prefixes=("repo",)
-    )
+    findings = _classify(old, moved, coordination_roots=("coord",), reviewed_prefixes=("repo",))
     assert findings == ["repo: ref moved to another object: refs/ar/review/x"], findings
 
     lonely = _WorldState(
@@ -361,17 +338,11 @@ def test_a_moved_pin_is_a_finding_but_an_attested_pin_is_allowed() -> None:
         dirs=set(),
     )
     added = _WorldState(
-        git={
-            "repo": _GitState(
-                refs="refs/ar/review/y ccc", head="0" * 40
-            )
-        },
+        git={"repo": _GitState(refs="refs/ar/review/y ccc", head="0" * 40)},
         files={},
         dirs=set(),
     )
-    findings = _classify(
-        lonely, added, coordination_roots=("coord",), reviewed_prefixes=("repo",)
-    )
+    findings = _classify(lonely, added, coordination_roots=("coord",), reviewed_prefixes=("repo",))
     assert findings == ["repo: ref appeared: refs/ar/review/y"], findings
 
     attested_tree = "a" * 40
@@ -385,29 +356,19 @@ def test_a_moved_pin_is_a_finding_but_an_attested_pin_is_allowed() -> None:
         }
     ).encode("utf-8")
     both_halves = _WorldState(
-        git={
-            "repo": _GitState(
-                refs=f"refs/ar/review/y {attested_tree}", head="0" * 40
-            )
-        },
+        git={"repo": _GitState(refs=f"refs/ar/review/y {attested_tree}", head="0" * 40)},
         files={"task/notes/reports/review-comparisons/c.json": attested_record},
         dirs={"task/notes/reports/review-comparisons"},
     )
     assert (
-        _classify(
-            lonely, both_halves, coordination_roots=("coord",), reviewed_prefixes=("repo",)
-        )
+        _classify(lonely, both_halves, coordination_roots=("coord",), reviewed_prefixes=("repo",))
         == []
     )
 
     # A record-named pin to a foreign object is a finding: the name half alone never
     # clears. The pure probe names y while pointing at e*40 against trees of a*40.
     foreign = _WorldState(
-        git={
-            "repo": _GitState(
-                refs="refs/ar/review/y " + "e" * 40, head="0" * 40
-            )
-        },
+        git={"repo": _GitState(refs="refs/ar/review/y " + "e" * 40, head="0" * 40)},
         files={"task/notes/reports/review-comparisons/c.json": attested_record},
         dirs={"task/notes/reports/review-comparisons"},
     )

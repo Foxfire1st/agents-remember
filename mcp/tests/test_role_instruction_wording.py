@@ -228,11 +228,11 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "A turn ending proves only that it ended. Verify each Manager's delivery and aggregate evidence; the Manager owns the leaf-diff, repair and evidence loop. You may inspect supplied actual diffs for acceptance without taking over that loop. Request an independent Reviewer when the brief or risk requires it; a Reviewer never adjudicates its own work. Request a Curator for affected memory/onboarding when needed. Keep reports, findings, review, curation, and Git publication separately addressed. Use the existing AR task and paired Git owners for their semantic records; do not claim acceptance or landing from the status of an agent in Paseo.",
             ],
             "roles/manager.md": [
-                "You coordinate one selected master at Projects altitude. You do not own the portfolio. For one master, the Architect delegates coordination to one Manager. An Orchestrator sits above the Managers when two or more masters are worked on at the same time, or when the developer asks for one above a single master. Direct coordination by the Architect is only the developer-chosen exception. When another agent started you, report to that agent using its parent agent ID in your handover, unless the Architect instructs the reporting-recipient change below.",
+                "You coordinate one selected master at Projects altitude. You do not own the portfolio. For one master, the Architect delegates coordination to one Manager. An Orchestrator sits above the Managers when two or more masters are worked on at the same time, or when the developer asks for one above a single master. Direct coordination by the Architect is only the developer-chosen exception. When another agent started you, report to that agent's role with its task references, unless the Architect instructs the reporting-recipient change below.",
                 "Read each leaf's reports and task records yourself. Direct leaf handover flow and relay limits follow `../operations/coordination.md`. Inspect the complete changed-file diff and both verdicts before deciding the gate. Keep closeout, integration, task status and acceptance writes, and the order of landings. Reviews are evidence, not gate decisions. Preserve stable requirement/finding IDs and distinguish implementation, review, curation and publication status. A Manager started from the dashboard has no parent and needs none: put a needed developer decision in your own chat and do not invent an Architect ID.",
                 "Decide the order of your leaves, agent starts and replacements, operational problems, ordinary requirement interpretation within the intended promise, checks before and after a landing, and paired closeout and integration within delegated authority. Review rounds, memory passes and relay limits follow `../operations/coordination.md`. Accepting a verdict for the gate stays yours. Assign a check or investigation that belongs to no leaf to an Investigator on your own sprint and master. Send the scoped concern as your first `role_message` on `agents-remember-task` to its returned agent ID; never select a leaf for this role.",
                 "Keep your rulings in one durable rulings record, a list of requirement sentences that should change, and one status file under the selected master's notes; name their paths in your report. The Architect reads these files on its own and aligns the requirement texts with the rulings. These records do not authorize new or dropped scope or a changed promise.",
-                "When another agent started you, message your parent or the instructed reporting recipient only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover, or to the instructed reporting-recipient ID recorded in your report. When the Orchestrator owns coordination, do not bypass it to the Architect. Forward only questions requiring the developer and permission notices as stated below; send no other role messages or landing notices. Ordinary requirement readings and operational rulings stay with you; keep the work going. Send one further message with the path of your report when the whole assignment is finished or cannot be finished. Send no other messages to that recipient.",
+                "When another agent started you, message your parent or the instructed reporting recipient only for a developer decision: new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; or a blocker that none of your own decisions can remove. Send these with `role_message` on `agents-remember-task` to the parent agent ID in your handover, or to the instructed reporting-recipient ID recorded in your report. When the Orchestrator owns coordination, do not bypass it to the Architect. Forward only questions requiring the developer and permission notices as stated below; send no other role messages or landing notices. Ordinary requirement readings and operational rulings stay with you; keep the work going. Send one further message with the path of your report, addressed to the parent's role with its task references, when the whole assignment is finished or cannot be finished. Send no other messages to that recipient.",
                 "If the Architect who started you names an Orchestrator's agent ID in a message when a second master starts, record that instruction and reporting-recipient ID in your durable report and send developer-needed matters to that Orchestrator from then on. This changes your reporting recipient, not your fixed launch parent; no other message changes whom you report to.",
                 "If you cannot start a needed role within your permissions, report that blocker to your parent or instructed reporting recipient with `role_message` on `agents-remember-task`; without a parent, report it in your own chat and invent no Architect ID. Never start that role yourself.",
                 "If an upward message cannot be delivered, write the matter in your status file, continue every part of the work that does not depend on the developer's decision, and send the message again later. Do not decide the developer's question yourself.",
@@ -782,7 +782,11 @@ class HandoverTextWordingTests(unittest.TestCase):
                     self.assertIn(
                         "send what needs the developer's decision to that parent", question
                     )
+                    # A question stays addressed to the parent's agent ID (MIK-R93
+                    # rules 1 and 10; architect QADDR ruling option (a)): rule 10's
+                    # return address is not extended to questions.
                     self.assertIn(f"addressed to agent {parent.agent_id}", question)
+                    self.assertNotIn("addressed to the return address", question)
                     self.assertIn("role_message on agents-remember-task", question)
                     self.assertIn("takes precedence over generic own-chat guidance", question)
                     self.assertIn("do not end your turn on the question", question)
@@ -817,13 +821,30 @@ class HandoverTextWordingTests(unittest.TestCase):
                         )
                         self.assertIn(categories, relation)
                         self.assertIn(final, relation)
+                        self.assertIn("addressed to the return address", relation)
+                        self.assertNotIn("addressed to its agent id", relation)
                         self.assertNotIn("questions about the assignment and your result", prompt)
                     elif role in {"worker", "reviewer", "curator"}:
                         self.assertIn("Send no routine result to the parent.", relation)
                         self.assertIn("leafSeats.roleMessageArguments", relation)
+                        # A leaf's parent is the current Manager of its master, and a
+                        # return goes to that role with its task references (rule 10).
+                        self.assertIn("the current Manager of this master", relation)
+                        self.assertIn("addressed to the return address role manager", relation)
+                        self.assertNotIn("addressed to its agent id", relation)
                     else:
-                        expected = f"Agent {parent.agent_id} ({parent.role} · {parent.subject}) started this role and is its parent in Paseo. Send that agent your questions about the assignment, questions requiring the developer's decision, and your result with role_message, addressed to its agent id. The selected AR sprint/master/leaf is work scope; the parent is the agent named here and no other."
-                        self.assertEqual(relation.encode(), expected.encode())
+                        self.assertIn(
+                            f"Agent {parent.agent_id} ({parent.role} · {parent.subject}) started this role and is its parent in Paseo.",
+                            relation,
+                        )
+                        self.assertIn("addressed to the return address", relation)
+                        self.assertIn("is not the address of a return", relation)
+                        self.assertNotIn("addressed to its agent id", relation)
+                        self.assertIn(
+                            "your questions about the assignment, questions requiring the "
+                            "developer's decision, and your result",
+                            relation,
+                        )
 
     def test_the_first_message_names_no_forbidden_host_string(self) -> None:
         parent = StartingAgent("1f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "architect", "Projects")
@@ -975,13 +996,24 @@ class HandoverTextWordingTests(unittest.TestCase):
         self.assertEqual(started["host"]["entryMode"], "agent-role-start")
         self.assertEqual(
             started["host"]["parent"],
-            {"agentId": parent.agent_id, "role": "architect", "task": "Projects"},
+            {
+                "agentId": parent.agent_id,
+                "role": "architect",
+                "task": "Projects",
+                "sprintDocumentRef": None,
+                "masterDocumentRef": None,
+                "taskDocumentRef": None,
+                "returnAddress": {"role": "architect"},
+            },
         )
         self.assertIn(
             f"Agent {parent.agent_id} (architect · Projects) started this role and is its parent",
             started["host"]["ownerRelation"],
         )
-        self.assertIn("role_message, addressed to its agent id", started["host"]["ownerRelation"])
+        self.assertIn(
+            "addressed to the return address role architect", started["host"]["ownerRelation"]
+        )
+        self.assertNotIn("addressed to its agent id", started["host"]["ownerRelation"])
         self.assertTrue(
             prompt.startswith(
                 f"AR ROLE BRIEF: agent {parent.agent_id} (architect · Projects) started this role"

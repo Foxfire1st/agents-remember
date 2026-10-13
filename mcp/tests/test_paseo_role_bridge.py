@@ -568,10 +568,10 @@ class AgentWaitScriptTests(RoleBridgeScriptTestCase):
                     "textTruncated": False,
                 },
             ),
-            "a reply longer than the limit": (
+            "a reply longer than the message limit comes back whole for the tool to file": (
                 agent("idle"),
                 [MESSAGE, reply("é" * 20001)],
-                {"outcome": "finished", "text": "é" * 20000, "textTruncated": True},
+                {"outcome": "finished", "text": "é" * 20001, "textTruncated": False},
             ),
             "a timeline without turn ids": (
                 agent("idle"),

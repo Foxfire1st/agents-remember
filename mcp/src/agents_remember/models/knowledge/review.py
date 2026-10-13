@@ -47,6 +47,7 @@ from agents_remember.models.knowledge.review_applicability import (
 )
 from agents_remember.models.knowledge.review_external_movement import ExternalGitMovement
 from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
+from agents_remember.models.knowledge.review_meaning_effects import ReviewMeaningEffects
 from agents_remember.models.knowledge.review_outline import ReviewOutline
 from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannel,
@@ -993,6 +994,13 @@ class KnowledgeReviewPayload(KnowledgeModel):
     # optional: every review answers the question, and a selection that read its scope and holds no
     # family states ``no_family_recorded`` rather than leaving an absent field to be read as one.
     family_context: ReviewFamilyContext
+    # The recorded effect of this leaf's meaning changes (MIK-R43): the steps of the
+    # selected record and of the families and members the family context returns, in
+    # attempt order, or why there are none. Required, not optional: every review
+    # answers the question, and a selection whose history holds no step states ``none``
+    # rather than leaving an absent field to be read as one. A current build's answer
+    # without this field is invalid and is shown as a failure, not as ``none``.
+    meaning_effects: ReviewMeaningEffects
     staleness: ReviewStaleness
     submission: ReviewSubmission
     # What this leaf's own managed syncs measured against the generation it published (ICR-R22@v1),

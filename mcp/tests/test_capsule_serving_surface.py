@@ -347,9 +347,14 @@ def test_a_real_client_and_server_exchange_over_the_installed_sdk(tmp_path: Path
     )
     # 6. The unsupported read is refused rather than served as an empty success.
     assert "absent" in observed, "an unlisted skill URI must not read successfully"
-    # 7. The advertised tool surface includes the capsule operation and the skill reads.
-    for name in ("role_capsule_compile", "skill_catalog_list", "skill_catalog_read"):
-        assert name in observed["tools"]
+    # 7. The capsule operation and the catalog reads left the served tool list
+    # with MIK-R112 rule 5 (L112, 976bc39e): an agent gets its capsule at its
+    # start and reads skills as files (resources/read, skills/list, skills/get
+    # above). Their functions stay behind the role start; nothing on the wire
+    # lists them anymore, so this exchange asserts no tool by those names.
+    assert "role_capsule_compile" not in observed["tools"]
+    assert "skill_catalog_list" not in observed["tools"]
+    assert "skill_catalog_read" not in observed["tools"]
     # 8. The declared extension's own two methods are answered on this same transport.
     extension = observed["extension"]
     assert extension["list"]["ok"], extension["list"]

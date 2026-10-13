@@ -250,9 +250,7 @@ def refuse_ungated_candidate(contract, code_tree: str) -> None:
         raise RuntimeError(refusal)
 
 
-def _frozen_recorded_closeout(
-    contract, repository: Path, memory_commit: str
-) -> tuple[str, ...]:
+def _frozen_recorded_closeout(contract, repository: Path, memory_commit: str) -> tuple[str, ...]:
     """Commits whose closed history files stay frozen for one judged leaf pair (MIK-R52 rule 1).
 
     Only the contract's recorded closeout freezes anything: when the judged memory commit is
@@ -274,9 +272,7 @@ def _frozen_recorded_closeout(
             "the pair is not judged"
         ) from error
     try:
-        require_readable_commit(
-            repository, memory_commit, what="the judged memory commit"
-        )
+        require_readable_commit(repository, memory_commit, what="the judged memory commit")
         descends = memory_commit == recorded[0] or require_ancestor(
             repository,
             recorded[0],
@@ -306,20 +302,25 @@ def _frozen_recorded_closeout(
 
 
 def leaf_pair_refusal(
-    contract, *, code_commit: str, memory_commit: str, bases: Sequence[str], persist_worklist: bool = True
+    contract,
+    *,
+    code_commit: str,
+    memory_commit: str,
+    bases: Sequence[str],
+    persist_worklist: bool = True,
 ) -> str | None:
     """Judge a leaf's code and memory commits exactly as the closeout judges its candidate.
 
-    MIK-R52 rule 1: the knowledge validator as a leaf publication over the two commits with the
-    caller's ``bases``, then the mandatory gate with the worklist recomputed over the two
- commits' trees and the contract's base pair. ``None`` when the pair passes; the refusal
- naming every finding when it does not. A side Git cannot read refuses the judgment as an
- unreadable input, and nothing is landed or recorded. Only the contract's recorded closeout
- freezes history files (:func:`_frozen_recorded_closeout`).
+       MIK-R52 rule 1: the knowledge validator as a leaf publication over the two commits with the
+       caller's ``bases``, then the mandatory gate with the worklist recomputed over the two
+    commits' trees and the contract's base pair. ``None`` when the pair passes; the refusal
+    naming every finding when it does not. A side Git cannot read refuses the judgment as an
+    unreadable input, and nothing is landed or recorded. Only the contract's recorded closeout
+    freezes history files (:func:`_frozen_recorded_closeout`).
 
- The repositories are resolved as the landing routes resolve them: the memory and code repo
- paths when set, else the route's live worktrees.
- """
+    The repositories are resolved as the landing routes resolve them: the memory and code repo
+    paths when set, else the route's live worktrees.
+    """
 
     repository = contract.memory_repo_path or contract.memory_worktree
     code_repository = contract.code_repo_path or contract.code_worktree

@@ -31,6 +31,7 @@ from agents_remember.kernel.recorded_reads import (
     observed_exists,
     recorded_reads,
 )
+from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
 from agents_remember.worktrees.modules import contract_reader
 from test_review_git_trees import (
@@ -41,6 +42,7 @@ from test_review_git_trees import (
     World,
     _repository,
     commit,
+    git,
     world,
 )
 from test_review_read_latency import _body, _live, _ports, _query
@@ -449,10 +451,16 @@ def _packet_inputs(fixture: World) -> tuple[Path, Path, Path, Path, bytes, bytes
     }
     fixture.memory_base = commit(
         fixture.memory,
-        {"knowledge/decisions/DEC-AAAAAA-input.json": json.dumps(decision)},
+        # Canonical bytes: the gate judges the candidate with the validator, and
+        # the validator refuses a knowledge file that is not canonical.
+        {"knowledge/decisions/DEC-AAAAAA-input.json": canonical_text(decision)},
         fixture.code_base,
     )
     fixture.contract()
+    # The gate judges the leaf's candidate against the parent line's tip — every
+    # record the base holds must exist in the candidate — so the leaf's branch
+    # carries the commit that advanced the parent line.
+    git(fixture.memory_worktree, "merge", "--ff-only", fixture.memory_base)
     return first, second, alias, manifest, original, altered
 
 

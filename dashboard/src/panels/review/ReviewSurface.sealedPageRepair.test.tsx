@@ -8,7 +8,6 @@ import { ReviewSurface } from './ReviewSurface';
 import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
 import { captured, catalogue, selectedMemberId, target, serve } from './l86.test-utils';
 import { treeViewStore } from './triageViewPreference';
-vi.setConfig({ testTimeout: 30000 });
 beforeEach(() => {
   localStorage.clear();
   treeViewStore.getState().setView('changed');

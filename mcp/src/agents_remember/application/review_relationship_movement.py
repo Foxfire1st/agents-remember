@@ -144,12 +144,8 @@ def relationship_movements(
     before_connection = open_read_only_database(Path(sources.before_database))
     after_connection = open_read_only_database(Path(sources.after_database))
     try:
-        before = recorded_snapshot(
-            "before", sources.before_database, before_connection
-        )
-        after = recorded_snapshot(
-            "after", sources.after_database, after_connection
-        )
+        before = recorded_snapshot("before", sources.before_database, before_connection)
+        after = recorded_snapshot("after", sources.after_database, after_connection)
         movements = _movements(items, before, after, sources)
         routes = governing_route_movements(sources.selector, sources.repository_id, before, after)
     finally:

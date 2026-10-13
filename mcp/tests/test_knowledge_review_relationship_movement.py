@@ -366,9 +366,9 @@ def test_a_source_rename_is_never_a_recorded_movement_and_carries_no_inference(
 
     fixture = movement_fixture
     payload = review(fixture)
-    assert all(
-        movement.rename_inference is None for movement in realization_movements(payload)
-    ), "no movement names two recorded addresses, so Git's inference has nothing to attach to"
+    assert all(movement.rename_inference is None for movement in realization_movements(payload)), (
+        "no movement names two recorded addresses, so Git's inference has nothing to attach to"
+    )
 
     added = [
         movement
@@ -690,7 +690,9 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
     family = FamilyIdentitySeed(family_id=ROUTE_FAMILY)
 
     movements, rows = _routes(
-        family, _route_snapshot(tmp_path, "before", ("a", "b")), _route_snapshot(tmp_path, "after", ("b", "c"))
+        family,
+        _route_snapshot(tmp_path, "before", ("a", "b")),
+        _route_snapshot(tmp_path, "after", ("b", "c")),
     )
     assert rows == [
         ("retracted", [("recorded", "a")], None),
@@ -708,7 +710,9 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
 
     # A changed route is one retracted and one added relationship; a route is never reassigned.
     _movements, rows = _routes(
-        family, _route_snapshot(tmp_path, "before", ("a",)), _route_snapshot(tmp_path, "after", ("b",))
+        family,
+        _route_snapshot(tmp_path, "before", ("a",)),
+        _route_snapshot(tmp_path, "after", ("b",)),
     )
     assert rows == [("retracted", [("recorded", "a")], None), ("added", [], ("recorded", "b"))]
 
@@ -718,11 +722,15 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
     assert rows == [("moved", [("ungoverned", None)], ("recorded", "a"))]
     assert movements[0].gaps == ()
 
-    movements, rows = _routes(family, _route_snapshot(tmp_path, "before", ()), _route_snapshot(tmp_path, "after", ()))
+    movements, rows = _routes(
+        family, _route_snapshot(tmp_path, "before", ()), _route_snapshot(tmp_path, "after", ())
+    )
     assert rows == [("unchanged", [("ungoverned", None)], ("ungoverned", None))]
 
     movements, rows = _routes(
-        family, _route_snapshot(tmp_path, "before", ("a",), recorded=False), _route_snapshot(tmp_path, "after", ("a",))
+        family,
+        _route_snapshot(tmp_path, "before", ("a",), recorded=False),
+        _route_snapshot(tmp_path, "after", ("a",)),
     )
     assert rows == [("moved", [("not_recorded", None)], ("recorded", "a"))]
     assert [(gap.side, gap.code) for gap in movements[0].gaps] == [("before", "route_not_recorded")]
@@ -740,7 +748,9 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
     assert "no movement of the governing-route association is stated" in movements[0].statement
 
     movements, rows = _routes(
-        family, _route_snapshot(tmp_path, "before", None), _route_snapshot(tmp_path, "after", ("a",))
+        family,
+        _route_snapshot(tmp_path, "before", None),
+        _route_snapshot(tmp_path, "after", ("a",)),
     )
     assert rows == [("unresolved", [("unavailable", None)], ("recorded", "a"))]
 
@@ -748,10 +758,16 @@ def test_each_declared_route_is_one_relationship_and_an_unread_side_is_never_ung
     # selector names no identity and is answered with no association at all.
     invariant = InvariantIdentitySeed(invariant_id=ROUTE_INVARIANT)
     _movements, rows = _routes(
-        invariant, _route_snapshot(tmp_path, "before", None), _route_snapshot(tmp_path, "after", ("a",))
+        invariant,
+        _route_snapshot(tmp_path, "before", None),
+        _route_snapshot(tmp_path, "after", ("a",)),
     )
     assert rows == [("unchanged", [("ungoverned", None)], ("ungoverned", None))]
-    assert _routes(None, _route_snapshot(tmp_path, "before", ("a",)), _route_snapshot(tmp_path, "after", ("a",))) == (
+    assert _routes(
+        None,
+        _route_snapshot(tmp_path, "before", ("a",)),
+        _route_snapshot(tmp_path, "after", ("a",)),
+    ) == (
         (),
         [],
     )

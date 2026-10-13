@@ -6,8 +6,6 @@ import { firstOutlineChange, outlineCounts } from './changeTriage';
 import { treeOrderStore } from './triageOrderPreference';
 import { treeViewStore } from './triageViewPreference';
 
-vi.setConfig({ testTimeout: 30000 });
-
 import { catalogue, selectedMemberId, serve, target } from './l86.test-utils';
 beforeEach(() => {
   localStorage.clear();

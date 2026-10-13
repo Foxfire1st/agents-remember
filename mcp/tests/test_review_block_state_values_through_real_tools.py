@@ -10,8 +10,9 @@ real tool attaches.
 Ruling 814778 point 3 narrowed the v2 receipt to measured values only
 (``bound``/``moved``); a delivery without a memory commit writes no receipt. The
 rebinding keeps its ``unmeasured`` match and verdict with a dedicated staged-fault
-case below. A memory-disabled leaf records no tree comparison at all
-(``test_a_memory_disabled_leaf_records_no_comparison``).
+case below. A leaf without memory has no case here: the mode is removed,
+and the opt-out refusals hold that boundary in
+``test_memory_opt_out_refused_start.py`` and ``test_memory_opt_out_refused_routes.py``.
 """
 
 from __future__ import annotations
@@ -38,16 +39,15 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from checkpoint_landing_test_support import close_out_leaf, commit_memory_content
-from closeout_input_test_support import ensure_fixture_waiting_door
 from test_closeout_queue import QueueFixture
 from test_review_final_output_receipt import commit_file, git
 from test_review_result_blocks_through_real_tools import _config as _sync_config
-from test_review_result_blocks_through_real_tools import _record_review
-from test_source_lineage import _fixture
-from test_source_lineage import _git as other_git
+from test_review_result_blocks_through_real_tools import (
+    _integrate_without_item_judgment,
+    _record_review,
+)
 from test_transaction_only_worktree_delivery import (
     _apply,
-    _bind_task_without_review,
     _closeout_fixture,
 )
 from test_worktree_sync_knowledge_merge import _commit, _converted_lines
@@ -96,8 +96,11 @@ def _closed_reviewed_leaf(tmp_path: Path) -> tuple[Any, Any]:
     assert leaf.memory_worktree is not None and leaf.code_worktree is not None
     (leaf.code_worktree / "reviewed.py").write_text("VALUE = 2\n", encoding="utf-8")
     (leaf.memory_worktree / "knowledge").mkdir(exist_ok=True)
+    # Canonical bytes: the integration judges the pair with the validator, and
+    # the validator refuses a knowledge file that is not canonical.
     (leaf.memory_worktree / "knowledge/layout.json").write_text(
-        '{"schema":"ar-memory-layout/v2","conversion":"1"}\n', encoding="utf-8"
+        canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+        encoding="utf-8",
     )
     capture = capture_future_code_candidate(leaf)
     trees = live_review_trees(leaf.coordination_root, leaf, capture.codeCandidateTree)
@@ -186,7 +189,9 @@ def test_sync_records_not_measured_when_the_carry_fails(
     (code_worktree / "same.py").write_text("SAME = 1\n", encoding="utf-8")
     contract, _reviewed = _record_review(lines)
     config = _sync_config(lines)
-    commit_file(lines.fixture.code_repo, "same.py", "SAME = 1\n")
+    # The landed line holds different bytes than the parked file: applying the
+    # parked candidate would lose the parked byte, so the git proof still refuses.
+    commit_file(lines.fixture.code_repo, "same.py", "SAME = 2\n")
     result = worktree_tools.worktree_sync_tool(
         config,
         contract_path=contract.contract_path.as_posix(),
@@ -258,9 +263,7 @@ def test_integration_receipt_is_bound_when_both_trees_match(tmp_path: Path) -> N
     """An unchanged integration delivers exactly the reviewed pair: verdict bound."""
 
     fixture, closed = _closed_reviewed_leaf(tmp_path)
-    landed = worktree_tools.worktree_integrate_tool(
-        fixture.cfg, contract_path=closed.contract_path.as_posix(), strategy="ff-only"
-    )
+    landed = _integrate_without_item_judgment(fixture.cfg, closed)
 
     assert landed["ok"] is True, landed
     receipt = landed["final_output_receipt"]
@@ -284,17 +287,18 @@ def test_integration_receipt_is_moved_when_code_changes_after_review(
     assert leaf.memory_worktree is not None and leaf.code_worktree is not None
     (leaf.code_worktree / "reviewed.py").write_text("VALUE = 2\n", encoding="utf-8")
     (leaf.memory_worktree / "knowledge").mkdir(exist_ok=True)
+    # Canonical bytes: the integration judges the pair with the validator, and
+    # the validator refuses a knowledge file that is not canonical.
     (leaf.memory_worktree / "knowledge/layout.json").write_text(
-        '{"schema":"ar-memory-layout/v2","conversion":"1"}\n', encoding="utf-8"
+        canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+        encoding="utf-8",
     )
     capture = capture_future_code_candidate(leaf)
     trees = live_review_trees(leaf.coordination_root, leaf, capture.codeCandidateTree)
     assert isinstance(trees, ReviewTrees), trees
     (leaf.code_worktree / "late.py").write_text("LATE = 1\n", encoding="utf-8")
     closed = close_out_leaf(leaf)
-    landed = worktree_tools.worktree_integrate_tool(
-        fixture.cfg, contract_path=closed.contract_path.as_posix(), strategy="ff-only"
-    )
+    landed = _integrate_without_item_judgment(fixture.cfg, closed)
 
     assert landed["ok"] is True, landed
     receipt = landed["final_output_receipt"]
@@ -326,9 +330,7 @@ def test_sync_records_unmeasured_when_the_memory_capture_faults(
     def _faulted_capture(*args: Any, **kwargs: Any) -> str:
         raise OSError("staged capture fault: memory candidate unreadable")
 
-    with mock.patch.object(
-        rebinding_module, "worktree_candidate_tree", _faulted_capture
-    ):
+    with mock.patch.object(rebinding_module, "worktree_candidate_tree", _faulted_capture):
         result = worktree_tools.worktree_sync_tool(
             config,
             contract_path=contract.contract_path.as_posix(),
@@ -351,29 +353,3 @@ def test_sync_records_unmeasured_when_the_memory_capture_faults(
     assert read.rebinding.code_match == "matches-reviewed-input", read.rebinding
     assert read.rebinding.memory_match == "unmeasured", read.rebinding
     assert read.rebinding.memory_detail == block["memory_detail"], read.rebinding
-
-
-def test_a_memory_disabled_leaf_records_no_comparison(tmp_path: Path, worktree_services: Any) -> None:
-    """A leaf without memory holds no tree comparison, so closeout, integrate and sync
-    have nothing to measure on it."""
-
-    fixture = _fixture(tmp_path, external_memory=False, selected_profile=False)
-    contract = fixture.leaf_contract
-    assert contract.memory_worktree is None
-    assert contract.code_worktree is not None
-    contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
-    other_git(
-        fixture.code_repo,
-        "worktree",
-        "add",
-        contract.code_worktree.as_posix(),
-        contract.code_work_branch,
-    )
-    (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
-    ensure_fixture_waiting_door(contract, force_synthetic=True)
-    contract = load_contract(contract.contract_path)
-    _bind_task_without_review(contract)
-    capture = capture_future_code_candidate(contract)
-    trees = live_review_trees(contract.coordination_root, contract, capture.codeCandidateTree)
-
-    assert trees is None

@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes, atomic_write_text
+from agents_remember.kernel.direct_execution_grants import (
+    DirectExecutionGrant,
+    grants_for_task,
+)
 from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity, record_read
 from agents_remember.models.task_intent import require_task_intent_identity
 
@@ -185,6 +189,34 @@ def write_task_docs_and_remove(
         raise
 
 
+def _stored_grant_for(
+    task_root: Path,
+    doc: TaskDocument,
+    census: dict[tuple[str, str, str], dict[str, DirectExecutionGrant]],
+) -> DirectExecutionGrant | None:
+    """The leaf's live grant for its stored Markdown, read from the one record.
+
+    ``None`` for non-leaves, outside the canonical tasks layout, and when no
+    readable grant exists: publication never breaks on a missing or broken
+    grant file, and ungranted Markdown stays byte-identical (F12). One census
+    per task is shared across the batch.
+    """
+    if doc.kind != "subTask":
+        return None
+    parents = task_root.parents
+    if len(parents) < 3:
+        return None
+    key = (parents[2].as_posix(), doc.repo, task_root.name)
+    grants = census.get(key)
+    if grants is None:
+        try:
+            grants = grants_for_task(parents[2], doc.repo, task_root.name)
+        except (OSError, ValueError):
+            grants = {}
+        census[key] = grants
+    return grants.get(f"{task_root.name}/{doc.slug}.json")
+
+
 def write_task_doc_batch(
     documents: list[tuple[Path, TaskDocument]],
     *,
@@ -195,6 +227,7 @@ def write_task_doc_batch(
     writes: list[tuple[Path, str]] = []
     paths: list[tuple[Path, Path]] = []
     seen: set[Path] = set()
+    grant_census: dict[tuple[str, str, str], dict[str, DirectExecutionGrant]] = {}
     for task_root, doc in documents:
         _require_publishable_task_document(doc)
         task_root.mkdir(parents=True, exist_ok=True)
@@ -211,6 +244,7 @@ def write_task_doc_batch(
                 render_markdown(
                     doc,
                     graph_titles=graph_titles if doc.executionGraph is not None else None,
+                    direct_grant=_stored_grant_for(task_root, doc, grant_census),
                 ),
             )
         )

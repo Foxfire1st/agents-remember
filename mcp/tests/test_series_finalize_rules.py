@@ -89,6 +89,8 @@ def _leaf_rows(world: World, contract: WorktreeContract, *, landed: bool) -> Non
         code_source_branch=contract.code_work_branch,
         code_work_branch="leaf-l1",
         code_worktree=world.coord.parent / "wt-l1",
+        memory_worktree=world.coord.parent / "wt-memory-l1",
+        ledger_path=world.coord.parent / "wt-memory-l1" / "memory.md",
         integration_status="completed" if landed else "not-started",
         integrated_code_commit=world.base if landed else "",
     )

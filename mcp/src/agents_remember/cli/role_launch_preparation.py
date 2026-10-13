@@ -52,7 +52,11 @@ from agents_remember.cli.role_launch_receipts import (
 from agents_remember.cli.role_launch_receipts import (
     digest as _digest,
 )
-from agents_remember.cli.role_launch_workspace import _leaf_contract_path, _resolve_workspace
+from agents_remember.cli.role_launch_workspace import (
+    _direct_leaf_grant,
+    _leaf_contract_path,
+    _resolve_workspace,
+)
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
@@ -67,6 +71,7 @@ from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.task_document_copies import prepare_task_document_copies
+from agents_remember.worktrees.task_resolver import series_contract_path
 
 ROLE_START_OPERATIONS: dict[LauncherRole, CapsuleOperation] = {
     "architect": "planning",
@@ -456,18 +461,21 @@ def _ar_mcp_context(
     }
 
 
-def _verify_leaf_revival_scope(context: RoleLaunchContext, receipt: dict[str, Any]) -> None:
+def _verify_leaf_revival_scope(
+    config: McpRuntimeConfig, context: RoleLaunchContext, receipt: dict[str, Any]
+) -> None:
     """Refuse the revive of a leaf-bound agent whose task scope changed since its launch.
 
     The scope is the task reference and the contract path. The one computed now comes from the
-    leaf document alone, so the comparison creates and starts nothing.
+    leaf document alone, so the comparison creates and starts nothing. A direct leaf is
+    bound through its grant to its master's series contract, never to a leaf enclosure.
     """
 
     if context.task is None:
         raise ValueError("A leaf role requires its canonical task document for a revive.")
     current = TaskScopedReaderContext(
         task_document_ref=context.task.ref,
-        contract_path=_leaf_contract_path(context.task).as_posix(),
+        contract_path=_revival_contract_path(config, context.task).as_posix(),
     ).model_dump(mode="json")
     recorded = _recorded_leaf_scope(receipt)
     if recorded != current:
@@ -477,6 +485,19 @@ def _verify_leaf_revival_scope(context: RoleLaunchContext, receipt: dict[str, An
             f"{json.dumps(recorded, sort_keys=True)}. Computed now: "
             f"{json.dumps(current, sort_keys=True)}. Start a new execution for the current scope."
         )
+
+
+def _revival_contract_path(config: McpRuntimeConfig, leaf: ResolvedTaskDocument) -> Path:
+    """The contract binding a leaf's revival: the series contract through its grant.
+
+    A direct leaf never owns a leaf enclosure, so its binding is the canonical
+    leaf document with its master's series contract. Any other leaf keeps the
+    enclosure binding. The grant is read, never inferred: an unreadable grant
+    refuses the revive rather than falling back to an enclosure.
+    """
+    if _direct_leaf_grant(config, leaf):
+        return series_contract_path(leaf.path.parent)
+    return _leaf_contract_path(leaf)
 
 
 def _recorded_leaf_scope(receipt: dict[str, Any]) -> dict[str, Any] | None:
@@ -653,11 +674,27 @@ def _compile_handover(
                     "agentId": started_by.agent_id,
                     "role": started_by.role,
                     "task": started_by.subject,
+                    "sprintDocumentRef": (
+                        started_by.sprint_ref.model_dump(mode="json")
+                        if started_by.sprint_ref is not None
+                        else None
+                    ),
+                    "masterDocumentRef": (
+                        started_by.master_ref.model_dump(mode="json")
+                        if started_by.master_ref is not None
+                        else None
+                    ),
+                    "taskDocumentRef": (
+                        started_by.task_ref.model_dump(mode="json")
+                        if started_by.task_ref is not None
+                        else None
+                    ),
+                    "returnAddress": _return_address(started_by, context),
                 }
                 if started_by
                 else None
             ),
-            "ownerRelation": _owner_relation(started_by, role=context.role),
+            "ownerRelation": _owner_relation(started_by, role=context.role, context=context),
             "developerQuestions": (
                 "Because another agent started this role, send what needs the "
                 "developer's decision to that parent with role_message on "
@@ -810,14 +847,91 @@ def _started_from(started_by: StartingAgent | None) -> str:
     return f"agent {started_by.agent_id} ({started_by.role} · {started_by.subject})"
 
 
-def _owner_relation(started_by: StartingAgent | None, *, role: LauncherRole) -> str:
-    """Whom this role answers to: the agent that started it, or nobody but the developer."""
+def _return_address(
+    started_by: StartingAgent | None, context: RoleLaunchContext
+) -> dict[str, Any] | None:
+    """The address a return goes to: the parent's role with its task references.
+
+    A leaf's parent is the current Manager of its master, whoever started the
+    agent; any other role's parent is the agent above it, whoever started it
+    (MIK-R117 rule 10). An id read from an earlier message is never the
+    address of a return: after a replacement it names an archived agent.
+    """
+
+    def dumped(reference: Any) -> dict[str, Any] | None:
+        return reference.model_dump(mode="json") if reference is not None else None
+
+    if context.role in LEAF_ROLES and context.sprint is not None and context.master is not None:
+        return {
+            "role": "manager",
+            "sprint_document_ref": dumped(context.sprint.ref),
+            "master_document_ref": dumped(context.master.ref),
+        }
+    # A leaf without its master in context still names its starter's role;
+    # the references ride along where they are known.
+    if started_by is None:
+        return None
+    parent = canonical_role(started_by.role)
+    wanted: tuple[str, ...] = {
+        "manager": ("sprint", "master"),
+        "orchestrator": ("sprint",),
+        "investigator": ("sprint", "master"),
+    }.get(parent, ())
+    starters = {
+        "sprint": started_by.sprint_ref,
+        "master": started_by.master_ref,
+        "task": started_by.task_ref,
+    }
+    fallbacks = {
+        "sprint": context.sprint.ref if context.sprint else None,
+        "master": context.master.ref if context.master else None,
+        "task": context.task.ref if context.task else None,
+    }
+    address: dict[str, Any] = {"role": started_by.role}
+    for name in wanted:
+        reference = starters[name] or fallbacks[name]
+        if reference is not None:
+            address[f"{name}_document_ref"] = dumped(reference)
+    return address
+
+
+def _address_words(address: dict[str, Any]) -> str:
+    """The return address in words, as the first message names it."""
+    words = [f"role {address['role']}"]
+    for key in ("sprint_document_ref", "master_document_ref", "task_document_ref"):
+        reference = address.get(key)
+        if isinstance(reference, dict):
+            words.append(f"{key} {reference.get('repository')}:{reference.get('path')}")
+    return ", ".join(words)
+
+
+def _owner_relation(
+    started_by: StartingAgent | None, *, role: LauncherRole, context: RoleLaunchContext
+) -> str:
+    """Whom this role answers to: the agent that started it, or nobody but the developer.
+
+    A return goes to the parent's role with its task references, named as the
+    return address; an id read from an earlier message is never the address of
+    a return (MIK-R117 rule 10).
+    """
 
     if started_by is None:
         return (
             "This role was started from the dashboard launcher. It has no parent agent and needs "
             "none: the developer who reads this chat owns its decisions. The selected AR "
             "sprint/master/leaf is work scope, not a parent."
+        )
+    address = _return_address(started_by, context)
+    if address is None:
+        addressed = (
+            "no return address is recorded for this launch: ask the developer in your own "
+            "chat where a return goes"
+        )
+    else:
+        addressed = (
+            f"addressed to the return address {_address_words(address)}. A return goes to "
+            "the parent's role with its task references; an id read from an earlier message "
+            "is not the address of a return."
         )
     if role in {"orchestrator", "manager"}:
         return (
@@ -826,7 +940,7 @@ def _owner_relation(started_by: StartingAgent | None, *, role: LauncherRole) -> 
             "decision: new or dropped scope or a change to a requirement's promise; "
             "something only the developer can do or approve; an override of a role default; "
             "or a blocker that none of your own decisions can remove. Send these with "
-            f"{ROLE_MESSAGE_TOOL}, addressed to its agent id. Send one further "
+            f"{ROLE_MESSAGE_TOOL}, {addressed}. Send one further "
             "message with the path of your report when the whole assignment is finished or "
             "cannot be finished. Decide everything else yourself and record it in your "
             "rulings record, list of requirement sentences to change, and status file; send "
@@ -837,21 +951,21 @@ def _owner_relation(started_by: StartingAgent | None, *, role: LauncherRole) -> 
     if role in LEAF_ROLES:
         return (
             f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "
-            "role and is its parent in Paseo. Send that agent only questions requiring the "
+            "role. Its parent in Paseo is the current Manager of this master, whoever started "
+            "it: send the parent only questions requiring the "
             "developer's decision or a decision above the leaf, and the start, authority, "
             "recovery, limit, disagreement, sync and closeout-readiness occasions assigned "
-            f"by your role, with {ROLE_MESSAGE_TOOL}, addressed to its agent id. Hand-overs, "
+            f"by your role, with {ROLE_MESSAGE_TOOL}, {addressed}. Hand-overs, "
             "results and questions about another leaf seat's work go directly to the seat "
             "concerned, using the exact sibling role and task references in "
             "leafSeats.roleMessageArguments. Send no routine result to the parent. "
-            "The selected AR sprint/master/leaf is work scope; the parent is the agent "
-            "named here and no other."
+            "The selected AR sprint/master/leaf is work scope."
         )
     return (
         f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "
         "role and is its parent in Paseo. Send that agent your questions about the assignment, "
         f"questions requiring the developer's decision, and your result with {ROLE_MESSAGE_TOOL}, "
-        "addressed to its agent id. The selected AR "
+        f"{addressed}. The selected AR "
         "sprint/master/leaf is work scope; the parent is the agent named here and no other."
     )
 

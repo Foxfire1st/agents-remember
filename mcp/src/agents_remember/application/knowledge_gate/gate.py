@@ -286,11 +286,15 @@ def evaluate_leaf_gate(
     kept = None if key is None else memo.remembered(key)
     if kept is not None:
         if persist_worklist:
-            _persist(contract, kept.worklist)  # the latest worklist beside the contract stays this one
+            _persist(
+                contract, kept.worklist
+            )  # the latest worklist beside the contract stays this one
         return kept
     # Every requirement file the evaluation reads for approval state is recorded with the verdict.
     with recorded_reads() as reads:
-        result = _evaluate(contract, candidate, lines, unreadable, persist_worklist=persist_worklist)
+        result = _evaluate(
+            contract, candidate, lines, unreadable, persist_worklist=persist_worklist
+        )
     if key is not None and result is not None:
         memo.remember(key, result, reads)
     return result

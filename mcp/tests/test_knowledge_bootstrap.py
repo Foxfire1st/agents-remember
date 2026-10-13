@@ -118,7 +118,10 @@ def world(root: Path, *, converted: bool = False) -> World:
     code_root = root / REPO_ID
     memory_root = coordination_root / "memory-repos" / f"ar-{REPO_ID}"
     _write(code_root, {CODE_FILE: _CODE_TEXT})
-    memory = {MEMORY_CARD: f"# {CODE_FILE}\n", "onboarding/overview.md": "# root\n"}
+    memory = {
+        MEMORY_CARD: f"# {CODE_FILE}\n",
+        "onboarding/overview.md": "# root\n\n## What This Repo Is\n\nThe repository root route.\n",
+    }
     if converted:
         memory["knowledge/layout.json"] = canonical_text(
             {"schema": "ar-memory-layout/v2", "conversion": "1"}

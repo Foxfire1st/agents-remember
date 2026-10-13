@@ -204,8 +204,8 @@ def leaf(tmp_path: Path) -> Leaf:
     files = {
         "knowledge/layout.json": LAYOUT,
         "knowledge/invariants/INV-AAAAAA-y.json": INVARIANT,
-        "onboarding/overview.md": "# root\n",
-        "onboarding/pkg/overview.md": "# pkg\n\nThe package route.\n",
+        "onboarding/overview.md": "# root\n\n## What This Repo Is\n\nThe repository root route.\n",
+        "onboarding/pkg/overview.md": "# pkg\n\n## What This Area Is\n\nThe package route.\n",
         "onboarding/pkg/overview.json": canonical_text(
             {"schema": "ar-onboarding-route/v1", "path": "pkg", "references": {}}
         ),

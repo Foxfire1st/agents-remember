@@ -32,6 +32,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     DriftSummaryOutput,
     run_drift_summary,
 )
+from agents_remember.memory_quality.landing_report import LandingBasePort
 from agents_remember.memory_quality.reference_state import is_converted_memory
 from agents_remember.memory_quality.style.citations import claim_reopen, range_resolution
 from agents_remember.memory_quality.style.citations.source_index_state import SourceIndexError
@@ -122,6 +123,8 @@ class DriftCheckContext:
     write_report: bool = True
     knowledge_base: KnowledgeBasePort | None = None
     """The converted tree's comparison base (MIK-R24 rule 7); without it, a converted ``HEAD``."""
+    landing_base: LandingBasePort | None = None
+    """The leaf's admitted memory base for the landing report (MIK-R120 rule 1)."""
 
 
 def run_memory_quality_check(
@@ -178,6 +181,7 @@ def _converted_check(
             onboarding_root.parent,
             drift_context.code_repository_root,
             base=drift_context.knowledge_base,
+            landing_base=drift_context.landing_base,
         )
     return check, run_check(check, onboarding_root, drift_context)
 

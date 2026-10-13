@@ -47,6 +47,7 @@ from agents_remember.cli.paseo_bridge import (
     bridge_call,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.modules.quality.dagger_authority import HOST_REGISTRY_ROOT_ENV
 
 PASEO_AGENT_KIND = "paseo-agent"
@@ -110,11 +111,17 @@ class StartingAgent:
     """The role agent that starts another one: its agent id, its role, and the work it serves.
 
     ``subject`` is the id of the most specific task document of its binding, or ``Projects``.
+    The three refs are the starter's own task references: the return address of the started
+    agent names the parent's role with these references (MIK-R117 rule 10), so a return still
+    reaches the role after the starter is replaced.
     """
 
     agent_id: str
     role: str
     subject: str
+    sprint_ref: TaskDocumentRef | None = None
+    master_ref: TaskDocumentRef | None = None
+    task_ref: TaskDocumentRef | None = None
 
 
 def mint_agent_id() -> str:

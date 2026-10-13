@@ -14,13 +14,20 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
+from agents_remember.kernel.direct_execution_grants import (
+    ARCHITECT_GRANTER,
+    DEVELOPER_GRANTER,
+    DirectExecutionGrant,
+    grants_for_task,
+)
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
     ApprovedRequirementPacketRef,
 )
 from agents_remember.observer.projection import (
+    DirectGrantNode,
     DiscardedSubTaskNode,
     EnclosureNode,
     SeriesNode,
@@ -31,6 +38,9 @@ from agents_remember.observer.projection import (
     TaskDocumentRef,
     TaskExecutionGraphNode,
     TaskExecutionNode,
+    TaskHeaderNoteNode,
+    TaskReviewFindingNode,
+    TaskReviewStateNode,
     TaskSeatNode,
     TaskSectionNode,
     TaskStepDispositionNode,
@@ -154,7 +164,11 @@ def read_task_documents(
                 path,
                 lifecycle_maps,
                 now,
-                _TaskDocProjectionOptions(include_body=False, master_docs=master_docs),
+                _TaskDocProjectionOptions(
+                    include_body=False,
+                    master_docs=master_docs,
+                    coordination_root=coordination_root,
+                ),
             )
         )
     return nodes
@@ -198,7 +212,9 @@ def read_task_document_body(  # pragma: no cover
         _task_document_lifecycle_maps(enclosures),
         now,
         _TaskDocProjectionOptions(
-            include_body=True, master_docs=_graph_master_docs(tasks_root, doc)
+            include_body=True,
+            master_docs=_graph_master_docs(tasks_root, doc),
+            coordination_root=coordination_root,
         ),
     )
 
@@ -303,7 +319,15 @@ def read_series_documents(
     if not tasks_root.is_dir():
         return []
     nodes: list[SeriesNode] = []
-    for path, payload in _iter_task_document_payloads(tasks_root, now=now):
+    docs = list(_iter_task_document_payloads(tasks_root, now=now))
+    leaf_ids_by_dir: dict[str, dict[str, str]] = {}
+    for leaf_path, leaf_payload in docs:
+        leaf_id = leaf_payload.get("id")
+        if leaf_payload.get("kind") == "subTask" and isinstance(leaf_id, str):
+            leaf_ids_by_dir.setdefault(leaf_path.parent.as_posix(), {})[leaf_id] = (
+                leaf_path.as_posix()
+            )
+    for path, payload in docs:
         if payload.get("kind") != "master":
             continue
         doc = _projected_document(payload)
@@ -317,7 +341,13 @@ def read_series_documents(
                 status=doc.status,
                 createdAt=doc.createdAt,
                 objective="",
-                subTasks=_series_subtask_nodes(path, doc),
+                subTasks=_series_subtask_nodes(
+                    path,
+                    doc,
+                    direct_grants=_subtask_grant_nodes(
+                        coordination_root, tasks_root, path, doc, leaf_ids_by_dir
+                    ),
+                ),
                 discardedCount=len(doc.discardedSubTasks),
                 discardedSubTasks=_discarded_subtask_nodes(doc),
                 doneCount=series_done(doc),
@@ -332,7 +362,52 @@ def read_series_documents(
     return nodes
 
 
-def _series_subtask_nodes(path: Path, doc: TaskDocument) -> list[SeriesSubTaskNode]:
+def _grant_giver_label(grant: DirectExecutionGrant) -> str:
+    """Who gave the grant, as the dashboard shows it (MIK-R94 rule 4)."""
+    if grant.granted_by == DEVELOPER_GRANTER:
+        return DEVELOPER_GRANTER
+    if grant.granter_agent_id:
+        return f"architect {grant.granter_agent_id}"
+    return ARCHITECT_GRANTER
+
+
+def _subtask_grant_nodes(
+    coordination_root: Path,
+    tasks_root: Path,
+    path: Path,
+    doc: TaskDocument,
+    leaf_ids_by_dir: Mapping[str, Mapping[str, str]],
+) -> dict[str, DirectGrantNode]:
+    """One master's subtask grants, keyed by subtask number (MIK-R94 rule 4).
+
+    Matched by leaf id against the payloads already read -- never by filename
+    guess. Unreadable grant files read as no grant (gates still refuse them).
+    """
+    try:
+        grants = grants_for_task(coordination_root, doc.repo, path.parent.name)
+    except OSError:
+        return {}
+    repo_root = tasks_root / doc.repo
+    nodes: dict[str, DirectGrantNode] = {}
+    for leaf_id, leaf_posix in leaf_ids_by_dir.get(path.parent.as_posix(), {}).items():
+        try:
+            leaf_rel = Path(leaf_posix).relative_to(repo_root).as_posix()
+        except ValueError:
+            continue
+        grant = grants.get(leaf_rel)
+        if grant is not None:
+            nodes[leaf_id] = DirectGrantNode(
+                grantedBy=_grant_giver_label(grant), grantedAt=grant.granted_at
+            )
+    return nodes
+
+
+def _series_subtask_nodes(
+    path: Path,
+    doc: TaskDocument,
+    *,
+    direct_grants: Mapping[str, DirectGrantNode] | None = None,
+) -> list[SeriesSubTaskNode]:
     indexed = [
         (index, sub, _series_subtask_created_at(path.parent, sub.file))
         for index, sub in enumerate(doc.subTasks)
@@ -347,6 +422,7 @@ def _series_subtask_nodes(path: Path, doc: TaskDocument) -> list[SeriesSubTaskNo
             status=sub.status,
             scope=sub.scope,
             createdAt=created_at,
+            directGrant=(direct_grants or {}).get(sub.number),
         )
         for _, sub, created_at in indexed
     ]
@@ -393,7 +469,14 @@ def _ref_lifecycle(
     return lifecycle_by_dir.get((base_dir / ref_file).resolve().parent)
 
 
-def _task_step_nodes(doc: TaskDocument) -> list[TaskStepNode]:
+def _task_step_nodes(doc: TaskDocument, *, preview: bool = False) -> list[TaskStepNode]:
+    """Project one document's steps, bounding long prose for summaries (rule 9).
+
+    The on-demand body (``preview=False``) carries whole strings with clear
+    flags; the always-on summary carries bounded previews so one task document
+    cannot grow every snapshot by its longest prose. Full details stay reachable
+    through the existing body read; nothing reachable is capped away.
+    """
     return [
         TaskStepNode(
             id=step.id,
@@ -414,12 +497,92 @@ def _task_step_nodes(doc: TaskDocument) -> list[TaskStepNode]:
                         if sub.disposition is not None
                         else None
                     ),
+                    note=_summary_preview(sub.note) if preview else sub.note,
                 )
                 for sub in step.substeps
             ],
+            outcome=_summary_preview(step.outcome) if preview else step.outcome,
+            note=_summary_preview(step.note) if preview else step.note,
+            outcomeTruncated=preview and _is_truncated(step.outcome),
+            noteTruncated=preview and _is_truncated(step.note),
         )
         for step in doc.steps
     ]
+
+
+# Display-aligned summary boundaries (MIK-R127 rule 9): the always-on summary
+# carries what the page blocks draw — six head notes with the whole count, the
+# first review findings with whole descriptions previewed — never the complete
+# prose. Full details stay reachable through the existing on-demand body read.
+_SUMMARY_TEXT_PREVIEW_CHARS = 400
+_SUMMARY_HEADER_NOTES = 6
+_SUMMARY_REVIEW_FINDINGS = 25
+
+
+def _is_truncated(value: str | None) -> bool:
+    return value is not None and len(value) > _SUMMARY_TEXT_PREVIEW_CHARS
+
+
+@overload
+def _summary_preview(value: None) -> None: ...
+
+
+@overload
+def _summary_preview(value: str) -> str: ...
+
+
+def _summary_preview(value: str | None) -> str | None:
+    if value is None or len(value) <= _SUMMARY_TEXT_PREVIEW_CHARS:
+        return value
+    return value[:_SUMMARY_TEXT_PREVIEW_CHARS]
+
+
+def _task_doc_form(doc: TaskDocument) -> Literal["sprint", "master", "task"]:
+    """The page form of one document by the model's own rule (MIK-R127 rule 1)."""
+    if doc.is_sprint:
+        return "sprint"
+    if doc.kind == "master":
+        return "master"
+    return "task"
+
+
+def _task_review_state_node(
+    doc: TaskDocument, *, preview: bool = False
+) -> TaskReviewStateNode | None:
+    """The recorded review round, bounded as the Review block shows it (rule 9).
+
+    Summaries carry the first ``_SUMMARY_REVIEW_FINDINGS`` findings with whole
+    descriptions previewed; ``totalFindings`` always names the whole round for
+    the counted link, ``openFindings`` always counts the open findings of the
+    whole round, and the on-demand body carries every finding whole.
+    """
+    state = doc.reviewState
+    if state is None:
+        return None
+    remaining = set(state.remainingFindingIds)
+    findings = [
+        TaskReviewFindingNode(
+            findingId=item.findingId,
+            description=_summary_preview(item.description) if preview else item.description,
+            open=item.findingId in remaining,
+            descriptionTruncated=preview and _is_truncated(item.description),
+        )
+        for item in state.baselineFindings
+    ]
+    # Counted before the cut: an open finding beyond the summary's first ones
+    # is still open.
+    open_findings = sum(1 for item in findings if item.open)
+    if preview:
+        findings = findings[:_SUMMARY_REVIEW_FINDINGS]
+    return TaskReviewStateNode(
+        round=state.round,
+        pending=state.pending,
+        additionalRounds=state.additionalRounds,
+        findings=findings,
+        totalFindings=len(state.baselineFindings),
+        openFindings=open_findings,
+        developerApproval=state.developerApproval,
+    )
 
 
 def _execution_graph_view(
@@ -504,6 +667,7 @@ class _TaskDocProjectionOptions:
 
     include_body: bool = False
     master_docs: Mapping[TaskDocumentRef, TaskDocument] | None = None
+    coordination_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -627,6 +791,14 @@ def _task_doc_node(
     execution_graph, execution_waves, execution_graph_view = _execution_graph_fields(
         doc, options.master_docs
     )
+    direct_grant = _task_doc_grant_node(options.coordination_root, path, doc)
+    # The always-on summary carries bounded previews (rule 9); the on-demand
+    # body carries every note and whole string. Totals always name the whole
+    # collection for the page's counted links.
+    preview = not options.include_body
+    header_notes = [
+        TaskHeaderNoteNode(label=note.label, value=note.value) for note in doc.headerNotes
+    ]
     return TaskDocNode(
         id=doc.id,
         lifecycleId=lifecycle_id,
@@ -634,6 +806,14 @@ def _task_doc_node(
         title=doc.title,
         status=doc.status,
         kind=doc.kind,
+        form=_task_doc_form(doc),
+        type=doc.type,
+        integrationBranch=doc.integrationBranch,
+        statusNote=(_summary_preview(doc.statusNote) if preview else doc.statusNote),
+        statusNoteTruncated=preview and _is_truncated(doc.statusNote),
+        headerNotes=(header_notes[:_SUMMARY_HEADER_NOTES] if preview else header_notes),
+        headerNotesTotal=len(header_notes),
+        reviewState=_task_review_state_node(doc, preview=preview),
         stepsDone=step_done(doc),
         stepsTotal=step_total(doc),
         currentStep=current_step(doc),
@@ -641,7 +821,7 @@ def _task_doc_node(
         bodyRevision=body_revision,
         createdAt=doc.createdAt,
         ageSeconds=_file_age_seconds(path, now),
-        steps=_task_step_nodes(doc),
+        steps=_task_step_nodes(doc, preview=preview),
         objective=reader.objective,
         requirements=reader.requirements,
         design=reader.design,
@@ -679,10 +859,34 @@ def _task_doc_node(
         executionGraph=execution_graph,
         executionWaves=execution_waves,
         executionGraphView=execution_graph_view,
+        directGrant=direct_grant,
     )
 
 
+def _task_doc_grant_node(
+    coordination_root: Path | None, path: Path, doc: TaskDocument
+) -> DirectGrantNode | None:
+    """One leaf's grant node for its document projection (MIK-R94 rule 4).
+
+    ``None`` for non-leaves, without a coordination root, and when no readable
+    grant exists: a projection never breaks on a missing or broken grant file.
+    """
+    if coordination_root is None or doc.kind != "subTask":
+        return None
+    try:
+        grants = grants_for_task(coordination_root, doc.repo, path.parent.name)
+    except (OSError, ValueError):
+        return None
+    grant = grants.get(f"{path.parent.name}/{path.name}")
+    if grant is None:
+        return None
+    return DirectGrantNode(grantedBy=_grant_giver_label(grant), grantedAt=grant.granted_at)
+
+
 def _task_doc_body_revision(doc: TaskDocument) -> str:
+    # Every field an open reader displays joins the revision: a change to any
+    # of them refetches an already-open document instead of letting a cached
+    # body override the newer summary. The task model is only read, never edited.
     payload = {
         "objective": doc.objective,
         "requirements": [_task_intent_body_value(value) for value in doc.requirements],
@@ -692,6 +896,11 @@ def _task_doc_body_revision(doc: TaskDocument) -> str:
         "openQuestions": [_task_intent_body_value(value) for value in doc.openQuestions],
         "references": list(doc.references),
         "sections": [section.model_dump(mode="json") for section in doc.sections],
+        "statusNote": doc.statusNote,
+        "headerNotes": [note.model_dump(mode="json") for note in doc.headerNotes],
+        "type": doc.type,
+        "steps": [step.model_dump(mode="json") for step in doc.steps],
+        "reviewState": doc.reviewState.model_dump(mode="json") if doc.reviewState else None,
         # Sprint structure (L14): the sub-task index rows (typed masterRef links included) and the
         # first-class seats ride the always-on summary, but an OPEN reader renders the fetched body
         # — so both join the revision and a linkage/seat edit refetches an already-open sprint doc.

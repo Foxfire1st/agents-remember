@@ -61,6 +61,7 @@ from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_LOOP_MAX_ROUNDS,
     DEFAULT_LOOP_PER_LEVEL,
     DEFAULT_REVIEWER_REUSE,
+    DEFAULT_ROLE_MESSAGE_LIMIT,
     HARNESS_IDS,
     KNOWN_AGENT_NOTIFIER_FIELDS,
     KNOWN_CONCURRENCY_FIELDS,
@@ -150,6 +151,7 @@ __all__ = [
     "DEFAULT_LOOP_MAX_ROUNDS",
     "DEFAULT_LOOP_PER_LEVEL",
     "DEFAULT_REVIEWER_REUSE",
+    "DEFAULT_ROLE_MESSAGE_LIMIT",
     "HARNESS_IDS",
     "KNOWN_AGENT_NOTIFIER_FIELDS",
     "KNOWN_CONCURRENCY_FIELDS",
@@ -509,6 +511,12 @@ def _parse_orchestration(
     harness_ids = tuple(harness.id for harness in harnesses) if strict else None
     gate_raw = raw.get("gateDelegation")
     gate_policy, at_seams = parse_gate_delegation(gate_raw, source=source)
+    limit_raw = raw.get("roleMessageLimit")
+    role_message_limit = (
+        DEFAULT_ROLE_MESSAGE_LIMIT
+        if limit_raw is None
+        else _require_positive_int(limit_raw, "orchestration.roleMessageLimit", source)
+    )
     return AgenticSettings(
         gate_policy=gate_policy,
         require_reviewer_verdict_at_seams=at_seams,
@@ -520,6 +528,7 @@ def _parse_orchestration(
         expectations=_parse_expectations(raw.get("expectations"), source=source),
         agent_notifier=_parse_agent_notifier(raw.get("agentNotifier"), source=source),
         quality_gate=_parse_quality_gate(raw.get("qualityGate"), source=source),
+        role_message_limit=role_message_limit,
         spawn_harness=_parse_spawn(raw.get("spawn"), source=source, harness_ids=harness_ids),
         harnesses=harnesses,
         sources=sources,

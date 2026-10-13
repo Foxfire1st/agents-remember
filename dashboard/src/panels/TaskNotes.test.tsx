@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FolderEntry } from "../data/notes";
@@ -184,6 +185,185 @@ describe("TaskNotes reference resolution", () => {
     await view.findByTestId("notes-root-count"); // the folder answer arrived — resolution is settled
     expect(view.queryByTestId("note-ref-1")).toBeNull();
     expect(view.getByText(/the confinement idiom to reuse/)).toBeTruthy();
+  });
+
+  it("asks for the resolution once per content of the references, not per render", async () => {
+    const reference = "notes/friction-ledger.md (F-M — the finding this leaf closes)";
+    stubNotesApi([entry("friction-ledger.md")], [[reference, "friction-ledger.md"]]);
+    // What each resolution request named, in the order the page asked.
+    const asked = (): string[][] =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(([url]) => String(url).startsWith("/api/notes/resolve"))
+        .map(([, init]) => (JSON.parse(String(init?.body)) as { references: string[] }).references);
+    const page = (references: string[]) => (
+      <TaskNotes repo={REPO} master={MASTER} references={references} onOpenNotes={vi.fn()} />
+    );
+    const view = render(page([reference]));
+    await view.findByTestId("note-ref-1");
+    expect(asked()).toEqual([[reference]]);
+
+    // a new list of the same content: no new request, and the link stays
+    view.rerender(page([reference]));
+    view.rerender(page([reference]));
+    await view.findByTestId("notes-root-count");
+    expect(asked()).toEqual([[reference]]);
+    expect(view.getByTestId("note-ref-1")).toBeTruthy();
+
+    // another content: one more request, which names the new list
+    view.rerender(page([reference, "another.md"]));
+    await waitFor(() => expect(asked()).toEqual([[reference], [reference, "another.md"]]));
+
+    // an empty text is a reference of its own and no empty list
+    view.rerender(page([""]));
+    await waitFor(() => expect(asked()).toHaveLength(3));
+    expect(asked()[2]).toEqual([""]);
+  });
+
+  it("asks nothing again when an empty list becomes a list of one empty text", async () => {
+    stubNotesApi([entry("friction-ledger.md")]);
+    const asked = (): string[][] =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(([url]) => String(url).startsWith("/api/notes/resolve"))
+        .map(([, init]) => (JSON.parse(String(init?.body)) as { references: string[] }).references);
+    const page = (references: string[]) => (
+      <TaskNotes repo={REPO} master={MASTER} references={references} onOpenNotes={vi.fn()} />
+    );
+    const view = render(page([]));
+    await view.findByTestId("notes-root-count");
+    expect(asked()).toEqual([[]]);
+
+    // the two lists join to the same key, as they always did: the page draws the
+    // new reference and sends no second request
+    view.rerender(page([""]));
+    await view.findByTestId("plain-ref-1");
+    expect(asked()).toEqual([[]]);
+  });
+});
+
+describe("TaskNotes resolution liveness (L150-CODE-01, kept at the L127 sync)", () => {
+  // The notes API stub with manual answer control: every fetch parks its answer
+  // until the test settles it, so rerenders land while a request is in flight.
+  // L127's landed hooks key the resolution on content; these cases pin that the
+  // in-flight result still arrives across equal-content rerenders and replays.
+  function stubDeferredNotes() {
+    const parked: { url: string; answer: (value: Response) => void }[] = [];
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        calls.push(url);
+        return new Promise<Response>((answer) => {
+          parked.push({ url, answer });
+        });
+      }),
+    );
+    return { parked, calls };
+  }
+
+  function folderAnswer(total: number): Response {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => folderPayload([entry("a.md")], total),
+    } as unknown as Response;
+  }
+
+  function resolveAnswer(pairs: [string, string | null][]): Response {
+    return { ok: true, status: 200, json: async () => resolvePayload(pairs) } as unknown as Response;
+  }
+
+  function resolveCalls(calls: string[]): string[] {
+    return calls.filter((url) => url.startsWith("/api/notes/resolve"));
+  }
+
+  // Settles every parked answer whose URL starts with the prefix, in parked order;
+  // other parked answers stay parked.
+  async function settle(parked: { url: string; answer: (value: Response) => void }[], prefix: string, value: Response) {
+    await act(async () => {
+      for (const call of parked.splice(0)) {
+        if (call.url.startsWith(prefix)) call.answer(value);
+        else parked.push(call);
+      }
+    });
+  }
+
+  // Settles only the latest parked answer for the prefix; earlier ones stay parked.
+  async function settleLatest(parked: { url: string; answer: (value: Response) => void }[], prefix: string, value: Response) {
+    await act(async () => {
+      for (let index = parked.length - 1; index >= 0; index -= 1) {
+        if (parked[index].url.startsWith(prefix)) {
+          parked.splice(index, 1)[0].answer(value);
+          return;
+        }
+      }
+    });
+  }
+
+  function renderNotes(references: string[]) {
+    return render(<TaskNotes repo={REPO} master={MASTER} references={references} onOpenNotes={vi.fn()} />);
+  }
+
+  it("delivers the in-flight result across an equal-content identity rerender", async () => {
+    const { parked, calls } = stubDeferredNotes();
+    const view = renderNotes(["notes/a.md"]);
+    expect(parked).toHaveLength(2);
+    // A new array identity with the same content refires nothing: the pending
+    // request keeps its only live owner.
+    view.rerender(<TaskNotes repo={REPO} master={MASTER} references={["notes/a.md"]} onOpenNotes={vi.fn()} />);
+    expect(resolveCalls(calls)).toHaveLength(1);
+    await settle(parked, "/api/notes/folder", folderAnswer(7));
+    await settle(parked, "/api/notes/resolve", resolveAnswer([["notes/a.md", "a.md"]]));
+    expect((await view.findByTestId("notes-root-count")).textContent).toContain("7 entries in the top folder");
+    expect(await view.findByTestId("note-ref-1")).toBeTruthy();
+    expect(resolveCalls(calls)).toHaveLength(1);
+  });
+
+  it("still delivers through a StrictMode setup replay", async () => {
+    const { parked, calls } = stubDeferredNotes();
+    const view = render(
+      <StrictMode>
+        <TaskNotes repo={REPO} master={MASTER} references={["notes/a.md"]} onOpenNotes={vi.fn()} />
+      </StrictMode>,
+    );
+    // The replay's cleanup cancels the first owner; the replayed setup re-issues.
+    await act(async () => {});
+    expect(resolveCalls(calls)).toHaveLength(2);
+    await settle(parked, "/api/notes/folder", folderAnswer(7));
+    await settle(parked, "/api/notes/resolve", resolveAnswer([["notes/a.md", "a.md"]]));
+    expect((await view.findByTestId("notes-root-count")).textContent).toContain("7 entries in the top folder");
+    expect(await view.findByTestId("note-ref-1")).toBeTruthy();
+  });
+
+  it("lets the latest content win and ignores the stale answer", async () => {
+    const { parked, calls } = stubDeferredNotes();
+    const view = renderNotes(["notes/a.md"]);
+    expect(parked).toHaveLength(2);
+    view.rerender(
+      <TaskNotes repo={REPO} master={MASTER} references={["notes/a.md", "notes/b.md"]} onOpenNotes={vi.fn()} />,
+    );
+    expect(resolveCalls(calls)).toHaveLength(2);
+    // The latest answer settles first and wins; the stale first answer settles
+    // last with different content and must not overwrite it.
+    await settleLatest(parked, "/api/notes/folder", folderAnswer(5));
+    await settleLatest(parked, "/api/notes/resolve", resolveAnswer([["notes/a.md", "a.md"], ["notes/b.md", "b.md"]]));
+    await settle(parked, "/api/notes/folder", folderAnswer(1));
+    await settle(parked, "/api/notes/resolve", resolveAnswer([["notes/a.md", "a.md"]]));
+    expect((await view.findByTestId("notes-root-count")).textContent).toContain("5 entries in the top folder");
+    expect(await view.findByTestId("note-ref-2")).toBeTruthy();
+  });
+
+  it("fires no new request for settled content on rerender", async () => {
+    const urls = stubNotesApi([entry("friction-ledger.md")], [["notes/friction-ledger.md", "friction-ledger.md"]]);
+    const view = renderNotes(["notes/friction-ledger.md"]);
+    await view.findByTestId("note-ref-1");
+    expect(resolveCalls(urls)).toHaveLength(1);
+    view.rerender(<TaskNotes repo={REPO} master={MASTER} references={["notes/friction-ledger.md"]} onOpenNotes={vi.fn()} />);
+    // Flush effects and settled fetches deterministically instead of a wall-clock sleep.
+    await act(async () => {});
+    expect(resolveCalls(urls)).toHaveLength(1);
+    expect((await view.findByTestId("notes-root-count")).textContent).toContain("in the top folder");
   });
 });
 

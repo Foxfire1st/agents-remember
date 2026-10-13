@@ -160,7 +160,7 @@ def converted_memory(code: Path, code_commit: str) -> dict[str, str]:
                 "realizes": [realization("RLZ-A00001", "land"), realization("RLZ-A00002", "keep")],
             }
         ),
-        "onboarding/overview.md": "# root\n",
+        "onboarding/overview.md": "# root\n\n## What This Repo Is\n\nThe repository root route.\n",
     }
 
 

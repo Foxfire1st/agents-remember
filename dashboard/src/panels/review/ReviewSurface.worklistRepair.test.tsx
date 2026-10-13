@@ -138,8 +138,14 @@ it('F06 shows captured resolved-stale reasons and a supplied unverifiable proof-
     const mark = view.container.querySelector<HTMLElement>(
       `[data-testid="review-card-currentness"][data-entry="${entry.id}"][data-side="${side}"]`,
     )!;
-    expect(mark.textContent).toContain(entry[side].currentness_reason);
     expect(mark.closest('details')).toBeNull();
+    // The mark names the entry, its state and its side exactly (F4); the recorded reason reads
+    // beside it, outside any disclosure.
+    const reason = view.container.querySelector<HTMLElement>(
+      `[data-testid="review-card-currentness-reason"][data-entry="${entry.id}"][data-side="${side}"]`,
+    )!;
+    expect(reason.textContent).toContain(entry[side].currentness_reason);
+    expect(reason.closest('details')).toBeNull();
   }
   checkEntryIdentities(view.getByTestId('review-surface'), cards.entries!);
 });

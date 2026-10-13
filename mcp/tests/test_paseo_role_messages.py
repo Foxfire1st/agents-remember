@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 import unittest
 import uuid
@@ -96,6 +97,8 @@ class RoleMessageTests(RoleToolsTestCase):
                 result = self.message(caller, "report your plan", agent_id=worker)
 
                 self.assertEqual(self.received(worker), [f"{line}\nreport your plan"])
+                message_file = result.pop("messageFile")
+                message_digest = result.pop("messageFileSha256")
                 self.assertEqual(
                     result,
                     {
@@ -107,13 +110,31 @@ class RoleMessageTests(RoleToolsTestCase):
                         "taken": "started",
                     },
                 )
+                self.assertTrue(message_file.endswith(".md"))
+                self.assertEqual(
+                    hashlib.sha256(Path(message_file).read_bytes()).hexdigest(),
+                    message_digest,
+                )
                 self.assertEqual(sender_line(starting_agent(self.config, caller)), line)
                 # Accepted means the host took the message; nothing waits for the turn.
                 self.assertEqual([command for command, _p in self.runtime.calls], ["agent-send"])
-        with self.subTest("nothing is stored by AR and no receipt changes"):
+        with self.subTest("one file per message, and no receipt changes"):
             after = sorted(path.as_posix() for path in self.root.rglob("*") if path.is_file())
-            self.assertEqual(after, before)
-            self.assertEqual({path: Path(path).read_bytes() for path in after}, saved)
+            added = [path for path in after if path not in before]
+            # One file per accepted message, named by time, sender and recipient.
+            self.assertEqual(len(added), 4)
+            for path in added:
+                name = Path(path).name
+                self.assertRegex(
+                    name,
+                    r"^\d{8}T\d{6}Z_[a-z]+-[0-9a-f]{8}_to_worker-[0-9a-f]{8}\.md$",
+                )
+                content = Path(path).read_text()
+                self.assertIn("report your plan", content)
+                self.assertIn("messageId:", content)
+            self.assertEqual(
+                {path: Path(path).read_bytes() for path in after if path in saved}, saved
+            )
         with self.subTest("a task document that is gone still names the work by its reference"):
             caller = binding("orchestrator", sprint_ref=OTHER_SPRINT)
             self.assertEqual(
@@ -381,9 +402,7 @@ class RoleMessageTests(RoleToolsTestCase):
             (_first_request, first), (_second_request, second) = launched
             self.runtime.agents[first].update(status="idle", archivedAt=None, received=[])
             self.runtime.calls.clear()
-            result = self.message(
-                self.architect, role="manager", **selection_of("manager")
-            )
+            result = self.message(self.architect, role="manager", **selection_of("manager"))
             self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", second))
 
     def test_only_an_agent_id_of_this_lines_receipts_is_a_recipient(self) -> None:
@@ -642,7 +661,8 @@ class RoleMessageTests(RoleToolsTestCase):
             result = self.refusal(
                 self.message(self.architect, agent_id=worker), "recipient-cannot-be-resumed"
             )
-            self.assertEqual(result["detail"], NO_ROLLOUT)
+            self.assertTrue(result["detail"].startswith(NO_ROLLOUT))
+            self.assertTrue(Path(result["messageFile"]).name.endswith(".undelivered.md"))
             self.assertEqual(
                 [command for command, _p in self.runtime.calls], ["agent-send", "agent-resume"]
             )
@@ -930,6 +950,9 @@ class RoleMessageTests(RoleToolsTestCase):
                 "caller-has-no-binding",
                 "no-paseo-runtime-configured",
                 "host-unreachable",
+                "message-too-long",
+                "message-file-failed",
+                "settings-invalid",
             },
         )
 

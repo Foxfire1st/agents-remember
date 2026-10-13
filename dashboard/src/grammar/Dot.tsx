@@ -5,10 +5,10 @@ import { cva } from "../../styled-system/css";
 // COLOUR is the channel. It is the fastest read and it GROUPS related facts — cyan is "live or
 // routine", amber is "wants you", the fault red is "broken". Seven tones cannot separate nine
 // variants and a base, though, so the GLYPH is what makes each one its own: `awaiting-developer`
-// and `warn` are both amber, and cockpit/Cockpit.tsx renders their two panels as siblings in a
-// single always-visible rail, so without a distinct mark a handoff and a queue warning would be the
-// same dot in one glance. Dot.test.tsx pins exactly that and nothing more: every variant, plus an
-// unrecognised one, renders differently from every other.
+// and `warn` are both amber, and the tasks column of cockpit/Cockpit.tsx shows both — the attention
+// queue's layer opens over the tree of lifecycle states — so without a distinct mark a handoff and
+// a queue warning would be the same dot in one glance. Dot.test.tsx pins exactly that and nothing
+// more: every variant, plus an unrecognised one, renders differently from every other.
 //
 // MOTION is additive, never an identity. `html[data-effects="off"]` (the Calm header toggle) nulls
 // every animation from an unlayered `!important` rule in index.css and `_motionReduce` does the same
@@ -27,7 +27,8 @@ const dot = cva({
     // the rails stay aligned and a state change never reflows the row.
     width: "1ch",
     marginRight: "0.4em",
-    // The dot sits in AttentionQueue's flex row; without this the mark is squeezable.
+    // A dot put straight into a flex row is squeezable without this. No consumer does that today:
+    // LifecycleList and AttentionQueue each wrap the dot in a cell of their own.
     flexShrink: "0",
     textAlign: "center",
     lineHeight: "1",

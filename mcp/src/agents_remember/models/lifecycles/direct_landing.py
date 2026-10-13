@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.models.lifecycles.policy import GatePolicyRuleSnapshot
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 
 class DirectLandingOperationInput(BaseModel):
@@ -19,12 +20,17 @@ class DirectLandingOperationInput(BaseModel):
     kind: Literal["direct-landing"] = "direct-landing"
     configPath: str
     contractPath: str
+    leafTaskDocumentRef: TaskDocumentRef
     effectiveInput: EffectiveCloseoutInput
     approvalNote: str
     gatePolicy: list[GatePolicyRuleSnapshot] = Field(default_factory=list)
     codeCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     codeTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     candidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    codeCommitMessage: str = ""
+    """The message of a created code commit; empty for a verified-existing one."""
+    codeBefore: GitMutationSnapshot | None = None
+    """The pre-publication code snapshot (admitted ref/tip) for a create; None for verify."""
     memoryRepository: str
     memoryBranch: str
     memoryRef: str = Field(pattern=r"^refs/heads/.+$")

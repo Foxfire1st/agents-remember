@@ -61,9 +61,12 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         manager = binding("manager")
         worker = self.start(manager, "worker")["agentId"]
         self.runtime.agents[worker]["pendingPermissions"] = [{"name": "Bash"}]
-        with patch.object(
-            tools, "_note_waiting", side_effect=RuntimeError("simulated stop after store fsync")
-        ), self.assertRaises(RuntimeError):
+        with (
+            patch.object(
+                tools, "_note_waiting", side_effect=RuntimeError("simulated stop after store fsync")
+            ),
+            self.assertRaises(RuntimeError),
+        ):
             self.message(manager, agent_id=worker, text="durable orphan")
         located = tools._locate_recipient_store(
             self.config, tools.RoleMessageCall(text="lookup", agent_id=worker), worker
@@ -89,9 +92,7 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         self.open_worker(worker)
         outcome = held.drain_held(self.config, located[0], located[1])
         self.assertEqual(outcome["outcome"], "delivered")
-        with patch.object(
-            held, "_write_receipt", side_effect=OSError("disk full at end record")
-        ):
+        with patch.object(held, "_write_receipt", side_effect=OSError("disk full at end record")):
             recorded = held.apply_drain_to_receipt(located[0], outcome)
 
         self.assertFalse(recorded)
@@ -118,9 +119,12 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
             return original_send(payload)
 
         with patch.object(self.runtime, "_agent_send", side_effect=dedup):
-            with patch.object(
-                held, "_remove_ids", side_effect=RuntimeError("stop after host delivered")
-            ), self.assertRaises(RuntimeError):
+            with (
+                patch.object(
+                    held, "_remove_ids", side_effect=RuntimeError("stop after host delivered")
+                ),
+                self.assertRaises(RuntimeError),
+            ):
                 held.drain_held(self.config, located[0], located[1])
             self.message(manager, agent_id=worker, text="later batch member")
             with patch.object(held, "STALE_CLAIM_SECONDS", 0):
@@ -160,9 +164,10 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         held.apply_drain_to_receipt(located[0], result)
         self.assertEqual((read_receipt(located[0]) or {}).get("heldWaiting"), 0)
         self.runtime.agents[worker]["pendingPermissions"] = [{"name": "Bash"}]
-        with patch.object(
-            tools, "_note_waiting", side_effect=RuntimeError("stop after admission")
-        ), self.assertRaises(RuntimeError):
+        with (
+            patch.object(tools, "_note_waiting", side_effect=RuntimeError("stop after admission")),
+            self.assertRaises(RuntimeError),
+        ):
             self.message(manager, agent_id=worker, text="second-cycle orphan")
         self.open_worker(worker)
 
@@ -190,8 +195,9 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
             original(*args, **kwargs)
             raise Stopped("stop after store deletion, before staging terminal metadata")
 
-        with patch.object(held, "_remove_ids", side_effect=stop_after_delete), self.assertRaises(
-            Stopped
+        with (
+            patch.object(held, "_remove_ids", side_effect=stop_after_delete),
+            self.assertRaises(Stopped),
         ):
             held.drain_held(self.config, located[0], located[1])
 
@@ -237,8 +243,9 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
             return real_remove(*args, **kwargs)
 
         with patch.object(held, "_send_once", side_effect=dedup_limit):
-            with patch.object(held, "_remove_ids", side_effect=stop_second), self.assertRaises(
-                Stopped
+            with (
+                patch.object(held, "_remove_ids", side_effect=stop_second),
+                self.assertRaises(Stopped),
             ):
                 held.drain_held(self.config, located[0], located[1])
             self.message(manager, agent_id=worker, text="later C")
@@ -268,7 +275,11 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
 
         def limited(config, payload):
             if len(payload["text"].encode()) > limit_bytes:
-                return {"delivered": False, "refused": "busy", "detail": "declared fixture size limit"}
+                return {
+                    "delivered": False,
+                    "refused": "busy",
+                    "detail": "declared fixture size limit",
+                }
             answer = original(config, payload)
             if answer.get("delivered"):
                 accepted.append(payload["text"])
@@ -301,7 +312,11 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
 
         def limited(config, payload):
             if len(payload["text"].encode()) > limit_bytes:
-                return {"delivered": False, "refused": "busy", "detail": "declared fixture size limit"}
+                return {
+                    "delivered": False,
+                    "refused": "busy",
+                    "detail": "declared fixture size limit",
+                }
             answer = original(config, payload)
             if answer.get("delivered"):
                 accepted.append(payload["text"])
@@ -332,7 +347,9 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
                 reason="test",
             ),
         )
-        claimed, _claim = held._claim_batch(folder, agent)
+        batch = held._claim_batch(folder, agent)
+        assert batch is not None
+        claimed, _claim = batch
         self.assertEqual(len(claimed), 1)
 
         with self.assertRaises(held.HeldMessageCommitted):
@@ -563,9 +580,7 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
     def test_zero_input_cycles_do_no_drain_work(self) -> None:
         for _ in range(3):
             swept = held.sweep_held_messages(self.config)
-            self.assertEqual(
-                (swept["swept"], swept["delivered"], swept["stillHeld"]), (0, 0, 0)
-            )
+            self.assertEqual((swept["swept"], swept["delivered"], swept["stillHeld"]), (0, 0, 0))
 
     def test_idle_fleet_reads_stay_bounded_at_two_sizes(self) -> None:
         # The sealed census boundary: an idle fleet costs a bounded rotation per
@@ -587,9 +602,10 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
                         _out.append(str(found))
                         yield found
 
-                with patch.object(Path, "rglob", counted), patch.object(
-                    held, "_read_receipt", wraps=held._read_receipt
-                ) as reader:
+                with (
+                    patch.object(Path, "rglob", counted),
+                    patch.object(held, "_read_receipt", wraps=held._read_receipt) as reader,
+                ):
                     result = held.sweep_held_messages(self.config)
                 self.assertEqual(len(yielded), 0)
                 self.assertLessEqual(reader.call_count, held.SWEEP_MAX_RECEIPT_READS_PER_TICK)
@@ -613,11 +629,7 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
         for agent_id in dead:
             self.runtime.agents[agent_id]["archivedAt"] = ARCHIVED_AT
         history_root = (
-            self.config.coordination_root
-            / "notes"
-            / "reports"
-            / EXECUTIONS_DIRECTORY
-            / "history"
+            self.config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY / "history"
         )
         history_root.mkdir(parents=True, exist_ok=True)
         historic_id, historic_path, historic_folder = self.craft_recipient("historic")
@@ -640,9 +652,7 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
         # The history receipt never drains: its store is untouched.
         self.assertEqual(self.received(historic_id), [])
         self.assertEqual(held.waiting_total(historic_folder, historic_id), 1)
-        self.assertEqual(
-            (third["swept"], third["delivered"], third["stillHeld"]), (0, 0, 0)
-        )
+        self.assertEqual((third["swept"], third["delivered"], third["stillHeld"]), (0, 0, 0))
 
     def name_of(self, agent_id: str) -> str:
         """The fleet name behind one crafted agent, read back from its receipt."""

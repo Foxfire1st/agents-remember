@@ -326,6 +326,7 @@ const VOCABULARIES: Record<
     'task_doc.skip_step',
   ],
   'projection.analytics.taskDocuments[].executionNature': ['organizational', 'atomic'],
+  'projection.analytics.taskDocuments[].form': ['sprint', 'master', 'task'],
   'projection.analytics.taskDocuments[].executionGraphView.nodes[].kind': ['lump', 'segment'],
   'projection.analytics.taskDocuments[].executionGraphView.nodes[].frontierState': [
     'landed',

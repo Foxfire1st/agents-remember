@@ -24,7 +24,7 @@ from agents_remember.worktrees.modules import abandon as abandon_module
 from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
-from lifecycle_enclosure_test_support import enclosure_contract
+from lifecycle_enclosure_test_support import byte_tree, enclosure_contract
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -323,3 +323,27 @@ def test_external_memory_branch_stays_outside_exception(
     assert "worktree_enclosure_adopt" in PUBLIC_TOOLS
     assert contract_path.read_bytes() == before
     assert load_contract(contract_path).cleanup == "pending"
+
+
+def test_series_abandon_preview_leaves_populated_logs_and_apply_removes_them(
+    worktree_services: None, tmp_path: Path
+) -> None:
+    """A series enclosure with populated logs previews without touching disk, then removes them."""
+
+    root = tmp_path / "series"
+    contract, _text = enclosure_contract(root, kind="series")
+    logs = contract.worktree_group / "logs" / "ar-tools-20261012"
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "000000000001-task_doc-aaaaaaaa.json").write_text("{}\n", encoding="utf-8")
+    (contract.worktree_group / "logs" / "ar-tools-20261012.jsonl").write_text(
+        "{}\n", encoding="utf-8"
+    )
+
+    before = byte_tree(contract.worktree_group)
+    preview = abandon_module._abandon_directories(contract, dry_run=True, force=False)
+    assert set(preview) == {"reports", "lifecycle"}
+    assert byte_tree(contract.worktree_group) == before
+
+    applied = abandon_module._abandon_directories(contract, dry_run=False, force=False)
+    assert set(applied) == {"reports", "lifecycle"}
+    assert not (contract.worktree_group / "logs").exists()

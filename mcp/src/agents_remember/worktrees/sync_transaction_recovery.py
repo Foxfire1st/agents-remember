@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 
@@ -31,9 +32,14 @@ from agents_remember.worktrees.sync_transaction_authority import (
     update_record,
 )
 from agents_remember.worktrees.sync_transaction_git import (
+    MAX_NAMED_SYNC_PATHS,
+    CancelTreeAssessment,
     SyncGitProofError,
+    assess_retained_tree,
+    assess_stash_tree,
     delete_pinned_ref,
-    discard_conflicted_wip_reapply,
+    discard_owned_reapply,
+    drop_parked_wip,
     ensure_temporary_worktree,
     exact_created_head,
     merge_head,
@@ -53,6 +59,8 @@ from agents_remember.worktrees.sync_transaction_state import (
     sync_side_refs,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+
+logger = logging.getLogger(__name__)
 
 
 def finalize_sync(
@@ -94,6 +102,7 @@ def finalize_sync(
     # Publish the terminal transaction before deleting its recovery authority. A crash at
     # any later cut leaves a terminal record whose residue cleanup is strictly idempotent.
     record = update_record(store, record, phase="completed")
+    _retire_restored_stashes(record)
     remove_temporary_worktrees(record)
     delete_authority(record)
     return with_recomputed_worklist(completed_sync_result(current, record, fetch), current)
@@ -224,11 +233,30 @@ def cancel_sync(
     record: SyncOperationRecord,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
+    assessments = _precheck_cancel_sides(record)
+    later = [
+        f"{side_name}/{path}"
+        for side_name, assessment in assessments.items()
+        for path in assessment.later_work
+    ]
+    unproven = [
+        f"{side_name}/{path}"
+        for side_name, assessment in assessments.items()
+        for path in assessment.unproven_paths
+    ]
+    if later or unproven:
+        faults = dict.fromkeys(
+            assessment.merge_fault for assessment in assessments.values() if assessment.merge_fault
+        )
+        return _refuse_cancel_for_later_work(record, fetch, later, unproven, "; ".join(faults))
     record = update_record(store, record, phase="cancelling")
     for side in (record.memory, record.code):
         if side is not None:
-            if side.wipState == "restore-conflict":
-                discard_conflicted_wip_reapply(side)
+            assessment = assessments.get(side.side)
+            if assessment is not None and (
+                assessment.needs_discard or side.wipState == "restore-conflict"
+            ):
+                discard_owned_reapply(side, assessment.owned_untracked)
             if side.plan in {"already-current", "skip"}:
                 if side_branch_head(side) != side.preSyncHead:
                     raise SyncGitProofError(
@@ -243,11 +271,122 @@ def cancel_sync(
     require_contract_bases_unchanged(reload_contract(contract), record)
     remove_temporary_worktrees(record)
     record = update_record(store, record, phase="cancelled")
+    _retire_restored_stashes(record)
     delete_authority(record)
     return command_result(
         0,
         "sync-cancelled",
         "The exact sync transaction was cancelled and every participating branch was restored.",
+        fetch,
+    )
+
+
+def _retire_restored_stashes(record: SyncOperationRecord) -> None:
+    """Drop the kept stash entries of restored sides at terminal finalization.
+
+    Restore and settle keep every stash so a later cancel can still return the
+    parked bytes; only a terminal transaction retires them, entry by entry, and
+    only the entry its own record names. A missing entry is already gone.
+    """
+
+    for side in (record.code, record.memory):
+        if side is not None and side.wipState == "restored" and side.wipStash:
+            drop_parked_wip(side)
+
+
+def _precheck_cancel_sides(record: SyncOperationRecord) -> dict[str, CancelTreeAssessment]:
+    """Prove a cancel can run before the record moves: a refused cancel changes nothing."""
+
+    assessments: dict[str, CancelTreeAssessment] = {}
+    for side in (record.code, record.memory):
+        if side is None:
+            continue
+        if side.plan in {"already-current", "skip"}:
+            if side_branch_head(side) != side.preSyncHead:
+                raise SyncGitProofError(f"{side.side} unchanged branch moved after sync admission")
+            continue
+        if merge_head(Path(side.worktree)) is not None or side.wipState == "restore-conflict":
+            carried = _cancel_carried_head(side)
+            assessments[side.side] = assess_retained_tree(side, carried)
+        else:
+            assessments[side.side] = assess_stash_tree(side, _cancel_carried_head(side))
+    return assessments
+
+
+def _cancel_carried_head(side: SyncSideRecord) -> str | None:
+    """The head the parked reapply ran onto, or ``None`` where it never moved."""
+
+    worktree = Path(side.worktree)
+    current = head_commit(worktree)
+    active = merge_head(worktree)
+    if active is not None:
+        if current != side.preSyncHead or active != side.sourceCommit:
+            raise SyncGitProofError(f"{side.side} active merge is outside sync authority")
+        return side.sourceCommit
+    if current == side.preSyncHead:
+        return None
+    if exact_created_head(side, current):
+        return current
+    raise SyncGitProofError(
+        f"{side.side} has later or unrelated commits; automatic rollback is unsafe"
+    )
+
+
+def _refuse_cancel_for_later_work(
+    record: SyncOperationRecord,
+    fetch: dict[str, object],
+    later: list[str],
+    unproven: list[str] | None = None,
+    merge_fault: str = "",
+) -> WorktreeCommandResult:
+    """Refuse a cancel over later or unshowable work before anything changes, record included.
+
+    ``merge_fault`` is git's words where it could not make the reapply's merge again: a
+    path both sides changed then stands among the later work, and the refusal says why.
+    """
+
+    fault_note = (
+        f" Git could not make the reapply's merge again ({merge_fault}), so a path both sides "
+        "changed cannot be shown to be the reapply's own."
+        if merge_fault and later
+        else ""
+    )
+    if unproven:
+        logger.error("sync cancel refused over unproven paths: %s", ", ".join(unproven))
+        shown = ", ".join(unproven[:MAX_NAMED_SYNC_PATHS])
+        if len(unproven) > MAX_NAMED_SYNC_PATHS:
+            shown += f" and {len(unproven) - MAX_NAMED_SYNC_PATHS} more"
+        summary = (
+            "The sync cannot be cancelled: after an interrupted step, these paths cannot be "
+            f"shown to be the transaction's own: {shown}. Nothing was changed; the sync record "
+            "keeps its phase. Resolve the listed paths and continue the sync; cancelling would "
+            "discard bytes no stash and no commit shows."
+        )
+        if later:
+            later_shown = ", ".join(later[:MAX_NAMED_SYNC_PATHS])
+            if len(later) > MAX_NAMED_SYNC_PATHS:
+                later_shown += f" and {len(later) - MAX_NAMED_SYNC_PATHS} more"
+            summary += (
+                f" These further paths hold later work no stash and no commit holds: {later_shown}."
+                f"{fault_note}"
+            )
+        return manual_repair_result(
+            "sync-cancel-unproven-after-interrupt",
+            summary,
+            record,
+            fetch,
+        )
+    logger.error("sync cancel refused over later work: %s", ", ".join(later))
+    shown = ", ".join(later[:MAX_NAMED_SYNC_PATHS])
+    if len(later) > MAX_NAMED_SYNC_PATHS:
+        shown += f" and {len(later) - MAX_NAMED_SYNC_PATHS} more"
+    return manual_repair_result(
+        "sync-cancel-refused-later-work",
+        "The sync cannot be cancelled: the worktree holds later work no stash and no commit "
+        f"holds: {shown}.{fault_note} Save those paths elsewhere, cancel the sync, then restore "
+        "them. "
+        "Nothing was changed; the sync record keeps its phase.",
+        record,
         fetch,
     )
 
@@ -349,9 +488,10 @@ def cleanup_terminal_residue(
     store: SyncOperationStore,
     record: SyncOperationRecord,
 ) -> None:
-    """Finish only idempotent temp/ref cleanup left after a terminal publication."""
+    """Finish only idempotent temp/ref/stash cleanup left after a terminal publication."""
 
     remove_temporary_worktrees(record)
+    _retire_restored_stashes(record)
     delete_authority(record)
     # Re-publish the same strict bytes after cleanup so a truncated prior write cannot
     # masquerade as successful residue collection.

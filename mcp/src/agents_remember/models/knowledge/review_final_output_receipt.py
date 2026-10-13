@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Literal
+from typing import Literal, overload
 
 from pydantic import Field, model_validator
 
@@ -81,7 +81,7 @@ BoundOrMovedVerdict = Literal["bound", "moved"]
 FinalOutputVerdict = Literal["bound", "unmeasured", "moved"]
 
 
-def code_match_state(reviewed_candidate_tree: str, delivered_code_tree: str) -> MatchState:
+def code_match_state(reviewed_candidate_tree: str, delivered_code_tree: str) -> MeasuredMatchState:
     """Whether the delivered code tree is the candidate tree the generation reviewed."""
 
     if delivered_code_tree == reviewed_candidate_tree:
@@ -331,10 +331,28 @@ def tree_comparison_digest(comparison: ReviewTreeComparisonRecord) -> str:
     ).hexdigest()
 
 
+@overload
+def tree_match_state(reviewed: str, observed: str) -> MeasuredMatchState: ...
+
+
+@overload
+def tree_match_state(reviewed: str, observed: str | None) -> MatchState: ...
+
+
 def tree_match_state(reviewed: str, observed: str | None) -> MatchState:
     if observed is None:
         return "not-comparable"
     return code_match_state(reviewed, observed)
+
+
+@overload
+def tree_output_verdict(
+    code: MeasuredMatchState, memory: MeasuredMatchState
+) -> BoundOrMovedVerdict: ...
+
+
+@overload
+def tree_output_verdict(code: MatchState, memory: MatchState) -> FinalOutputVerdict: ...
 
 
 def tree_output_verdict(code: MatchState, memory: MatchState) -> FinalOutputVerdict:

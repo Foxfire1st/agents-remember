@@ -28,8 +28,8 @@ from agents_remember.application.knowledge_read import (
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import logical_digest
 from agents_remember.memory.knowledge.read import SelectionQuery, select_recorded_scope
-from agents_remember.memory.knowledge.store import open_read_only_store
 from agents_remember.memory.knowledge.schema import generation_of_database
+from agents_remember.memory.knowledge.store import open_read_only_store
 from agents_remember.models.knowledge.read import (
     FamilyRevisionSeed,
     InvariantIdentitySeed,
@@ -43,7 +43,6 @@ from agents_remember.models.knowledge.read import (
     ReadItem,
     continue_from_cursor,
 )
-from knowledge_rows_test_support import open_knowledge_store
 from read_scope_test_support import ReadScopeFixture, build_read_scope_fixture
 
 pytestmark = pytest.mark.evidence_unit
@@ -1027,9 +1026,9 @@ def test_each_dataset_file_is_selected_from_its_own_rows(
             )
         finally:
             mine_store.close()
-        assert {item.item_id for item in mine.items} == {
-            item.item_id for item in own.items
-        }, "the same topology selects the same shape from each file"
+        assert {item.item_id for item in mine.items} == {item.item_id for item in own.items}, (
+            "the same topology selects the same shape from each file"
+        )
         nothing = select_recorded_scope(
             store.connection,
             SelectionQuery(

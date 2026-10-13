@@ -17,7 +17,7 @@ sections below are the fields a consumer reads; where wording differs, those fil
 
 1. **A verdict is evidence, not a decision.** State an explicit pass/block **recommendation**; the gate's
    decider decides. Never write the verdict as if it were the gate outcome.
-2. **Route the verdict to the seam's recipient** (leaf block directly to the Worker with the sealed findings report; master/super findings stay with their owning Manager/Orchestrator).
+2. **Route the verdict to the seam's recipient** (leaf block directly to the Worker with the sealed findings report; master/super findings stay with their owning Manager/Orchestrator). The verdict travels as a file: the handover message names its path, never its pasted text.
 3. **Refute-or-confirm:** every finding must survive an attempt to refute it. Rank findings and cite
    the backing evidence file.
 4. Cover all three lenses (completion · scoped implementation evidence · onboarding-vs-code)
@@ -366,3 +366,7 @@ every preceding ID, and retains earlier accepted adjudications rather than openi
 review. Outside-list observations, changed deliveries, new routes, and newly discovered criteria
 return to the developer rather than becoming successor findings. A successor never adds, reopens,
 or resets an issue. At the settings limit, request authorization as `../operations/review.md` states before any extra review. Verifying repaired items is an ordinary round; no broader extra-round authority exists beyond the recorded approval.
+
+## Handover
+
+Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.

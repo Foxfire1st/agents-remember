@@ -15,9 +15,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.direct_execution_grants import refuse_open_direct_sibling
+from agents_remember.kernel.direct_execution_grants import DirectGrantError, grants_for_task
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     TaskDocSourceSnapshot,
     TaskDocument,
@@ -234,6 +237,33 @@ class _TaskDocCandidateContext:
     selected_snapshot: TaskDocSourceSnapshot
 
 
+def _branch_addressed_leaf(target: TaskDocTarget) -> TaskDocumentRef | None:
+    """The selected leaf of a branch-addressed call, from the target alone.
+
+    The leaf's own file is ``<slug>.json`` in the addressed task root; the
+    grant gate resolves and kind-checks it. ``None`` when the target names no
+    document, which the gate refuses.
+    """
+    if target.task_name is None or target.slug is None:
+        return None
+    return TaskDocumentRef(repository=target.repo_id, path=f"{target.task_name}/{target.slug}.json")
+
+
+def _refuse_open_direct_sibling_for_task_doc(
+    config: McpRuntimeConfig, leaf: TaskDocumentRef | None
+) -> None:
+    """Refuse a branch-addressed review while another direct leaf is in work."""
+    if leaf is None:
+        return
+    try:
+        refuse_open_direct_sibling(config, leaf, "branch_addressed record_route_review")
+    except DirectGrantError as error:
+        raise TaskDocError(
+            f"branch_addressed record_route_review for {leaf.repository}:{leaf.path} "
+            f"is refused: {error.detail}"
+        ) from error
+
+
 def task_doc_tool(
     config: McpRuntimeConfig,
     target: TaskDocTarget,
@@ -246,7 +276,11 @@ def task_doc_tool(
         raise TaskDocError(
             f"unknown operation {operation!r}; expected one of {', '.join(VALID_OPERATIONS)}"
         )
-    _enforce_branch_addressed_policy(config, operation, call.branch_addressed)
+    _enforce_branch_addressed_policy(
+        config, operation, call.branch_addressed, _branch_addressed_leaf(target)
+    )
+    if call.branch_addressed and operation == "record_route_review":
+        _refuse_open_direct_sibling_for_task_doc(config, _branch_addressed_leaf(target))
     task_root, contract = _resolve(config, target.repo_id, target.task_name, target.contract_path)
     payload_fields = edit.fields or {}
     slug = target.slug
@@ -538,9 +572,39 @@ def _get_task_doc_result(context: _TaskDocSpecialContext) -> dict[str, Any]:
     return result
 
 
+def _get_direct_grant_payload(
+    context: _TaskDocSpecialContext, doc: TaskDocument
+) -> dict[str, Any] | None:
+    """The leaf's live grant for a get answer, read from the one record.
+
+    ``None`` for non-leaves and when no readable grant exists: a get answer
+    never breaks on a missing or broken grant file (gates still refuse it).
+    """
+    if doc.kind != "subTask":
+        return None
+    try:
+        grants = grants_for_task(
+            context.config.coordination_root,
+            context.target.repo_id,
+            context.task_root.name,
+        )
+    except OSError:
+        return None
+    grant = grants.get(f"{context.task_root.name}/{doc.slug}.json")
+    return grant.model_dump() if grant is not None else None
+
+
 def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, Any] | None:
     if context.operation == "get":
-        return _get_task_doc_result(context)
+        # L116 behaviour (settings limit, linkage facts) via the shared helper,
+        # plus MIK-R94 rule 4: the get answer carries the leaf's live grant.
+        result = _get_task_doc_result(context)
+        json_path = _existing_json(context.task_root, context.target.slug)
+        doc = read_task_doc(json_path)
+        direct_grant = _get_direct_grant_payload(context, doc)
+        if direct_grant is not None:
+            result["directGrant"] = direct_grant
+        return result
     if context.operation == "read_steps":
         return _read_steps(context)
     if context.operation in task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS:

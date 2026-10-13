@@ -90,6 +90,21 @@ def recorded(config: McpRuntimeConfig, role: str = "architect"):
         workspace["taskReportAccessRoot"] = str(
             _bind_task_report_access(config.workspace_root, reports)
         )
+    else:
+        # Since MIK-R71 rules 13-14 the readers read the collected report at
+        # its canonical place (the task notes for a task role, the workspace
+        # report folder for a taskless one), which is what this helper seeds:
+        # the read route derives the same root and name, so the written file
+        # is found and every refusal keeps its meaning.
+        if context.effective_task is None:
+            workspace["taskReportAccessRoot"] = str(
+                config.workspace_root / ".agents-remember" / "reports"
+            )
+        else:
+            task_reports = context.effective_task.path.parent / "notes" / "reports"
+            task_reports.mkdir(parents=True, exist_ok=True)
+            workspace["taskReportAccessRoot"] = str(task_reports)
+        Path(workspace["taskReportAccessRoot"]).mkdir(parents=True, exist_ok=True)
     report = Path(_role_report_path(context, workspace, request_id=request.request_id))
     receipt = {
         "schema": RECEIPT_SCHEMA,

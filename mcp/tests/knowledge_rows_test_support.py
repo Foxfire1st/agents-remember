@@ -436,9 +436,7 @@ class _TextTree:
                 record
             )
         for text_id, record in self.families.items():
-            rendered[record_path("family", text_id, text_id.lower())] = canonical_json_bytes(
-                record
-            )
+            rendered[record_path("family", text_id, text_id.lower())] = canonical_json_bytes(record)
         for path, sidecar in self.sidecars.items():
             rendered[path] = canonical_json_bytes(sidecar)
         return rendered
@@ -465,15 +463,11 @@ class _TextTree:
             "revision_invariants_by_projected": self.revision_invariants_by_projected,
             "family_ids": self.family_ids,
             "family_revision_families": self.family_revision_families,
-            "family_revision_families_by_projected": (
-                self.family_revision_families_by_projected
-            ),
+            "family_revision_families_by_projected": (self.family_revision_families_by_projected),
             "claim_entries": self.claim_entries,
             "anchor_ids": self.anchor_ids,
             "anchor_facts": self.anchor_facts,
-            "member_rows": {
-                key: list(pair) for key, pair in self.member_rows.items()
-            },
+            "member_rows": {key: list(pair) for key, pair in self.member_rows.items()},
             "claim_entries_by_projected": self.claim_entries_by_projected,
             "member_rows_by_projected": {
                 key: list(pair) for key, pair in self.member_rows_by_projected.items()
@@ -503,9 +497,7 @@ class _TextTree:
             tree.entry_sequence = int(data["entry_sequence"])
             tree.invariant_ids = dict(data["invariant_ids"])
             tree.revision_invariants = dict(data["revision_invariants"])
-            tree.revision_invariants_by_projected = dict(
-                data["revision_invariants_by_projected"]
-            )
+            tree.revision_invariants_by_projected = dict(data["revision_invariants_by_projected"])
             tree.family_ids = dict(data["family_ids"])
             tree.family_revision_families = dict(data["family_revision_families"])
             tree.family_revision_families_by_projected = dict(
@@ -595,9 +587,7 @@ class RowStore(OpenedKnowledgeStore):
             path.unlink()
         report = build_index(_snapshot(self.tree), path)
         if report.state != "complete":
-            raise ValueError(
-                f"the fixture tree did not build cleanly: {report.problems!r}"
-            )
+            raise ValueError(f"the fixture tree did not build cleanly: {report.problems!r}")
         connection = apsw.Connection(str(path))
         connection.execute("PRAGMA foreign_keys=ON")
         object.__setattr__(self, "connection", connection)
@@ -648,14 +638,10 @@ class RowStore(OpenedKnowledgeStore):
             )
         record = self.tree.invariants[text_id]
         if text_id in self.tree.invariant_revised:
-            raise ValueError(
-                f"invariant {text_id} already holds a revision; {_SINGLE_REVISION}"
-            )
+            raise ValueError(f"invariant {text_id} already holds a revision; {_SINGLE_REVISION}")
         self.tree.invariant_revised.add(text_id)
         record["revision"] = _revision_number(draft.display_version)
-        record["status"] = (
-            "accepted" if draft.state_at_origin == "accepted" else "proposed"
-        )
+        record["status"] = "accepted" if draft.state_at_origin == "accepted" else "proposed"
         record["statement"] = draft.statement
         record["applicability"] = draft.applicability
         record["conditions"] = list(draft.conditions)
@@ -777,9 +763,7 @@ def create_family_member(store: OpenedKnowledgeStore, request: FamilyMemberReque
     member = request.member
     family_text = tree.family_revision_families.get(member.family_revision_id)
     if family_text is None:
-        family_text = tree.family_revision_families_by_projected.get(
-            str(member.family_revision_id)
-        )
+        family_text = tree.family_revision_families_by_projected.get(str(member.family_revision_id))
     if family_text is None:
         raise ValueError(
             f"family revision {member.family_revision_id!r} is not recorded in this dataset"
@@ -855,9 +839,7 @@ def create_source_anchor(store: OpenedKnowledgeStore, request: SourceAnchorReque
     tree = _store_tree(store)
     facts = _anchor_facts(request.anchor)
     tree.anchor_facts[str(request.anchor.anchor_id)] = facts
-    return RowOutcome(
-        repository_id=INDEX_REPOSITORY_ID, anchor_id=str(request.anchor.anchor_id)
-    )
+    return RowOutcome(repository_id=INDEX_REPOSITORY_ID, anchor_id=str(request.anchor.anchor_id))
 
 
 def create_realization_claim(
@@ -875,9 +857,7 @@ def create_realization_claim(
         if facts is None:
             facts = tree.anchor_facts_by_projected.get(str(endpoint.anchor_id))
         if facts is None:
-            raise ValueError(
-                f"anchor {endpoint.anchor_id!r} is not recorded in this dataset"
-            )
+            raise ValueError(f"anchor {endpoint.anchor_id!r} is not recorded in this dataset")
     claim = request.claim
     invariant_text = _revision_text_id(tree, claim.invariant_revision_id)
     if invariant_text is None:
@@ -1035,9 +1015,7 @@ def remove_realization_claim(
                     del tree.sidecars[path]
                 break
     _rebuild(store)
-    return RowOutcome(
-        state="removed", repository_id=INDEX_REPOSITORY_ID, claim_id=request.claim_id
-    )
+    return RowOutcome(state="removed", repository_id=INDEX_REPOSITORY_ID, claim_id=request.claim_id)
 
 
 class _Namespace:

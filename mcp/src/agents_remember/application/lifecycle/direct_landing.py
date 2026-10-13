@@ -4,19 +4,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents_remember.application.direct_execution_grants import refuse_open_direct_sibling
 from agents_remember.application.memory_mode_refusal import (
     memory_mode_refusal_evidence,
     memory_mode_refusal_payload,
 )
 from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.authority import require_within_coordination
+from agents_remember.kernel.direct_execution_grants import DirectGrantError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.worktrees.closeout_input import CloseoutInputError
 from agents_remember.worktrees.direct_landing import (
     DirectLandingError,
     DirectLandingRequest,
     direct_landing,
-    require_direct_landing_enabled,
+    require_direct_grant,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
     direct_landing_store,
@@ -65,11 +67,17 @@ def direct_landing_tool(
     config: McpRuntimeConfig,
     request: DirectLandingRequest,
 ) -> dict[str, object]:
-    """Run one policy-gated, branch-addressed direct landing."""
+    """Run one grant-gated, branch-addressed direct landing."""
+    grant_error: DirectLandingError | None = None
     try:
-        require_direct_landing_enabled(config)
+        require_direct_grant(config, request.leaf_task_document_ref)
+        refuse_open_direct_sibling(config, request.leaf_task_document_ref, "direct landing")
     except DirectLandingError as exc:
-        return _direct_error_payload(exc, recovery={})
+        grant_error = exc
+    except DirectGrantError as exc:
+        grant_error = DirectLandingError("direct-landing-sibling-open", exc.detail)
+    if grant_error is not None:
+        return _direct_error_payload(grant_error, recovery={})
     configured = admit_configured_contract(
         config, request.contract_path, operation="direct_landing"
     )

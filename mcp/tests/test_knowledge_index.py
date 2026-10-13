@@ -344,7 +344,8 @@ def test_a_sparse_checkout_keeps_its_skipped_files_committed_blobs_in_the_captur
     head_tree = git(root, "rev-parse", "HEAD^{tree}")
     # Names, not contents: the review tree's history files.
     history = sorted(
-        path.relative_to(root).as_posix() for path in (root / "knowledge" / "history").glob("*.json")
+        path.relative_to(root).as_posix()
+        for path in (root / "knowledge" / "history").glob("*.json")
     )
     assert len(history) >= 2, history
     skipped, present = history[0], history[1]
@@ -378,7 +379,6 @@ def test_a_sparse_checkout_keeps_its_skipped_files_committed_blobs_in_the_captur
     # A file that is absent without that flag is still captured as deleted, as today.
     (root / present).unlink()
     assert directory_key(root) != head_tree
-
 
 
 def test_an_edited_working_tree_is_never_answered_from_the_previous_content(

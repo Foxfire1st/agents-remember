@@ -43,6 +43,7 @@ PUBLIC_TOOLS = (
     "worktree_sync",
     "worktree_pause",
     "direct_landing",
+    "direct_execution_grant",
     "worktree_closeout_preview",
     "worktree_closeout_apply",
     "worktree_integrate",

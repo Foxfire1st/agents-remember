@@ -204,9 +204,7 @@ def test_a_relationship_at_a_further_revision_outside_the_union_is_not_displayed
     assert "no relationship citing" in movement.statement
     assert before.auxiliary_revision_id in movement.statement
     assert "withdrawn association rather than a movement" in movement.statement
-    assert not any(
-        location.path == INTERMEDIATE_PATH for location in payload.source.locations
-    )
+    assert not any(location.path == INTERMEDIATE_PATH for location in payload.source.locations)
 
 
 def test_a_membership_recorded_again_under_another_family_revision_is_a_retraction(

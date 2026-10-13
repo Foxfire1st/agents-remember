@@ -167,6 +167,9 @@ master's leaf loop to the master-exit seam, then hand over.
 - Leaf-review notes on the relevant leaf document; decision-log entries for every delegated gate
   you decide and every reopen. Each leaf's status names its next seat and since when. Read the
   reports for progress; request no acknowledgement-only handovers.
+
+## Messages
+Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
 ```
 
 ---

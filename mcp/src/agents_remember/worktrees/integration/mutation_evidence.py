@@ -25,6 +25,7 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
+    checkout_holding_branch,
     head_commit,
     require_git,
     worktree_candidate_tree,
@@ -466,7 +467,20 @@ def _require_evidence_repository(
 def _contract_repositories(
     contract: WorktreeContract,
 ) -> dict[CloseoutMutationLeg, Path | None]:
+    """The authoritative checkout per mutation leg.
+
+    A leaf contract names its own code worktree. A series contract names no
+    single code checkout, so the code side resolves to the checkout holding
+    the work branch at call time (F01): branch tips are repository-global,
+    and the direct landing route journals its code intent and proof against
+    exactly that checkout.
+    """
+
+    if contract.kind == "leaf":
+        code: Path | None = contract.code_worktree
+    else:
+        code = checkout_holding_branch(contract.code_repo_path, contract.code_work_branch)
     return {
-        "code": contract.code_worktree if contract.kind == "leaf" else None,
+        "code": code,
         "memory": contract.memory_worktree or contract.memory_repo_path,
     }

@@ -200,9 +200,7 @@ class StatusTableTests(StatusTestCase):
                 if previous_agent is not None:
                     # Rule 9: one seat holds one agent; the archived holder frees
                     # the seat for the next launch.
-                    self.runtime.agents[previous_agent]["archivedAt"] = (
-                        "2026-10-02T02:00:00.000Z"
-                    )
+                    self.runtime.agents[previous_agent]["archivedAt"] = "2026-10-02T02:00:00.000Z"
                 request = self.launched(**state)
                 before = self.refresh(request)
                 self.assertEqual(before["status"], prev_status)
@@ -215,7 +213,9 @@ class StatusTableTests(StatusTestCase):
                 )
                 # Nothing about the last turn can be read from a closed session: the summary stays.
                 self.assertEqual(public.get("result"), before.get("result"))
-                self.assertEqual(public["canStart"], prev_status in {"completed", "failed", "stopped"})
+                self.assertEqual(
+                    public["canStart"], prev_status in {"completed", "failed", "stopped"}
+                )
                 previous_agent = self.receipt(request)["execution"]["agentId"]
 
     def test_row_06_a_pending_permission_request_is_running_and_names_the_tool(self) -> None:
@@ -282,9 +282,7 @@ class StatusTableTests(StatusTestCase):
                 if previous_agent is not None:
                     # Rule 9: one seat holds one agent; the archived holder frees
                     # the seat for the next launch.
-                    self.runtime.agents[previous_agent]["archivedAt"] = (
-                        "2026-10-02T02:00:00.000Z"
-                    )
+                    self.runtime.agents[previous_agent]["archivedAt"] = "2026-10-02T02:00:00.000Z"
                 request = self.launched(**state)
 
                 public = self.refresh(request)

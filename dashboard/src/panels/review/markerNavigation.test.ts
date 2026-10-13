@@ -15,13 +15,15 @@ function workspace(over: Partial<WorkspaceState> = {}) {
       calls.push(`${name} ${JSON.stringify(args[0] ?? null)}`);
   const state = {
     chosen: { familyId: 'fam-a', memberRevisionId: 'rev-a' } as FamilySelection | null,
-    lane: { destination: 'unknown', path: 'src/a.py' },
+    // The unexplained-changes lane as the workspace holds it since MIK-R86: a worklist view,
+    // not a lane object. The return below restores into it.
+    worklist: true,
     openPath: null,
     layout: 'inline',
     fullFile: true,
     focusSelection: { current: { from: null } },
     setChosen: record('setChosen'),
-    setLane: record('setLane'),
+    setWorklist: record('setWorklist'),
     setOpenPath: record('setOpenPath'),
     setLayout: record('setLayout'),
     setFullFile: record('setFullFile'),
@@ -76,7 +78,7 @@ describe('the return', () => {
     restore();
     expect(calls).toEqual([
       'onSelect {"kind":"family","id":"fam-a"} {"familyId":"fam-a","memberRevisionId":"rev-a"}',
-      'setLane {"destination":"unknown","path":"src/a.py"}',
+      'setWorklist true',
       'setOpenPath null',
       'setLayout "inline"',
       'setFullFile true',

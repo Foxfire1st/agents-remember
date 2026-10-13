@@ -7,8 +7,15 @@ import type { PluginPage } from "./page";
 // The control channel between the AR dashboard and the app it frames.
 //
 //   dashboard -> app   { type: "ar.open", agentId, workspaceId? } | { type: "ar.open", workspaceId }
-//                      { type: "ar.ping" }
+//                      { type: "ar.ping" } | { type: "ar.hello", capabilities }
 //   app -> dashboard   { source: "ar-plugin", type: "ready" | "shown" | "error" | "pong", ... }
+//                      { source: "ar-plugin", type: "navigated" | "on-chat" | "load-failed", agentId }
+//
+// Each side says what it can do. The plugin names its abilities in `ready` and in every `pong`
+// (PLUGIN_ABILITIES); a dashboard that reads this answers `ready` with `ar.hello` and its own
+// list. A side that says nothing is an older build: it is served as before, and it is sent
+// nothing it did not ask for. `navigated`, `on-chat` and `load-failed` go only to a dashboard
+// that said it reads them.
 //
 // A document page names the agent's workspace in `ar.open` for the record; navigation itself
 // carries the agent alone, because the supported `navigation.openAgent({agentId})` resolves the
@@ -24,6 +31,14 @@ import type { PluginPage } from "./page";
 // satisfies the request and re-evaluated on later observations. A screen that never appears
 // is never reported, so the dashboard's deadline ends the request.
 //
+// `on-chat` is the same sign without its last part: the application is on the agent's chat,
+// its header and its input are that agent's, while the conversation may still be loading. It
+// is sent once per request, before `shown`.
+//
+// `load-failed` ends a request in place of `shown`: on the agent's chat the application shows
+// its own pane for a host that could not load the agent, with its own Retry. The dashboard
+// then waits for nothing; what the pane says and offers is the application's.
+//
 // Each side names the other's origin when it posts and checks it when it receives; neither uses
 // a wildcard, and no message carries a secret. Navigation itself goes through supported plugin
 // interfaces (a contributed screen and its `navigation` prop, and the public SDK for the checks).
@@ -34,6 +49,14 @@ import type { PluginPage } from "./page";
 // Paseo's web UI letting itself be framed at all (it sends no frame-ancestors restriction).
 
 export const OPEN_SCREEN_ID = "open";
+
+/**
+ * What this plugin can do for the dashboard that frames it: show an agent on request and answer
+ * for it, answer a ping, take the page mode, report `shown` only when the chat is displayed,
+ * tell when the application was asked to navigate, when it is on the agent's chat, and when
+ * it shows there that the host could not load the agent.
+ */
+export const PLUGIN_ABILITIES = ["open-agent", "ping", "page", "shown-on-display", "navigated", "on-chat", "load-failed"];
 
 export interface EmbedEntry {
   dashboardOrigin: string;
@@ -130,6 +153,8 @@ export function installBridge(
     else if (mode === "chats" && stopSidebar) { stopSidebar(); stopSidebar = undefined; }
   };
   if (isDocumentPage(page)) pageMode("document");
+  // What the framing dashboard said it can do; empty until it says so, and for one that never does.
+  let dashboardAbilities: string[] = [];
   let knownAgents = new Map<string, { parentAgentId: string | null }>();
   let selectedCandidates: string[] = [];
   let lastSelection = "";
@@ -139,7 +164,7 @@ export function installBridge(
    * mounted chat, so another agent's screen or an Opening screen never satisfies it — while
    * a display that already shows the requested agent confirms at once.
    */
-  let pendingDisplay: { agentId: string; workspaceId: string | null; sourceAgentId?: string; generation: number } | null = null;
+  let pendingDisplay: { agentId: string; workspaceId: string | null; sourceAgentId?: string; generation: number; onChatTold?: boolean } | null = null;
   const send = (payload: Record<string, unknown>) => {
     if (!live) return;
     page.window.parent.postMessage({ source: PLUGIN_ID, ...payload }, parentOrigin);
@@ -329,7 +354,7 @@ export function installBridge(
       }
     }
   };
-  const displaySatisfied = (workspaceId: string | null, agentId: string): boolean => {
+  const onAgentChat = (workspaceId: string | null, agentId: string): boolean => {
     try {
       if (!workspaceId) return false;
       // Route path segments only: the query and hash name nothing. A workspace id that
@@ -362,8 +387,26 @@ export function installBridge(
       // The visible strip agrees: no on-screen selected agent tab may name another agent.
       // A render lag between the store write and the strip keeps the wait open; the timer
       // below re-observes it.
-      if (!noContradictingSelection(agentId)) return false;
+      return noContradictingSelection(agentId);
+    } catch {
+      return false;
+    }
+  };
+  const chatDrawn = (): boolean => {
+    try {
       return agentChatVisible();
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * The application's own pane for a host that could not load the agent, with its own Retry
+   * (`agent-load-error`, pinned @getpaseo/server 0.11.1 and 0.11.0-beta.2; unsupported, read
+   * only, like the loading and not-found markers).
+   */
+  const loadFailed = (): boolean => {
+    try {
+      return firstVisible('[id="agent-load-error"], [data-testid="agent-load-error"]') !== null;
     } catch {
       return false;
     }
@@ -375,7 +418,10 @@ export function installBridge(
    * agent tab names another agent, and an agent chat is visibly mounted with no loading
    * or not-found pane. A display that already satisfies the request confirms at once, on
    * any observation. A newer request, a stopped bridge, or a changed parent relation drops
-   * the wait, and the dashboard's deadline ends it.
+   * the wait, and the dashboard's deadline ends it. Where all but the mounted chat holds, a
+   * dashboard that reads it is told once that the application is on the agent's chat; and
+   * where the application shows there that the host could not load the agent, it is told
+   * that instead of `shown`, and the wait ends.
    */
   const confirmDisplay = () => {
     const pending = pendingDisplay;
@@ -385,7 +431,17 @@ export function installBridge(
       clearPending();
       return;
     }
-    if (!displaySatisfied(pending.workspaceId, pending.agentId)) return;
+    if (!onAgentChat(pending.workspaceId, pending.agentId)) return;
+    if (!pending.onChatTold && !pending.sourceAgentId && dashboardAbilities.includes("on-chat")) {
+      pending.onChatTold = true;
+      post({ type: "on-chat", agentId: pending.agentId });
+    }
+    if (!pending.sourceAgentId && dashboardAbilities.includes("load-failed") && loadFailed()) {
+      clearPending();
+      post({ type: "load-failed", agentId: pending.agentId });
+      return;
+    }
+    if (!chatDrawn()) return;
     clearPending();
     post({ type: "shown", agentId: pending.agentId, workspaceId: pending.workspaceId });
   };
@@ -422,6 +478,9 @@ export function installBridge(
       // dashboard workspace that disagrees with the host record never blocks the open; the
       // reported workspace below always names where the host keeps the agent.
       open({ agentId });
+      // From here the host has answered and the application draws: a dashboard that shows
+      // what a slow switch waits for is told so.
+      if (!sourceAgentId && dashboardAbilities.includes("navigated")) post({ type: "navigated", agentId });
     } catch (error) {
       const message = errorText(error);
       const code = /not found/i.test(message) ? "agent-not-found" : "open-failed";
@@ -462,7 +521,9 @@ export function installBridge(
     if (message.type === "ar.page" && (message.page === "document" || message.page === "chats")) {
       pageMode(message.page);
     } else if (message.type === "ar.ping") {
-      post({ type: "pong" });
+      post({ type: "pong", capabilities: PLUGIN_ABILITIES });
+    } else if (message.type === "ar.hello" && Array.isArray(message.capabilities)) {
+      dashboardAbilities = message.capabilities.filter((ability: unknown) => typeof ability === "string");
     } else if (message.type === "ar.open" && typeof message.agentId === "string") {
       void openAgent(message.agentId);
     } else if (message.type === "ar.open" && typeof message.workspaceId === "string") {
@@ -475,7 +536,7 @@ export function installBridge(
   };
 
   page.window.addEventListener("message", onMessage);
-  post({ type: "ready" });
+  post({ type: "ready", capabilities: PLUGIN_ABILITIES });
   const stopHierarchy = startHierarchy(client, post, (sourceAgentId, parentId) => openAgent(parentId, sourceAgentId));
   const stopSelection = watchSelectedChats(page, (agentIds) => {
     selectedCandidates = agentIds;

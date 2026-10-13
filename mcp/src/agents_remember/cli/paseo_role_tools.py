@@ -12,6 +12,12 @@ first under the scope check of Revive, and an archived or missing recipient is r
 sequence of bridge calls inside this one tool call; nothing here polls outside a call and no
 message is stored.
 
+Every message holds at most the settings' limit of characters (``text`` counts; the sender
+line and the file line do not). The tool writes one file per message before handing it to the
+host (see :mod:`agents_remember.cli.role_message_files`): the message and, where given, the
+full text from ``body`` and the records or copies of ``attach``. A refused delivery keeps its
+file under a name ending in ``.undelivered.md``.
+
 Every answer is a plain mapping in the shape of the tools' response models. A call that is not
 carried out is a refusal that names its one reason.
 """
@@ -23,6 +29,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -89,7 +96,30 @@ from agents_remember.cli.role_launch_routes import (
     _role_launch_dispatch_endpoint,
     dispatch_leaf_set,
 )
+from agents_remember.cli.role_message_delivery import (
+    _archived_with_successor,
+    _ensure_recipient_link,
+    _ensure_sender_link,
+    _file_long_reply,
+    _FiledMessage,
+    _keep_refused_file,
+    _message_scope,
+    _MessageDraft,
+    _MessageParties,
+    _prepare_attachments,
+    _Recipient,
+    _recipient_role,
+    _recipient_subject,
+    _refuse_over_limit,
+    _Refused,
+    _store_message,
+)
+from agents_remember.cli.role_message_files import file_line, utc_stem
 from agents_remember.errors import RolePreparationError
+from agents_remember.kernel.agentic_settings import (
+    AgenticSettingsError,
+    load_agentic_settings,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import (
     MAX_WAIT_SECONDS,
@@ -101,6 +131,7 @@ from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_ro
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.tool_events import call_target_role
+from agents_remember.serving.paseo.paseo_plugin_files import publish_role_agent
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.role_reports import (
     RoleReportCollectionError,
@@ -129,31 +160,9 @@ MAY_START: dict[str, tuple[str, ...]] = {
 }
 
 
-class _Refused(Exception):
-    """One named reason for not carrying out a call."""
-
-    def __init__(self, refusal: str, detail: str, next_action: str, **fields: Any) -> None:
-        super().__init__(detail)
-        self.refusal = refusal
-        self.detail = detail
-        self.next_action = next_action
-        self.fields = fields
-
-    def payload(self) -> dict[str, Any]:
-        return {
-            "ok": False,
-            "status": "refused",
-            "refusal": self.refusal,
-            "detail": self.detail,
-            "nextAction": self.next_action,
-            **self.fields,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class _Recipient:
-    agent_id: str
-    receipt: dict[str, Any]
+# _Refused and _Recipient are imported from role_message_delivery above: the two
+# definitions were identical, and refusals raised while filing must be the same
+# class the send below catches.
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +171,9 @@ class _MessageSend:
 
     ``located`` is the recipient's receipt path, receipt and working folder, or None
     when the recipient has no receipt with a store (then nothing can be held for it).
+    ``filed`` is the filed message's record (path, SHA-256, message id, folder, the
+    recipient's role and task, the text limit), or None when the message was held
+    before it could be filed.
     """
 
     config: McpRuntimeConfig
@@ -171,6 +183,7 @@ class _MessageSend:
     located: tuple[Path, dict[str, Any], str] | None
     withdrawn: str | None
     collection: dict[str, Any] | None
+    filed: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -217,13 +230,27 @@ def starting_agent(config: McpRuntimeConfig, binding: AgentBinding) -> StartingA
 
     reference = binding.task_ref or binding.master_ref or binding.sprint_ref
     if reference is None:
-        return StartingAgent(binding.agent_id, binding.role, _PROJECTS)
+        return StartingAgent(
+            binding.agent_id,
+            binding.role,
+            _PROJECTS,
+            binding.sprint_ref,
+            binding.master_ref,
+            binding.task_ref,
+        )
     try:
         subject = TaskDocumentTopology(config.coordination_root).resolve(reference).document.id
     except TaskDocumentRefError:
         # The document is gone or unreadable; its reference still says which work is meant.
         subject = reference.key
-    return StartingAgent(binding.agent_id, binding.role, subject)
+    return StartingAgent(
+        binding.agent_id,
+        binding.role,
+        subject,
+        binding.sprint_ref,
+        binding.master_ref,
+        binding.task_ref,
+    )
 
 
 def sender_line(sender: StartingAgent) -> str:
@@ -232,9 +259,29 @@ def sender_line(sender: StartingAgent) -> str:
     return f"From {sender.role} · {sender.subject} · agent {sender.agent_id}"
 
 
-# ---------------------------------------------------------------------------------------------
-# Role start
-# ---------------------------------------------------------------------------------------------
+def role_message_limit(config: McpRuntimeConfig, binding: AgentBinding) -> int:
+    """The bound on the characters of one message text, read per call (MIK-R117).
+
+    The number in force is the one the settings file names at the call; where
+    the settings name none it is :data:`DEFAULT_ROLE_MESSAGE_LIMIT`. A changed
+    number holds for the next call without a restart of a tool server.
+    """
+
+    reference = binding.task_ref or binding.master_ref or binding.sprint_ref
+    repo_root = None
+    if reference is not None:
+        scope = config.repositories.get(reference.repository)
+        if scope is not None:
+            repo_root = scope.path
+    try:
+        settings = load_agentic_settings(config.coordination_root, repo_root=repo_root)
+    except AgenticSettingsError as error:
+        raise _Refused(
+            "settings-invalid",
+            f"The settings cannot be loaded: {error}",
+            "Fix the named field in the named settings file; the next call reads it again.",
+        ) from error
+    return settings.role_message_limit
 
 
 def start_rule_violation(binding: AgentBinding, selection: RoleSelection) -> tuple[str, str] | None:
@@ -306,12 +353,13 @@ def start_leaf_set(
                 )
         sender = starting_agent(config, binding)
         reviewer_opening = (
-            f"{sender_line(sender)}\n{call.reviewer_message}"
-            if call.reviewer_message
-            else None
+            f"{sender_line(sender)}\n{call.reviewer_message}" if call.reviewer_message else None
         )
         return dispatch_leaf_set(
-            config, call, sender, reviewer_opening=reviewer_opening,
+            config,
+            call,
+            sender,
+            reviewer_opening=reviewer_opening,
             lock_wait_seconds=LOCK_WAIT_SECONDS,
         )
     except _Refused as refused:
@@ -502,15 +550,6 @@ def _start_refusal(error: HTTPException) -> _Refused:
     return _launch_refused(detail)
 
 
-def _host_unreachable(detail: str) -> _Refused:
-    return _Refused(
-        "host-unreachable",
-        f"The Paseo runtime cannot be reached. {detail}",
-        "Tell the developer in your own chat that the Paseo runtime cannot be reached; repeat "
-        "the call after runtime_install (if not installed) and agents-remember dashboard --daemon.",
-    )
-
-
 def _projects_preparation_note(receipt: dict[str, Any]) -> str:
     preparation = receipt.get("preparation")
     if isinstance(preparation, dict) and preparation.get("workspace") == "opened":
@@ -595,7 +634,7 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         second_copy_loaded = not harness_carries_one_server(
             launch_agent if isinstance(launch_agent, str) else None
         )
-    return {
+    result = {
         "ok": launch == "running",
         "status": launch,
         "detail": str(receipt.get("detail") or "") + _projects_preparation_note(receipt),
@@ -609,10 +648,54 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         "executionStatus": execution,
         **({"preparation": receipt["preparation"]} if "preparation" in receipt else {}),
         "choices": launch_choice_metadata(receipt.get("choices", {})),
-        **({"taskDocumentFiles": receipt["taskDocumentFiles"]} if receipt.get("taskDocumentFiles") else {}),
+        **(
+            {"taskDocumentFiles": receipt["taskDocumentFiles"]}
+            if receipt.get("taskDocumentFiles")
+            else {}
+        ),
         **({"warning": receipt["warning"]} if receipt.get("warning") else {}),
         **({"nextAction": next_action} if next_action else {}),
     }
+    if launch == "running" and isinstance(agent_id, str):
+        _publish_role_agent_for_plugin(config, request, agent_id, result.get("reportPath"))
+    return result
+
+
+def _publish_role_agent_for_plugin(
+    config: McpRuntimeConfig,
+    request: RoleDispatchRequest,
+    agent_id: str,
+    report_path: str | None,
+) -> bool:
+    """Publish the started agent's facts for the rule-11 plugin (MIK-R117).
+
+    Best-effort: without a configured runtime home, without a report path,
+    or on any filesystem trouble the start still succeeds and the agent is
+    simply silent to the plugin. A repeat start republishes the same record.
+    """
+    if not report_path:
+        return False
+    try:
+        runtime = config.paseo_runtime
+    except Exception:
+        return False
+    if runtime is None:
+        return False
+    reference = (
+        request.task_document_ref or request.master_document_ref or request.sprint_document_ref
+    )
+    try:
+        return publish_role_agent(
+            runtime.home,
+            agent_id,
+            {
+                "role": request.role,
+                "task": reference.key if reference is not None else "Projects",
+                "reportPath": report_path,
+            },
+        )
+    except Exception:
+        return False
 
 
 def _refuse_agent_that_is_gone(config: McpRuntimeConfig, agent_id: str, execution: str) -> None:
@@ -646,6 +729,60 @@ def _refuse_agent_that_is_gone(config: McpRuntimeConfig, agent_id: str, executio
 # ---------------------------------------------------------------------------------------------
 
 
+def _file_message(
+    config: McpRuntimeConfig, call: RoleMessageCall, parties: _MessageParties, limit: int
+) -> dict[str, Any]:
+    """File one message before it reaches the host (MIK-R117 rules 2 to 4).
+
+    The filing is the all-or-nothing transaction of role_message_delivery: the scope,
+    the attachments, the workspace links and the staged write either all happen or a
+    preparation failure refuses the send as message-file-failed before anything is
+    delivered. The record carries the filed path, its SHA-256, the message id, the
+    folder, the recipient's role and task, and the text limit.
+    """
+
+    scope = _message_scope(config, parties)
+    sender = parties.sender
+    recipient = parties.recipient
+    when = datetime.now(UTC)
+    message_id = str(uuid.uuid4())
+    recipient_role = _recipient_role(recipient, call)
+    recipient_task = _recipient_subject(config, recipient)
+    stem = utc_stem(sender.role, sender.agent_id, recipient_role, recipient.agent_id, when=when)
+    attachments = _prepare_attachments(call, parties, scope, stem)
+    sender_warning = _ensure_sender_link(config, parties)
+    recipient_warning = _ensure_recipient_link(config, parties)
+    link_warning = recipient_warning
+    if sender_warning:
+        link_warning = (
+            f"{sender_warning} {recipient_warning}".strip() if recipient_warning else sender_warning
+        )
+    path, digest, _payload = _store_message(
+        call,
+        parties,
+        _MessageDraft(
+            scope.folder,
+            sender_line(sender),
+            stem,
+            when,
+            message_id,
+            recipient_role,
+            recipient_task,
+        ),
+        attachments,
+    )
+    return {
+        "path": path.as_posix(),
+        "sha256": digest,
+        "messageId": message_id,
+        "folder": scope.folder.as_posix(),
+        "recipientRole": recipient_role,
+        "recipientTask": recipient_task,
+        "limit": limit,
+        "linkWarning": link_warning or "",
+    }
+
+
 def send_role_message(
     config: McpRuntimeConfig,
     call: RoleMessageCall,
@@ -655,8 +792,12 @@ def send_role_message(
     """Send one message to one role agent and, with ``wait``, return the turn's outcome."""
 
     sender: StartingAgent | None = None
+    recipient: _Recipient | None = None
+    filed: dict[str, Any] | None = None
     try:
         binding = _caller(config, environment)
+        limit = role_message_limit(config, binding)
+        _refuse_over_limit(call, limit)
         selection = RoleSelection.model_validate(
             dict(
                 role=binding.role,
@@ -682,8 +823,10 @@ def send_role_message(
         collection = _collect_own_reports(config, binding, own_path, own_receipt)
         located = _locate_recipient_store(config, call, recipient.agent_id)
         withdrawn, withdrawal_note = _withdraw_requested(config, call, sender, recipient, located)
+        parties = _MessageParties(binding, sender, recipient, own_receipt)
+        filed = _file_message(config, call, parties, limit)
         result = _deliver_or_hold(
-            _MessageSend(config, call, sender, recipient, located, withdrawn, collection)
+            _MessageSend(config, call, sender, recipient, located, withdrawn, collection, filed)
         )
         if collection is not None:
             result["reportCollection"] = collection
@@ -693,9 +836,15 @@ def send_role_message(
             result["detail"] = f"{result['detail']} {withdrawal_note}"
         result.update(_held_readback(located[0] if located else None, sender.agent_id))
     except _Refused as refused:
+        if refused.refusal == "recipient-archived" and recipient is not None and sender is not None:
+            parties = _MessageParties(binding, sender, recipient, own_receipt)
+            refused = _archived_with_successor(config, parties)
+        if filed is not None:
+            _keep_refused_file(Path(filed["path"]), refused)
         result = _refusal_answer(config, call, sender, refused)
     if call.role == "system-specialist":
-        result["warning"] = ROLE_ALIAS_NOTICE
+        prior = str(result.get("warning", ""))
+        result["warning"] = f"{prior} {ROLE_ALIAS_NOTICE}".strip()
     return result
 
 
@@ -837,9 +986,7 @@ def _withdraw_requested(
     return message_id, None
 
 
-def _record_held_lines(
-    path: Path, ended: list[dict[str, Any]], how: str
-) -> None:
+def _record_held_lines(path: Path, ended: list[dict[str, Any]], how: str) -> None:
     """Write terminal lines for messages ended outside a drain (withdrawal)."""
 
     from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
@@ -871,7 +1018,7 @@ def _deliver_or_hold(send: _MessageSend) -> dict[str, Any]:
         # could take it at that moment.
         return _hold_for_seat(send, reason="held-behind-waiting")
     try:
-        return _deliver(send.config, send.call, send.sender, send.recipient)
+        return _deliver(send.config, send.call, send.sender, send.recipient, send.filed)
     except _Refused as undelivered:
         if undelivered.refusal == "recipient-busy" and undelivered.fields.get("holdReason"):
             if located is None:
@@ -916,6 +1063,11 @@ def _hold_for_seat(
     assert located is not None, "held for a recipient without a store"
     path, _receipt, folder = located
     line = sender_line(send.sender)
+    text = send.call.text
+    if send.filed is not None and (send.call.body is not None or send.call.attach):
+        # The whole text from body and the records or copies of attach ride in the file;
+        # the held text names it so the recipient can read it on delivery (MIK-R117 rule 3).
+        text += f"\n{file_line(Path(send.filed['path']), str(send.filed['sha256']))}"
     try:
         taken = hold_message(
             folder,
@@ -923,7 +1075,7 @@ def _hold_for_seat(
             HeldMessage(
                 sender_line=line,
                 sender_agent_id=send.sender.agent_id,
-                text=send.call.text,
+                text=text,
                 reason=reason,
                 permission=permission,
             ),
@@ -958,7 +1110,9 @@ def _hold_for_seat(
         return _held_wait_permission(send, drain)
     apply_drain_to_receipt(path, drain)
     drain_permission = drain.get("permission")
-    final_reason = reason if outcome in {"still-held", "drain-failed", "nothing-waiting"} else outcome
+    final_reason = (
+        reason if outcome in {"still-held", "drain-failed", "nothing-waiting"} else outcome
+    )
     if final_reason == "permission-pending" and reason == "permission-pending":
         # Rule 4a names the permission as the refused send named it: the send met the
         # prompt first, so its naming (or "not supplied") stands over the drain's.
@@ -974,9 +1128,7 @@ def _hold_for_seat(
     )
 
 
-def _trigger_delivery(
-    drain: dict[str, Any], taken: dict[str, Any]
-) -> dict[str, Any]:
+def _trigger_delivery(drain: dict[str, Any], taken: dict[str, Any]) -> dict[str, Any]:
     """The split part carrying the triggering message; the last part as fallback."""
 
     deliveries = [
@@ -1053,11 +1205,7 @@ def _held_then_delivered(
         result["reportCollection"] = send.collection
     if send.withdrawn is not None:
         result["withdrawnHeldMessageId"] = send.withdrawn
-    if (
-        send.call.wait
-        and drain.get("outcome") == "delivered"
-        and isinstance(message_id, str)
-    ):
+    if send.call.wait and drain.get("outcome") == "delivered" and isinstance(message_id, str):
         result.update(
             wait_for_turn(
                 send.config,
@@ -1131,8 +1279,7 @@ def _held_answer(
         "detail": (
             f"The message is held for agent {send.recipient.agent_id}: {why}. It is delivered "
             "when the recipient can be written to, in the order it was taken; nothing has "
-            "to be sent again."
-            + (f" The last delivery attempt said: {detail}" if detail else "")
+            "to be sent again." + (f" The last delivery attempt said: {detail}" if detail else "")
         ),
         "recipientAgentId": send.recipient.agent_id,
         "senderLine": sender_line(send.sender),
@@ -1141,6 +1288,9 @@ def _held_answer(
         "waitingMine": taken.get("waitingMine"),
         "waitingTotal": taken.get("waitingTotal"),
     }
+    if send.filed is not None:
+        result["messageFile"] = send.filed["path"]
+        result["messageFileSha256"] = send.filed["sha256"]
     if permission:
         result["permission"] = permission
     else:
@@ -1167,13 +1317,8 @@ def _refusal_answer(
     """The refusal answer, with the sender's terminal lines when its recipient is gone."""
 
     result = refused.payload()
-    if (
-        sender is not None
-        and refused.refusal in {"recipient-archived", "recipient-not-found"}
-    ):
-        result.update(
-            _held_readback(_refusal_receipt_path(config, call, refused), sender.agent_id)
-        )
+    if sender is not None and refused.refusal in {"recipient-archived", "recipient-not-found"}:
+        result.update(_held_readback(_refusal_receipt_path(config, call, refused), sender.agent_id))
     return result
 
 
@@ -1467,16 +1612,22 @@ def _deliver(
     call: RoleMessageCall,
     sender: StartingAgent,
     recipient: _Recipient,
+    filed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     line = sender_line(sender)
-    message_id = str(uuid.uuid4())
     # One id for the message whatever the number of attempts: the runtime records it with the
-    # message, and the wait finds the message by it.
+    # message, and the wait finds the message by it. A filed message already has its id from
+    # the filing, so the file, the payload and the wait name the same message.
+    message_id = str(filed["messageId"]) if filed is not None else str(uuid.uuid4())
     payload = {
         "agentId": recipient.agent_id,
         "text": f"{line}\n{call.text}",
         "messageId": message_id,
     }
+    if filed is not None and (call.body is not None or call.attach):
+        # The whole text from body and the records or copies of attach ride in the file;
+        # the delivered text names it so the recipient can read it (MIK-R117 rule 3).
+        payload["text"] += f"\n{file_line(Path(filed['path']), str(filed['sha256']))}"
     resumed = False
     try:
         with investigator_message_capacity(config, recipient.receipt):
@@ -1520,21 +1671,40 @@ def _deliver(
             else {}
         ),
     }
+    if filed is not None:
+        result["messageFile"] = filed["path"]
+        result["messageFileSha256"] = filed["sha256"]
+        if filed.get("linkWarning"):
+            prior = str(result.get("warning", ""))
+            result["warning"] = f"{prior} {filed['linkWarning']}".strip()
     if not call.wait:
         return result
-    return {
-        **result,
-        **wait_for_turn(
-            config,
-            SentMessage(
-                recipient.agent_id,
-                message_id,
-                turn_id if isinstance(turn_id, str) and turn_id else None,
-                steered=taken == "steered",
-            ),
-            min(max(1, call.timeout_seconds), MAX_WAIT_SECONDS),
+    waited = wait_for_turn(
+        config,
+        SentMessage(
+            recipient.agent_id,
+            message_id,
+            turn_id if isinstance(turn_id, str) and turn_id else None,
+            steered=taken == "steered",
         ),
-    }
+        min(max(1, call.timeout_seconds), MAX_WAIT_SECONDS),
+    )
+    if filed is not None:
+        # A wait reply longer than the limit is filed whole and cut in the answer (rule 6).
+        _file_long_reply(
+            _FiledMessage(
+                Path(filed["folder"]),
+                sender,
+                str(filed["recipientRole"]),
+                recipient.agent_id,
+                str(filed["recipientTask"]),
+                str(filed["messageId"]),
+            ),
+            int(filed["limit"]),
+            waited,
+            result,
+        )
+    return {**result, **waited}
 
 
 def _send(config: McpRuntimeConfig, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1564,6 +1734,15 @@ def _send(config: McpRuntimeConfig, payload: dict[str, Any]) -> dict[str, Any]:
     raise AssertionError("unreachable")
 
 
+def _host_unreachable(detail: str) -> _Refused:
+    return _Refused(
+        "host-unreachable",
+        f"The Paseo runtime cannot be reached. {detail}",
+        "Tell the developer in your own chat that the Paseo runtime cannot be reached; repeat "
+        "the call after runtime_install (if not installed) and agents-remember dashboard --daemon.",
+    )
+
+
 def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
     """Resume the recipient's closed session, under the scope check a Revive applies."""
 
@@ -1571,7 +1750,9 @@ def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
     if receipt.get("role") in LEAF_ROLES:
         try:
             selection = RoleSelection.model_validate(receipt.get("selection"))
-            _verify_leaf_revival_scope(resolve_role_launch_context(config, selection), receipt)
+            _verify_leaf_revival_scope(
+                config, resolve_role_launch_context(config, selection), receipt
+            )
         except (ValidationError, ValueError, TaskDocumentRefError) as error:
             raise _Refused(
                 "scope-check-failed",

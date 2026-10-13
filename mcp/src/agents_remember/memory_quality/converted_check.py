@@ -12,6 +12,10 @@ comes from anchors instead, so the integrity slot runs :func:`converted_knowledg
   (``R22.6-carried-stale``) and never refused as if it were newly written;
 * its report-only findings and every stale reference (:mod:`.reference_state`) are report-only: a
   stale reference is refreshed through the onboarding gate (MIK-R30), never failed here.
+* what the landing cuts from a card and adds beside the knowledge (:mod:`.landing_report`,
+  MIK-R120): every card or overview under ``onboarding/`` shortened against the comparison base,
+  and every path added outside ``onboarding/``, ``knowledge/`` and ``system/`` -- report-only,
+  never a refusal and never actionable.
 """
 
 from __future__ import annotations
@@ -28,6 +32,11 @@ from agents_remember.memory_quality.knowledge_validator.trees import (
     knowledge_tree_from_git,
 )
 from agents_remember.memory_quality.knowledge_validator.validator import validate_tree
+from agents_remember.memory_quality.landing_report import (
+    CheckLandingScope,
+    LandingBasePort,
+    landing_report_for_check,
+)
 from agents_remember.memory_quality.reference_state import check_references
 
 CONVERTED_KNOWLEDGE_CHECK: Final = "knowledge.converted"
@@ -100,7 +109,12 @@ def _unbuildable_base(problem: str) -> dict[str, Any]:
 
 
 def converted_knowledge_check(
-    memory_root: Path, code_root: Path, *, base: KnowledgeBasePort | None = None
+    memory_root: Path,
+    code_root: Path,
+    *,
+    base: KnowledgeBasePort | None = None,
+    landing_base: LandingBasePort | None = None,
+    include_landing: bool = True,
 ) -> dict[str, Any]:
     """Validate the converted tree and report its stale references (report-only).
 
@@ -109,6 +123,11 @@ def converted_knowledge_check(
     of being decided against an invented empty base (L44-C1-09): the named
     unbuildable-base refusal is recorded, every independently measurable
     reference state keeps being reported, and no new/carried refusal fires.
+
+    The landing report compares against the bound leaf base when one is
+    supplied (MIK-R120 rule 1), else against the same comparison base.
+    ``include_landing=False`` skips the landing report for callers that
+    surface only validator and stale-reference state (the drift summary).
     """
 
     tree = knowledge_tree_from_directory(memory_root)
@@ -129,6 +148,33 @@ def converted_knowledge_check(
     ]
     references = check_references(memory_root, code_root)
     report_only.extend(references["reportOnlyFindings"])
+    landing_counts: dict[str, Any] = {
+        "cutCardCount": 0,
+        "cutCards": [],
+        "addedFileCount": 0,
+        "addedFileBytes": 0,
+        "addedFiles": [],
+    }
+    if include_landing:
+        resolved_leaf_base = landing_base(tree) if landing_base is not None else None
+        landing = landing_report_for_check(
+            CheckLandingScope(
+                memory_root=memory_root,
+                candidate=tree,
+                bases=bases,
+                base_problem=problem,
+                code_root=code_root,
+                leaf_base=resolved_leaf_base,
+            )
+        )
+        report_only.extend(landing["reportOnlyFindings"])
+        landing_counts = {
+            "cutCardCount": landing["cutCardCount"],
+            "cutCards": landing["cutCards"],
+            "addedFileCount": landing["addedFileCount"],
+            "addedFileBytes": landing["addedFileBytes"],
+            "addedFiles": landing["addedFiles"],
+        }
     return {
         "ok": not findings,
         "check": CONVERTED_KNOWLEDGE_CHECK,
@@ -139,4 +185,5 @@ def converted_knowledge_check(
         "referenceStates": references["states"],
         "sidecarCount": references["sidecarCount"],
         "unreadableSidecars": references["unreadableSidecars"],
+        **landing_counts,
     }

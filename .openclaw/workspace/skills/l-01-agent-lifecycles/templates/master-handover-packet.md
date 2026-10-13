@@ -33,6 +33,7 @@ The truth boundary this template obeys is authored once in `../core/acceptance.m
 5. Do not address an orchestrator occupant. `role_message` (by role plus task references) is available for clarification or a
    blocking issue; ordinary completion comes from the packet plus terminal/finalizer truth, and that
    terminal outcome attests only that the turn ended — rule 4's validation is what accepts it.
+6. Hand the packet over as a file. Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
 
 ## Shape
 

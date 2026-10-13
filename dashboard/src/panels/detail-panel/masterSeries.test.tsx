@@ -1,27 +1,28 @@
-import { fireEvent, render } from "@testing-library/react";
-import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from '@testing-library/react';
+import { useState } from 'react';
+import { describe, expect, it, vi } from 'vitest';
 
-import { DetailPanel } from "./DetailPanel";
-import { dashboardStore } from "../../data/store";
-import type { LifecycleProjection } from "../../types/projection";
+import { DetailPanel } from './DetailPanel';
+import { dashboardStore } from '../../data/store';
+import type { LifecycleProjection } from '../../types/projection';
 import {
+  cells,
   nestedProgressSteps,
   seedProjection,
   seedSeries,
   seedSeriesOrdering,
   seedTaskDocuments,
   taskDoc,
-} from "./test-utils";
+} from './test-utils';
 
-describe("DetailPanel master series navigation (6g)", () => {
-  it("renders an unbound planning leaf task document by typed taskdoc selection", () => {
+describe('DetailPanel master series navigation (6g)', () => {
+  it('renders an unbound planning leaf task document by typed taskdoc selection', () => {
     const doc = taskDoc({
       lifecycleId: undefined,
-      kind: "subTask",
-      title: "Plan Before Worktree",
-      docPath: "/tasks/repo-a/planning/01_plan.json",
-      objective: "Plan the document before opening a worktree.",
+      kind: 'subTask',
+      title: 'Plan Before Worktree',
+      docPath: '/tasks/repo-a/planning/01_plan.json',
+      objective: 'Plan the document before opening a worktree.',
     });
     seedTaskDocuments([doc]);
 
@@ -29,35 +30,35 @@ describe("DetailPanel master series navigation (6g)", () => {
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/01_plan.json" />,
     );
 
-    expect(getAllByText("Plan Before Worktree").length).toBeGreaterThan(0);
-    expect(getByText("Plan the document before opening a worktree.")).toBeTruthy();
-    expect(queryByText("No task document bound to this task.")).toBeNull();
+    expect(getAllByText('Plan Before Worktree').length).toBeGreaterThan(0);
+    expect(getByText('Plan the document before opening a worktree.')).toBeTruthy();
+    expect(queryByText('No task document bound to this task.')).toBeNull();
   });
 
-  it("renders an unbound master task document by kind", () => {
+  it('renders an unbound master task document by kind', () => {
     const master = taskDoc({
       lifecycleId: undefined,
-      kind: "master",
-      title: "Planning Master",
-      docPath: "/tasks/repo-a/planning/task.json",
-      objective: "Master plan objective.",
+      kind: 'master',
+      title: 'Planning Master',
+      docPath: '/tasks/repo-a/planning/task.json',
+      objective: 'Master plan objective.',
       subTasks: [
         {
-          number: "99",
-          name: "Leaf created first",
-          file: "01_leaf.md",
-          status: "planning",
-          scope: "",
+          number: '99',
+          name: 'Leaf created first',
+          file: '01_leaf.md',
+          status: 'planning',
+          scope: '',
         },
       ],
     });
     const leaf = taskDoc({
-      id: "99",
+      id: '99',
       lifecycleId: undefined,
-      kind: "subTask",
-      title: "Leaf created first",
-      docPath: "/tasks/repo-a/planning/01_leaf.json",
-      objective: "Leaf objective.",
+      kind: 'subTask',
+      title: 'Leaf created first',
+      docPath: '/tasks/repo-a/planning/01_leaf.json',
+      objective: 'Leaf objective.',
     });
     seedTaskDocuments([master, leaf]);
 
@@ -65,54 +66,54 @@ describe("DetailPanel master series navigation (6g)", () => {
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/task.json" />,
     );
 
-    expect(getByText("Master plan objective.")).toBeTruthy();
-    expect(getByTestId("subtask-open-1").textContent).toContain("99. Leaf created first");
-    expect(queryByText("No task document bound to this task.")).toBeNull();
+    expect(getByText('Master plan objective.')).toBeTruthy();
+    expect(cells(getByTestId('subtask-open-1'))).toEqual(['99', 'Leaf created first']);
+    expect(queryByText('No task document bound to this task.')).toBeNull();
   });
 
-  it("renders discarded-before-start history separately from the live sub-task index", () => {
+  it('keeps discarded-before-start history behind the gone link beside the live sub-task index', () => {
     const master = taskDoc({
       lifecycleId: undefined,
-      kind: "master",
-      title: "Audited planning master",
-      docPath: "/tasks/repo-a/planning/task.json",
-      objective: "Keep planning removal visible without inventing completion.",
+      kind: 'master',
+      title: 'Audited planning master',
+      docPath: '/tasks/repo-a/planning/task.json',
+      objective: 'Keep planning removal visible without inventing completion.',
       subTasks: [
         {
-          number: "1",
-          name: "Live planning leaf",
-          file: "01_live.md",
-          status: "planning",
-          scope: "",
+          number: '1',
+          name: 'Live planning leaf',
+          file: '01_live.md',
+          status: 'planning',
+          scope: '',
         },
       ],
       discardedCount: 1,
       discardedSubTasks: [
         {
-          number: "2",
-          name: "Never started",
-          file: "02_never_started.md",
-          scope: "retired planning work",
-          disposition: "discard-unstarted",
-          reason: "No implementation was needed",
-          discardedAt: "2026-08-24T12:00:00+00:00",
+          number: '2',
+          name: 'Never started',
+          file: '02_never_started.md',
+          scope: 'retired planning work',
+          disposition: 'discard-unstarted',
+          reason: 'No implementation was needed',
+          discardedAt: '2026-08-24T12:00:00+00:00',
           proof: {
-            childJson: { state: "missing" },
-            childMarkdown: { state: "missing" },
-            version: "task-unstarted-evidence/v1",
+            childJson: { state: 'missing' },
+            childMarkdown: { state: 'missing' },
+            version: 'task-unstarted-evidence/v1',
             taskDocumentRef: {
-              repository: "repo-a",
-              path: "planning/02_never_started.json",
+              repository: 'repo-a',
+              path: 'planning/02_never_started.json',
             },
-            taskState: "planning-unstarted",
-            enclosureState: "absent",
-            locatorState: "absent",
-            doorState: "absent",
-            operationState: "absent",
-            seatState: "absent",
-            reviewState: "absent",
-            commitState: "absent",
-            fingerprint: "a".repeat(64),
+            taskState: 'planning-unstarted',
+            enclosureState: 'absent',
+            locatorState: 'absent',
+            doorState: 'absent',
+            operationState: 'absent',
+            seatState: 'absent',
+            reviewState: 'absent',
+            commitState: 'absent',
+            fingerprint: 'a'.repeat(64),
           },
         },
       ],
@@ -123,48 +124,53 @@ describe("DetailPanel master series navigation (6g)", () => {
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/task.json" />,
     );
 
-    expect(getByText("Discarded before start (1)")).toBeTruthy();
-    const discarded = getByText("2. Never started").closest("li");
-    expect(discarded?.textContent).toContain("No implementation was needed");
-    expect(discarded?.textContent).toContain("proof " + "a".repeat(64));
-    expect(getByTestId("subtask-open-1").textContent).toContain("1. Live planning leaf");
+    expect(cells(getByTestId('subtask-open-1'))).toEqual(['1', 'Live planning leaf']);
+    // no abandoned rows, one discarded audit: the link names the discarded history
+    expect(getByTestId('group-gone-link').textContent).toContain('1 discarded before start');
+    fireEvent.click(getByTestId('group-gone-link'));
+    const discarded = getByText('Never started').parentElement;
+    expect(cells(discarded as HTMLElement).slice(0, 2)).toEqual(['2', 'Never started']);
+    expect(discarded?.textContent).toContain('No implementation was needed');
+    expect(discarded?.textContent).toContain('proof ' + 'a'.repeat(64));
+    fireEvent.click(getByTestId('doc-view-back'));
+    expect(getByTestId('subtask-open-1')).toBeTruthy();
   });
 
-  it("opens authored master leaves from the full projected pool when the master is lifecycle-bound", () => {
+  it('opens authored master leaves from the full projected pool when the master is lifecycle-bound', () => {
     const lc: LifecycleProjection = {
-      id: "ROOT",
-      state: "running",
-      phase: "build",
+      id: 'ROOT',
+      state: 'running',
+      phase: 'build',
       fleeting: false,
-      startedAt: "2026-06-20T09:00:00+00:00",
-      lastEventTs: "2026-06-20T09:00:30+00:00",
-      stateEnteredAt: "2026-06-20T09:00:00+00:00",
+      startedAt: '2026-06-20T09:00:00+00:00',
+      lastEventTs: '2026-06-20T09:00:30+00:00',
+      stateEnteredAt: '2026-06-20T09:00:00+00:00',
       inferred: false,
       actions: [],
     };
     const master = taskDoc({
-      lifecycleId: "ROOT",
-      kind: "master",
-      title: "Lifecycle Master",
-      docPath: "/tasks/repo-a/planning/task.json",
-      objective: "Master plan objective.",
+      lifecycleId: 'ROOT',
+      kind: 'master',
+      title: 'Lifecycle Master',
+      docPath: '/tasks/repo-a/planning/task.json',
+      objective: 'Master plan objective.',
       subTasks: [
         {
-          number: "1",
-          name: "Leaf from projected pool",
-          file: "01_leaf.md",
-          status: "planning",
-          scope: "",
+          number: '1',
+          name: 'Leaf from projected pool',
+          file: '01_leaf.md',
+          status: 'planning',
+          scope: '',
         },
       ],
     });
     const leaf = taskDoc({
-      id: "1",
-      lifecycleId: "ROOT",
-      kind: "subTask",
-      title: "Leaf from projected pool",
-      docPath: "/tasks/repo-a/planning/01_leaf.json",
-      objective: "Leaf objective from the projected pool.",
+      id: '1',
+      lifecycleId: 'ROOT',
+      kind: 'subTask',
+      title: 'Leaf from projected pool',
+      docPath: '/tasks/repo-a/planning/01_leaf.json',
+      objective: 'Leaf objective from the projected pool.',
     });
     seedProjection({
       lifecycles: [lc],
@@ -189,26 +195,26 @@ describe("DetailPanel master series navigation (6g)", () => {
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/task.json" />,
     );
 
-    expect(getByTestId("subtask-open-1").tagName.toLowerCase()).toBe("button");
-    fireEvent.click(getByTestId("subtask-open-1"));
-    expect(getByText("Leaf objective from the projected pool.")).toBeTruthy();
-    expect(queryByText("No task document bound to this task.")).toBeNull();
+    expect(getByTestId('subtask-open-1').tagName.toLowerCase()).toBe('button');
+    fireEvent.click(getByTestId('subtask-open-1'));
+    expect(getByText('Leaf objective from the projected pool.')).toBeTruthy();
+    expect(queryByText('No task document bound to this task.')).toBeNull();
   });
 
-  it("keeps master rows static when the referenced leaf has no authored task document", () => {
+  it('keeps master rows static when the referenced leaf has no authored task document', () => {
     const master = taskDoc({
       lifecycleId: undefined,
-      kind: "master",
-      title: "Planning Master",
-      docPath: "/tasks/repo-a/planning/task.json",
-      objective: "Master plan objective.",
+      kind: 'master',
+      title: 'Planning Master',
+      docPath: '/tasks/repo-a/planning/task.json',
+      objective: 'Master plan objective.',
       subTasks: [
         {
-          number: "1",
-          name: "Missing leaf",
-          file: "01_missing.md",
-          status: "planning",
-          scope: "",
+          number: '1',
+          name: 'Missing leaf',
+          file: '01_missing.md',
+          status: 'planning',
+          scope: '',
         },
       ],
     });
@@ -218,111 +224,132 @@ describe("DetailPanel master series navigation (6g)", () => {
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/task.json" />,
     );
 
-    expect(getByTestId("subtask-open-1").tagName.toLowerCase()).toBe("div");
-    expect(getByTestId("subtask-open-1").textContent).toContain("1. Missing leaf");
+    expect(getByTestId('subtask-open-1').tagName.toLowerCase()).not.toBe('button');
+    expect(cells(getByTestId('subtask-open-1'))).toEqual(['1', 'Missing leaf']);
   });
 
-  it("renders structured ids with step and code example titles", () => {
+  it('renders structured ids with step and code example titles', () => {
     const doc = taskDoc({
       lifecycleId: undefined,
-      kind: "subTask",
-      title: "Id Display",
-      docPath: "/tasks/repo-a/planning/ids.json",
+      kind: 'subTask',
+      title: 'Id Display',
+      docPath: '/tasks/repo-a/planning/ids.json',
       steps: [
         {
-          id: "S11",
-          title: "Make Operations disappearance archive/delete-based",
-          status: "pending",
+          id: 'S11',
+          title: 'Make Operations disappearance archive/delete-based',
+          status: 'pending',
           substeps: [
             {
-              id: "S11.1",
-              title: "Exclude archived task documents",
-              status: "pending",
+              id: 'S11.1',
+              title: 'Exclude archived task documents',
+              status: 'pending',
             },
           ],
+          noteTruncated: false,
+          outcomeTruncated: false,
         },
       ],
       codeExamples: [
         {
-          id: "E4",
-          title: "Master leaf list uses task-specific numbers",
-          distinctChange: "Series/master reader ordering and enumeration.",
-          why: "The display number is structured presentation.",
-          language: "tsx",
-          snippet: "<LeafTaskRow />",
+          id: 'E4',
+          title: 'Master leaf list uses task-specific numbers',
+          distinctChange: 'Series/master reader ordering and enumeration.',
+          why: 'The display number is structured presentation.',
+          language: 'tsx',
+          snippet: '<LeafTaskRow />',
         },
       ],
     });
     seedTaskDocuments([doc]);
 
-    const { getAllByText, getByText, queryByText } = render(
+    const { getAllByText, getByTestId, getByText, queryByText } = render(
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/ids.json" />,
     );
 
-    expect(getAllByText("S11 — Make Operations disappearance archive/delete-based")).toHaveLength(1);
-    expect(getAllByText("S11.1 — Exclude archived task documents")).toHaveLength(1);
-    expect(getByText("E4 — Master leaf list uses task-specific numbers")).toBeTruthy();
-    expect(queryByText("Make Operations disappearance archive/delete-based")).toBeNull();
-    expect(queryByText("Master leaf list uses task-specific numbers")).toBeNull();
+    // the step row: its number in one cell, its title in the next, each once
+    expect(cells(getByTestId('step-S11')).slice(1, 3)).toEqual([
+      'S11',
+      'Make Operations disappearance archive/delete-based',
+    ]);
+    expect(getAllByText('Make Operations disappearance archive/delete-based')).toHaveLength(1);
+    expect(cells(getByTestId('substep-S11-S11.1')).slice(1)).toEqual([
+      'S11.1',
+      'Exclude archived task documents',
+    ]);
+    expect(getByText('E4 — Master leaf list uses task-specific numbers')).toBeTruthy();
+    expect(queryByText('Master leaf list uses task-specific numbers')).toBeNull();
   });
 
-  it("labels parent and nested intentional skips without relabeling ordinary done", () => {
+  it('labels parent and nested intentional skips without relabeling ordinary done', () => {
     const disposition = {
-      kind: "intentionalSkip" as const,
-      reason: "Superseded by the accepted path.",
-      recordedAt: "2026-08-03T12:00:00+00:00",
-      recordedVia: "task_doc.skip_step" as const,
+      kind: 'intentionalSkip' as const,
+      reason: 'Superseded by the accepted path.',
+      recordedAt: '2026-08-03T12:00:00+00:00',
+      recordedVia: 'task_doc.skip_step' as const,
     };
     const doc = taskDoc({
       lifecycleId: undefined,
-      kind: "subTask",
-      title: "Skip display",
-      docPath: "/tasks/repo-a/planning/skips.json",
+      kind: 'subTask',
+      title: 'Skip display',
+      docPath: '/tasks/repo-a/planning/skips.json',
       stepsDone: 3,
       stepsTotal: 3,
       steps: [
         {
-          id: "S1",
-          title: "Skipped parent",
-          status: "done",
+          id: 'S1',
+          title: 'Skipped parent',
+          status: 'done',
           disposition,
           substeps: [
             {
-              id: "C1",
-              title: "Skipped child",
-              status: "done",
-              disposition: { ...disposition, reason: "Child became unnecessary." },
+              id: 'C1',
+              title: 'Skipped child',
+              status: 'done',
+              disposition: { ...disposition, reason: 'Child became unnecessary.' },
             },
           ],
+          noteTruncated: false,
+          outcomeTruncated: false,
         },
-        { id: "S2", title: "Ordinary done", status: "done", substeps: [] },
+        {
+          id: 'S2',
+          title: 'Ordinary done',
+          status: 'done',
+          substeps: [],
+          noteTruncated: false,
+          outcomeTruncated: false,
+        },
       ],
     });
     seedTaskDocuments([doc]);
 
-    const { getAllByText, getByText } = render(
+    const { getByTestId, getByText } = render(
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/skips.json" />,
     );
 
-    expect(getAllByText("SKIPPED")).toHaveLength(2);
+    expect(getByTestId('step-state-S1').textContent).toBe('skipped');
     expect(getByText(/Superseded by the accepted path/)).toBeTruthy();
-    expect(getByText(/Child became unnecessary/)).toBeTruthy();
-    expect(getByText("S2 — Ordinary done").closest("li")?.textContent).not.toContain("SKIPPED");
+    expect(getByTestId('substep-S1-C1').textContent).toContain(
+      'skipped: Child became unnecessary.',
+    );
+    expect(getByTestId('step-state-S2').textContent).toBe('done');
+    expect(getByTestId('step-S2').textContent).not.toMatch(/skipped/i);
   });
 
-  it("pins the sub-task index above the description and keeps the in-section copy", () => {
+  it('draws one sub-task index and lists the other sections as further notes', () => {
     seedSeries();
-    const { getAllByText, getByTestId, getByText } = render(
+    const { getAllByTestId, getAllByText, getByTestId, getByText, queryByTestId } = render(
       <DetailPanel selectedId="series" />,
     );
-    expect(getAllByText("My Series").length).toBeGreaterThan(0);
-    const objective = getByText("Series objective text");
-    const topIndex = getByTestId("subtask-open-1"); // pinned navigation copy
-    expect(getByTestId("subtask-mid-1")).toBeTruthy(); // authored in-section copy stays
-    // the pinned index precedes the description in the DOM (FOLLOWING set => objective is after it)
-    expect(
-      topIndex.compareDocumentPosition(objective) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(getAllByText('My Series').length).toBeGreaterThan(0);
+    const objective = getByText('Series objective text');
+    // one index: the waiting row stands once, with no in-section second copy
+    expect(getAllByTestId('subtask-open-1')).toHaveLength(1);
+    expect(queryByTestId('subtask-mid-1')).toBeNull();
+    // the free-form section is one Further-notes line, not drawn whole
+    expect(getByTestId('further-open-0').textContent).toContain('Current State');
+    expect(objective).toBeTruthy();
   });
 
   it("drills into a slice's reader and returns via the breadcrumb", () => {
@@ -331,37 +358,38 @@ describe("DetailPanel master series navigation (6g)", () => {
       <DetailPanel selectedId="series" />,
     );
     // The master overview is shown, the slice body is not.
-    expect(queryByText("Slice objective text")).toBeNull();
+    expect(queryByText('Slice objective text')).toBeNull();
 
-    fireEvent.click(getByTestId("subtask-open-1"));
-    expect(getByText("Slice objective text")).toBeTruthy(); // the slice's full reader
-    expect(getAllByText("S1 — do the thing")).toHaveLength(1);
+    fireEvent.click(getByTestId('subtask-open-1'));
+    expect(getByText('Slice objective text')).toBeTruthy(); // the slice's full reader
+    expect(getAllByText('do the thing')).toHaveLength(1);
+    expect(cells(getByTestId('step-S1')).slice(1, 3)).toEqual(['S1', 'do the thing']);
 
-    fireEvent.click(getByTestId("series-breadcrumb"));
-    expect(getByTestId("subtask-open-1")).toBeTruthy(); // back to the master index
-    expect(queryByText("Slice objective text")).toBeNull();
+    fireEvent.click(getByTestId('series-breadcrumb'));
+    expect(getByTestId('subtask-open-1')).toBeTruthy(); // back to the master index
+    expect(queryByText('Slice objective text')).toBeNull();
   });
 
-  it("jumps lifecycles from a cross-master row on a master TASK DOC", () => {
+  it('jumps lifecycles from a cross-master row on a master TASK DOC', () => {
     // The cross-series jump is reachable only from a master task document: `linkedLifecycleId`
     // lives on `TaskSubTaskRefNode`. A SeriesNode's rows are `SeriesSubTaskNode`, which the
     // server never stamps with one — this fixture used to be a series, so it was exercising a
     // projection the server cannot produce.
     const master = taskDoc({
       lifecycleId: undefined,
-      kind: "master",
-      title: "Cross-linking Master",
-      docPath: "/tasks/repo-a/planning/task.json",
-      objective: "Master plan objective.",
+      kind: 'master',
+      title: 'Cross-linking Master',
+      docPath: '/tasks/repo-a/planning/task.json',
+      objective: 'Master plan objective.',
       subTasks: [
-        { number: "1", name: "Own slice", file: "01_leaf.md", status: "planning", scope: "" },
+        { number: '1', name: 'Own slice', file: '01_leaf.md', status: 'planning', scope: '' },
         {
-          number: "2",
-          name: "Parallel series",
-          file: "../other/task.md",
-          status: "inProgress",
-          scope: "",
-          linkedLifecycleId: "LC-OTHER",
+          number: '2',
+          name: 'Parallel series',
+          file: '../other/task.md',
+          status: 'inProgress',
+          scope: '',
+          linkedLifecycleId: 'LC-OTHER',
         },
       ],
     });
@@ -373,97 +401,99 @@ describe("DetailPanel master series navigation (6g)", () => {
         onOpenLifecycle={onOpenLifecycle}
       />,
     );
-    fireEvent.click(getByTestId("subtask-open-link-2")); // the "→" cross-series row
-    expect(onOpenLifecycle).toHaveBeenCalledWith("LC-OTHER");
+    fireEvent.click(getByTestId('subtask-open-link-2')); // the "→" cross-series row
+    expect(onOpenLifecycle).toHaveBeenCalledWith('LC-OTHER');
   });
 
-  it("opens the commanded master from a sprint masterRef row, then drills to its leaf (L14-R2)", () => {
+  it('opens the commanded master from a sprint masterRef row, then drills to its leaf (L14-R2)', () => {
     // The sprint → master → leaf click path: a sprint row's typed `masterRef` resolves against
     // the full projected pool (the master lives in ANOTHER folder, never in `sliceDocs`) and the
     // row dispatches the task-doc selection for it — the same `taskdoc:` key the Cockpit's open()
     // passes through to `setSelectedId`.
     const sprint = taskDoc({
-      id: "SPRINT",
+      id: 'SPRINT',
       lifecycleId: undefined,
-      kind: "master",
-      title: "Commanding Sprint",
-      docPath: "/tasks/repo-a/sprint/task.json",
-      orchestrates: ["master"],
+      kind: 'master',
+      title: 'Commanding Sprint',
+      docPath: '/tasks/repo-a/sprint/task.json',
+      orchestrates: ['master'],
       subTasks: [
         {
-          number: "1",
-          name: "Commanded Master",
-          file: "",
-          status: "inProgress",
-          scope: "",
-          masterRef: { repository: "repo-a", path: "master/task.json" },
+          number: '1',
+          name: 'Commanded Master',
+          file: '',
+          status: 'inProgress',
+          scope: '',
+          masterRef: { repository: 'repo-a', path: 'master/task.json' },
         },
       ],
     });
     const master = taskDoc({
-      id: "MASTER",
+      id: 'MASTER',
       lifecycleId: undefined,
-      kind: "master",
-      title: "Commanded Master",
-      docPath: "/tasks/repo-a/master/task.json",
+      kind: 'master',
+      title: 'Commanded Master',
+      docPath: '/tasks/repo-a/master/task.json',
       subTasks: [
-        { number: "1", name: "Leaf one", file: "01_leaf.md", status: "planning", scope: "" },
+        { number: '1', name: 'Leaf one', file: '01_leaf.md', status: 'planning', scope: '' },
       ],
     });
     const leaf = taskDoc({
-      id: "1",
+      id: '1',
       lifecycleId: undefined,
-      kind: "subTask",
-      title: "Leaf one",
-      docPath: "/tasks/repo-a/master/01_leaf.json",
-      objective: "Leaf objective.",
+      kind: 'subTask',
+      title: 'Leaf one',
+      docPath: '/tasks/repo-a/master/01_leaf.json',
+      objective: 'Leaf objective.',
     });
     seedTaskDocuments([sprint, master, leaf]);
 
     // A stateful shell standing in for the Cockpit: the row jump becomes the next selection.
     function Shell() {
       const [selectedId, setSelectedId] = useState<string | null>(
-        "taskdoc:/tasks/repo-a/sprint/task.json",
+        'taskdoc:/tasks/repo-a/sprint/task.json',
       );
       return <DetailPanel selectedId={selectedId} onOpenLifecycle={setSelectedId} />;
     }
     const { getAllByText, getByTestId, getByText } = render(<Shell />);
 
-    // sprint → master: the typed row renders as the "⇒" master link, not a slice or static row
-    const masterRow = getByTestId("subtask-open-master-1");
-    expect(masterRow.textContent).toContain("⇒ 1. Commanded Master");
+    // sprint → master: the typed row is the master's link — its id and its name — not a
+    // slice or static row
+    const masterRow = getByTestId('subtask-open-master-1');
+    expect(masterRow.tagName.toLowerCase()).toBe('button');
+    expect(cells(masterRow)).toEqual(['MASTER', 'Commanded Master']);
     fireEvent.click(masterRow);
 
     // the master document reader renders, with its leaf rows visible
-    expect(getAllByText("Commanded Master").length).toBeGreaterThan(0);
-    const leafRow = getByTestId("subtask-open-1");
-    expect(leafRow.textContent).toContain("Leaf one");
+    expect(getAllByText('Commanded Master').length).toBeGreaterThan(0);
+    const leafRow = getByTestId('subtask-open-1');
+    expect(leafRow.textContent).toContain('Leaf one');
 
     // master → leaf: the full sprint → master → leaf drill-down
     fireEvent.click(leafRow);
-    expect(getByText("Leaf objective.")).toBeTruthy();
+    expect(getByText('Leaf objective.')).toBeTruthy();
   });
 
-  it("keeps a masterRef row static when the commanded master is not projected", () => {
+  it('keeps a masterRef row static when the commanded master is not projected', () => {
     // Fallback honesty: a masterRef whose target is absent from the projected pool (another
     // repo's docs, or a document the projection withheld) degrades to the row's older behavior —
     // here, with no same-folder slice and no cross-series link, the static index row. There is no
     // document-count bound any more (260916-TDPU removed it), so absence means absent, not evicted.
     const sprint = taskDoc({
-      id: "SPRINT",
+      id: 'SPRINT',
       lifecycleId: undefined,
-      kind: "master",
-      title: "Commanding Sprint",
-      docPath: "/tasks/repo-a/sprint/task.json",
-      orchestrates: ["missing"],
+      kind: 'master',
+      title: 'Commanding Sprint',
+      docPath: '/tasks/repo-a/sprint/task.json',
+      orchestrates: ['missing'],
       subTasks: [
         {
-          number: "1",
-          name: "Unprojected Master",
-          file: "",
-          status: "planning",
-          scope: "",
-          masterRef: { repository: "repo-a", path: "missing/task.json" },
+          number: '1',
+          name: 'Unprojected Master',
+          file: '',
+          status: 'planning',
+          scope: '',
+          masterRef: { repository: 'repo-a', path: 'missing/task.json' },
         },
       ],
     });
@@ -473,72 +503,75 @@ describe("DetailPanel master series navigation (6g)", () => {
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />,
     );
 
-    expect(queryByTestId("subtask-open-master-1")).toBeNull();
-    const row = getByTestId("subtask-open-1");
-    expect(row.tagName.toLowerCase()).toBe("div");
-    expect(row.textContent).toContain("1. Unprojected Master");
+    expect(queryByTestId('subtask-open-master-1')).toBeNull();
+    const row = getByTestId('subtask-open-1');
+    expect(row.tagName.toLowerCase()).not.toBe('button');
+    expect(cells(row)).toEqual(['1', 'Unprojected Master']);
   });
 
-  it("renders markdown in master sections (GFM table + bold), not raw", () => {
+  it('renders markdown in section views (GFM table + bold), not raw on the page', () => {
     seedSeries();
-    const { container, queryByText } = render(<DetailPanel selectedId="series" />);
-    const table = container.querySelector("table");
-    expect(table).toBeTruthy(); // the GFM table is a real <table>, not raw pipes
-    expect(container.querySelector("th")?.textContent).toBe("Slice");
-    expect(container.querySelector("strong")?.textContent).toBe("strong");
+    const { container, getByTestId, queryByText } = render(<DetailPanel selectedId="series" />);
+    expect(container.querySelector('table')).toBeNull(); // the page holds the line, not the table
     expect(queryByText(/\| Slice \| Status \|/)).toBeNull(); // raw markdown is gone
+    fireEvent.click(getByTestId('further-open-0'));
+    const view = getByTestId('doc-view');
+    expect(view.querySelector('table')).toBeTruthy(); // the view holds a real <table>
+    expect(view.querySelector('th')?.textContent).toBe('Slice');
+    expect(view.querySelector('strong')?.textContent).toBe('strong');
+    fireEvent.click(getByTestId('doc-view-back'));
+    expect(getByTestId('further-open-0')).toBeTruthy();
   });
 
-  it("shows no token total on the master reader", () => {
+  it('shows no token total on the master reader', () => {
     seedSeries();
     const { container, queryByText } = render(<DetailPanel selectedId="series" />);
 
-    expect(queryByText("series tokens")).toBeNull();
+    expect(queryByText('series tokens')).toBeNull();
     expect(container.querySelector("[aria-label$='aggregate series tokens']")).toBeNull();
   });
 
-  it("shows no token number when the read snapshot still holds the removed fields", () => {
+  it('shows no token number when the read snapshot still holds the removed fields', () => {
     // Expected Evidence 2 (MIK-R115): a stored latest-state.json that still holds the
     // removed fields reads as any removed field does — nothing fails, and the views
     // show none of it. The JSON round-trip keeps the old keys at runtime, past the types.
     seedSeries();
-    const one = dashboardStore.getState().lifecycles["LC-SER"];
+    const one = dashboardStore.getState().lifecycles['LC-SER'];
     const aged = JSON.parse(
       JSON.stringify({
         ...one,
         tokens: 1500,
-        tokenSeries: [{ at: "2026-06-20T09:00:00+00:00", tokens: 1500 }],
+        tokenSeries: [{ at: '2026-06-20T09:00:00+00:00', tokens: 1500 }],
       }),
     );
     const metrics = JSON.parse(
       JSON.stringify({ ...dashboardStore.getState().metrics, totalTokens: 1500 }),
     );
-    dashboardStore.getState().applyDelta("lifecycle", aged);
-    dashboardStore.getState().applyDelta("metrics", metrics);
+    dashboardStore.getState().applyDelta('lifecycle', aged);
+    dashboardStore.getState().applyDelta('metrics', metrics);
 
     const detail = render(<DetailPanel selectedId="LC-SER" />);
     const master = render(<DetailPanel selectedId="series" />);
     for (const view of [detail, master]) {
-      const text = view.container.textContent ?? "";
-      expect(view.queryByText("series tokens")).toBeNull();
+      const text = view.container.textContent ?? '';
+      expect(view.queryByText('series tokens')).toBeNull();
       expect(text).not.toMatch(/[0-9][,0-9]* tok/);
     }
   });
 
-  it("orders master leaves by creation time and displays task-specific numbers", () => {
+  it('orders master leaves by creation time and displays task-specific numbers', () => {
     seedSeriesOrdering();
-    const { getByTestId, queryByText } = render(<DetailPanel selectedId="series" />);
+    const { getByTestId } = render(<DetailPanel selectedId="series" />);
 
-    expect(getByTestId("subtask-open-1").textContent).toContain("01. Zulu earlier");
-    expect(getByTestId("subtask-open-2").textContent).toContain("99. Alpha later");
-    expect(queryByText("1. Zulu earlier")).toBeNull();
-    expect(queryByText("2. Alpha later")).toBeNull();
+    // the id cell holds the task's own number, never the row's position
+    expect(cells(getByTestId('subtask-open-1'))).toEqual(['01', 'Zulu earlier']);
+    expect(cells(getByTestId('subtask-open-2'))).toEqual(['99', 'Alpha later']);
   });
 
-  it("summarizes task progress with every declared parent and nested step", () => {
+  it('summarizes task progress with every declared parent and nested step', () => {
     seedSeries({
       sliceDoc: {
-        title: "Parallel Leaf Enclosure Workflow",
+        title: 'Parallel Leaf Enclosure Workflow',
         stepsDone: 46,
         stepsTotal: 49,
         steps: nestedProgressSteps(),
@@ -546,55 +579,55 @@ describe("DetailPanel master series navigation (6g)", () => {
     });
     const { getByRole, getByTestId, queryByText } = render(<DetailPanel selectedId="series" />);
 
-    const row = getByTestId("subtask-open-1");
-    expect(row.textContent).toContain("46/49 · inProgress");
-    expect(row.textContent).not.toContain("6/7");
+    const row = getByTestId('subtask-open-1');
+    // the Now row carries the declared progress, not the nested recount
+    expect(getByTestId('now-steps-1').textContent).toBe('46/49');
+    expect(getByTestId('now-row-1').textContent).not.toContain('6/7');
 
     fireEvent.click(row);
-    expect(getByRole("img", { name: "steps done" }).textContent).toBe("46/49");
-    expect(queryByText("6/7")).toBeNull();
+    expect(getByRole('img', { name: 'steps done' }).textContent).toBe('46 of 49 done');
+    expect(queryByText('6/7')).toBeNull();
   });
 
-  it("renders master content when a selected task-id lifecycle maps to the series task name", () => {
+  it('renders master content when a selected task-id lifecycle maps to the series task name', () => {
     seedSeries({
-      lifecycleId: "SERIES_TASK",
-      enclosureTaskId: "SERIES_TASK",
-      enclosureTaskName: "series",
+      lifecycleId: 'SERIES_TASK',
+      enclosureTaskId: 'SERIES_TASK',
+      enclosureTaskName: 'series',
     });
     const { getByText, queryByText } = render(<DetailPanel selectedId="SERIES_TASK" />);
 
-    expect(getByText("Series objective text")).toBeTruthy();
-    expect(getByText("Current State")).toBeTruthy();
-    expect(queryByText("series 1 task slices")).toBeNull();
-    expect(queryByText("No task document bound to this task.")).toBeNull();
+    expect(getByText('Series objective text')).toBeTruthy();
+    expect(getByText('Current State')).toBeTruthy();
+    expect(queryByText('series 1 task slices')).toBeNull();
+    expect(queryByText('No task document bound to this task.')).toBeNull();
   });
 
-  it("does not use parent taskName as content for a leaf lifecycle without a projected doc", () => {
+  it('does not use parent taskName as content for a leaf lifecycle without a projected doc', () => {
     seedSeries({
-      lifecycleId: "LEAF_TASK",
-      enclosureTaskId: "SERIES_TASK",
-      enclosureTaskName: "series",
-      sliceDoc: { lifecycleId: "OTHER_TASK" },
+      lifecycleId: 'LEAF_TASK',
+      enclosureTaskId: 'SERIES_TASK',
+      enclosureTaskName: 'series',
+      sliceDoc: { lifecycleId: 'OTHER_TASK' },
     });
     const { getByText, queryByText } = render(<DetailPanel selectedId="LEAF_TASK" />);
 
-    expect(getByText("No task document bound to this task.")).toBeTruthy();
-    expect(queryByText("Series objective text")).toBeNull();
-    expect(queryByText("Current State")).toBeNull();
+    expect(getByText('No task document bound to this task.')).toBeTruthy();
+    expect(queryByText('Series objective text')).toBeNull();
+    expect(queryByText('Current State')).toBeNull();
   });
 
-  it("keeps a direct leaf lifecycle document ahead of the parent series mapping", () => {
+  it('keeps a direct leaf lifecycle document ahead of the parent series mapping', () => {
     seedSeries({
-      lifecycleId: "LEAF_TASK",
-      enclosureTaskId: "SERIES_TASK",
-      enclosureTaskName: "series",
+      lifecycleId: 'LEAF_TASK',
+      enclosureTaskId: 'SERIES_TASK',
+      enclosureTaskName: 'series',
     });
     const { getAllByText, getByText, queryByText } = render(<DetailPanel selectedId="LEAF_TASK" />);
 
-    expect(getByText("Slice objective text")).toBeTruthy();
-    expect(getAllByText("S1 — do the thing")).toHaveLength(1);
-    expect(queryByText("Series objective text")).toBeNull();
-    expect(queryByText("Current State")).toBeNull();
+    expect(getByText('Slice objective text')).toBeTruthy();
+    expect(getAllByText('do the thing')).toHaveLength(1);
+    expect(queryByText('Series objective text')).toBeNull();
+    expect(queryByText('Current State')).toBeNull();
   });
-
 });

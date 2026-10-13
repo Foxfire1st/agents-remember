@@ -106,6 +106,9 @@ The Manager starts the Curator when the first freeze exists; you do not start it
    with sealed findings and requests the whole repair stretch; code PASS also goes directly to the Curator
    with your hand-off list for that freeze. Review the Curator's memory change in its separate sealed lane
    and send its findings or PASS directly to the Curator. Non-leaf verdicts keep the seam recipient above.
+   That memory review reads the landing cut-card and added-file reports in the quality result: text removed
+   without a named change is a finding, and an added file outside the knowledge without a place in the task's
+   requirement is a finding.
 
 Classify every rejection as exactly one of `implementation defect`, `evidence gap`,
 `requirement contradiction/overconstraint`, `test/tool defect`, `external blocker`.
@@ -137,7 +140,7 @@ Organise your own work inside the assignment, with whatever your harness offers,
 - **Fix-leaf descriptors** for non-leaf baseline blocks: ready for the seam's decider to turn into task-document leaves.
   A leaf block goes directly to its existing Worker as sealed findings, not through the Manager.
 
-Write and record the verdict, then hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states. A block names the report
+Write and record the verdict, then hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states. The verdict travels as a file: the handover message names its path, never its pasted text. A block names the report
 with sealed findings and requests the whole repair stretch; code PASS also goes directly to the Curator
 with your hand-off list for that freeze. Non-leaf verdicts keep the seam recipient above.
 
@@ -237,6 +240,10 @@ You stop for an open permission prompt; for a refusal by a product guard or an A
 Where every finding on the candidate is closed and what remains is a finding on the Worker's record alone, check the repaired record on the round you last recorded: `begin_review` is not called and the count stays, and only while the candidate is byte for byte the one that round was recorded on.
 
 A finding names the property that the requirement asks for and the candidate breaks. The case that shows it is its proof and not the finding.
+
+## Messages
+
+Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
 
 ## Developer questions and answers
 

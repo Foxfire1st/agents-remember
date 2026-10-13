@@ -171,7 +171,7 @@ def fixture_tree_files() -> dict[str, bytes]:
         DIRECT_LANDING_SIDECAR: encode(load_fixture("4.1-direct_landing.py.json")),
         DIRECT_LANDING_CARD: DIRECT_LANDING_MARKDOWN.encode("utf-8"),
         ROUTE_SIDECAR: encode(load_fixture("4.1-worktrees-overview.json")),
-        ROUTE_CARD: b"# worktrees\n\nThe route's files are listed with their anchors [1].\n",
+        ROUTE_CARD: b"# worktrees\n\n## Governing Overview\n\n[mcp overview](../overview.md)\n\n## What This Area Is\n\nThe route's files pair each delivery with its memory candidate.\n\n## Evidence\n\n- The route's files are listed with their anchors [1].\n",
         f"onboarding/{TEST_DIRECT_LANDING}.json": encode(
             load_fixture("4.4-test_direct_landing.py.json")
         ),

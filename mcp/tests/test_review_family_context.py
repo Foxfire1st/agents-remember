@@ -453,9 +453,7 @@ def test_a_family_only_the_candidate_records_is_a_one_sided_context_with_a_state
         ),
     )
     payload = review(scenario.endpoints)
-    entry = entry_for(
-        payload, scenario.endpoints.diff.after.fixture.extra_families[0].family_id
-    )
+    entry = entry_for(payload, scenario.endpoints.diff.after.fixture.extra_families[0].family_id)
 
     assert entry.selection.state == "added"
     assert entry.before.state == "not_recorded"
@@ -712,9 +710,7 @@ def _review_of_unfamiliar_invariant(
         ),
     )
     endpoints = replace_after_tree(endpoints, after)
-    return endpoints, InvariantIdentitySeed(
-        invariant_id=after.extra_invariants[0].invariant_id
-    )
+    return endpoints, InvariantIdentitySeed(invariant_id=after.extra_invariants[0].invariant_id)
 
 
 # -- the transport the client reads: the same composition, over the real route -------------------

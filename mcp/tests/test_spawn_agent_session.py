@@ -279,8 +279,14 @@ def _running_chat(session_id: str, *, task_document_ref: TaskDocumentRef) -> Ter
 
 
 class SpawnAgentSessionTests(unittest.TestCase):
+    # Control-socket paths are kernel-bound (~103 bytes): the cases that mint
+    # a control endpoint run their whole tree under the approved short root
+    # so the suite holds for any TMPDIR. mkdtemp keeps each test unique.
+    SHORT_ROOT = Path("/tmp/mik-run3/l157/t")
+
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp())
+        self.SHORT_ROOT.mkdir(parents=True, exist_ok=True)
+        self.tmp = Path(tempfile.mkdtemp(prefix="spawn-", dir=self.SHORT_ROOT))
         self.config = _config(self.tmp)
         _write_leaf_task(self.tmp)
         self.repo = write_current_task_lineage(

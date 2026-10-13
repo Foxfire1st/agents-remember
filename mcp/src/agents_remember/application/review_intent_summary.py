@@ -249,9 +249,7 @@ def _populations(
 def _heads(
     populations: Mapping[str, tuple[str, ...]],
 ) -> dict[str, tuple[str, ...]]:
-    return {
-        identity: revision_heads(population) for identity, population in populations.items()
-    }
+    return {identity: revision_heads(population) for identity, population in populations.items()}
 
 
 def _invariant_side(

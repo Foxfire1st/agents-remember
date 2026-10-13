@@ -30,8 +30,6 @@ from agents_remember.models.lifecycles.curator_coherence import (
 )
 from agents_remember.models.lifecycles.evidence_dependencies import (
     EVIDENCE_DEPENDENCY_VALIDATOR,
-    MAX_CURATOR_REVIEW_ASSESSMENTS,
-    MAX_CURATOR_SOURCE_CANDIDATES,
     build_evidence_dependencies,
     canonical_sha256,
     dependency,

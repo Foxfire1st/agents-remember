@@ -371,33 +371,54 @@ def test_a_candidate_that_changed_after_a_continuation_refuses_the_continuation(
     # row was added or removed by the refused read.
     after_rows = diff_row_counts(fixture.after.database_path)
     assert after_rows["invariant_revision"] == before_rows["invariant_revision"] + 1
+    assert after_rows["invariant"] == before_rows["invariant"] + 1
     assert {
-        table: count for table, count in after_rows.items() if table != "invariant_revision"
-    } == {table: count for table, count in before_rows.items() if table != "invariant_revision"}
+        table: count
+        for table, count in after_rows.items()
+        if table not in ("invariant_revision", "invariant")
+    } == {
+        table: count
+        for table, count in before_rows.items()
+        if table not in ("invariant_revision", "invariant")
+    }
 
 
 def add_unrelated_revision(fixture: DiffFixture) -> None:
-    """Author one more revision of the compared identity in the candidate, through the store.
+    """Author one more invariant revision in the candidate, through the store.
 
-    It is a real write to the candidate database, and it is deliberately a write that changes what the
-    request's own selector selects: an identity selector selects every retained revision of the
-    identity on each side, so a new revision moves the candidate's selected set and therefore the
-    comparison binding. A write that the selector did not reach would leave the binding intact and
-    would not test the invalidation at all.
+    It is a real write to the candidate database, and it deliberately moves the
+    candidate snapshot the continuation binds: the cursor binds a digest over
+    both declared logical snapshots, so a candidate whose bytes moved presents
+    a binding the cursor does not name. A text record holds exactly one
+    revision, so a second retained revision of the compared identity is a shape
+    no tree can express; the write is a new invariant with its single revision
+    instead, which moves the bound snapshot the same way.
     """
 
     from uuid import uuid4  # noqa: PLC0415 - one local import for one fixture mutation
 
-    from knowledge_rows_test_support import RevisionDraft  # noqa: PLC0415
+    from knowledge_rows_test_support import (  # noqa: PLC0415
+        InvariantRequest,
+        RevisionDraft,
+    )
 
     store = open_knowledge_store(fixture.after.database_path, fixture.repository_id)
     try:
+        invariant_id = str(uuid4())
+        created_invariant = store.create_extra_invariant(
+            InvariantRequest(
+                repository_id=fixture.repository_id,
+                invariant_id=invariant_id,
+                display_label="an unrelated invariant",
+                provenance=fixture.before.fixture.authorship,
+            )
+        )
         created = store.create_revision(
             RevisionRequest(
                 repository_id=fixture.repository_id,
                 revision=RevisionDraft(
                     revision_id=str(uuid4()),
-                    invariant_id=fixture.retry_invariant_id,
+                    invariant_id=invariant_id,
                     display_version="v9",
                     statement="A revision the curator authored after the first comparison.",
                     applicability="Every retry the shared budget admits in this repository namespace.",
@@ -408,8 +429,10 @@ def add_unrelated_revision(fixture: DiffFixture) -> None:
         )
     finally:
         store.close()
-    if created.state != "created":
-        raise AssertionError(f"the candidate mutation did not land: {created.refusal!r}")
+    if created_invariant.state != "created" or created.state != "created":
+        raise AssertionError(
+            f"the candidate mutation did not land: {created_invariant!r} {created!r}"
+        )
 
 
 def test_a_continuation_presented_against_another_selector_refuses_and_returns_no_page(

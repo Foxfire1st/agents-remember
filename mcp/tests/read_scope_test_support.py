@@ -643,11 +643,7 @@ def _create_invariant(
         display_label=label,
         provenance=fixture.authorship,
     )
-    created = (
-        store.create_extra_invariant(request)
-        if extra
-        else store.create_invariant(request)
-    )
+    created = store.create_extra_invariant(request) if extra else store.create_invariant(request)
     _require("create_invariant", created.state, created.refusal)
     return created
 
@@ -726,10 +722,15 @@ def _build_families(  # noqa: PLR0913 -- one call carries a whole family's delta
         _require("create_family", created.state, created.refusal)
         family_ids[seed.family_id] = created.family_id
         revision_number = (
-            direct_family_revision_number if seed.family_id == fixture.direct_family.family_id else 1
+            direct_family_revision_number
+            if seed.family_id == fixture.direct_family.family_id
+            else 1
         )
         guarantee = _family_guarantee(seed.family_id, fixture)
-        if seed.family_id == fixture.direct_family.family_id and direct_family_guarantee is not None:
+        if (
+            seed.family_id == fixture.direct_family.family_id
+            and direct_family_guarantee is not None
+        ):
             guarantee = direct_family_guarantee
         revision = families.create_family_revision(
             store,
@@ -800,7 +801,9 @@ def _build_families(  # noqa: PLR0913 -- one call carries a whole family's delta
             try:
                 invariant_revision_id = slots[slot]
             except KeyError:
-                raise AssertionError(f"extra family member slot names a revision slot: {slot!r}") from None
+                raise AssertionError(
+                    f"extra family member slot names a revision slot: {slot!r}"
+                ) from None
             member = memberships.create_family_member(
                 store,
                 FamilyMemberRequest(

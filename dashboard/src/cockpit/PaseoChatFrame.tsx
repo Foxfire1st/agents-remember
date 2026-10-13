@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { css } from "../../styled-system/css";
 import {
   PaseoFrameControl,
@@ -7,18 +7,15 @@ import {
 } from "./paseoFrameControl";
 import {
   parseFrameDescriptor,
+  requestWaitText,
+  UNAVAILABLE_HEADLINE,
   type AvailablePaseoFrame,
   type PaseoAgentTarget,
   type PaseoFrameDescriptor,
+  type PaseoFrameShowing,
+  type PaseoOpenRequest,
   type PaseoFrameUnavailableReason,
 } from "./paseoFrameModel";
-
-const UNAVAILABLE_HEADLINE: Record<PaseoFrameUnavailableReason, string> = {
-  "not-configured": "no Paseo runtime configured",
-  unreachable: "Paseo daemon unreachable",
-  "origin-not-listed": "embedded chat is not configured for this address",
-  backend: "the dashboard backend did not answer",
-};
 
 const frameShell = css({
   position: "relative",
@@ -38,7 +35,25 @@ const frameElement = css({
   border: "0",
   background: "var(--bg)",
 });
-const frameBody = css({ display: "flex", flex: "1", minHeight: "0", minWidth: "0" });
+const frameBody = css({ position: "relative", display: "flex", flex: "1", minHeight: "0", minWidth: "0" });
+// Laid over the frame, so the chat under it does not move when the line comes and goes. At the
+// bottom edge: the application's header and its controls at the top stay free, and while a
+// conversation loads the application shows no input at the bottom.
+const frameWaiting = css({
+  position: "absolute",
+  bottom: "0",
+  left: "0",
+  right: "0",
+  display: "flex",
+  alignItems: "center",
+  gap: "0.6rem",
+  padding: "0.3rem 0.75rem",
+  borderTop: "1px solid var(--grid)",
+  background: "var(--bg-panel)",
+  color: "muted",
+  fontFamily: "var(--font-mono)",
+  fontSize: "0.72rem",
+});
 const frameNotice = css({
   display: "flex",
   flexShrink: "0",
@@ -135,13 +150,22 @@ interface PaseoChatFrameProps {
   scope: string;
   target: PaseoAgentTarget | null;
   page?: "chats" | "document";
+  /**
+   * What the pane's owner still waits for before it can name the chat of the selection. While
+   * it is set the frame keeps what it shows, out of reach, under this one line.
+   */
+  holding?: string | null;
   onAvailability?: (available: boolean) => void;
 }
+
+const NOTHING_SHOWN: PaseoFrameShowing = { shown: null, refused: null, landed: null, request: null };
 
 function useFrameController({ scope, target, page }: PaseoChatFrameProps) {
   const [frame, setFrame] = useState<PaseoFrameView | null>(null);
   const [control, setControl] = useState<PaseoControlState>("waiting");
   const [agentProblem, setAgentProblem] = useState<string | null>(null);
+  const [showing, setShowing] = useState<PaseoFrameShowing>(NOTHING_SHOWN);
+  const [pluginNotice, setPluginNotice] = useState<string | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [controller] = useState(
     () =>
@@ -150,12 +174,16 @@ function useFrameController({ scope, target, page }: PaseoChatFrameProps) {
         setControl,
         setFrame,
         setAgentProblem,
+        setShowing,
+        setPluginNotice,
         page,
       }),
   );
   const agentId = target?.agentId;
   const workspaceId = target?.workspaceId;
-  useEffect(() => {
+  // Before the browser paints the change: the request is out with the click, and the line the
+  // pane shows meanwhile is the request's own from the first frame on.
+  useLayoutEffect(() => {
     controller.display(
       scope,
       agentId ? { agentId, ...(workspaceId ? { workspaceId } : {}) } : null,
@@ -173,9 +201,42 @@ function useFrameController({ scope, target, page }: PaseoChatFrameProps) {
     frame,
     control,
     agentProblem,
+    pluginNotice,
+    wait: frameWait(showing, agentId, page),
     frameRef,
     controller,
   };
+}
+
+/** Why the frame is kept out of reach under one line, and whether Retry is offered with it. */
+interface FrameWait {
+  line: string | null;
+  held: boolean;
+  late: boolean;
+}
+
+const IN_REACH: FrameWait = { line: null, held: false, late: false };
+
+/**
+ * The frame is in reach when the application is on the selection's agent: it confirmed the
+ * agent as shown, it said it is on the agent's chat while the conversation still loads (the
+ * line then stays until the chat is shown), or its document was loaded on the agent's address,
+ * which holds no earlier chat. Until then the earlier chat stays visible and takes no input.
+ * An agent the frame refused is named by its own notice; on a document page the earlier chat
+ * stays out of reach under it.
+ */
+function frameWait(showing: PaseoFrameShowing, agentId: string | undefined, page: PaseoChatFrameProps["page"]): FrameWait {
+  if (!agentId || showing.shown === agentId) return IN_REACH;
+  const landed = showing.landed === agentId;
+  if (showing.refused === agentId) return { line: null, held: page === "document" && !landed, late: false };
+  const request = showing.request?.agentId === agentId ? showing.request : null;
+  if (landed && !request) return IN_REACH;
+  return requestWait(request, landed);
+}
+
+/** The wait for an agent that is asked for: its line, and whether input is let through already. */
+function requestWait(request: PaseoOpenRequest | null, landed: boolean): FrameWait {
+  return { line: requestWaitText(request), held: !landed && request?.onChat !== true, late: request?.late === true };
 }
 
 /** Fetch the embed descriptor on first activation and each explicit Retry. */
@@ -218,6 +279,7 @@ export function PaseoChatFrame(props: PaseoChatFrameProps) {
       <FrameUnavailable reason={descriptor.reason} detail={descriptor.detail} onRetry={retry} />
     );
   if (!descriptor || !state.frame) return <FrameLoading />;
+  const wait = props.holding ? { line: props.holding, held: true, late: false } : state.wait;
   return (
     <EmbeddedFrame
       available={descriptor}
@@ -225,6 +287,8 @@ export function PaseoChatFrame(props: PaseoChatFrameProps) {
       frameRef={state.frameRef}
       control={state.control}
       agentProblem={state.agentProblem}
+      pluginNotice={state.pluginNotice}
+      wait={wait}
       onRetry={retry}
     />
   );
@@ -246,6 +310,8 @@ interface EmbeddedFrameProps {
   frameRef: React.RefObject<HTMLIFrameElement | null>;
   control: PaseoControlState;
   agentProblem: string | null;
+  pluginNotice: string | null;
+  wait: FrameWait;
   onRetry: () => void;
 }
 
@@ -255,7 +321,12 @@ function EmbeddedFrame(props: EmbeddedFrameProps) {
     frame,
     frameRef,
     control,
+    wait,
   } = props;
+  // A chat that goes out of reach while the keyboard is in it gives the keyboard back.
+  useEffect(() => {
+    if (wait.held && document.activeElement === frameRef.current) frameRef.current?.blur();
+  }, [wait.held, frameRef]);
   return (
     <div
       className={frameShell}
@@ -277,7 +348,21 @@ function EmbeddedFrame(props: EmbeddedFrameProps) {
             "clipboard-read " + available.frameOrigin + "; clipboard-write " + available.frameOrigin
           }
           className={frameElement}
+          /* The earlier chat stays visible while another is asked for, and takes
+             no pointer and no keyboard until the application is on the selection's own chat. */
+          inert={wait.held}
+          style={wait.held ? { pointerEvents: "none" } : undefined}
         />
+        {wait.line && control !== "waiting" ? (
+          <div role="status" className={frameWaiting} data-testid="paseo-frame-waiting">
+            <span>{wait.line}</span>
+            {wait.late ? (
+              <button type="button" className={frameButton} onClick={props.onRetry}>
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {control === "waiting" ? (
         <div role="status" className={frameOverlay} data-testid="paseo-frame-connecting">
@@ -292,6 +377,7 @@ function FrameNotices({
   available,
   control,
   agentProblem,
+  pluginNotice,
   onRetry,
 }: EmbeddedFrameProps) {
   return (
@@ -307,6 +393,11 @@ function FrameNotices({
       {agentProblem ? (
         <div role="status" className={frameNotice} data-testid="paseo-frame-agent-problem">
           {agentProblem}
+        </div>
+      ) : null}
+      {pluginNotice ? (
+        <div role="status" className={frameNotice} data-testid="paseo-frame-plugin-notice">
+          {pluginNotice}
         </div>
       ) : null}
       {available.projectsWorkspaceDetail ? (

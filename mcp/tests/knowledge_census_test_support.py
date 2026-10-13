@@ -102,7 +102,14 @@ def census_tree_files() -> dict[str, bytes]:
     files = fixture_tree_files()
     for route in (".", *EXTRA_ROUTES):
         prefix = "onboarding" if route == "." else f"onboarding/{route}"
-        files[f"{prefix}/overview.md"] = f"# {route}\n".encode()
+        if route == ".":
+            files[f"{prefix}/overview.md"] = (
+                b"# .\n\n## What This Repo Is\n\nThe repository root route.\n"
+            )
+        else:
+            files[f"{prefix}/overview.md"] = (
+                f"# {route}\n\n## What This Area Is\n\nThe {route} route.\n".encode()
+            )
     for route, artifact in ROUTE_ARTIFACT.items():
         files.setdefault(artifact, f"# {route} card\n".encode())
     baseline = CensusBaseline.model_validate(

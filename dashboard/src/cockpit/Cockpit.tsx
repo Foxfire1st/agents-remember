@@ -31,7 +31,6 @@ import {
   masterFolderForSelection,
 } from "../data/taskIdentity";
 import { ModeBar } from "../grammar/ModeBar";
-import { AttentionQueue } from "../panels/AttentionQueue";
 import { ChangeSetViewer, type ChangeSetTarget } from "../panels/changeset/ChangeSetViewer";
 import { ReviewSurface } from "../panels/review/ReviewSurface";
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../data/taskArtifacts";
@@ -61,8 +60,9 @@ const EMPTY_SERIES: SeriesNode[] = [];
 const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 
 // The cockpit shell: persistent command chrome that never hides the alarms —
-// a top status bar, a left rail (attention queue + lifecycle list = the master-caution, always
-// visible), a switchable centre viewport (Chats / Operations / Knowledge / File Viewer),
+// a top status bar, a left rail (the lifecycle list with the attention queue's bell in its head =
+// the master-caution, always visible), a switchable centre viewport (Chats / Operations /
+// Knowledge / File Viewer),
 // and a persistent right rail (the event river ticker). The mode bar selects the viewport.
 // Selection is ephemeral UI state held here and shared across panels and views.
 // The "machine map" views (Engine Room / Topology) and the Chats terminal
@@ -675,13 +675,12 @@ function LeftRail({
       aria-hidden={fullBleed}
       {...railEnter}
     >
-      {/* These two panels are the reason grammar/Dot.tsx cannot lean on colour alone. They are
-          SIBLINGS in one always-visible rail — severities above, lifecycle states below — so a
-          developer reads both grammars in one glance, and an amber dot up here says nothing
-          about an amber dot down there (the reducer builds no attention row for an
-          `awaiting-developer` lifecycle). Cockpit.test.tsx renders this rail and pins the two
-          dots apart. */}
-      <AttentionQueue onSelect={onSelect} active={!fullBleed && !takeover} />
+      {/* The task list is the whole rail. The attention queue is a bell in the list's head; its
+          entries open in a layer over the tree (MIK-R144 rule 3a). The two grammars of
+          grammar/Dot.tsx still meet in this one column — severities in the layer, lifecycle
+          states in the tree under it — and an amber mark up there says nothing about an amber
+          mark down here (the reducer builds no attention row for an `awaiting-developer`
+          lifecycle). Cockpit.test.tsx renders this rail and pins the two marks apart. */}
       <LifecycleList selectedId={selectedId} onSelect={onSelect} active={!fullBleed && !takeover} />
       <RailResizeHandle side="left" width={leftRailWidth} onResize={onResize} />
     </motion.aside>
@@ -841,7 +840,7 @@ function RailedBody({
       aria-hidden={state.takeover ? true : undefined}
     >
       {/* The rails are never unmounted on a full-bleed view — only hidden — so re-entering a
-          railed view is instant instead of a fresh AttentionQueue + LifecycleList mount, and rail
+          railed view is instant instead of a fresh LifecycleList mount, and rail
           state (scroll, collapsed groups) survives the switch (same keep-alive pattern
           as the files/knowledge/chats layers below). display:none drops them from the grid, so the
           full-bleed single column is unaffected. */}
@@ -902,7 +901,6 @@ export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitV
   return (
     <IntentEntryRevalidation shown={state.view === "operations" && !state.takeover}>
       <div className={cx(shell, "cockpit--shell")}>
-        <div className="crt-overlay" aria-hidden="true" />
         <TopBar />
         {state.changeSet ? (
           <ChangeSetTakeover

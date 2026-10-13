@@ -13,9 +13,11 @@ import json
 import shutil
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
 from test_sprint_archive import ArchiveWorld
@@ -269,24 +271,52 @@ def _fifteen_master_world(world: ArchiveWorld):
 def test_fifteen_master_preview_bounded_and_exact(world):
     refs = _fifteen_master_world(world)
     before = world.snapshot()
-    preview = world.archive(dry_run=True)
+    # The fifteen-master preview is over the answer bound, so since L108
+    # (663f51ae, MIK-R108 rules 3-4) the delivered answer is the overflow short
+    # form and the whole preview lies in the file the answer names in `log`.
+    # The call context below is what the server dispatch installs on the wire;
+    # without it no log is written and the answer points nowhere.
+    with tool_call_context(
+        "task_doc",
+        {"operation": "archive_sprint"},
+        config=SimpleNamespace(
+            coordination_root=world.coord,
+            transcript_root=world.coord / "logs" / "mcp",
+        ),
+    ):
+        preview = world.archive(dry_run=True)
     assert preview["ok"] and preview["state"] == "would-archive"
-    assert len(preview["wouldChange"]) <= 16
-    assert len(preview["wouldWrite"]) <= 16
-    assert preview["sprintArchive"]["moveOrder"][0] == "sprint"
-    assert len(preview["sprintArchive"]["moveOrder"]) == 16
-    assert {entry["masterRef"]["path"] for entry in preview["archivedMasters"]} == {
+    assert preview["overflow"] is True
+    assert preview["log"].endswith(".json")
+    whole = json.loads(Path(preview["log"]).read_text(encoding="utf-8"))
+    assert len(whole["wouldChange"]) <= 16
+    assert len(whole["wouldWrite"]) <= 16
+    assert whole["sprintArchive"]["moveOrder"][0] == "sprint"
+    assert len(whole["sprintArchive"]["moveOrder"]) == 16
+    assert {entry["masterRef"]["path"] for entry in whole["archivedMasters"]} == {
         ref.path for ref in refs
     }
-    assert len(preview["taskArchive"]["cleanups"]) == 16
+    assert len(whole["taskArchive"]["cleanups"]) == 16
     assert world.snapshot() == before
     result = world.archive()
     assert result["ok"] and result["state"] == "archived"
     for ref in refs:
         assert (world.tasks / "0_archive" / Path(ref.path).parent / "task.json").is_file()
-    repeat = world.archive(dry_run=True)
+    # The archived-state preview carries the sixteen cleanups, so it too is
+    # over the bound: same short form, same file-backed read.
+    with tool_call_context(
+        "task_doc",
+        {"operation": "archive_sprint"},
+        config=SimpleNamespace(
+            coordination_root=world.coord,
+            transcript_root=world.coord / "logs" / "mcp",
+        ),
+    ):
+        repeat = world.archive(dry_run=True)
     assert repeat["ok"] and repeat["state"] == "archived"
-    assert repeat["wouldChange"] == []
+    assert repeat["overflow"] is True
+    repeat_whole = json.loads(Path(repeat["log"]).read_text(encoding="utf-8"))
+    assert repeat_whole["wouldChange"] == []
 
 
 def test_shared_keeper_preview_and_hook_failure_preview(world):

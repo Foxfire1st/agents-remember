@@ -384,9 +384,7 @@ def test_a_merge_moved_row_refuses_at_leaf_publication(
     _commit(fixture.memory_repo, {INTEGRATE_SIDECAR: moved}, message)
     assert fixture.sync(memory_sync_choice="merge-memory").payload["state"] == "synced"
 
-    merge = git(
-        fixture.memory_repo, "rev-parse", fixture.contract.memory_work_branch
-    )
+    merge = git(fixture.memory_repo, "rev-parse", fixture.contract.memory_work_branch)
     refusal = memory_commit_refusal(
         memory_repository=fixture.memory_repo,
         candidate_tree=merge,

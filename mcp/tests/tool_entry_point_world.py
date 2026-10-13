@@ -307,6 +307,12 @@ def _returned_arm(tool: str, payload: dict[str, Any] | None) -> tuple[str, str]:
     whole, missing = _read_whole_result(payload)
     if whole is None:
         return "unvalidatable", missing or "the answer names no whole-result file"
+    return _judge_delivered(tool, payload, whole)
+
+
+def _judge_delivered(tool: str, payload: dict[str, Any], whole: dict[str, Any]) -> tuple[str, str]:
+    """The arm for a call with a validated whole result: shape, envelope, keys, then ok."""
+
     try:
         TOOL_RESPONSE_MODELS[tool].model_validate(whole)
     except ValidationError as error:
@@ -328,6 +334,12 @@ def _returned_arm(tool: str, payload: dict[str, Any] | None) -> tuple[str, str]:
             f"the delivered answer holds {unknown!r}, which neither the whole result holds "
             "nor the shaping of MIK-R108 adds",
         )
+    return _refusal_arm(payload)
+
+
+def _refusal_arm(payload: dict[str, Any]) -> tuple[str, str]:
+    """The arm for a delivered answer: a refusal read from the answer, or the payload."""
+
     if payload.get("ok") is False:
         # Whether the caller can act on the refusal is read from the
         # delivered answer, never from the whole result (MIK-R130 rule 2).
@@ -685,31 +697,21 @@ class EntryPointWorld:
         # nothing is touched outside it even if a handler resolved it.
         absent_memory_root = (self.coord / "temp" / "knowledge" / "absent-memory-root").as_posix()
         return {
-            "ping": {},
             "server_info": {},
-            "context_packet": {"repo_id": REPO, "include_providers": False},
+            "context_packet": {"repo_id": REPO},
             "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
             "resolve_context": {"repo_id": REPO},
             "runtime_install": {"dry_run": True, "install_provider_deps": False},
-            "skills_install": {"dry_run": True},
             "dispatch_agent": {
                 "task_document_ref": self.task_ref,
                 "role": "worker",
                 "brief": "entry-point sweep",
             },
             "retire_child": {"task_document_ref": self.task_ref, "role": "worker"},
-            "rename_child": {
-                "task_document_ref": self.task_ref,
-                "role": "worker",
-                "label": "sweep",
-            },
-            "rename_self": {"label": "sweep"},
-            "drift_check": {"repo_id": REPO},
             "memory_quality_check": {
                 "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
             },
             "citation_fix": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
-            "citation_migrate": {"repo_id": REPO, "contract_path": contract, "dry_run": True},
             "route_index_refresh": {"repo_id": REPO, "dry_run": True},
             "memory_init": {"repo_id": REPO, "initialize_git": True},
             "memory_baseline_status": {"repo_id": REPO},
@@ -731,51 +733,14 @@ class EntryPointWorld:
                 "old_base": "HEAD",
                 "intent_note": "entry-point sweep",
             },
-            "provider_status": {},
-            "provider_diagnostics": {},
-            "provider_watchers": {"action": "status"},
-            "grepai_search": {"query": "entry-point sweep"},
-            "grepai_trace": {"symbol": "entry_point_sweep", "trace_action": "callers"},
-            "cgc_symbol_search": {"repo_id": REPO, "name": "sweep"},
-            "cgc_callers": {"repo_id": REPO, "function": "sweep"},
-            "cgc_callees": {"repo_id": REPO, "function": "sweep"},
-            "cgc_dependencies": {"repo_id": REPO, "module": "sweep"},
-            "cgc_complexity": {"repo_id": REPO},
-            "cgc_visualize": {"repo_id": REPO, "dry_run": True},
+            # MIK-R112 removed the provider and code-search tools with the code
+            # that only they used; their rows leave with them, no replacement.
             "task_doc": {
                 "repo_id": REPO,
                 "operation": "read_steps",
                 "task_name": MASTER,
                 "slug": "1_leaf",
             },
-            "lifecycle_start": {},
-            "lifecycle_phase": {"phase": "build"},
-            "lifecycle_turn_end_notification": {"summary": "entry-point sweep"},
-            "lifecycle_end": {"outcome": "completed"},
-            "switch_lifecycle": {"on_unsaved": "discard"},
-            "lifecycle_resume": {},
-            "lifecycle_gate": {
-                "kind": "plan-approval",
-                "wait": True,
-                "caller": {
-                    "role": "worker",
-                    "task_document_ref": {"repository": REPO, "path": "absent/task.json"},
-                },
-            },
-            "gate_list": {"caller": self.worker},
-            "gate_decide": {
-                "task_document_ref": self.leaf_ref,
-                "kind": "plan-approval",
-                "decision": "approve",
-                "caller": self.manager,
-            },
-            "role_capsule_compile": {
-                "contract_path": contract,
-                "task_path": f"{MASTER}/1_leaf.json",
-                "role": "worker",
-            },
-            "skill_catalog_list": {},
-            "skill_catalog_read": {"uri": "__FROM_LIST__"},
             # This server is unbound: role tools refuse before reading, starting or sending.
             "role_start": {
                 "role": "worker",
@@ -806,6 +771,10 @@ class EntryPointWorld:
                 "contract_path": absent,
                 "code_commit": "deadbeef",
                 "dry_run": True,
+            },
+            "direct_execution_grant": {
+                "task_document_ref": {"repository": REPO, "path": f"{MASTER}/absent.json"},
+                "action": "give",
             },
             "worktree_start": {
                 "repo_id": REPO,
@@ -857,15 +826,6 @@ class EntryPointWorld:
             "worktree_checkpoint_landing": {"contract_path": contract, "dry_run": True},
             "task_reopen": {"contract_path": contract, "dry_run": True},
             "lifecycle_finalize_task": {"contract_path": contract, "dry_run": True},
-            "codex_benchmark_prepare": {"dry_run": True},
-            "codex_benchmark_run": {"dry_run": True},
-            "message_parent": {"ask": "sweep", "response": "sweep"},
-            "message_child": {
-                "task_document_ref": self.task_ref,
-                "role": "worker",
-                "ask": "sweep",
-                "response": "sweep",
-            },
             # -- knowledge ----------------------------------------------------------------
             # The three `knowledge_*` operations over a memory tree (MIK-R26 rule 5). This fixture
             # has no memory tree: `knowledge_read` and `knowledge_integrity_check` name an absent
@@ -936,10 +896,6 @@ class EntryPointWorld:
         uncased = sorted(set(PUBLIC_TOOLS) - set(arguments))
         if uncased:
             raise AssertionError(f"roster tools with no case: {uncased}")
-        listing = self.call("skill_catalog_list", {})
-        skills = (listing[1] or {}).get("skills") or []
-        if skills:
-            arguments["skill_catalog_read"] = {"uri": skills[0]["uri"]}
         results: dict[str, dict[str, Any]] = {}
         for tool in PUBLIC_TOOLS:
             prepared = self.ambient_state()

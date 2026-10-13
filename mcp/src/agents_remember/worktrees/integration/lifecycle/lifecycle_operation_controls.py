@@ -72,6 +72,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control_projection import (
     LifecycleControlProjectionContext,
+    direct_supersede_refusal,
     generation_requires_recovery,
     legal_operation_controls,
 )
@@ -107,6 +108,7 @@ from agents_remember.worktrees.integration.lifecycle.worker.state import (
     reconcile_worker_exit,
 )
 from agents_remember.worktrees.integration.mutation_evidence import closeout_requires_recovery
+from agents_remember.worktrees.knowledge_gate import settle_direct_closing
 from agents_remember.worktrees.queue.closeout_projection_publication import (
     refresh_closeout_projection,
 )
@@ -180,6 +182,10 @@ def control_operation(
     contract, location = _reload_control_contract(command)
     store = LifecycleOperationStore(location.journal_path(command.kind))
     observed = _observe_control_under_lease(command, contract=contract, store=store)
+    if command.kind == "direct-landing" and command.action == "supersede":
+        # A direct landing claims no door, so there is nothing to supersede
+        # (ruling e55c0093 point 3); retire is its owner's disposition.
+        raise direct_supersede_refusal(observed.contract, observed.record)
     legal_rows = legal_operation_controls(
         observed.contract,
         observed.record,
@@ -346,18 +352,27 @@ def _resume(
     _require_resumable(record, action)
     if dry_run:
         return operation_projection(record, contract=contract)
-    contract, record = _resume_closeout_publications(contract, store, record)
     if record.operationKind == "direct-landing":
         current_contract, _location = reread_configured_contract(
             contract,
             record.input.configPath,
         )
-        _require_proven_closeout_door_for_launch(record)
+        # Direct-landing authority is the grant plus the admitted evidence,
+        # proven by the recovery classifier inside the recover call: the
+        # route never claims closeout doors, so no door proof is required
+        # for launch (F04). A direct landing claims no door by design, so the
+        # two door checks a record without a door cannot pass do not apply to
+        # it; they stay exactly as they are for a closeout. The recovery runs
+        # on what the record carries and settles the kept closing receipt in
+        # the same call (MIK-R143 rule 3b, rulings 08236bba and e55c0093).
         current = recover_direct_landing_under_authority(current_contract, store, record)
+        if current.status == "completed":
+            settle_direct_closing(current_contract, current=current.fingerprint, state="landed")
         return operation_projection(
             current,
             contract=load_contract(current_contract.contract_path),
         )
+    contract, record = _resume_closeout_publications(contract, store, record)
     requeued, changed = store.resume_generation(
         requeued_same_generation,
         expected_generation=record.generation,
@@ -380,7 +395,10 @@ def _resume_closeout_publications(
     store: LifecycleOperationStore,
     record: LifecycleOperationRecord,
 ) -> tuple[WorktreeContract, LifecycleOperationRecord]:
-    if record.operationKind not in {"closeout", "direct-landing"}:
+    if record.operationKind != "closeout":
+        # Only the enclosure closeout claims doors. The direct landing route
+        # never does: its launch authority is the grant plus the admitted
+        # evidence, proven by the recovery classifier (F04).
         return contract, record
     if record.legacyMigration is not None and record.doorPublication is None:
         # The explicit schema-1 bridge proves a retained generation that predates

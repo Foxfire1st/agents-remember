@@ -77,6 +77,10 @@ response — it must be this leaf's memory worktree — and preview any write wi
 2. **Route every change-set and notes item to its right onboarding home** through the
    `c-05-create-or-update-onboarding-files` workflow — the specific sidecar, or the overview whose subject it actually
    is. Never add an overview heading named for a leaf or date; update the applicable overview body.
+   An overview reads from its purpose (MIK-R80): title, the governing overview, what the area is for
+   under one of the fixed headings `## What This Repo Is`, `## What This Area Is` or `## Purpose`,
+   how it is built, its invariants and boundaries, and last all citation lines together. A change
+   goes into the section its change belongs to.
    Never overview-dump, never task-log-dump. An item with no file, route or entity home goes to the Operational
    Notes target as a last resort, never as the default drop point for something merely inconvenient to place.
    **On converted memory** (the tree holds the knowledge layout marker), follow the c-05 skill's converted-card
@@ -106,6 +110,7 @@ response — it must be this leaf's memory worktree — and preview any write wi
    made after its commit can never match the tree the authority attests.
 7. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
+   Evidence and working files go to the task record or the scratch root, never into the memory worktree.
 The result is review evidence, never a new closeout gate or an intent verdict.
 
 **The repository-foundation entry — the same reconciliation, without this leaf's delta.** Run the
@@ -143,6 +148,8 @@ opportunity, alternative frame or forward-learning hypothesis is **not automatic
   entries it wrote with their IDs and paths, the history rows, and every refusal with its own reason. It carries
   the **family coverage** the same way — the families authored or updated with their members and routes, and the
   families you examined and left unchanged with the reason. What you did not examine is reported as not examined.
+- **For every card the quality check reports as cut, the handover names the change of this task that made the
+  removed text untrue.** Text is never removed to clear a finding of the quality check.
 - **On the repository-foundation entry**, the same report carries the foundation's own facts instead of a leaf's:
   the state that was read before authoring, the source areas examined and not examined, each record's outcome, the
   files the wave wrote (or the state that says nothing was written), and the remaining and carried work — with the
@@ -232,6 +239,10 @@ You stop for an open permission prompt; for a refusal by a product guard or an A
 - **An unresolved transaction conflict belongs to the Manager**; source-change questions go to the Worker and
   evidenced code concerns to both Worker and Reviewer under the direct-handover rules. Report them without
   repairing code or transaction state. Your completed curation never decides whether a leaf lands.
+
+## Messages
+
+Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
 
 ## Developer questions and answers
 

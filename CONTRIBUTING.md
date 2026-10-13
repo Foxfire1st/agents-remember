@@ -81,8 +81,8 @@ integrity, recovery and external protocol boundaries. Delete obsolete assertions
 support together. Do not add recursive test runs, repeated collection, repository census
 copies, or synthetic fixture worlds to establish test policy.
 
-The provisional unit budget is 1,000 collected parametrized cases. The separate integration
-budget is declared beside it in `pyproject.toml`. Collection checks these limits without
+The provisional unit budget is 5,000 collected parametrized cases. The separate integration
+budget of 1,000 is declared beside it in `pyproject.toml`. Collection checks these limits without
 starting another collection or scanning source. Combined delivery observes both populations.
 An increase needs an explicit protection/cost tradeoff in the change description: what
 consequential behavior requires it, why existing tests cannot absorb it, and its case, code-size

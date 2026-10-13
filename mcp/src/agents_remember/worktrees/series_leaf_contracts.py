@@ -167,4 +167,6 @@ def exact_atomic_leaf_contracts(
             "atomic-series-leaf-contract-set-incomplete",
             f"master {series.task_id!r} closeout requires one exact enclosure for each non-abandoned row: missing={sorted(missing)!r}; complete those rows through their leaf lifecycle before closeout",
         )
-    return {leaf_id: contracts[leaf_id] for leaf_id in sorted(documents.refs) if leaf_id in contracts}
+    return {
+        leaf_id: contracts[leaf_id] for leaf_id in sorted(documents.refs) if leaf_id in contracts
+    }
