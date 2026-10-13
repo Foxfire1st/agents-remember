@@ -96,13 +96,17 @@ def _line_converted(contract: WorktreeContract, repository: Path) -> bool | str:
         return str(error)
 
 
-def _commit_converted(repository: Path, memory_commit: str) -> bool:
-    """On an unconverted line: whether the landed commit holds the marker (unreadable: exempt)."""
+def _commit_converted(repository: Path, memory_commit: str) -> bool | str:
+    """On an unconverted line: whether the landed commit holds the marker.
+
+    A probe Git cannot answer is returned as its named error text, never read as
+    unconverted: conversion does not repair an unreadable object (MIK-R46).
+    """
 
     try:
         return converted_memory(repository, memory_commit)
-    except GateProbeError:
-        return False  # as before this master: an unconverted line's commit is never read
+    except (GateProbeError, RuntimeError) as error:
+        return str(error)
 
 
 def _unnamed_memory_commit_refusal(converted: bool) -> str | None:
@@ -138,12 +142,14 @@ def _knowledge_gate_refusal(
     line = _line_converted(contract, repository)
     if isinstance(line, str):
         return line
-    if not line and not (memory_commit and _commit_converted(repository, memory_commit)):
+    if not line:
         # Unconverted memory: nothing more is read, exactly as before this master -- unless the
-        # repository holds converted memory, when the cutover lock refuses (MIK-R09 rule 6). The
-        # lock's verdict is the whole answer here: the landed commit is only probed for the
-        # marker, never read (L09 review R1, finding 7).
-        return leaf_cutover_refusal(contract, "record_landing")
+        # landed commit itself is converted, when the judged landing below decides (L148 landed
+        # behaviour, sealed L46-R1-B04). The helper names an unreadable probe by its error,
+        # never collapsing it, and otherwise refuses with the cutover lock (MIK-R09 rule 6).
+        refused = _unconverted_line_landing_refusal(contract, repository, memory_commit)
+        if refused is not None:
+            return refused
     if not memory_commit:
         return _unnamed_memory_commit_refusal(line)
     return _judged_landing_refusal(contract, code_commit, memory_commit)
@@ -288,6 +294,33 @@ def _judged_recorded_code(contract: WorktreeContract, code_commit: str) -> str:
     ):
         return recorded
     return code_commit
+
+
+def _unconverted_line_landing_refusal(
+    contract: WorktreeContract, repository: Path, memory_commit: str
+) -> str | None:
+    """Refuse a landing on an unconverted memory line (MIK-R46 rule 1).
+
+    A missing landed commit, or one that holds no converted marker, is refused
+    with the central message before anything is read: recording a landing
+    writes landing state onto the line, and an ordinary operation on
+    unconverted memory refuses first. A landed commit Git cannot probe is
+    named by its probe error instead: conversion does not repair an
+    unreadable object. A present converted candidate is NOT made legacy by
+    the line's prior tip (sealed L46-R1-B04: converted candidates still reach
+    validation): ``None`` routes it to the caller's judged landing. The
+    landed commit is only probed for the marker, never read (L09 review R1,
+    finding 7).
+    """
+
+    if not memory_commit:
+        return leaf_cutover_refusal(contract, "record_landing")
+    commit_state = _commit_converted(repository, memory_commit)
+    if isinstance(commit_state, str):
+        return commit_state
+    if commit_state:
+        return None
+    return leaf_cutover_refusal(contract, "record_landing")
 
 
 def _landing_request(

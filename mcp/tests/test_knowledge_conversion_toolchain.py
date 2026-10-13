@@ -4,6 +4,7 @@ is read as legacy-format and refused elsewhere once its official line is convert
 
 from __future__ import annotations
 
+import argparse
 import gzip
 import json
 from pathlib import Path
@@ -13,13 +14,14 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from agents_remember.application import memory_tools, prepared_certification
+from agents_remember.application import memory_tools, prepared_certification, worktree_tools
 from agents_remember.application.memory_quality import census as census_module
 from agents_remember.application.memory_quality.census import (
     PreparedMemoryCensus,
     census_curator_candidates,
 )
 from agents_remember.application.memory_quality.census_base import census_comparison
+from agents_remember.application.memory_quality.controller import run_memory_quality_request
 from agents_remember.application.memory_quality.converted_base import (
     context_check_base,
     converted_check_base,
@@ -27,6 +29,7 @@ from agents_remember.application.memory_quality.converted_base import (
 from agents_remember.application.memory_tools import CitationOperationScope, memory_init_tool
 from agents_remember.application.read_files import read_ar_files_tool
 from agents_remember.application.worktree_services import MemoryQualityAdapter
+from agents_remember.cli import knowledge_convert
 from agents_remember.kernel import memory_init
 from agents_remember.kernel.coordination_context_resolver import StorageSettings
 from agents_remember.kernel.memory_init import LAYOUT_MARKER_TEXT
@@ -35,7 +38,7 @@ from agents_remember.mcp.tools import memory as memory_tool_payloads
 from agents_remember.memory.conversion import card_authoring
 from agents_remember.memory.conversion.card_authoring import author_card_references
 from agents_remember.memory.conversion.code_objects import CodeObjects
-from agents_remember.memory.conversion.convert import convert_memory
+from agents_remember.memory.conversion.convert import CONVERSION_FORMAT_VERSION, convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
 from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
 from agents_remember.memory_quality.converted_cards import converted_card_metadata
@@ -57,9 +60,12 @@ from agents_remember.memory_quality.memory_census_scope import (
 from agents_remember.memory_quality.reference_state import check_references, fix_references
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.ids import derived_record_id
+from agents_remember.models.memory import MemoryQualitySyncRequest
 from agents_remember.observer import reset_ambient
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.worktree_contract import load_contract
+from curator_coherence_test_support import write_curator_evidence
 from knowledge_conversion_test_support import (
     APP,
     APP_SIDECAR,
@@ -69,6 +75,15 @@ from knowledge_conversion_test_support import (
     code_repository,
     git,
     memory_repository,
+)
+from test_closeout_queue import (
+    MASTER_A,
+    SPRINT,
+    QueueFixture,
+    cover_fixture_code_changes,
+)
+from test_closeout_queue import (
+    REPO as QUEUE_REPO,
 )
 from test_read_ar_files import REPO, _build_context, _make_config, _write_route_index
 
@@ -194,9 +209,15 @@ def test_memory_quality_reads_the_converted_format(tmp_path: Path) -> None:
     assert (absent["status"], absent["findingCount"]) == ("fail", 0)
 
 
-def test_an_unconverted_leaf_is_refused_only_once_its_official_line_is_converted(
+def test_an_unconverted_leaf_is_refused_with_the_conversion_step_on_any_line(
     tmp_path: Path,
 ) -> None:
+    """MIK-R46 rules 1 and 2: an unconverted leaf is refused on any line, naming the conversion.
+
+    When its official line is converted the refusal names the crossing sync; otherwise it names
+    the first conversion. A converted worktree is never refused.
+    """
+
     code = code_repository(tmp_path / "code")
     memory = tmp_path / "memory"
     memory_repository(memory, code)
@@ -211,7 +232,9 @@ def test_an_unconverted_leaf_is_refused_only_once_its_official_line_is_converted
             operation="knowledge-ingest",
         )
 
-    assert refusal() is None  # before the cutover every line is unconverted: nothing changes
+    first = refusal()
+    assert first is not None and "code legacy-format" in first
+    assert "agents-remember knowledge-convert" in first
     _convert_in_place(memory, code)
     git(memory, "add", "-A")
     git(memory, "commit", "-q", "-m", "convert the official line")
@@ -511,11 +534,14 @@ def test_citation_rows_author_a_converted_cards_sidecar_with_resolved_anchors(
     assert "| X. |" in other.read_text(encoding="utf-8")  # nothing of it written
 
 
-def test_one_converted_card_is_fixed_by_its_document_alone_and_legacy_keeps_the_snapshot(
+def test_one_converted_card_is_fixed_by_its_document_alone_and_unconverted_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """L37 ruling 2026-10-01T10:06:02: on converted memory ``citation_fix`` takes ``--document``
-    alone and touches that one card; on unconverted memory a document still needs its snapshot."""
+    """On converted memory ``citation_fix`` takes ``--document`` alone and touches that one card.
+
+    MIK-R46 rule 1: on unconverted memory the fix refuses with the conversion step and the
+    fixer never runs (the L37 ruling's unconverted snapshot pairing is gone with the old path).
+    """
 
     code = code_repository(tmp_path / "code")
     memory = tmp_path / "memory"
@@ -531,11 +557,9 @@ def test_one_converted_card_is_fixed_by_its_document_alone_and_legacy_keeps_the_
             cast(Any, None), repo_id="demo", contract_path="contract.md", operation_scope=scope
         )
 
-    legacy = mock.Mock(side_effect=AssertionError("the legacy fixer ran without a snapshot"))
-    monkeypatch.setattr(memory_tools.fixer, "fix_onboarding_root", legacy)
-    monkeypatch.setattr(memory_tools, "_citation_trees", legacy)
-    with pytest.raises(ValueError, match="--document and --expected-snapshot together"):
-        fix(one)  # unconverted: the pairing rule stands
+    refused = fix(one)  # unconverted: refused with the conversion step; the fixer never runs
+    assert refused["ok"] is False and refused["code"] == "legacy-format"
+    assert "agents-remember knowledge-convert" in refused["detail"]
     with pytest.raises(ValueError, match="together"):
         memory_tools.citation_migrate_tool(
             cast(Any, None), repo_id="demo", contract_path="contract.md", operation_scope=one
@@ -561,7 +585,6 @@ def test_one_converted_card_is_fixed_by_its_document_alone_and_legacy_keeps_the_
     assert "| Finding |" in pending.read_text(encoding="utf-8")  # another card: not authored
     assert (memory / APP_SIDECAR).read_bytes() == elsewhere  # and not refreshed
     assert set(fixed["rewrittenSidecars"]) <= {f"onboarding/{EXTRA}.json"}
-    legacy.assert_not_called()
     assert fix(CitationOperationScope())["authoring"]["authoredCards"] == [
         "onboarding/src/pkg/other.py.md"
     ]  # tree-wide stays the default
@@ -973,3 +996,176 @@ def test_two_tables_with_no_blank_line_between_them_are_refused_by_name(tmp_path
 @pytest.fixture(autouse=True)
 def _ambient() -> None:
     reset_ambient()
+
+
+def _convert_worktree(memory_worktree: Path, code_worktree: Path) -> None:
+    """Run the public ``knowledge-convert`` command over one leaf's memory worktree."""
+
+    args = argparse.Namespace(
+        memory_root=memory_worktree,
+        code=code_worktree,
+        code_commit="HEAD",
+        version=CONVERSION_FORMAT_VERSION,
+        report=None,
+        check=False,
+    )
+    assert knowledge_convert.run(args) == 0
+    assert (memory_worktree / "knowledge" / "layout.json").is_file()
+
+
+@pytest.mark.integration
+def test_an_official_line_converts_closes_lands_crosses_then_checks(tmp_path: Path) -> None:
+    """MIK-R46 rule 6 (memory with an official line), end to end through the public tools.
+
+    An old-format fixture repository holds one official line and two open leaves. The
+    closeout preview refuses the first leaf with the one ``legacy-format`` message and
+    writes nothing; the leaf converts its memory worktree with ``knowledge-convert`` as
+    its first memory change, covers its change, closes out and lands through the public
+    closeout and integrate routes; the second leaf crosses at its next ``worktree_sync``
+    with ``merge-memory``; then ``memory_quality_check`` at repository scope runs instead
+    of refusing.
+    """
+
+    fixture = QueueFixture(tmp_path / "world", memory_mode="external", converted=False)
+    leaf1 = load_contract(fixture.contracts[MASTER_A].contract_path)
+    assert leaf1.memory_worktree is not None and leaf1.code_worktree is not None
+    fixture.author_unstarted_leaf("master-a", "LEAF-A2")
+    leaf2 = fixture.start_leaf("LEAF-A2")
+    assert leaf2.memory_worktree is not None and leaf2.code_worktree is not None
+    # The second leaf's starting files stay out of every branch's way: its feature file is
+    # renamed to a path the landing never touches, so the later crossing merges cleanly.
+    renamed = leaf2.code_worktree / "leaf-a2-feature.txt"
+    (leaf2.code_worktree / "feature.txt").rename(renamed)
+
+    messages = worktree_tools.CloseoutCommitMessages(code="leaf code", memory="leaf memory")
+    before = (
+        git(leaf1.code_worktree, "rev-parse", "HEAD"),
+        git(leaf1.memory_worktree, "rev-parse", "HEAD"),
+        git(fixture.code, "rev-parse", leaf1.code_source_branch),
+        git(fixture.memory, "rev-parse", leaf1.memory_source_branch),
+        git(leaf1.code_worktree, "status", "--porcelain"),
+        git(leaf1.memory_worktree, "status", "--porcelain"),
+    )
+    preview = worktree_tools.worktree_closeout_preview_tool(
+        fixture.cfg, leaf1.contract_path.as_posix(), messages
+    )
+    assert preview["state"] == "knowledge-gate-refused", preview
+    text = json.dumps(preview)
+    assert "code legacy-format" in text and "agents-remember knowledge-convert" in text, text
+    assert (
+        git(leaf1.code_worktree, "rev-parse", "HEAD"),
+        git(leaf1.memory_worktree, "rev-parse", "HEAD"),
+        git(fixture.code, "rev-parse", leaf1.code_source_branch),
+        git(fixture.memory, "rev-parse", leaf1.memory_source_branch),
+        git(leaf1.code_worktree, "status", "--porcelain"),
+        git(leaf1.memory_worktree, "status", "--porcelain"),
+    ) == before  # the refusal writes nothing
+
+    _convert_worktree(leaf1.memory_worktree, leaf1.code_worktree)
+    leaf1 = load_contract(leaf1.contract_path)
+    assert leaf1.memory_worktree is not None
+    cover_fixture_code_changes(leaf1, "feature.txt")
+    write_curator_evidence(leaf1, caller_ref=SPRINT)
+
+    applied = worktree_tools.worktree_closeout_apply_tool(
+        fixture.cfg,
+        leaf1.contract_path.as_posix(),
+        messages,
+        worktree_tools.CloseoutApproval(intent_note="Approve the first-conversion leaf only"),
+    )
+    assert applied.get("ok") is True and applied["state"] == "closed", applied
+    landed = worktree_tools.worktree_integrate_tool(
+        fixture.cfg, contract_path=leaf1.contract_path.as_posix()
+    )
+    assert landed.get("ok") is True and landed["state"] == "integrated", landed
+    official = git(fixture.memory, "rev-parse", leaf1.memory_source_branch)
+    assert official != before[3]
+    assert (
+        git(fixture.memory, "show", f"{official}:knowledge/layout.json").strip() != ""
+    )  # the official line is converted
+
+    leaf2 = load_contract(leaf2.contract_path)
+    synced = worktree_tools.worktree_sync_tool(
+        fixture.cfg, contract_path=leaf2.contract_path.as_posix(), memory_sync_choice="merge-memory"
+    )
+    assert synced.get("ok") is True and synced["state"] == "synced", synced
+    crossed = git(fixture.memory, "rev-parse", leaf2.memory_work_branch)
+    assert (
+        git(fixture.memory, "show", f"{crossed}:knowledge/layout.json").strip() != ""
+    )  # the second leaf crossed into the text format
+
+    # The master landing that carries the landed line to main is the ordinary master flow;
+    # the test fast-forwards main to the landed super tip to set up the repository check.
+    git(fixture.code, "merge", "--ff-only", "super")
+    git(fixture.memory, "merge", "--ff-only", "super")
+    checked = run_memory_quality_request(
+        fixture.cfg,
+        MemoryQualitySyncRequest(repo_id=QUEUE_REPO, mode="sync", contract_path=None),
+    )
+    assert checked.get("ok") is True, json.dumps(checked, indent=1, default=str)[:3000]
+
+
+@pytest.mark.integration
+def test_memory_without_a_baseline_converts_in_place_then_adopts(tmp_path: Path) -> None:
+    """MIK-R46 rule 6 (memory with no attributed baseline), through the public tools.
+
+    Before the conversion ``memory_baseline_status`` answers ``legacy-format`` with the
+    conversion step; ``knowledge-convert`` runs on the memory root itself; then the
+    baseline adopts, which validates the converted tree.
+    """
+
+    root = tmp_path / "world"
+    coordination = root / "coordination"
+    code = root / "repo"
+    memory = coordination / "memory-repos" / "ar-repo"
+    code.mkdir(parents=True, exist_ok=True)
+    memory.mkdir(parents=True, exist_ok=True)
+    git(code, "init", "-q", "-b", "main")
+    git(code, "config", "user.email", "agents-remember@example.invalid")
+    git(code, "config", "user.name", "Agents Remember")
+    (code / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    git(code, "add", "-A")
+    git(code, "commit", "-q", "-m", "Add module")
+    coordination.mkdir(parents=True, exist_ok=True)
+    config_path = root / "settings.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "coordinationRoot": coordination.as_posix(),
+                "workspaceRoot": root.as_posix(),
+                "repositories": {"repo": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    git(memory, "init", "-q", "-b", "main")
+    git(memory, "config", "user.email", "agents-remember@example.invalid")
+    git(memory, "config", "user.name", "Agents Remember")
+    (memory / "onboarding").mkdir(parents=True, exist_ok=True)
+    (memory / "onboarding" / "module.md").write_text("# Module\n", encoding="utf-8")
+    (memory / "system").mkdir(parents=True, exist_ok=True)
+    (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+    (memory / "memory.md").write_text("not a ledger\n", encoding="utf-8")
+    # Adoption is the bootstrap exception on the exact unborn branch memory_init mints.
+    git(memory, "config", "agents-remember.defaultBranch", "main")
+    git(memory, "update-ref", "-d", "refs/heads/main")
+
+    config = load_config(config_path)
+    initial = memory_tools.memory_baseline_status_tool(config, repo_id="repo")
+    assert initial["state"] == "legacy-format", initial
+    # The refusal is said once, short, in `message`; the conversion command rides
+    # the logged detail and the next action (MIK-R46 rule 6, say-once shape).
+    assert "did not run: the memory root is unconverted" in str(initial.get("message", "")), initial
+    assert "agents-remember knowledge-convert" in str(initial.get("detail", "")), initial
+    assert "agents-remember knowledge-convert" in str(initial.get("nextAction", "")), initial
+
+    _convert_worktree(memory, code)
+    result = memory_tools.memory_baseline_adopt_tool(
+        config,
+        repo_id="repo",
+        accept_drift=True,
+        branches=memory_tools.MemoryBranches(source_branch="main", work_branch="main"),
+    )
+    assert result["ok"] is True, result
+    assert result["state"] == "adopted", result

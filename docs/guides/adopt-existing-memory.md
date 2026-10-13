@@ -2,6 +2,8 @@
 
 Use this guide when an external memory repo already exists and should become the first ledgered memory baseline.
 
+Convert first: when the memory is still in the legacy format (no `knowledge/layout.json`), every ordinary memory operation refuses it with the code `legacy-format`. Follow [Make the First Conversion](first-conversion.md) before adopting — case A for memory with no attributed baseline, case B for memory with an official line. `memory_baseline_status` answers the state `legacy-format` until the conversion is done.
+
 ## Purpose
 
 `c-10-adopt-memory-baseline` turns current external-memory onboarding into the first `memory.md` baseline. It does not refresh stale onboarding. It records that the current memory content is accepted as matching a code commit.

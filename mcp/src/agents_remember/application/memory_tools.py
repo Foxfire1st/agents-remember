@@ -42,9 +42,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     run_drift_summary,
 )
 from agents_remember.memory_quality.style.citations import (
-    fixer,
     migration,
-    range_resolution,
     source_index,
 )
 from agents_remember.memory_quality.style.citations.exclusion_register import (
@@ -54,7 +52,11 @@ from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
 from agents_remember.models.knowledge_files.records import RECORD_MODELS
 from agents_remember.models.lifecycles.curator_coherence import MAX_CURATOR_SOURCE_CANDIDATES
-from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, legacy_format_refusal
+from agents_remember.worktrees.cutover_lock import (
+    LEGACY_FORMAT_CODE,
+    is_legacy_format_refusal,
+    legacy_format_refusal,
+)
 from agents_remember.worktrees.integration.configured_contract_authority import (
     require_configured_contract_repositories,
 )
@@ -171,6 +173,22 @@ def drift_check_tool(
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
     # A drift read files no temp report (rule 6); the observer snapshot still applies and is
     # a named open boundary, not part of this fix.
+    memory_root = scope.onboarding_root.parent
+    if memory_root.is_dir() and not reference_state.is_converted_memory(memory_root):
+        # MIK-R46 rules 1 and 2: drift on unconverted memory is status "error" with the one
+        # rule-2 message; it is not measured in the old format.
+        message = legacy_format_refusal(
+            memory_root,
+            operation="drift_check",
+            subject=f"the memory tree {memory_root.as_posix()}",
+        )
+        return {
+            "ok": False,
+            "operation": "drift_check",
+            "onboardingRoot": scope.onboarding_root.as_posix(),
+            "status": "error",
+            "error": message,
+        }
     packet = run_drift_summary(
         code_repository_root=scope.code_root,
         context=scope.context,
@@ -304,8 +322,7 @@ def _pre_baseline_official_scope(
         raise AuthorityError(
             f"{operation} without a leaf contract is refused: the configured memory root "
             f"({repo.memory_root.as_posix()}) holds no knowledge/layout.json, so no "
-            f"pre-baseline admission applies; it requires a leaf contract_path -- start or "
-            f"attach a worktree and pass its contract path"
+            f"pre-baseline admission applies -- {legacy_format_refusal(repo.memory_root, operation=operation, subject='this memory root')}"
         )
     if baseline.has_adopted_baseline(repo.memory_root):
         raise AuthorityError(
@@ -369,14 +386,16 @@ def citation_check_tool(
             "repoId": scope.repo_id,
             **reference_state.check_references(memory_root, scope.code_root),
         }
-    trees = _citation_trees(scope, operation_scope.excludes)
+    # MIK-R46 rule 1: the check refuses unconverted memory with the one rule-2 message,
+    # exactly as the fix does; read_ar_files is how such a tree is looked at.
     return {
         "repoId": scope.repo_id,
-        **range_resolution.check_onboarding_root(
-            scope.onboarding_root,
-            trees,
-            only=operation_scope.document,
-            expected_snapshot=operation_scope.expected_snapshot,
+        "ok": False,
+        "code": LEGACY_FORMAT_CODE,
+        "detail": legacy_format_refusal(
+            memory_root,
+            operation="citation_check",
+            subject=f"the memory tree {memory_root.as_posix()}",
         ),
     }
 
@@ -459,29 +478,22 @@ def citation_fix_tool(
                 ),
             }
         )
-    operation_scope.validate(allow_documents=True)
-    trees = _citation_trees(scope, operation_scope.excludes)
-    full = fixer.fix_onboarding_root(
-        scope.onboarding_root,
-        trees,
-        dry_run=dry_run,
-        only=(
-            operation_scope.document
-            if operation_scope.documents is None
-            else list(operation_scope.documents)
+    # MIK-R46 rule 1: the fix refuses unconverted memory with the one rule-2 message, in
+    # every mode -- the old-format write path is gone, and the old-format dry-run report
+    # with it; convert first, then repeat. The next action rides the whole result so the
+    # delivered answer validates against it.
+    return {
+        "repoId": scope.repo_id,
+        "ok": False,
+        "code": LEGACY_FORMAT_CODE,
+        "detail": legacy_format_refusal(
+            memory_root,
+            operation="citation_fix",
+            subject=f"the memory tree {memory_root.as_posix()}",
         ),
-        expected_snapshot=operation_scope.expected_snapshot,
-    )
-    return _citation_fix_result(
-        {
-            "repoId": scope.repo_id,
-            **full,
-            **_citation_fix_status(
-                full,
-                document_count=_citation_fix_document_count(memory_root, operation_scope, full),
-            ),
-        }
-    )
+        "nextAction": "citation_fix",
+        **measuring_build_stamp(),
+    }
 
 
 def _citation_fix_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -736,6 +748,27 @@ def route_index_refresh_tool(
         if not dry_run and contract_path is not None
         else _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
     )
+    memory_root = scope.onboarding_root.parent
+    if (
+        not dry_run
+        and memory_root.is_dir()
+        and not reference_state.is_converted_memory(memory_root)
+    ):
+        # MIK-R46 rule 1: the apply refuses unconverted memory with the one rule-2 message;
+        # the preview (dry_run) still reports as today. Convert first, then repeat.
+        return {
+            "ok": False,
+            "operation": "route_index_refresh",
+            "repoId": scope.repo_id,
+            "code": LEGACY_FORMAT_CODE,
+            "detail": legacy_format_refusal(
+                memory_root,
+                operation="route_index_refresh",
+                subject=f"the memory tree {memory_root.as_posix()}",
+            ),
+            "onboardingRoot": scope.onboarding_root.as_posix(),
+            "dryRun": dry_run,
+        }
     result = build_route_indexes(
         code_root=scope.code_root,
         onboarding_root=scope.onboarding_root,
@@ -907,7 +940,13 @@ def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> di
     payload = baseline.baseline_status(_baseline_request(config, repo))
     return {
         "ok": payload.get("state")
-        not in {"blocked-drift", "blocked-invalid", "blocked-legacy-cards", "unavailable"},
+        not in {
+            "blocked-drift",
+            "blocked-invalid",
+            "blocked-legacy-cards",
+            "unavailable",
+            "legacy-format",
+        },
         "operation": "memory_baseline_status",
         **payload,
     }
@@ -990,6 +1029,36 @@ def memory_carryover_plan_tool(
     return {"ok": True, "operation": "memory_carryover_plan", **payload}
 
 
+def _carryover_legacy_refusal(detail: str) -> dict[str, Any]:
+    """The typed refusal for a carryover the rule-1 lock reports by raising.
+
+    The short message carries the refusal once for the answer guard; the full rule-2
+    text stays in the logged detail.
+    """
+
+    short = (
+        "memory_carryover_apply did not run: the target memory is unconverted "
+        "(no knowledge/layout.json); convert it first."
+    )
+    return {
+        "ok": False,
+        "operation": "memory_carryover_apply",
+        "state": "refused",
+        "code": LEGACY_FORMAT_CODE,
+        "message": short,
+        "detail": detail.strip(),
+        "nextAction": (
+            "convert the target memory first (agents-remember knowledge-convert "
+            "MEMORY_ROOT --code CODE_REPOSITORY), then rerun memory_carryover_apply; "
+            "memory_baseline_status reports the same repository's state"
+        ),
+        "nextStep": {
+            "summary": short,
+            "nextTool": "memory_baseline_status",
+        },
+    }
+
+
 def memory_carryover_apply_tool(
     config: McpRuntimeConfig,
     selection: CarryoverSelection,
@@ -998,15 +1067,20 @@ def memory_carryover_apply_tool(
     include_review_required: list[str] | None = None,
     messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
-    payload = carryover._apply_carryover_for_request(
-        _carryover_request(config, selection),
-        authority=config,
-        options=carryover.CarryoverApplyOptions(
-            intent_note=intent_note,
-            include_review_required=include_review_required,
-            memory_commit_message=messages.memory,
-        ),
-    )
+    try:
+        payload = carryover._apply_carryover_for_request(
+            _carryover_request(config, selection),
+            authority=config,
+            options=carryover.CarryoverApplyOptions(
+                intent_note=intent_note,
+                include_review_required=include_review_required,
+                memory_commit_message=messages.memory,
+            ),
+        )
+    except RuntimeError as error:
+        if not is_legacy_format_refusal(str(error)):
+            raise
+        return _carryover_legacy_refusal(str(error))
     return {"ok": True, "operation": "memory_carryover_apply", **payload}
 
 

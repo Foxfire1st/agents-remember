@@ -418,8 +418,16 @@ def open_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     memory_seed = init_repo(memory_repo, "main")
     write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
-    git(memory_repo, "add", "memory.md")
-    git(memory_repo, "commit", "-m", "Add memory ledger")
+    # MIK-R46 rule 8: the shared fixture builds converted memory -- the layout marker rides
+    # the base commit, so lifecycles under test run the converted routes.
+    (memory_repo / "knowledge").mkdir(parents=True, exist_ok=True)
+    (memory_repo / "knowledge" / "layout.json").write_text(
+        '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n', encoding="utf-8"
+    )
+    git(memory_repo, "add", "memory.md", "knowledge/layout.json")
+    # The seed pairs with the code base (Code-Commit trailer): converted memory
+    # is judged by the invariant gate, which reads the pairing.
+    git(memory_repo, "commit", "-m", f"Add memory ledger\n\nCode-Commit: {code_base}")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
     git(code_repo, "branch", "super", code_base)
     git(memory_repo, "branch", "super", memory_base)

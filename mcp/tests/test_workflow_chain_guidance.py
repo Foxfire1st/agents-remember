@@ -73,6 +73,7 @@ from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.server import create_server
 from agents_remember.models.base import NextStep
+from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.observer.ambient import ambient
 from agents_remember.worktrees.modules.guidance import lifecycle_guidance
@@ -374,8 +375,16 @@ class WorkflowWorld:
             json.dumps({"version": 1, "onboarding": {"storage": {"mode": "memory-repo"}}}),
             encoding="utf-8",
         )
+        # Converted memory: the layout marker rides the scaffold commit, so lifecycles under
+        # test run the converted routes. The scaffold pairs with the code base (Code-Commit
+        # trailer): converted memory is judged by the invariant gate, which reads the pairing.
+        (self.memory / "knowledge").mkdir(parents=True, exist_ok=True)
+        (self.memory / "knowledge" / "layout.json").write_text(
+            '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n', encoding="utf-8"
+        )
         _git(self.memory, "add", "-A")
-        _git(self.memory, "commit", "-m", "memory scaffold")
+        code_base = _git(self.code, "rev-parse", "HEAD")
+        _git(self.memory, "commit", "-m", f"memory scaffold\n\nCode-Commit: {code_base}")
         # `load_config` resolves a configured repository as `<workspaceRoot>/<repo_id>` and ignores
         # the settings file's `path` key (`kernel/primitives/runtime_config.py::_parse_repository_entry`);
         # that is the convention the mutation boundaries re-read afterwards. Without this link the
@@ -765,6 +774,33 @@ class WorkflowChainObservation:
         self.world.author_documents()
         started = self._record("worktree_start")
         assert started.kind == "RETURNED", started
+
+        # Converted memory: the leaf's closeout judges the work file against the invariant
+        # gate, which needs the file's onboarding trace. Seed L1's open history with the
+        # trace row; the closeout extends it with its own rows.
+        history_dir = load_contract(self.world.contract).memory_worktree
+        assert history_dir is not None
+        history_dir = history_dir / "knowledge" / "history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        (history_dir / f"{LEAF_ID}.json").write_text(
+            canonical_text(
+                {
+                    "schema": "ar-history/v1",
+                    "leaf": LEAF_ID,
+                    "closed": False,
+                    "rows": [
+                        {
+                            "id": "ROW-000000",
+                            "subject": f"onboarding:{CODE_CHANGE}",
+                            "disposition": "no_impact",
+                            "reason": "The work file carries no invariant.",
+                            "items": [],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
 
         # The work itself: one real change inside the code worktree.
         (load_contract(self.world.contract).code_worktree / CODE_CHANGE).write_text(

@@ -945,14 +945,13 @@ def _bootstrap(world: World, memory: Path) -> str:
     return str(printed.call_args.args[0])
 
 
-def test_knowledge_bootstrap_refuses_unconverted_memory_once_the_repository_holds_converted_memory(
+def test_knowledge_bootstrap_refuses_unconverted_memory_with_or_without_converted_memory_elsewhere(
     tmp_path: Path,
 ) -> None:
-    """MIK-R09 rule 6 / MIK-R24 rule 9: an unconverted root is refused, naming how it converts.
+    """MIK-R46 rules 1 and 2: an unconverted root is refused, naming how it converts.
 
-    In a repository that holds converted memory the cutover lock names the crossing sync. In one
-    that holds none the root is memory in the legacy format: the database writer is retired
-    (MIK-R26), and the refusal names the conversion command.
+    In a repository that holds converted memory the refusal names the converted line; in one
+    that holds none it says so. Both carry the conversion command and the crossing sync.
     """
 
     world = build_world(tmp_path)  # its main branch holds the layout marker
@@ -972,7 +971,8 @@ def test_knowledge_bootstrap_refuses_unconverted_memory_once_the_repository_hold
     commit_all(other, "unconverted")
     before = tree_bytes(other)
     legacy = _bootstrap(world, other)
-    assert "knowledge-bootstrap refuses the memory root" in legacy and "legacy format" in legacy
+    assert "knowledge-bootstrap refuses the unconverted memory of" in legacy
+    assert "legacy format" in legacy
     assert "agents-remember knowledge-convert" in legacy and "worktree_sync" in legacy
     assert "holds no converted memory yet" in legacy
     assert tree_bytes(other) == before and not list(other.rglob("*.sqlite"))

@@ -304,7 +304,7 @@ def initialize_memory(
     created_dirs.extend(_create_missing_dirs(paths[1:], dry_run=dry_run))
     created_files = _create_missing_files(files, dry_run=dry_run)
 
-    return {
+    result: dict[str, Any] = {
         "ok": True,
         "operation": "memory_init",
         "repoId": repo_id,
@@ -317,3 +317,13 @@ def initialize_memory(
         "layoutMarker": layout,
         "git": git,
     }
+    if layout == "unconverted-existing-memory":
+        # The initializer never marks legacy content (marking it would read the old format as
+        # the new one); the root converts first (MIK-R46 rule 6).
+        result["nextStep"] = (
+            "this memory root is unconverted (no knowledge/layout.json): convert first with "
+            "`agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY`, as the "
+            "c-13-install-and-onboard skill and docs/guides/first-conversion.md describe "
+            "(MIK-R46 rule 6)"
+        )
+    return result

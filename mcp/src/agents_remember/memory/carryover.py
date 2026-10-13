@@ -807,11 +807,12 @@ CONVERTED_TARGET = (
 
 
 def _require_legacy_format_target(request: CarryoverRequest, configured: RepositoryScope) -> None:
-    """Carryover writes legacy-format memory only, and only while the repository is not locked.
+    """Carryover writes legacy-format memory only, and only on unconverted lines -- which every
+    route now refuses (MIK-R46 rule 1).
 
-    A converted target is refused, naming the file writer. An unconverted target is refused by the
-    cutover lock once its memory repository holds converted memory (MIK-R09 rule 6), naming the
-    crossing sync, exactly as the closeout that would land the carried memory refuses it.
+    A converted target is refused, naming the file writer. An unconverted target is refused by
+    the cutover lock with the one ``legacy-format`` message naming the conversion, exactly as
+    the closeout that would land the carried memory refuses it.
     """
 
     target = request.target_memory.resolve()

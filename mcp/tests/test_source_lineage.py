@@ -17,6 +17,7 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
@@ -454,6 +455,7 @@ def _fixture(
     external_memory: bool = True,
     publish_locations: bool = True,
     selected_profile: bool = False,
+    converted_memory: bool = False,
 ) -> _Fixture:
     """One task world with external memory: every task runs with a memory repository.
 
@@ -465,7 +467,12 @@ def _fixture(
     assert external_memory, "this fixture builds an external-memory world only (MIK-R50)"
     coordination = root / "coordination"
     code_repo = _repo(root / "code", selected_profile=selected_profile)
-    memory_repo = _repo(root / "memory")
+    code_base = _git(code_repo, "rev-parse", "super")
+    memory_repo = _repo(
+        root / "memory",
+        converted=converted_memory,
+        pair_code=code_base if converted_memory else None,
+    )
     task_root = coordination / "tasks" / "repo" / "master"
     _write_task_tree(coordination)
     memory_mode = "external"
@@ -611,7 +618,13 @@ def _doc(**values: object) -> TaskDocument:
     )
 
 
-def _repo(path: Path, *, selected_profile: bool = False) -> Path:
+def _repo(
+    path: Path,
+    *,
+    selected_profile: bool = False,
+    converted: bool = False,
+    pair_code: str | None = None,
+) -> Path:
     path.mkdir(parents=True)
     _git(path, "init", "-b", "super")
     _git(path, "config", "user.email", "test@example.invalid")
@@ -621,7 +634,20 @@ def _repo(path: Path, *, selected_profile: bool = False) -> Path:
     if selected_profile:
         profile = install_fixture_profile(path, "repo")
         _git(path, "add", profile.relative_to(path).as_posix())
-    _git(path, "commit", "-m", "base")
+    message = "base"
+    if converted:
+        # Converted memory: the marker rides the base commit and the base pairs with the
+        # code base, so lifecycles under test run the converted routes under the gate.
+        marker = path / "knowledge" / "layout.json"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+            encoding="utf-8",
+        )
+        _git(path, "add", marker.relative_to(path).as_posix())
+        if pair_code is not None:
+            message = f"base\n\nCode-Commit: {pair_code}"
+    _git(path, "commit", "-m", message)
     _git(path, "branch", "main", "super")
     _git(path, "branch", "ar/master")
     _git(path, "branch", "leaf", "ar/master")

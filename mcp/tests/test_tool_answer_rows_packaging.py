@@ -25,14 +25,12 @@ from unittest.mock import patch
 
 import pytest
 from agents_remember.application.memory_tools import (
-    CarryoverCommitMessages,
     CarryoverSelection,
     CitationOperationScope,
     citation_migrate_tool,
     drift_check_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
-    memory_carryover_apply_tool,
     memory_carryover_plan_tool,
     memory_init_tool,
     route_index_refresh_tool,
@@ -404,30 +402,18 @@ class CarryoverProductionTests(unittest.TestCase):
                 fixture.cfg.coordination_root, "memory_carryover_plan", planned, label="plan"
             )
             planned_answer = compact_carryover_payload(planned, planned_report.as_posix())
-            applied_result = memory_carryover_apply_tool(
-                fixture.cfg,
-                selection,
-                intent_note="carry the landed branch memory",
-                messages=CarryoverCommitMessages(memory="Carry over landed branch memory\n"),
-            )
-            applied_report = write_tool_report(
-                fixture.cfg.coordination_root,
-                "memory_carryover_apply",
-                applied_result,
-                label="apply",
-            )
-            applied_answer = compact_carryover_payload(applied_result, applied_report.as_posix())
+            # MIK-R46 rule 1 removes the apply half of this test: memory_carryover_apply
+            # refuses unconverted memory with the one legacy-format message, and it refuses
+            # a converted target too (it copies legacy Markdown with no format check and no
+            # validator) -- pinned by test_carryover_apply_refuses_unconverted_memory_with_the_
+            # conversion_step and test_carryover_never_writes_converted_memory_and_takes_the_
+            # cutover_lock; what carryover does on converted memory is MIK-R56. Only the plan
+            # derives row cases here.
         with self.subTest("plan"):
             measured = assert_production_answer(self, "memory_carryover_plan", planned_answer)
             self.assertLessEqual(500, 2 * measured)
             assert_answer_survives_the_guard(
                 "memory_carryover_plan", planned_answer, planned_answer
-            )
-        with self.subTest("apply"):
-            measured = assert_production_answer(self, "memory_carryover_apply", applied_answer)
-            self.assertLessEqual(800, 2 * measured)
-            assert_answer_survives_the_guard(
-                "memory_carryover_apply", applied_answer, applied_answer
             )
 
     def test_forty_path_population_passes_through_whole(self) -> None:

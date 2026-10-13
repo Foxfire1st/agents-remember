@@ -31,6 +31,7 @@ from agents_remember.application.review_tree_comparison import ReviewTrees, live
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.models.knowledge.review_sync_rebinding import ReviewSyncRebinding
 from agents_remember.models.knowledge_files.canonical import canonical_text
+from agents_remember.worktrees.knowledge_gate import close_owner_history
 from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules.future_code_candidate import capture_future_code_candidate
 from agents_remember.worktrees.worktree_contract import (
@@ -105,6 +106,14 @@ def _closed_reviewed_leaf(tmp_path: Path) -> tuple[Any, Any]:
     capture = capture_future_code_candidate(leaf)
     trees = live_review_trees(leaf.coordination_root, leaf, capture.codeCandidateTree)
     assert isinstance(trees, ReviewTrees), trees
+    # The closeout closes the leaf history, so the review covers the closed state:
+    # without this the delivered pair (closed history) differs from the reviewed one.
+    assert leaf.memory_worktree is not None
+    close_owner_history(leaf.memory_worktree, "LEAF-C")
+    reviewed = live_review_trees(
+        leaf.coordination_root, leaf, capture_future_code_candidate(leaf).codeCandidateTree
+    )
+    assert isinstance(reviewed, ReviewTrees), reviewed
     return fixture, close_out_leaf(leaf)
 
 

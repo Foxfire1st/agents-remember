@@ -685,11 +685,19 @@ class MeasuringBuildStampTests(unittest.TestCase):
         the stamp returns to the answer, or if the status counts go missing.
         """
 
-        scope = SimpleNamespace(repo_id="repo", onboarding_root=Path("/memory/onboarding"))
+        scope = SimpleNamespace(
+            repo_id="repo",
+            onboarding_root=Path("/memory/onboarding"),
+            code_root=Path("/code"),
+        )
         with (
             mock.patch.object(memory_tools, "_leaf_memory_writer_scope", return_value=scope),
-            mock.patch.object(memory_tools, "_citation_trees", return_value=mock.Mock()),
-            mock.patch.object(memory_tools.fixer, "fix_onboarding_root", return_value={"ok": True}),
+            # MIK-R46 rule 8: this case's subject is the serving-build stamp, not the memory
+            # format, so it runs on converted memory.
+            mock.patch.object(
+                memory_tools.reference_state, "is_converted_memory", return_value=True
+            ),
+            mock.patch.object(memory_tools, "_converted_citation_fix", return_value={"ok": True}),
         ):
             response = memory_tools.citation_fix_tool(
                 mock.Mock(), repo_id="repo", contract_path="/contract"

@@ -285,6 +285,16 @@ becomes one more than the higher side's, and its history row goes to the leaf's 
 on a master line, to the `<task-id>-crossing-<n>` file the sync opened. Stage the result and
 continue; the file validator runs before the merge is committed and refuses an unresolved value.
 
+Unconverted memory is refused before anything moves (MIK-R46 rules 1–3): a sync whose memory
+sides are unconverted refuses with the code `legacy-format`, except a fast-forward that takes
+a converted source (the line converts by taking it) and a crossing merge with a converted
+side. The plain Git merge of three unconverted trees is gone, and a fast-forward from an
+unconverted source onto a converted target refuses rather than taking the line out of the
+text format. A refused line converts first — one new leaf converts inside its memory
+worktree, every other open line crosses at its next `worktree_sync` with `merge-memory` —
+as the `c-13-install-and-onboard` skill's first-conversion procedure
+(`docs/guides/first-conversion.md`) describes.
+
 Closeout invokes this sync automatically when its ancestor check finds a carry it can settle — a
 fast-forward, or a merge where the leaf owns its own commit — so a moved line is not an operator
 step: the sync parks any pending uncommitted candidate, carries the moved source into the leaf's code

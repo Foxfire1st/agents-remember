@@ -20,6 +20,23 @@ def test_valid_public_progression_keeps_the_invalid_sweep_inputs_separate(tmp_pa
 
     world = EntryPointWorld()
     try:
+        # MIK-R46 rule 8: this progression's subject is the entry-point arms, not the memory
+        # format, so it runs on converted memory -- the marker is committed to the scaffold
+        # line before the leaf starts, exactly as a converted line looks to every route.
+        # The commit pairs the line with the code base (Code-Commit trailer), so the
+        # invariant gate can read the pairing.
+        code_base = _git(world.code, "rev-parse", "HEAD")
+        (world.memory / "knowledge").mkdir(parents=True, exist_ok=True)
+        (world.memory / "knowledge" / "layout.json").write_text(
+            '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n', encoding="utf-8"
+        )
+        _git(world.memory, "add", "knowledge/layout.json")
+        _git(
+            world.memory,
+            "commit",
+            "-m",
+            f"Convert the sweep memory line\n\nCode-Commit: {code_base}",
+        )
         world.build()
         assert world.benign()["worktree_record_landing"]["landed_code_commit"] == "deadbeef"
         kind, parent = world.call(

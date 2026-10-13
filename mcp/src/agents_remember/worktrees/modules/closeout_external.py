@@ -26,9 +26,11 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     prove_git_commit,
 )
 from agents_remember.worktrees.knowledge_gate import (
+    GateProbeError,
     HistoryClosing,
     close_owner_history,
     closed_out_memory,
+    converted_memory,
     leaf_cutover_refusal,
     leaf_gate_refusal,
     leaf_memory_converted,
@@ -39,6 +41,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs, report_operatio
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     PublicationHooks,
+    local_branch_ref,
     publish_tree_commit,
     require_ancestor,
     require_git,
@@ -208,17 +211,42 @@ GATE_NOT_APPLICABLE = "not-applicable"
 """What :func:`candidate_gate_verdict` answers for a contract the gate does not govern."""
 
 
+def _series_format_verdict(contract) -> str:
+    """The format verdict for a series/master contract on external memory (MIK-R46 rule 1).
+
+    The invariant gate does not govern series contracts, but an external series whose
+    own line holds the layout marker on neither its work tip nor its source tip is
+    refused with the one ``legacy-format`` message, never passed through. A probe Git
+    cannot answer refuses by name. Callers translate a non-``None`` answer into their
+    route's refusal before anything moves.
+    """
+
+    repository = contract.memory_repo_path
+    assert repository is not None
+    work = contract.memory_work_branch
+    source = contract.memory_source_branch
+    try:
+        work_ref = local_branch_ref(work) if work else ""
+        source_ref = local_branch_ref(source) if source else ""
+        if converted_memory(repository, work_ref, source_ref):
+            return GATE_NOT_APPLICABLE
+    except (GateProbeError, RuntimeError) as error:
+        return str(error)
+    return leaf_cutover_refusal(contract, "the closeout validator") or GATE_NOT_APPLICABLE
+
+
 def candidate_gate_verdict(contract, code_tree: str) -> str | None:
     """The mandatory gate's verdict over the closeout's candidate, before anything is committed.
 
     ``None`` when it passes, the refusal naming every finding when it does not, and
     :data:`GATE_NOT_APPLICABLE` for a contract the gate does not govern (not a leaf, no memory
-    worktree, or unconverted memory). The gate is asked about the accepted code candidate tree and
-    the memory worktree's current tree. Nothing is written to either worktree: the gate reads the
-    leaf's own history files whatever their ``closed`` flag, so the closing need not be applied
-    to ask. The apply's preflight (:func:`refuse_ungated_candidate`) and the preview read this one
-    verdict, so a preview cannot promise a closeout the apply refuses; the gate's memo makes the
-    second of the two free.
+    worktree, or no external memory). An external leaf's unconverted memory is refused by the
+    cutover lock (MIK-R46 rule 1), never passed through: the gate is asked about the accepted
+    code candidate tree and the memory worktree's current tree. Nothing is written to either
+    worktree: the gate reads the leaf's own history files whatever their ``closed`` flag, so the
+    closing need not be applied to ask. The apply's preflight (:func:`refuse_ungated_candidate`)
+    and the preview read this one verdict, so a preview cannot promise a closeout the apply
+    refuses; the gate's memo makes the second of the two free.
     """
 
     repository = contract.memory_worktree
@@ -226,10 +254,20 @@ def candidate_gate_verdict(contract, code_tree: str) -> str | None:
         # A contract that carries the removed mode never reaches the gate's
         # trees: the verdict itself refuses it by name (L50-CODE-R1-F02), so a
         # direct caller meets the opt-out refusal rather than not-applicable.
-        # External unconverted and series contracts keep GATE_NOT_APPLICABLE.
+        # Series contracts keep GATE_NOT_APPLICABLE; an external unconverted leaf is refused
+        # by the cutover lock above (MIK-R46 rule 1), never passed through.
         return opt_out_detail_for_contract(contract, "worktree_closeout")
-    if contract.kind != "leaf" or repository is None or not leaf_memory_converted(contract):
+    if contract.kind != "leaf" or repository is None:
+        # The gate does not govern series contracts -- but an external series on
+        # unconverted memory is refused with the one legacy-format message
+        # (MIK-R46 rule 1), never passed through as not-applicable. A series
+        # whose own line already holds the marker converts or is converted, so
+        # the verdict stays not-applicable for it.
+        if contract.memory_mode == "external" and contract.memory_repo_path is not None:
+            return _series_format_verdict(contract)
         return GATE_NOT_APPLICABLE
+    if not leaf_memory_converted(contract):
+        return leaf_cutover_refusal(contract, "the closeout validator")
     return leaf_gate_refusal(
         contract, code_tree=code_tree, memory_tree=_exact_memory_tree(contract, repository)
     )

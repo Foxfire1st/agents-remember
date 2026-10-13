@@ -45,17 +45,28 @@ from agents_remember.worktrees.worktree_contract import (
 class SyncFixture:
     """Live code/memory worktrees whose official lines can be moved."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, converted: bool = True) -> None:
         self.root = root
         self.code_repo = root / "repo-a"
         self.code_base = make_repo(self.code_repo)
         self.memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
         memory_seed = make_repo(self.memory_repo)
+        if converted:
+            # MIK-R46 rule 8: shared fixtures build converted memory -- the layout marker
+            # rides the base commit, so ordinary syncs run the converted routes.
+            (self.memory_repo / "knowledge").mkdir(parents=True, exist_ok=True)
+            (self.memory_repo / "knowledge" / "layout.json").write_text(
+                '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n',
+                encoding="utf-8",
+            )
         write_ledger(
             self.memory_repo / "memory.md",
             create_initial_ledger("repo-a", self.code_base, memory_seed),
         )
-        git(self.memory_repo, "add", "memory.md")
+        if converted:
+            git(self.memory_repo, "add", "memory.md", "knowledge/layout.json")
+        else:
+            git(self.memory_repo, "add", "memory.md")
         git(self.memory_repo, "commit", "-m", "Add memory ledger")
         self.memory_base = git(self.memory_repo, "rev-parse", "HEAD")
         self.contract = default_contract(

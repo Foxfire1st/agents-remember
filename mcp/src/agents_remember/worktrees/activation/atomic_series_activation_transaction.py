@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from agents_remember.worktrees.activation.atomic_series_activation import (
     AtomicSeriesActivationError,
+    AtomicSeriesActivationObservation,
     observe_atomic_series,
     publish_atomic_series_selection,
     require_atomic_series_cancellation_owner,
@@ -18,14 +20,18 @@ from agents_remember.worktrees.activation.atomic_series_admission import (
     AtomicSeriesAdmissionRequest,
     atomic_series_admission_projection,
 )
+from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE, legacy_format_refusal
+from agents_remember.worktrees.knowledge_crossing import merge_base
+from agents_remember.worktrees.knowledge_validation import has_layout_marker
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.git import branch_commit, is_ancestor
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_source_refresh import fetch_source_upstreams
 from agents_remember.worktrees.sync_transaction import (
     sync_contract_under_authority,
     sync_input_refusal,
 )
-from agents_remember.worktrees.sync_transaction_authority import source_pair
+from agents_remember.worktrees.sync_transaction_authority import command_result, source_pair
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -161,6 +167,229 @@ def sync_selected_atomic_series_under_authority(
         )
 
 
+def _series_legacy_refusal(
+    repository: Path,
+    line: str,
+    fetch: dict[str, object],
+    sides: str,
+) -> WorktreeCommandResult:
+    """The shared legacy-format refusal for a series memory sync."""
+    return command_result(
+        2,
+        f"sync-{CUTOVER_LOCK_CODE}",
+        "The memory sync is refused: its memory is unconverted and must cross the boundary first.",
+        fetch,
+        detail=legacy_format_refusal(
+            repository,
+            operation="worktree_sync",
+            subject=f"the memory sync of {line} ({sides})",
+        ),
+    )
+
+
+def _series_memory_ff_refusal(
+    repository: Path,
+    line: str,
+    fetch: dict[str, object],
+    work_tip: str,
+    source_tip: str,
+) -> WorktreeCommandResult | None:
+    """Judge the memory fast-forward shape for a series sync.
+
+    Returns a refusal payload, or None when the line takes the source.
+    """
+    if work_tip == source_tip:
+        return None  # admitted as already-current
+    sides = f"preSyncHead {work_tip}, sourceCommit {source_tip}"
+    states = {side: has_layout_marker(repository, side) for side in (work_tip, source_tip)}
+    if all(states.values()) or (not states[work_tip] and states[source_tip]):
+        return None  # converted throughout, or the line takes the source
+    if states[work_tip]:
+        return command_result(
+            2,
+            f"sync-{CUTOVER_LOCK_CODE}",
+            "The memory sync is refused: its source is unconverted and would take a "
+            "converted line out of the text format.",
+            fetch,
+            detail=legacy_format_refusal(
+                repository,
+                operation="worktree_sync",
+                subject=(
+                    f"the memory sync of {line} ({sides}): its target holds converted "
+                    "memory (knowledge/layout.json) and its source does not, so a "
+                    "fast-forward would take the line out of the text format -- convert "
+                    "the source line first"
+                ),
+            ),
+        )
+    return _series_legacy_refusal(repository, line, fetch, sides)
+
+
+def _series_memory_merge_refusal(
+    repository: Path,
+    line: str,
+    fetch: dict[str, object],
+    work_tip: str,
+    source_tip: str,
+) -> WorktreeCommandResult | None:
+    """Judge the diverged (merge) shape for a series sync.
+
+    Returns a refusal payload, or None when the transaction's crossing or
+    converted-throughout shapes proceed.
+    """
+    base = merge_base(repository, work_tip, source_tip)
+    sides = f"preSyncHead {work_tip}, sourceCommit {source_tip}, merge base {base}"
+    if any(has_layout_marker(repository, side) for side in (base, work_tip, source_tip)):
+        return None  # the crossing sync or converted throughout, as today
+    return _series_legacy_refusal(repository, line, fetch, sides)
+
+
+def _legacy_series_memory_refusal(
+    contract: WorktreeContract, args: WorktreeArgs, fetch: dict[str, object]
+) -> WorktreeCommandResult | None:
+    """Judge the series memory sides before the reconciling selection is published (MIK-R46 rule 1).
+
+    The refusal precedes every durable write of the envelope. The judgment mirrors
+    the transaction's exact preflight (:func:`sync_transaction._sync_side_outcome`)
+    on the same branch tips a series plans from, so this check can only refuse what
+    the transaction would refuse, and admits what it admits:
+    - already current (equal tips, or the source an ancestor of the work tip):
+      proceed, as today;
+    - all unconverted sides (fast-forward pair or merge triple): refuse with the
+      one ``legacy-format`` message;
+    - converted target with an unconverted source: refuse (taking it would leave
+      the text format);
+    - any converted side the transaction admits or crosses: proceed.
+    Skip-memory, missing branches and unanswered probes all proceed to the
+    transaction, which judges precisely. ``None`` means proceed.
+    """
+
+    if (
+        contract.memory_mode != "external"
+        or contract.memory_repo_path is None
+        or args.memory_sync_choice == "skip-memory"
+        or not contract.memory_work_branch
+        or not contract.memory_source_branch
+    ):
+        return None
+    repository = contract.memory_repo_path
+    work_branch = contract.memory_work_branch
+    source_branch = contract.memory_source_branch
+    try:
+        work_tip = branch_commit(repository, work_branch)
+        source_tip = branch_commit(repository, source_branch)
+    except Exception:
+        return None  # never fail closed here; the transaction judges precisely
+    if work_tip == source_tip or is_ancestor(repository, source_tip, work_tip):
+        return None  # already current, exactly as the transaction plans it
+    line = f"{work_branch} ({repository.as_posix()})"
+    try:
+        if is_ancestor(repository, work_tip, source_tip):
+            return _series_memory_ff_refusal(repository, line, fetch, work_tip, source_tip)
+        return _series_memory_merge_refusal(repository, line, fetch, work_tip, source_tip)
+    except Exception:
+        return None  # never fail closed here; the transaction judges precisely
+
+
+def _reconciling_series_selection(
+    contract: WorktreeContract, args: WorktreeArgs, fetch: dict[str, object]
+) -> AtomicSeriesActivationObservation | WorktreeCommandResult:
+    """The reconciling selection, or the refusal that precedes it (MIK-R46 rule 1).
+
+    A fresh sync judges the series memory sides before the reconciling selection
+    is published -- the certain all-unconverted refusal precedes the write
+    (no-write envelope). Anything else runs the transaction's exact preflight.
+    In-flight continue/cancel are untouched.
+    """
+
+    if args.resolution_action == "cancel":
+        return require_atomic_series_cancellation_owner(contract)
+    if args.resolution_action == "continue":
+        return require_selected_atomic_series(contract)
+    early = _legacy_series_memory_refusal(contract, args, fetch)
+    if early is not None:
+        return early
+    return publish_atomic_series_selection(contract, "reconciling")
+
+
+def _cancelled_series_release(
+    synced: WorktreeCommandResult, contract: WorktreeContract, args: WorktreeArgs
+) -> WorktreeCommandResult | None:
+    """The released-cancel result, or ``None`` when this is not a cancel unwind."""
+
+    state = str(synced.payload.get("state", ""))
+    if args.resolution_action != "cancel" or state not in {
+        "sync-cancelled",
+        "sync-cancelled-no-authority",
+        "sync-resolution-not-active",
+    }:
+        return None
+    released = release_atomic_series_selection(contract)
+    payload = dict(synced.payload)
+    if state == "sync-resolution-not-active":
+        payload["state"] = "sync-cancelled"
+    payload["atomicSeriesActivation"] = released.source_fact()
+    payload["summary"] = (
+        f"{payload.get('summary', 'The sync transaction is not active.')} "
+        "The exact atomic-series selection is now vacant."
+    )
+    return WorktreeCommandResult(0, payload)
+
+
+def _incomplete_series_result(
+    synced: WorktreeCommandResult,
+    reconciling: AtomicSeriesActivationObservation,
+    contract: WorktreeContract,
+) -> WorktreeCommandResult | None:
+    """The reconciling-incomplete result, or ``None`` when the pair is current."""
+
+    state = str(synced.payload.get("state", ""))
+    current = load_contract(contract.contract_path)
+    code_tip, memory_tip, external = source_pair(current)
+    if current.code_base_commit == code_tip and (
+        not external or current.memory_base_commit == memory_tip
+    ):
+        return None
+    payload = dict(synced.payload)
+    payload["state"] = "atomic-series-source-pair-incomplete"
+    payload["syncState"] = state
+    payload["nextTool"] = "worktree_sync"
+    next_args: dict[str, object] = {
+        "contract_path": current.contract_path.as_posix(),
+        "dry_run": False,
+    }
+    if external and current.memory_base_commit != memory_tip:
+        next_args["memory_sync_choice"] = "merge-memory"
+    payload["nextArgs"] = next_args
+    payload["summary"] = (
+        "The sync pass completed without bringing the exact external-memory base current. "
+        "The atomic master remains selected and reconciling; merge the current memory line "
+        "before implementation exposure."
+    )
+    incomplete = WorktreeCommandResult(0, payload)
+    return _reconciling_result(incomplete, reconciling.source_fact())
+
+
+def _finish_series_sync(
+    synced: WorktreeCommandResult,
+    reconciling: AtomicSeriesActivationObservation,
+    contract: WorktreeContract,
+) -> WorktreeCommandResult:
+    """The terminal result once the pass ran under a reconciling selection."""
+
+    state = str(synced.payload.get("state", ""))
+    if synced.returncode != 0 or state not in {"synced", "already-current"}:
+        return _reconciling_result(synced, reconciling.source_fact())
+    incomplete = _incomplete_series_result(synced, reconciling, contract)
+    if incomplete is not None:
+        return incomplete
+    current = load_contract(contract.contract_path)
+    active = publish_atomic_series_selection(current, "active")
+    payload = dict(synced.payload)
+    payload["atomicSeriesActivation"] = active.source_fact()
+    return WorktreeCommandResult(synced.returncode, payload)
+
+
 def _sync_selected_atomic_series_under_authority(
     contract: WorktreeContract,
     *,
@@ -172,58 +401,15 @@ def _sync_selected_atomic_series_under_authority(
         return invalid
     if args.dry_run:
         return sync_contract_under_authority(contract, args, fetch=fetch)
-    if args.resolution_action == "cancel":
-        reconciling = require_atomic_series_cancellation_owner(contract)
-    elif args.resolution_action == "continue":
-        reconciling = require_selected_atomic_series(contract)
-    else:
-        reconciling = publish_atomic_series_selection(contract, "reconciling")
+    selected = _reconciling_series_selection(contract, args, fetch)
+    if isinstance(selected, WorktreeCommandResult):
+        return selected
+    reconciling = selected
     synced = sync_contract_under_authority(contract, args, fetch=fetch)
-    state = str(synced.payload.get("state", ""))
-    if args.resolution_action == "cancel" and state in {
-        "sync-cancelled",
-        "sync-cancelled-no-authority",
-        "sync-resolution-not-active",
-    }:
-        released = release_atomic_series_selection(contract)
-        payload = dict(synced.payload)
-        if state == "sync-resolution-not-active":
-            payload["state"] = "sync-cancelled"
-        payload["atomicSeriesActivation"] = released.source_fact()
-        payload["summary"] = (
-            f"{payload.get('summary', 'The sync transaction is not active.')} "
-            "The exact atomic-series selection is now vacant."
-        )
-        return WorktreeCommandResult(0, payload)
-    if synced.returncode != 0 or state not in {"synced", "already-current"}:
-        return _reconciling_result(synced, reconciling.source_fact())
-    current = load_contract(contract.contract_path)
-    code_tip, memory_tip, external = source_pair(current)
-    if current.code_base_commit != code_tip or (
-        external and current.memory_base_commit != memory_tip
-    ):
-        payload = dict(synced.payload)
-        payload["state"] = "atomic-series-source-pair-incomplete"
-        payload["syncState"] = state
-        payload["nextTool"] = "worktree_sync"
-        next_args: dict[str, object] = {
-            "contract_path": current.contract_path.as_posix(),
-            "dry_run": False,
-        }
-        if external and current.memory_base_commit != memory_tip:
-            next_args["memory_sync_choice"] = "merge-memory"
-        payload["nextArgs"] = next_args
-        payload["summary"] = (
-            "The sync pass completed without bringing the exact external-memory base current. "
-            "The atomic master remains selected and reconciling; merge the current memory line "
-            "before implementation exposure."
-        )
-        incomplete = WorktreeCommandResult(0, payload)
-        return _reconciling_result(incomplete, reconciling.source_fact())
-    active = publish_atomic_series_selection(current, "active")
-    payload = dict(synced.payload)
-    payload["atomicSeriesActivation"] = active.source_fact()
-    return WorktreeCommandResult(synced.returncode, payload)
+    released = _cancelled_series_release(synced, contract, args)
+    if released is not None:
+        return released
+    return _finish_series_sync(synced, reconciling, contract)
 
 
 def _admission_refusal(request: _AdmissionRefusalRequest) -> WorktreeCommandResult:

@@ -1,8 +1,10 @@
-"""The cutover's carried completions (MIK-R37; L37 P1).
+"""The cutover's carried completions (MIK-R37; L37 P1), as MIK-R46 re-rules them.
 
-* the cutover lock (MIK-R09 rule 6, second bullet; MIK-R24 rule 9; MIK-R37 rule 6) at every write,
-  memory-quality, sync, closeout and landing route, inert in a repository that holds no converted
-  memory and never in the way of the converting candidate;
+* the cutover lock (MIK-R46 rules 1 and 2) at every write, memory-quality, sync, closeout
+  and landing route: unconverted memory refuses unconditionally, whether or not the
+  repository holds converted memory elsewhere, with the one ``legacy-format`` message that
+  names the conversion; the probe only words the message. The converting candidate is never
+  in the way: it holds the marker on its own side, so the gate applies to it instead;
 * the frozen database (MIK-R37 rule 3);
 * no production read selects the database on a converted tree (L23 F8);
 * ``origin.handoff.evidence`` is a list of strings (L24 carry).
@@ -222,7 +224,7 @@ _ROUTES: dict[str, Callable[[_Probe], str | None]] = {
 }
 
 
-def test_every_route_refuses_unconverted_memory_once_the_repository_holds_converted_memory(
+def test_every_route_refuses_unconverted_memory_with_or_without_converted_memory_elsewhere(
     tmp_path: Path, ports: None
 ) -> None:
     world = _unconverted(tmp_path)
@@ -232,16 +234,22 @@ def test_every_route_refuses_unconverted_memory_once_the_repository_holds_conver
         assert refusal is not None, f"{name} did not refuse"
         assert f"branch {LINE}" in refusal and "crossing sync" in refusal, (name, refusal)
 
-    git(world.memory, "branch", "-D", LINE)  # no converted memory: the lock is inert
+    git(world.memory, "branch", "-D", LINE)  # no converted memory anywhere: still refused
     assert converted_memory_location(world.memory) is None
     answers = {name: run(probe) for name, run in _ROUTES.items()}
     # MIK-R26: the knowledge writer writes files only, so it still refuses this unconverted tree,
-    # now as memory in the legacy format, and names the conversion command. No other route asks.
+    # now as memory in the legacy format, and names the conversion command.
     written = answers.pop("knowledge-ingest")
     assert written is not None and "legacy format" in written, written
     assert "agents-remember knowledge-convert" in written and "crossing sync" in written
     assert "holds no converted memory yet" in written
-    assert answers == dict.fromkeys(answers)
+    # MIK-R46 rule 1: every other route refuses too, with the one rule-2 message -- the lock is
+    # never inert on unconverted memory any more.
+    for name, refusal in answers.items():
+        assert refusal is not None, f"{name} did not refuse"
+        assert "code legacy-format" in refusal, (name, refusal)
+        assert "agents-remember knowledge-convert" in refusal, (name, refusal)
+        assert "holds no converted memory yet" in refusal, (name, refusal)
 
 
 def test_the_prepared_closeout_refuses_by_the_lock_at_both_entry_points(tmp_path: Path) -> None:

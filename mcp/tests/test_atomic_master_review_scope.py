@@ -7,6 +7,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.route_review import RouteReviewError
 from agents_remember.worktrees.route_review_scope import (
@@ -15,6 +16,10 @@ from agents_remember.worktrees.route_review_scope import (
 )
 from agents_remember.worktrees.worktree_contract import load_contract
 from test_closeout_queue import MASTER_A, MASTER_B, QueueFixture
+
+# MIK-R46 rule 8: the shared fixture builds converted memory, whose curator-evidence
+# publication recomputes the invariant gate -- explicit application composition.
+pytestmark = pytest.mark.usefixtures("worktree_services")
 
 
 class AtomicMasterReviewScopeTests(unittest.TestCase):

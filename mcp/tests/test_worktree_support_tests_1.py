@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import argparse
 import json
 import tempfile
 from pathlib import Path
 
+from agents_remember.cli import knowledge_convert
 from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.memory.conversion.convert import CONVERSION_FORMAT_VERSION
 from agents_remember.models.closeout.input import EffectiveCloseoutInput, EnabledCloseoutLeg
 from agents_remember.models.closeout.source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
@@ -184,6 +187,17 @@ class WorktreeSupport1(WorktreeSupportTests):
             coordination_root = workspace / "ar-coordination"
             memory_root = coordination_root / "memory-repos" / "ar-repo-a"
             initialized_memory_repo(memory_root, "repo-a", "main", "main", code_base)
+            # The memory line pairs with the code line through a Code-Commit trailer:
+            # on converted memory the gate reads the trailer, so a world without one
+            # has no provable pairing.
+            (memory_root / "pairing.md").write_text("# Pairing\n", encoding="utf-8")
+            git(memory_root, "add", "-A")
+            git(
+                memory_root,
+                "commit",
+                "-m",
+                f"Pair the memory line with the code base\n\nCode-Commit: {code_base}",
+            )
             git(memory_root, "branch", "super", "main")
             task_root = coordination_root / "tasks" / "repo-a" / "260624_master"
             write_task_doc(
@@ -307,6 +321,22 @@ class WorktreeSupport1(WorktreeSupportTests):
                 leaf_contract,
                 leaf_document,
             )
+            # The start creates a fresh, unconverted memory worktree: its first conversion
+            # (the public command) precedes the curator evidence publication below.
+            assert leaf_contract.memory_worktree is not None
+            self.assertEqual(
+                knowledge_convert.run(
+                    argparse.Namespace(
+                        memory_root=leaf_contract.memory_worktree,
+                        code=leaf_contract.code_worktree,
+                        code_commit="HEAD",
+                        version=CONVERSION_FORMAT_VERSION,
+                        report=None,
+                        check=False,
+                    )
+                ),
+                0,
+            )
             queue = _publish_and_read_leaf_queue(workspace, coordination_root, leaf_contract)
             self.assertEqual(queue["state"], "valid-built", queue)
             self.assertEqual(queue["sourceProblems"], [], queue)
@@ -326,6 +356,12 @@ class WorktreeSupport1(WorktreeSupportTests):
             )
             self.assertIn("ar/15_leaf", git(code_repo, "branch", "--list", "ar/15_leaf"))
 
+            # The conversion scaffolding served the evidence publication above; it leaves
+            # with the leaf, so the abandon below sees the worktrees as the start left
+            # them (abandon refuses dirty worktrees).
+            assert leaf_contract.memory_worktree is not None
+            converted_marker = leaf_contract.memory_worktree / "knowledge" / "layout.json"
+            converted_marker.unlink(missing_ok=True)
             abandoned = worktree_manager.abandon_result(
                 worktree_manager.WorktreeArgs(
                     contract_path=leaf_contract.contract_path,

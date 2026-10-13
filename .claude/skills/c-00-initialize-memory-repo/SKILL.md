@@ -152,6 +152,14 @@ instead of reading, writing, or migrating it yourself.
 on its worktree contracts, or re-initialize the memory root with this skill. Nothing is migrated
 automatically, and no existing memory root is rewritten or deleted.
 
+**Unconverted memory is refused, not initialized around.** When the memory root holds legacy
+content (`onboarding/*.md` cards or `knowledge.sqlite`) but no `knowledge/layout.json`,
+`memory_init` still writes no marker — writing one beside legacy cards would read the old
+format as the new one — and its result names the first-conversion procedure. Every ordinary
+memory operation refuses such memory with the code `legacy-format`. Convert first with the
+`c-13-install-and-onboard` skill's first-conversion procedure (`docs/guides/first-conversion.md`),
+then continue here.
+
 Report which are present and which are missing. If everything exists, stop with a clean summary.
 
 ### 3. Create Missing Directories

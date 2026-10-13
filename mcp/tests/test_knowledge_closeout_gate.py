@@ -991,39 +991,45 @@ def test_an_insertion_only_hunk_is_linked_only_by_a_candidate_range(world: Gated
     assert any(kind == "unexplained_hunk" for kind, _subject in subjects)
 
 
-def test_an_unconverted_leaf_is_not_gated_at_any_route(world: Gated) -> None:
-    """Rule 6 / transition: no layout marker on either side, so every route behaves as before."""
+def test_an_unconverted_leaf_is_refused_at_every_route_before_anything_moves(world: Gated) -> None:
+    """MIK-R46 rule 1: no layout marker on either side, so every route refuses with the one
+    ``legacy-format`` message before reading or writing; the refusal names the conversion."""
 
     for branch in ("main", "leaf"):
         git(world.memory, "checkout", "-q", branch)
         git(world.memory, "rm", "-q", "knowledge/layout.json")
         commit(world.memory, {})
     world.memory_base = git(world.memory, "rev-parse", "main")  # the leaf's base: unconverted
-    reset_worktree_services()  # nothing is bound: an unconverted route never asks the gate
+    reset_worktree_services()  # nothing is bound: a refusal never asks the gate
     _edit(world, CODE_A.replace("return value", "return -value"))
     candidate = world.candidate()
     head = commit(world.memory, {})  # its parent holds no marker either (a deletion is gated)
-    assert (
-        leaf_gate_refusal(world.contract, code_tree=candidate.code, memory_tree=candidate.memory)
-        is None
+    gate_refusal = leaf_gate_refusal(
+        world.contract, code_tree=candidate.code, memory_tree=candidate.memory
     )
+    assert gate_refusal is not None and "code legacy-format" in gate_refusal
     assert not leaf_memory_converted(world.contract)
     assert not checkout_memory_converted(world.memory)
     main = git(world.memory, "rev-parse", "main")
     request = LandingGateRequest(world.memory, head, (main,), world.code, world.code_base)
     assert prepared_closeout_refusal(world.contract) is None  # gap 3 touches converted memory only
-    # Gap 2: an unconverted direct landing is unchanged: no gate, no capture, nothing written.
+    # An unconverted direct landing is refused before capture: no gate, nothing written.
 
     series = _series(world)
     code_commit = commit(world.code, {A: CODE_A.replace("return value", "return +value")})
     objects = git(world.memory, "count-objects", "-v")
     status = git(world.memory, "status", "--porcelain", "--untracked-files=all")
-    assert route._close_gated_leaf(series, code_commit) is None
+    with pytest.raises(route.DirectLandingError, match="code legacy-format"):
+        route._close_gated_leaf(series, code_commit)
     assert git(world.memory, "count-objects", "-v") == objects
     assert git(world.memory, "status", "--porcelain", "--untracked-files=all") == status
-    assert landing_gate_refusal(request) is None
-    assert record_landing._knowledge_gate_refusal(world.contract, world.code_base, head) is None
-    assert record_landing._knowledge_gate_refusal(world.contract, world.code_base, "") is None
+    landing_refusal = landing_gate_refusal(request)
+    assert landing_refusal is not None and "code legacy-format" in landing_refusal
+    for maybe_empty in (head, ""):
+        record_refusal = record_landing._knowledge_gate_refusal(
+            world.contract, world.code_base, maybe_empty
+        )
+        assert record_refusal is not None and "code legacy-format" in record_refusal
     assert leaf_worklist(world.contract, persist=False) is None
 
 

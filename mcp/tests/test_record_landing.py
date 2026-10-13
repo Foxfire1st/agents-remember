@@ -8,6 +8,7 @@ nowhere.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -18,12 +19,22 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.application.worktree_services import build_default_worktree_services
+from agents_remember.application.worktree_tools import worktree_sync_tool
+from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.models.knowledge_files.canonical import canonical_text
+from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.record_landing import PR_STRATEGY, record_landing_result
+from agents_remember.worktrees.services import bind_worktree_services
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_series_contract,
     load_contract,
     write_contract,
@@ -44,6 +55,7 @@ def _git(repo: Path, *args: str) -> str:
 def _fixture(root: Path) -> WorktreeContract:
     """A series contract over a repository whose work branch has landed nowhere yet."""
 
+    bind_worktree_services(build_default_worktree_services())
     repo = root / "repo"
     repo.mkdir()
     _git(repo, "init", "-b", "main")
@@ -52,17 +64,69 @@ def _fixture(root: Path) -> WorktreeContract:
     _git(repo, "commit", "-m", "base")
     for branch in ("super", "ar/master"):
         _git(repo, "branch", branch)
+    code_base = _git(repo, "rev-parse", "super")
+    _git(repo, "update-ref", "refs/remotes/origin/super", code_base)
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/super")
     memory_repo = root / "memory"
     memory_repo.mkdir()
     _git(memory_repo, "init", "-b", "main")
     (memory_repo / "memory.md").write_text("# memory\n", encoding="utf-8")
+    # Converted memory: the marker rides the base commit and the base pairs with the code
+    # base, so the recording runs the converted routes under the gate.
+    (memory_repo / "knowledge").mkdir(parents=True, exist_ok=True)
+    (memory_repo / "knowledge" / "layout.json").write_text(
+        canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}), encoding="utf-8"
+    )
     _git(memory_repo, "add", "-A")
-    _git(memory_repo, "commit", "-m", "base")
+    _git(memory_repo, "commit", "-m", f"base\n\nCode-Commit: {code_base}")
     for branch in ("super", "ar/master"):
         _git(memory_repo, "branch", branch)
+    memory_base = _git(memory_repo, "rev-parse", "super")
+    _git(memory_repo, "update-ref", "refs/remotes/origin/super", memory_base)
+    _git(memory_repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/super")
     coordination = root / "coordination"
     task_root = coordination / "tasks" / "repo" / "master"
     task_root.mkdir(parents=True)
+    # Converted recording resolves the master task document through the gate.
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "MASTER",
+                "slug": "master",
+                "title": "Master",
+                "kind": "master",
+                "status": "inProgress",
+                "repo": "repo",
+                "createdAt": "2026-08-22T00:00:00+00:00",
+                "subTasks": [
+                    SubTaskRef(
+                        number="1",
+                        name="Leaf",
+                        file="leaf.json",
+                        status="planning",
+                    ).model_dump(mode="json"),
+                ],
+            }
+        ),
+    )
+    # Converted recording resolves the leaf task document through the gate.
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "1",
+                "slug": "leaf",
+                "title": "LEAF-1",
+                "kind": "subTask",
+                "status": "inProgress",
+                "repo": "repo",
+                "createdAt": "2026-08-15T00:00:00+00:00",
+                "objective": "Exercise the exact fixture task intent.",
+                "requirements": ["The fixture publishes canonical task intent."],
+            }
+        ),
+    )
     contract = default_series_contract(
         ContractTask("master", "repo", coordination, "light-task", "external"),
         code=RepoBranchPlan(repo, "super", "ar/master", _git(repo, "rev-parse", "super")),
@@ -72,6 +136,11 @@ def _fixture(root: Path) -> WorktreeContract:
         task_root=task_root,
     )
     write_contract(contract.contract_path, contract)
+    # The sync reconciles through the published operation location.
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract_publication_text(contract.contract_path, contract),
+    )
     return contract
 
 
@@ -89,14 +158,68 @@ def _record(
     landed_code_commit: str = "",
     dry_run: bool = False,
 ):
+    # Converted memory: the recording names the landed memory commit for the gate.
+    # Nothing changed memory-side, so the landed memory commit is the line head.
+    assert contract.memory_repo_path is not None
+    landed_memory = _git(contract.memory_repo_path, "rev-parse", "super")
     return record_landing_result(
         WorktreeArgs(
             contract_path=contract.contract_path,
             approved=True,
             landed_code_commit=landed_code_commit,
+            landed_memory_content_commit=landed_memory,
             dry_run=dry_run,
         )
     )
+
+
+def _synced(root: Path, contract: WorktreeContract) -> WorktreeContract:
+    """Reconcile the externally landed commits as the chain's own sync position.
+
+    Converted lines prove the landing chain (MIK-R52 rule 4): a recorded pull-request
+    landing is admitted through the sync the master reconciled, not as a leaf landing.
+    The sync's branch authority wants the source at the repository default, so the
+    landed source heads are published to the remote default first, the way a merged
+    pull request advances them.
+    """
+
+    assert contract.memory_repo_path is not None
+    for repo, source in (
+        (contract.code_repo_path, contract.code_source_branch),
+        (contract.memory_repo_path, contract.memory_source_branch),
+    ):
+        head = _git(repo, "rev-parse", source)
+        _git(repo, "update-ref", f"refs/remotes/origin/{source}", head)
+    code_link = root / "repo"
+    if not code_link.exists():
+        code_link.symlink_to(contract.code_repo_path, target_is_directory=True)
+    if contract.memory_repo_path is not None:
+        memory_link = contract.coordination_root / "memory-repos" / f"ar-{contract.repo_name}"
+        memory_link.parent.mkdir(parents=True, exist_ok=True)
+        if not memory_link.exists():
+            memory_link.symlink_to(contract.memory_repo_path, target_is_directory=True)
+    config_path = root / "settings.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "coordinationRoot": contract.coordination_root.as_posix(),
+                "workspaceRoot": root.as_posix(),
+                "retirement": {"autoLandOnIntegration": False},
+                "repositories": {contract.repo_name: {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    synced = worktree_sync_tool(
+        config,
+        contract_path=contract.contract_path.as_posix(),
+        memory_sync_choice="merge-memory",
+        dry_run=False,
+    )
+    assert synced["ok"], synced
+    return load_contract(contract.contract_path)
 
 
 class RecordLandingTests(unittest.TestCase):
@@ -104,6 +227,7 @@ class RecordLandingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = _fixture(Path(tmp))
             landed = _commit_on(contract.code_repo_path, "super", "landed.txt")
+            contract = _synced(Path(tmp), contract)
 
             result = _record(contract, landed_code_commit=landed)
 
@@ -156,11 +280,15 @@ class RecordLandingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = _fixture(Path(tmp))
             landed = _commit_on(contract.code_repo_path, "super", "landed.txt")
+            contract = _synced(Path(tmp), contract)
+            assert contract.memory_repo_path is not None
+            landed_memory = _git(contract.memory_repo_path, "rev-parse", "super")
 
             result = record_landing_result(
                 WorktreeArgs(
                     contract_path=contract.contract_path,
                     landed_code_commit=landed,
+                    landed_memory_content_commit=landed_memory,
                     dry_run=True,
                 )
             )
@@ -174,6 +302,7 @@ class RecordLandingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = _fixture(Path(tmp))
             landed = _commit_on(contract.code_repo_path, "super", "landed.txt")
+            contract = _synced(Path(tmp), contract)
 
             _record(contract, landed_code_commit=landed)
             again = _record(contract, landed_code_commit=landed)

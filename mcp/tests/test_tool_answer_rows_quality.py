@@ -42,6 +42,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
@@ -114,6 +115,65 @@ def _write_broken_anchor_cards(onboarding: Path, count: int) -> None:
         )
 
 
+def _write_missing_anchor_sidecars(onboarding: Path, count: int) -> None:
+    """Author ``count`` file sidecars whose reference anchor names a missing file.
+
+    Converted memory has no citation tables for the legacy anchor checks to read; the
+    damage converted memory can have is a sidecar anchor naming a path the paired code
+    tree does not hold, which the knowledge validator refuses (MIK-R22 rule 6). The
+    paired Markdown carries the reference's marker so the markers rule stays silent and
+    the anchor path is the one violation each sidecar contributes.
+    """
+
+    onboarding.mkdir(parents=True, exist_ok=True)
+    for index in range(count):
+        name = f"pkg/side-{index:02d}.py"
+        (onboarding / name).parent.mkdir(parents=True, exist_ok=True)
+        # The [1] marker in the paired Markdown satisfies the markers rule, so the
+        # only violation left is the anchor's missing path.
+        (onboarding / f"{name}.md").write_text(
+            f"# Side {index:02d}\n\nThe file's anchor [1] names its source.\n",
+            encoding="utf-8",
+        )
+        sidecar = onboarding / f"{name}.json"
+        sidecar.write_text(
+            canonical_text(
+                {
+                    "schema": "ar-onboarding-file/v1",
+                    "path": name,
+                    "references": {
+                        "1": {
+                            "targets": [
+                                {
+                                    "kind": "code",
+                                    "anchor": {
+                                        "path": f"pkg/missing-{index:02d}.py",
+                                        "locator": {"kind": "symbol", "name": "run"},
+                                        "blob": "0" * 40,
+                                        "content": "sha256:" + "0" * 64,
+                                    },
+                                }
+                            ]
+                        }
+                    },
+                    "realizes": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+
+def _write_converted_layout(memory_worktree: Path) -> None:
+    """Mark the memory worktree converted so the run judges converted damage."""
+
+    layout = memory_worktree / "knowledge" / "layout.json"
+    layout.parent.mkdir(parents=True, exist_ok=True)
+    layout.write_text(
+        canonical_text({"schema": "ar-memory-layout/v2", "conversion": "1"}),
+        encoding="utf-8",
+    )
+
+
 def _settle(repo_id: str, run_id: str) -> Any:
     deadline = time.monotonic() + HANG_GUARD_SECONDS
     while time.monotonic() < deadline:
@@ -129,12 +189,13 @@ class QualityProductionTests(unittest.TestCase):
         self.addCleanup(_registry.clear)
 
     def test_sync_failure_derives_the_largest_case(self) -> None:
-        """A real sync over 25 conflicted cards answers 20 blocking entries."""
+        """A real sync over 25 sidecars with missing-path anchors answers 54 findings."""
 
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             contract, configured, scoped = _scoped_pair(root)
-            _write_broken_anchor_cards(contract.memory_worktree / "onboarding", 25)
+            _write_missing_anchor_sidecars(contract.memory_worktree / "onboarding", 25)
+            _write_converted_layout(contract.memory_worktree)
             # The cited top-level directory must exist for the missing files to
             # read as this repository's damage rather than a dependency's absence.
             package = contract.code_worktree / "pkg"
@@ -161,7 +222,7 @@ class QualityProductionTests(unittest.TestCase):
             self.assertEqual(answer["code"], "action-required")
             self.assertEqual(
                 answer["error"],
-                "Memory quality found 53 curator-actionable findings; repair the "
+                "Memory quality found 54 curator-actionable findings; repair the "
                 "blocking findings and rerun the check.",
             )
             self.assertEqual(answer["nextAction"], "memory_quality_check")

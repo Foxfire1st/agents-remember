@@ -95,7 +95,21 @@ def _register_knowledge_commands(sub: argparse._SubParsersAction) -> None:
     fmt.set_defaults(func=knowledge_format.run)
     convert = sub.add_parser(
         "knowledge-convert",
-        help="Convert a memory tree and its knowledge database into the text knowledge format.",
+        help=(
+            "Convert a memory tree and its knowledge database into the text knowledge format; "
+            "the first step of the first-conversion procedure (MIK-R46 rule 6). Permanent: "
+            "unconverted lines live in other clones, so the converter stays (MIK-R46 rule 7)."
+        ),
+        description=(
+            "Convert a memory tree and its knowledge database into the text knowledge format. "
+            "This command is the first step of the first-conversion procedure (MIK-R46 rule 6), "
+            "described by the c-13-install-and-onboard skill and docs/guides/first-conversion.md: "
+            "memory with no attributed baseline converts in place, then adopts the baseline; "
+            "memory with an official line converts inside one new leaf's memory worktree as that "
+            "leaf's first memory change. The converter stays: the command, its read-only reader "
+            "of the legacy database, and conversion-format version 1 are permanent parts of the "
+            "product (MIK-R46 rule 7)."
+        ),
     )
     knowledge_convert.add_arguments(convert)
     convert.set_defaults(func=knowledge_convert.run)

@@ -18,6 +18,7 @@ from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
     RECORD_DIRECTORIES,
 )
+from agents_remember.worktrees.cutover_lock import first_conversion_procedure
 
 MemoryFormat = Literal["text/v2", "legacy-format"]
 TEXT_FORMAT: Final = "text/v2"
@@ -41,10 +42,9 @@ def legacy_published_intent(memory_root: Path) -> dict[str, Any]:
         "detail": (
             "this memory tree is unconverted (no knowledge/layout.json); its onboarding is returned "
             "as legacy-format and no knowledge section is read from it. A line that descends from "
-            "a converted official line converts through the crossing sync (worktree_sync); an "
-            "unconverted official line, or a repository without one, converts by running "
-            "agents-remember knowledge-convert on that line and committing it through its normal "
-            "route"
+            "a converted official line converts through the crossing sync (worktree_sync with "
+            "merge-memory); a repository that was never converted "
+            f"{first_conversion_procedure()}."
         ),
     }
 

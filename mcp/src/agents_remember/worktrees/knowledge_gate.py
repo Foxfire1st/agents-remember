@@ -7,11 +7,10 @@ applies, with a marker probe that reads no knowledge:
 
 * **Applicability (rule 6).** The gate applies when K_C or K_B holds the layout marker
   ``knowledge/layout.json``, so a leaf that deletes the marker is still gated. Where neither side
-  holds it, the memory is unconverted: the cutover lock (:mod:`.cutover_lock`, rule 6's second
-  bullet) refuses it once the memory repository holds converted memory anywhere, naming the crossing
-  sync; in a repository that holds none, the route behaves exactly as before this master and every
-  function here returns ``None`` after the probe. A probe Git cannot answer refuses; an unreadable
-  side is never taken for unconverted memory.
+  holds it, the memory is unconverted: the cutover lock (:mod:`.cutover_lock`, MIK-R46 rule 1)
+  refuses it unconditionally, with the one ``legacy-format`` message naming the conversion; every
+  function here returns ``None`` after the probe only where there is nothing to judge. A probe Git
+  cannot answer refuses; an unreadable side is never taken for unconverted memory.
 * **No bypass (rule 5).** A converted route with no bound gate is refused, never committed ungated.
   No function here takes a flag that skips it.
 

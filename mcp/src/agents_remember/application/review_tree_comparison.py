@@ -155,22 +155,40 @@ class ReviewTrees:
 # -- applicability -------------------------------------------------------------------------------
 
 
-def official_line_converted(memory_repository: Path | None, official_line: str) -> bool:
-    """Whether the official memory line's tip holds the layout marker."""
+def official_line_converted(memory_repository: Path | None, official_line: str) -> bool | str:
+    """Whether the official memory line's tip holds the layout marker.
+
+    ``False`` only when the probe answers and the tip lacks the marker. A tip Git
+    cannot answer (rev-parse names nothing) is returned as its named error text,
+    never read as converted or unconverted memory: conversion does not repair an
+    unreadable object (MIK-R46 rule 1).
+    """
 
     if memory_repository is None or not official_line:
         return False
-    return _git(memory_repository, "cat-file", "-t", f"{official_line}:{LAYOUT_MARKER_PATH}") == (
-        "blob"
-    )
+    try:
+        resolved = _git(memory_repository, "rev-parse", "--verify", "--quiet", official_line)
+    except (OSError, RuntimeError) as error:
+        return (
+            f"the official memory line {official_line!r} cannot be probed ({error}), and an "
+            "unanswered probe is never read as converted or unconverted memory"
+        )
+    if resolved is None:
+        return (
+            f"the official memory line {official_line!r} cannot be read: rev-parse names "
+            "nothing in the memory repository, and an unanswered probe is never read as "
+            "converted or unconverted memory"
+        )
+    return _git(memory_repository, "cat-file", "-t", f"{resolved}:{LAYOUT_MARKER_PATH}") == ("blob")
 
 
-def memory_converted(contract: WorktreeContract) -> bool:
+def memory_converted(contract: WorktreeContract) -> bool | str:
     """Whether a leaf's review is a tree review: its memory worktree or its official line converted.
 
     A leaf for which neither holds has unconverted memory. Its review compares no knowledge: it
     reads the source identities of its code pair, and reports each knowledge side as
-    ``legacy-unavailable``, because the canonical datasets are retired.
+    ``legacy-unavailable``, because the canonical datasets are retired. An official line
+    Git cannot answer is returned as its named error text, never collapsed to unconverted.
     """
 
     worktree = contract.memory_worktree
@@ -228,11 +246,17 @@ def comparison_records(task_root: Path, leaf_id: str) -> tuple[ReviewTreeCompari
 def live_review_trees(
     coordination_root: Path, contract: WorktreeContract, code_candidate_tree: str
 ) -> ReviewTrees | ReviewRefusal | None:
-    """Capture, pin and record a live leaf's four trees; ``None`` when its memory is unconverted."""
+    """Capture, pin and record a live leaf's four trees; ``None`` when its memory is unconverted.
+
+    An official line Git cannot answer is a named refusal, never a silent ``None``.
+    """
 
     worktree = contract.memory_worktree
     memory_repository = contract.memory_repo_path or worktree
-    if worktree is None or memory_repository is None or not memory_converted(contract):
+    converted = memory_converted(contract)
+    if isinstance(converted, str):
+        return _unresolved("memory", converted)
+    if worktree is None or memory_repository is None or not converted:
         return None
     try:
         drafted = _live_draft(coordination_root, contract, memory_repository, code_candidate_tree)
