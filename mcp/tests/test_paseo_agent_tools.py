@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import stat
 import sys
 import tempfile
@@ -889,15 +890,17 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         self.replace(role_launch_preparation, "_compile_handover", compiled)
 
     def unresolved_leaf_launch(self) -> tuple[Any, dict[str, Any], Path, Path]:
-        """A worker launch that stays unresolved: its request, receipt, link and stored artifact."""
+        """A worker launch that stays unresolved: its request, receipt, access folder and artifact."""
 
         self.compile_for_the_enclosure()
         request = self.request("worker")
         self.runtime.fail("agent-create", "paseo_daemon_unreachable")
         self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
         saved = self.receipt(request)
-        link = self.enclosures.group / "task-reports"
-        return request, saved, link, Path(saved["handoverArtifact"]["canonicalPath"])
+        # New starts use a real role-reports folder (L71); only pre-existing alias
+        # bindings still restore the enclosure's task-reports link.
+        access = Path(saved["workspace"]["taskReportAccessRoot"])
+        return request, saved, access, Path(saved["handoverArtifact"]["canonicalPath"])
 
     def refused_with_nothing_sent(self, request: Any) -> str:
         calls = len(self.runtime.calls)
@@ -906,99 +909,46 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         self.assertEqual(len(self.runtime.calls), calls)
         return str(error.detail)
 
-    def test_a_leaf_retry_puts_a_missing_report_access_link_back(self) -> None:
-        request, saved, link, stored = self.unresolved_leaf_launch()
+    def test_a_leaf_retry_restores_a_missing_report_folder(self) -> None:
+        request, saved, access, stored = self.unresolved_leaf_launch()
         reference = saved["handoverArtifact"]
-        written = stored.stat()
-        recorded = (
-            f"The handover artifact of this request is recorded at {stored}, but the path the "
-            f"agent was given, {reference['path']},"
-        )
-        put_back = (
-            "Put back what that path ran through (for a leaf role, the report-access link of "
-            "its enclosure) and retry."
-        )
-        with self.subTest("something else at the link's name is refused, and named"):
-            link.unlink()
-            link.mkdir()
-            # A folder is at the link's name, so the given path leads to itself.
-            self.assertEqual(
-                self.refused_with_nothing_sent(request),
-                f"{recorded} no longer leads to that file. {put_back}",
-            )
-            self.assertEqual(list(link.iterdir()), [])
-            link.rmdir()
-        with self.subTest("a link that leads nowhere is not replaced and nothing is made there"):
-            nowhere = self.root / "removed-report-folder"
-            link.symlink_to(nowhere)
-            self.assertEqual(
-                self.refused_with_nothing_sent(request),
-                f"{recorded} now leads to {nowhere / 'role-launch' / stored.name}. {put_back}",
-            )
-            self.assertEqual(os.readlink(link), nowhere.as_posix())
-            self.assertFalse(nowhere.exists())
-            link.unlink()
-        with self.subTest("a missing link is bound again, as the first launch bound it"):
-            self.assertFalse(link.exists())
-            self.assertEqual(self.dispatch(request)[1]["status"], "running")
-            self.assertTrue(link.is_symlink())
-            self.assertEqual(os.readlink(link), saved["workspace"]["taskReportRoot"])
-            self.assertEqual(link.resolve(), stored.parent.parent)
-            self.assertEqual(Path(reference["path"]).read_text(encoding="utf-8"), self.prompt)
-            self.assertEqual(
-                (stored.stat().st_ino, stored.stat().st_mtime_ns),
-                (written.st_ino, written.st_mtime_ns),
-            )
-            created = self.runtime.launch_calls()[-1][1]
-            self.assertEqual(created["prompt"], saved["replayRequest"]["agent"]["prompt"])
+        self.assertTrue(access.is_dir() and not access.is_symlink())
+        self.assertEqual(Path(reference["path"]), stored)
+        shutil.rmtree(access)
+        self.assertFalse(access.exists())
+        self.assertEqual(self.dispatch(request)[1]["status"], "running")
+        self.assertTrue(access.is_dir() and not access.is_symlink())
+        self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
+        self.assertEqual(self.receipt(request)["handoverArtifact"]["path"], stored.as_posix())
 
-    def test_a_leaf_retry_binds_no_link_for_a_receipt_that_disagrees_with_itself(self) -> None:
-        request, saved, link, stored = self.unresolved_leaf_launch()
+    def test_a_leaf_retry_refuses_a_changed_artifact_until_it_is_deleted(self) -> None:
+        request, _saved, _access, stored = self.unresolved_leaf_launch()
+        # The artifact is read-only: replace it the way an overwrite would.
+        stored.unlink()
+        stored.write_text("another assignment", encoding="utf-8")
+        kept = self.receipt_path(request).read_bytes()
+        self.assertEqual(
+            self.refused_with_nothing_sent(request),
+            f"The handover artifact {stored} no longer holds the first message saved for "
+            "this request. Delete that file and retry; the retry writes it again from the "
+            "saved message.",
+        )
+        self.assertEqual(self.receipt_path(request).read_bytes(), kept)
+        self.assertEqual(stored.read_text(encoding="utf-8"), "another assignment")
+        stored.unlink()
+        self.assertEqual(self.dispatch(request)[1]["status"], "running")
+        self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
+
+    def test_a_leaf_retry_uses_the_receipt_as_the_launch_wrote_it(self) -> None:
+        # The link-disagreement cases of the enclosure-link design left with it (L71):
+        # a new start binds no link, so there is nothing to disagree about the link's
+        # name, folder, or target. The link behavior itself is still held where it still
+        # exists, by the unit tests over hand-made links. What the route still guarantees
+        # is the receipt it wrote: a damaged artifact reference is refused by name, and
+        # the receipt as written gets the retry through without creating any link.
+        request, saved, access, stored = self.unresolved_leaf_launch()
         reference = saved["handoverArtifact"]
-        workspace = saved["workspace"]
         path = self.receipt_path(request)
-        link.unlink()
-        foreign = self.root / "a-folder-of-the-caller-s-choosing"
-        foreign.mkdir()
-        elsewhere = self.root / "a-place-of-the-caller-s-choosing"
-        renamed = self.enclosures.group / "reports"
-        # A retry binds only where the receipt agrees with itself: the link's name and folder,
-        # the artifact's path under the link, its recorded place under the link's target.
-        disagreeing: dict[str, dict[str, Any]] = {
-            "another target for the link": {
-                "workspace": {**workspace, "taskReportRoot": foreign.as_posix()}
-            },
-            "another place for the link": {
-                "workspace": {**workspace, "taskReportAccessRoot": (elsewhere / "link").as_posix()}
-            },
-            "another name for the link": {
-                "workspace": {**workspace, "taskReportAccessRoot": renamed.as_posix()}
-            },
-            "another name for the link, and the artifact's path through it": {
-                "workspace": {**workspace, "taskReportAccessRoot": renamed.as_posix()},
-                "handoverArtifact": {
-                    **reference,
-                    "path": (renamed / "role-launch" / stored.name).as_posix(),
-                },
-            },
-            "the link in another folder than the workspace": {
-                "workspace": {**workspace, "path": elsewhere.as_posix()}
-            },
-            "an artifact path that leaves the link again": {
-                "handoverArtifact": {
-                    **reference,
-                    "path": f"{link.as_posix()}/../task-reports/role-launch/{stored.name}",
-                }
-            },
-        }
-        for label, changed in disagreeing.items():
-            with self.subTest(label):
-                role_launch_receipts._write_receipt(path, {**saved, **changed})
-                self.refused_with_nothing_sent(request)
-                # No link was made, at the enclosure or anywhere the receipt names.
-                self.assertFalse(link.is_symlink() or link.exists())
-                self.assertFalse(elsewhere.exists() or renamed.exists())
-                self.assertEqual(list(foreign.iterdir()), [])
         with self.subTest("an artifact reference that lacks a part is refused by the receipt"):
             damaged = {key: value for key, value in reference.items() if key != "canonicalPath"}
             role_launch_receipts._write_receipt(path, {**saved, "handoverArtifact": damaged})
@@ -1007,29 +957,103 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 "canonicalPath,",
                 self.refused_with_nothing_sent(request),
             )
-            self.assertFalse(link.is_symlink() or link.exists())
+            self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
         with self.subTest("the receipt as the launch wrote it gets the retry through"):
             role_launch_receipts._write_receipt(path, saved)
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
-            self.assertEqual(os.readlink(link), workspace["taskReportRoot"])
+            self.assertEqual(self.receipt(request)["handoverArtifact"]["path"], stored.as_posix())
+            self.assertTrue(access.is_dir() and not access.is_symlink())
 
-    def test_a_leaf_agent_is_given_its_paths_through_the_report_access_link(self) -> None:
+    def saved_alias_world(self) -> tuple[Any, dict[str, Any], Path, Path, Path]:
+        """A pre-existing alias world: the enclosure's task-reports link over a reports folder.
+
+        New starts bind a real role-reports folder (L71); enclosures created before that
+        keep their recorded `task-reports` link. A retry restores through such a saved
+        link without passing preparation again.
+        """
+
+        request, saved, _access, _stored = self.unresolved_leaf_launch()
+        reports = self.root / "legacy-reports"
+        (reports / "role-launch").mkdir(parents=True)
+        link = self.enclosures.group / "task-reports"
+        link.symlink_to(reports, target_is_directory=True)
+        report = link / "role-launch" / f"01_LEAF-worker-{request.request_id}.md"
+        reference = write_handover_artifact(report.as_posix(), self.prompt)
+        # A real legacy launch compiled its first message through the link: the saved
+        # launch call must carry that same line, or the restore rightly refuses.
+        replay = {
+            **saved["replayRequest"],
+            "agent": {
+                **saved["replayRequest"]["agent"],
+                "prompt": first_message(reference, self.prompt),
+            },
+        }
+        legacy = {
+            **saved,
+            "replayRequest": replay,
+            "workspace": {
+                **saved["workspace"],
+                "taskReportAccessRoot": link.as_posix(),
+                "taskReportRoot": reports.as_posix(),
+            },
+            "handoverArtifact": reference,
+        }
+        role_launch_receipts._write_receipt(self.receipt_path(request), legacy)
+        return request, legacy, link, reports, Path(reference["canonicalPath"])
+
+    def test_a_leaf_retry_uses_its_saved_alias_link(self) -> None:
+        request, _legacy, link, reports, stored = self.saved_alias_world()
+        self.assertEqual(self.dispatch(request)[1]["status"], "running")
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(os.readlink(link), reports.as_posix())
+        self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
+
+    def test_a_leaf_retry_recreates_a_missing_saved_alias_link(self) -> None:
+        request, _legacy, link, reports, stored = self.saved_alias_world()
+        link.unlink()
+        self.assertFalse(link.exists())
+        self.assertEqual(self.dispatch(request)[1]["status"], "running")
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(os.readlink(link), reports.as_posix())
+        self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
+
+    def test_a_leaf_retry_refuses_when_something_else_occupies_the_saved_alias_link(
+        self,
+    ) -> None:
+        request, legacy, link, _reports, stored = self.saved_alias_world()
+        reference = legacy["handoverArtifact"]
+        link.unlink()
+        link.mkdir()
+        self.assertEqual(
+            self.refused_with_nothing_sent(request),
+            f"The handover artifact of this request is recorded at {stored}, but the "
+            f"path the agent was given, {reference['path']}, no longer leads to that "
+            "file. Put back what that path ran through (for a leaf role, the "
+            "report-access link of its enclosure) and retry.",
+        )
+        self.assertEqual(list(link.iterdir()), [])
+        link.rmdir()
+        self.assertEqual(self.dispatch(request)[1]["status"], "running")
+        self.assertTrue(link.is_symlink())
+
+    def test_a_leaf_agent_is_given_its_paths_through_the_report_access_folder(self) -> None:
         self.compile_for_the_enclosure()
         request = self.request("worker")
 
         self.assertEqual(self.dispatch(request)[1]["status"], "running")
 
         name = f"01_LEAF-worker-{request.request_id}"
-        link = self.enclosures.group / "task-reports" / "role-launch"
-        canonical = self.leaf.path.parent / "notes" / "reports" / "role-launch"
-        self.assertNotEqual(link, canonical)
-        self.assertEqual(link.resolve(), canonical)
+        access = Path(self.receipt(request)["workspace"]["taskReportAccessRoot"])
+        report = access / "role-launch" / f"{name}.md"
+        # New starts use a real role-reports folder (L71): the agent reaches its report
+        # and artifact directly, with no link in between.
+        self.assertTrue(access.is_dir() and not access.is_symlink())
         created = self.runtime.launch_calls()[-1][1]
         digest = hashlib.sha256(self.prompt.encode("utf-8")).hexdigest()
         # The agent is told the paths it can reach from inside its enclosure, everywhere.
-        reachable = (link / f"{name}.handover.txt").as_posix()
+        reachable = (access / "role-launch" / f"{name}.handover.txt").as_posix()
         environment = created["mcpServers"]["agents-remember-task"]["env"]
-        self.assertEqual(environment["AR_REPORT_PATH"], (link / f"{name}.md").as_posix())
+        self.assertEqual(environment["AR_REPORT_PATH"], report.as_posix())
         self.assertIn(
             f" Assignment file: {reachable} (SHA-256 {digest}). ", created["systemPrompt"]
         )
@@ -1040,12 +1064,12 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             self.receipt(request)["handoverArtifact"],
             {
                 "path": reachable,
-                "canonicalPath": (canonical / f"{name}.handover.txt").as_posix(),
+                "canonicalPath": reachable,
                 "sha256": digest,
                 "bytes": len(self.prompt.encode("utf-8")),
             },
         )
-        stored = canonical / f"{name}.handover.txt"
+        stored = access / "role-launch" / f"{name}.handover.txt"
         self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
         self.assertEqual(stat.S_IMODE(stored.stat().st_mode), 0o444)
 

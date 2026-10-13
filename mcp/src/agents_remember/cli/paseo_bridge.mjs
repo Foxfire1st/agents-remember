@@ -375,6 +375,10 @@ function stillLoading(entry) {
   return {
     id: entry.provider,
     label: nonEmpty(entry.label) ?? entry.provider,
+    // The row carries the runtime's modes on every path (L71): a provider that is
+    // still listing reports no models, but its modes are already known.
+    modes: entry.modes ?? [], defaultModeId: entry.defaultModeId ?? null,
+    fetchedAt: entry.fetchedAt ?? null,
     models: [],
     listingError: 'the runtime was still listing the models of this provider when the call ended'
   }

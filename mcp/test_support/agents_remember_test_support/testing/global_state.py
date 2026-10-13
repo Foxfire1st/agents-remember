@@ -102,6 +102,16 @@ def _reset_extension(module: ModuleType, attribute: str) -> None:
         setattr(module, attribute, False)
 
 
+def _reset_sweep_cursor(module: ModuleType, attribute: str) -> None:
+    del attribute
+    module._reset_sweep_cursor()
+
+
+def _reset_tool_writer(module: ModuleType, attribute: str) -> None:
+    del attribute
+    module.reset_tool_writer()
+
+
 def _row(
     module: str,
     attribute: str,
@@ -151,9 +161,30 @@ PROCESS_MUTABLE_STATES = (
         treatment="constant for tests",
     ),
     _row(
+        "application.tool_answer_log",
+        "_FOLDER_BUDGETS",
+        "Forget per-folder measured answer budgets between test modules.",
+    ),
+    _row(
         "cli.paseo_catalog",
         "_CATALOGS",
         "Forget runtime discovery so another module cannot inherit a launcher catalog.",
+    ),
+    _row(
+        "cli.role_held_messages",
+        "_sweep_walks",
+        "Close suspended sweep walks before forgetting them between test modules.",
+        _reset_sweep_cursor,
+    ),
+    _row(
+        "cli.role_message_files",
+        "_NEXT_COUNTER",
+        "Forget message-stem counters between test modules.",
+    ),
+    _row(
+        "kernel.atomic_write",
+        "_temps_in_flight",
+        "Forget this process's in-flight temp paths between test modules.",
     ),
     _row(
         "kernel.file_lock",
@@ -240,6 +271,12 @@ PROCESS_MUTABLE_STATES = (
         "_AmbientRegistry.instance",
         "Stop and join the heartbeat before clearing the ambient singleton.",
         _reset_ambient,
+    ),
+    _row(
+        "observer.tool_events",
+        "_ToolEventRegistry.instance",
+        "Clear the installed tool-event writer between test modules.",
+        _reset_tool_writer,
     ),
     _row(
         "serving.build_info",

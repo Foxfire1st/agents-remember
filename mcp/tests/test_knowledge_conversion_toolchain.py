@@ -822,9 +822,11 @@ def test_the_fixer_checks_every_card_first_and_refuses_by_name(tmp_path: Path) -
     refused = {one["card"]: one["reason"] for one in fixed["authoring"]["refused"]}
     assert set(refused) == {"onboarding/src/pkg/a_first.py.md", "onboarding/src/pkg/z_last.py.md"}
     assert all("does not parse" in reason for reason in refused.values())
+    # MIK-R45 failure behavior with MIK-R110 rule 2: refused cards are named in the
+    # authoring refusal above and stay out of the mechanical re-record, so the fixer
+    # names only the sidecar it cannot read at all.
     assert set(fixed["unreadableSidecars"]) == {
         "onboarding/src/pkg/a_first.py.json",
-        "onboarding/src/pkg/z_last.py.json",
     }
     assert (first.read_bytes(), last.read_bytes()) == originals
     assert fix_references(memory, code.root, dry_run=True)["ok"] is False  # named, and not ok

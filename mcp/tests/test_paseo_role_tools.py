@@ -1071,20 +1071,19 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
         leaf = {key: ref.model_dump(mode="json") for key, ref in selection_of("worker").items()}
         start = {"role": "worker", "request_id": str(uuid.uuid4()), **leaf}
         # This process was not started by a launch: no binding, whatever the settings hold.
+        # MIK-R108: the answer carries no envelope field; the operation repeats the tool.
         _loop, refused = self.call("role_start", start)
         self.assertEqual(
-            (refused["ok"], refused["operation"], refused["refusal"]),
-            (False, "role_start", "caller-has-no-binding"),
+            (refused["ok"], refused["refusal"]),
+            (False, "caller-has-no-binding"),
         )
         message = {"text": "hello", "agent_id": str(uuid.uuid4())}
         _loop, refused = self.call("role_message", message)
-        self.assertEqual(
-            (refused["operation"], refused["refusal"]), ("role_message", "caller-has-no-binding")
-        )
+        self.assertEqual(refused["refusal"], "caller-has-no-binding")
         _loop, refused = self.call("role_start_set", {"request_id": str(uuid.uuid4()), **leaf})
         self.assertEqual(
-            (refused["operation"], refused["refusal"]),
-            ("role_start_set", "caller-has-no-binding"),
+            (refused["ok"], refused["refusal"]),
+            (False, "caller-has-no-binding"),
         )
         with (
             self.subTest("a wait longer than the maximum is refused by the argument model"),

@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
+import apsw
 from agents_remember.application.legacy_dataset_copies import plan_cleanup, run_cleanup
 from agents_remember.application.review_comparison_generation import (
     _UNSEALED_FIELDS,
@@ -58,10 +61,37 @@ LEFT_COPY = (
 
 
 def _dataset(path: Path) -> bytes:
-    """One SQLite file holding the knowledge schema; return the bytes the manifest seals."""
+    """One SQLite file holding the knowledge schema; return the bytes the manifest seals.
+
+    MIK-R26 rule 6: the file is built under a working name and copied into place --
+    the derived index never opens or writes a retired dataset name, so a
+    retired-named copy cannot be authored through the store. The copy keeps only
+    the logical tables: a file carrying the index's own ``ix_*`` tables reads as a
+    derived index, not as a leftover copy. The same shape
+    ``test_knowledge_copy_cleanup`` builds.
+    """
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    open_knowledge_store(path, "11111111-1111-4111-8111-111111111111").close()
+    with tempfile.TemporaryDirectory(prefix="ar-copies-template-") as temporary:
+        template = Path(temporary) / "template.sqlite"
+        open_knowledge_store(template, "11111111-1111-4111-8111-111111111111").close()
+        shutil.copy(template, path)
+    connection = apsw.Connection(str(path))
+    try:
+        for table in (
+            "ix_meta",
+            "ix_problem",
+            "ix_record",
+            "ix_entry",
+            "ix_member",
+            "ix_route",
+            "ix_link",
+            "ix_history_row",
+            "ix_uuid",
+        ):
+            connection.execute(f"DROP TABLE {table}")
+    finally:
+        connection.close()
     return path.read_bytes()
 
 

@@ -404,11 +404,33 @@ def test_a_half_recorded_family_row_makes_the_display_unavailable(
 ) -> None:
     """A changed family row with only one of effect/revision is invalid (MIK-R48 rule 3).
 
-    Validated writes refuse such a row, so the case is built by filing it into a copy
-    of the after index directly: the projection still refuses to show a step for it.
+    The row is staged by the index build from a text history file, like every other
+    row (MIK-R74 rule 3); the half-recorded state is fault-injected afterwards with
+    an UPDATE on the tmp copy -- the validated writer refuses such a row, and the
+    projection must still refuse to show a step for it.
     """
 
     world = _meaning_world(tmp_path)
+    _write(
+        world.memory_worktree,
+        {
+            f"knowledge/history/{LEAF}-attempt-3.json": _attempt_history(
+                3,
+                [
+                    {
+                        "id": "ROW-H11111",
+                        "subject": FAMILY,
+                        "disposition": "changed",
+                        "reason": "The guarantee was restated.",
+                        "items": [],
+                        "examined": [{"id": INVARIANT, "revision": 2}],
+                        "revision": 2,
+                        "effect": "clarify",
+                    }
+                ],
+            )
+        },
+    )
     resolved = _resolve(world)
     copied = tmp_path / "half-recorded.sqlite"
     shutil.copyfile(resolved.candidate_database, copied)
@@ -425,20 +447,11 @@ def test_a_half_recorded_family_row_makes_the_display_unavailable(
     )
     connection = sqlite3.connect(copied)
     try:
-        connection.execute(
-            "INSERT INTO ix_history_row (id, owner, owner_kind, closed, path, subject, "
-            "disposition, document) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                "ROW-H11111",
-                LEAF,
-                "leaf",
-                0,
-                f"knowledge/history/{LEAF}.json",
-                FAMILY,
-                "changed",
-                document,
-            ),
+        cursor = connection.execute(
+            "UPDATE ix_history_row SET document = ? WHERE id = ?",
+            (document, "ROW-H11111"),
         )
+        assert cursor.rowcount == 1, "the staged row the fault injection corrupts"
         connection.commit()
     finally:
         connection.close()
