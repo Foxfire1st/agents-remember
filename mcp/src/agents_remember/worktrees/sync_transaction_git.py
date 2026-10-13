@@ -6,9 +6,11 @@ identity. Code-side files keep ordinary Git semantics, including a file named me
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,6 +20,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel.git_command import read_git_blob_bytes, run_git
+from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.worktrees.knowledge_crossing import (
     CrossingSyncError,
@@ -70,18 +73,25 @@ class CancelTreeAssessment:
     cancel is refused while it is non-empty, and the refusal says so instead of
     claiming later work. ``owned_untracked`` names untracked paths the
     recorded stash holds, removed explicitly because ``reset --hard`` keeps them.
-    ``needs_discard`` says owned dirt is present at all.
+    ``needs_discard`` says owned dirt is present at all. ``merge_fault`` holds
+    git's words where it could not make the reapply's merge again: a path both
+    sides changed then cannot be shown to be the reapply's own and stands in
+    ``later_work``, and the refusal says why.
     """
 
     later_work: tuple[str, ...] = ()
     owned_untracked: tuple[str, ...] = ()
     unproven_paths: tuple[str, ...] = ()
     needs_discard: bool = False
+    merge_fault: str = ""
 
 
-#: Blob modes ``merge-file`` can reapply; a symlink or submodule change the proof
-#: cannot compute fails its path instead of passing it.
+#: Blob modes whose reapply the proof computes; a symlink or submodule change the
+#: proof cannot compute fails its path instead of passing it.
 _REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
+
+#: A full object name, as ``git merge-tree`` writes the merged tree's.
+_OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 
 class SyncGitProofError(RuntimeError):
@@ -346,28 +356,155 @@ def parked_wip_failures(side: SyncSideRecord, carried_head: str) -> tuple[str, .
 
     A path fails when the worktree differs from the reapplied content, and when
     no construction computes that content (a file type git cannot merge, a path
-    removed on one side): both fail the proof and the cancel leads back. Every
-    path the stash holds is proved, including entries beyond the journal sample.
-    An unreadable stash inventory raises instead of passing on the sample: the
-    sample names failures, it never passes a proof.
+    removed on one side, a merge git cannot make again): both fail the proof and
+    the cancel leads back. Every path the stash holds is proved, including
+    entries beyond the journal sample. An unreadable stash inventory raises
+    instead of passing on the sample: the sample names failures, it never passes
+    a proof.
     """
 
     failures: list[str] = []
+    merge = _ReapplyMerge(side, carried_head)
     for path in stashed_parked_paths(side):
-        expected = expected_reapplied_content(side, path, carried_head)
+        expected = expected_reapplied_content(side, path, carried_head, merge)
         if expected.kind == "uncomputable":
             failures.append(path)
             continue
         actual = worktree_entry_content(side, path)
         if (actual.kind, actual.content) != (expected.kind, expected.content):
             failures.append(path)
+    if merge.fault:
+        logger.error(
+            "sync %s proof could not make the reapply's merge again: %s", side.side, merge.fault
+        )
     return tuple(failures)
 
 
+def reapply_merge_fault(side: SyncSideRecord, carried_head: str, paths: tuple[str, ...]) -> str:
+    """Git's words where the proof of these paths needed a merge git could not make.
+
+    Empty where git made the merge, and where none of the paths asked for one:
+    the failed proof says why a path both sides changed could not be computed.
+    """
+
+    merge = _ReapplyMerge(side, carried_head)
+    with contextlib.suppress(SyncGitProofError, GitPreparationError):
+        for path in paths:
+            expected_reapplied_content(side, path, carried_head, merge)
+    return merge.fault
+
+
+def named_merge_rules(side: SyncSideRecord, paths: tuple[str, ...]) -> dict[str, str]:
+    """The merge the carried head's attributes prescribe for each path that has one.
+
+    A failed proof names the rule beside its path, so a path git merges by a
+    driver of its own is read as such. Attributes git cannot read name nothing.
+    """
+
+    if not paths:
+        return {}
+    listed = run_git(
+        Path(side.worktree), ["check-attr", "--source=HEAD", "-z", "merge", "--", *paths]
+    )
+    if listed.returncode != 0:
+        return {}
+    cells = listed.stdout.split("\0")
+    rules = zip(cells[0::3], cells[2::3], strict=False)
+    return {path: rule for path, rule in rules if rule != "unspecified"}
+
+
+class _ReapplyMerge:
+    """Git's own merge of the parked candidate onto the carried head.
+
+    The reapply is ``git stash apply`` in the side's worktree: git merges the
+    stash onto the head with the stash's parent as base, each path by the driver
+    the head's attributes name for it and the head's side first. ``git
+    merge-tree`` makes that merge again without an index or a checkout. It runs
+    in that same worktree, so the configuration git's merge reads there (a
+    driver's program, the rename and renormalize settings, also where they are
+    set for that worktree alone) is the reapply's; the attributes are the carried
+    head's. One setting the reapply reads and ``merge-tree`` does not, so the
+    proof hands it over: ``diff.algorithm``. Measured on git 2.43.0, 2.45.4,
+    2.47.3, 2.49.1, 2.52.0 and 2.55.0: the last two follow it, the older ones
+    merge with histogram diffs whatever they are told, and on each the reapply
+    and ``merge-tree`` do the same.
+
+    There is one merge and one expected content per path. Where git cannot make
+    the merge, ``fault`` holds its words and no path has an expected content:
+    the proof never merges by a construction of its own. The merge is made once
+    per proof, and only when a path changed on both sides asks for it. Its only
+    writes are the merge's own objects, the ones a reapply writes: no ref names
+    them, and git's garbage collection removes them.
+    """
+
+    def __init__(self, side: SyncSideRecord, carried_head: str) -> None:
+        self._side = side
+        self._carried_head = carried_head
+        self._asked = False
+        self._tree: str | None = None
+        self._conflicted: frozenset[str] = frozenset()
+        self.fault = ""
+
+    def content(self, path: str) -> ExpectedReappliedContent:
+        """One both-changed path's merged content; uncomputable where git gives none."""
+
+        if not self._asked:
+            self._asked = True
+            self._make()
+        if self._tree is None or path in self._conflicted:
+            return ExpectedReappliedContent("uncomputable")
+        merged = _spec_content(Path(self._side.repository), (f"{self._tree}:{path}",))
+        if merged is None:
+            return ExpectedReappliedContent("uncomputable")
+        return ExpectedReappliedContent("bytes", merged)
+
+    def _make(self) -> None:
+        """Make the merge where the reapply ran, under the diff algorithm it read."""
+
+        worktree = Path(self._side.worktree)
+        configured = run_git(worktree, ["config", "--get", "diff.algorithm"])
+        if configured.returncode not in {0, 1}:
+            self.fault = _git_words(configured, "git config --get diff.algorithm")
+            return
+        algorithm = configured.stdout.strip() if configured.returncode == 0 else ""
+        merged = run_git(
+            worktree,
+            [
+                f"--attr-source={self._carried_head}",
+                "merge-tree",
+                "--write-tree",
+                "--no-messages",
+                "--name-only",
+                "-z",
+                *([f"-Xdiff-algorithm={algorithm}"] if algorithm else []),
+                f"--merge-base={self._side.wipStash}^1",
+                self._carried_head,
+                self._side.wipStash,
+            ],
+        )
+        cells = [cell for cell in merged.stdout.split("\0") if cell]
+        if merged.returncode in {0, 1} and cells and _OBJECT_ID.fullmatch(cells[0]):
+            self._tree, self._conflicted = cells[0], frozenset(cells[1:])
+        else:
+            self.fault = _git_words(merged, "git merge-tree")
+
+
+def _git_words(result: subprocess.CompletedProcess[str], command: str) -> str:
+    """One line for a refusal: the command, its exit code and git's first words."""
+
+    lines = (result.stderr.strip() or result.stdout.replace("\0", " ").strip()).splitlines()
+    said = f": {lines[0].strip()}" if lines else ""
+    return f"{command} ended with {result.returncode}{said}"
+
+
 def expected_reapplied_content(
-    side: SyncSideRecord, path: str, carried_head: str
+    side: SyncSideRecord, path: str, carried_head: str, merge: _ReapplyMerge | None = None
 ) -> ExpectedReappliedContent:
-    """What the reapply of one parked path onto the carried head gives."""
+    """What the reapply of one parked path onto the carried head gives.
+
+    ``merge`` is git's merge of the candidate onto that head; the paths of one
+    proof share it, so it is made once.
+    """
 
     repository = Path(side.repository)
     parked_rev, parked = _parked_path_content(side, path)
@@ -387,7 +524,8 @@ def expected_reapplied_content(
         return _expected_deleted_path(base, carried)
     if carried is None:
         return ExpectedReappliedContent("uncomputable")
-    return _expected_changed_path(repository, parked, base, carried)
+    contents = (parked, base, carried)
+    return _expected_changed_path(path, contents, merge or _ReapplyMerge(side, carried_head))
 
 
 def _expected_deleted_path(base: bytes, carried: bytes | None) -> ExpectedReappliedContent:
@@ -399,15 +537,20 @@ def _expected_deleted_path(base: bytes, carried: bytes | None) -> ExpectedReappl
 
 
 def _expected_changed_path(
-    repository: Path, parked: bytes, base: bytes, carried: bytes
+    path: str, contents: tuple[bytes, bytes, bytes], merge: _ReapplyMerge
 ) -> ExpectedReappliedContent:
-    """What the reapply of a parked change to a carried-changed file gives."""
+    """What the reapply of a parked change to a carried-changed file gives.
 
-    if parked == base:
+    Git merges content only where both sides changed the file differently: that
+    merge is git's own, and where git cannot make it the path is uncomputable.
+    """
+
+    parked, base, carried = contents
+    if parked in {base, carried}:
         return ExpectedReappliedContent("bytes", carried)
     if carried == base:
         return ExpectedReappliedContent("bytes", parked)
-    return _merged_path_content(repository, parked, base, carried)
+    return merge.content(path)
 
 
 def parked_path_content(side: SyncSideRecord, path: str) -> ExpectedReappliedContent:
@@ -669,11 +812,12 @@ def assess_stash_tree(side: SyncSideRecord, carried_head: str | None) -> CancelT
     parked = set(stashed_parked_paths(side)) if side.wipStash else set()
     later: list[str] = []
     owned_untracked: list[str] = []
+    merge = _ReapplyMerge(side, carried_head) if carried_head is not None else None
     for path in sorted(dirty):
         if path not in parked:
             later.append(path)
             continue
-        if _path_owned_by_stash(side, path, carried_head):
+        if _path_owned_by_stash(side, path, carried_head, merge):
             actual = worktree_entry_content(side, path)
             if actual.kind == "bytes" and _is_untracked(side, path):
                 owned_untracked.append(path)
@@ -687,6 +831,7 @@ def assess_stash_tree(side: SyncSideRecord, carried_head: str | None) -> CancelT
         later_work=tuple(later_sorted),
         owned_untracked=tuple(owned_untracked),
         needs_discard=bool(dirty - set(later_sorted)),
+        merge_fault=merge.fault if merge is not None else "",
     )
 
 
@@ -737,6 +882,7 @@ def assess_retained_tree(side: SyncSideRecord, carried_head: str | None) -> Canc
     }
     mismatched = set(sorted(dirty)) - matched
     fallback_owned: set[str] = set()
+    merge = _ReapplyMerge(side, carried_head) if carried_head is not None else None
     if mismatched and merge_head(Path(side.worktree)) is None:
         parked = set(stashed_parked_paths(side))
         index_later = set(_index_later_paths(side, carried_head, parked))
@@ -744,7 +890,7 @@ def assess_retained_tree(side: SyncSideRecord, carried_head: str | None) -> Canc
             if (
                 path in parked
                 and path not in index_later
-                and _path_owned_by_stash(side, path, carried_head)
+                and _path_owned_by_stash(side, path, carried_head, merge)
             ):
                 fallback_owned.add(path)
     owned = matched | fallback_owned
@@ -758,16 +904,23 @@ def assess_retained_tree(side: SyncSideRecord, carried_head: str | None) -> Canc
         later_work=tuple(later_sorted),
         owned_untracked=tuple(owned_untracked),
         needs_discard=bool(owned),
+        merge_fault=merge.fault if merge is not None else "",
     )
 
 
-def _path_owned_by_stash(side: SyncSideRecord, path: str, carried_head: str | None) -> bool:
-    """Whether one dirty parked path's worktree bytes are exactly the reapply's."""
+def _path_owned_by_stash(
+    side: SyncSideRecord, path: str, carried_head: str | None, merge: _ReapplyMerge | None
+) -> bool:
+    """Whether one dirty parked path's worktree bytes are exactly the reapply's.
+
+    The cancel judges with the proof's own construction: ``merge`` is git's
+    merge of the candidate onto the carried head, shared by one assessment.
+    """
 
     if carried_head is None:
         expected = parked_path_content(side, path)
     else:
-        expected = expected_reapplied_content(side, path, carried_head)
+        expected = expected_reapplied_content(side, path, carried_head, merge)
     if expected.kind != "uncomputable":
         actual = worktree_entry_content(side, path)
         return (actual.kind, actual.content) == (expected.kind, expected.content)
@@ -821,7 +974,11 @@ def _index_later_paths(
 
 
 def _index_state(side: SyncSideRecord, path: str) -> tuple[str, bytes]:
-    """One path's staged state: ("blob", bytes), ("absent", b"") or ("unmerged", b"")."""
+    """One path's staged state: ("blob", bytes), ("absent", b"") or ("unmerged", b"").
+
+    The staged bytes are the blob's own: a text pipe would turn every carriage
+    return into a line feed, and a staged picture would never equal its stash.
+    """
 
     worktree = Path(side.worktree)
     listed = run_git(worktree, ["ls-files", "-s", "--", path])
@@ -832,10 +989,13 @@ def _index_state(side: SyncSideRecord, path: str) -> tuple[str, bytes]:
     stages = {line.split()[2] for line in listed.stdout.splitlines()}
     if stages != {"0"}:
         return ("unmerged", b"")
-    shown = run_git(worktree, ["show", f":{path}"])
-    if shown.returncode != 0:
+    try:
+        staged = _spec_content(worktree, (f":0:{path}",))
+    except GitPreparationError:
+        staged = None
+    if staged is None:
         raise SyncGitProofError(f"could not read the {side.side} staged bytes of {path}")
-    return ("blob", shown.stdout.encode("utf-8", "surrogateescape"))
+    return ("blob", staged)
 
 
 def _parked_deleted(side: SyncSideRecord, path: str) -> bool:
@@ -896,30 +1056,6 @@ def _expected_added_path(parked: bytes | None, carried: bytes | None) -> Expecte
     if parked is not None and carried == parked:
         return ExpectedReappliedContent("bytes", carried)
     return ExpectedReappliedContent("uncomputable")
-
-
-def _merged_path_content(
-    repository: Path, parked: bytes, base: bytes, carried: bytes
-) -> ExpectedReappliedContent:
-    """The three-way reapply of the parked change onto the carried head."""
-
-    with tempfile.TemporaryDirectory(prefix="ar-sync-proof-") as scratch:
-        scratch_dir = Path(scratch)
-        (scratch_dir / "parked").write_bytes(parked)
-        (scratch_dir / "base").write_bytes(base)
-        (scratch_dir / "carried").write_bytes(carried)
-        merged = run_git(
-            repository,
-            [
-                "merge-file",
-                (scratch_dir / "parked").as_posix(),
-                (scratch_dir / "base").as_posix(),
-                (scratch_dir / "carried").as_posix(),
-            ],
-        )
-        if merged.returncode != 0:
-            return ExpectedReappliedContent("uncomputable")
-        return ExpectedReappliedContent("bytes", (scratch_dir / "parked").read_bytes())
 
 
 def _parked_path_content(side: SyncSideRecord, path: str) -> tuple[str | None, bytes | None]:

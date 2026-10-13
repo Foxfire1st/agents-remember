@@ -245,7 +245,10 @@ def cancel_sync(
         for path in assessment.unproven_paths
     ]
     if later or unproven:
-        return _refuse_cancel_for_later_work(record, fetch, later, unproven)
+        faults = dict.fromkeys(
+            assessment.merge_fault for assessment in assessments.values() if assessment.merge_fault
+        )
+        return _refuse_cancel_for_later_work(record, fetch, later, unproven, "; ".join(faults))
     record = update_record(store, record, phase="cancelling")
     for side in (record.memory, record.code):
         if side is not None:
@@ -334,9 +337,20 @@ def _refuse_cancel_for_later_work(
     fetch: dict[str, object],
     later: list[str],
     unproven: list[str] | None = None,
+    merge_fault: str = "",
 ) -> WorktreeCommandResult:
-    """Refuse a cancel over later or unshowable work before anything changes, record included."""
+    """Refuse a cancel over later or unshowable work before anything changes, record included.
 
+    ``merge_fault`` is git's words where it could not make the reapply's merge again: a
+    path both sides changed then stands among the later work, and the refusal says why.
+    """
+
+    fault_note = (
+        f" Git could not make the reapply's merge again ({merge_fault}), so a path both sides "
+        "changed cannot be shown to be the reapply's own."
+        if merge_fault and later
+        else ""
+    )
     if unproven:
         logger.error("sync cancel refused over unproven paths: %s", ", ".join(unproven))
         shown = ", ".join(unproven[:MAX_NAMED_SYNC_PATHS])
@@ -354,6 +368,7 @@ def _refuse_cancel_for_later_work(
                 later_shown += f" and {len(later) - MAX_NAMED_SYNC_PATHS} more"
             summary += (
                 f" These further paths hold later work no stash and no commit holds: {later_shown}."
+                f"{fault_note}"
             )
         return manual_repair_result(
             "sync-cancel-unproven-after-interrupt",
@@ -368,7 +383,8 @@ def _refuse_cancel_for_later_work(
     return manual_repair_result(
         "sync-cancel-refused-later-work",
         "The sync cannot be cancelled: the worktree holds later work no stash and no commit "
-        f"holds: {shown}. Save those paths elsewhere, cancel the sync, then restore them. "
+        f"holds: {shown}.{fault_note} Save those paths elsewhere, cancel the sync, then restore "
+        "them. "
         "Nothing was changed; the sync record keeps its phase.",
         record,
         fetch,

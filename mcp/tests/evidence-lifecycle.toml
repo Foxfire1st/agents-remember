@@ -1595,6 +1595,7 @@ consumers = [
   "mcp/tests/test_suite_load_independence.py",
   "mcp/tests/test_sync_dashboard.py",
   "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_sync_reapply_merge.py",
   "mcp/tests/test_sync_runtime.py",
   "mcp/tests/test_sync_scripts.py",
   "mcp/tests/test_task_decision_product_records.py",

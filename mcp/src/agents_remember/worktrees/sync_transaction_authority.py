@@ -20,8 +20,10 @@ from agents_remember.worktrees.sync_transaction_git import (
     delete_pinned_ref,
     discard_memory_cache_changes,
     git_status,
+    named_merge_rules,
     parked_wip_failures,
     read_ref,
+    reapply_merge_fault,
     remove_temporary_worktree,
     sample_paths,
     side_branch_head,
@@ -469,7 +471,11 @@ def _retain_parked_conflict(
 def _unproven_restore_error(
     side: SyncSideRecord, failures: tuple[str, ...], *, uninventoried: bool = False
 ) -> SyncGitProofError:
-    """The failed proof: its paths, the kept stash, and the one next action."""
+    """The failed proof: its paths, the kept stash, and the one next action.
+
+    A path the carried head's attributes give a merge of its own is named with it,
+    and a merge git could not make again is named with git's words.
+    """
 
     logger.error(
         "sync %s parked WIP unproven on every failed path: %s (stash %s)",
@@ -477,10 +483,19 @@ def _unproven_restore_error(
         ", ".join(failures),
         side.wipStash,
     )
-    shown = ", ".join(failures[:MAX_NAMED_SYNC_PATHS])
+    named = failures[:MAX_NAMED_SYNC_PATHS]
+    rules = named_merge_rules(side, named)
+    shown = ", ".join(f"{path} (merge={rules[path]})" if path in rules else path for path in named)
     if len(failures) > MAX_NAMED_SYNC_PATHS:
         shown += f" and {len(failures) - MAX_NAMED_SYNC_PATHS} more"
     count = "1 path holds" if len(failures) == 1 else f"{len(failures)} paths hold"
+    fault = reapply_merge_fault(side, side_branch_head(side), named)
+    merge_note = (
+        f" Git could not make the reapply's merge again ({fault}), so no path both sides "
+        "changed could be proven."
+        if fault
+        else ""
+    )
     inventory_note = (
         " The recorded stash could not be fully inventoried, so no path beyond the "
         "journal sample was proven."
@@ -489,7 +504,8 @@ def _unproven_restore_error(
     )
     return SyncGitProofError(
         f"{side.side} parked worktree WIP could not be proven restored: {count} none of the "
-        f"parked bytes: {shown}. The parked candidate stays in stash {side.wipStash}; run "
+        f"parked bytes: {shown}.{merge_note} The parked candidate stays in stash "
+        f"{side.wipStash}; run "
         f"worktree_sync with resolution_action='cancel' to restore the pre-sync heads and the "
         f"parked work. Do not edit the worktree until the transaction is closed.{inventory_note}"
     )
