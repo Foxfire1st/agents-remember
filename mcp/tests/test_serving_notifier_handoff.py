@@ -59,6 +59,13 @@ class ServingNotifierHandoffTests(_HandoffCase):
             self.clock.elapse(N - P / 2)
             self.world.heartbeat_gate.release.set()
             await self.wait_for_notifier_pass(after=0)
+            # Both loops parked before driving: the first pass ran in a worker thread while
+            # this case already polls ahead, so without this settle the notifier's re-parked
+            # interval deadline lands on either side of the observer's next poll by turns,
+            # and the probe release (hence the sweep window it opens) differs with it.
+            # Settling fixes the order, not the timing: no wait lengthened, no assert changed
+            # (MIK-R160 rule 9; the other handoff cases already settle the same way).
+            await self.settle()
 
             previous = await self.drive_to_full_sweep()
             # The fact becomes readable half a polling delay after that sweep started: the packet's

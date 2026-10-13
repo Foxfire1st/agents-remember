@@ -333,9 +333,12 @@ class AgentCommandScriptTests(unittest.TestCase):
             self.call("agent-create", payload, features=[])
         self.assertFalse(any(row["via"] in {"public", "daemon", "send"} for row in self.recorded()))
         invalid = {**payload, "featureValues": {"fast_mode": True}}
-        with self.assertRaisesRegex(PaseoBridgeFailure, "service_tier"):
+        # The bridge names the offending feature, not the offered set (L71).
+        with self.assertRaisesRegex(PaseoBridgeFailure, "fast_mode"):
             self.call("agent-create", invalid)
-        self.assertEqual(self.recorded(), [])
+        # The refusal still precedes any create: the one recorded call is the feature
+        # discovery the validation reads (fc2f4bb6, Fast service tier per role).
+        self.assertFalse(any(row["via"] in {"public", "daemon", "send"} for row in self.recorded()))
 
     def failure(self, command: str, payload: dict[str, Any], **scenario: Any) -> PaseoBridgeFailure:
         with self.assertRaises(PaseoBridgeFailure) as raised:
@@ -487,6 +490,9 @@ class AgentCommandScriptTests(unittest.TestCase):
             "provider": "codex",
             "model": "gpt-a",
             "thinkingOptionId": "low",
+            # The bridge returns the agent with its mode and feature values (L71).
+            "modeId": None,
+            "featureValues": {},
             "title": "Worker · 01_LEAF",
             "labels": labels,
             "workspaceId": "wks_fake",
@@ -870,12 +876,36 @@ class AgentCommandScriptTests(unittest.TestCase):
 
         reply = self.call("catalog", {}, entries=entries, providerEntries=declared)
 
+        # The catalog row carries the runtime's modes (L71); the fake entries declare
+        # none, so they read back the empty defaults.
         self.assertEqual(
             reply["providers"],
             [
-                {"id": "codex", "label": "Codex", "models": []},
-                {"id": "hermes", "label": "Hermes", "models": []},
-                {"id": "eve", "label": "Eve", "models": [], "acceptsToolServers": False},
+                {
+                    "id": "codex",
+                    "label": "Codex",
+                    "modes": [],
+                    "defaultModeId": None,
+                    "fetchedAt": None,
+                    "models": [],
+                },
+                {
+                    "id": "hermes",
+                    "label": "Hermes",
+                    "modes": [],
+                    "defaultModeId": None,
+                    "fetchedAt": None,
+                    "models": [],
+                },
+                {
+                    "id": "eve",
+                    "label": "Eve",
+                    "modes": [],
+                    "defaultModeId": None,
+                    "fetchedAt": None,
+                    "models": [],
+                    "acceptsToolServers": False,
+                },
             ],
         )
         self.assertNotIn("not passed on", json.dumps(reply))

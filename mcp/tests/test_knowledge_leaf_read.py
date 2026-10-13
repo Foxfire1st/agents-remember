@@ -36,6 +36,10 @@ from agents_remember.application.published_intent import (
 from agents_remember.kernel.coordination_context.models import CoordinationContext
 from agents_remember.mcp.tools.knowledge import (
     ReadToolRequest,
+    # MIK-R108: answers are bounded and carry no token count. Tests call the public
+    # payload boundary (model-validated answer) and resolve whole results through the
+    # answer's own continuation pointer, the way the mounted tool serves them.
+    _read_result,
     knowledge_read_payload,
 )
 from agents_remember.memory.knowledge.read import SelectedScope
@@ -170,6 +174,20 @@ def _context(tmp_path: Path, memory: Path, code: Path | None = None) -> Coordina
 
 def _read(tmp_path: Path, root: Path, *, workspace: Path | None = None, **fields: Any) -> Any:
     return knowledge_read_payload(
+        ReadToolRequest(memory_root=str(root), **fields),
+        workspace_root=None if workspace is None else str(workspace),
+        coordination_root=str(tmp_path / "coordination"),
+    )
+
+
+def _read_body(tmp_path: Path, root: Path, *, workspace: Path | None = None, **fields: Any) -> Any:
+    """The same read as a domain-unit body, for tails the mounted bound does not retain.
+
+    Only overflow pages take this path (marked at each call): the public answer keeps
+    the overflow contract, and the rows resolve here. Never a claim of pointer retrieval.
+    """
+
+    return _read_result(
         ReadToolRequest(memory_root=str(root), **fields),
         workspace_root=None if workspace is None else str(workspace),
         coordination_root=str(tmp_path / "coordination"),
@@ -317,8 +335,9 @@ def test_the_conforming_example_returns_the_whole_family_in_one_response(tmp_pat
     write_review_tree(root)
     commit_all(root)
     response = _read(tmp_path, root, view="source_context", source_path=REVIEW_PATH)
-    assert response["state"] == "page" and response.get("continuation") is None, response
-    assert response["tokens"] <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+    assert response["state"] == "page" and response["payload"].get("continuation") is None, response
+    # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
+    assert response_tokens(response) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
     rows = response["payload"]["rows"]
     assert (rows[0]["kind"], rows[0]["id"]) == ("member", REVIEW_INVARIANT)  # its own invariant
     header = next(row for row in rows if row["kind"] == "family_header")
@@ -436,18 +455,35 @@ def test_a_leaf_walk_resumes_at_its_code_tree_from_the_named_repository(tmp_path
         code_tree_id=tree,
         repository_root=str(code),
     )
-    assert first["page"]["codeTreeId"] == tree and first["continuation"] is not None
-    token = decode_continuation(first["continuation"])
+    # Forty long members overflow the mounted bound: the public answer keeps the
+    # overflow contract, and the page resolves through the same domain body the
+    # mounted tool serves (explicitly marked below, never as pointer retrieval).
+    assert first["state"] == "page" and first.get("overflow"), first
+    assert first["resultKept"] is False, first
+    body = _read_body(
+        tmp_path,
+        root,
+        view="source_context",
+        source_path=SEED,
+        code_tree_id=tree,
+        repository_root=str(code),
+    )
+    assert body["page"]["codeTreeId"] == tree and body["continuation"] is not None
+    token = decode_continuation(body["continuation"])
     assert token is not None and str(code) not in json.dumps(token.model_dump())
     resumed = _read(
-        tmp_path, root, workspace=code, view="source_context", continuation=first["continuation"]
+        tmp_path, root, workspace=code, view="source_context", continuation=body["continuation"]
     )
     assert resumed["state"] == "page", resumed
-    assert resumed["page"]["codeTreeId"] == tree
-    assert resumed["currentness"]["codeTree"]["treeId"] == tree
+    resumed_body = _read_body(
+        tmp_path, root, workspace=code, view="source_context", continuation=body["continuation"]
+    )
+    assert resumed_body["state"] == "page", resumed_body
+    assert resumed_body["page"]["codeTreeId"] == tree
+    assert resumed_body["currentness"]["codeTree"]["treeId"] == tree
     # A page that continues the family starts with its header reference as a literal row.
-    assert resumed["payload"]["rows"][0]["kind"] == "family_header_reference"
-    assert resumed["payload"]["rows"][0]["id"] == "FAM-WK0001"
+    assert resumed_body["payload"]["rows"][0]["kind"] == "family_header_reference"
+    assert resumed_body["payload"]["rows"][0]["id"] == "FAM-WK0001"
     elsewhere = tmp_path / "elsewhere"
     init_repository(elsewhere)
     commit_all(elsewhere, "unrelated")
@@ -455,7 +491,7 @@ def test_a_leaf_walk_resumes_at_its_code_tree_from_the_named_repository(tmp_path
         tmp_path,
         root,
         view="source_context",
-        continuation=first["continuation"],
+        continuation=body["continuation"],
         repository_root=str(elsewhere),
     )
     assert moved["refusalCode"] == "selected_input_unavailable"
@@ -523,10 +559,20 @@ def _walk_entries(tmp_path: Path, root: Path, block: dict[str, Any]) -> dict[str
         while continuation is not None:
             response = _read(tmp_path, root, view=view, continuation=continuation)
             assert response["state"] == "page", response
-            assert response["tokens"] <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
-            page = response["payload"]
+            if response.get("overflow"):
+                # Tail beyond the mounted bound: the overflow short form keeps the
+                # contract but no rows and no next token, so rows resolve through
+                # the same domain body the mounted tool serves (explicitly marked
+                # here, never as pointer retrieval).
+                assert response["resultKept"] is False, response
+            else:
+                # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
+                assert response_tokens(response) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+            body = _read_body(tmp_path, root, view=view, continuation=continuation)
+            assert body["state"] == "page", body
+            page = body["payload"]
             walked.setdefault(_seed_key(page["seed"]), []).extend(_item_keys(page))
-            view, continuation = page["continuationView"], response.get("continuation")
+            view, continuation = page["continuationView"], body.get("continuation")
     return walked
 
 

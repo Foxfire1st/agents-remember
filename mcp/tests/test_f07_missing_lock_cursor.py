@@ -47,6 +47,7 @@ from agents_remember.observer.event_retention import (
 from agents_remember.observer.events import Event
 from agents_remember.observer.store import EventStore, workspace_base_offset, workspace_logical_size
 from agents_remember.serving import events as serving
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 SEED_ID = "already-seen-seed"
 NEW_ID = "new-after-cut"
@@ -329,11 +330,15 @@ def test_concurrent_cut_during_protected_read_waits() -> None:
 
         def slow_read(p: Path, start: int):
             entered.set()
+            # Hold the protected read open while the writer's compaction, already unblocked
+            # by `entered`, lands. A condition wait would deadlock: the cut takes the lock
+            # this held read owns; the asserts below verify the interleaving loudly.
+            # load-independent: bounded hold for an already-unblocked local compaction.
             time.sleep(0.3)
             return original(p, start)
 
         def writer() -> None:
-            assert entered.wait(timeout=10), "protected read never started"
+            assert entered.wait(timeout=HANG_GUARD_SECONDS), "protected read never started"
             outcome["dropped"] = compact_workspace_river(
                 root, now=base_time + datetime.timedelta(seconds=1, milliseconds=500), ttl_seconds=0
             )
@@ -344,7 +349,7 @@ def test_concurrent_cut_during_protected_read_waits() -> None:
             with mock.patch.object(serving, "_read_lines_from", side_effect=slow_read):
                 first, cursor = serving.read_new_events(root, {"workspace": virtual_start})
         finally:
-            thread.join(timeout=15)
+            thread.join(timeout=HANG_GUARD_SECONDS)
         assert not thread.is_alive(), "writer did not finish after the hold released"
         assert outcome.get("dropped") == 1, "concurrent cut never landed"
         assert [e.payload["id"] for e in first] == [f"row-{i:06d}" for i in range(2, 5)]

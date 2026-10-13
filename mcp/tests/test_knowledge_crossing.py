@@ -1530,6 +1530,8 @@ def test_gap_pairing_scales_near_linearly_on_fully_paired_inputs() -> None:
     elapsed = time.perf_counter() - started
 
     assert pairs == {str(number): str(number) for number in range(1, 2001)}
+    # The 10s bound catches a complexity regression, not load: pairing 2000 references
+    # runs in well under a second. load-independent: complexity bound.
     assert elapsed < 10, f"pairing 2000 references took {elapsed:.2f}s"
 
 
@@ -1561,6 +1563,8 @@ def test_gap_pairing_scales_on_crossed_fully_paired_inputs() -> None:
     assert pairs == {
         str(base_number): str(side_number) for base_number, side_number in enumerate(order, start=1)
     }
+    # The 10s bound catches a complexity regression, not load: crossed pairing of 2000
+    # references runs in well under a second. load-independent: complexity bound.
     assert elapsed < 10, f"pairing 2000 crossed references took {elapsed:.2f}s"
 
 

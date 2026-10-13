@@ -527,6 +527,7 @@ consumers = [
   "mcp/tests/test_direct_leaf_integration_refusal.py",
   "mcp/tests/test_direct_leaf_role_start.py",
   "mcp/tests/test_emptied_sprint.py",
+  "mcp/tests/test_enclosure_without_remains.py",
   "mcp/tests/test_evidence_dependency_bounds.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_bootstrap_procedure.py",

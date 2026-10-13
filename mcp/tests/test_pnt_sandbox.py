@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import signal
+import subprocess
 import sys
 import unittest
 import warnings
@@ -338,6 +339,79 @@ class SafetyCheckTests(SandboxCase):
                     self.assertNotIn("runtime_install", ops.calls)
                     self.assertNotIn("spawn dashboard", ops.calls)
                 link.unlink()
+
+    def test_build_roots_command_resolves_every_expected_root_without_errors(self) -> None:
+        """Rule 8: the resolver-root check runs the real command and parses its report.
+
+        The command exits 0 whatever it resolves, so the exit alone proves nothing: the
+        test parses the actual JSON report and proves errors empty, every expected root
+        present and non-null, and the repository resolver roots reached by the resolver.
+        """
+        settings = self.layout.settings_file
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        document = settings_document(self.layout)
+        document["providers"] = {"grepai-memory": {}}
+        settings.write_text(json.dumps(document), encoding="utf-8")
+        shared = self.layout.user_settings_file
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        shared.write_text(json.dumps(host_settings_document(self.layout, None)))
+        # The resolver answers for a repository whose memory holds a first commit.
+        self.layout.repository.mkdir(parents=True, exist_ok=True)
+        memory = self.layout.memory
+        memory.mkdir(parents=True, exist_ok=True)
+        identity = ("-c", "user.name=t", "-c", "user.email=t@invalid.example")
+        for args in (
+            ("init", "-q", "-b", "main"),
+            (*identity, "commit", "-q", "--allow-empty", "-m", "x"),
+        ):
+            subprocess.run(["git", *args], cwd=memory, check=True, capture_output=True)
+        script = REPOSITORY_ROOT / "scripts" / "pnt_sandbox" / "build_roots.py"
+        pythonpath = str(REPOSITORY_ROOT / "mcp" / "src")
+        if os.environ.get("PYTHONPATH"):
+            pythonpath += os.pathsep + os.environ["PYTHONPATH"]
+        env = {
+            **os.environ,
+            "AR_DAGGER_AUTHORITY_ROOT": self.layout.dagger_authority.as_posix(),
+            "XDG_CONFIG_HOME": str(self.layout.config_home),
+            "XDG_DATA_HOME": str(self.layout.root / "data"),
+            "XDG_CACHE_HOME": str(self.layout.root / "cache"),
+            "PYTHONPATH": pythonpath,
+        }
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--config",
+                settings.as_posix(),
+                "--mode",
+                "mcp",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=300,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        report = json.loads(completed.stdout)
+        self.assertEqual(report["errors"], {})
+        self.assertEqual(sorted(report["roots"]), sorted(report["expected"]))
+        for key, value in report["roots"].items():
+            self.assertIsNotNone(value, key)
+        resolvers = sorted(key for key in report["roots"] if ".resolver." in key)
+        self.assertEqual(
+            resolvers,
+            [
+                f"{REPOSITORY}.resolver.{name}"
+                for name in (
+                    "code_repository_root",
+                    "memory_root",
+                    "onboarding_root",
+                    "task_root",
+                    "temp_root",
+                )
+            ],
+        )
 
 
 class BuildInputTests(SandboxCase):

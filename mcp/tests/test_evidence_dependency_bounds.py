@@ -340,8 +340,19 @@ def test_oversize_payload_bound_refuses_by_name(ports: None) -> None:
 
 def test_old_coherence_record_still_loads(ports: None) -> None:
     """F04/F09 old-record loading: a real pre-derivation coherence record (leaf 260928-MIK-L39,
-    MIK-R39@v1 era, bytes vendored exactly) loads through the production record model and its
-    dependency declaration still validates under the derived bound."""
+    MIK-R39@v1 era, a declared derivative, not original bytes) loads through the production
+    record model and its dependency declaration still validates under the derived bound.
+
+    Derivative declaration (architect L159-F07 disposition via the manager, 2026-10-13;
+    kept in the test's own text so the fixture-hygiene guard keeps scanning fixtures):
+    derived from the record of 260928-MIK-L39 (generations/407e11c3/record.json); the
+    home prefix of the original recording machine retargeted to /home/test in 8
+    occurrences, nothing else changed (original bytes: the committed fixture blob at
+    HEAD, sha256 407e11c3…, recoverable via git). The record carries no digest of its
+    own bytes (its internal digests name other artifacts and are unaffected); the
+    external exact-bytes pin (evidence-lifecycle.toml source_version_or_generator for
+    this fixture) no longer agrees with these bytes. The hygiene translation is retained.
+    """
 
     raw = OLD_RECORD_FIXTURE.read_bytes()
     assert len(raw) > 60000

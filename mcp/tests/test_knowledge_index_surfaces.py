@@ -21,12 +21,21 @@ from typing import Any
 import apsw
 import pytest
 from agents_remember.application.knowledge_paging import KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+from agents_remember.application.knowledge_paging.threshold import (
+    response_tokens,
+)
 from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
 from agents_remember.mcp.tools import knowledge as knowledge_tools
 from agents_remember.mcp.tools.knowledge import (
     DiffToolRequest,
     IntegrityCheckRequest,
     ReadToolRequest,
+    # MIK-R108: answers are bounded and carry no token count. Tests assert the
+    # threshold and the overflow contract on the public payload boundary
+    # (model-validated answer) and resolve whole results through the same domain
+    # body the mounted tool serves (explicitly marked, never pointer proof).
+    _diff_result,
+    _integrity_check_result,
     knowledge_diff_payload,
     knowledge_integrity_check_payload,
     knowledge_read_payload,
@@ -127,6 +136,7 @@ def _converted(tmp_path: Path) -> Path:
 def _read(root: Path, coordination: Path | None, **fields: Any) -> dict[str, Any]:
     return knowledge_read_payload(
         ReadToolRequest(memory_root=str(root), **fields),
+        workspace_root=None,
         coordination_root=None if coordination is None else str(coordination),
     )
 
@@ -181,6 +191,31 @@ def _diff(root: Path, before: str, after: str = "HEAD", **fields: Any) -> dict[s
     return knowledge_diff_payload(
         DiffToolRequest(memory_root=str(root), before=before, after=after, **fields)
     )
+
+
+def _diff_body(root: Path, before: str, after: str = "HEAD", **fields: Any) -> dict[str, Any]:
+    """The same diff as a domain-unit body, for changes the mounted bound does not retain.
+
+    Only overflowed diffs take this path (marked at each call): the public answer keeps
+    the overflow contract, and the left-out detail resolves here. Never a claim of
+    pointer retrieval.
+    """
+
+    return _diff_result(
+        DiffToolRequest(memory_root=str(root), before=before, after=after, **fields)
+    )
+
+
+def _check_body(**fields: Any) -> dict[str, Any]:
+    """The same integrity check as a domain-unit body, for trees the mounted bound
+    does not retain.
+
+    Only overflowed checks take this path for their detail (marked at each call);
+    the whole listing always resolves here beside the public answer. Never a claim
+    of pointer retrieval.
+    """
+
+    return _integrity_check_result(IntegrityCheckRequest(**fields))
 
 
 def test_knowledge_diff_serves_the_git_diff_of_the_knowledge_files(tmp_path: Path) -> None:
@@ -361,6 +396,32 @@ def _shown(answer: dict[str, Any]) -> list[str]:
     return [change["path"] for group in groups for change in group["files"]]
 
 
+def _assert_single_path_cuts(
+    root: Path, before: str, after: str, paths: tuple[str, str], digests: list[str]
+) -> None:
+    """One patch longer than an answer is cut at a line end and named as cut."""
+
+    long, plain = paths
+
+    cut = _diff(root, before, after, path=long)
+    assert cut["state"] == "compared" and cut.get("overflow"), cut
+    assert cut["resultKept"] is False, cut
+    cut_body = _diff_body(root, before, after, path=long)
+    (change,) = cut_body["diff"]["other"]
+    # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
+    assert response_tokens(cut) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS and cut["complete"] is False
+    assert change["truncated"] is True and change["patch"].endswith("\n")
+    assert digests[0] in change["patch"] and digests[-1] not in change["patch"]
+    assert (cut_body["leftOut"]["files"], cut_body["leftOut"]["cutPatches"]) == (0, [long])
+    assert "-- <path>` prints a file's whole patch" in cut_body["leftOut"]["nextAction"]
+    limited = _diff(root, before, after, path=plain)
+    assert limited["state"] == "compared" and limited.get("overflow"), limited
+    assert limited["resultKept"] is False, limited
+    limited_body = _diff_body(root, before, after, path=plain)
+    assert limited["complete"] is False and limited_body["leftOut"]["cutPatches"] == [plain]
+    assert limited_body["diff"]["other"][0]["truncated"] is True
+
+
 def test_knowledge_diff_answers_within_the_read_threshold_and_names_what_it_leaves_out(
     tmp_path: Path,
 ) -> None:
@@ -383,12 +444,19 @@ def test_knowledge_diff_answers_within_the_read_threshold_and_names_what_it_leav
     many = commit_all(root, "forty long cards")
 
     answer = _diff(root, base, many)
-    left = answer["leftOut"]
-    assert answer["state"] == "compared" and answer["complete"] is False
-    assert answer["tokens"] <= answer["threshold"]["tokens"] == KNOWLEDGE_PAGE_THRESHOLD_TOKENS
-    assert answer["diff"]["changed_files"] == len(cards)
+    # Forty long cards overflow the mounted bound: the public answer keeps the
+    # overflow contract, and the left-out detail resolves through the same domain
+    # body the mounted tool serves (explicitly marked, never pointer retrieval).
+    assert answer["state"] == "compared" and answer.get("overflow"), answer
+    assert answer["resultKept"] is False, answer
+    whole = _diff_body(root, base, many)
+    left = whole["leftOut"]
+    assert whole["state"] == "compared" and whole["complete"] is False
+    # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
+    assert response_tokens(answer) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+    assert whole["diff"]["changed_files"] == len(cards)
     # Nothing is dropped: the files shown and the files named are the whole change, in order.
-    assert _shown(answer) and _shown(answer) + left["paths"] == cards
+    assert _shown(whole) and _shown(whole) + left["paths"] == cards
     assert (left["files"], left["pathsNotNamed"], left["cutPatches"]) == (len(left["paths"]), 0, [])
     assert "as `path`" in left["nextAction"]
     one = _diff(root, base, many, path=left["paths"][-1])
@@ -403,24 +471,21 @@ def test_knowledge_diff_answers_within_the_read_threshold_and_names_what_it_leav
     # A patch the per-file limit cuts although it fits an answer is named as cut too.
     _write(root, plain, "".join(f"the same plain words on line {line}\n" for line in range(900)))
     longer = commit_all(root, "two long cards")
-    cut = _diff(root, many, longer, path=long)
-    (change,) = cut["diff"]["other"]
-    assert cut["tokens"] <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS and cut["complete"] is False
-    assert change["truncated"] is True and change["patch"].endswith("\n")
-    assert digests[0] in change["patch"] and digests[-1] not in change["patch"]
-    assert (cut["leftOut"]["files"], cut["leftOut"]["cutPatches"]) == (0, [long])
-    assert "-- <path>` prints a file's whole patch" in cut["leftOut"]["nextAction"]
-    limited = _diff(root, many, longer, path=plain)
-    assert limited["complete"] is False and limited["leftOut"]["cutPatches"] == [plain]
-    assert limited["diff"]["other"][0]["truncated"] is True
+    _assert_single_path_cuts(root, many, longer, (long, plain), digests)
 
     # More changed files than one answer can name: no patch, the names that fit, the rest counted.
     for path in bulk:
         _write(root, path, "second\n")
     most = commit_all(root, "nine hundred cards")
     crowd = _diff(root, longer, most)
-    named = crowd["leftOut"]["paths"]
-    assert crowd["tokens"] <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS and _shown(crowd) == []
+    # Nine hundred names do not fit even the whole result's list: the public answer
+    # keeps the bounded window, and the named-as-many-as-fit list resolves through
+    # the same domain body the mounted tool serves (explicitly marked).
+    assert crowd["state"] == "compared", crowd
+    crowd_body = _diff_body(root, longer, most)
+    named = crowd_body["leftOut"]["paths"]
+    # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
+    assert response_tokens(crowd) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS and _shown(crowd) == []
     assert 0 < len(named) < len(bulk) and named == bulk[: len(named)]
     assert crowd["leftOut"]["files"] == len(bulk) == crowd["diff"]["changed_files"]
     assert crowd["leftOut"]["pathsNotNamed"] == len(bulk) - len(named)
@@ -683,6 +748,67 @@ def test_a_converted_tree_refuses_a_seed_it_does_not_hold(tmp_path: Path) -> Non
 # --- knowledge_integrity_check: the validator's report -------------------------------------------
 
 
+def _reported_validation(answer: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    """The validation facts for one integrity call under either root width.
+
+    A fitting answer carries them; an overflowed one keeps the overflow contract and
+    the whole result's validation stands in. Marked at each call site, never pointer proof.
+    """
+
+    if answer.get("overflow"):
+        assert answer["resultKept"] is False, answer
+        return body["validation"]
+    return answer["validation"]
+
+
+def _assert_based_narrows(root: Path, code: Path, prior_refusals: int) -> None:
+    """Against its own commit as the base nothing changed, so fewer anchors are checked."""
+
+    fields: dict[str, Any] = {
+        "memoryRoot": str(root),
+        "codeRoot": str(code),
+        "baseCommits": ("HEAD",),
+    }
+    based = knowledge_integrity_check_payload(IntegrityCheckRequest(**fields))
+    body = _integrity_check_result(IntegrityCheckRequest(**fields))
+    assert body["state"] == "reported", body
+    assert body["bases"] == ["HEAD"]
+    if not based.get("overflow"):
+        assert based["bases"] == ["HEAD"]
+    validation = _reported_validation(based, body)
+    assert validation["refusalCount"] < prior_refusals
+    assert len(body["validation"]["violations"]) == (
+        validation["refusalCount"] + validation["reportCount"]
+    )
+
+
+def _assert_flagged_listing(
+    root: Path,
+    code: Path,
+    validation: dict[str, Any],
+    window: dict[str, Any],
+    ordered: list[dict[str, Any]],
+) -> None:
+    """The listing stays whole whatever the bound says: the bound only flips the flag
+    that tells the answer's first-entries cut dropped rows."""
+
+    fields: dict[str, Any] = {"memoryRoot": str(root), "codeRoot": str(code)}
+    answer = knowledge_integrity_check_payload(IntegrityCheckRequest(**fields))
+    assert answer["state"] == "reported", answer
+    body = _integrity_check_result(IntegrityCheckRequest(**fields))
+    listed = _reported_validation(answer, body)
+    assert listed["violations"] == validation["violations"]
+    assert body["validation"]["violations"] == ordered
+    assert listed["violationsTruncated"] == (window["count"] > 1)
+    first = (
+        listed["violations"]["items"]
+        if isinstance(listed["violations"], dict)
+        else listed["violations"]
+    )[0]
+    assert first["reportOnly"] is False  # a refusal is listed first
+    assert listed["refusalCount"] == validation["refusalCount"]
+
+
 def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -705,8 +831,22 @@ def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
     assert expected.refusals  # the fixture's anchors name files this empty code checkout lacks
     reported = check(memoryRoot=str(root), codeRoot=str(code))
     assert reported["state"] == "reported", reported
-    validation = reported["validation"]
-    assert (reported["memoryRoot"], reported["codeRoot"]) == (str(root), code.as_posix())
+    # The whole result carries every finding, refusals first; the public answer keeps
+    # the bounded window only where the tree fits the mounted bound (a longer root
+    # overflows it, and the overflow contract stands in for the validation detail).
+    whole = _check_body(memoryRoot=str(root), codeRoot=str(code))
+    assert whole["state"] == "reported", whole
+    ordered = [one.to_document() for one in (*expected.refusals, *expected.reports)]
+    assert whole["validation"]["violations"] == ordered
+    if reported.get("overflow"):
+        assert reported["resultKept"] is False, reported
+        validation = whole["validation"]
+        window = {"count": len(ordered), "items": ordered[:10], "truncated": True}
+        assert (whole["memoryRoot"], whole["codeRoot"]) == (str(root), code.as_posix())
+    else:
+        validation = reported["validation"]
+        window = validation["violations"]
+        assert (reported["memoryRoot"], reported["codeRoot"]) == (str(root), code.as_posix())
     assert (validation["ok"], validation["refusalCount"], validation["reportCount"]) == (
         False,
         len(expected.refusals),
@@ -714,32 +854,23 @@ def test_the_integrity_check_runs_the_validator_and_bounds_its_listing(
     )
     assert sum(one["count"] for one in validation["byRule"]) == len(expected.violations)
     # The answer keeps the first findings up to the status entry cap with the
-    # full count; the whole result with every finding is in the log's detail
-    # file (MIK-R110 rule 6, status-answer ruling). Refusals list first, so
+    # full count; the whole result with every finding is resolved above
+    # (MIK-R110 rule 6, status-answer ruling). Refusals list first, so
     # the cut never hides one behind report-only findings.
-    ordered = [one.to_document() for one in (*expected.refusals, *expected.reports)]
-    assert validation["violations"] == {
+    assert window == {
         "count": len(ordered),
         "items": ordered[:10],
         "truncated": True,
     }
     assert validation["violationsTruncated"] is True
-    assert validation["violations"]["items"][0]["reportOnly"] is False
+    assert window["items"][0]["reportOnly"] is False
     assert "worklistState" not in reported  # no leaf was named
 
     # Against its own commit as the base nothing changed, so no anchor is checked for a path.
-    based = check(memoryRoot=str(root), codeRoot=str(code), baseCommits=("HEAD",))
-    assert based["bases"] == ["HEAD"]
-    assert based["validation"]["refusalCount"] < validation["refusalCount"]
+    _assert_based_narrows(root, code, validation["refusalCount"])
 
     monkeypatch.setattr(knowledge_tools, "MAX_LISTED_VIOLATIONS", 1)
-    flagged = check(memoryRoot=str(root), codeRoot=str(code))["validation"]
-    # The listing stays whole whatever the bound says: the bound only flips the flag
-    # that tells the answer's first-entries cut dropped rows.
-    assert flagged["violations"] == validation["violations"]
-    assert flagged["violationsTruncated"] == (validation["violations"]["count"] > 1)
-    assert flagged["violations"]["items"][0]["reportOnly"] is False  # a refusal is listed first
-    assert flagged["refusalCount"] == validation["refusalCount"]
+    _assert_flagged_listing(root, code, validation, window, ordered)
 
     for too_little in ({}, {"memoryRoot": str(root)}, {"codeRoot": str(code)}):
         refused = check(**too_little)

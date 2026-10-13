@@ -263,9 +263,10 @@ class _Gate:
 class _ServingFixture:
     """One disposable serving runtime whose background loops run under a virtual clock.
 
-    Only the observation owner is real: the projector, metrics, notifier, death-watch and
-    compaction loops are replaced by parked coroutines, and the two blocking startup calls are
-    inert, so a case cannot start containers, read live settings, or write stores.
+    Only the observation owner is real: the projector, metrics, notifier, death-watch,
+    held-delivery and compaction loops are replaced by parked coroutines, and the two
+    blocking startup calls are inert, so a case cannot start containers, read live
+    settings, or write stores.
 
     ``startup`` is the ordered account of the lifespan's pre-serve startup, one ``(step,
     sweeps_completed)`` entry per step. The sweep count is the ordering witness: the one
@@ -344,6 +345,11 @@ class _ServingFixture:
             )
             stack.enter_context(
                 mock.patch.object(lifespan_module, "relay_death_watch_loop", _parked_forever)
+            )
+            # MIK-R100 rule 4a (L100): the held-delivery loop is not the observation
+            # owner, so it stays parked like every other non-observation loop.
+            stack.enter_context(
+                mock.patch.object(lifespan_module, "_held_delivery_loop", _parked_forever)
             )
             stack.enter_context(
                 mock.patch.object(
@@ -754,8 +760,9 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
             ]
             self.assertEqual(len(observers), 1)
             self.assertFalse(observers[0].done())
-            # projector.run, metrics, notifier, death-watch, river compaction.
-            self.assertEqual(len(siblings), 5)
+            # projector.run, metrics, notifier, death-watch, held-delivery (MIK-R100
+            # rule 4a, L100), river compaction.
+            self.assertEqual(len(siblings), 6)
             self.assertTrue(all(not task.done() for task in siblings))
 
             # The retry completes and parks again, so the sibling assertions below are made with

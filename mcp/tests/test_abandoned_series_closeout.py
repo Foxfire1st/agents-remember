@@ -55,20 +55,32 @@ def series(root: Path, completed: int = 1, abandoned: int = 1) -> WorktreeContra
     code = root / "code"
     base = init_repo(code)
     git(code, "branch", "master")
+    # MIK-R50 (L50): the removed `disabled` mode is refused at contract build, so the
+    # fixture builds its world with an external memory repository, the way L155 does.
+    memory = root / "memory"
+    memory_base = init_repo(memory)
+    git(memory, "branch", "master")
     contract = default_series_contract(
         ContractTask(
             name="master",
             repo_name="repo-a",
             coordination_root=root / "coord",
             workflow_kind="light-task",
-            memory_mode="disabled",
+            memory_mode="external",
         ),
         code=RepoBranchPlan(
             repo_path=code, source_branch="main", work_branch="master", base_commit=base
         ),
+        memory=RepoBranchPlan(
+            repo_path=memory,
+            source_branch="main",
+            work_branch="master",
+            base_commit=memory_base,
+        ),
     )
     rows = []
     previous = base
+    previous_memory = memory_base
     for index in range(completed + abandoned):
         leaf_id = f"L{index}"
         status = "Completed" if index < completed else "abandoned"
@@ -86,6 +98,10 @@ def series(root: Path, completed: int = 1, abandoned: int = 1) -> WorktreeContra
         if status == "Completed":
             landed = commit_file(code, f"{leaf_id}.txt", leaf_id, leaf_id)
             git(code, "branch", "-f", "master", landed)
+            # The atomic closeout proves the landing chain on both sides of the pair,
+            # so every code landing is mirrored by a memory landing.
+            memory_landed = commit_file(memory, f"{leaf_id}.txt", leaf_id, leaf_id)
+            git(memory, "branch", "-f", "master", memory_landed)
             child = replace(
                 contract,
                 kind="leaf",
@@ -100,9 +116,18 @@ def series(root: Path, completed: int = 1, abandoned: int = 1) -> WorktreeContra
                 integration_status="completed",
                 integrated_code_commit=landed,
                 code_worktree=root / f"leaf-{index}",
+                # External-memory leaf contracts carry their memory leg (L155).
+                memory_source_branch="master",
+                memory_work_branch=f"leaf-memory-{index}",
+                memory_base_commit=previous_memory,
+                memory_content_commit=memory_landed,
+                integrated_memory_content_commit=memory_landed,
+                memory_worktree=root / f"leaf-memory-{index}",
+                ledger_path=root / f"leaf-memory-{index}" / "memory.md",
             )
             write_contract(child.contract_path, child)
             previous = landed
+            previous_memory = memory_landed
     master = TaskDocument(
         id="MASTER",
         slug="master",
@@ -142,6 +167,10 @@ def test_abandoned_rows_without_enclosures_and_with_unlanded_enclosures_pass(
             parent_contract_path=contract.contract_path,
             parent_task_name="master",
             cleanup="abandoned",
+            # External-memory leaf contracts carry their memory leg (L155); these
+            # abandoned rows never landed, so no memory integration is recorded.
+            memory_worktree=tmp_path / f"abandoned-memory-{index}",
+            ledger_path=tmp_path / f"abandoned-memory-{index}" / "memory.md",
         )
         write_contract(child.contract_path, child)
     require_closeout_publication_authority(contract)
@@ -158,6 +187,14 @@ def test_landed_abandoned_row_refuses_with_named_remedy(tmp_path):
         integration_status="completed",
         integrated_code_commit=contract.code_base_commit,
         code_commit=contract.code_base_commit,
+        # The row claims a completed integration, so its memory leg is recorded as
+        # landed at the base too; the refusal below is about the row, not the leg.
+        memory_source_branch="master",
+        memory_base_commit=contract.memory_base_commit,
+        memory_content_commit=contract.memory_base_commit,
+        integrated_memory_content_commit=contract.memory_base_commit,
+        memory_worktree=tmp_path / "abandoned-memory-landed",
+        ledger_path=tmp_path / "abandoned-memory-landed" / "memory.md",
     )
     write_contract(child.contract_path, child)
     with pytest.raises(ValueError, match=r"row 'L1'.*abandoned.*completed integration.*reconcile"):
@@ -274,6 +311,9 @@ def test_an_unordered_landing_chain_names_the_leaves_and_the_cells_to_repair(tmp
     first = load_contract(leaf_enclosure_path(contract.task_root, "L0"))
     twin = replace(load_contract(leaf_enclosure_path(contract.task_root, "L1")))
     twin = replace(twin, integrated_code_commit=first.integrated_code_commit)
+    # The order is over the pair, not the code commit alone: the twin shares the
+    # memory landing too, so neither leaf precedes the other on either side.
+    twin = replace(twin, integrated_memory_content_commit=first.integrated_memory_content_commit)
     message = _unordered_leaves_detail(contract, {"L0": first, "L1": twin})
     assert "'L0' and 'L1'" in message and contract.task_id in message
     assert "integrated_code_commit" in message and "series-contract.md" in message
@@ -556,6 +596,10 @@ class _TaskWorld:
         self.tasks = self.coord / "tasks" / REPOSITORY
         self.code = root / "code"
         self.base = init_repo(self.code)
+        # MIK-R50 (L50): the removed `disabled` mode is refused at contract build, so the
+        # fixture builds its world with an external memory repository, the way L155 does.
+        self.memory = root / "memory"
+        self.memory_base = init_repo(self.memory)
         self.cfg = _config(self.coord, self.code)
         for name, (nature, status, rows) in masters.items():
             write_task_doc(
@@ -593,7 +637,7 @@ class _TaskWorld:
                 repo_name=REPOSITORY,
                 coordination_root=self.coord,
                 workflow_kind="light-task",
-                memory_mode="disabled",
+                memory_mode="external",
             ),
             code=RepoBranchPlan(
                 repo_path=self.code,
@@ -601,8 +645,15 @@ class _TaskWorld:
                 work_branch=f"ar/{master}",
                 base_commit=self.base,
             ),
+            memory=RepoBranchPlan(
+                repo_path=self.memory,
+                source_branch="main",
+                work_branch=f"ar/{master}",
+                base_commit=self.memory_base,
+            ),
         )
         path = leaf_enclosure_path(self.tasks / master, leaf_id)
+        leaf_memory = self.coord.parent / f"memory-{master}-{leaf_id.lower()}"
         write_contract(
             path,
             replace(
@@ -614,6 +665,9 @@ class _TaskWorld:
                 integration_status="completed" if landed else "not-started",
                 code_commit=self.base if landed else "",
                 integrated_code_commit=self.base if landed else "",
+                # External-memory leaf contracts carry their memory leg (L155).
+                memory_worktree=leaf_memory,
+                ledger_path=leaf_memory / "memory.md",
             ),
         )
         return path

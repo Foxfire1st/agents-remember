@@ -180,7 +180,10 @@ class InvestigatorTests(RoleToolsTestCase):
                 original.update(
                     requestId=str(request.request_id),
                     status="completed",
-                    createdAt=f"2026-10-{number:02d}",
+                    # Far-future dates, not the wall month: the listing keeps the newest
+                    # fifty, so the fakes must sort above the eight open requests
+                    # whatever day the suite runs.
+                    createdAt=f"9999-10-{number:02d}",
                 )
                 path.write_text(json.dumps(original))
             listing = investigator_listing(self.config, selection)

@@ -101,6 +101,12 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
             1,
             "the exact host dependency of the shipped whole-tree lock",
         ),
+        # The dev-only fake Paseo host names the pinned server its navigation follows
+        # (L123); it reaches Paseo only through the genuine bridge code it fakes.
+        "dashboard/src/dev/FakePaseoHost.tsx": (
+            2,
+            "dev-only fake for the MIK-R121 browser test: two comments naming the pinned server truth it follows; the page itself drives the genuine bridge code",
+        ),
     },
     PROGRAM: {
         ".claude/render-starter.py": (

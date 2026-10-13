@@ -389,17 +389,21 @@ class RoleExecutionResultTests(unittest.TestCase):
 
 class RoleProjectDispatchTests(unittest.TestCase):
     def test_projects_architect_dispatch_remains_available(self) -> None:
-        with patch.object(
-            role_launch_routes,
-            "_start_execution",
-            return_value=JSONResponse({"status": "running"}),
-        ) as start:
-            response = role_launch_routes._role_launch_dispatch_endpoint(
-                _runtime_config(Path("/tmp/role-projects-test")),
-                RoleDispatchRequest(role="architect", requestId=uuid.uuid4()),
-            )
-        self.assertEqual(response.status_code, 200)
-        start.assert_called_once()
+        # A fresh root every run: a stale old-location settings file under a reused
+        # root trips the settings-location upgrade refusal before dispatch runs.
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(
+                role_launch_routes,
+                "_start_execution",
+                return_value=JSONResponse({"status": "running"}),
+            ) as start:
+                response = role_launch_routes._role_launch_dispatch_endpoint(
+                    _runtime_config(root),
+                    RoleDispatchRequest(role="architect", requestId=uuid.uuid4()),
+                )
+            self.assertEqual(response.status_code, 200)
+            start.assert_called_once()
 
 
 class TasklessExecutionIdentityTests(unittest.TestCase):
@@ -453,7 +457,12 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
             self.assertNotEqual(
                 first_path, role_launch_receipts._receipt_path(config, second, second_id)
             )
-            workspace = {"path": (root / "projects").as_posix()}
+            workspace = {
+                "path": (root / "projects").as_posix(),
+                # The report path is resolved under the access root (L71); a
+                # taskless role reports beside its own access folder.
+                "taskReportAccessRoot": (root / "role-reports" / "architect").as_posix(),
+            }
             context = RoleLaunchContext(
                 role="architect", sprint=None, master=None, task=None, effective_task=None
             )

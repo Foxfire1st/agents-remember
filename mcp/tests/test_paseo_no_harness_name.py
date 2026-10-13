@@ -44,6 +44,43 @@ INHERITED_MODULES = {
 # the discovery (cli/discovery.py) reads; no launch decision depends on it, and the word cannot
 # go without changing that help text.
 NAMED_EXCEPTIONS = {"cli/dashboard.py": ".claude/mcp/agents-remember-settings.json"}
+# Modules where an agent kind's name IS this build's launch decision, required by MIK-R71:
+# rule 21 names the least permissive mode for each agent kind (Claude `default`, Codex
+# `auto`), and the launch grants a new agent the read of its own assignment through the
+# host mechanism of its provider. Like RULE6_MODULES these are scanned but their agent
+# names are admitted: the decision cannot name the agent kind it decides for without
+# naming it.
+RULE21_MODULES = {
+    "cli/paseo_catalog.py": (
+        "the rule-21 least-permissive-mode table (least permissive supported mode for "
+        "this agent kind): the reference names the mode for each agent kind, Claude "
+        "`default` and Codex `auto`; MIK-R71 rule 21"
+    ),
+    "cli/paseo_launch.py": (
+        "the provider's own grant mechanism for rule 22 (the installed host grants by "
+        "exact tool name for Claude; Codex carries a side effect that prevents the same "
+        "grant); MIK-R71 rules 21 and 22"
+    ),
+}
+# The exact harness words each R71 file may name: an unrelated new provider decision in
+# either file fails the guard. Unlike RULE6's whole-module allowance, the admission is
+# bound to these occurrences; a file that stops naming them, or names more, is refused.
+RULE21_ADMITTED_NAMES = {
+    "cli/paseo_catalog.py": {"claude", "codex"},
+    "cli/paseo_launch.py": {"Claude", "Codex", "claude"},
+}
+
+
+def guard_passes(name: str, found: list[str]) -> bool:
+    """Whether the harness-name guard accepts ``found`` in the named scanned file."""
+
+    if name in RULE6_MODULES:
+        return found != []
+    if name in RULE21_MODULES:
+        return set(found) == RULE21_ADMITTED_NAMES[name]
+    return found == []
+
+
 # Modules where a harness's name IS this build's launch decision, ruled by the architect
 # (MIK-R112 rule 6, choice b): the one-launch exclusion table that keeps the product's
 # other server out of a role agent. Unlike INHERITED_MODULES these are scanned (they stay
@@ -158,6 +195,10 @@ class NoHarnessNameTests(unittest.TestCase):
         self.assertEqual(sorted(RULE6_MODULES), ["application/agent_binding.py"])
         for _name, reason in RULE6_MODULES.items():
             self.assertGreater(len(reason), 40)
+        # The R71 exception is exactly two modules: an entry that no longer applies has to go.
+        self.assertEqual(sorted(RULE21_MODULES), ["cli/paseo_catalog.py", "cli/paseo_launch.py"])
+        for _name, reason in RULE21_MODULES.items():
+            self.assertGreater(len(reason), 40)
         imported_by_the_seam = {
             name
             for pattern in LAUNCH_CODE_PATTERNS
@@ -176,10 +217,28 @@ class NoHarnessNameTests(unittest.TestCase):
             with self.subTest(name):
                 text = path.read_text(encoding="utf-8")
                 found = sorted(set(harness_names_in(text, NAMED_EXCEPTIONS.get(name, ""))))
-                if name in RULE6_MODULES:
-                    self.assertNotEqual(found, [], f"{name} no longer names a harness")
-                else:
-                    self.assertEqual(found, [], f"{name} names a harness: {found}")
+                self.assertTrue(
+                    guard_passes(name, found), f"{name} names outside its admission: {found}"
+                )
+        # The R71 admission is exact: the admitted words pass, an unrelated new
+        # provider word fails, and silence fails (the mechanism must stay named).
+        for name, admitted in RULE21_ADMITTED_NAMES.items():
+            with self.subTest(witness=name):
+                self.assertTrue(guard_passes(name, sorted(admitted)))
+                self.assertFalse(guard_passes(name, sorted(admitted | {"eve"})))
+                self.assertFalse(guard_passes(name, []))
+        # A mutant probe on the real files: an unrelated provider decision added to
+        # either R71 file's actual text fails the guard, so the admission cannot
+        # silently widen to new harness/provider branches.
+        for name in RULE21_ADMITTED_NAMES:
+            with self.subTest(mutant=name):
+                text = (PACKAGE / name).read_text(encoding="utf-8")
+                mutated = (
+                    text + '\n_DEFAULT_EVE_MODE = "auto"  # an unrelated new provider decision\n'
+                )
+                found = sorted(set(harness_names_in(mutated)))
+                self.assertIn("eve", [word.lower() for word in found])
+                self.assertFalse(guard_passes(name, found), f"{name} admits {found}")
         # The scan sees what it is meant to catch, inside an identifier too, and passes the one
         # inherited identifier and words that merely contain a harness's letters.
         caught: dict[str, list[str]] = {

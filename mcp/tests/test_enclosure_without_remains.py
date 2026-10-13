@@ -12,6 +12,7 @@ change, where both verbs refuse with ``operation-location-missing``.
 from __future__ import annotations
 
 import dataclasses
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -23,8 +24,12 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 from agents_remember.worktrees.modules import abandon as abandon_module
 from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.terminal_inventory import (
+    terminal_without_remains_reason,
+)
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from lifecycle_enclosure_test_support import byte_tree, enclosure_contract
+from test_worktree_support import init_repo
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -50,6 +55,13 @@ def _leafless_enclosure(base: Path, *, integrated: bool) -> Path:
     _git(code_repo, "update-ref", "refs/remotes/origin/main", head)
     _git(code_repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 
+    # MIK-R50 (L50): the terminal verbs resolve the memory side's repository identity
+    # whatever the mode, so the fixture carries a memory repository built the way L155
+    # builds its own (test_worktree_support.init_repo), not a second inline bootstrap.
+    # No work branch is created: the leafless enclosure has no remains by construction.
+    memory_repo = root / "memory"
+    init_repo(memory_repo)
+
     contract, _text = enclosure_contract(root, kind="leaf")
     contract = dataclasses.replace(
         contract,
@@ -57,6 +69,9 @@ def _leafless_enclosure(base: Path, *, integrated: bool) -> Path:
         code_source_branch="main",
         code_base_commit=head,
         integration_status=("completed" if integrated else "not-started"),
+        # The terminal verbs require a nonempty lifecycle id (as in
+        # test_external_memory_branch_stays_outside_exception below).
+        lifecycle_id="l159-no-remains-fixture",
     )
     contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
     write_contract(contract.contract_path, contract)
@@ -137,6 +152,14 @@ def test_folder_on_disk_still_requires_adoption_first(
     ):
         contract_path = _leafless_enclosure(tmp_path / operation, integrated=integrated)
         contract = load_contract(contract_path)
+        assert contract.memory_repo_path is not None, "the fixture carries a memory repo"
+        if operation == "worktree_cleanup":
+            # Cleanup's kept-line gate needs landed tips on both sides; these branches
+            # satisfy that prerequisite, and the folder below keeps the adoption-first
+            # refusal. Abandon keeps the original folder-only subject: no work branches
+            # exist there, so only the folder can trigger the adoption-first refusal.
+            _git(contract.code_repo_path, "branch", contract.code_work_branch, "main")
+            _git(contract.memory_repo_path, "branch", contract.memory_work_branch, "main")
         (contract.worktree_group / "reports").mkdir(parents=True)
         (contract.worktree_group / "reports" / "integrate-operation.json").write_text(
             "{}\n", encoding="utf-8"
@@ -150,6 +173,22 @@ def test_folder_on_disk_still_requires_adoption_first(
         assert result.returncode == 2, result.payload
         assert result.payload["nextAction"] == "worktree_enclosure_adopt"
         assert "worktree_enclosure_adopt" in PUBLIC_TOOLS
+
+
+def test_terminal_without_remains_reason_requires_the_folder_gone(tmp_path: Path) -> None:
+    """The no-remains reason is folder-sensitive: a folder alone is remains (MIK-R82 rule 5)."""
+
+    for integrated, operation in (
+        (False, "worktree_abandon"),
+        (True, "worktree_cleanup"),
+    ):
+        contract_path = _leafless_enclosure(tmp_path / operation, integrated=integrated)
+        contract = load_contract(contract_path)
+        (contract.worktree_group / "reports").mkdir(parents=True)
+        assert terminal_without_remains_reason(contract, operation=operation) is None
+        shutil.rmtree(contract.worktree_group)
+        reason = terminal_without_remains_reason(contract, operation=operation)
+        assert reason is not None and "MIK-R82" in reason
 
 
 def test_present_work_branch_still_requires_adoption_first(

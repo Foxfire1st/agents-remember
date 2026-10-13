@@ -180,7 +180,7 @@ DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
 # many characters. The message file itself has no limit.
 DEFAULT_ROLE_MESSAGE_LIMIT = 1000
 
-# The BUILTIN registry ids (claude|codex|pi). Harness references (roles.<role>.harness,
+# The ids of the builtin harness registry. Harness references (roles.<role>.harness,
 # spawn.harness) are validated against the EFFECTIVE id set -- these plus any
 # orchestration.harnesses-defined ids -- so a settings value can never inject argv through a
 # reference; argv is definable only through the explicit harnesses family (260703-L16).
@@ -512,7 +512,7 @@ def _require_bool(raw: object, owner: str, source: str) -> bool:
 def _require_string_list(raw: object, owner: str, source: str) -> tuple[str, ...]:
     """A free-form list of non-empty strings (shape-checked only; content never validated).
 
-    An EMPTY list is refused (PR #100 review, Codex P2): ``RoleKnobs`` cannot distinguish
+    An EMPTY list is refused (PR #100 review follow-up): ``RoleKnobs`` cannot distinguish
     "absent" from "explicitly cleared" (empty tuple = not configured), so a per-level ``[]``
     meant to clear a flat default would silently INHERIT it instead — the same silent-degrade
     shape as a ``null`` family key (260703-L18 finding 6). Omit the key to inherit; list

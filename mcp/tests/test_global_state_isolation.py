@@ -31,44 +31,81 @@ from agents_remember_test_support.testing.global_state import (
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 
+def _owned_cleared(module: ModuleType, state: ProcessMutableState) -> Any:
+    return {"previous module": object()}
+
+
+def _owned_cached(module: ModuleType, state: ProcessMutableState) -> Any:
+    return mock.Mock()
+
+
+def _owned_quality(module: ModuleType, state: ProcessMutableState) -> Any:
+    module.__dict__["_lock"] = threading.Lock()
+    return {"completed run": SimpleNamespace(status="completed")}
+
+
+def _owned_spawned(module: ModuleType, state: ProcessMutableState) -> Any:
+    process = mock.Mock()
+    process.poll.return_value = None
+    return [process]
+
+
+def _owned_delegated_sweep(module: ModuleType, state: ProcessMutableState) -> Any:
+    # The wrapper delegates to the owner's own resetter: the fake owner carries a
+    # mock of it, and the test asserts the delegation below.
+    module.__dict__["_reset_sweep_cursor"] = mock.Mock()
+    return {"previous module": object()}
+
+
+def _owned_delegated_writer(module: ModuleType, state: ProcessMutableState) -> Any:
+    module.__dict__["reset_tool_writer"] = mock.Mock()
+    return {"previous module": object()}
+
+
+def _owned_binding(module: ModuleType, state: ProcessMutableState) -> Any:
+    module.__dict__["reset_worktree_services"] = lambda: setattr(module, state.attribute, None)
+    return object()
+
+
+def _owned_plain(module: ModuleType, state: ProcessMutableState) -> Any:
+    value = True
+
+    def original() -> None:
+        pass
+
+    if state.reset is not None and state.reset.__name__ == "_reset_compact_content":
+        _orig = original
+
+        def wrapper() -> None:
+            _orig()
+
+        module.__dict__["_fm"] = SimpleNamespace(_convert_to_content=wrapper)
+    else:
+
+        def wrapper() -> None:
+            original()
+
+        module.__dict__["ServerSession"] = SimpleNamespace(__init__=wrapper)
+    module.__dict__["original_callable"] = original
+    return value
+
+
+_OWNED_STATE_BUILDERS = {
+    "_clear": _owned_cleared,
+    "_clear_cache": _owned_cached,
+    "_finish_quality_runs": _owned_quality,
+    "_stop_spawned": _owned_spawned,
+    "_reset_sweep_cursor": _owned_delegated_sweep,
+    "_reset_tool_writer": _owned_delegated_writer,
+    "_clear_binding": _owned_binding,
+}
+
+
 def _module_with_owned_state(state: ProcessMutableState) -> tuple[ModuleType, Any]:
     module = ModuleType(state.module)
     assert state.reset is not None
     action = state.reset.__name__
-    if action == "_clear":
-        value = {"previous module": object()}
-    elif action == "_clear_cache":
-        value = mock.Mock()
-    elif action == "_finish_quality_runs":
-        module.__dict__["_lock"] = threading.Lock()
-        value = {"completed run": SimpleNamespace(status="completed")}
-    elif action == "_stop_spawned":
-        process = mock.Mock()
-        process.poll.return_value = None
-        value = [process]
-    elif action == "_clear_binding":
-        value = object()
-        module.__dict__["reset_worktree_services"] = lambda: setattr(module, state.attribute, None)
-    else:
-        value = True
-
-        def original() -> None:
-            pass
-
-        if action == "_reset_compact_content":
-            _orig = original
-
-            def wrapper() -> None:
-                _orig()
-
-            module.__dict__["_fm"] = SimpleNamespace(_convert_to_content=wrapper)
-        else:
-
-            def wrapper() -> None:
-                original()
-
-            module.__dict__["ServerSession"] = SimpleNamespace(__init__=wrapper)
-        module.__dict__["original_callable"] = original
+    value = _OWNED_STATE_BUILDERS.get(action, _owned_plain)(module, state)
     setattr(module, state.attribute, value)
     return module, tuple(value) if action == "_stop_spawned" else value
 
@@ -172,6 +209,10 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
                         )
                     elif action == "_clear_binding":
                         self.assertIsNone(value)
+                    elif action == "_reset_sweep_cursor":
+                        module._reset_sweep_cursor.assert_called_once_with()
+                    elif action == "_reset_tool_writer":
+                        module.reset_tool_writer.assert_called_once_with()
                     else:
                         self.assertEqual(value, {})
 

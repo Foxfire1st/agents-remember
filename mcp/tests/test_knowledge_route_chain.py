@@ -20,6 +20,7 @@ import pytest
 from agents_remember.application.knowledge_leaf import select_leaf
 from agents_remember.application.knowledge_leaf.chain import chain_directory
 from agents_remember.application.knowledge_paging import KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+from agents_remember.application.knowledge_paging.threshold import response_tokens
 from agents_remember.application.published_intent import published_intent_block
 from agents_remember.application.read_files import read_ar_files_tool
 from agents_remember.memory.knowledge_index import KnowledgeIndex, text_uuid
@@ -37,7 +38,16 @@ from agents_remember.observer import (
 )
 from agents_remember.observer.ambient import AmbientTiming
 from knowledge_index_test_support import commit_all, init_repository, write_document
-from test_knowledge_leaf_read import SEED, _context, _graph, _invariant, _read, _shape, _sidecar
+from test_knowledge_leaf_read import (
+    SEED,
+    _context,
+    _graph,
+    _invariant,
+    _read,
+    _read_body,
+    _shape,
+    _sidecar,
+)
 from test_read_ar_files import REPO, _build_context, _make_config
 
 
@@ -317,8 +327,15 @@ def _walk(
     """Every row of a walk: ``first``'s page, then each ``knowledge_read`` continuation (each
     resumed naming ``family`` as ``familyRevisionId`` too, when given)."""
 
-    rows = list(first["rows"])
-    continuation = first.get("continuation")
+    # A public tool answer nests rows under ``payload``; a published-intent block seed
+    # carries them at the top, and the domain body behind the mounted tool carries the
+    # next token at its own top level. Tails the mounted bound does not retain arrive
+    # as the overflow short form (contract only, no rows, no next token), so rows and
+    # advancement resolve through that same domain body, explicitly marked, never as
+    # pointer proof.
+    page = first.get("payload", first)
+    rows = list(page["rows"])
+    continuation = first.get("continuation") or page.get("continuation")
     while continuation is not None:
         response = _read(
             tmp_path,
@@ -328,9 +345,21 @@ def _walk(
             family_revision_id=family,
         )
         assert response["state"] == "page", response
-        assert response["tokens"] <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
-        rows.extend(response["payload"]["rows"])
-        continuation = response.get("continuation")
+        if response.get("overflow"):
+            assert response["resultKept"] is False, response
+        else:
+            # MIK-R108: answers no longer carry the count; the measured fact is recomputed here.
+            assert response_tokens(response) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
+        body = _read_body(
+            tmp_path,
+            root,
+            view="source_context",
+            continuation=continuation,
+            family_revision_id=family,
+        )
+        assert body["state"] == "page", body
+        rows.extend(body["payload"]["rows"])
+        continuation = body.get("continuation")
     return [row for row in rows if row["kind"] != "family_header_reference"]
 
 
@@ -378,8 +407,13 @@ def test_a_family_seed_walk_resumes_under_any_spelling_of_its_family(
 ) -> None:
     tmp_path, root = long_tree
     family = _read(tmp_path, root, view="source_context", family_revision_id="FAM-B16000")
-    first = {**family["payload"], "continuation": family.get("continuation")}
-    assert first["continuation"] is not None
+    # The family seed overflows the mounted bound: the public answer keeps the
+    # overflow contract, and the page resolves through the same domain body the
+    # mounted tool serves (explicitly marked, never as pointer retrieval).
+    assert family["state"] == "page" and family.get("overflow"), family
+    assert family["resultKept"] is False, family
+    first = _read_body(tmp_path, root, view="source_context", family_revision_id="FAM-B16000")
+    assert first["state"] == "page" and first["continuation"] is not None
     # Review F4: the token binds the bare family ID; ``ID@rev`` and the projected UUID name it too.
     uuid = text_uuid("revision", "FAM-B16000@1")
     for named in ("FAM-B16000", "FAM-B16000@1", uuid):
@@ -401,12 +435,14 @@ def test_a_family_seed_walk_resumed_naming_a_revision_the_tree_lacks_is_refused(
 ) -> None:
     tmp_path, root = long_tree
     family = _read(tmp_path, root, view="source_context", family_revision_id="FAM-B16000")
+    assert family["state"] == "page", family
+    body = _read_body(tmp_path, root, view="source_context", family_revision_id="FAM-B16000")
     # Ruling R2-1: resuming is held to the named revision exactly as a fresh read is.
     resumed = _read(
         tmp_path,
         root,
         view="source_context",
-        continuation=family["continuation"],
+        continuation=body["continuation"],
         family_revision_id=named,
     )
     fresh = _read(tmp_path, root, view="source_context", family_revision_id=named)

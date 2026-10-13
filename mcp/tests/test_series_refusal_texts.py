@@ -38,20 +38,34 @@ def _landed_master(root: Path) -> WorktreeContract:
 
     code = root / "code"
     base = init_repo(code)
+    # MIK-R50 (L50): the removed `disabled` mode is refused at contract build, so the
+    # fixture builds its world with an external memory repository, the way L155 does.
+    memory = root / "memory"
+    memory_base = init_repo(memory)
     contract = default_series_contract(
         ContractTask(
             name="master",
             repo_name="repo-a",
             coordination_root=root / "coord",
             workflow_kind="light-task",
-            memory_mode="disabled",
+            memory_mode="external",
         ),
         code=RepoBranchPlan(
             repo_path=code, source_branch="main", work_branch="line", base_commit=base
         ),
+        memory=RepoBranchPlan(
+            repo_path=memory,
+            source_branch="main",
+            work_branch="line",
+            base_commit=memory_base,
+        ),
     )
     landed = commit_file(code, "leaf.txt", "leaf", "leaf")
     git(code, "branch", "line", landed)
+    # The closeout proves the code ref; the memory side mirrors the landing so the
+    # memory leg is landed too and only the removed code branch is refused below.
+    memory_landed = commit_file(memory, "leaf.txt", "leaf", "leaf")
+    git(memory, "branch", "line", memory_landed)
     leaf = replace(
         contract,
         kind="leaf",
@@ -65,6 +79,14 @@ def _landed_master(root: Path) -> WorktreeContract:
         integration_status="completed",
         integrated_code_commit=landed,
         code_worktree=root / "leaf",
+        # External-memory leaf contracts carry their memory leg (L155).
+        memory_source_branch="line",
+        memory_work_branch="leaf-memory",
+        memory_base_commit=memory_base,
+        memory_content_commit=memory_landed,
+        integrated_memory_content_commit=memory_landed,
+        memory_worktree=root / "leaf-memory",
+        ledger_path=root / "leaf-memory" / "memory.md",
     )
     write_contract(leaf.contract_path, leaf)
     for document in (

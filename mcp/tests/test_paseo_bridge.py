@@ -102,11 +102,14 @@ class BridgeProcessTests(unittest.TestCase):
     def test_unconfigured_or_never_started_runtime_refuses_before_any_process(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            # The shared user settings file is global to the installation the
+            # fixture represents: each case writes (or unlinks) it immediately
+            # before its own call, so the cases cannot clobber each other.
             cases = {
-                "paseo_runtime_not_configured": runtime_config(root / "unconfigured", None),
-                "paseo_daemon_unreachable": runtime_config(root, runtime_settings(root)),
+                "paseo_runtime_not_configured": (root / "unconfigured", None),
+                "paseo_daemon_unreachable": (root, runtime_settings(root)),
             }
-            for code, config in cases.items():
+            for code, (path, settings) in cases.items():
                 with (
                     self.subTest(code=code),
                     patch.object(
@@ -121,7 +124,7 @@ class BridgeProcessTests(unittest.TestCase):
                     patch.object(paseo_bridge.subprocess, "run") as run,
                     self.assertRaises(PaseoBridgeFailure) as raised,
                 ):
-                    bridge_call(config, "catalog", {"cwd": "/work/folder"})
+                    bridge_call(runtime_config(path, settings), "catalog", {"cwd": "/work/folder"})
                 self.assertEqual(raised.exception.code, code)
                 run.assert_not_called()
             self.assertTrue(str(raised.exception).startswith("The Paseo daemon of "))
@@ -133,8 +136,12 @@ class BridgeProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             config = started_runtime(root)
+            # The bridge resolves the shared runtime block through XDG_CONFIG_HOME, so the
+            # hostile environment keeps that one variable: without it the bridge would read
+            # the account's real settings instead of this fixture's host.
             inherited = {
                 "PATH": "/usr/bin",
+                "XDG_CONFIG_HOME": os.environ["XDG_CONFIG_HOME"],
                 "PASEO_HOME": "/other/paseo-home",
                 "PASEO_LISTEN": "127.0.0.1:6799",
                 "AR_PASEO_URL": "ws://127.0.0.1:6799/ws",
@@ -167,6 +174,7 @@ class BridgeProcessTests(unittest.TestCase):
             run.call_args.kwargs["env"],
             {
                 "PATH": "/usr/bin",
+                "XDG_CONFIG_HOME": os.environ["XDG_CONFIG_HOME"],
                 "AR_PASEO_INSTALL_PREFIX": (root / "prefix").resolve().as_posix(),
                 "AR_PASEO_URL": "ws://127.0.0.1:6833/ws",
                 "AR_PASEO_SERVER_ID": SERVER_ID,
@@ -520,6 +528,11 @@ class BridgeScriptTests(unittest.TestCase):
             {
                 "id": "slow",
                 "label": "Slow",
+                # The catalog row carries the runtime's modes (L71): a fake entry
+                # without them reads back the empty defaults.
+                "modes": [],
+                "defaultModeId": None,
+                "fetchedAt": None,
                 "models": [],
                 "listingError": (
                     "the runtime was still listing the models of this provider when the call ended"
@@ -531,6 +544,9 @@ class BridgeScriptTests(unittest.TestCase):
             {
                 "id": "codex",
                 "label": "Codex",
+                "modes": [],
+                "defaultModeId": None,
+                "fetchedAt": None,
                 "models": [
                     {
                         "id": "gpt-a",
@@ -539,10 +555,19 @@ class BridgeScriptTests(unittest.TestCase):
                         "isDefault": True,
                         "efforts": [{"id": "low", "label": "Low"}, {"id": "high", "label": "high"}],
                         "defaultEffort": "high",
+                        # The catalog keeps every feature the host lists (MIK-R71 rule 3).
+                        "features": [],
                         "serviceTiers": [],
                     },
-                    {"id": "gpt-b", "label": "gpt-b", "efforts": [], "serviceTiers": []},
                     {
+                        "id": "gpt-b",
+                        "label": "gpt-b",
+                        "efforts": [],
+                        "features": [],
+                        "serviceTiers": [],
+                    },
+                    {
+                        "features": [],
                         "serviceTiers": [],
                         "id": "gpt-c",
                         "label": "gpt-c",
@@ -551,7 +576,17 @@ class BridgeScriptTests(unittest.TestCase):
                 ],
             },
         )
-        self.assertEqual(providers["eve"], {"id": "eve", "label": "Eve", "models": []})
+        self.assertEqual(
+            providers["eve"],
+            {
+                "id": "eve",
+                "label": "Eve",
+                "modes": [],
+                "defaultModeId": None,
+                "fetchedAt": None,
+                "models": [],
+            },
+        )
         self.assertEqual(
             {name: providers[name].get("listingError") for name in ("pi", "hermes", "claude")},
             {

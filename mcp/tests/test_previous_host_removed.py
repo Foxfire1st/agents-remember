@@ -404,6 +404,13 @@ ROUTES = {
     "/api/role-launch/dispatch": {"POST"},
     "/api/role-launch/result": {"POST"},
     "/api/role-launch/report": {"POST"},
+    # The launcher's later routes, each owned by the requirement that added it: the
+    # dispatch progress notice (MIK-R95), the written role reports (chat launcher
+    # simplification), and the selected task's sidebar chats (MIK L140).
+    "/api/role-launch/progress/{request_id}": {"GET"},
+    "/api/role-launch/reports": {"GET"},
+    "/api/role-launch/document-chats": {"POST"},
+    "/api/role-launch/document-chats/tree": {"POST"},
 }
 METHODS = ("GET", "POST", "PUT", "DELETE")
 
@@ -420,7 +427,7 @@ class FormerRouteTests(unittest.TestCase):
             transcript_root=root / "coordination" / "logs" / "mcp",
         )
 
-    def test_the_launcher_registers_its_five_routes_and_answers_404_on_the_former_paths(
+    def test_the_launcher_registers_its_nine_routes_and_answers_404_on_the_former_paths(
         self,
     ) -> None:
         app = FastAPI()

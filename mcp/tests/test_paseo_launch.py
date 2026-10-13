@@ -367,6 +367,35 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
 
 
 class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
+    def check_launched_agent(
+        self,
+        request: Any,
+        public: dict[str, Any],
+        receipt: dict[str, Any],
+        launched: dict[str, Any],
+        placed: dict[str, Any],
+    ) -> None:
+        """The launched agent carries its folder, title, labels and reachable paths."""
+
+        agent_id = launched["agent_id"]
+        host = {
+            "kind": "paseo-agent",
+            "serverId": SERVER_ID,
+            "workspaceId": launched["workspace_id"],
+            "agentId": agent_id,
+        }
+        self.assertEqual(public["execution"], host)
+        self.assertEqual(receipt["execution"], host)
+        self.assertEqual(receipt["agentId"], agent_id)
+        self.assertIs(receipt["hostAgentExists"], True)
+        self.assertEqual(receipt["agent"], {"id": "codex", "model": "gpt-a", "effort": "low"})
+        self.assertEqual(receipt["workspace"]["path"], placed["folder"])
+        self.assertNotIn("replayRequest", receipt)
+        self.assert_applied_is_recorded(request, launched["definition"], launched["note"])
+        self.assertTrue(
+            placed["path"].relative_to(self.root).as_posix().startswith(placed["receipt_directory"])
+        )
+
     def test_each_role_class_gets_one_agent_in_its_folder_with_title_and_labels(self) -> None:
         projects = self.config.workspace_root.resolve().as_posix()
         refs = {"sprint": SPRINT_REF.key, "master": MASTER_REF.key, "task": LEAF_REF.key}
@@ -472,25 +501,22 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 )
                 self.assertEqual(str(uuid.UUID(agent_id)), agent_id)
                 self.assertEqual(list(self.runtime.agents), [agent_id])
-                host = {
-                    "kind": "paseo-agent",
-                    "serverId": SERVER_ID,
-                    "workspaceId": workspace_id,
-                    "agentId": agent_id,
-                }
                 receipt = self.receipt(request)
-                self.assertEqual(public["execution"], host)
-                self.assertEqual(receipt["execution"], host)
-                self.assertEqual(receipt["agentId"], agent_id)
-                self.assertIs(receipt["hostAgentExists"], True)
-                self.assertEqual(
-                    receipt["agent"], {"id": "codex", "model": "gpt-a", "effort": "low"}
-                )
-                self.assertEqual(receipt["workspace"]["path"], folder)
-                self.assertNotIn("replayRequest", receipt)
-                self.assert_applied_is_recorded(request, definition, note)
-                self.assertTrue(
-                    path.relative_to(self.root).as_posix().startswith(receipt_directory)
+                self.check_launched_agent(
+                    request,
+                    public,
+                    receipt,
+                    {
+                        "agent_id": agent_id,
+                        "workspace_id": workspace_id,
+                        "definition": definition,
+                        "note": note,
+                    },
+                    {
+                        "folder": folder,
+                        "path": path,
+                        "receipt_directory": receipt_directory,
+                    },
                 )
                 self.runtime.agents.clear()
         # The receipt and artifact were stored before each runtime call.
@@ -502,15 +528,32 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             self.assertTrue(stored)
         # Beside receipts and message bindings a launch writes its artifact and nothing else: no
         # harness configuration file, in the folders it uses or in the user's home.
+        # The task documents are the fixture's own (resolved_document writes them), and the
+        # task-document copies are the launch's publication for the agent (L71): both are
+        # enumerated exactly, so an unexpected file still fails this assertion.
+        nown = sorted(
+            path.relative_to(self.root).as_posix()
+            for path in self.root.rglob("*")
+            if path.is_file()
+            and "-native-executions" not in path.as_posix()
+            and path != self.config.coordination_root / "system/settings.json"
+        )
+        task_documents = {
+            f"coordination/tasks/{REPO}/sprint/task.json",
+            f"coordination/tasks/{REPO}/sprint/task.md",
+            f"coordination/tasks/{REPO}/master/task.json",
+            f"coordination/tasks/{REPO}/master/task.md",
+            f"coordination/tasks/{REPO}/master/01_leaf.json",
+            f"coordination/tasks/{REPO}/master/01_leaf.md",
+            "enclosure-group/task-documents/INDEX.json",
+            "enclosure-group/task-documents/master/01_leaf.md",
+        }
         self.assertEqual(
+            nown,
             sorted(
-                path.relative_to(self.root).as_posix()
-                for path in self.root.rglob("*")
-                if path.is_file()
-                and "-native-executions" not in path.as_posix()
-                and path != self.config.coordination_root / "system/settings.json"
+                {f"reports/{saved['requestId']}.handover.txt" for _, saved, _, _ in observed}
+                | task_documents
             ),
-            sorted({f"reports/{saved['requestId']}.handover.txt" for _, saved, _, _ in observed}),
         )
         self.assertEqual(
             self.runtime.workspaces,
@@ -569,6 +612,10 @@ class LaunchRefusalTests(PaseoLaunchTestCase):
             self.assertTrue(str(error.detail).startswith("no Paseo runtime configured: "))
             self.assertEqual(self.runtime.calls, [])
             self.resolve_context.assert_not_called()
+        # The unconfigured case above unlinks the shared user settings file, while the
+        # launch reads the runtime block first (MIK-R96): the cases below need their
+        # configured host back before they can reach their own refusal.
+        prepare_host(self.root, configured=True)
         with self.subTest("the catalog cannot be loaded for the validation"):
             self.runtime.fail("catalog", "paseo_daemon_unreachable", "The Paseo daemon is down.")
             error = self.refused(self.request("worker"))
