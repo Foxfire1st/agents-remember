@@ -915,7 +915,9 @@ def test_remaining_preview_plan_and_queue_reads_write_nothing(
     )
     assert checkpoint["ok"] is False
     assert checkpoint["code"] == "contract-not-a-series"
-    assert checkpoint["error"] == (
+    # D279: an answered refusal carries its reason in summary, not the raised channel.
+    assert "error" not in checkpoint
+    assert checkpoint["summary"] == (
         "worktree_checkpoint_landing requires an atomic series contract: "
         "a leaf lands through closeout and worktree_integrate instead."
     )
@@ -929,7 +931,8 @@ def test_remaining_preview_plan_and_queue_reads_write_nothing(
     )
     assert recorded["ok"] is False
     assert recorded["code"] == "commit-not-on-landing-target"
-    assert "not reachable from any landing target" in recorded["error"]
+    assert "error" not in recorded
+    assert "not reachable from any landing target" in recorded["summary"]
     # The adopted seat keeps branch memory outside the coordination root, so the plan
     # names that authority refusal before reading anything. A raising plan is still a
     # plan for rule 6: it must write nothing.

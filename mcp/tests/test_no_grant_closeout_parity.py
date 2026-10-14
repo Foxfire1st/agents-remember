@@ -125,6 +125,13 @@ def main() -> None:
         )
         assert result["series_integrated"].get("ok"), result["series_integrated"]
         assert result["series_integrated"].get("state") == "integrated", result["series_integrated"]
+        # Port only this old producer's own route-index facts to L110's shape.
+        # No current/grant result is available in this baseline-only process.
+        for phase in ("leaf_preview", "leaf_apply"):
+            refresh = result[phase]["route_index_refresh"]
+            refresh["refreshedCount"] = refresh["written"]
+            refresh["unchangedCount"] = refresh["unchanged"]
+            refresh["staleCount"] = len(refresh["staleIndexes"])
         out.write_text(json.dumps(result, indent=1, sort_keys=True), encoding="utf-8")
     finally:
         reset_worktree_services()

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -48,6 +48,8 @@ from agents_remember.worktrees.modules.startup.leaf_ref_start import (
     invalid_contract_request_result,
     invalid_leaf_ref_result,
     resolve_start_leaf_doc_id,
+    start_input_edge_refusal,
+    start_parent_input_refusal,
 )
 from agents_remember.worktrees.modules.startup.master_series_admission import (
     MasterSeriesContractAdmissionError,
@@ -1096,6 +1098,9 @@ def _build_start_contract(context, args: WorktreeArgs) -> StartContractPlan | Wo
     memory_mode = args.memory_mode or "external"
     memory_repo = _start_memory_repo(context, memory_mode)
     work_branch = args.work_branch or f"ar/{args.worktree_name}"
+    parent_refusal = start_parent_input_refusal(context, args, task_root)
+    if parent_refusal is not None:
+        return parent_refusal
     admission_refusal = _existing_master_series_admission_refusal(
         context,
         args,
@@ -1116,6 +1121,23 @@ def _build_start_contract(context, args: WorktreeArgs) -> StartContractPlan | Wo
             memory_work_branch=_external_memory_value(memory_mode, work_branch),
         )
     )
+    source_refusal = None
+    if args.source_branch:
+        # Preview is read-only: validate the caller's source before bootstrap
+        # can publish a parent contract, activation or either protected ref.
+        preview_parent = _parent_series_contract(context, replace(args, dry_run=True), memory_mode)
+        if isinstance(preview_parent, WorktreeCommandResult):
+            source_refusal = preview_parent
+        else:
+            expected_source = _start_source_branch(
+                context, replace(args, source_branch=None), task_root, preview_parent, repo
+            )
+            if args.source_branch.removeprefix("refs/heads/") != expected_source:
+                source_refusal = start_input_edge_refusal(
+                    context, args, "source_branch", expected_source
+                )
+    if source_refusal is not None:
+        return source_refusal
     parent_series = _parent_series_contract(context, args, memory_mode)
     if isinstance(parent_series, WorktreeCommandResult):
         # The requested series remains reconciling or its admission evidence refused.

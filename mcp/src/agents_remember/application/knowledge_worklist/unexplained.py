@@ -268,13 +268,18 @@ def _admits(coverage: Mapping[str, Any], at_candidate: bool) -> list[str]:
     return ["attach", "author", NO_INVARIANT] if at_candidate else [NO_INVARIANT]
 
 
-def _trace(path: str, blob: str | None) -> dict[str, Any]:
-    """The onboarding-trace fact before the gate's own item is known: only a row can answer."""
+def _trace(path: str, blob: str | None, counted: bool) -> dict[str, Any]:
+    """The onboarding-trace fact before the gate's own item is known: only a row can answer.
+
+    ``counted`` is the card's counted change from K_B to K_C: the one value the item's own
+    answer and the gate's currency both read, until :func:`settle_uncovered` binds the gate's
+    own item for the file.
+    """
 
     return {
         "subject": card_subject(path),
         "item": None,
-        "countedChange": False,
+        "countedChange": counted,
         "sourceBlobs": {path: blob or ABSENT},
     }
 
@@ -416,14 +421,16 @@ def _finished(
         path = facts["path"]
         blob = facts.get("candidateBlob", facts.get("blob"))
         candidate = blob if isinstance(blob, str) else None
-        facts["onboardingTrace"] = _trace(path, candidate)
         counted = counted_change(
             base_files,
             candidate_files,
             f"onboarding/{path}.md",
             f"onboarding/{path}.json",
         )
-        item["satisfiedBy"] = _current_onboarding_row(path, candidate, onboarding, counted)
+        trace = facts["onboardingTrace"] = _trace(path, candidate, counted)
+        item["satisfiedBy"] = _current_onboarding_row(
+            path, candidate, onboarding, trace["countedChange"]
+        )
     else:
         item["satisfiedBy"] = unexplained_satisfied_by(item, rows)
     return item

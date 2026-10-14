@@ -539,24 +539,44 @@ def test_invalid_public_leaf_source_base_and_protected_ref_stay_refused_without_
     before = capture_preview_state(world)
     world.record("before-refusals", before.snapshot)
     for arguments in (
-        {"leaf_id": "FOREIGN-LEAF"},
         {"source_branch": "main"},
         {"source_branch": "0" * 40},
+        {"parent_task": "wrong-parent"},
+        {"leaf_id": "FOREIGN-LEAF"},
         {"work_branch": "main"},
         {"work_branch": f"ar/{MASTER}"},
     ):
-        refused = world.start(**arguments)
-        assert refused.isError or (
-            refused.structuredContent and not refused.structuredContent["ok"]
-        )
-        after = world.snapshot()
-        world.record(f"refused-after-call-{world.calls}", after)
-        assert_preview_read_only(
-            before,
-            attach_record(world, after),
-            expected_tools=world.log_tools_since(mark),
-            expected_river_tools=world.river_tools_since(mark),
-        )
+        for dry_run in (True, False):
+            refused = world.start(**arguments, dry_run=dry_run)
+            if "source_branch" in arguments or "parent_task" in arguments:
+                assert not refused.isError, refused
+                assert refused.structuredContent is not None
+                payload = refused.structuredContent
+                assert not payload["ok"] and not payload.get("overflow")
+                assert payload["code"] == (
+                    "start-source-branch-mismatch"
+                    if "source_branch" in arguments
+                    else "start-parent-task-mismatch"
+                )
+                assert payload["nextTool"] == "worktree_start"
+                assert payload["nextArgs"]["dry_run"] is dry_run
+                assert payload["nextArgs"]["skip_provider_setup"] is True
+                field = "source_branch" if "source_branch" in arguments else "parent_task"
+                expected = f"ar/{MASTER}" if field == "source_branch" else "sprint"
+                assert payload["nextArgs"][field] == expected
+                assert not world.parent_path.exists()
+            else:
+                assert refused.isError or (
+                    refused.structuredContent and not refused.structuredContent["ok"]
+                )
+            after = world.snapshot()
+            world.record(f"refused-after-call-{world.calls}", after)
+            assert_preview_read_only(
+                before,
+                attach_record(world, after),
+                expected_tools=world.log_tools_since(mark),
+                expected_river_tools=world.river_tools_since(mark),
+            )
     git(world.code, "branch", f"ar/{MASTER}", "super")
     mark = world.mark()
     occupied = capture_preview_state(world)

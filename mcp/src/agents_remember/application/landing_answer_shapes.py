@@ -358,6 +358,26 @@ def project_landing_answer(
     allowed = kept | _REFUSAL_KEYS | {"nextStep"} | set(FRAMEWORK_ANSWER_KEYS)
     answer = {key: value for key, value in whole.items() if key in allowed}
     _refusal_envelope(answer, whole)
+    if not whole.get("ok", True) and whole.get("code") != "raised":
+        # Admission tables and duplicated investigation/guidance stay in the
+        # whole log, not in the refusal's code, sentence and executable step.
+        for key in (
+            "admission",
+            "detail",
+            "expected",
+            "observed",
+            "eligibility",
+            "retryPrecondition",
+            "statusAction",
+            "atomicSeriesActivation",
+        ):
+            if key == "detail" and not (
+                isinstance(whole.get("summary"), str) and whole["summary"].strip()
+            ):
+                # Some producers (direct_landing) already use detail as their
+                # one reason slot. Keep it when there is no summary to keep.
+                continue
+            answer.pop(key, None)
     _strip_redundant_answer_addresses(answer)
     if tool_name == "worktree_closeout_preview":
         _trim_preview_commit_locations(answer)
@@ -365,28 +385,19 @@ def project_landing_answer(
 
 
 def _refusal_envelope(answer: dict[str, Any], whole: dict[str, Any]) -> None:
-    """Complete the refusal envelope from the producer's own words.
+    """Complete a normal refusal without using the raised-error channel.
 
-    Some producers refuse with ``status``/``detail`` but no ``code``/``error``
-    (closeout input, direct landing, operation control). The answer must still
-    carry a code and an error sentence: take the code from a nonempty status
-    and the error from the detail's first line (else the summary). Existing
-    codes and errors are never replaced; successful answers are untouched.
+    Producers keep their one WHY sentence in ``summary`` or ``detail``
+    (D279); verbose investigation stays in the detail log. The existing code
+    or producer status identifies the refusal. Actual ``raised`` answers keep ``error``.
     """
-    if whole.get("ok", True):
+    if whole.get("ok", True) or whole.get("code") == "raised":
         return
     if "code" not in answer:
         status = whole.get("status")
         if isinstance(status, str) and status.strip():
             answer["code"] = status
-    if "error" not in answer:
-        detail = whole.get("detail")
-        if isinstance(detail, str) and detail.strip():
-            answer["error"] = detail.splitlines()[0]
-        else:
-            summary = whole.get("summary")
-            if isinstance(summary, str) and summary.strip():
-                answer["error"] = summary.splitlines()[0]
+    answer.pop("error", None)
 
 
 def _strip_redundant_answer_addresses(answer: dict[str, Any]) -> None:
@@ -398,7 +409,7 @@ def _strip_redundant_answer_addresses(answer: dict[str, Any]) -> None:
     addresses its next step with the contract repeats its own top-level
     contract address the same way: the next step reads ``nextArgs``, so the
     echo goes and the detail file keeps the whole result. A refusal keeps
-    its code, error and next step; only the redundant echo goes, so a
+    its code, reason sentence and next step; only the redundant echo goes, so a
     deep-root refusal still fits its bound with its blockers.
     An empty ``blockers`` list says nothing blocks. The nested ``nextStep``
     triple rides verbatim for the guidance machinery that reads it. Copies

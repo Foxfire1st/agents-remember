@@ -59,10 +59,12 @@ their accumulated change is reviewed on the canonical master at master-to-parent
 
 ## Bound Paseo intake and capabilities
 
-For an AR-launched Paseo capsule, read the supplied task with its exact `taskDocReadArgs` on
-`agents-remember-task` (extensionless slug), then read the canonical JSON at the returned `docPath`.
-Use the handover's `arMcpContext.readerArguments` and the actual tool schemas; `task_context` carries
-both the canonical task reference and enclosure contract. Missing scope fields and refused
+For an AR-launched Paseo capsule, read the rendered task document and canonical JSON at the exact
+`rendered_path` and `json_path` supplied by `taskDocReadArgs`, with your own file tools.
+`task_doc` writes and does not read. Call these AR tools only on `agents-remember-task`.
+Use the handover's `arMcpContext.readerArguments` and the actual
+tool schemas: `knowledge_read` takes `memoryRoot`; only `read_ar_files` uses `task_context` with the
+canonical task reference and enclosure contract. Missing scope fields and refused
 capabilities are blockers, not permission to use another AR server or an unscoped command. Read the
 assignment's applicable task packets, not an unrelated role or the complete hierarchy by default.
 

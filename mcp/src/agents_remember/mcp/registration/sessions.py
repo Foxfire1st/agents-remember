@@ -59,16 +59,7 @@ def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         agent_id: str | None = None,
         interrupt_turn: bool = False,
     ) -> dict[str, Any]:
-        """Retire the receipt-tracked agent in one authorized direct child seat.
-
-        MIK-R100 rule 8: the agent that started the seat retires the agent in it
-        without giving it a turn, and the launch record names the caller and the
-        reason. An agent in a turn is not retired unless interrupt_turn says the
-        turn may be interrupted. Any other role agent is refused with the starter
-        named; an unknown or ambiguous agent id is refused by name and nothing
-        is archived; a repeated call for an already retired agent changes nothing
-        and says so.
-        """
+        """Retire one authorized direct child seat using task_document_ref, role and reason. Only its starter may retire it; interrupt_turn is required for a running turn. Repeats are inert. More: docs/tool-details.md."""
         return retire_child_payload(
             config,
             RetireChildRequest(

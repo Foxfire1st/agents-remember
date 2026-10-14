@@ -111,29 +111,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         replaces: dict[str, str] | None = None,
         replaces_interrupt_turn: bool = False,
     ) -> dict[str, object]:
-        """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1).
-
-        Only a role agent that AR launched can call this. Only the leaf's owning Manager can call this: any other role is refused
-        before anything is prepared. Each seat is then checked as a start of its
-        role is. The three have the calling Manager as their parent and the same
-        leaf as their selection, and each takes its agent, model, effort and
-        feature values as any start of its role does: pass them
-        per seat in worker, reviewer and curator (agent, model, effort, featureValues).
-
-        The Worker opens at once. The Reviewer and the Curator are held: each exists on
-        the host, is reached by its role and the leaf's task reference, and has taken no
-        turn, with its handover written when the seat is prepared. reviewer_message is
-        the Reviewer's first work: carried, the Reviewer opens at once with its handover
-        and that message. replaces names, per seat role, the holder a replacing start
-        retires first, by the rule of role_start; replaces_interrupt_turn is the word,
-        for the whole set, that a replaced holder's turn may be interrupted.
-
-        The answer names the three agent ids and says for each whether it has taken a
-        turn. A repeat with the same request id reconciles the same three agents: it
-        creates no fourth and opens no held seat. If one of the three cannot be created,
-        the call says which, leaves the others as they are, and a repeat completes the
-        set.
-        """
+        """Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1). Only a role agent that AR launched can call this. Only the leaf's owning Manager may call it. Pass selection, request_id and per-seat launch choices. Worker opens; Reviewer and Curator are held unless reviewer_message opens the Reviewer. A repeat with the same request id reconciles the same three agents: it creates no fourth and opens no held seat. More: docs/tool-details.md."""
         try:
             call = RoleStartSetCall(
                 request_id=request_id,

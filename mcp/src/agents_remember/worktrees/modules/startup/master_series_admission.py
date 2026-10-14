@@ -123,12 +123,18 @@ def _master_series_admission_refusal(
             bounded_observed_detail = bounded_activation_detail(observed_detail)
             assert bounded_observed_detail is not None
             public_observed = {**public_observed, "detail": bounded_observed_detail}
-    public_summary = bounded_activation_detail(
-        f"Master-series startup refused ({error.status}): {public_detail} "
-        "Inspect the supplied worktree_status address and correct the named edge "
-        "before retrying."
-    )
-    assert public_summary is not None
+    public_summary = {
+        "atomic-series-contract-unreadable": (
+            "The parent series contract is unreadable; inspect its parser diagnosis in the log."
+        ),
+        "atomic-series-contract-kind-mismatch": "The parent task contract is not a series contract.",
+        "atomic-series-contract-edge-mismatch": (
+            "The existing master series contract does not match the task's declared edge."
+        ),
+        REOPEN_REQUIRED_STATUS: (
+            "The master series generation is terminal and archived; preview task_reopen before a new start."
+        ),
+    }.get(error.status, "Master-series startup refused; inspect worktree_status before retrying.")
     requested_master: TaskDocumentRef | None = None
     repository_root = (spec.coordination_root / "tasks" / spec.repo_name).resolve(strict=False)
     task_path = (spec.task_root / "task.json").resolve(strict=False)

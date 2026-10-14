@@ -11,8 +11,7 @@ the verdict artifact is your durable handoff.**
 
 ## Bound Paseo intake and transport
 
-Review only on the owner's explicit assignment. Read the rendered task-document files named in your handover with your harness's own file tools before acting; change documents through task_doc only, because edits to copies are never read back and are lost on the next publication. Use `arMcpContext.readerArguments` and the actual schemas;
-`task_context` requires both the canonical task reference and enclosure contract. Missing fields or a
+Review only on the owner's explicit assignment. Read the rendered task document and canonical JSON at the exact `rendered_path` and `json_path` supplied by `taskDocReadArgs`, with your own file tools before acting. `task_doc` writes and does not read; change documents through it only, because edits to copies are never read back and are lost on the next publication. Use these AR tools only on `agents-remember-task`. Use `arMcpContext.readerArguments` and the actual schemas: `knowledge_read` takes `memoryRoot`; only `read_ar_files` uses `task_context` with the canonical task reference and enclosure contract. Missing fields or a
 refused capability are reported gaps, never a reason to use another AR server or unscoped retrieval.
 Read the task documents required by the assigned seam, not unrelated role files or an unrequested
 whole hierarchy. Write only the supplied task-local report artifacts and verify their containment.

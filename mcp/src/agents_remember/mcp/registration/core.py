@@ -80,19 +80,7 @@ def _register_orientation_tools(
         include_freshness: bool = False,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
-        """Where the caller works and what needs action (MIK-R109).
-
-        Slim answer: the roots (code/memory worktrees, enclosure, task
-        document), task ID/master, action lines when needed, serving build
-        and pair commits. `include_drift` measures the reference anchors of onboarding cards
-        and the validity of the tree -- a stale reference is reported and never blocks by itself;
-        whether an invariant is still current is answered by `knowledge_read` and
-        `knowledge_integrity_check`, not here; a leaf that changes a source
-        file must change that file's card or record why not (MIK-R30); and
-        nothing is repaired (`citation_fix` re-records anchors that only
-        moved, and a curator re-authors a stale one); omit it and nothing is measured. `include_freshness` fetches remotes and writes FETCH_HEAD,
-        so the tool is marked as a write. Leaf calls pass task_context.
-        Longer explanation: docs/reference/mcp-tools.md."""
+        """Orient a repository or leaf; leaf calls pass task_context. include_drift measures the reference anchors of onboarding cards and validity of the tree; omit it and nothing is measured. Staleness never blocks by itself. Currentness: knowledge_read and knowledge_integrity_check. MIK-R30: update the card or record why not; citation_fix repairs moved anchors, a curator re-authors stale ones. Nothing is repaired here. include_freshness fetches remotes and writes FETCH_HEAD. More: docs/tool-details.md."""
         return context_packet_payload(
             config,
             ContextPacketRequest(

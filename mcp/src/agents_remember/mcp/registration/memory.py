@@ -52,30 +52,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     def memory_quality_check(
         request: MemoryQualityCheckRequest,
     ) -> dict[str, Any]:
-        """Prepare memory before certification admission using drift-integrity and style checks.
-        It never changes code or memory. A full contract-scoped call atomically replaces the one
-        operational checklist at `<worktree enclosure>/reports/curator-memory-quality.md` and its
-        structured, report-digest-bound `.json` attestation; subset and unscoped calls write
-        operation. Every contract-scoped execution also publishes the complete structural
-        census to reports/memory-census.json; the answer carries the counts and the
-        checklist's location instead of the census, the sample and the catalogue.
-        This worklist requires no code-gate results and does not certify semantic decisions.
-        ok=false means findings exist (e.g. dirty-source
-        drift), not that the tool failed. `curatorActionableCount` and
-        `qualityChecklistStatus` are the onboarding-repair loop gate. Once the raw checklist is
-        `ready-for-closeout`, combined `checklistStatus=coherence-required` means the caller must
-        prepare, publish, and validate the exact structured `curator_coherence` authority;
-        `closeoutReady=true` is impossible until that same validator accepts it. Checklist and
-        attestation rendering are deterministic, so a same-input rerun preserves the published
-        authority; changed inputs stale it and require republishing. Final commit stamps remain
-        closeout-owned. The request is exactly one discriminated mode:
-        `sync` and `start` carry repository plus optional scope/check/detail fields, while
-        `poll` carries repository, run id, and the same contract path for a candidate run.
-        Repository-only calls are explicitly official diagnostics and cannot become candidate
-        acceptance. A saturated unique start returns `capacity-reached` without launching work.
-        A poll returns the identical pair-bound result; `run-not-found` means the run was evicted,
-        belongs to another repository, or the server restarted, so submit a new start request
-        with the original contract path for a candidate run."""
+        """Check memory before closeout: findings, counts and the checklist location, not semantic certification. Pass a sync, start or poll request; candidate runs use the leaf contract. Ready memory also requires validated curator_coherence. Longer explanation: docs/tool-details.md."""
         if isinstance(request, MemoryQualityPollRequest):
             return memory_quality_check_poll_payload(config, request)
         if isinstance(request, MemoryQualityStartRequest):
@@ -93,30 +70,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         dry_run: bool = False,
         exclude: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Regenerate anchored citation ranges inside one leaf memory worktree.
-
-        Two admissions: a leaf enclosure contract (the ordinary write route; the
-        application guard refuses the official memory repo), or no contract on the
-        configured memory root while that root has no attributed baseline (the
-        pre-baseline bootstrap admission, which answers with `admission: \"pre-baseline\"`).
-        In every other case a call without a contract refuses and names the leaf route;
-        once the baseline exists, the refusal says so. A
-        pure move is repaired; renamed, deleted, or ambiguous anchors remain a curator worklist.
-        Preview with dry_run=true. Check the cards of a change in one call and repair them in
-        one call: pass `documents` with every onboarding-relative file, or `document` for one
-        file (a list of one). A call that names both is refused, and so is an empty list; a
-        call that names more documents than one leaf may hold changed files with cards is
-        refused before anything is read. A named document that does not exist is a refusal
-        of that document and does not stop the others. Pass `expected_snapshot` to assert a
-        previously built immutable source generation. `exclude`
-        adds caller-supplied, code-root-relative path globs for THIS call only, narrowing the
-        acquisition beyond the register every call already honours: the memory layer's
-        settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore.
-        The answer is a status -- whether the step went well, with the counts (rewritten,
-        stale, unreadable, refused) -- and the whole result with every list is in the log's
-        detail file. On converted memory it authors the cards' citation rows into sidecar
-        references and re-records moved anchors; a document then needs no expected_snapshot
-        and scopes the run to those cards."""
+        """Repair moved citation anchors in a leaf memory worktree. Pass repo_id and contract_path, with documents for a batch or document for one card; preview with dry_run. Renames, deletions and ambiguous anchors remain curator work. Longer explanation: docs/tool-details.md."""
         return citation_fix_payload(
             config,
             repo_id,
@@ -136,12 +90,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         dry_run: bool = False,
         contract_path: str | None = None,
     ) -> dict[str, Any]:
-        """Regenerate the overview.index.json route indexes so they match the current onboarding
-        tree. Apply requires a leaf enclosure contract and writes only that leaf's memory
-        worktree, or no contract on the configured memory root while that root has no
-        attributed baseline (the pre-baseline bootstrap admission, which answers with
-        `admission: \"pre-baseline\"`). Any other unscoped call is read-only and therefore
-        requires dry_run=true."""
+        """Refresh route indexes for a leaf memory worktree using repo_id and contract_path. Preview with dry_run; unscoped writes require pre-baseline admission. More: docs/tool-details.md."""
         return route_index_refresh_payload(
             config, repo_id, dry_run=dry_run, contract_path=contract_path
         )
@@ -188,12 +137,7 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         work_branch: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Create the first attributed memory baseline for an external memory repo. Mutating: commits
-        memory content and refreshes its disposable ledger cache. Gated on clean drift unless accept_drift=true.
-        `accept_drift` accepts stale anchors only: it never lets a tree with a validator
-        violation through, and the first baseline of a converted tree is validated
-        before it is committed. Preview with
-        dry_run=true. Usually driven by the c-10-adopt-memory-baseline skill."""
+        """Adopt the first attributed external-memory baseline and commit memory. Pass repo_id; preview with dry_run. accept_drift permits stale anchors, never validator violations. More: docs/tool-details.md."""
         return memory_baseline_adopt_payload(
             config,
             repo_id,
@@ -217,9 +161,7 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         old_base: str,
         replace_existing: bool = False,
     ) -> dict[str, Any]:
-        """Plan (non-mutating) carrying richer onboarding from a source branch into the exact open
-        external-memory leaf. Review it, then apply before normal leaf closeout/integration.
-        Files no report."""
+        """Plan richer onboarding from a source branch into the open external-memory leaf; review before apply. More: docs/tool-details.md."""
         return memory_carryover_plan_payload(
             config,
             CarryoverSelection(

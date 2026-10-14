@@ -14,6 +14,8 @@ import anyio
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.server import create_server
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from agents_remember.tasks import SubTaskRef, read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import (
     activation_path,
@@ -74,7 +76,15 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
     @staticmethod
     async def _call(server, name: str, arguments: dict[str, object]):
         async with create_connected_server_and_client_session(server._mcp_server) as client:
-            return await client.call_tool(name, arguments)
+            result = await client.call_tool(name, arguments)
+        payload = result.structuredContent
+        if name == "worktree_start" and payload is not None and not payload["ok"]:
+            assert not result.isError and not payload.get("overflow"), payload
+            assert count_response_tokens(payload) <= bound_for(name)
+            assert payload["code"] and payload["summary"] and payload["nextTool"]
+            assert "error" not in payload
+            assert not {"admission", "detail", "retryPrecondition", "statusAction"} & payload.keys()
+        return result
 
     @staticmethod
     def _arguments(**values: object) -> dict[str, object]:
@@ -89,19 +99,16 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
     def _assert_bounded_parser_refusal(self, result, contract, malformed_bytes) -> None:
-        # Since L108 (663f51ae, MIK-R108 rules 3-4) the oversized parser refusal
-        # is over the answer bound: the delivered answer is the overflow short
-        # form, and the whole refusal — the bounded detail and the admission —
-        # lies in the file the answer names in `log`.
+        # L111's repair keeps the parser diagnosis whole in the detail file,
+        # while the refusal envelope itself fits the existing L108 bound.
         self.assertFalse(result.isError)
         assert result.structuredContent is not None
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
-        self.assertTrue(payload["overflow"])
-        self.assertEqual(payload["state"], "atomic-series-contract-unreadable")
-        self.assertEqual(payload["status"], "atomic-series-contract-unreadable")
-        # `contract_path` is a long path: the short form sheds it under a
-        # long test root, so read it from the whole refusal in `log`.
+        self.assertFalse(payload.get("overflow", False))
+        self.assertEqual(payload["code"], "atomic-series-contract-unreadable")
+        self.assertLessEqual(count_response_tokens(payload), bound_for("worktree_start"))
+        # The next-step address is sufficient; diagnosis and admission stay whole.
         whole = self._whole(result)
         self.assertEqual(whole["contract_path"], contract.contract_path.as_posix())
         self.assertIn("invalid contract kind:", whole["detail"])
@@ -328,9 +335,11 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         assert sync.structuredContent is not None
         sync_payload = sync.structuredContent
         self.assertFalse(sync_payload["ok"])
-        # The oversized sync refusal is over the answer bound like the parser
-        # refusal above: short form on the wire, whole admission in `log`.
-        self.assertTrue(sync_payload["overflow"])
+        # Both oversized admission diagnoses remain whole in the log;
+        # L111's refusal envelope fits the unchanged guard without a cut.
+        self.assertFalse(sync_payload.get("overflow", False))
+        self.assertLessEqual(count_response_tokens(sync_payload), bound_for("worktree_sync"))
+        self.assertNotIn("admission", sync_payload)
         self.assertEqual(sync_payload["nextTool"], "worktree_sync")
         admission = self._whole(sync)["admission"]
         self.assertEqual(admission["activation"]["observedState"], "unreadable")

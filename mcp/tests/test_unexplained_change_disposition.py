@@ -31,6 +31,7 @@ from agents_remember.application.knowledge_worklist.onboarding_trace import (
     worktree_code_blobs,
 )
 from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
+from agents_remember.application.knowledge_worklist.unexplained import settle_uncovered
 from agents_remember.application.knowledge_writer.memory_state import Owner
 from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
 from agents_remember.application.memory_quality.controller import _needed_rows_dropped
@@ -593,6 +594,47 @@ def test_the_writer_names_the_unexplained_items_an_onboarding_row_answers(
     assert row["items"] == [item["id"]]
     answered = leaf_worklist(contract)
     assert answered is not None and only(answered, FRESH)["satisfiedBy"] == row["id"]
+
+
+def test_an_updated_row_over_a_changed_card_answers_an_uncovered_hunk_for_the_gate_too(
+    world: World,
+) -> None:
+    """MIK-R10 rule 5 with MIK-R53 rule 2: the worklist and the gate read one counted change.
+
+    The card of an uncovered file changed between K_B and K_C, so the file's current ``updated``
+    row answers its hunk. Where no ``onboarding_trace`` item binds the hunk (MIK-R30 raised none
+    for the card), the worklist names that row and the gate must accept it. Catches a stored
+    ``countedChange: False`` beside a ``satisfiedBy`` the worklist computed with a counted change
+    (L113, 2026-10-14: six cards, 15 hunks).
+    """
+
+    base = world.code_commit({FRESH: "VALUE = 1\n"})
+    card = world.memory / f"onboarding/{FRESH}.md"
+    memory_base = world.memory_commit({f"onboarding/{FRESH}.md": "# fresh\n\nA value.\n"}, base)
+    code = world.code_commit({FRESH: "VALUE = 2\n"})
+    card.write_text("# fresh\n\nA value, now two.\n", encoding="utf-8")
+    subject = f"onboarding:{FRESH}"
+    reason = "The card names the new value."
+    report = written(
+        world, {"history": [{"subject": subject, "disposition": "updated", "reason": reason}]}
+    )
+    (row,) = report.rows
+
+    document = worklist(world, code, base=base, memory_base=memory_base)
+    settled = settle_uncovered(document["items"])
+    (item,) = [one for one in settled if one["kind"] in UNEXPLAINED]
+    trace = item["facts"]["onboardingTrace"]
+    assert item["facts"]["coverage"]["state"] == "uncovered" and trace["item"] is None
+    assert item["satisfiedBy"] == row.id  # the worklist names the updated row
+    history = HistoryFile.model_validate(
+        json.loads((world.memory / f"knowledge/history/{LEAF}.json").read_text(encoding="utf-8"))
+    )
+    candidate = SimpleNamespace(revision=lambda record_id: None)
+    context = GateContext(
+        owner=LEAF, history=history, candidate=cast(Any, candidate), code=cast(Any, None)
+    )
+    assert unexplained_row_open(item, context) is None  # and the gate accepts it
+    assert trace["countedChange"] is True
 
 
 # --------------------------------------------------------------------------------------------------

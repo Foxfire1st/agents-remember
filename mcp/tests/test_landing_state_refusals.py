@@ -68,6 +68,7 @@ def _refusal(test: unittest.TestCase, kind: str, payload: dict[str, Any] | None)
     test.assertEqual(kind, "RETURNED", f"the call raised instead of answering: {payload}")
     assert payload is not None
     test.assertFalse(payload.get("ok"), f"a refusal reports ok:false: {payload}")
+    test.assertNotIn("error", payload, "D279: an ordinary refusal is not a raised error")
     return payload
 
 
@@ -144,7 +145,7 @@ class LandingStateRefusalTests(unittest.TestCase):
         answer = _refusal(self, kind, payload)
         self.assertEqual(answer.get("state"), "blocked")
         self.assertEqual(answer.get("code"), "closeout-incomplete")
-        self.assertIn("integration requires closeout.status completed", answer.get("error", ""))
+        self.assertIn("integration requires closeout.status completed", answer.get("summary", ""))
         next_step = answer.get("next") or {}
         self.assertEqual(next_step.get("tool"), "worktree_closeout_preview")
         stored = load_contract(world.contract)
@@ -160,7 +161,7 @@ class LandingStateRefusalTests(unittest.TestCase):
         answer = _refusal(self, kind, payload)
         self.assertEqual(answer.get("state"), "refused")
         self.assertEqual(answer.get("code"), "contract-not-a-series")
-        self.assertIn("requires an atomic series contract", answer.get("error", ""))
+        self.assertIn("requires an atomic series contract", answer.get("summary", ""))
 
     def test_record_commit_that_landed_nowhere_is_answered(self) -> None:
         world = self._world()
@@ -180,7 +181,7 @@ class LandingStateRefusalTests(unittest.TestCase):
         answer = _refusal(self, kind, payload)
         self.assertEqual(answer.get("state"), "refused")
         self.assertEqual(answer.get("code"), "commit-not-on-landing-target")
-        self.assertIn("not reachable from any landing target", answer.get("error", ""))
+        self.assertIn("not reachable from any landing target", answer.get("summary", ""))
         stored = load_contract(world.contract)
         self.assertEqual(stored.integration_status, "not-started")
 
@@ -203,7 +204,7 @@ class LandingStateRefusalTests(unittest.TestCase):
         answer = _refusal(self, kind, payload)
         self.assertEqual(answer.get("state"), "blocked")
         self.assertEqual(answer.get("code"), "integration-incomplete")
-        self.assertIn("cleanup requires integration.status completed", answer.get("error", ""))
+        self.assertIn("cleanup requires integration.status completed", answer.get("summary", ""))
         next_step = answer.get("next") or {}
         self.assertEqual(next_step.get("tool"), "worktree_integrate")
 
@@ -742,7 +743,7 @@ class TerminalPreconditionCodeTests(unittest.TestCase):
         )
         answer = _refusal(self, kind, payload)
         self.assertEqual(answer.get("code"), "worktree-checkout-mismatch")
-        self.assertIn("checked out", answer.get("error", ""))
+        self.assertIn("checked out", answer.get("summary", ""))
 
     def test_attach_republish_with_unresolved_work_answers_terminal_blocked(self) -> None:
         """F01.5: the start/attach republish raise answers in the envelope.
@@ -769,8 +770,8 @@ class TerminalPreconditionCodeTests(unittest.TestCase):
         )
         answer = _refusal(self, kind, payload)
         self.assertEqual(answer.get("state"), "task-enclosure-binding-terminal-blocked")
-        self.assertIn("unresolved", str(answer.get("error", "")))
-        self.assertIn("S1", str(answer.get("error", "")))
+        self.assertIn("unresolved", str(answer.get("summary", "")))
+        self.assertIn("S1", str(answer.get("summary", "")))
         self.assertEqual(world.contract.read_bytes(), contract_bytes)
 
 

@@ -897,14 +897,28 @@ class TaskDocReadRemovalSweepTests(unittest.TestCase):
         "mcp/src/agents_remember/package_data/runtime/skills",
         "skills",
         "docs",
+        ".claude/skills",
+        ".codex/skills",
+        ".cursor/skills",
+        ".github-vscode/skills",
+        ".hermes/skills",
+        ".openclaw/workspace/skills",
+        ".pi/skills",
+        ".agents/skills",
     )
 
     # Call shapes: an instruction that reads through task_doc.
     CALL_SHAPES = (
-        re.compile(r"""operation\s*=\s*["']get["']"""),
+        re.compile(r"""operation\s*=\s*["']?get\b"""),
         re.compile(r'''"operation":\s*"get"'''),
         re.compile(r"""task_doc\.get\b"""),
         re.compile(r"""task_doc\s+get\b"""),
+        re.compile(
+            r"read the supplied task[^.]{0,300}taskDocReadArgs[^.]{0,150}"
+            r"on\s*`agents-remember-task`",
+            re.IGNORECASE,
+        ),
+        re.compile(r"`task_context`\s+(?:requires|carries)\s+both the canonical task"),
     )
 
     def _files(self) -> list[Path]:
