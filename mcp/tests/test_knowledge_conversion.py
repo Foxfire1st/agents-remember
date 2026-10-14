@@ -250,10 +250,12 @@ def test_conversion_is_deterministic_version_pinned_and_a_no_op_once_converted(
     assert "already converted" in capsys.readouterr().out
     git(memory, "add", "-A")
     git(memory, "commit", "-q", "-m", "converted")
-    # Against its own converted commit, the exported entry at a deleted path is carried: reported.
+    # Against its own converted commit, the exported entry at a deleted path is carried: the
+    # commit route refuses it as carried-stale (MIK-R53 rule 11), for the maintenance pass.
     validate = ["knowledge-validate", str(memory), "--code", str(code.root), "--base", "HEAD"]
-    assert cli_main(validate) == 0
-    assert "passes: 0 violation(s)" in capsys.readouterr().out
+    assert cli_main(validate) == 1
+    out = capsys.readouterr().out
+    assert "[R22.6-carried-stale]" in out and "is refused: 1 violation(s)" in out
     with pytest.raises(ConversionVersionError):
         convert_memory(
             memory_from_directory(twin),

@@ -191,7 +191,9 @@ def test_alternative_counts_and_the_one_chosen_are_refused_by_rule() -> None:
         ("DEC-N0CH0S", "alternatives", "R13.1-alternatives", False),
         ("DEC-TW0CHS", "alternatives", "R13.1-alternatives", False),
     ]
-    messages = {one.path[20:30]: one.message for one in report.refusals}
+    messages = {
+        one.path[20:30]: one.message for one in report.refusals if one.rule.startswith("R13.1")
+    }
     assert "at least 2 considered alternatives; this one has 1" in messages["DEC-D12RTE"]
     assert "exactly one alternative is chosen; chosen: none" in messages["DEC-N0CH0S"]
     assert "chosen: 0, 1" in messages["DEC-TW0CHS"]
@@ -239,13 +241,13 @@ def test_reconsider_on_names_an_existing_rejected_or_deferred_alternative() -> N
     assert "which is chosen" in first.message and "has 3 (indexes 0 to 2)" in second.message
 
 
-def test_a_decision_that_governs_nothing_is_reported_not_refused() -> None:
+def test_a_decision_that_governs_nothing_is_refused() -> None:
     document = _variant(
         _d18(), links=[{"relation": "reconsider_on", "target": ASSUMPTION, "alternative": 1}]
     )
     report = _validate(document)
-    assert report.ok, report.render()
-    assert _found(report) == [("DEC-D18TXT", "links", "R13.3-governs", True)]
+    assert not report.ok, report.render()
+    assert _found(report) == [("DEC-D18TXT", "links", "R13.3-governs", False)]
 
 
 def test_superseded_is_derived_and_reconsider_links_carry_their_subject() -> None:
@@ -321,5 +323,8 @@ def test_a_decision_is_never_an_export_so_a_legacy_id_exempts_it_from_nothing() 
         origin={**ORIGIN, "legacyId": "legacy-decision-1"},
     )
     report = _validate(forged)
-    assert [(one.rule, one.field) for one in report.refusals] == [("R27.2-new-record", "admission")]
+    assert [(one.rule, one.field) for one in report.refusals] == [
+        ("R27.2-new-record", "admission"),
+        ("R27.4-legacy-unassessed", "admission"),
+    ]
     assert "is legacy-unassessed, which only exported records carry" in report.refusals[0].message

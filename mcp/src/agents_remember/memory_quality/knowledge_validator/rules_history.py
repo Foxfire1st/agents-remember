@@ -268,7 +268,8 @@ def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
                 path,
                 f"rows.{row.id if row is not None else subject}.subject",
                 f"the row's subject {subject} names no record of this tree; a row is about an "
-                "existing invariant or family (MIK-R07 failure rule)",
+                "existing invariant, family, decision or facet record, and a membership row "
+                "about an existing invariant (MIK-R07 failure rule, MIK-R53 rule 9)",
             )
     for path, row, mismatched, moved in _mismatches(context):
         # MIK-R52 rule 7: the report-only treatment of a row the merge moved applies only to a
@@ -297,7 +298,9 @@ def check_merged_history_rows(context: ValidationContext) -> Iterator[Finding]:
                 path,
                 f"rows.{row.id}.covers",
                 f"the merge moved covered entries {mismatched} of the row about {row.subject}; "
-                "the leaf's next gate checks the row against its new base (MIK-R09)",
+                "deferred because the merge cannot judge the row against its new base, so the "
+                "leaf's next gate checks it there (MIK-R09); the next publication or landing "
+                "refuses it if the row still disagrees",
             )
 
 
@@ -382,7 +385,7 @@ HISTORY_ROWS_MERGED_RULE = register_rule(
         "MIK-R09 (sync)",
         "a row the merge itself moved an entry under is reported, and re-checked at the gate",
         check_merged_history_rows,
-        report_only=True,
+        merge_reports=True,
     )
 )
 FAMILY_JUDGMENTS_RULE = register_rule(

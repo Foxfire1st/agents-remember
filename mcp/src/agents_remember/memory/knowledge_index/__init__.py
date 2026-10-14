@@ -52,6 +52,7 @@ from agents_remember.memory.knowledge_index.tree import (
     directory_snapshot,
     git_tree_snapshot,
     is_indexed_path,
+    with_prose_companions,
 )
 
 __all__ = [
@@ -82,4 +83,5 @@ __all__ = [
     "is_indexed_path",
     "parse_tree",
     "text_uuid",
+    "with_prose_companions",
 ]

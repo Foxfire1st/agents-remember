@@ -312,8 +312,8 @@ def test_a_no_impact_row_never_satisfies_and_a_kept_dead_route_keeps_the_item_op
 # --------------------------------------------------------------------------------------------------
 
 
-def test_a_carried_dead_route_the_validator_only_reports_is_a_mandatory_item(world: World) -> None:
-    """L04 ruling 1: ``R04.1-carried-route-absent`` is report-only; here it becomes an item.
+def test_a_carried_dead_route_the_validator_refuses_is_a_mandatory_item(world: World) -> None:
+    """L04 ruling 1, MIK-R53 rule 11: ``R04.1-carried-route-absent`` refuses; here it is an item.
 
     ``svc/legacy`` is deleted. No realization entry lies there, so the worklist reaches no family
     through its entries -- the item is still raised, and only a family row (not no_impact) with a
@@ -327,8 +327,8 @@ def test_a_carried_dead_route_the_validator_only_reports_is_a_mandatory_item(wor
         bases=[knowledge_tree_from_git(world.memory, world.memory_base, label="K_B")],
         code=code_tree_from_git(world.code, code, label="C"),
     )
-    assert report.ok, report.render()
-    carried = [one for one in report.reports if one.rule == "R04.1-carried-route-absent"]
+    assert not report.ok, report.render()
+    carried = [one for one in report.refusals if one.rule == "R04.1-carried-route-absent"]
     assert [UNREALIZED in one.message for one in carried] == [True]
 
     document = world.worklist(code)

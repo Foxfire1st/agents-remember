@@ -29,6 +29,7 @@ from agents_remember.memory_quality.knowledge_validator import (
 )
 from agents_remember.memory_quality.knowledge_validator import registry as registry_module
 from agents_remember.memory_quality.knowledge_validator.markers import find_markers
+from agents_remember.memory_quality.knowledge_validator.parsed import parse_tree
 from agents_remember.memory_quality.knowledge_validator.rules_admission import ADMISSION_RULES
 from agents_remember.memory_quality.knowledge_validator.rules_overviews import OVERVIEW_RULES
 from agents_remember.memory_quality.knowledge_validator.trees import is_excluded_from_knowledge
@@ -95,7 +96,8 @@ def _add_reference(number: str, target: dict[str, Any]) -> Callable[[dict[str, A
 
 
 def test_converted_fixture_tree_passes_every_rule() -> None:
-    report = _validate(fixture_tree_files())
+    files = fixture_tree_files()
+    report = _validate(files, bases=[tree(files, "K_B")])
 
     assert report.ok, report.render()
     assert [violation.rule for violation in report.violations] == [LEGACY_COUNT]
@@ -104,12 +106,17 @@ def test_converted_fixture_tree_passes_every_rule() -> None:
     assert {
         rule.id
         for rule in registered_rules()
-        if rule.report_only and rule.owner.startswith("MIK-R22")
+        if rule.merge_reports and rule.owner.startswith("MIK-R22")
+    } == {"R22.6-carried-stale"}
+    assert {
+        rule.id
+        for rule in registered_rules()
+        if rule.migration_debt and rule.owner.startswith("MIK-R22")
     } == {
         "R22.3-sidecar-without-markdown",
         "R22.3-unresolved-target",
-        "R22.6-carried-stale",
     }
+    assert [rule.id for rule in registered_rules() if rule.report_only] == []
 
 
 # --------------------------------------------------------------------------------------------------
@@ -120,7 +127,7 @@ def test_converted_fixture_tree_passes_every_rule() -> None:
 def test_shape_refuses_a_bad_field_and_names_file_field_and_rule() -> None:
     files = edit_json(fixture_tree_files(), INVARIANT, lambda doc: doc.update(revision=0))
 
-    [line] = _only(_validate(files), "R22.1-shape")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.1-shape")
 
     assert line.startswith(f"{INVARIANT}: revision: [R22.1-shape]")
 
@@ -129,7 +136,7 @@ def test_non_canonical_file_names_the_formatter_command() -> None:
     files = fixture_tree_files()
     files[INVARIANT] = files[INVARIANT].replace(b"  ", b"    ")
 
-    [line] = _only(_validate(files), "R22.1-canonical")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.1-canonical")
 
     assert f"agents-remember knowledge-format {INVARIANT}" in line
 
@@ -140,7 +147,7 @@ def test_a_file_outside_the_layout_and_a_misplaced_sidecar_are_shape_violations(
     files["onboarding/elsewhere/overview.json"] = files.pop(ROUTE_SIDECAR)
     files["onboarding/elsewhere/overview.md"] = files.pop(ROUTE_CARD)
 
-    lines = _only(_validate(files), "R22.1-shape")
+    lines = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.1-shape")
 
     assert any("knowledge/notes.json" in line and "location" in line for line in lines)
     assert any("this sidecar lives at" in line for line in lines)
@@ -155,7 +162,7 @@ def test_filename_must_begin_with_the_record_id() -> None:
     files = fixture_tree_files()
     files[invariant_path("INV-AAAAAA")] = files.pop(invariant_path("INV-R8M2TD"))
 
-    lines = _only(_validate(files), "R22.2-identity")
+    lines = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.2-identity")
 
     assert "the filename begins with INV-AAAAAA, not the record's ID INV-R8M2TD" in lines[0]
 
@@ -193,7 +200,7 @@ def test_duplicate_entry_ids_across_sidecars_are_refused() -> None:
         lambda doc: doc["realizes"][0].update(id="RLZ-D1RW4N"),
     )
 
-    [line] = _only(_validate(files), "R22.2-identity")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.2-identity")
 
     assert "RLZ-D1RW4N" in line and DIRECT_LANDING_SIDECAR in line and INTEGRATE_SIDECAR in line
 
@@ -209,7 +216,7 @@ def test_a_hand_added_marker_without_a_reference_is_refused() -> None:
     files = fixture_tree_files()
     files[INTEGRATE_CARD] += b"\nThe landing pair is recorded here [4].\n"
 
-    [line] = _only(_validate(files), "R22.3-markers")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.3-markers")
 
     assert line.startswith(f"{INTEGRATE_CARD}: line 3: [R22.3-markers] marker [4] has no reference")
 
@@ -218,7 +225,7 @@ def test_an_unused_reference_is_refused() -> None:
     files = fixture_tree_files()
     files[DIRECT_LANDING_CARD] = files[DIRECT_LANDING_CARD].replace(b" [7]", b"")
 
-    [line] = _only(_validate(files), "R22.3-markers")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.3-markers")
 
     assert line.startswith(f"{DIRECT_LANDING_SIDECAR}: references.7:")
 
@@ -228,17 +235,17 @@ def test_markdown_without_a_sidecar_and_a_record_card_have_no_markers() -> None:
     files["onboarding/mcp/README.md.md"] = b"# README\n\nSee [1].\n"
     files[INVARIANT.replace(".json", ".md")] = b"# Landing pair\n\nProved by [2].\n"
 
-    lines = _only(_validate(files), "R22.3-markers")
+    lines = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.3-markers")
 
     assert len(lines) == 2
     assert all("without a sidecar" in line for line in lines)
 
 
-def test_a_file_sidecar_without_markdown_is_reported_not_refused() -> None:
-    files = fixture_tree_files()
-    del files[INTEGRATE_CARD]
+def test_a_carried_file_sidecar_without_markdown_is_migration_debt() -> None:
+    base = fixture_tree_files()
+    del base[INTEGRATE_CARD]
 
-    report = _validate(files)
+    report = _validate(dict(base), bases=[tree(dict(base), "K_B")])
 
     assert report.ok, report.render()
     assert _rules(report, refusing=False) == {"R22.3-sidecar-without-markdown", LEGACY_COUNT}
@@ -252,7 +259,7 @@ def test_a_file_sidecar_without_markdown_holds_no_references() -> None:
     )
     del files[INTEGRATE_CARD]
 
-    assert _only(_validate(files), "R22.3-markers")[0].startswith(
+    assert _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.3-markers")[0].startswith(
         f"{INTEGRATE_SIDECAR}: references.1"
     )
 
@@ -266,7 +273,7 @@ def test_every_referenced_or_linked_record_id_exists() -> None:
     decision = "knowledge/decisions/DEC-D12RTE-local-family-routes.json"
     files = edit_json(files, decision, lambda doc: doc["links"][0].update(target="INV-M1SS22"))
 
-    lines = _only(_validate(files), "R22.3-record-links")
+    lines = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.3-record-links")
 
     assert any("references.5.targets.0.id" in line and "INV-M1SS11" in line for line in lines)
     assert any(f"{decision}: links.0.target" in line for line in lines)
@@ -275,11 +282,11 @@ def test_every_referenced_or_linked_record_id_exists() -> None:
 def test_a_retired_record_still_resolves() -> None:
     files = edit_json(fixture_tree_files(), INVARIANT, lambda doc: doc.update(status="retired"))
 
-    assert _validate(files).ok
+    assert _validate(files, bases=[tree(dict(files), "K_B")]).ok
 
 
-def test_an_unresolved_target_is_reported_not_refused() -> None:
-    files = edit_json(
+def test_a_carried_unresolved_target_is_migration_debt() -> None:
+    base = edit_json(
         fixture_tree_files(),
         DIRECT_LANDING_SIDECAR,
         lambda doc: doc["references"]["7"]["targets"].append(
@@ -287,7 +294,7 @@ def test_an_unresolved_target_is_reported_not_refused() -> None:
         ),
     )
 
-    report = _validate(files)
+    report = _validate(base, bases=[tree(dict(base), "K_B")])
 
     assert report.ok and _rules(report, refusing=False) == {"R22.3-unresolved-target", LEGACY_COUNT}
 
@@ -298,7 +305,7 @@ def test_a_disallowed_relation_is_refused_under_the_relations_rule_by_field() ->
         fixture_tree_files(), decision, lambda doc: doc["links"][1].update(relation="bounds")
     )
 
-    [line] = _only(_validate(files), "R22.3-relations")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.3-relations")
 
     assert line.startswith(f"{decision}: links.1.relation: [R22.3-relations] relation 'bounds'")
 
@@ -317,7 +324,7 @@ def test_a_dot_named_card_and_its_sidecar_are_validated() -> None:
         }
     )
 
-    [line] = _only(_validate(files), "R22.3-markers")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.3-markers")
 
     assert line.startswith("onboarding/.git-blame-ignore-revs.md: line 3:")
     assert "has no reference in onboarding/.git-blame-ignore-revs.json" in line  # sidecar read
@@ -336,7 +343,7 @@ def test_an_invariant_record_may_not_list_its_realizations() -> None:
         fixture_tree_files(), INVARIANT, lambda doc: doc.update(realizations=["RLZ-D1RW4N"])
     )
 
-    [line] = _only(_validate(files), "R22.4-single-owner")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.4-single-owner")
 
     assert "'realizations' is not a field of this record" in line
 
@@ -346,7 +353,7 @@ def test_every_family_member_exists() -> None:
     files = fixture_tree_files()
     del files[invariant_path("INV-R8M2TD")]
 
-    [line] = _only(_validate(files), "R22.5-family-members")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.5-family-members")
 
     assert line.startswith(f"{family}: members.1:") and "INV-R8M2TD" in line
 
@@ -366,18 +373,18 @@ def test_an_added_anchor_must_name_an_existing_path() -> None:
     assert "references.8.targets.0.anchor.path" in line and "mcp/src/gone.py" in line
 
 
-def test_a_carried_anchor_at_a_deleted_path_is_reported_stale_not_refused() -> None:
+def test_a_carried_anchor_at_a_deleted_path_refuses_off_merge() -> None:
     files = fixture_tree_files()
 
     report = _validate(files, bases=[tree(files, "K_B")], code=code(frozenset()))
 
-    assert report.ok, report.render()
-    # The family's carried routes are gone with the code, too: reported the same way (MIK-R04).
-    assert _rules(report, refusing=False) == {
+    assert not report.ok, report.render()
+    # The family's carried routes are gone with the code, too: refused the same way (MIK-R04).
+    assert _rules(report) == {
         "R22.6-carried-stale",
         "R04.1-carried-route-absent",
-        LEGACY_COUNT,
     }
+    assert _rules(report, refusing=False) == {LEGACY_COUNT}
 
 
 def test_merge_where_one_parent_deleted_a_file_the_other_parents_card_cites() -> None:
@@ -409,7 +416,14 @@ def test_a_re_anchored_entry_is_checked_and_a_moved_entry_carries_nothing() -> N
 
     report = _validate(files, bases=[tree(fixture_tree_files(), "K_B")], code=code(paths))
 
-    [line] = _only(report, "R22.6-anchor-path")
+    assert _rules(report) == {
+        "R22.6-anchor-path",
+        "R22.6-carried-stale",
+        "R04.1-carried-route-absent",
+    }, report.render()
+    [line] = [
+        violation.render() for violation in report.refusals if violation.rule == "R22.6-anchor-path"
+    ]
     assert line.startswith(f"{INTEGRATE_SIDECAR}: realizes.RLZ-4E1C9A.anchor") and INTEGRATE in line
 
 
@@ -418,14 +432,14 @@ def test_locator_kind_and_content_hash_are_anchor_rules() -> None:
         document["realizes"][0]["anchor"]["locator"] = {"kind": "regex", "pattern": "x"}
 
     files = edit_json(fixture_tree_files(), INTEGRATE_SIDECAR, bad)
-    assert _rules(_validate(files)) == {"R22.6-locator"}
+    assert _rules(_validate(files, bases=[tree(dict(files), "K_B")])) == {"R22.6-locator"}
 
     files = edit_json(
         fixture_tree_files(),
         INTEGRATE_SIDECAR,
         lambda doc: doc["realizes"][0]["anchor"].update(content="md5:abc"),
     )
-    assert _rules(_validate(files)) == {"R22.6-content"}
+    assert _rules(_validate(files, bases=[tree(dict(files), "K_B")])) == {"R22.6-content"}
 
 
 def test_an_unconverted_base_is_refused_and_a_standalone_conversion_checks_no_path() -> None:
@@ -433,11 +447,9 @@ def test_an_unconverted_base_is_refused_and_a_standalone_conversion_checks_no_pa
     unconverted = {"onboarding/x.md": b"# x\n"}
 
     report = _validate(files, bases=[tree(unconverted, "K_B")])
-    assert _rules(report) == {"R22.6-base-converted"}
+    assert _rules(report) == {"R22.6-base-converted", LEGACY_COUNT}
 
-    conversion = validate_tree(
-        tree(files), bases=[tree(unconverted, "K_B")], code=None, conversion=True
-    )
+    conversion = validate_tree(tree(files), code=None, conversion=True)
     assert conversion.ok and _rules(conversion, refusing=False) == {LEGACY_COUNT}
     with pytest.raises(ValueError, match="paired code tree"):
         validate_tree(tree(files))
@@ -518,7 +530,7 @@ def test_history_is_checked_for_shape_only() -> None:
 
     assert _validate(files, bases=[tree(files, "K_B")]).ok
     files[path] = files[path].replace(b'"closed": true', b'"closed": "yes"')
-    assert _rules(_validate(files)) == {"R22.1-shape"}
+    assert _rules(_validate(files, bases=[tree(dict(files), "K_B")])) == {"R22.1-shape"}
 
 
 # --------------------------------------------------------------------------------------------------
@@ -546,19 +558,22 @@ def test_commit_routes_validate_only_when_a_side_has_the_layout_marker() -> None
 # --------------------------------------------------------------------------------------------------
 
 
-def test_a_later_packets_rule_runs_everywhere_and_report_only_never_refuses() -> None:
+def test_a_later_packets_rule_runs_everywhere_and_plain_report_only_is_refused() -> None:
     def always(context: ValidationContext) -> list[Finding]:
         return [Finding(INVARIANT, "statement", f"checked {len(context.parsed.records)} records")]
 
-    report_only = ValidationRule("TEST.report", "test", "reports", always, report_only=True)
     refusing = ValidationRule("TEST.refuse", "test", "refuses", always)
     converted = tree(fixture_tree_files(), "K_B")
     try:
-        register_rule(report_only)
-        with pytest.raises(ValueError, match="already registered"):
-            register_rule(report_only)
+        with pytest.raises(ValueError, match="report-only"):
+            register_rule(
+                ValidationRule("TEST.report", "test", "reports", always, report_only=True)
+            )
+        assert "TEST.report" not in {rule.id for rule in registered_rules()}
         assert require_valid_commit(converted, bases=[converted], code=code()) is not None
         register_rule(refusing)
+        with pytest.raises(ValueError, match="already registered"):
+            register_rule(refusing)
         with pytest.raises(KnowledgeValidationError, match=r"\[TEST.refuse\] checked 6 records"):
             require_valid_commit(converted, bases=[converted], code=code())
     finally:
@@ -591,7 +606,7 @@ def test_an_invalid_marker_number_names_how_to_write_it_as_text() -> None:
     files = fixture_tree_files()
     files[INTEGRATE_CARD] += b"\nThe first slot signals[0] is empty.\n"
 
-    [line] = _only(_validate(files), "R22.3-markers")
+    [line] = _only(_validate(files, bases=[tree(dict(files), "K_B")]), "R22.3-markers")
 
     assert "[0] is not a reference number" in line and "\\[n]" in line
 
@@ -662,10 +677,24 @@ def _with_export(
 def test_the_packets_admitted_example_passes_as_a_new_record() -> None:
     """``spans_locations`` realized in ``integrate.py`` and more; ``guarded_by_test`` proved."""
 
-    report = _validate(fixture_tree_files())
+    files = fixture_tree_files()
+    # The target is genuinely absent in the base, so the new-record checker judges it: a base
+    # that already holds the ID would make it existing and skip new-record prose admission.
+    base = {path: data for path, data in files.items() if path != INVARIANT}
+    assert INVARIANT not in base
+    assert "INV-7K3F9Q" not in parse_tree(tree(base, "K_B")).records
+    report = _validate(files, bases=[tree(base, "K_B")])
 
     assert report.ok, report.render()
     assert _messages(report, NEW) == [] and _messages(report, EXISTING) == []
+
+    # The same base setup with a reference-only justification still refuses: the pass above
+    # came from the live new-record checker judging the prose, not from a vacuous setup.
+    bad = edit_json(
+        fixture_tree_files(), INVARIANT, _admission(["spans_locations"], "introduced by L43")
+    )
+    (live,) = _messages(_validate(bad, bases=[tree(base, "K_B")]), NEW)
+    assert "INV-7K3F9Q" in live and "admission.justification" in live
 
 
 def test_a_new_record_whose_justification_is_only_a_reference_is_refused() -> None:
@@ -717,7 +746,15 @@ def test_a_new_record_whose_justification_is_only_a_reference_is_refused() -> No
         files = edit_json(
             fixture_tree_files(), INVARIANT, _admission(["spans_locations"], justification)
         )
-        assert _validate(files).ok, justification
+        # The base genuinely lacks the target, so the positive leg runs the same new-record
+        # checker as the negative leg above; a base that already holds the ID would pass any
+        # prose through the existing-record path.
+        base = {path: data for path, data in fixture_tree_files().items() if path != INVARIANT}
+        assert INVARIANT not in base
+        assert "INV-7K3F9Q" not in parse_tree(tree(base, "K_B")).records
+        report = _validate(files, bases=[tree(base, "K_B")])
+        assert report.ok, justification
+        assert _messages(report, NEW) == [], justification
 
     # The same rule holds for a new family and a new decision.
     files = edit_json(
@@ -765,30 +802,38 @@ def test_an_unsupported_checkable_criterion_on_a_new_record_is_refused_naming_it
     assert not one_file.ok and not no_test.ok
 
 
-def test_an_existing_record_whose_test_was_deleted_is_only_reported() -> None:
+def test_an_existing_record_whose_test_was_deleted_refuses_off_merge() -> None:
     base = fixture_tree_files()
     candidate = _without_proof(base)
 
-    report = _validate(candidate, bases=[tree(base, "K_B")])
+    leaf = _validate(candidate, bases=[tree(base, "K_B")])
 
-    assert report.ok, report.render()
-    (reported,) = [one for one in report.reports if one.rule == EXISTING]
-    assert reported.path == INVARIANT and reported.field == "admission.criteria"
-    assert "guarded_by_test" in reported.message and "reported, not refused" in reported.message
+    assert not leaf.ok, leaf.render()
+    (finding,) = [one for one in leaf.refusals if one.rule == EXISTING]
+    assert finding.path == INVARIANT and finding.field == "admission.criteria"
+    assert "guarded_by_test" in finding.message
+    assert "admission governs creation" in finding.message
+
+    merged = _validate(candidate, bases=[tree(base, "left"), tree(base, "right")])
+
+    assert merged.ok, merged.render()
+    (message,) = _messages(merged, EXISTING)
+    assert "guarded_by_test" in message and "merge" in message and "refuse" in message
 
 
-def test_exported_retired_and_merged_records_are_never_refused() -> None:
-    unsupported = _without_proof(fixture_tree_files())
+def test_exported_retired_and_merged_records_refuse_off_merge() -> None:
+    base = fixture_tree_files()
+    unsupported = _without_proof(base)
 
     claim = {"criteria": ["guarded_by_test"], "justification": "L43"}
-    report = _validate(_with_export(fixture_tree_files(), claim))
-    assert report.ok, report.render()
-    (reported,) = _messages(report, EXISTING)
+    leaf = _validate(_with_export(base, claim), bases=[tree(base, "K_B")])
+    assert not leaf.ok, leaf.render()
+    (reported,) = _messages(leaf, EXISTING)
     assert EXPORTED in reported and "guarded_by_test" in reported
 
     retired = edit_json(unsupported, INVARIANT, lambda document: document.update(status="retired"))
     retired = edit_json(retired, INVARIANT, _admission(["guarded_by_test"], "L43"))
-    report = _validate(retired)
+    report = _validate(retired, bases=[tree(base, "K_B")])
     assert report.ok and _messages(report, EXISTING) == [], report.render()
 
     # At a merge, a record either parent holds is not new: an unrelated sync is never blocked.
@@ -804,7 +849,8 @@ def test_a_forged_legacy_id_does_not_make_a_record_exported() -> None:
 
     unsupported = {"criteria": ["guarded_by_test"], "justification": "A test pins the export."}
     genuine = _validate(_with_export(fixture_tree_files(), unsupported))
-    assert genuine.ok and _messages(genuine, NEW) == [], genuine.render()
+    assert not genuine.ok, genuine.render()
+    assert _messages(genuine, NEW) == [], genuine.render()
     assert len(_messages(genuine, EXISTING)) == 1
 
     forged = _validate(_with_export(fixture_tree_files(), unsupported, identifier="INV-F0RG3D"))
@@ -818,32 +864,107 @@ def test_a_forged_legacy_id_does_not_make_a_record_exported() -> None:
 
 
 def test_legacy_records_are_counted_until_assessed_or_demoted() -> None:
-    files = _with_export(fixture_tree_files(), "legacy-unassessed")
+    base = _with_export(fixture_tree_files(), "legacy-unassessed")
 
-    (count,) = [one for one in _validate(files).reports if one.rule == LEGACY_COUNT]
+    carried = _validate(dict(base), bases=[tree(dict(base), "K_B")])
+    assert carried.ok, carried.render()
+    (count,) = [one for one in carried.reports if one.rule == LEGACY_COUNT]
     assert count.message.startswith("2 live record(s) are still legacy-unassessed")
     assert "1 family(s), 1 invariant(s)" in count.message
 
     # Assessed: the exported invariant states its criterion. Demoted: the family is retired and its
     # file kept. Neither is counted any more.
     assessed = edit_json(
-        files,
+        base,
         invariant_path(EXPORTED, "exported"),
         _admission(["prevents_costly_mistake"], "An unpaired landing corrupts the ledger."),
     )
     demoted = edit_json(assessed, FAMILY, lambda document: document.update(status="retired"))
-    report = _validate(demoted)
+    report = _validate(demoted, bases=[tree(dict(demoted), "K_B")])
     assert FAMILY in demoted and [one for one in report.reports if one.rule == LEGACY_COUNT] == []
+
+
+# F10 (round 1): carried debt is the actual base finding, not a filename match. ---
+
+
+def test_an_assessed_record_turned_unassessed_refuses_as_new() -> None:
+    base = fixture_tree_files()
+    candidate = edit_json(
+        base, INVARIANT, lambda document: document.update(admission="legacy-unassessed")
+    )
+    report = _validate(candidate, bases=[tree(dict(base), "K_B")])
+    assert not report.ok, report.render()
+    (message,) = [
+        one for one in _messages(report, LEGACY_COUNT) if "no comparison base holds it" in one
+    ]
+    assert "INV-7K3F9Q" in message
+    (count,) = [one for one in report.reports if one.rule == LEGACY_COUNT]
+    assert count.message.startswith("1 live record(s)")
+
+
+def test_a_retired_unassessed_record_newly_live_refuses_as_new() -> None:
+    retired = edit_json(
+        fixture_tree_files(),
+        INVARIANT,
+        lambda document: document.update(status="retired", admission="legacy-unassessed"),
+    )
+    candidate = edit_json(retired, INVARIANT, lambda document: document.update(status="proposed"))
+    report = _validate(candidate, bases=[tree(dict(retired), "K_B")])
+    assert not report.ok, report.render()
+    (message,) = [
+        one for one in _messages(report, LEGACY_COUNT) if "no comparison base holds it" in one
+    ]
+    assert "INV-7K3F9Q" in message
+
+
+def test_a_family_routeless_but_assessed_in_base_refuses_when_unassigned() -> None:
+    routeless = edit_json(
+        fixture_tree_files(),
+        FAMILY,
+        lambda document: document.update(
+            routes=[],
+            admission={
+                "criteria": ["joint_guarantee"],
+                "justification": "The pair lands together.",
+            },
+        ),
+    )
+    candidate = edit_json(
+        routeless, FAMILY, lambda document: document.update(admission="legacy-unassessed")
+    )
+    report = _validate(candidate, bases=[tree(dict(routeless), "K_B")])
+    assert not report.ok, report.render()
+    (message,) = _messages(report, "R04.4-route-unassigned")
+    assert "FAM-SEQNTS6C" in message
+
+
+def test_debt_carried_by_any_base_still_reports() -> None:
+    assessed = fixture_tree_files()
+    candidate = edit_json(
+        assessed, INVARIANT, lambda document: document.update(admission="legacy-unassessed")
+    )
+    # A genuinely different second base that holds the finding: the same legacy-unassessed
+    # tree with its own card prose, not a copy of the candidate.
+    other = dict(candidate)
+    other[INTEGRATE_CARD] = candidate[INTEGRATE_CARD] + b"\nCarried-base prose.\n"
+    assert other[INTEGRATE_CARD] != candidate[INTEGRATE_CARD]
+    report = _validate(candidate, bases=[tree(dict(assessed), "K_B1"), tree(other, "K_B2")])
+    assert report.ok, report.render()
+    (count,) = [one for one in report.reports if one.rule == LEGACY_COUNT]
+    assert count.message.startswith("2 live record(s)")
 
 
 def test_the_rules_are_registered_refusing_new_and_reporting_the_rest() -> None:
     registered = {rule.id: rule for rule in registered_rules()}
-    flags = {rule.id: (rule.report_only, rule.writer_reports) for rule in ADMISSION_RULES}
+    flags = {
+        rule.id: (rule.merge_reports, rule.migration_debt, rule.writer_reports)
+        for rule in ADMISSION_RULES
+    }
     assert flags == {
-        NEW: (False, False),
-        EXISTING: (True, False),
-        LEGACY_COUNT: (True, False),
-        KEPT: (False, False),
+        NEW: (False, False, False),
+        EXISTING: (True, False, True),
+        LEGACY_COUNT: (False, True, False),
+        KEPT: (False, False, False),
     }
     assert all(
         registered[rule_id] is rule for rule_id, rule in ((r.id, r) for r in ADMISSION_RULES)
@@ -874,8 +995,9 @@ def test_conforming_overview_passes_the_order_rules() -> None:
 def test_buried_purpose_is_refused_and_names_the_heading() -> None:
     """Packet rule 1: the first section after the title and the governing overview is the purpose."""
 
+    base = fixture_tree_files()
     files = _route_overview(
-        fixture_tree_files(),
+        base,
         "# worktrees\n"
         "\n"
         "## Governing Overview\n"
@@ -895,7 +1017,9 @@ def test_buried_purpose_is_refused_and_names_the_heading() -> None:
         "- The route's files are listed with their anchors [1].\n",
     )
 
-    [line] = _only(_validate(files, leaf_publication=True), PURPOSE_FIRST)
+    [line] = _only(
+        _validate(files, bases=[tree(dict(base), "K_B")], leaf_publication=True), PURPOSE_FIRST
+    )
 
     assert line.startswith(f"{ROUTE_CARD}: ## How It Is Built: [{PURPOSE_FIRST}]")
     assert "not the purpose" in line
@@ -904,8 +1028,9 @@ def test_buried_purpose_is_refused_and_names_the_heading() -> None:
 def test_paraphrased_purpose_heading_is_refused() -> None:
     """Packet rule 1, worker ruling: the purpose carries a fixed heading, not a paraphrase."""
 
+    base = fixture_tree_files()
     files = _route_overview(
-        fixture_tree_files(),
+        base,
         "# worktrees\n"
         "\n"
         "## Governing Overview\n"
@@ -921,7 +1046,9 @@ def test_paraphrased_purpose_heading_is_refused() -> None:
         "- The route's files are listed with their anchors [1].\n",
     )
 
-    [line] = _only(_validate(files, leaf_publication=True), PURPOSE_FIRST)
+    [line] = _only(
+        _validate(files, bases=[tree(dict(base), "K_B")], leaf_publication=True), PURPOSE_FIRST
+    )
 
     assert "## What This Directory Is For" in line
 
@@ -929,8 +1056,9 @@ def test_paraphrased_purpose_heading_is_refused() -> None:
 def test_leaf_named_and_dated_sections_are_refused() -> None:
     """Packet rule 2: no section is named after a leaf or a date."""
 
+    base = fixture_tree_files()
     files = _route_overview(
-        fixture_tree_files(),
+        base,
         "# worktrees\n"
         "\n"
         "## Governing Overview\n"
@@ -954,7 +1082,9 @@ def test_leaf_named_and_dated_sections_are_refused() -> None:
         "- The route's files are listed with their anchors [1].\n",
     )
 
-    lines = _only(_validate(files, leaf_publication=True), NO_LEAF_SECTIONS)
+    lines = _only(
+        _validate(files, bases=[tree(dict(base), "K_B")], leaf_publication=True), NO_LEAF_SECTIONS
+    )
 
     assert len(lines) == 2
     assert any("named after a leaf" in line and "L99" in line for line in lines)
@@ -964,8 +1094,9 @@ def test_leaf_named_and_dated_sections_are_refused() -> None:
 def test_scattered_citations_are_refused_and_name_the_line() -> None:
     """Packet rule 7: every citation line stands together at the overview's end."""
 
+    base = fixture_tree_files()
     files = _route_overview(
-        fixture_tree_files(),
+        base,
         "# worktrees\n"
         "\n"
         "## Governing Overview\n"
@@ -981,7 +1112,9 @@ def test_scattered_citations_are_refused_and_name_the_line() -> None:
         "- The route's files are listed with their anchors [1].\n",
     )
 
-    [line] = _only(_validate(files, leaf_publication=True), CITATIONS_AT_END)
+    [line] = _only(
+        _validate(files, bases=[tree(dict(base), "K_B")], leaf_publication=True), CITATIONS_AT_END
+    )
 
     assert line.startswith(f"{ROUTE_CARD}: line 9: [{CITATIONS_AT_END}]")
     assert "## Evidence" in line
@@ -1037,8 +1170,9 @@ def test_combined_fixture_fires_all_three_rules_and_refuses_closeout() -> None:
     """Packet Expected Evidence 4: a leaf-named section, a buried purpose and scattered
     citations give three findings, and the closeout is refused."""
 
+    base = fixture_tree_files()
     files = _route_overview(
-        fixture_tree_files(),
+        base,
         "# worktrees\n"
         "\n"
         "## Governing Overview\n"
@@ -1062,7 +1196,7 @@ def test_combined_fixture_fires_all_three_rules_and_refuses_closeout() -> None:
         "- The route's files are listed with their anchors [1].\n",
     )
 
-    report = _validate(files, leaf_publication=True)
+    report = _validate(files, bases=[tree(dict(base), "K_B")], leaf_publication=True)
 
     assert _rules(report) == {PURPOSE_FIRST, NO_LEAF_SECTIONS, CITATIONS_AT_END}
     try:

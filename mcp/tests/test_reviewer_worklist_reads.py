@@ -445,7 +445,10 @@ def _packet_inputs(fixture: World) -> tuple[Path, Path, Path, Path, bytes, bytes
         "consequences": ["Read the owning packet."],
         "decider": "developer",
         "supersedes": [],
-        "links": [{"relation": "reconsider_on", "target": reference, "alternative": 1}],
+        "links": [
+            {"relation": "constrains", "target": "INV-AAAAAA"},
+            {"relation": "reconsider_on", "target": reference, "alternative": 1},
+        ],
         "admission": "legacy-unassessed",
         "origin": ORIGIN,
     }

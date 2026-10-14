@@ -20,8 +20,8 @@ from functools import cached_property
 
 from agents_remember.memory.knowledge_index import (
     MemoryTreeSnapshot,
-    is_indexed_path,
     parse_tree,
+    with_prose_companions,
 )
 from agents_remember.memory.knowledge_index.build import IndexedEntry, ParsedTree
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
@@ -76,7 +76,7 @@ class KnowledgeSide:
     def from_tree(cls, label: str, key: str, tree: KnowledgeTree) -> KnowledgeSide:
         """A side given as the validator's tree (the converted base of MIK-R24 rule 7)."""
 
-        files = {path: data for path, data in tree.files.items() if is_indexed_path(path)}
+        files = with_prose_companions(tree.files)
         snapshot = MemoryTreeSnapshot(key=key, source="git", location=tree.label, files=files)
         return cls.from_snapshot(label, snapshot)
 

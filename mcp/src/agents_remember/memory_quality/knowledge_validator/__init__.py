@@ -10,10 +10,12 @@ committed instead of by database constraints. One module, one rule registry:
 * :mod:`.rules_structure` and :mod:`.rules_references` -- MIK-R22's own rules 1 to 7;
 * :mod:`.family_routes` and :mod:`.rules_routes` -- MIK-R04's family routes: Coverage, Non-empty,
   the reported states and the mechanical route suggestion;
-* :mod:`.rules_admission` -- MIK-R27's admission rule: refused on a new record, reported on an
-  existing one, and the count of records still ``legacy-unassessed``;
+* :mod:`.rules_admission` -- MIK-R27's admission rule: refused on a new record, and the count
+  of records still ``legacy-unassessed``; an existing record whose criterion no longer holds and
+  the legacy count carry MIK-R53's report reasons;
 * :mod:`.rules_decisions` -- MIK-R13's decision content rules: alternatives, ``reconsider_when``,
-  ``superseded`` never stored, ``reconsider_on`` indexes, and the governs links reported;
+  ``superseded`` never stored, ``reconsider_on`` indexes, and the governs links every commit
+  route refuses;
 * :mod:`.rules_reconsideration` -- MIK-R14's guard: an alternative a ``reconsider_on`` link
   addresses keeps its index, so a reorder never silently retargets the link;
 * :mod:`.rules_history` -- MIK-R09's rule on history rows that are not frozen: their subjects name

@@ -170,11 +170,13 @@ def test_file_shape_owner_and_row_uniqueness_are_enforced() -> None:
 def test_row_kind_registry_owns_disjoint_subject_forms() -> None:
     # MIK-R30's onboarding_trace kind is registered by MIK-R24 rule 8 step 1, its first writer;
     # MIK-R11 registers the planned row, MIK-R10 the unexplained-change row and MIK-R14 the
-    # reconsideration row.
+    # reconsideration row. MIK-R53 rules 6 and 8 register the membership and record rows.
     # Leaves register in landing order, so the registry is compared as a set.
     assert {kind.name for kind in HISTORY_ROW_KINDS} == {
         "invariant",
         "family",
+        "membership",
+        "record",
         "onboarding_trace",
         "planned",
         "unexplained",
@@ -183,7 +185,9 @@ def test_row_kind_registry_owns_disjoint_subject_forms() -> None:
     assert row_kind_for_subject(INV).model is InvariantRow
     assert row_kind_for_subject(FAM).model is FamilyRow
     assert row_kind_for_subject("onboarding:mcp/x.py").name == "onboarding_trace"
-    for subject in ("DEC-7K3F9Q", "INV-0143"):
+    # MIK-R53 rule 8: a decision record ID is a record row's subject now.
+    assert row_kind_for_subject("DEC-7K3F9Q").name == "record"
+    for subject in ("hunk:abc", "INV-0143"):
         with pytest.raises(ValueError, match="no registered"):
             row_kind_for_subject(subject)
     # D28: the seven dispositions (D6's four, extended, rerouted, assigned) plus the family's

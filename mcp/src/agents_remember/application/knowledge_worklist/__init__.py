@@ -21,6 +21,10 @@ MIK-R07 rule 0) and persisted as ``knowledge-worklist/v1`` in the leaf's enclosu
   on import), the coverage lookup and the items for every unlinked change.
 * :mod:`.reconsideration` -- MIK-R14's ``reconsideration_candidate`` kind (registered on import by
   :mod:`.compute`): a decision whose ``reconsider_on`` target changed.
+* :mod:`.membership` -- MIK-R53's ``unassigned_invariant`` kind (registered on import by
+  :mod:`.compute`): a live invariant no family lists that is new or newly unlisted.
+* :mod:`.touched_records` -- MIK-R53's ``touched_record`` kind (registered on import by
+  :mod:`.compute`): a decision or facet record of the base whose files differ in the candidate.
 
 An entry is raised only when changed lines intersect its own range, when it moved or disappeared,
 or when it changed outside the managed flow; a change elsewhere in the same file raises nothing.
@@ -49,6 +53,9 @@ from agents_remember.application.knowledge_worklist.leaf import (
     worklist_for_sides,
     worklist_path,
 )
+from agents_remember.application.knowledge_worklist.membership import (
+    UNASSIGNED_INVARIANT_KIND,
+)
 from agents_remember.application.knowledge_worklist.onboarding_trace import (
     ONBOARDING_TRACE_KIND,
 )
@@ -69,6 +76,9 @@ from agents_remember.application.knowledge_worklist.route_conditions import (
     FAMILY_ROUTE_CONDITION_KIND,
     family_route_item_open,
 )
+from agents_remember.application.knowledge_worklist.touched_records import (
+    TOUCHED_RECORD_KIND,
+)
 from agents_remember.application.knowledge_worklist.unexplained import (
     UNEXPLAINED_FILE_KIND,
     UNEXPLAINED_HUNK_KIND,
@@ -81,6 +91,8 @@ __all__ = [
     "ONBOARDING_TRACE_KIND",
     "PLANNED_UNTOUCHED_KIND",
     "RECONSIDERATION_KIND",
+    "TOUCHED_RECORD_KIND",
+    "UNASSIGNED_INVARIANT_KIND",
     "UNEXPLAINED_FILE_KIND",
     "UNEXPLAINED_HUNK_KIND",
     "WORKLIST_FILE_NAME",

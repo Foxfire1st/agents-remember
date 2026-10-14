@@ -204,7 +204,7 @@ def _public_supplied_fixture(tmp_path: Path, name: str) -> dict[str, Any]:
     fixture: dict[str, Any] = _converted_series_fixture(tmp_path / name)
     world = fixture["world"]
     code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
     bind_worktree_services(build_default_worktree_services())
     fixture["code_commit"] = code
     return fixture

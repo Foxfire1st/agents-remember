@@ -32,12 +32,16 @@ from agents_remember.application.knowledge_gate import (
 from agents_remember.application.knowledge_gate import gate as gate_module
 from agents_remember.application.knowledge_worklist import ITEM_KINDS, compute, satisfying_row
 from agents_remember.application.knowledge_worklist.code import CodeTrees
-from agents_remember.application.knowledge_worklist.leaf import CandidateTrees, leaf_worklist
+from agents_remember.application.knowledge_worklist.leaf import (
+    CandidateTrees,
+    leaf_worklist,
+    recompute_leaf_worklist,
+)
 from agents_remember.errors import CertificationContractError, CuratorCoherenceError
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory_quality.knowledge_validator.commit_route import GitKnowledgeValidation
 from agents_remember.models.knowledge_files import canonical_text
-from agents_remember.models.knowledge_files.history import FamilyRow
+from agents_remember.models.knowledge_files.history import FamilyRow, HistoryFile
 from agents_remember.worktrees import direct_landing as route
 from agents_remember.worktrees.integration.closeout import curator_coherence
 from agents_remember.worktrees.integration.closeout.certification import execution
@@ -312,9 +316,26 @@ class Gated:
         return result
 
 
-def trace_rows(*subjects: str) -> list[dict[str, Any]]:
+def trace_rows(world: Gated, *subjects: str) -> list[dict[str, Any]]:
+    """Onboarding rows bound to the recomputed worklist's blobs, as the writer fills them."""
+
+    found = recompute_leaf_worklist(world.contract)
+    assert found is not None and found[0]["state"] == "complete"
+    blobs = {
+        item["subject"]: item["facts"].get("sourceBlobs", {})
+        for item in found[0]["items"]
+        if item["kind"] == "onboarding_trace"
+    }
     return [
-        {"subject": subject, "disposition": "no_impact", "reason": "Only the body changed."}
+        {
+            "subject": subject,
+            "disposition": "no_impact",
+            "reason": "Only the body changed.",
+            "sources": [
+                {"path": path, "blob": blob}
+                for path, blob in sorted(blobs.get(subject, {}).items())
+            ],
+        }
         for subject in subjects
     ]
 
@@ -422,25 +443,32 @@ def test_a_leaf_is_ready_only_once_current_rows_answer_every_item_and_a_new_edit
     before = world.reanchor("RLZ-A00001", "RLZ-A00002")
     one = {"RLZ-A00001": before["RLZ-A00001"]}
     examined = family_row({"INV-AAAAAA": 1, "INV-BBBBBB": 1})
-    world.rows(world.invariant_row("INV-AAAAAA", one), examined, *trace_rows(*TRACES))
+    world.rows(world.invariant_row("INV-AAAAAA", one), examined, *trace_rows(world, *TRACES))
     partial = world.gate()
     assert set(_open(partial)) == {"touched_invariant INV-AAAAAA", "reached_family FAM-F00001"}
     assert "does not cover RLZ-A00002" in _open(partial)["touched_invariant INV-AAAAAA"]
     assert "INV-AAAAAA" in _open(partial)["reached_family FAM-F00001"]
 
     # Conforming: a current invariant row and a family row naming every member.
-    world.rows(world.invariant_row("INV-AAAAAA", before), examined, *trace_rows(*TRACES))
+    world.rows(world.invariant_row("INV-AAAAAA", before), examined, *trace_rows(world, *TRACES))
     ready = world.gate()
     assert ready.ok and ready.refusal() is None, ready.refusal()
     assert ready.brief()["state"] == "pass"
 
     # Boundary: the worker edits `land` again. The entry is stale at C, the invariant row stops
-    # being current, and so does the family row: the finding count returns to 2.
+    # being current, and so does the family row; the source file changed after its onboarding
+    # row too, so the trace items reopen until the row is named again (MIK-R53 rule 3).
     _edit(world, CODE_A.replace("return value", "return value - 0").replace("return 1", "return 3"))
     again = world.gate()
-    assert set(_open(again)) == {"touched_invariant INV-AAAAAA", "reached_family FAM-F00001"}
-    assert len(again.findings) == 2
+    assert set(_open(again)) == {
+        "touched_invariant INV-AAAAAA",
+        "reached_family FAM-F00001",
+        "onboarding_trace onboarding:pkg/a.py",
+        "onboarding_trace onboarding:pkg/overview",
+    }
+    assert len(again.findings) == 4
     assert "RLZ-A00001 is stale" in _open(again)["touched_invariant INV-AAAAAA"]
+    assert "changed after" in _open(again)["onboarding_trace onboarding:pkg/a.py"]
 
 
 def _answered(world: Gated, before: dict[str, dict[str, Any]], *extra: dict[str, Any]) -> None:
@@ -455,7 +483,7 @@ def test_a_sibling_whose_meaning_changed_after_the_family_row_reopens_the_family
 
     _edit(world, CODE_A.replace("return value", "return -value"))
     before = world.reanchor("RLZ-A00001")
-    _answered(world, before, *trace_rows(*TRACES))
+    _answered(world, before, *trace_rows(world, *TRACES))
     assert world.gate().ok
 
     write(
@@ -482,7 +510,7 @@ def test_a_sibling_whose_meaning_changed_after_the_family_row_reopens_the_family
         world.invariant_row("INV-AAAAAA", before),
         family_row({"INV-AAAAAA": 1, "INV-BBBBBB": 2}),
         sibling,
-        *trace_rows(*TRACES),
+        *trace_rows(world, *TRACES),
     )
     assert world.gate().ok
 
@@ -528,7 +556,7 @@ def test_items_are_recomputed_from_the_new_base_after_a_sync(world: Gated) -> No
 
     _edit(world, CODE_A.replace("return value", "return -value"))
     before = world.reanchor("RLZ-A00001")
-    _answered(world, before, *trace_rows(*TRACES))
+    _answered(world, before, *trace_rows(world, *TRACES))
     assert world.gate().ok
     for repository in (world.code, world.memory):
         commit(repository, {})  # the leaf's work so far, committed on its branch
@@ -559,7 +587,7 @@ def test_items_are_recomputed_from_the_new_base_after_a_sync(world: Gated) -> No
     world.rows(
         world.invariant_row("INV-AAAAAA", before, revision=2),
         family_row({"INV-AAAAAA": 2, "INV-BBBBBB": 1}),
-        *trace_rows(*TRACES),
+        *trace_rows(world, *TRACES),
     )
     assert world.gate().ok
 
@@ -593,46 +621,71 @@ def test_an_incomplete_run_is_one_finding_naming_its_input_never_an_unhandled_er
         assert not result.ok
 
 
+def _gate_history_file(*rows: Any) -> HistoryFile:
+    return HistoryFile.model_validate(
+        {"schema": "ar-history/v1", "leaf": LEAF, "closed": False, "rows": list(rows)}
+    )
+
+
+def _gate_context(*rows: Any, revision: int | None = None) -> GateContext:
+    candidate = SimpleNamespace(revision=lambda record_id: revision)
+    return GateContext(
+        LEAF, _gate_history_file(*rows), candidate=cast(Any, candidate), code=cast(Any, None)
+    )
+
+
 def test_every_registered_kind_is_decided_by_its_own_predicate_never_a_generic_lookup() -> None:
     """Carried from L30, L06, L10 and L14; D29: an unanswered reconsideration blocks."""
 
     assert set(GATE_PREDICATES) == set(ITEM_KINDS)
 
-    def context(*rows: Any) -> GateContext:
-        history = cast(Any, SimpleNamespace(rows=list(rows)))
-        return GateContext(LEAF, history, candidate=cast(Any, None), code=cast(Any, None))
+    BLOB = "a" * 40
 
-    def row(subject: str) -> Any:
-        return SimpleNamespace(id="ROW-000009", subject=subject)
+    def history_file(*rows: Any) -> HistoryFile:
+        return _gate_history_file(*rows)
 
-    # onboarding_trace: a counted change satisfies it with no row; the generic lookup finds none.
-    counted = {"id": "sha256:1", "kind": "onboarding_trace", "subject": TRACES[0]}
-    assert item_open_reason({**counted, "facts": {"countedChange": True}}, context()) is None
-    assert satisfying_row("onboarding_trace", TRACES[0], None) is None
-    uncounted = {**counted, "facts": {"countedChange": False}}
-    assert item_open_reason(uncounted, context()) is not None
-    assert item_open_reason(uncounted, context(row(TRACES[0]))) is None
-    unreadable = {**counted, "facts": {"countedChange": False, "sidecarUnreadable": True}}
-    assert item_open_reason(unreadable, context(row(TRACES[0]))) is not None
+    def context(*rows: Any, revision: int | None = None) -> GateContext:
+        return _gate_context(*rows, revision=revision)
 
-    # unexplained: a covered change needs its no_invariant row; an uncovered one its trace.
-    hunk = {"id": "sha256:2", "kind": "unexplained_hunk", "subject": "hunk:pkg/a.py@absent..absent"}
-    covered = {**hunk, "facts": {"coverage": {"state": "covered"}}}
-    assert item_open_reason(covered, context()) is not None
-    assert item_open_reason(covered, context(row("hunk:sha256:2"))) is None
-    trace = {"countedChange": False, "subject": TRACES[0]}
-    uncovered = {**hunk, "facts": {"coverage": {"state": "uncovered"}, "onboardingTrace": trace}}
-    assert item_open_reason(uncovered, context(row("hunk:sha256:2"))) is not None
-    assert item_open_reason(uncovered, context(row(TRACES[0]))) is None
+    def trace_row(blob: str = BLOB) -> dict[str, Any]:
+        return {
+            "id": "ROW-000009",
+            "subject": TRACES[0],
+            "disposition": "no_impact",
+            "reason": "Only the body changed.",
+            "items": [],
+            "sources": [{"path": "pkg/a.py", "blob": blob}],
+        }
 
     # planned_untouched and reconsideration_candidate: their own row by subject (D29).
-    for kind, subject in (
-        ("planned_untouched", "planned:invariant:INV-AAAAAA#clarify"),
-        ("reconsideration_candidate", "reconsider:DEC-AAAAAA#1"),
+    for kind, subject, row_document in (
+        (
+            "planned_untouched",
+            "planned:invariant:INV-AAAAAA#clarify",
+            {
+                "id": "ROW-000009",
+                "subject": "planned:invariant:INV-AAAAAA#clarify",
+                "disposition": "deferred",
+                "reason": "Later.",
+                "items": [],
+                "ref": {"leaf": LEAF},
+            },
+        ),
+        (
+            "reconsideration_candidate",
+            "reconsider:DEC-AAAAAA#1",
+            {
+                "id": "ROW-000009",
+                "subject": "reconsider:DEC-AAAAAA#1",
+                "disposition": "still_rejected",
+                "reason": "Holds.",
+                "items": [],
+            },
+        ),
     ):
         item = {"id": "sha256:3", "kind": kind, "subject": subject, "facts": {}}
         assert item_open_reason(item, context()) is not None
-        assert item_open_reason(item, context(row(subject))) is None
+        assert item_open_reason(item, context(row_document)) is None
 
     # family_route_condition: decided by subject, so an item whose ID changed between recomputes
     # is answered by the same family row (L06 N2); never by no_impact.
@@ -667,6 +720,98 @@ def test_every_registered_kind_is_decided_by_its_own_predicate_never_a_generic_l
     assert "no invariant row" in str(item_open_reason({**invariant_item, "facts": {}}, no_history))
 
 
+def test_r53_kinds_are_decided_by_their_own_predicates() -> None:
+    """MIK-R53 rules 3, 6 and 8: the new kinds answer through their own row's currency."""
+
+    assert set(GATE_PREDICATES) == set(ITEM_KINDS)
+
+    blob = "a" * 40
+    blobs = {"pkg/a.py": blob}
+
+    def trace_row(current: str = blob) -> dict[str, Any]:
+        return {
+            "id": "ROW-000009",
+            "subject": TRACES[0],
+            "disposition": "no_impact",
+            "reason": "Only the body changed.",
+            "items": [],
+            "sources": [{"path": "pkg/a.py", "blob": current}],
+        }
+
+    # onboarding_trace: a counted change alone never satisfies it; only a bound row does
+    # (MIK-R53 rule 1). The generic lookup finds none for a rowless item.
+    counted = {"id": "sha256:1", "kind": "onboarding_trace", "subject": TRACES[0]}
+    assert (
+        item_open_reason({**counted, "facts": {"countedChange": True}}, _gate_context()) is not None
+    )
+    assert satisfying_row("onboarding_trace", TRACES[0], None) is None
+    uncounted = {**counted, "facts": {"countedChange": False, "sourceBlobs": blobs}}
+    assert item_open_reason(uncounted, _gate_context()) is not None
+    # MIK-R53 rule 3: only the row whose sources equal the facts answers it.
+    assert item_open_reason(uncounted, _gate_context(trace_row())) is None
+    assert item_open_reason(uncounted, _gate_context(trace_row("b" * 40))) is not None
+    unreadable = {**counted, "facts": {"countedChange": False, "sidecarUnreadable": True}}
+    assert item_open_reason(unreadable, _gate_context(trace_row())) is not None
+
+    # unexplained: a covered change needs its no_invariant row; an uncovered one its trace.
+    hunk_id = "sha256:" + "2" * 64
+    hunk = {"id": hunk_id, "kind": "unexplained_hunk", "subject": "hunk:pkg/a.py@absent..absent"}
+    covered = {**hunk, "facts": {"coverage": {"state": "covered"}}}
+    assert item_open_reason(covered, _gate_context()) is not None
+    hunk_row = {
+        "id": "ROW-000009",
+        "subject": f"hunk:{hunk_id}",
+        "disposition": "no_invariant",
+        "reason": "No invariant.",
+        "items": [],
+    }
+    assert item_open_reason(covered, _gate_context(hunk_row)) is None
+    trace = {"countedChange": False, "subject": TRACES[0], "sourceBlobs": blobs}
+    uncovered = {**hunk, "facts": {"coverage": {"state": "uncovered"}, "onboardingTrace": trace}}
+    assert item_open_reason(uncovered, _gate_context(hunk_row)) is not None
+    assert item_open_reason(uncovered, _gate_context(trace_row())) is None
+    assert item_open_reason(uncovered, _gate_context(trace_row("b" * 40))) is not None
+
+    # unassigned_invariant: the membership row at the current revision (MIK-R53 rule 6).
+    membership = {
+        "id": "sha256:4",
+        "kind": "unassigned_invariant",
+        "subject": "membership:INV-AAAAAA",
+        "facts": {"revision": 1},
+    }
+    assert item_open_reason(membership, _gate_context(revision=1)) is not None
+    current = {
+        "id": "ROW-000009",
+        "subject": "membership:INV-AAAAAA",
+        "disposition": "no_family",
+        "reason": "No joint obligation.",
+        "items": [],
+        "revision": 1,
+        "considered": [],
+    }
+    assert item_open_reason(membership, _gate_context(current, revision=1)) is None
+    assert item_open_reason(membership, _gate_context(current, revision=2)) is not None
+
+    # touched_record: the record row at the candidate revision with the change's disposition.
+    touched = {
+        "id": "sha256:5",
+        "kind": "touched_record",
+        "subject": "DEC-AAAAAA",
+        "facts": {"baseRevision": 1, "revision": 2, "baseStatus": "active", "status": "active"},
+    }
+    assert item_open_reason(touched, _gate_context()) is not None
+    changed = {
+        "id": "ROW-000009",
+        "subject": "DEC-AAAAAA",
+        "disposition": "changed",
+        "reason": "Rewritten.",
+        "items": [],
+        "revision": 2,
+        "effect": "clarify",
+    }
+    assert item_open_reason(touched, _gate_context(changed)) is None
+
+
 # --------------------------------------------------------------------------------------------------
 # The validator at the gate, with the open-history-row rule (carried from L12)
 # --------------------------------------------------------------------------------------------------
@@ -684,7 +829,7 @@ def test_the_gate_runs_the_validator_and_its_history_row_rule(world: Gated) -> N
         stale_after,
         {**ghost, "revision": 1},
         family_row({"INV-AAAAAA": 1, "INV-BBBBBB": 1}),
-        *trace_rows(*TRACES),
+        *trace_rows(world, *TRACES),
     )
     write(world.memory, {"onboarding/pkg/a.py.md": "# a [4]\n"})  # a marker with no reference
     result = world.gate()
@@ -782,7 +927,7 @@ def test_the_closeout_validator_refuses_until_the_gate_passes_and_never_runs_ung
     ) == (GATE_UNBOUND)
     ports()
     before = world.reanchor("RLZ-A00001")
-    _answered(world, before, *trace_rows(*TRACES))
+    _answered(world, before, *trace_rows(world, *TRACES))
     answered = world.candidate()
     assert (
         leaf_gate_refusal(world.contract, code_tree=answered.code, memory_tree=answered.memory)
@@ -805,7 +950,9 @@ def test_the_closeout_memory_commit_closes_the_history_file_and_validates_its_ex
     closing.restore()
     assert not history.exists()
     code_commit = commit(world.code, {"pkg/a.py": CODE_A.replace("return 1", "return 3")})
-    _answered(world, world.reanchor("RLZ-A00002"), *trace_rows(*TRACES))  # the gate runs too (P1c)
+    _answered(
+        world, world.reanchor("RLZ-A00002"), *trace_rows(world, *TRACES)
+    )  # the gate runs too (P1c)
     open_bytes = history.read_bytes()
     closing = close_owner_history(world.memory, LEAF)
     closed = json.loads(history.read_text())
@@ -879,7 +1026,7 @@ def test_direct_landing_gates_names_its_leaf_closes_its_history_and_restores_on_
     assert "touched_invariant INV-AAAAAA" in unanswered.value.detail
 
     before = world.reanchor("RLZ-A00001")
-    _answered(world, before, *trace_rows(*TRACES))
+    _answered(world, before, *trace_rows(world, *TRACES))
     history = world.memory / f"knowledge/history/{LEAF}.json"
     open_bytes = history.read_bytes()
     with (
@@ -903,7 +1050,7 @@ def test_record_landing_checks_the_landed_memory_commit_is_closed_and_valid(
     contract = world.contract
     code_commit = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
     before = world.reanchor("RLZ-A00001")
-    _answered(world, before, *trace_rows(*TRACES))
+    _answered(world, before, *trace_rows(world, *TRACES))
     landed_open = commit(world.memory, {}, trailer=code_commit)
     refusal = record_landing._knowledge_gate_refusal(contract, code_commit, landed_open)
     assert refusal is not None and "is not closed" in refusal
@@ -1073,7 +1220,7 @@ def test_the_gate_memo_reuses_a_verdict_only_for_the_identical_inputs(
         assert evaluated.call_count == 1
 
         before = world.reanchor("RLZ-A00001")  # a changed memory tree misses
-        _answered(world, before, *trace_rows(*TRACES))
+        _answered(world, before, *trace_rows(world, *TRACES))
         answered = world.candidate()
         assert evaluate_leaf_gate(world.contract, answered) is not None
         assert evaluated.call_count == 2

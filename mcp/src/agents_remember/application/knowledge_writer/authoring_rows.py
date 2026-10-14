@@ -10,8 +10,10 @@ for the type checker only).
 from __future__ import annotations
 
 import re
+import subprocess
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Final
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, Final, get_args
 
 from pydantic import ValidationError
 
@@ -22,6 +24,7 @@ from agents_remember.application.knowledge_writer.code_anchors import (
     CodeSnapshot,
 )
 from agents_remember.application.knowledge_writer.handoff import (
+    HANDLE_PREFIX,
     CoverRequest,
     RowRequest,
     family_effect_refusal,
@@ -46,22 +49,38 @@ from agents_remember.application.knowledge_writer.reconsideration import (
 from agents_remember.application.knowledge_writer.report import (
     RowOutcome,
 )
+from agents_remember.kernel.git_command import GitPreparationError
 from agents_remember.memory.conversion.code_objects import CodeObjects
+from agents_remember.memory_quality.knowledge_validator.trees import (
+    KnowledgeTreeReadError,
+    knowledge_tree_from_git,
+)
+from agents_remember.models.knowledge.effect import EffectLabel
+from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history import (
     HISTORY_SCHEMA,
+    RECORD_ROW_SUBJECT_PATTERN,
     FamilyRow,
     HistoryFile,
     InvariantRow,
+    MembershipRow,
     OnboardingTraceRow,
     PlannedEffectRow,
     ReconsiderationRow,
+    RecordRow,
     UnexplainedChangeRow,
     is_closed_history,
+    membership_invariant,
+    membership_subject,
 )
 from agents_remember.models.knowledge_files.ids import (
     EntryKind,
     RecordKind,
     RowKind,
+)
+from agents_remember.worktrees.modules.onboarding_trace import (
+    card_paths,
+    counted_change,
 )
 
 if TYPE_CHECKING:
@@ -84,6 +103,31 @@ def _first_error(error: ValidationError) -> str:
     )
 
 
+_EVIDENCE_MARKER: Final = " Evidence ("
+
+
+class _LeafBaseUnreadable(ValueError):
+    """The leaf's paired base is named but its tree cannot be read."""
+
+
+def _carried_evidence_segments(reason: str) -> list[str]:
+    """Previously appended foreign-evidence segments of a stored row reason (MIK-R53 rule 8).
+
+    :meth:`HistoryRowAuthoring._reason_with_evidence` is the sole producer of ``" Evidence ("``
+    segments, so scanning for the marker recovers every segment a prior run appended
+    byte-exact -- including a trailing empty one, where an accepted reason ends in the bare
+    marker and the split form would drop that suffix on a later reason-only rewrite.
+    """
+
+    segments: list[str] = []
+    start = 0
+    while (found := reason.find(_EVIDENCE_MARKER, start)) >= 0:
+        end = reason.find(_EVIDENCE_MARKER, found + len(_EVIDENCE_MARKER))
+        segments.append(reason[found:] if end < 0 else reason[found:end])
+        start = found + len(_EVIDENCE_MARKER)
+    return segments
+
+
 class HistoryRowAuthoring:
     """The history-row and cover methods of one authoring operation."""
 
@@ -101,6 +145,13 @@ class HistoryRowAuthoring:
         reconsiderations: Mapping[str, Mapping[str, Any]]
         worklist_items: tuple[tuple[str, str, str], ...]
         trace_items: tuple[tuple[str, str], ...]
+        onboarding_sources: Mapping[str, tuple[str, ...]]
+        """The persisted worklist's onboarding items' covered sources by subject (MIK-R53)."""
+        onboarding_counted: Mapping[str, bool]
+        """The persisted worklist's onboarding items' counted change by subject (MIK-R53)."""
+        memory_base: str | None
+        """The leaf's paired memory base commit: the gate's K_B for the card comparison."""
+        handles: dict[str, str]
 
         def problem(self, where: str, message: str) -> None: ...
 
@@ -194,6 +245,136 @@ class HistoryRowAuthoring:
         ):
             if re.match(model.subject_pattern, request.subject):
                 return write(request, rows.get(request.subject), where)
+        if re.match(RECORD_ROW_SUBJECT_PATTERN, request.subject):
+            return self._record_row(request, rows.get(request.subject), where)
+        return self._aliased_or_stored_row(request, rows, where)
+
+    def _aliased_or_stored_row(
+        self, request: RowRequest, rows: Mapping[str, Any], where: str
+    ) -> dict[str, Any] | None:
+        """A ``handoff:`` alias, a membership form, or the stored-record fallback (rules 6, 8)."""
+
+        if request.subject.startswith(HANDLE_PREFIX):
+            if request.disposition == "no_family":
+                handoff_membership = self._handoff_membership(request, rows)
+                if handoff_membership is not None:
+                    canonical, existing = handoff_membership
+                    return self._membership_row(
+                        replace(request, subject=canonical), existing, where
+                    )
+            canonical = self._resolve_record_subject(request)
+            if canonical is not None:
+                return self._record_row(
+                    replace(request, subject=canonical), rows.get(canonical), where
+                )
+            return self._stored_record_row(request, rows, where)
+        membership_existing = self._membership_existing(request, rows, where)
+        if membership_existing is not None:
+            _canonical, existing = membership_existing
+            return self._membership_row(request, existing, where)
+        if request.disposition == "no_family" or membership_invariant(request.subject) is not None:
+            return None  # refused above with its reason
+        return self._stored_record_row(request, rows, where)
+
+    def _handoff_membership(
+        self, request: RowRequest, rows: Mapping[str, Any]
+    ) -> tuple[str, Mapping[str, Any] | None] | None:
+        """The canonical membership subject a ``handoff:`` no_family alias names, if any.
+
+        A ``no_family`` row about a stored invariant is a membership row, whatever alias form
+        names it; resolving before the stored-record fallback keeps the alias equivalent to
+        the literal and bare forms, with a stable row ID on rerun. Returns ``None`` -- without
+        recording anything -- when the alias names no stored invariant, so wrong-kind and
+        unknown aliases keep the stored row's refusal and no malformed ID is ever guessed.
+        """
+
+        key = request.subject.removeprefix(HANDLE_PREFIX)
+        resolved = self.handles.get(key) or self.state.record_by_origin(
+            "invariant", self.owner, key
+        )
+        if resolved is None:
+            found = self.state.record(key)
+            resolved = key if found is not None and found[1] == "invariant" else None
+        else:
+            found = self.state.record(resolved)
+            if found is None or found[1] != "invariant":
+                return None
+        if resolved is None:
+            return None
+        canonical = membership_subject(resolved)
+        existing = rows.get(canonical)
+        return canonical, existing if isinstance(existing, Mapping) else None
+
+    def _resolve_record_subject(self, request: RowRequest) -> str | None:
+        """The canonical decision/facet record ID a ``handoff:`` row subject names (MIK-R53 rule 8).
+
+        Valid alias forms resolve before dispatch so every new sibling produces equivalent
+        row fields; the stored row is looked up by the canonical subject, keeping the row ID
+        stable on rerun. Returns ``None`` silently for anything else -- an invariant/family
+        alias the stored-record fallback owns, a wrong-kind or unknown alias it refuses --
+        so no malformed ID is ever normalized into a guess.
+        """
+
+        key = request.subject.removeprefix(HANDLE_PREFIX)
+        candidate = self.handles.get(key)
+        if candidate is None:
+            for kind in (
+                "decision",
+                "incident",
+                "assumption",
+                "limitation",
+                "failure_mode",
+                "scenario",
+                "diagnostic",
+                "term",
+            ):
+                candidate = self.state.record_by_origin(kind, self.owner, key)
+                if candidate is not None:
+                    break
+        if candidate is None:
+            return None
+        found = self.state.record(candidate)
+        if found is None or found[1] not in (
+            "decision",
+            "incident",
+            "assumption",
+            "limitation",
+            "failure_mode",
+            "scenario",
+            "diagnostic",
+            "term",
+        ):
+            return None
+        return candidate
+
+    def _membership_existing(
+        self, request: RowRequest, rows: Mapping[str, Any], where: str
+    ) -> tuple[str, Mapping[str, Any] | None] | None:
+        """The canonical membership subject and its stored row, if this is a membership row.
+
+        Bare-invariant and alias forms resolve to ``membership:<INV>`` before the stored-row
+        lookup, so an unchanged rerun finds its row instead of minting a new ID. Returns
+        ``None`` for non-membership subjects, and -- after recording the refusal -- for
+        unresolvable ones.
+        """
+
+        if membership_invariant(request.subject) is not None:
+            canonical = request.subject
+        elif request.disposition != "no_family":
+            return None
+        else:
+            resolved = self._resolve_membership_subject(request, where)
+            if resolved is None:
+                return None
+            canonical = resolved[1]
+        existing = rows.get(canonical)
+        return canonical, existing if isinstance(existing, Mapping) else None
+
+    def _stored_record_row(
+        self, request: RowRequest, rows: Mapping[str, Any], where: str
+    ) -> dict[str, Any] | None:
+        """A row about a stored invariant or family record, by resolved ID."""
+
         subject = self.resolve_id(request.subject, where)
         found = None if subject is None else self.state.record(subject)
         if subject is None or found is None:
@@ -219,9 +400,16 @@ class HistoryRowAuthoring:
     def _onboarding_row(
         self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
     ) -> dict[str, Any] | None:
-        """An ``onboarding_trace`` row (MIK-R30): a reviewed no-impact judgment about a card or
-        route overview. It carries no covers, effect, because or examined members. Marker lines a
-        crossing sync moved into an existing row (MIK-R24 rule 8 step 1) are kept."""
+        """An ``onboarding_trace`` row (MIK-R30, MIK-R53 rules 1 and 2).
+
+        Disposition ``updated`` or ``no_impact``; it carries nothing an invariant, family or
+        planned row carries. The writer fills ``sources`` from the code candidate: one
+        ``{path, blob}`` per covered source file, ``absent`` for a deleted file. A file card's
+        path comes from its subject; a route overview's from the leaf's persisted worklist item.
+        An ``updated`` row whose card has no counted change between the memory base and the
+        produced candidate is refused. Marker lines a crossing sync moved into an existing row
+        (MIK-R24 rule 8 step 1) are kept.
+        """
 
         extra = [
             name
@@ -230,11 +418,39 @@ class HistoryRowAuthoring:
                 ("effect", request.effect),
                 ("because", request.because),
                 ("examined", request.examined),
+                ("considered", request.considered),
+                ("ref", request.ref),
             )
             if value
         ]
         if extra:
             self.problem(where, f"an onboarding_trace row carries no {extra}")
+            return None
+        paths = card_paths(request.subject)
+        if paths is None:
+            self.problem(where, f"the subject {request.subject!r} names no card or overview")
+            return None
+        if request.subject.endswith("/overview") or request.subject == "onboarding:overview":
+            sources = self.onboarding_sources.get(request.subject)
+            if sources is None:
+                self.problem(
+                    where,
+                    f"no worklist item covers {request.subject}; recompute the leaf's worklist "
+                    "and name the row again once an item needs it",
+                )
+                return None
+        else:
+            sources = (request.subject.removeprefix("onboarding:"),)
+        markdown, sidecar = paths
+        if request.disposition == "updated" and not self._row_counted_change(
+            request.subject, markdown, sidecar, where
+        ):
+            self.problem(
+                where,
+                f"an updated onboarding row needs a counted change of its card between the "
+                f"memory base and the candidate, and {markdown} has none: update the card's "
+                "Markdown or its sidecar's references, or name the row no_impact",
+            )
             return None
         row: dict[str, Any] = {
             "id": existing["id"] if existing is not None else self.mint("history_row"),
@@ -242,6 +458,9 @@ class HistoryRowAuthoring:
             "disposition": request.disposition,
             "reason": request.reason,
             "items": list(request.items),
+            "sources": [
+                {"path": path, "blob": self.code.blobs.get(path) or ABSENT} for path in sources
+            ],
         }
         if existing is not None and existing.get("markers"):
             row["markers"] = list(existing["markers"])
@@ -251,6 +470,271 @@ class HistoryRowAuthoring:
             self.problem(where, _first_error(error))
             return None
         return row
+
+    def _row_counted_change(self, subject: str, markdown: str, sidecar: str, where: str) -> bool:
+        """The card comparison, failing closed when the leaf's paired base cannot be read."""
+
+        try:
+            return self._card_counted_change(subject, markdown, sidecar)
+        except _LeafBaseUnreadable as error:
+            self.problem(where, str(error))
+            return False
+
+    def _card_counted_change(self, subject: str, markdown: str, sidecar: str) -> bool:
+        """Whether the card has a counted change from the leaf's base to this run's candidate.
+
+        With the leaf's paired base named, the current base-to-candidate comparison decides:
+        a persisted worklist flag is the gate's comparison at worklist time, and a card the
+        leaf restored or re-edited after that makes it stale, so the flag never overrides the
+        known base (MIK-R53 rule 2). Without the paired base the persisted flag decides when
+        present -- the worklist is computed against the paired base, so writer and gate agree
+        in preclosed and reopened leaves -- and only when neither is known is the operation's
+        own HEAD compared instead.
+        """
+
+        if self.memory_base is None:
+            counted = self.onboarding_counted.get(subject)
+            if counted is not None:
+                return counted
+        return counted_change(
+            self._counted_base_files(),
+            {path: self._produced_bytes(path) for path in (markdown, sidecar)},
+            markdown,
+            sidecar,
+        )
+
+    def _counted_base_files(self) -> Mapping[str, bytes]:
+        """The card-comparison base: the leaf's paired base, else the operation's own base."""
+
+        if self.memory_base is None:
+            base = self.state.base
+            return base.files if base is not None else {}
+        try:
+            tree = knowledge_tree_from_git(
+                self.state.root, self.memory_base, label="leaf paired base"
+            )
+        except (
+            KnowledgeTreeReadError,
+            GitPreparationError,
+            KeyError,
+            OSError,
+            subprocess.SubprocessError,
+        ) as error:
+            raise _LeafBaseUnreadable(
+                f"the leaf's paired memory base {self.memory_base[:12]} cannot be read, so an "
+                f"updated onboarding row cannot be judged: {error!r}"
+            ) from error
+        return tree.files
+
+    def _produced_bytes(self, path: str) -> bytes | None:
+        """The candidate bytes at ``path`` as this run produces them (``None`` when deleted)."""
+
+        if path in self.state.removed:
+            return None
+        document = self.state.documents.get(path)
+        if document is not None:
+            return canonical_text(document).encode("utf-8")
+        return self.state.files.get(path)
+
+    def _membership_row(
+        self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
+    ) -> dict[str, Any] | None:
+        """A ``membership`` row (MIK-R53 rule 6): the invariant belongs to no family.
+
+        The subject is ``membership:<invariant ID>``; a ``no_family`` disposition with any other
+        subject resolves it to the stored invariant it names. ``considered`` names the examined
+        families. The row carries the invariant's revision in the produced tree, and is refused
+        for an invariant a family of the produced tree lists.
+        """
+
+        extra = [
+            name
+            for name, value in (
+                ("covers", request.covers),
+                ("effect", request.effect),
+                ("because", request.because),
+                ("examined", request.examined),
+                ("ref", request.ref),
+            )
+            if value
+        ]
+        if extra:
+            self.problem(where, f"a membership row carries no {extra}")
+            return None
+        resolved = self._resolve_membership_subject(request, where)
+        if resolved is None:
+            return None
+        invariant, subject, found = resolved
+        listing = self._listing_family(invariant)
+        if listing is not None:
+            self.problem(
+                where,
+                f"{invariant} is listed by family {listing} of the produced tree, so no "
+                "no_family row is written for it; list the change under that family's row, or "
+                "remove the member first",
+            )
+            return None
+        considered = self._resolve_considered(request, where)
+        row: dict[str, Any] = {
+            "id": existing["id"] if existing is not None else self.mint("history_row"),
+            "subject": subject,
+            "disposition": request.disposition,
+            "reason": request.reason,
+            "items": list(request.items),
+            "revision": found[2].get("revision"),
+            "considered": considered,
+        }
+        try:
+            MembershipRow.model_validate(row)
+        except ValidationError as error:
+            self.problem(where, _first_error(error))
+            return None
+        return row
+
+    def _resolve_membership_subject(
+        self, request: RowRequest, where: str
+    ) -> tuple[str, str, Any] | None:
+        """The membership row's ``(invariant, subject, stored record)``, or ``None``."""
+
+        invariant = membership_invariant(request.subject)
+        if invariant is None:
+            if request.disposition != "no_family":
+                self.problem(
+                    where, f"the subject {request.subject!r} names no record (unknown subject)"
+                )
+                return None
+            resolved = self.resolve_id(request.subject, where)
+            found = None if resolved is None else self.state.record(resolved)
+            if resolved is None:
+                return None
+            if found is None or found[1] != "invariant":
+                self.problem(where, f"the subject {request.subject!r} names no stored invariant")
+                return None
+            return resolved, membership_subject(resolved), found
+        found = self.state.record(invariant)
+        if found is None or found[1] != "invariant":
+            self.problem(where, f"the subject {request.subject!r} names no stored invariant")
+            return None
+        return invariant, request.subject, found
+
+    def _resolve_considered(self, request: RowRequest, where: str) -> list[str]:
+        """The considered families as stored IDs, refusing the ones that resolve to none."""
+
+        considered = []
+        for one in request.considered:
+            family = self.resolve_id(one, where)
+            member = None if family is None else self.state.record(family)
+            if member is None or member[1] != "family":
+                key = one.removeprefix("handoff:")
+                family = self.handles.get(key) or self.state.record_by_origin(
+                    "family", self.owner, key
+                )
+                member = None if family is None else self.state.record(family)
+            if family is None or member is None or member[1] != "family":
+                self.problem(where, f"considered family {one!r} is not a stored family")
+                continue
+            considered.append(family)
+        return considered
+
+    def _listing_family(self, invariant_id: str) -> str | None:
+        """A family of the produced tree listing ``invariant_id``, or ``None``."""
+
+        for record_id, (_path, kind) in self.state.records.items():
+            if kind != "family":
+                continue
+            found = self.state.record(record_id)
+            if found is not None and invariant_id in (found[2].get("members") or ()):
+                return record_id
+        return None
+
+    def _record_row(
+        self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
+    ) -> dict[str, Any] | None:
+        """A ``record`` row (MIK-R53 rule 8): the disposition of a decision or facet record.
+
+        It carries the record's revision in the produced tree, ``effect`` (required on
+        ``changed``, ``retire`` on ``retired``) and optional ``because``. Evidence for a record
+        another owner authored is stored in its reason, which answers the writer's demand for a
+        row about that record.
+        """
+
+        extra = [
+            name
+            for name, value in (
+                ("covers", request.covers),
+                ("examined", request.examined),
+                ("considered", request.considered),
+                ("ref", request.ref),
+            )
+            if value
+        ]
+        if extra:
+            self.problem(where, f"a record row carries no {extra}")
+            return None
+        refusal = self._record_effect_refusal(request)
+        if refusal is not None:
+            self.problem(where, refusal)
+            return None
+        subject = self.resolve_id(request.subject, where)
+        found = None if subject is None else self.state.record(subject)
+        if subject is None:
+            return None
+        if found is None or found[1] not in {
+            "decision",
+            "incident",
+            "assumption",
+            "limitation",
+            "failure_mode",
+            "scenario",
+            "diagnostic",
+            "term",
+        }:
+            self.problem(
+                where, f"the subject {request.subject!r} names no decision or facet record"
+            )
+            return None
+        row: dict[str, Any] = {
+            "id": existing["id"] if existing is not None else self.mint("history_row"),
+            "subject": subject,
+            "disposition": request.disposition,
+            "reason": self._reason_with_evidence(
+                subject, request.reason, self._foreign_carry(existing, found[2])
+            ),
+            "items": list(request.items),
+            "revision": found[2].get("revision"),
+        }
+        if request.effect is not None:
+            row["effect"] = request.effect
+        if request.because:
+            row["because"] = [self.resolve(one, where) for one in request.because]
+        try:
+            RecordRow.model_validate(row)
+        except ValidationError as error:
+            self.problem(where, _first_error(error))
+            return None
+        return row
+
+    def _record_effect_refusal(self, request: RowRequest) -> str | None:
+        """Why a record row's effect input is refused, or ``None`` (MIK-R53 rule 8)."""
+
+        if request.disposition == "changed" and request.effect is None:
+            return (
+                f"record {request.subject}: a changed row records the curator's judgment of "
+                "the meaning change, so it needs an 'effect', one of "
+                f"{', '.join(get_args(EffectLabel))}; add it to this 'history' entry"
+            )
+        if request.disposition == "retired" and request.effect != "retire":
+            return (
+                f"record {request.subject}: a retired row's effect is 'retire'; set it on "
+                "this 'history' entry, or make it another disposition"
+            )
+        if request.disposition not in {"changed", "retired"} and request.effect_supplied:
+            return (
+                f"record {request.subject}: a {request.disposition} row records no effect "
+                "(only a changed or retired row does); remove 'effect' from this "
+                "'history' entry, or make it a changed row"
+            )
+        return None
 
     def _unexplained_row(
         self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
@@ -513,12 +997,46 @@ class HistoryRowAuthoring:
             return f"ref.row {ref.row} names no history row"
         return None
 
-    def _reason_with_evidence(self, subject: str, reason: str) -> str:
-        """The row's reason, with the evidence of this run's updates of another owner's record."""
+    def _foreign_carry(
+        self, existing: Mapping[str, Any] | None, record: Mapping[str, Any]
+    ) -> str | None:
+        """A stored foreign row's reason to carry, or ``None`` (MIK-R53 rule 8).
 
+        Only a foreign-owned record carries: same-owner row reasons stay authorial, and the
+        R54 replacement grant applies to same-owner origin only. A missing reason carries
+        nothing.
+        """
+
+        if not isinstance(existing, Mapping):
+            return None
+        origin = record.get("origin")
+        if not isinstance(origin, Mapping):
+            return None
+        if origin.get(self.owner.kind) == self.owner.id and origin.get("task") == self.owner.task:
+            return None
+        reason = existing.get("reason")
+        return reason if isinstance(reason, str) else None
+
+    def _reason_with_evidence(self, subject: str, reason: str, carry: str | None = None) -> str:
+        """The row's reason, with the evidence of this run's updates of another owner's record.
+
+        ``carry`` is a stored row's reason whose previously appended foreign-evidence segments
+        survive the rewrite: two foreign updates with distinct evidence, and a later reason-only
+        rewrite, retain every evidence value (MIK-R53 rule 8). Segments already present are
+        never duplicated.
+        """
+
+        if carry:
+            for segment in _carried_evidence_segments(carry):
+                if segment not in reason or (
+                    segment == _EVIDENCE_MARKER and not reason.endswith(segment)
+                ):
+                    reason = f"{reason}{segment}"
         pending = self._foreign_evidence.pop(subject, [])
         for handoff_entry, evidence in pending:
-            reason = f"{reason} Evidence ({handoff_entry}): {'; '.join(evidence)}"
+            segment = f" Evidence ({handoff_entry}): {'; '.join(evidence)}"
+            if segment not in reason:
+                reason = f"{reason}{segment}"
             self._stored_in.setdefault(handoff_entry, []).append(
                 f"{self.state.history_target(self.owner)[0]}#{subject}"
             )

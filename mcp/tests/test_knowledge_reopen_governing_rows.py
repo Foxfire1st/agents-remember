@@ -188,7 +188,9 @@ def test_a_change_on_the_parent_line_may_be_answered_by_any_later_row(
     _close_out_and_integrate(world)
 
     _edit(world, CODE_A.replace("return value", "return +value"))
-    _write(world, _rows_for_the_edit(traces=False))  # attempt 2: a no_impact row governs
+    # MIK-R53 rule 3: the new edit reopens the onboarding items too, so the traces are named
+    # again beside the no_impact row that governs attempt 2.
+    _write(world, _rows_for_the_edit())  # attempt 2: a no_impact row governs
     assert world.gate().ok, world.gate().refusal()
     code = commit(world.code, {})
     memory = _closeout(world, code).memory_commit  # the validator at the leaf's closeout passes
@@ -301,10 +303,11 @@ def test_the_writer_fills_a_rows_items_from_the_leafs_worklist(world: Gated, por
         rows = json.loads((world.memory / FIRST).read_text())["rows"]
         return {row["subject"]: row["items"] for row in rows}
 
-    _write(world, _rows_for_the_edit())  # no worklist: as before, nothing is filled in
+    invariant, family, *traces = _rows_for_the_edit()["history"]
+    _write(world, _handoff(invariant, family, traces[0]), {})  # no worklist: nothing filled in;
+    # an overview row binds its item's sources, so it is named with the worklist below
     assert set(map(tuple, stored().values())) == {()}
     named = "sha256:" + "0" * 64
-    invariant, family, *traces = _rows_for_the_edit()["history"]
     odd = {"kind": "touched_invariant", "subject": "INV-AAAAAA", "id": "not an item id"}
     worklist = {**worklist, "items": [*worklist["items"], odd, {**odd, "id": 7}, "not an item"]}
     _write(world, _handoff({**invariant, "items": [named]}, family, *traces), worklist)
@@ -327,7 +330,7 @@ def test_a_history_file_closed_by_a_hand_commit_is_not_frozen(world: Gated, port
     stale = world.invariant_row("INV-AAAAAA", before)
     stale["covers"][0]["after"] = before["RLZ-A00001"]  # the entry's old anchor: contradicts K_C
     examined = {"INV-AAAAAA": 1, "INV-BBBBBB": 1}
-    world.rows(stale, family_row(examined), *trace_rows(*TRACES), closed=True)
+    world.rows(stale, family_row(examined), *trace_rows(world, *TRACES), closed=True)
     code = commit(world.code, {})
     commit(world.memory, {}, trailer=code)  # the closed file, committed by hand
     commit(world.memory, {"notes.md": "one more commit\n"}, trailer=code)

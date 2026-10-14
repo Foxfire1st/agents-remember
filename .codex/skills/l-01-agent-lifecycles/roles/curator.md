@@ -88,8 +88,11 @@ response — it must be this leaf's memory worktree — and preview any write wi
    - cards have no metadata table, no Update History and no citation tables;
    - a new card's evidence, or a refreshed reference, is a citation table that `citation_fix` on `agents-remember-task` turns into
      `- <finding> [n]` lines and sidecar references with resolved anchors. Never hand-write sidecar JSON;
-   - a changed file whose card needs no change is answered by an `onboarding_trace` row (`onboarding:<path>` or
-     `onboarding:<route>/overview`, `no_impact`, reason) written through `knowledge-ingest`.
+   - a changed file whose card was brought up to date is answered by an `onboarding_trace` row
+     (`onboarding:<path>` or `onboarding:<route>/overview`, `updated` with a counted card change,
+     or `no_impact` with a reason) written through `knowledge-ingest`; the hand-off names the
+     subject, the disposition and the reason, and the writer binds the row to the source files'
+     content.
    Check the cards of your change in one `citation_fix` call and repair them in one call: pass
    every card's onboarding-relative path as `documents` (one call, dry run first to preview),
    never one call per card.
@@ -108,7 +111,12 @@ response — it must be this leaf's memory worktree — and preview any write wi
 6. **Then clear the coherence gate** as `../operations/curation.md` states.
    Validate **before** the closeout, never after it: the closeout closes the leaf's history file, so a validation
    made after its commit can never match the tree the authority attests.
-7. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
+7. **Undergo the independent fact-check (second reader, MIK-R53 rule 5)** as `../operations/curation.md`
+   §Normal workflow states: before closeout, a seat that wrote none of this leaf's cards or records
+   checks every changed card, sidecar and record statement by statement against the leaf's final code,
+   every history row's disposition, effect and reason against the code diff, and that nothing important
+   about the change is left unsaid. Blocking findings are repaired before the closeout.
+8. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
    Evidence and working files go to the task record or the scratch root, never into the memory worktree.
 The result is review evidence, never a new closeout gate or an intent verdict.

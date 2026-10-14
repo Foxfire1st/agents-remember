@@ -168,7 +168,7 @@ class Classifier:
         locator = anchor.locator.to_document()
         base_blob = self.code.base().get(path)
         candidate_blob = self.code.candidate().get(path)
-        at_base = self._resolve(path, locator, anchor.blob, base_blob)
+        at_base = self._resolve(path, locator, anchor.blob, base_blob, side="base")
         at_candidate = self._resolve(path, locator, anchor.blob, candidate_blob)
         facts = Classification(
             entry_id=key,
@@ -202,9 +202,15 @@ class Classifier:
         return _with(facts, "carried")
 
     def _resolve(
-        self, path: str, locator: Mapping[str, Any], recorded: str, blob: str | None
+        self,
+        path: str,
+        locator: Mapping[str, Any],
+        recorded: str,
+        blob: str | None,
+        *,
+        side: str = "candidate",
     ) -> Resolved | None:
-        return None if blob is None else self.code.resolve(path, locator, recorded, blob)
+        return None if blob is None else self.code.resolve(path, locator, recorded, blob, side=side)
 
     def _hits(
         self,

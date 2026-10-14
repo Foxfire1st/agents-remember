@@ -5,35 +5,47 @@ None of these rules reads a history file: its anchors and subjects are historica
 * **Rule 3, markers.** Every unescaped ``[n]`` marker of an onboarding Markdown file has a reference
   in its sidecar, and every reference is used. A Markdown file without a sidecar -- a record's
   Markdown included -- has no markers. A file sidecar without Markdown holds no references; the
-  sidecar itself is reported, not refused (MIK-R21 rule 5), by a report-only rule. A route sidecar
+  sidecar itself is conversion-written migration debt (``migration_debt``, MIK-R53 rule 10), by a
+  ``migration_debt`` rule. A route sidecar
   sits beside its ``overview.md``.
 * **Rule 3, record links.** Every record ID a sidecar reference, a sidecar entry or a record's
   ``links`` and ``supersedes`` names exists in the tree. Records are never deleted, so a retired
   record still resolves.
 * **Rule 3, relations.** Every relation is admitted for its record kind.
-* **Rule 3, unresolved targets** are reported, never refused.
+* **Rule 3, unresolved targets** are conversion-written migration debt (``migration_debt``).
 * **Rule 5, families.** Every member ID exists.
 * **Rule 6, anchor paths.** An anchor is checked for path existence in the paired code tree only
   when no comparison base holds an equal anchor for the same entry (by entry ID) or the same
-  reference target (in the same sidecar). A carried anchor whose path is absent is reported as
-  stale, never refused, so the stalest knowledge can still be represented and repaired.
+  reference target (in the same sidecar). A carried anchor whose path is absent refuses at every
+  commit and landing route and reports only at a sync merge (``merge_reports``, MIK-R53 rule
+  10), so the stalest knowledge can still be merged and repaired.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 from agents_remember.memory_quality.knowledge_validator.markers import Marker, find_markers
-from agents_remember.memory_quality.knowledge_validator.parsed import RecordFile, SidecarFile
+from agents_remember.memory_quality.knowledge_validator.parsed import (
+    RecordFile,
+    SidecarFile,
+    parse_sidecars_leniently,
+    parse_tree,
+)
 from agents_remember.memory_quality.knowledge_validator.registry import (
     Finding,
     ValidationContext,
     ValidationRule,
     anchor_key,
+    debt_report_note,
+    debt_reports_at,
+    merge_report_note,
+    merge_reports_at,
     register_rule,
     sidecar_entries,
 )
+from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from agents_remember.models.knowledge_files.shapes import (
     ROUTE_TARGET_PREFIX,
     AnchorTarget,
@@ -96,16 +108,40 @@ def check_markers(context: ValidationContext) -> Iterator[Finding]:
         yield from _markdown_findings(path, text, sidecar)
 
 
+def _base_sidecars_without_markdown(bases: Iterable[KnowledgeTree]) -> frozenset[str]:
+    """The sidecar paths a comparison base holds as a file sidecar without Markdown."""
+
+    missing: set[str] = set()
+    for base in bases:
+        parsed = parse_tree(base)
+        for sidecar in parsed.sidecars:
+            if (
+                isinstance(sidecar.sidecar, FileSidecar)
+                and sidecar.markdown_path not in parsed.markdown
+            ):
+                missing.add(sidecar.path)
+    return frozenset(missing)
+
+
 def check_sidecar_without_markdown(context: ValidationContext) -> Iterator[Finding]:
+    carried_paths = _base_sidecars_without_markdown(context.bases)
+    migration = context.migration
     for sidecar in context.parsed.sidecars:
         if isinstance(sidecar.sidecar, FileSidecar) and (
             sidecar.markdown_path not in context.parsed.markdown
         ):
+            carried = sidecar.path in carried_paths
+            message = (
+                "file sidecar without Markdown: its entries wait for a curator to re-home or retire "
+                "them (MIK-R21 rule 5)"
+            )
+            if debt_reports_at(context, carried=carried):
+                message += f"; {debt_report_note(migration)}"
             yield Finding(
                 sidecar.path,
                 "",
-                "file sidecar without Markdown: its entries wait for a curator to re-home or retire "
-                "them (MIK-R21 rule 5)",
+                message,
+                carried=carried,
             )
 
 
@@ -148,15 +184,35 @@ def check_relations(context: ValidationContext) -> Iterator[Finding]:
             yield Finding(problem.path, problem.field, problem.message)
 
 
+def _base_unresolved_targets(bases: Iterable[KnowledgeTree]) -> frozenset[tuple[str, str]]:
+    """``(sidecar path, target text)`` of every unresolved target a comparison base holds."""
+
+    found: set[tuple[str, str]] = set()
+    for base in bases:
+        for sidecar in parse_sidecars_leniently(base):
+            for reference in sidecar.sidecar.references.values():
+                for target in reference.targets:
+                    if isinstance(target, UnresolvedTarget):
+                        found.add((sidecar.path, target.text))
+    return frozenset(found)
+
+
 def check_unresolved_targets(context: ValidationContext) -> Iterator[Finding]:
+    carried_targets = _base_unresolved_targets(context.bases)
+    migration = context.migration
     for sidecar in context.parsed.sidecars:
         for number, reference in sidecar.sidecar.references.items():
             for index, target in enumerate(reference.targets):
                 if isinstance(target, UnresolvedTarget):
+                    carried = (sidecar.path, target.text) in carried_targets
+                    message = f"unresolved reference target: {target.text}"
+                    if debt_reports_at(context, carried=carried):
+                        message += f"; {debt_report_note(migration)}"
                     yield Finding(
                         sidecar.path,
                         f"references.{number}.targets.{index}",
-                        f"unresolved reference target: {target.text}",
+                        message,
+                        carried=carried,
                     )
 
 
@@ -216,13 +272,19 @@ def check_carried_stale(context: ValidationContext) -> Iterator[Finding]:
     code = context.code
     if code is None:
         return
+    reporting = merge_reports_at(context)
     for anchor in _sidecar_anchors(context):
         if anchor.carried and not code.has_file(anchor.path):
+            message = (
+                f"carried anchor names {anchor.path}, absent from {code.label}: a stale entry "
+                "(MIK-R03) or stale reference (MIK-R24 rule 5), for the maintenance pass"
+            )
+            if reporting:
+                message += f"; {merge_report_note(context)}"
             yield Finding(
                 anchor.sidecar,
                 anchor.field,
-                f"carried anchor names {anchor.path}, absent from {code.label}: a stale entry "
-                "(MIK-R03) or stale reference (MIK-R24 rule 5), for the maintenance pass",
+                message,
             )
 
 
@@ -233,9 +295,9 @@ REFERENCE_RULES = (
     ValidationRule(
         "R22.3-sidecar-without-markdown",
         "MIK-R22 rule 3 (MIK-R21 rule 5)",
-        "a file sidecar without Markdown is reported",
+        "a file sidecar without Markdown is migration debt",
         check_sidecar_without_markdown,
-        report_only=True,
+        migration_debt=True,
     ),
     ValidationRule(
         "R22.3-record-links", "MIK-R22 rule 3", "referenced record IDs exist", check_record_links
@@ -246,9 +308,9 @@ REFERENCE_RULES = (
     ValidationRule(
         "R22.3-unresolved-target",
         "MIK-R22 rule 3",
-        "unresolved reference targets are reported",
+        "unresolved reference targets are migration debt",
         check_unresolved_targets,
-        report_only=True,
+        migration_debt=True,
     ),
     ValidationRule(
         "R22.5-family-members", "MIK-R22 rule 5", "family members exist", check_family_members
@@ -262,9 +324,10 @@ REFERENCE_RULES = (
     ValidationRule(
         "R22.6-carried-stale",
         "MIK-R22 rule 6",
-        "carried anchors at absent paths are reported stale",
+        "carried anchors at absent paths refuse, merge_reports",
         check_carried_stale,
-        report_only=True,
+        writer_reports=True,
+        merge_reports=True,
     ),
 )
 

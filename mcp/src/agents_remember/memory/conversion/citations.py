@@ -69,6 +69,8 @@ class RowContext:
     tree: Mapping[str, str]
     objects: CodeObjects
     route_sidecar: bool
+    symlinks: frozenset[str] = frozenset()
+    """Tree paths whose entry is a symlink: symbol anchors there are refused."""
 
 
 def _plain_path(value: str) -> str | None:
@@ -80,7 +82,7 @@ def _plain_path(value: str) -> str | None:
 
 def _anchor(context: RowContext, path: str, locator: dict[str, Any]) -> dict[str, Any] | None:
     blob = context.tree[path]
-    content = context.objects.content(blob, locator, path)
+    content = context.objects.content(blob, locator, path, symlinks=context.symlinks)
     if content is None:
         return None
     anchor: dict[str, Any] = {"locator": locator, "blob": blob, "content": content}
@@ -106,7 +108,9 @@ def _symbol_targets(
         if anchor.kind != model.SYMBOL:
             continue
         for path in cited:
-            span = context.objects.symbol_span(path, context.tree[path], anchor.text)
+            span = context.objects.symbol_span(
+                path, context.tree[path], anchor.text, symlinks=context.symlinks
+            )
             if span is None:
                 continue
             target = _anchor(context, path, {"kind": "symbol", "name": anchor.text})

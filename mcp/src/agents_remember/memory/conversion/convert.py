@@ -258,6 +258,7 @@ def _convert_cards(
             tree=objects.tree(commit),
             objects=objects,
             route_sidecar=own is None,
+            symlinks=CodeObjects.link_paths(objects.tree_modes(commit)),
         )
         references = {
             str(number): row_reference(row, context, tally.targets)
@@ -333,6 +334,7 @@ def _entry_states(export: ExportResult, objects: CodeObjects, commit: str) -> di
     """Exported entries by MIK-R03 state at the conversion's code tree (``current``/``stale``)."""
 
     tree = objects.tree(commit)
+    symlinks = CodeObjects.link_paths(objects.tree_modes(commit))
     states: Counter[str] = Counter()
     for path, entries in export.entries.items():
         blob = tree.get(path)
@@ -342,7 +344,8 @@ def _entry_states(export: ExportResult, objects: CodeObjects, commit: str) -> di
                 states["stale:path-absent"] += 1
             elif (
                 blob == anchor["blob"]
-                or objects.content(blob, anchor["locator"], path) == anchor["content"]
+                or objects.content(blob, anchor["locator"], path, symlinks=symlinks)
+                == anchor["content"]
             ):
                 states["current"] += 1
             else:

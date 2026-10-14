@@ -81,9 +81,11 @@ from agents_remember.models.knowledge_files.reconsideration import (
 from agents_remember.models.knowledge_files.shapes import (
     Anchor,
     DecisionId,
+    FamilyId,
     FileModel,
     InvariantId,
     Label,
+    RepositoryPath,
     RequirementReference,
     Text,
     require_unique,
@@ -96,8 +98,14 @@ ABSENT: Final = "absent"
 
 INVARIANT_DISPOSITIONS: Final = ("changed", "moved", "deleted", "extended", "no_impact")
 FAMILY_DISPOSITIONS: Final = ("changed", "rerouted", "assigned", "retired", "no_impact")
+ONBOARDING_DISPOSITIONS: Final = ("updated", "no_impact")
+MEMBERSHIP_DISPOSITIONS: Final = ("no_family",)
+RECORD_DISPOSITIONS: Final = ("changed", "retired", "no_impact")
 InvariantDisposition = Literal["changed", "moved", "deleted", "extended", "no_impact"]
 FamilyDisposition = Literal["changed", "rerouted", "assigned", "retired", "no_impact"]
+OnboardingDisposition = Literal["updated", "no_impact"]
+MembershipDisposition = Literal["no_family"]
+RecordDisposition = Literal["changed", "retired", "no_impact"]
 
 _OWNER_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 _CROSSING_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]*-crossing-[1-9][0-9]*$"
@@ -284,17 +292,34 @@ class FamilyRow(HistoryRow):
         return self
 
 
+class SourceBlob(FileModel):
+    """``{ path, blob }``: one source file the row examined, at the code candidate.
+
+    ``blob`` is the file's Git blob at C, or ``"absent"`` when C no longer holds the
+    path. An onboarding row is current while its sources equal the item's facts
+    (MIK-R53 rule 3); a row without ``sources`` predates the binding (rule 4).
+    """
+
+    path: RepositoryPath
+    blob: Label
+
+    @model_validator(mode="after")
+    def _require_blob_or_absent(self) -> SourceBlob:
+        if self.blob != ABSENT and not re.fullmatch(r"[0-9a-f]+", self.blob):
+            raise ValueError("a source blob is a hex object id or 'absent'")
+        return self
+
+
 class OnboardingTraceRow(HistoryRow):
-    """A reviewed-no-impact attestation about one onboarding card or route overview.
+    """A judgment about one onboarding card or route overview (MIK-R30, MIK-R53).
 
     Subject ``onboarding:<source path>`` for a file card and ``onboarding:<route>/overview`` for a
-    route overview (``onboarding:overview`` for the root route). MIK-R30 owns the kind: such a row,
-    with disposition ``no_impact``, satisfies the onboarding gate's item for a changed source file's
-    card or governing route overview that has no counted change
-    (``worktrees/modules/onboarding_trace.py``); ``no_impact`` is the only disposition. The curator
-    writes it through the writer's ``history`` section; MIK-R24 rule 8 step 1 also writes it (an
-    open leaf's Update History ``No content impact:``/``No route impact:`` markers move here when
-    its line is converted).
+    route overview (``onboarding:overview`` for the root route). Disposition ``updated`` (the card
+    was brought up to date) or ``no_impact`` (it was reviewed and needs no change). ``sources``
+    binds the judgment to the covered source files' blobs at the code candidate (MIK-R53 rule 1);
+    the writer fills it, and ``updated`` without it is refused. Rows written before the binding
+    carry no ``sources``: in a closed file they stay valid and frozen, in an open file they
+    answer nothing (MIK-R53 rule 4).
 
     ``markers`` holds the moved marker lines, one entry per line (a line longer than one text value
     is split deterministically into consecutive pieces); ``reason`` is then a short fixed summary.
@@ -304,9 +329,21 @@ class OnboardingTraceRow(HistoryRow):
 
     row_kind: ClassVar[str] = "onboarding_trace"
     subject_pattern: ClassVar[str] = r"^onboarding:\S(?:.*\S)?$"
-    dispositions: ClassVar[tuple[str, ...]] = ("no_impact",)
+    dispositions: ClassVar[tuple[str, ...]] = ONBOARDING_DISPOSITIONS
 
     markers: tuple[Text, ...] | None = Field(default=None, min_length=1)
+    sources: tuple[SourceBlob, ...] | None = None
+
+    @model_validator(mode="after")
+    def _require_bound_updated_row(self) -> OnboardingTraceRow:
+        if self.disposition == "updated" and self.sources is None:
+            raise ValueError(
+                "an updated onboarding row binds the source blobs it examined; "
+                "the writer fills 'sources' from the code candidate"
+            )
+        if self.sources is not None:
+            require_unique(tuple(source.path for source in self.sources), what="source paths")
+        return self
 
 
 class PlannedRef(FileModel):
@@ -394,6 +431,89 @@ class ReconsiderationRow(HistoryRow):
     dispositions: ClassVar[tuple[str, ...]] = RECONSIDER_DISPOSITIONS
 
 
+RECORD_ROW_PREFIXES: Final = (
+    RECORD_PREFIXES["decision"],
+    RECORD_PREFIXES["incident"],
+    RECORD_PREFIXES["assumption"],
+    RECORD_PREFIXES["limitation"],
+    RECORD_PREFIXES["failure_mode"],
+    RECORD_PREFIXES["scenario"],
+    RECORD_PREFIXES["diagnostic"],
+    RECORD_PREFIXES["term"],
+)
+"""The record subjects a ``record`` row names: decisions and facet records, never invariants."""
+
+RECORD_ROW_SUBJECT_PATTERN: Final = id_pattern(*RECORD_ROW_PREFIXES)
+MEMBERSHIP_SUBJECT_PATTERN: Final = "^membership:" + id_pattern(RECORD_PREFIXES["invariant"])[1:]
+
+
+def membership_subject(invariant_id: str) -> str:
+    """The ``membership`` row subject for ``invariant_id`` (MIK-R53 rule 6)."""
+
+    return f"membership:{invariant_id}"
+
+
+def membership_invariant(subject: str) -> str | None:
+    """The invariant ID a ``membership`` row subject names, or ``None`` when it names none."""
+
+    if not subject.startswith("membership:"):
+        return None
+    candidate = subject.removeprefix("membership:")
+    return candidate if re.match(id_pattern(RECORD_PREFIXES["invariant"]), candidate) else None
+
+
+class MembershipRow(HistoryRow):
+    """No family: the curator examined the invariant and found no joint obligation (MIK-R53 rule 6).
+
+    Subject ``membership:<invariant id>``; the one disposition ``no_family``. ``revision`` is the
+    invariant's revision in the candidate, filled by the writer. ``considered`` names the family
+    IDs examined; it may be empty. The row answers an ``unassigned_invariant`` worklist item at
+    the invariant's current revision. The writer refuses it for an invariant a family lists.
+    """
+
+    row_kind: ClassVar[str] = "membership"
+    subject_pattern: ClassVar[str] = MEMBERSHIP_SUBJECT_PATTERN
+    dispositions: ClassVar[tuple[str, ...]] = MEMBERSHIP_DISPOSITIONS
+
+    revision: Revision
+    considered: tuple[FamilyId, ...] = ()
+
+    @model_validator(mode="after")
+    def _require_distinct_considered(self) -> MembershipRow:
+        require_unique(tuple(self.considered), what="considered family ids")
+        return self
+
+
+class RecordRow(HistoryRow):
+    """A judgment about one decision or facet record (MIK-R53 rule 8).
+
+    The subject is the record's ID (a decision, incident, assumption, limitation, failure mode,
+    scenario, diagnostic or term). Dispositions: ``changed`` (the record's meaning changed),
+    ``retired`` (its status became ``retired``) or ``no_impact``. ``revision`` is the record's
+    revision in the candidate, filled by the writer. ``effect`` is required on ``changed`` and is
+    ``retire`` on ``retired``; ``because`` is optional. The row answers a ``touched_record``
+    worklist item, and carries the evidence for a record another owner authored.
+    """
+
+    row_kind: ClassVar[str] = "record"
+    subject_pattern: ClassVar[str] = RECORD_ROW_SUBJECT_PATTERN
+    dispositions: ClassVar[tuple[str, ...]] = RECORD_DISPOSITIONS
+
+    revision: Revision
+    effect: EffectLabel | None = None
+    because: tuple[Because, ...] | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _require_disposition_effect(self) -> RecordRow:
+        if self.disposition == "changed" and self.effect is None:
+            raise ValueError("a changed record row names its effect")
+        if self.disposition == "retired" and self.effect != "retire":
+            raise ValueError("a retired record row's effect is retire")
+        if self.disposition == "no_impact" and self.effect is not None:
+            raise ValueError("a no_impact record row carries no effect")
+        return self
+
+
 @dataclass(frozen=True)
 class HistoryRowKind:
     """A registered row kind: the subject form it claims, its model and its owner packet."""
@@ -404,7 +524,7 @@ class HistoryRowKind:
 
 
 # The row-kind registry. A registered item kind of MIK-R08 rule 1 whose satisfying row lives in the
-# history file adds its row kind here when it lands. Subject forms must not overlap.
+# history file adds its row kind here when they land. Subject forms must not overlap.
 HISTORY_ROW_KINDS: Final[tuple[HistoryRowKind, ...]] = (
     HistoryRowKind("invariant", InvariantRow, "MIK-R07"),
     HistoryRowKind("family", FamilyRow, "MIK-R07"),
@@ -412,6 +532,8 @@ HISTORY_ROW_KINDS: Final[tuple[HistoryRowKind, ...]] = (
     HistoryRowKind("planned", PlannedEffectRow, "MIK-R11"),
     HistoryRowKind("unexplained", UnexplainedChangeRow, "MIK-R10"),
     HistoryRowKind("reconsideration", ReconsiderationRow, "MIK-R14"),
+    HistoryRowKind("membership", MembershipRow, "MIK-R53"),
+    HistoryRowKind("record", RecordRow, "MIK-R53"),
 )
 
 
@@ -544,6 +666,21 @@ def merged_leaf_history(files: Iterable[HistoryFile]) -> HistoryFile | None:
     return ordered[-1].model_copy(update={"rows": tuple(rows.values())})
 
 
+def winning_row_closed(files: Iterable[HistoryFile]) -> dict[str, bool]:
+    """Each winning row subject's own file ``closed`` flag, in attempt order.
+
+    The same supersede rule as :func:`merged_leaf_history`: a row in a later attempt about a
+    subject supersedes the earlier one. A merged file carries only the latest file's flag, so
+    readers that judge a row by its own file's provenance (MIK-R53 rule 4) use this map.
+    """
+
+    closed: dict[str, bool] = {}
+    for history in sorted(files, key=lambda one: one.attempt_number):
+        for row in history.rows:
+            closed[row.subject] = history.closed
+    return closed
+
+
 # --------------------------------------------------------------------------------------------------
 # Freezing (rule 7)
 # --------------------------------------------------------------------------------------------------
@@ -611,13 +748,23 @@ def sidecar_entry_anchors(
 
 
 def unknown_subjects(history: HistoryFile, known_record_ids: Collection[str]) -> list[str]:
-    """Return the invariant and family row subjects that name no known record."""
+    """Return the row subjects that name no known record.
 
-    return [
-        row.subject
-        for row in history.rows
-        if isinstance(row, InvariantRow | FamilyRow) and row.subject not in known_record_ids
-    ]
+    Invariant, family and ``record`` rows name their record; a ``membership`` row names its
+    invariant after the ``membership:`` prefix. Every other kind answers worklist items, not
+    records, and is not checked here.
+    """
+
+    unknown = []
+    for row in history.rows:
+        if isinstance(row, InvariantRow | FamilyRow | RecordRow):
+            if row.subject not in known_record_ids:
+                unknown.append(row.subject)
+        elif isinstance(row, MembershipRow):
+            invariant = membership_invariant(row.subject)
+            if invariant is None or invariant not in known_record_ids:
+                unknown.append(row.subject)
+    return unknown
 
 
 def invariant_revision_violation(

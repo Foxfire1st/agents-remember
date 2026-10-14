@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from agents_remember.application.knowledge_worklist import leaf_onboarding_trace_sides
+from agents_remember.application.knowledge_worklist.onboarding_trace import worktree_code_blobs
 from agents_remember.application.memory_quality.converted_base import (
     context_check_base,
     leaf_base_port,
@@ -387,8 +388,16 @@ def _realize_prepared_memory(
     trace_sides = leaf_onboarding_trace_sides(current.contract, memory_tree=memory)
     if trace_sides is not None:
         # MIK-R30: a converted tree's onboarding gate is the history-file gate.
+        try:
+            code_blobs = worktree_code_blobs(physical_code, change.changed_paths)
+        except Exception as error:
+            raise RuntimeError(f"the code candidate's blobs cannot be read: {error}") from error
         validate_onboarding_traces_for_context(
-            context, change.changed_paths, trace_sides, working_paths=change.working_paths
+            context,
+            change.changed_paths,
+            trace_sides,
+            working_paths=change.working_paths,
+            code_blobs=code_blobs,
         )
     else:
         validate_onboarding_refresh_plan_for_context(

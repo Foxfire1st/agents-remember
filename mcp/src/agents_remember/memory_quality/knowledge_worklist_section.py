@@ -198,7 +198,7 @@ def _reconsideration_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) ->
 
 
 def _trace_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
-    """MIK-R30: the changed sources a card or route overview traces, and what answers it."""
+    """MIK-R53: the changed sources a card or route overview traces, and what answers it."""
 
     parts = [f"sources {', '.join(facts.get('sources') or ()) or '-'}"]
     if facts.get("sidecarUnreadable"):
@@ -207,9 +207,30 @@ def _trace_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]
     parts.append(
         f"answered by {answered}"
         if answered
-        else "needs a counted change of its Markdown or sidecar, or a no_impact row"
+        else "needs a counted change of its Markdown or sidecar references, "
+        "or a current updated/no_impact row (sources equal to the blobs at C)"
     )
     return parts
+
+
+def _membership_facts(_item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    """MIK-R53 rule 6: the unlisted invariant, and the row that answers it."""
+
+    return [
+        f"revision {facts.get('revision')}",
+        "needs the leaf's membership row (no_family) at the invariant's current revision",
+    ]
+
+
+def _touched_record_facts(_item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    """MIK-R53 rule 8: the record's change on both sides, and the row that answers it."""
+
+    return [
+        f"revision {facts.get('baseRevision')} to {facts.get('revision')}, "
+        f"status {facts.get('baseStatus')} to {facts.get('status')}",
+        "needs the leaf's record row at the candidate revision "
+        "(changed, retired or no_impact for the change)",
+    ]
 
 
 _FACT_RENDERERS: Final[
@@ -222,6 +243,8 @@ _FACT_RENDERERS: Final[
     "family_route_condition": _route_facts,
     "unexplained_hunk": _unexplained_facts,
     "unexplained_file": _unexplained_facts,
+    "unassigned_invariant": _membership_facts,
+    "touched_record": _touched_record_facts,
     "reconsideration_candidate": _reconsideration_facts,
     "onboarding_trace": _trace_facts,
 }

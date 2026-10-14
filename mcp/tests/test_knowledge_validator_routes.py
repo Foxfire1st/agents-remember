@@ -297,7 +297,7 @@ def test_the_standalone_command_validates_a_converted_fixture_tree(
     document = json.loads(out)
     assert document["ok"] is False
     rules = sorted((one["rule"], one["reportOnly"]) for one in document["violations"])
-    assert rules == [("R22.3-markers", False), (LEGACY_COUNT, True)]
+    assert rules == [("R22.3-markers", False), (LEGACY_COUNT, False)]
 
     unconverted = tmp_path / "unconverted"
     write_tree(unconverted, {"onboarding/x.md": b"# x [1]\n"})

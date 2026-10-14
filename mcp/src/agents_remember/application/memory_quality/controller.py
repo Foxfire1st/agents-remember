@@ -15,6 +15,7 @@ from agents_remember.application.knowledge_worklist import (
     recompute_leaf_worklist,
 )
 from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
+from agents_remember.application.knowledge_worklist.onboarding_trace import worktree_code_blobs
 from agents_remember.application.memory_quality.answer import (
     failed_quality_error,
     quality_result_answer,
@@ -106,6 +107,7 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_memory_refresh_attestations,
 )
 from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
+from agents_remember.worktrees.modules.onboarding_trace import CHECK_NAME, INCOMPLETE_CODE
 
 _CAPACITY_GUIDANCE = (
     "Poll an existing run or wait for active memory-quality work to finish, then submit "
@@ -923,8 +925,29 @@ def _onboarding_refresh_gate(
     memory_tree = scope.onboarding_root.parent
     trace_sides = leaf_onboarding_trace_sides(contract, memory_tree=memory_tree)
     if trace_sides is not None:
+        try:
+            code_blobs = worktree_code_blobs(contract.code_worktree, traced_paths)
+        except Exception as error:
+            return (
+                [
+                    {
+                        "check": CHECK_NAME,
+                        "code": INCOMPLETE_CODE,
+                        "path": "",
+                        "message": (
+                            "the onboarding trace gate cannot read the code candidate's "
+                            f"blobs: {error}"
+                        ),
+                    }
+                ],
+                [],
+            )
         trace, findings = onboarding_trace_gate_for_context(
-            scope.quality_context, traced_paths, trace_sides, working_paths=working_paths
+            scope.quality_context,
+            traced_paths,
+            trace_sides,
+            working_paths=working_paths,
+            code_blobs=code_blobs,
         )
         response["onboardingTrace"] = trace.brief()
         return list(findings), trace.report_only_findings()

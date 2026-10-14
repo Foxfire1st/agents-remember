@@ -181,7 +181,10 @@ def test_memory_quality_reads_the_converted_format(tmp_path: Path) -> None:
         drift_context=DriftCheckContext(code_repository_root=code.root, context=None),
     )
 
-    assert result["ok"] is True, result["findings"]
+    assert result["ok"] is False, result["findings"]
+    # MIK-R53 rule 11: a carried anchor at a deleted path refuses off merge.
+    (stale,) = [one for one in result["findings"] if one["rule"] == "R22.6-carried-stale"]
+    assert stale["path"] == "onboarding/src/pkg/deleted.py.json"
     assert result["checks"]["knowledge.converted"]["status"] == "converted"
     assert result["checks"]["style.update_history.history_order"]["status"] == (
         "not-applicable-converted"
@@ -198,13 +201,9 @@ def test_memory_quality_reads_the_converted_format(tmp_path: Path) -> None:
         )  # fmt: skip
         return item
 
-    passing = drift_item(result["checks"])
-    assert (passing["status"], passing["findingCount"]) == ("pass", 0)
-    refused = {
-        **result["checks"]["knowledge.converted"],
-        "ok": False,
-        "findingCount": 2,
-    }
+    converted_item = drift_item(result["checks"])
+    assert (converted_item["status"], converted_item["findingCount"]) == ("fail", 1)
+    refused = {**result["checks"]["knowledge.converted"], "ok": False, "findingCount": 2}
     failing = drift_item({**result["checks"], "knowledge.converted": refused})
     assert (failing["status"], failing["findingCount"]) == ("fail", 2)
     absent = drift_item({})  # a run that executed neither spelling is still a failure
@@ -629,9 +628,10 @@ def _rules(findings: list[dict[str, Any]]) -> list[str]:
 def test_the_converted_check_compares_an_unconverted_head_through_its_converted_base(
     tmp_path: Path,
 ) -> None:
-    """Review R3-1 (MIK-R24 rule 7): with ``HEAD`` unconverted, the ``knowledge.converted`` check
-    validates against ``HEAD``'s conversion, so a carried reference to a file the candidate deleted
-    or moved is reported, never refused as a newly written anchor."""
+    """Review R3-1 (MIK-R24 rule 7), MIK-R53 rule 11: with ``HEAD`` unconverted, the
+    ``knowledge.converted`` check validates against ``HEAD``'s conversion. A carried reference
+    to a file the candidate deleted or moved refuses off merge (it reports only at a sync
+    merge), never as a newly written anchor."""
 
     code = code_repository(tmp_path / "code")
     memory = tmp_path / "memory"
@@ -641,7 +641,15 @@ def test_the_converted_check_compares_an_unconverted_head_through_its_converted_
     (code.root / "tests/test_app.py").rename(code.root / "tests/test_moved.py")  # one moved
 
     without = converted_knowledge_check(memory, code.root)
-    assert set(_rules(without["findings"])) == {"R22.6-anchor-path"}  # every anchor read as new
+    # Every anchor is read as new; conversion-written debt no base holds refuses at once.
+    assert set(_rules(without["findings"])) == {
+        "R22.6-anchor-path",
+        "R22.3-unresolved-target",
+        "R22.3-sidecar-without-markdown",
+        "R04.4-route-unassigned",
+        "R27.4-legacy-unassessed",
+    }
+    new_anchors = [one for one in without["findings"] if one.get("rule") == "R22.6-anchor-path"]
     leaf = SimpleNamespace(
         contract=SimpleNamespace(code_base_commit=code.first),
         quality_code_root=code.root,
@@ -649,11 +657,12 @@ def test_the_converted_check_compares_an_unconverted_head_through_its_converted_
     coordination = tmp_path / "coordination"
     base = converted_check_base(cast(Any, leaf), coordination)
     checked = converted_knowledge_check(memory, code.root, base=base)
-    assert checked["ok"] is True and checked["findings"] == []
-    carried = [
+    assert checked["ok"] is False
+    carried = [one for one in checked["findings"] if one.get("rule") == "R22.6-carried-stale"]
+    assert len(carried) == len(new_anchors)  # the same anchors, refused as carried
+    assert [
         one for one in checked["reportOnlyFindings"] if one.get("rule") == "R22.6-carried-stale"
-    ]
-    assert len(carried) == len(without["findings"])  # the same anchors, reported
+    ] == []
     (cached,) = (coordination / "runtime" / "knowledge-worklist-bases").glob("*.json.gz")
     key = json.loads(gzip.decompress(cached.read_bytes()))["key"]
     assert (key[0], key[2]) == (
@@ -668,7 +677,9 @@ def test_the_converted_check_compares_an_unconverted_head_through_its_converted_
         memory / "onboarding",
         drift_context=MemoryQualityAdapter().drift_context(code.root, context, 50),
     )
-    assert quality["ok"] is True, quality["findings"]
+    # MIK-R53 rule 11: the closeout's quality run refuses the carried stale anchors too.
+    assert quality["ok"] is False, quality["findings"]
+    assert set(_rules(quality["findings"])) == {"R22.6-carried-stale"}
     assert context_check_base(code.root, SimpleNamespace()) is None  # no coordination root: no port
 
     unborn = tmp_path / "unborn-code"

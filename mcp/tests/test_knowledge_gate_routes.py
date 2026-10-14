@@ -145,7 +145,7 @@ def _answer(world: Gated) -> None:
     """The leaf's code change, answered by current rows in its open history file."""
 
     _edit(world, CODE_A.replace("return value", "return -value"))
-    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
 
 
 def _record(world: Gated, memory_commit: str) -> Any:
@@ -188,7 +188,7 @@ def test_a_hand_closed_leaf_file_is_refused_at_closeout_validation_and_record_la
             "reason": "Every member still holds.",
             "examined": [{"id": one, "revision": revision} for one, revision in examined.items()],
         },
-        *trace_rows(*TRACES),
+        *trace_rows(world, *TRACES),
         closed=True,
     )
     candidate = world.candidate()
@@ -799,7 +799,7 @@ def test_a_code_object_that_is_unavailable_is_named_and_keeps_the_item_findings(
     memo.GATE_MEMO.clear()
     _edit(world, CODE_A.replace("return value", "return -value").replace("return 1", "return 3"))
     before = world.reanchor("RLZ-A00001", "RLZ-A00002")
-    _answered(world, before, *trace_rows(*TRACES))
+    _answered(world, before, *trace_rows(world, *TRACES))
     _edit(world, CODE_A.replace("return value", "return +value").replace("return 1", "return 3"))
     missing = observe.CodeObjectUnavailable(
         "the blob e1 the line range was recorded against is unavailable"
@@ -918,7 +918,7 @@ def test_a_git_read_that_fails_inside_a_predicate_or_the_validator_is_never_a_ve
     memo.GATE_MEMO.clear()
     _edit(world, CODE_A.replace("return value", "return -value").replace("return 1", "return 3"))
     before = world.reanchor("RLZ-A00001", "RLZ-A00002")
-    _answered(world, before, *trace_rows(*TRACES))
+    _answered(world, before, *trace_rows(world, *TRACES))
     _edit(world, CODE_A.replace("return value", "return +value").replace("return 1", "return 3"))
     candidate = world.candidate()
     tip = git(world.memory, "rev-parse", "main")
@@ -1062,7 +1062,7 @@ def _lost_line_range(world: Gated) -> None:
     row = world.invariant_row("INV-AAAAAA", world.reanchor("RLZ-A00002"))
     lost_after = {**anchor, "path": A}
     row["covers"].append({"id": "RLZ-A00003", "before": lost_after, "after": lost_after})
-    world.rows(row, family_row({"INV-AAAAAA": 1, "INV-BBBBBB": 1}), *trace_rows(*TRACES))
+    world.rows(row, family_row({"INV-AAAAAA": 1, "INV-BBBBBB": 1}), *trace_rows(world, *TRACES))
 
 
 def test_a_recorded_blob_the_store_lacks_is_named_at_its_real_raise_site(
@@ -1155,7 +1155,7 @@ def test_an_unwritable_closing_receipt_restores_the_file_and_admits_nothing(worl
     """N25: direct landing restores the history file to its open bytes when the receipt fails."""
 
     series = _series(world)
-    world.rows(*trace_rows(*TRACES))
+    world.rows(*trace_rows(world, *TRACES))
     open_bytes = (world.memory / HISTORY).read_bytes()
     closing = close_owner_history(world.memory, LEAF)
     assert json.loads((world.memory / HISTORY).read_text())["closed"] is True

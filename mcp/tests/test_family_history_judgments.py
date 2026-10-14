@@ -22,6 +22,7 @@ from agents_remember.memory_quality.knowledge_validator import (
     knowledge_tree_from_directory,
     knowledge_tree_from_git,
     require_valid_commit,
+    validate_tree,
 )
 from agents_remember.memory_quality.knowledge_validator.commit_route import (
     GitKnowledgeValidation,
@@ -395,9 +396,18 @@ def test_a_master_landing_does_not_judge_closed_legacy_rows_its_base_lacks(tmp_p
     commit_all(world.memory, "the master's closed leaf history")
     master = git(world.memory, "rev-parse", "HEAD")
     assert _route(world, master, [base]) is None
-    # Without any base the closed files are equally historical (the product's standalone check).
-    assert _route(world, master, []) is None
-    assert _validate(world, bases=(), publication=False).ok
+    # Without any base the closed files are equally historical, so rows are still not judged --
+    # but with no base to carry the legacy-unassessed records, that debt is new and refuses at
+    # once (MIK-R53 rule 10).
+    standalone = _route(world, master, [])
+    assert standalone is not None and "R27.4-legacy-unassessed" in standalone
+    assert "R09-history-rows" not in standalone and "R48-family-judgment" not in standalone
+    standalone_report = validate_tree(
+        knowledge_tree_from_directory(world.memory),
+        code=CodeDirectory("paired code", world.code),
+    )
+    assert not standalone_report.ok
+    assert {v.rule for v in standalone_report.refusals} == {"R27.4-legacy-unassessed"}
 
 
 def test_a_master_landing_still_judges_an_open_history_file_it_publishes(tmp_path: Path) -> None:

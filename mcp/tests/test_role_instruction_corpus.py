@@ -613,6 +613,50 @@ def test_the_curator_hand_off_list_contract_has_one_home_its_consequences_declar
         "## Rule 2 — no paraphrase",
     ):
         assert section in text, f"{relative} no longer carries '{section}'"
+    # F12: every in-scope copy of the hand-off contract requires the current onboarding row
+    # and narrows counted sidecar edits to references.
+    copies = [contract] + [
+        REPOSITORY_ROOT / root / "l-01-agent-lifecycles" / relative
+        for root in (
+            ".agents/skills",
+            ".claude/skills",
+            ".codex/skills",
+            ".cursor/skills",
+            ".github-vscode/skills",
+            ".hermes/skills",
+            ".openclaw/workspace/skills",
+            ".pi/skills",
+            "mcp/src/agents_remember/package_data/runtime/skills",
+        )
+    ]
+    for copy_path in copies:
+        copy_text = " ".join(copy_path.read_text(encoding="utf-8").split())
+        assert "its current `onboarding:<path>` row" in copy_text, copy_path
+        assert "a counted change of its card alone never answers" in copy_text, copy_path
+        assert "its sidecar's `references` beyond mechanical anchor fields" in copy_text, copy_path
+    # F12 narrow (architect): the converted-card workflow's answer sentences require the
+    # current row (rules 1 and 2); nothing else of c-05 is touched.
+    workflow = "workflows/converted-card-workflow.md"
+    c05_copies = [SKILLS_ROOT / "c-05-create-or-update-onboarding-files" / workflow] + [
+        REPOSITORY_ROOT / root / "c-05-create-or-update-onboarding-files" / workflow
+        for root in (
+            ".agents/skills",
+            ".claude/skills",
+            ".codex/skills",
+            ".cursor/skills",
+            ".github-vscode/skills",
+            ".hermes/skills",
+            ".openclaw/workspace/skills",
+            ".pi/skills",
+            "mcp/src/agents_remember/package_data/runtime/skills",
+        )
+    ]
+    for c05_copy in c05_copies:
+        c05_text = " ".join(c05_copy.read_text(encoding="utf-8").split())
+        assert "its current `onboarding:<route>/overview`" in c05_text, c05_copy
+        assert "a counted change of its overview alone never answers" in c05_text, c05_copy
+        assert "an `updated` row with a counted change" in c05_text, c05_copy
+        assert "a `no_impact` row when the card still holds" in c05_text, c05_copy
     assert "target: []" in text, f"{relative} no longer encodes a ruling that applies nowhere"
     assert unresolved_references(LIFECYCLE_ROOT) == [], "the contract cites a path that is gone"
 

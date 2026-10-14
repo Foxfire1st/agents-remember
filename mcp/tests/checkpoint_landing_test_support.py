@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application import worktree_tools
+from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.kernel.memory_ledger import LedgerRow
@@ -218,6 +219,12 @@ def accumulate_master_line(
             "disposition": "no_impact",
             "reason": "The landing's file carries no invariant.",
             "items": [],
+            "sources": [
+                {
+                    "path": f"{label}.txt",
+                    "blob": CodeSnapshot.capture(leaf.code_worktree).blobs[f"{label}.txt"],
+                }
+            ],
         }
     )
     history_path.write_text(

@@ -19,8 +19,10 @@ from agents_remember.memory_quality.knowledge_validator import (
     validate_tree,
 )
 from knowledge_validator_test_support import (
+    FAMILY,
     ROUTE_CARD,
     code,
+    edit_json,
     fixture_tree_files,
     tree,
 )
@@ -47,7 +49,16 @@ CONFORMING = (
 
 
 def _overview(text: str) -> dict[str, bytes]:
-    files = fixture_tree_files()
+    files = edit_json(
+        fixture_tree_files(),
+        FAMILY,
+        lambda record: record.update(
+            admission={
+                "criteria": ["joint_guarantee"],
+                "justification": "Source identities and attributed landing pairs jointly keep recorded inputs exact.",
+            }
+        ),
+    )
     files[ROUTE_CARD] = text.encode("utf-8")
     return files
 

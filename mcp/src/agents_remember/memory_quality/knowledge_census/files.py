@@ -10,7 +10,7 @@ validator reports those problems (``R20.1-census-shape`` and ``R20.1-census-cano
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Final, Literal
 
@@ -36,14 +36,32 @@ from agents_remember.models.knowledge_files.census import (
 )
 from agents_remember.models.knowledge_files.documents import (
     KNOWLEDGE_ROOT,
+    ONBOARDING_ROOT,
     census_directory,
     parse_document,
 )
 from agents_remember.models.knowledge_files.shapes import FileModel
+from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH
 
 CENSUS_ROOT: Final = f"{KNOWLEDGE_ROOT}/census/"
+ROUTE_CARD: Final = "overview.md"
 
 ProblemCategory = Literal["shape", "canonical"]
+
+
+def onboarding_routes(memory_paths: Iterable[str]) -> frozenset[str]:
+    """The onboarding routes of a memory tree: ``.`` or the directory holding an ``overview.md``."""
+
+    routes: set[str] = set()
+    for path in memory_paths:
+        directory, _, name = path.rpartition("/")
+        if name != ROUTE_CARD:
+            continue
+        if directory == ONBOARDING_ROOT:
+            routes.add(ROOT_ROUTE_PATH)
+        elif directory.startswith(f"{ONBOARDING_ROOT}/"):
+            routes.add(directory.removeprefix(f"{ONBOARDING_ROOT}/"))
+    return frozenset(routes)
 
 
 def baseline_path(census_id: str) -> str:

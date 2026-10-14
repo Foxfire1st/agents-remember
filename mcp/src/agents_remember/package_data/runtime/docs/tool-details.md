@@ -93,3 +93,15 @@ continues and reports; a removal failure after the stop reports the failed
 paths. `providers-remove` (not this tool) refuses when its watcher stop
 fails, when a live process holds a folder open (naming pid and command), or
 when the provider root or a deletion target escapes the owned tree.
+
+## Drift check: the carried-anchor exception (MIK-R53 rule 11)
+
+`context_packet` with `include_drift` measures the reference anchors of
+onboarding cards and the validity of the tree. A stale reference is reported
+and never blocks by itself — with one exception: a carried anchor at a path
+the leaf deleted refuses the leaf's closeout or landing as
+`R22.6-carried-stale`, and is only reported at a sync merge. MIK-R53 rule 11
+replaces the MIK-R22 rule 6 clause that exception rested on, and its
+Supersedes names MIK-R44 v2 for that one kind (the "`violationCount` stays 0"
+boundary and the never-blocks sentence for a carried anchor at a gone path).
+Every other stale reference keeps the never-blocks sentence.

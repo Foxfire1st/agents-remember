@@ -26,11 +26,12 @@ latest status entry for that route across every census of K_B (MIK-R20); a route
 answers its items.
 
 **Satisfied** (:func:`~agents_remember.models.knowledge_files.unexplained.unexplained_satisfied_by`):
-a covered item by its ``no_invariant`` row; an uncovered item by the file's onboarding trace. The
-run first looks for the leaf's ``onboarding:<path>`` row; :func:`settle_uncovered` then takes the
+a covered item by its ``no_invariant`` row; an uncovered item by the file's current onboarding
+trace. The run first looks for the leaf's ``onboarding:<path>`` row and names it only while its
+``sources`` equal the file's blob at C (MIK-R53 rule 3); :func:`settle_uncovered` then takes the
 onboarding gate's own item for the file where the leaf route computed one (a counted card change
-satisfies it too). The gate (MIK-R09) applies the same predicate to the stored item, so the two
-agree by construction. Nothing here suggests an invariant, matches similar code or writes a row
+satisfies it too, and a stale row satisfies nothing). The gate (MIK-R09) applies the same currency
+to the stored item, so the two agree by construction. Nothing here suggests an invariant, matches similar code or writes a row
 (Exclusions).
 """
 
@@ -65,7 +66,11 @@ from agents_remember.models.knowledge_files.census import (
     governing_status,
 )
 from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
-from agents_remember.models.knowledge_files.history import HistoryFile, HistoryRow
+from agents_remember.models.knowledge_files.history import (
+    HistoryFile,
+    HistoryRow,
+    OnboardingTraceRow,
+)
 from agents_remember.models.knowledge_files.sidecars import RealizationEntry
 from agents_remember.models.knowledge_files.unexplained import (
     ABSENT,
@@ -86,7 +91,9 @@ from agents_remember.worktrees.modules.onboarding_trace import (
 )
 from agents_remember.worktrees.modules.onboarding_trace import (
     card_subject,
+    counted_change,
     nearest_governing_route,
+    onboarding_row_answers,
 )
 
 __all__ = [
@@ -110,8 +117,8 @@ _SATISFYING_ROW: Final = (
     "covered file (a realization entry in K_B, or its governing route migrated): the leaf's "
     "no_invariant row with subject {row} and a reason -- or attach/author an entry over the change, "
     "which links it (a delete-only hunk admits only no_invariant); uncovered file: the file's "
-    "onboarding trace, a counted change of its card or its onboarding:<path> no_impact row "
-    "(MIK-R10 rules 3-5)"
+    "current onboarding trace, a counted change of its card or its onboarding:<path> row whose "
+    "sources equal the file's blob at C (MIK-R10 rules 3-5, MIK-R53 rule 3)"
 )
 
 
@@ -261,10 +268,36 @@ def _admits(coverage: Mapping[str, Any], at_candidate: bool) -> list[str]:
     return ["attach", "author", NO_INVARIANT] if at_candidate else [NO_INVARIANT]
 
 
-def _trace(path: str) -> dict[str, Any]:
+def _trace(path: str, blob: str | None) -> dict[str, Any]:
     """The onboarding-trace fact before the gate's own item is known: only a row can answer."""
 
-    return {"subject": card_subject(path), "item": None, "countedChange": False}
+    return {
+        "subject": card_subject(path),
+        "item": None,
+        "countedChange": False,
+        "sourceBlobs": {path: blob or ABSENT},
+    }
+
+
+def _current_onboarding_row(
+    path: str, blob: str | None, rows: Mapping[str, OnboardingTraceRow], counted: bool
+) -> str | None:
+    """The ID of the leaf's row that currently answers ``path``, or ``None`` (MIK-R53 rule 3).
+
+    Only a current eligible authored row answers: a current ``no_impact`` row, or a
+    current ``updated`` row when the card carries the change (``counted``). A counted
+    card edit alone never answers. Sourceless rows answer nothing here (no closed-file
+    provenance in this run); the gate's own currency keeps frozen closed rows valid.
+    """
+
+    row = rows.get(card_subject(path))
+    if row is None:
+        return None
+    # Closed-file provenance is unavailable in this run, so sourceless rows answer
+    # nothing here; the gate's own currency keeps frozen closed rows valid.
+    if onboarding_row_answers(row, False, {path: blob or ABSENT}, counted):
+        return row.id
+    return None
 
 
 @dataclass
@@ -312,6 +345,7 @@ class _Collector:
                     "identities": list(sides),
                     "facts": {
                         "path": path,
+                        "candidateBlob": candidate_blob or ABSENT,
                         "hunks": [],
                         "changedLines": {"base": sides[0], "candidate": sides[1]},
                         "deleteOnly": new_count == 0,
@@ -367,14 +401,31 @@ def _rows_by_subject(history: HistoryFile | None) -> dict[str, str]:
     return {} if history is None else {row.subject: row.id for row in history.rows}
 
 
-def _finished(raw: dict[str, Any], rows: Mapping[str, str]) -> dict[str, Any]:
+def _finished(
+    raw: dict[str, Any],
+    rows: Mapping[str, str],
+    onboarding: Mapping[str, OnboardingTraceRow],
+    base_files: Mapping[str, bytes],
+    candidate_files: Mapping[str, bytes],
+) -> dict[str, Any]:
     identities = raw.pop("identities")
     item = {**raw, "id": item_id(raw["kind"], raw["subject"], identities)}
     facts = item["facts"]
     facts["row"] = row_subject(item)
     if facts["coverage"]["state"] == UNCOVERED:
-        facts["onboardingTrace"] = _trace(facts["path"])
-    item["satisfiedBy"] = unexplained_satisfied_by(item, rows)
+        path = facts["path"]
+        blob = facts.get("candidateBlob", facts.get("blob"))
+        candidate = blob if isinstance(blob, str) else None
+        facts["onboardingTrace"] = _trace(path, candidate)
+        counted = counted_change(
+            base_files,
+            candidate_files,
+            f"onboarding/{path}.md",
+            f"onboarding/{path}.json",
+        )
+        item["satisfiedBy"] = _current_onboarding_row(path, candidate, onboarding, counted)
+    else:
+        item["satisfiedBy"] = unexplained_satisfied_by(item, rows)
     return item
 
 
@@ -397,8 +448,13 @@ def unexplained_items(changes: Sequence[Mapping[str, Any]], sides: UnexplainedSi
         collector.change(change)
     history = None if sides.owner is None else sides.candidate.history(sides.owner)
     rows = _rows_by_subject(history)
+    onboarding = (
+        {}
+        if history is None
+        else {row.subject: row for row in history.rows if isinstance(row, OnboardingTraceRow)}
+    )
     items = tuple(
-        _finished(raw, rows)
+        _finished(raw, rows, onboarding, sides.base.files, sides.candidate.files)
         for raw in sorted(
             [*collector.hunks.values(), *collector.files.values()],
             key=lambda one: (one["kind"], one["subject"]),
@@ -422,8 +478,9 @@ def settle_uncovered(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
 
     The leaf route adds MIK-R30's items after the run (they need the onboarding Markdown); an
     uncovered item whose file has such an item takes its counted change, its unreadable sidecar and
-    its answer, so a card updated in the leaf satisfies it. Without one, the item keeps what the run
-    found (the ``onboarding:<path>`` row). The caller recomputes the digest over the settled list.
+    its answer, so only the file's current eligible authored row satisfies it. Without one, the item
+    keeps what the run found (the ``onboarding:<path>`` row). The caller recomputes the digest over
+    the settled list.
     """
 
     traces = {item["subject"]: item for item in items if item.get("kind") == ONBOARDING_ITEM_KIND}
@@ -471,6 +528,13 @@ def _settled(item: Mapping[str, Any], traces: Mapping[str, Mapping[str, Any]]) -
         "item": trace.get("id"),
         "countedChange": trace_facts.get("countedChange") is True,
     }
+    carried = trace_facts.get("sourceBlobs")
+    if isinstance(carried, dict):
+        bound["sourceBlobs"] = carried
+    else:
+        kept = facts.get("onboardingTrace") or {}
+        if isinstance(kept, Mapping) and isinstance(kept.get("sourceBlobs"), dict):
+            bound["sourceBlobs"] = kept["sourceBlobs"]
     if trace_facts.get("sidecarUnreadable"):
         bound["sidecarUnreadable"] = trace_facts["sidecarUnreadable"]
     settled = {**item, "facts": {**facts, "onboardingTrace": bound}}

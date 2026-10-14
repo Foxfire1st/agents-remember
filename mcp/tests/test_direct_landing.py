@@ -511,13 +511,14 @@ class DirectLandingTests(unittest.TestCase):
             dry_run=dry_run,
         )
 
-    def _converted_create_fixture(self, root: Path) -> dict:
+    def _converted_create_fixture(self, root: Path, *, answer: bool = True) -> dict:
         """A converted-memory fixture with an answered, uncommitted code change to create."""
 
         fixture = _converted_series_fixture(root)
         world = fixture["world"]
-        _edit(world, CODE_A.replace("return value", "return -value"))
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        if answer:
+            _edit(world, CODE_A.replace("return value", "return -value"))
+            _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         fixture["code_head"] = git(fixture["code"], "rev-parse", "HEAD")
         fixture["tasks"] = fixture["contract"].task_root
@@ -1006,7 +1007,7 @@ class DirectLandingTests(unittest.TestCase):
             ["same"] * 10 + ["ruled-out", "ruled-out", "direct-only"],
         )
         root = Path(self.temp.name)
-        fixture = self._converted_create_fixture(root / "create-census")
+        fixture = self._converted_create_fixture(root / "create-census", answer=False)
         config = fixture["config"]
         contract = fixture["contract"]
         # Grant row: without the grant the create refuses at entry.
@@ -1017,6 +1018,10 @@ class DirectLandingTests(unittest.TestCase):
         self.assertFalse(ungranted["ok"])
         self.assertEqual(ungranted["status"], "direct-landing-leaf-without-grant")
         give_grant(config, fixture["leaf_ref"], granted_by="architect", granter_agent_id="census")
+        # Source-bound trace computation materializes the enclosure: only after grant controls.
+        world = fixture["world"]
+        _edit(world, CODE_A.replace("return value", "return -value"))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         # Message row: without the create message the apply refuses up front.
         no_message = replace(
             self._converted_create_request(fixture, dry_run=False), code_commit_message=" "
@@ -1457,7 +1462,7 @@ class DirectLandingTests(unittest.TestCase):
         world = fixture["world"]
         config = fixture["config"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         memory_before = git(world.memory, "rev-parse", "HEAD")
         foreign = self._foreign_leaf_ref(config)
@@ -1474,7 +1479,7 @@ class DirectLandingTests(unittest.TestCase):
         world = fixture["world"]
         config = fixture["config"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         # The bound leaf's file stays open, but another leaf's open history is
         # the one the gate selects: the landing must not close a foreign file.
         other = {"schema": "ar-history/v1", "leaf": "260928-MIK-L96", "closed": False, "rows": []}
@@ -1542,7 +1547,7 @@ class DirectLandingTests(unittest.TestCase):
         sibling_ref = TaskDocumentRef(repository="repo-a", path="direct-task/sibling.json")
         give_grant(config, sibling_ref, granted_by="architect", granter_agent_id="fixture")
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         memory_before = git(world.memory, "rev-parse", "HEAD")
         request = replace(_converted_request(fixture, code), leaf_task_document_ref=sibling_ref)
@@ -1592,7 +1597,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / change)
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         history = world.memory / f"knowledge/history/{LEAF}.json"
         original_history = history.read_bytes()
         memory_head = head_commit(world.memory)
@@ -1663,7 +1668,7 @@ class DirectLandingTests(unittest.TestCase):
         )
         row = world.invariant_row("INV-AAAAAA", before, revision=2)
         family = family_row({"INV-AAAAAA": 2, "INV-BBBBBB": 1})
-        world.rows(row, family, *trace_rows(*TRACES))
+        world.rows(row, family, *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         # No lifecycle publication runs a commit hook, on any route (review R3, note 11 f): the
         # memory repository's failing ``pre-commit`` and ``commit-msg`` hooks are never run, and
@@ -1675,7 +1680,9 @@ class DirectLandingTests(unittest.TestCase):
         self.assertFalse(refused["ok"], refused)
         self.assertIn("governing row", str(refused["detail"]))
         world.rows(
-            {**row, "disposition": "changed", "effect": "clarify"}, family, *trace_rows(*TRACES)
+            {**row, "disposition": "changed", "effect": "clarify"},
+            family,
+            *trace_rows(world, *TRACES),
         )
         judge = KnowledgeGate.direct_verdict
         judged = []
@@ -1720,7 +1727,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "owner")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         history = world.memory / f"knowledge/history/{LEAF}.json"
         before = history.read_bytes()
         memory_head = head_commit(world.memory)
@@ -1743,7 +1750,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "source-head")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         history = world.memory / f"knowledge/history/{LEAF}.json"
         before = history.read_bytes()
         bind_worktree_services(build_default_worktree_services())
@@ -1776,7 +1783,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "receipt-history")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         history = world.memory / f"knowledge/history/{LEAF}.json"
         memory_head = head_commit(world.memory)
         bind_worktree_services(build_default_worktree_services())
@@ -1812,7 +1819,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / boundary)
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         memory_head = head_commit(world.memory)
         history = world.memory / f"knowledge/history/{LEAF}.json"
         opened = history.read_bytes()
@@ -1861,7 +1868,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "command-running")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         native = git_owner.run_git
         calls = []
@@ -1905,7 +1912,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / f"publish-{case}")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         git(world.memory, "branch", "elsewhere")
         history = world.memory / f"knowledge/history/{LEAF}.json"
@@ -1942,7 +1949,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "refused-twice")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         git(world.memory, "branch", "elsewhere")
         history = world.memory / f"knowledge/history/{LEAF}.json"
@@ -2000,7 +2007,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "recover-refused")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         git(world.memory, "branch", "elsewhere")
         history = world.memory / f"knowledge/history/{LEAF}.json"
@@ -2047,7 +2054,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "control-cancelled")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         history = world.memory / f"knowledge/history/{LEAF}.json"
         opened, memory_head = history.read_bytes(), head_commit(world.memory)
@@ -2096,7 +2103,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "replay")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         landed = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
         self.assertTrue(landed["ok"], landed)
@@ -2126,7 +2133,7 @@ class DirectLandingTests(unittest.TestCase):
         fixture = _converted_series_fixture(Path(self.temp.name) / "retry")
         world = fixture["world"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         request = _converted_request(fixture, code)
         judge = KnowledgeGate.direct_verdict
@@ -2175,7 +2182,7 @@ class DirectLandingTests(unittest.TestCase):
         )
         row = world.invariant_row("INV-AAAAAA", before, revision=2)
         family = family_row({"INV-AAAAAA": 2, "INV-BBBBBB": 1})
-        world.rows(row, family, *trace_rows(*TRACES), closed=True)
+        world.rows(row, family, *trace_rows(world, *TRACES), closed=True)
         git(world.memory, "add", "-A")
         git(world.memory, "commit", "-m", f"invalid recorded rows\n\nCode-Commit: {code}")
         invalid = head_commit(world.memory)
@@ -2187,7 +2194,7 @@ class DirectLandingTests(unittest.TestCase):
         world.rows(
             {**row, "disposition": "changed", "effect": "clarify"},
             family,
-            *trace_rows(*TRACES),
+            *trace_rows(world, *TRACES),
             closed=True,
         )
         with self.assertRaisesRegex(RuntimeError, "governing row"):
@@ -2196,7 +2203,7 @@ class DirectLandingTests(unittest.TestCase):
         git(world.memory, "commit", "-m", f"valid recorded rows\n\nCode-Commit: {code}")
         valid = head_commit(world.memory)
         require_gated_recovery(contract, code, valid)
-        world.rows(row, family, *trace_rows(*TRACES))
+        world.rows(row, family, *trace_rows(world, *TRACES))
         require_gated_recovery(contract, code, valid)
         self.assertEqual(head_commit(world.memory), valid)
 
@@ -2332,7 +2339,7 @@ class DirectLandingTests(unittest.TestCase):
         contract = fixture["contract"]
         memory = fixture["memory"]
         code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+        _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
         request = _converted_request(fixture, code)
         leaf_before = git(memory, "rev-parse", "leaf")

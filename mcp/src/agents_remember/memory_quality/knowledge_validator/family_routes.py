@@ -8,7 +8,8 @@ entries do not count -- tests live in their own directories):
 * **Coverage:** every realization entry of every member lies under at least one route;
 * **Non-empty:** every route contains at least one such entry.
 
-Three states are reported, never refused (rule 4):
+Three states have a named reason to report instead of refusing at every route (rule 4,
+MIK-R53 rules 10-12):
 
 * ``unrealized_family`` -- no member has a realization entry yet; Non-empty is waived;
 * ``route_unassigned`` -- ``routes: []`` with ``admission: legacy-unassessed``, which only the export

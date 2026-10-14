@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 from agents_remember.application import worktree_tools
+from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.worktree_tool_requests import (
     CloseoutApproval,
     CloseoutCommitMessages,
@@ -471,14 +472,16 @@ def _seed_converted_memory_layout(memory_worktree) -> None:
     )
 
 
-def _seed_leaf_trace_row(memory_worktree, leaf_id: str, subject: str) -> None:
+def _seed_leaf_trace_row(contract, leaf_id: str, subject: str) -> None:
     """Seed the leaf's open history with the onboarding trace its new file needs.
 
     The closeout extends the open file with its own rows; the gate answers the trace item
     from this row.
     """
 
-    history_dir = memory_worktree / "knowledge" / "history"
+    path = subject.removeprefix("onboarding:")
+    code = CodeSnapshot.capture(contract.code_worktree)
+    history_dir = contract.memory_worktree / "knowledge" / "history"
     history_dir.mkdir(parents=True, exist_ok=True)
     (history_dir / f"{leaf_id}.json").write_text(
         canonical_text(
@@ -493,6 +496,7 @@ def _seed_leaf_trace_row(memory_worktree, leaf_id: str, subject: str) -> None:
                         "disposition": "no_impact",
                         "reason": "The new file carries no invariant.",
                         "items": [],
+                        "sources": [{"path": path, "blob": code.blobs[path]}],
                     }
                 ],
             }
@@ -507,7 +511,7 @@ def _converted_closeout_fixture(tmp_path):
     contract, config = _closeout_fixture(tmp_path, converted=True)
     assert contract.memory_worktree is not None
     _seed_converted_memory_layout(contract.memory_worktree)
-    _seed_leaf_trace_row(contract.memory_worktree, "leaf-1", "onboarding:feature.py")
+    _seed_leaf_trace_row(contract, "leaf-1", "onboarding:feature.py")
     for repository in (contract.code_worktree, contract.memory_worktree):
         _git(repository, "branch", "elsewhere")
     return contract, config
@@ -659,7 +663,7 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
     (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
     (contract.memory_worktree / "onboarding").mkdir()
     (contract.memory_worktree / "feature.md").write_text("# Feature\n", encoding="utf-8")
-    _seed_leaf_trace_row(contract.memory_worktree, "leaf-1", "onboarding:feature.py")
+    _seed_leaf_trace_row(contract, "leaf-1", "onboarding:feature.py")
     ensure_fixture_waiting_door(contract, force_synthetic=True)
     contract = load_contract(contract.contract_path)
     _bind_task_without_review(contract)
@@ -777,7 +781,7 @@ def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, 
     (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
     (contract.memory_worktree / "onboarding").mkdir()
     (contract.memory_worktree / "feature.md").write_text("# Feature\n", encoding="utf-8")
-    _seed_leaf_trace_row(contract.memory_worktree, "leaf-1", "onboarding:feature.py")
+    _seed_leaf_trace_row(contract, "leaf-1", "onboarding:feature.py")
     ensure_fixture_waiting_door(contract, force_synthetic=True)
     contract = load_contract(contract.contract_path)
     _bind_task_without_review(contract)

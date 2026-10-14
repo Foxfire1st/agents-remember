@@ -40,6 +40,7 @@ from typing import get_args
 from uuid import uuid4
 
 import pytest
+from agents_remember.application.knowledge_worklist.leaf import recompute_leaf_worklist
 from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.application.worktree_services import (
@@ -498,6 +499,9 @@ def _build_journey(directory: Path) -> Journey:
     unmapped = endpoint.code_worktree / "src/unmapped.py"
     unmapped.parent.mkdir(parents=True)
     unmapped.write_text("# changed source with no recorded realization\n", encoding="utf-8")
+    # MIK-R53 rule 1: the overview row binds its worklist item's sources.
+    recomputed = recompute_leaf_worklist(contract)
+    assert recomputed is not None and recomputed[0]["state"] == "complete"
     answered = write_knowledge(
         WriteRequest(
             memory_root=endpoint.memory_worktree,
@@ -530,6 +534,7 @@ def _build_journey(directory: Path) -> Journey:
                 ]
             },
             commit=True,
+            worklist=recomputed[0],
         )
     )
     assert answered.state == "written", answered.render()

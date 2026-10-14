@@ -80,14 +80,18 @@ class _Code:
     """The code working tree, captured once, as the rows' anchors are resolved against it."""
 
     root: Path
-    _context: tuple[CodeObjects, dict[str, str]] | None = None
+    _context: tuple[CodeObjects, dict[str, str], frozenset[str]] | None = None
 
-    def objects(self) -> tuple[CodeObjects, dict[str, str]]:
+    def objects(self) -> tuple[CodeObjects, dict[str, str], frozenset[str]]:
         if self._context is None:
             with TemporaryDirectory(prefix="ar-card-authoring-") as scratch:
                 tree = worktree_candidate_tree(self.root, Path(scratch) / "index")
             objects = CodeObjects(self.root)
-            self._context = (objects, dict(objects.tree(tree)))
+            self._context = (
+                objects,
+                dict(objects.tree(tree)),
+                CodeObjects.link_paths(objects.tree_modes(tree)),
+            )
         return self._context
 
 
@@ -209,10 +213,15 @@ class _Card:
 
 
 def _context(card: _Card, code: _Code) -> RowContext:
-    objects, tree = code.objects()
+    objects, tree, symlinks = code.objects()
     own = None if is_overview(card.path) else card.sidecar["path"]
     return RowContext(
-        card=card.path, own_path=own, tree=tree, objects=objects, route_sidecar=own is None
+        card=card.path,
+        own_path=own,
+        tree=tree,
+        objects=objects,
+        route_sidecar=own is None,
+        symlinks=symlinks,
     )
 
 

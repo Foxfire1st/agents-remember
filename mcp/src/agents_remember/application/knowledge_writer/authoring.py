@@ -117,6 +117,15 @@ class Authoring(HistoryRowAuthoring):
     worklist_items: tuple[tuple[str, str, str], ...] = ()
     # ``(onboarding subject, id)`` of each unexplained item an onboarding row answers (MIK-R10).
     trace_items: tuple[tuple[str, str], ...] = ()
+    # The persisted worklist's onboarding items' covered sources by subject (MIK-R53 rule 1).
+    onboarding_sources: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    # The persisted worklist's onboarding items' counted change by subject (MIK-R53 rule 2):
+    # the gate's own base, which the writer's ``updated`` check follows instead of own HEAD
+    # when no paired base is named.
+    onboarding_counted: Mapping[str, bool] = field(default_factory=dict)
+    # The leaf's paired memory base commit (the gate's K_B): the card comparison's base, which
+    # a persisted worklist flag never overrides (MIK-R53 rule 2); ``None`` keeps own HEAD.
+    memory_base: str | None = None
 
     # -- the operation ------------------------------------------------------------------------
 

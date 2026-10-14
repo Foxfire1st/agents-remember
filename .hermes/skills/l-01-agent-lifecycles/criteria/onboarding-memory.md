@@ -23,15 +23,17 @@ things still described, renamed things under old names, duplicated rows.
   260703-L10 — the flowModels sidecar body was still the pre-convergence 8-model census and its
   references row still said "8 models" (the sidecar's 2026-07-06T12:05 history entry + L10R-3).
 
-### OM-2 — History-only-update detection
+### OM-2 — Independent fact-check of curated knowledge (second reader) *(requirement-bound: MIK-R53 rule 5)*
 
-**"Refreshed" must mean a genuine body edit.** An onboarding file whose only change is a new
-Update History line has NOT been refreshed — the body still asserts the old truth. Check that
-every claimed refresh touched body sentences, not just the history list.
-
-- Catching evidence: 260703-L8 cycle 6 — the builder reported route overviews as refreshed when
-  they were **history-only**; the scoped curator handoff caught it (L8 decision log, cycle-6 entry:
-  "report-vs-artifact verification belongs in the reviewer criteria catalog").
+**A seat that wrote none of the leaf's cards or records checks the curation before closeout.**
+On converted memory every changed card, sidecar and record is checked statement by statement
+against the leaf's final code; every history row's disposition, effect and reason is checked
+against the code diff; and the check says whether anything important about the change is left
+unsaid. Blocking findings are repaired before the closeout. This criterion replaces the Update
+History criteria: converted cards carry no Update History, and a counted card edit alone never
+closes a trace — only a content-bound curator row does (MIK-R53 rules 1–3). Binds converted
+memory only; this criterion entered by the requirement, not by the ratchet, and is demoted only
+by a developer ruling.
 
 ### OM-4 — Admission justifications are plausible *(requirement-bound: MIK-R27 rule 5, developer ruling D14)*
 
@@ -79,5 +81,6 @@ the sealed issue list into a finding.
 - A **standing** criterion that fires nothing for **N consecutive engagements** (default 5)
   demotes to spot-check.
 - A criterion that can be **mechanized graduates out of the catalog into a scoped diagnostic** — the
-  curator handoff is the working example, and it is THIS catalog's own OM-2 mechanized: the check catches
-  history-only "refreshes" at commit time, where prose requests did not.
+  curator handoff is the working example, and the former OM-2 (history-only "refresh" detection,
+  replaced by the MIK-R53 second-reader criterion above) mechanized exactly so: the gate catches
+  unreviewed refreshes at commit time, where prose requests did not.

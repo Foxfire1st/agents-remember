@@ -79,6 +79,27 @@ def is_indexed_path(path: str) -> bool:
     return path.startswith(f"{ONBOARDING_ROOT}/")
 
 
+def with_prose_companions[T](files: Mapping[str, T]) -> dict[str, T]:
+    """``files`` plus the Markdown prose companions the index carries as bytes (MIK-R53).
+
+    The index parses JSON knowledge files; record prose (``knowledge/<dir>/<id>.md`` beside
+    an indexed ``<id>.json``) and onboarding cards (``onboarding/**/*.md``) ride along
+    unparsed so worklist rules can compare them: a decision/facet record's Markdown
+    (rule 8) and a card's Markdown (rule 2). Excluded paths stay excluded, and prose
+    without its indexed JSON sibling is not carried.
+    """
+
+    indexed = {path: data for path, data in files.items() if is_indexed_path(path)}
+    for path, data in files.items():
+        if path in indexed or not path.endswith(".md") or is_excluded_from_knowledge(path):
+            continue
+        if path.startswith(f"{ONBOARDING_ROOT}/") or (
+            path.startswith(f"{KNOWLEDGE_ROOT}/") and f"{path[:-3]}.json" in indexed
+        ):
+            indexed[path] = data
+    return indexed
+
+
 def git_tree_snapshot(repository: Path, revision: str) -> MemoryTreeSnapshot:
     """Read the memory tree ``revision`` names (a commit, a tree or a ref) through Git objects."""
 
@@ -212,18 +233,18 @@ def _isolated(root: Path, arguments: list[str], state: IsolatedGitState) -> str:
 
 
 def _indexed_entries(listing: bytes) -> dict[str, str]:
-    """Parse ``ls-tree -r -z`` rows into indexed path -> blob id."""
+    """Parse ``ls-tree -r -z`` rows into indexed path -> blob id (plus prose companions)."""
 
-    entries: dict[str, str] = {}
+    rows: dict[str, str] = {}
     for row in listing.split(b"\0"):
         if not row:
             continue
         meta, _, raw_path = row.partition(b"\t")
         _mode, kind, object_id = meta.decode("ascii").split(" ")
         path = raw_path.decode("utf-8", "surrogateescape")
-        if kind == "blob" and is_indexed_path(path):
-            entries[path] = object_id
-    return entries
+        if kind == "blob":
+            rows[path] = object_id
+    return with_prose_companions(rows)
 
 
 def _blob_id(data: bytes, tree_id: str) -> str:
