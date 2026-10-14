@@ -24,12 +24,14 @@ class TaskDocMasterSync(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: str
-    masterDocPath: str
-    renderedPath: str
+    masterDocPath: str | None = None
+    renderedPath: str | None = None
     subtaskNumber: str | None = None
     rendered: str | None = None
     diff: str | None = None
     wouldLose: bool = False
+    # MIK-R111 rule 2: a failed sync rides the answer as a failure marker.
+    error: str | None = None
 
 
 class TaskDocDiscardSourceProof(BaseModel):
@@ -112,41 +114,31 @@ class TaskDocDiscardEvidence(BaseModel):
     nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
 
 
-class TaskDocSubStepRead(BaseModel):
-    """One substep's addressing and progress facts, as ``read_steps`` publishes them."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    title: str
-    status: str
-    note: str | None = None
-
-
-class TaskDocStepRead(BaseModel):
-    """One top-level step plus its substeps, as ``read_steps`` publishes them."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    title: str
-    status: str
-    note: str | None = None
-    substeps: list[TaskDocSubStepRead] = Field(default_factory=list)
-
-
 class TaskDocResponse(ToolResponse):
     """``task_doc``: the document's identity, status, and progress after the op."""
 
-    taskId: str
+    taskId: str | None = None
     slug: str
-    kind: str
-    status: str
+    kind: str | None = None
+    status: str | None = None
     lifecycleId: str | None = None
     docPath: str
-    renderedPath: str
+    renderedPath: str | None = None
     stepsDone: int = 0
     stepsTotal: int = 0
+    # Refusals (MIK-R111 rule 2: the removed read operations): a refusal
+    # carries ``ok: false`` with a machine-readable code and one sentence.
+    # Present only on refusals; every successful operation leaves them None
+    # (excluded by exclude_none).
+    code: str | None = None
+    error: str | None = None
+    # Writes (MIK-R111 rule 2): the unit the write changed and its new value
+    # in a phrase. Present only on successful writes.
+    updated: str | None = None
+    # By-file text input (MIK-R111 rule 2): the absolute path read once and
+    # its SHA-256. Present only on writes that took their text from a file.
+    inputFile: str | None = None
+    inputFileSha256: str | None = None
     # dry-run / preview (R5): set only when dry_run=True; a real op leaves these at their defaults.
     dryRun: bool = False
     rendered: str | None = None
@@ -223,15 +215,12 @@ class TaskDocResponse(ToolResponse):
     sprintArchive: dict[str, Any] | None = None
     # linkage_report + get on a sprint: the read-only drift facts.
     linkageFacts: list[dict[str, Any]] | None = None
+    # linkage_report (MIK-R111 rule 2): the counts by fact kind and the
+    # location of the report file. Present only on linkage_report.
+    factKinds: dict[str, int] | None = None
+    reportPath: str | None = None
     # Bounded first-review/fix-verification state; absent persisted state is reported as zero.
     reviewState: dict[str, Any] | None = None
-    # ``read_steps``: the focused checklist read. The handler has always emitted this payload
-    # (``task_doc_tools._read_steps`` -> ``task_doc_steps.step_payloads``) and the response model
-    # never declared it, so under ``StrictResponseModel``'s ``extra="forbid"`` the real payload was
-    # REJECTED after the read: ``steps: Extra inputs are not permitted``. The operation was unusable
-    # on every document until the model and the handler agreed. Present only on ``read_steps``;
-    # every other operation leaves it None (excluded by exclude_none).
-    steps: list[TaskDocStepRead] | None = None
     # author_execution_graph: what the batch applied and the derived scheduling view.
     bootstrapped: bool | None = None
     appliedMutations: list[dict[str, Any]] | None = None
@@ -239,6 +228,25 @@ class TaskDocResponse(ToolResponse):
     leafPlacementFacts: list[dict[str, Any]] | None = None
     numberingHints: list[dict[str, Any]] | None = None
     projectionEffects: list[TaskDocProjectionEffect] = Field(default_factory=list, max_length=2048)
+
+    @model_validator(mode="after")
+    def _identity_or_removed_refusal(self) -> Self:
+        """Identity stays required everywhere but the removed-read refusal.
+
+        A removed read on a missing or damaged document refuses with the
+        canonical file names and no parsed identity (MIK-R111 rule 2); every
+        other response still names its document.
+        """
+        if self.ok is False and self.code == "operation-removed":
+            return self
+        missing = [
+            name
+            for name in ("taskId", "kind", "status", "renderedPath")
+            if getattr(self, name) is None
+        ]
+        if missing:
+            raise ValueError(f"task_doc response is missing document identity: {missing}")
+        return self
 
 
 class TaskReopenResponse(WorktreeCommandResponse):

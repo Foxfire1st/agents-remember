@@ -51,6 +51,7 @@ from agents_remember.application.lifecycle.lifecycle_operation_location import (
 )
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.task_docs.task_unstarted_evidence import _contract_fact
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.application.worktree_status import worktree_status_packet
 from agents_remember.errors import MemoryModeUnsupportedError, MemoryOptOutRefusedError
 from agents_remember.kernel.coordination_context.paths import (
@@ -576,14 +577,23 @@ def test_cli_parses_the_supported_set_and_hands_removed_tokens_to_their_typed_re
         assert refused.payload["status"] == state
 
 
-def test_the_start_tool_documentation_names_external_only_and_both_refusals() -> None:
+def test_the_start_tool_documentation_names_external_only_and_both_refusals(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """The MCP docstring is a documented call surface, so it is checked as one."""
     import inspect  # noqa: PLC0415 - one local import keeps the collector light
 
     source = inspect.getsource(worktrees_registration)
-    assert "memory_mode is 'external' (the only startable mode" in source
-    assert "status 'memory-mode-unsupported'" in source
-    assert "status 'memory-opt-out-refused'" in source
+    assert "Reference: docs/reference/mcp-tools.md." in source
+    # The concise description points to the reference; the CLI help owns mode details.
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["start", "--help"])
+    documented = " ".join(capsys.readouterr().out.split())
+    assert "`external` is the only startable mode" in documented
+    with pytest.raises(MemoryModeUnsupportedError) as refused:
+        require_supported_memory_mode(REMOVED_INTERNAL)
+    assert refused.value.status == "memory-mode-unsupported"
+    assert "memory-opt-out-refused" in documented
     assert "memory_mode is 'internal'" not in source
     assert "memory_mode is 'external' or 'disabled'" not in source
 
@@ -757,11 +767,15 @@ def test_worktree_status_packet_reports_the_removed_mode_to_the_operator(tmp_pat
 def test_worktree_status_payload_reports_the_removed_mode_to_the_operator(tmp_path: Path) -> None:
     """The assembled tool payload, not just the context packet's summary."""
     contract, contract_path = _published_fixture(tmp_path)
-    payload = worktree_status_payload(
-        _config(tmp_path, contract),
-        TaskRef(repo_id=REPO_NAME, contract_path=contract_path.as_posix()),
-    )
-    _assert_operator_payload(payload, artifact=contract_path.as_posix())
+    config = _config(tmp_path, contract)
+    with tool_call_context("worktree_status", {}, config=config):
+        payload = worktree_status_payload(
+            config,
+            TaskRef(repo_id=REPO_NAME, contract_path=contract_path.as_posix()),
+        )
+    whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+    assert payload["status"] == whole["status"]
+    _assert_operator_payload(whole, artifact=contract_path.as_posix())
 
 
 @pytest.mark.integration

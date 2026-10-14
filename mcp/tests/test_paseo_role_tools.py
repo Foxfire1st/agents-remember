@@ -11,6 +11,7 @@ import os
 import threading
 import unittest
 import uuid
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -21,6 +22,7 @@ from agents_remember.application.agent_binding import (
     AgentBinding,
 )
 from agents_remember.application.role_launch_context import selection_binding
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.cli import (
     paseo_catalog,
     paseo_role_tools,
@@ -1056,7 +1058,8 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
         async def invoke() -> tuple[int, dict[str, Any]]:
             server = FastMCP("role-tools-test")
             register_role_agent_tools(server, self.config)
-            _content, structured = await server.call_tool(tool, arguments)
+            with tool_call_context(tool, arguments, config=self.config):
+                _content, structured = await server.call_tool(tool, arguments)
             return threading.get_ident(), cast(dict[str, Any], structured)
 
         return asyncio.run(invoke())
@@ -1110,8 +1113,10 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
                 recorded(paseo_role_tools.send_role_message),
             )
             loop_thread, started = self.call("role_start", start)
+            whole = json.loads(Path(started["log"]).read_text(encoding="utf-8"))
+            self.assertEqual(whole["agentId"], started["agentId"])
             self.assertEqual(
-                (started["status"], started["parentAgentId"]),
+                (whole["status"], whole["parentAgentId"]),
                 ("running", self.architect.agent_id),
             )
             _loop, sent = self.call(

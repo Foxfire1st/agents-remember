@@ -8,6 +8,7 @@ first two as facts; finalize and retire work on all three.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,6 +18,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
@@ -75,10 +77,16 @@ def world(tmp_path):
 
 
 def _facts(world: World) -> list[dict[str, Any]]:
-    report = task_doc_payload(
-        world.cfg, world.target, operation="linkage_report", edit=TaskDocEdit(), call=TaskDocCall()
-    )
-    return cast("list[dict[str, Any]]", report["linkageFacts"])
+    with tool_call_context("task_doc", {"operation": "linkage_report"}, config=world.cfg):
+        report = task_doc_payload(
+            world.cfg,
+            world.target,
+            operation="linkage_report",
+            edit=TaskDocEdit(),
+            call=TaskDocCall(),
+        )
+    facts = json.loads(Path(report["reportPath"]).read_text(encoding="utf-8"))["facts"]
+    return cast("list[dict[str, Any]]", facts)
 
 
 def _row(world: World, number: str) -> SubTaskRef:
@@ -209,25 +217,28 @@ def test_a_retired_masters_kept_seat_document_is_readable_and_its_writes_refuse(
     seat = read_task_doc(seat_path)
     write_task_doc(seat_path.parent, seat.model_copy(update={"id": "S-M1"}))
     assert world.retire()["ok"]
-    target = TaskDocTarget(repo_id=REPOSITORY, task_name="sprint", slug=SEAT_A)
-    read = task_doc_payload(
-        world.cfg, target, operation="get", edit=TaskDocEdit(), call=TaskDocCall()
-    )
-    assert read["ok"] and read["docPath"] == str(seat_path)
+    # MIK-R111 rule 2: the retired seat document is read as a file, not
+    # through the removed task_doc read operation.
+    read = read_task_doc(seat_path)
+    assert read.id == "S-M1" and seat_path.with_suffix(".md").is_file()
     before = world.snapshot()
+    seat_target = TaskDocTarget(repo_id=REPOSITORY, task_name="sprint", slug=SEAT_A)
     for operation, fields in (
         ("set_status", {"status": "abandoned"}),
         ("set_field", {"title": "Changed"}),
     ):
-        with pytest.raises(ValueError, match="the master is retired") as refused:
-            task_doc_payload(
+        with tool_call_context("task_doc", {"operation": operation}, config=world.cfg):
+            result = task_doc_payload(
                 world.cfg,
-                target,
+                seat_target,
                 operation=operation,
                 edit=TaskDocEdit(fields=fields),
                 call=TaskDocCall(),
             )
-        assert "row 'S-M1'" in str(refused.value)
+        assert result["ok"] is False
+        assert result["code"] == "master-sync-failed"
+        assert "the master is retired" in str(result["error"])
+        assert "row 'S-M1'" in str(result["error"])
         assert world.snapshot() == before
 
 
@@ -238,19 +249,20 @@ def test_a_retirement_row_that_kept_a_seat_file_never_stands_for_a_master_again(
     sprint = world.sprint().model_dump(mode="json")
     graph = sprint["executionGraph"]
     graph["nodes"].append(world.refs[0].model_dump())
-    task_doc_payload(
-        world.cfg,
-        world.target,
-        operation="set_field",
-        edit=TaskDocEdit(
-            fields={
-                "orchestrates": [*sprint["orchestrates"], "master-a"],
-                "executionGraph": graph,
-                "integrationBranch": "super",
-            }
-        ),
-        call=TaskDocCall(),
-    )
+    with tool_call_context("task_doc", {"operation": "set_field"}, config=world.cfg):
+        task_doc_payload(
+            world.cfg,
+            world.target,
+            operation="set_field",
+            edit=TaskDocEdit(
+                fields={
+                    "orchestrates": [*sprint["orchestrates"], "master-a"],
+                    "executionGraph": graph,
+                    "integrationBranch": "super",
+                }
+            ),
+            call=TaskDocCall(),
+        )
     facts = _facts(world)
     master = "agents-remember/master-a/task.json"
     assert {"kind": "membership-without-row", "master": master} in facts
@@ -271,7 +283,10 @@ def test_a_retirement_row_that_kept_a_seat_file_never_stands_for_a_master_again(
 
 def test_a_legacy_commanded_master_called_on_itself_is_sent_to_its_sprint(world):
     before = world.snapshot()
-    with pytest.raises(ValueError, match=r"commanded by sprint .*sprint/task.json.*on that sprint"):
+    with (
+        pytest.raises(ValueError, match=r"commanded by sprint .*sprint/task.json.*on that sprint"),
+        tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg),
+    ):
         task_doc_payload(
             world.cfg,
             TaskDocTarget(repo_id=REPOSITORY, task_name="master-a"),

@@ -17,6 +17,14 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from agents_remember.application.landing_answer_shapes import (
+    _ROLE_MESSAGE_REPLY_HEADROOM_TOKENS,
+    TASK_DOC_DIFF_TRUNCATED_MARKER,
+    _cut_reply,
+    _unretained_diff_marker,
+    project_landing_answer,
+    project_task_doc_answer,
+)
 from agents_remember.application.next_step import next_step_for
 from agents_remember.application.tool_answer_log import (
     DetailRequest,
@@ -29,6 +37,7 @@ from agents_remember.application.tool_answer_log import (
     prepare_log_folder,
     read_tool_caller,
     resolve_log_roots,
+    write_diff_report,
 )
 from agents_remember.kernel.agentic_settings import DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS
 from agents_remember.models.base import NextStep, ResponseEnvelope
@@ -237,6 +246,14 @@ def _apply_answer_guard(
 def _answer_bound(tool_name: str, arguments: Mapping[str, Any]) -> int:
     """The answer bound for one tool call (rule 4)."""
     task_operation = arguments.get("operation")
+    if (
+        tool_name == "role_message"
+        and not isinstance(task_operation, str)
+        and arguments.get("wait") is True
+    ):
+        # The wait-only exception: a waited reply is another agent's text,
+        # not a shaped result. Every other role_message call is shaped.
+        task_operation = "wait"
     return bound_for(
         tool_name, operation=task_operation if isinstance(task_operation, str) else None
     )
@@ -272,6 +289,15 @@ def _write_delivered_line(
         return answer, delivered_tokens, guard_cut
     if log_error is None:
         answer["logError"] = line_error
+    if record.tool_name == "role_message" and isinstance(answer.get("text"), str):
+        # Late failure must not lose the waited reply's beginning into the
+        # generic short form: refit the prefix after every attachment, with
+        # headroom for the newly attached logError, before re-guarding.
+        answer = _cut_reply(
+            answer,
+            headroom=_ROLE_MESSAGE_REPLY_HEADROOM_TOKENS
+            + count_response_tokens({"logError": answer["logError"]}),
+        )
     guarded, cut_now, delivered_tokens = _apply_answer_guard(
         answer,
         final_tokens=count_response_tokens(answer),
@@ -300,6 +326,85 @@ def _write_delivered_line(
     return answer, delivered_tokens, guard_cut
 
 
+def _attach_log_outcome(
+    tool_name: str,
+    answer: dict[str, Any],
+    log: str | None,
+    log_error: str | None,
+    diff_report: str | None = None,
+) -> dict[str, Any]:
+    """Attach the log outcome and settle promises that depend on it.
+
+    The guard measures the final mapping, so the diff-retention marker and
+    the waited-reply prefix are settled here, on the final mapping with every
+    attachment present: a lost detail file never fabricates a retained-diff
+    promise, and the generic overflow guard never strips a reply's text (its
+    beginning is kept to the bound here instead). When the whole caller diff
+    has its own report, the cut marker names that report -- which survives a
+    lost detail file -- instead of the detail file.
+    """
+    if log is not None:
+        answer["log"] = log
+    if log_error is not None:
+        answer["logError"] = log_error
+    if isinstance(answer.get("diff"), str):
+        if diff_report is not None:
+            answer["diff"] = answer["diff"].replace(
+                TASK_DOC_DIFF_TRUNCATED_MARKER,
+                f"... (truncated; the whole diff is in {diff_report})\n",
+            )
+        elif log is None:
+            answer["diff"] = answer["diff"].replace(
+                TASK_DOC_DIFF_TRUNCATED_MARKER, _unretained_diff_marker(log_error)
+            )
+    if tool_name == "role_message" and isinstance(answer.get("text"), str):
+        answer = _cut_reply(answer, headroom=0)
+    return answer
+
+
+def _attach_caller_diff_report(
+    tool_name: str,
+    finalized: dict[str, Any],
+    answer: dict[str, Any],
+    log_dir: Path | None,
+    day: str | None,
+) -> str | None:
+    """Write the whole caller diff as its own report; name it on the answer.
+
+    Returns the report path, or ``None`` when there is no whole diff, no log
+    directory, or the report could not be written. The report survives a lost
+    detail file; the cut marker names it instead of a fabricated promise.
+    """
+    whole_diff = finalized.get("diff")
+    if not isinstance(whole_diff, str) or not whole_diff or log_dir is None:
+        return None
+    diff_report = write_diff_report(log_dir, tool_name, whole_diff, day=day)
+    if diff_report is not None:
+        answer["diffReport"] = diff_report
+    return diff_report
+
+
+def _select_shaped_answer(
+    tool_name: str, finalized: dict[str, Any], arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """Project one validated whole result onto the answer the caller receives.
+
+    The task and landing tools project onto their shaped row; every other
+    tool keeps the stripped whole result. A projection that drops everything
+    still leaves the stripped whole result, never an empty answer.
+    """
+    if tool_name == "task_doc":
+        task_operation = arguments.get("operation")
+        projected = project_task_doc_answer(
+            finalized,
+            operation=task_operation if isinstance(task_operation, str) else None,
+            dry_run=arguments.get("dry_run") is True,
+        )
+    else:
+        projected = project_landing_answer(tool_name, finalized, arguments)
+    return truncate_lists(strip_envelope(projected if projected is not None else finalized))
+
+
 def complete_tool_response(
     tool_name: str,
     payload: dict[str, Any],
@@ -318,6 +423,10 @@ def complete_tool_response(
     stripped (the count goes to the log line), ``nextStep`` rides as
     ``next``, long lists are cut, and an answer over its bound gets the
     overflow short form with the whole result in the detail file (rule 4).
+    For the task and landing tools the answer is additionally projected onto
+    that tool's row (MIK-R111 rule 1,
+    ``application/landing_answer_shapes.py``); the projection only drops
+    keys, so the detail file still holds every field the answer held before.
     Every call is recorded to the daily log (rule 3); a log write that fails
     does not fail the call.
 
@@ -344,13 +453,23 @@ def complete_tool_response(
     if not isinstance(operation, str):
         operation = None
     bound = _answer_bound(tool_name, arguments)
-    shaped: dict[str, Any] = (
-        dict(answer) if answer is not None else truncate_lists(strip_envelope(finalized))
-    )
+    if answer is not None:
+        shaped: dict[str, Any] = dict(answer)
+    else:
+        shaped = _select_shaped_answer(tool_name, finalized, arguments)
     answer = shaped
     raw_next_step = answer.pop("nextStep", None)
     next_value = next_from_next_step(raw_next_step if isinstance(raw_next_step, dict) else None)
     if next_value is not None:
+        if (
+            isinstance(next_value.get("args"), dict)
+            and answer.get("nextArgs") == next_value["args"]
+        ):
+            # The derived ``next`` repeats the top-level next-step address
+            # the role-launch flow reads; the copy in ``next`` goes and the
+            # actionable ``nextArgs`` stays, so a deep-root refusal still
+            # fits its bound with its blockers.
+            del next_value["args"]
         answer["next"] = next_value
     answer_tokens = count_response_tokens(answer)
     whole_text = _canonical_json(finalized)
@@ -393,13 +512,15 @@ def complete_tool_response(
         )
     log = logged.log if logged is not None else None
     log_error = logged.log_error if logged is not None else None
+    # F01.9: the whole caller diff gets its own report beside the detail
+    # files, independent of the droppable investigation log. When the detail
+    # write failed, this report -- not a fabricated detail promise -- is what
+    # the cut marker names.
+    diff_report = _attach_caller_diff_report(tool_name, finalized, answer, log_dir, record.day)
     # The guard measures the final mapping the caller would get, including
     # every log/logError change: attaching the location can itself take an
     # exact-edge answer over its bound.
-    if log is not None:
-        answer["log"] = log
-    if log_error is not None:
-        answer["logError"] = log_error
+    answer = _attach_log_outcome(tool_name, answer, log, log_error, diff_report)
     final_tokens = count_response_tokens(answer)
     answer, guard_cut, delivered_tokens = _apply_answer_guard(
         answer, final_tokens=final_tokens, bound=bound, log=log, log_error=log_error

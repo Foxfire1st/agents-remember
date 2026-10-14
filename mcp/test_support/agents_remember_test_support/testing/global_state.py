@@ -211,6 +211,11 @@ PROCESS_MUTABLE_STATES = (
         treatment="restored",
     ),
     _row(
+        "kernel.primitives.runtime_config",
+        "_LEGACY_GATE_DELEGATION_WARNED",
+        "Every test module must observe its own legacy delegation warning.",
+    ),
+    _row(
         "mcp.compact_content",
         "_installed",
         "Undo the installed converter together with its installation guard.",

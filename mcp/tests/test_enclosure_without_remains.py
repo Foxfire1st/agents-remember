@@ -16,7 +16,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     inspect_lifecycle_operation_locator,
@@ -29,6 +28,7 @@ from agents_remember.worktrees.modules.terminal_inventory import (
 )
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
 from lifecycle_enclosure_test_support import byte_tree, enclosure_contract
+from read_boundary_oracle_test_support import _snapshot
 from test_worktree_support import init_repo
 
 
@@ -226,8 +226,17 @@ def test_never_integrated_leaf_cleanup_raises(worktree_services: None, tmp_path:
 
     contract_path = _leafless_enclosure(tmp_path, integrated=False)
 
-    with pytest.raises(RuntimeError, match=r"integration\.status completed"):
-        cleanup_module.cleanup_result(WorktreeArgs(contract_path=contract_path, dry_run=True))
+    before = _snapshot({"world": tmp_path})
+    refused = cleanup_module.cleanup_result(WorktreeArgs(contract_path=contract_path, dry_run=True))
+    assert refused.returncode == 2
+    assert refused.payload["code"] == "integration-incomplete"
+    assert refused.payload["error"] == "cleanup requires integration.status completed"
+    assert refused.payload["nextStep"] == {
+        "nextTool": "worktree_integrate",
+        "nextArgs": {"contract_path": contract_path.as_posix()},
+        "summary": "Integrate the closeout, then clean up again.",
+    }
+    assert _snapshot({"world": tmp_path}) == before
     assert "worktree_enclosure_adopt" in PUBLIC_TOOLS
 
 

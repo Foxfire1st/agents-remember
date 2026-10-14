@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -23,6 +24,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_retirement import MasterRetirementProof
@@ -67,6 +69,18 @@ def retire_lone(
         edit=TaskDocEdit(fields={"masterRef": ref.model_dump(), "reason": REASON, **fields}),
         call=TaskDocCall(dry_run=dry_run),
     )
+
+
+def _retire_lone_whole(
+    world: World, name: str, ref: TaskDocumentRef, *, dry_run: bool = False, **fields: Any
+) -> dict[str, Any]:
+    """Exercise the adapter; read omitted retirement facts from its exact detail file."""
+    with tool_call_context(
+        "task_doc", {"operation": "retire_master", "dry_run": dry_run}, config=world.cfg
+    ):
+        answer = retire_lone(world, name, ref, dry_run=dry_run, **fields)
+    # MIK-R111 rule 2 changes the answer, not the archive/proof/cleanup facts.
+    return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
 
 
 def archive_state(result: Any) -> dict[str, Any]:
@@ -141,12 +155,12 @@ def test_lone_master_dry_run_and_real_run_edit_no_sprint(world):
     contract, ref = lone(world)
     before = world.snapshot()
     refs = git(world.code, "show-ref")
-    preview = retire_lone(world, "outside", ref, dry_run=True)
+    preview = _retire_lone_whole(world, "outside", ref, dry_run=True)
     assert preview["ok"] and preview["state"] == "would-retire"
     assert preview["taskArchive"]["state"] == "would-archive"
     assert preview["removedOrchestrates"] == [] and preview["removedEdges"] == []
     assert world.snapshot() == before
-    result = retire_lone(world, "outside", ref)
+    result = _retire_lone_whole(world, "outside", ref)
     assert result["ok"] and result["state"] == "retired" and not result["retirementResumed"]
     archive = world.tasks / "0_archive" / "outside"
     assert result["taskArchive"]["archivePath"] == archive.as_posix()
@@ -166,12 +180,12 @@ def test_lone_master_refuses_what_a_sprint_or_its_arguments_make_wrong(world):
     member = world.refs[1]
     before = world.snapshot()
     with pytest.raises(ValueError, match=r"commanded by sprint.*sprint/task.json.*on that sprint"):
-        retire_lone(world, "master-b", member)
+        _retire_lone_whole(world, "master-b", member)
     with pytest.raises(ValueError, match=r"outside/task.json, but master.*master-b.*sprint/task"):
-        retire_lone(world, "outside", member)
+        _retire_lone_whole(world, "outside", member)
     edge = {"predecessor": ref.model_dump(), "successor": member.model_dump()}
     with pytest.raises(ValueError, match=r"commanded by no sprint.*without removeEdges"):
-        retire_lone(world, "outside", ref, removeEdges=[edge])
+        _retire_lone_whole(world, "outside", ref, removeEdges=[edge])
     assert world.snapshot() == before and contract.task_root.is_dir()
 
 
@@ -182,7 +196,7 @@ def test_lone_master_with_open_work_refuses_without_writes_and_a_pending_cleanup
 
     contract, ref = lone(world)
     write_contract(contract.contract_path, replace(contract, cleanup="pending"))
-    assert retire_lone(world, "outside", ref, dry_run=True)["state"] == "would-retire"
+    assert _retire_lone_whole(world, "outside", ref, dry_run=True)["state"] == "would-retire"
     leaf_worktree = world.coord.parent / "leaf-worktree"
     leaf_worktree.mkdir()
     leaf = replace(
@@ -200,10 +214,10 @@ def test_lone_master_with_open_work_refuses_without_writes_and_a_pending_cleanup
     write_contract(leaf.contract_path, leaf)
     before = world.snapshot()
     with pytest.raises(ValueError, match=r"has open work.*worktree directory .*leaf-worktree"):
-        retire_lone(world, "outside", ref)
+        _retire_lone_whole(world, "outside", ref)
     assert world.snapshot() == before
     leaf_worktree.rmdir()
-    assert retire_lone(world, "outside", ref)["state"] == "retired"
+    assert _retire_lone_whole(world, "outside", ref)["state"] == "retired"
 
 
 def test_lone_master_source_drift_before_publication_refuses_before_any_hook(world):
@@ -221,7 +235,7 @@ def test_lone_master_source_drift_before_publication_refuses_before_any_hook(wor
         patch.object(retirement_shared, "cleanup_review_artifacts") as cleanup,
         pytest.raises(ValueError, match=r"changed before publication"),
     ):
-        retire_lone(world, "outside", ref)
+        _retire_lone_whole(world, "outside", ref)
     cleanup.assert_not_called()
     assert contract.task_root.is_dir() and not (world.tasks / "0_archive").exists()
     assert not (contract.task_root / "notes/reports/master-retirement.json").exists()
@@ -234,7 +248,7 @@ def test_lone_master_failed_move_restores_folder_and_removes_its_proof(world):
         patch.object(Path, "rename", side_effect=OSError("disk refused rename")),
         pytest.raises(ValueError, match=r"task folder and proof were restored"),
     ):
-        retire_lone(world, "outside", ref)
+        _retire_lone_whole(world, "outside", ref)
     assert world.snapshot() == before and not (world.tasks / "0_archive").exists()
     assert not (contract.task_root / "notes/reports/master-retirement.json").exists()
 
@@ -245,13 +259,13 @@ def test_lone_master_interrupted_move_resumes_only_for_the_same_request(world):
         patch.object(Path, "rename", side_effect=KeyboardInterrupt),
         pytest.raises(KeyboardInterrupt),
     ):
-        retire_lone(world, "outside", ref)
+        _retire_lone_whole(world, "outside", ref)
     proof = contract.task_root / "notes/reports/master-retirement.json"
     kept = proof.read_bytes()
     with pytest.raises(ValueError, match=r"differs from its retained proof"):
-        retire_lone(world, "outside", ref, reason="another reason")
+        _retire_lone_whole(world, "outside", ref, reason="another reason")
     assert contract.task_root.is_dir() and proof.read_bytes() == kept
-    result = retire_lone(world, "outside", ref)
+    result = _retire_lone_whole(world, "outside", ref)
     assert result["ok"] and result["retirementResumed"] and not contract.task_root.exists()
     assert (
         world.tasks / "0_archive/outside/notes/reports/master-retirement.json"
@@ -287,7 +301,7 @@ def test_lone_master_partial_hook_failure_keeps_the_retirement_and_retries_clean
         patch.object(Path, "unlink", autospec=True, side_effect=partial_delete),
         patch.object(Path, "rename", autospec=True, side_effect=Path.rename) as move,
     ):
-        result = retire_lone(world, "outside", ref)
+        result = _retire_lone_whole(world, "outside", ref)
         assert not result["ok"] and result["state"] == "retired-with-hook-failures"
         assert "same masterRef and reason" in result["nextAction"]
         assert result["taskArchive"]["state"] == "archived" and move.call_count == 1
@@ -302,14 +316,14 @@ def test_lone_master_partial_hook_failure_keeps_the_retirement_and_retries_clean
         ]
         for changed in changes:
             with pytest.raises(ValueError):
-                retire_lone(world, "outside", ref, **changed)
-        retry = retire_lone(world, "outside", ref)
+                _retire_lone_whole(world, "outside", ref, **changed)
+        retry = _retire_lone_whole(world, "outside", ref)
         assert not retry["ok"] and retry["retirementResumed"] and move.call_count == 1
         assert [e["path"] for e in retry["taskArchive"]["reviewArtifacts"]["datasetCopies"]] == []
         absent = retry["taskArchive"]["reviewArtifacts"]["alreadyAbsent"]
         assert [(e["artifact"], e["deletedInAttempt"]) for e in absent] == [(deleted.as_posix(), 1)]
         fail = False
-        final = retire_lone(world, "outside", ref)
+        final = _retire_lone_whole(world, "outside", ref)
     assert final["ok"] and final["state"] == "retired" and final["retirementResumed"]
     assert [e["path"] for e in final["taskArchive"]["reviewArtifacts"]["datasetCopies"]] == [
         failed.as_posix()
@@ -362,14 +376,14 @@ def test_retry_with_a_mismatched_namespace_is_refused_without_changes(world):
 def test_any_hook_exception_ends_as_a_reported_failure_and_the_same_request_recovers(world, error):
     contract, ref = lone(world)
     with patch.object(retirement_shared, "cleanup_review_artifacts", side_effect=error):
-        result = retire_lone(world, "outside", ref)
+        result = _retire_lone_whole(world, "outside", ref)
         sprint_result = world.retire()
     for answer in (result, sprint_result):
         assert not answer["ok"] and answer["state"] == "retired-with-hook-failures"
         assert answer["taskArchive"]["state"] == "archived"
         assert type(error).__name__ in answer["taskArchive"]["reviewArtifacts"]["detail"]
     assert not contract.task_root.exists() and len(world.validate()) == 2
-    assert retire_lone(world, "outside", ref)["ok"] and world.retire()["ok"]
+    assert _retire_lone_whole(world, "outside", ref)["ok"] and world.retire()["ok"]
 
 
 def test_a_repeated_completed_request_writes_no_new_receipt(world):
@@ -378,14 +392,17 @@ def test_a_repeated_completed_request_writes_no_new_receipt(world):
     first = (reports / "review-artifact-cleanup.json").read_bytes()
     for _ in range(2):
         again = world.retire()
-        assert again["ok"] and again["taskArchive"]["reviewArtifacts"]["receipt"] == "unchanged"
+        assert again["ok"] and again["retirementState"] == "hook-finished"
+        # The application result still records the hook receipt; shaping only
+        # moved it off the wire, so retain the original unchanged-receipt check.
+        assert again["taskArchive"]["reviewArtifacts"]["receipt"] == "unchanged"
     assert (reports / "review-artifact-cleanup.json").read_bytes() == first
     assert not list(reports.glob("review-artifact-cleanup.attempt-*"))
 
 
 def test_a_retired_lone_master_is_still_readable_where_it_was_archived(world):
     _, ref = lone(world)
-    retire_lone(world, "outside", ref)
+    _retire_lone_whole(world, "outside", ref)
     archived = read_task_doc(world.tasks / "0_archive/outside/task.json")
     assert (
         archived.id == "outside"
@@ -489,7 +506,7 @@ def test_any_exception_before_archival_ends_restored_on_both_routes(world, error
         patch.object(Path, "rename", side_effect=error),
         pytest.raises(ValueError, match=r"before archival"),
     ):
-        retire_lone(world, "outside", ref)
+        _retire_lone_whole(world, "outside", ref)
     assert world.snapshot() == before and contract.task_root.is_dir()
 
 
@@ -532,9 +549,14 @@ def test_a_record_that_does_not_match_its_canonical_file_name_is_refused(world):
 
 
 def _generic(world, operation, **edit):
-    return task_doc_payload(
-        world.cfg, world.target, operation=operation, edit=TaskDocEdit(**edit), call=TaskDocCall()
-    )
+    with tool_call_context("task_doc", {"operation": operation}, config=world.cfg):
+        return task_doc_payload(
+            world.cfg,
+            world.target,
+            operation=operation,
+            edit=TaskDocEdit(**edit),
+            call=TaskDocCall(),
+        )
 
 
 def test_every_generic_route_to_a_retired_row_refuses_naming_the_row(world):
@@ -578,23 +600,28 @@ def test_every_generic_route_to_a_retired_row_refuses_naming_the_row(world):
         repo=REPOSITORY,
         createdAt="2026-10-04T00:00:00+00:00",
     )
-    with pytest.raises(ValueError, match=pattern):
-        task_doc_payload(
+    with tool_call_context("task_doc", {"operation": "create"}, config=world.cfg):
+        leaf_result = task_doc_payload(
             world.cfg,
             TaskDocTarget(repo_id=REPOSITORY, task_name="sprint", slug="zero"),
             operation="create",
             edit=TaskDocEdit(fields=leaf.model_dump(mode="json", by_alias=True)),
             call=TaskDocCall(),
         )
+    assert leaf_result["ok"] is False
+    assert leaf_result["code"] == "master-sync-failed"
+    assert re.search(pattern, str(leaf_result["error"]))
+    assert world.snapshot() == before
     assert world.sprint().subTasks[0].retirement == row.retirement
     # the linkage operations leave the retirement row in place
-    task_doc_payload(
-        world.cfg,
-        world.target,
-        operation="detach_master",
-        edit=TaskDocEdit(fields={"masterRef": world.refs[2].model_dump()}),
-        call=TaskDocCall(),
-    )
+    with tool_call_context("task_doc", {"operation": "detach_master"}, config=world.cfg):
+        task_doc_payload(
+            world.cfg,
+            world.target,
+            operation="detach_master",
+            edit=TaskDocEdit(fields={"masterRef": world.refs[2].model_dump()}),
+            call=TaskDocCall(),
+        )
     assert world.sprint().subTasks[0].retirement == row.retirement
 
 
@@ -605,9 +632,9 @@ def test_every_successful_retire_answer_carries_the_restart_notice_and_refusals_
         world.retire(),
         world.retire(),
         world.retire(dry_run=True),
-        retire_lone(world, "outside", ref, dry_run=True),
-        retire_lone(world, "outside", ref),
-        retire_lone(world, "outside", ref),
+        _retire_lone_whole(world, "outside", ref, dry_run=True),
+        _retire_lone_whole(world, "outside", ref),
+        _retire_lone_whole(world, "outside", ref),
     ]
     for answer in answers:
         assert answer["ok"] and "Restart required" in answer["detail"]

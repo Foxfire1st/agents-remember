@@ -19,6 +19,7 @@ from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, wo
 from agents_remember.worktrees.modules.landing import landing_refs
 from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.source_lineage import source_lineage_for_contract
+from agents_remember.worktrees.task_document_copies import stale_copy_line
 from agents_remember.worktrees.worktree_contract import (
     CleanupStatus,
     CloseoutStatus,
@@ -123,6 +124,9 @@ class WorktreeStatusFacts(TypedDict):
     freshness: NotRequired[dict[str, object]]
     source_lineage: NotRequired[dict[str, object]]
     landing: NotRequired[list[dict[str, object]]]
+    # MIK-R111 rule 3: one line naming task-document copies that differ from
+    # their sources. Present only when something differs; absent is clean.
+    task_document_copies: NotRequired[str]
 
 
 class WorktreeStatusPayload(WorktreeStatusFacts, LifecycleGuidance):
@@ -507,6 +511,9 @@ def _status_payload_with_landing(
         # The one place a degraded read becomes visible to whoever called a worktree tool:
         # the phase below was computed from the substituted values, and this says so.
         facts["unknown_contract_cells"] = list(contract.unknown_cells)
+    copies_line = stale_copy_line(contract.coordination_root, contract.worktree_group)
+    if copies_line is not None:
+        facts["task_document_copies"] = copies_line
     providers = worktree_services().provider_lifecycle.setup_status(contract)
     if providers is not None:
         facts["providers"] = providers

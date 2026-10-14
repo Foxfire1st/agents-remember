@@ -12,9 +12,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
+import agents_remember
 import pytest
 from agents_remember.application import worktree_tools
 from agents_remember.application.lifecycle.direct_landing import direct_landing_tool
@@ -42,6 +47,7 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
 from agents_remember.worktrees.cutover_lock import (
     CUTOVER_LOCK_CODE,
     is_legacy_format_refusal,
+    legacy_format_refusal,
 )
 from agents_remember.worktrees.integration.closeout.certification.execution import (
     execute_selected_closeout,
@@ -50,8 +56,11 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationStore,
     operation_record_path,
 )
-from agents_remember.worktrees.knowledge_gate import landing_gate_refusal
-from agents_remember.worktrees.modules.record_landing import _landing_request
+from agents_remember.worktrees.knowledge_gate import converted_memory, landing_gate_refusal
+from agents_remember.worktrees.modules.record_landing import (
+    _landing_request,
+    _legacy_format_next_step,
+)
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,
@@ -335,13 +344,16 @@ def test_record_landing_converted_candidate_on_legacy_line_reaches_its_validator
         _byte_tree(leaf.code_worktree),
         _byte_tree(leaf.memory_worktree),
     )
-    with pytest.raises(RuntimeError) as raised:
-        worktree_tools.worktree_record_landing_tool(
-            fixture.cfg,
-            contract_path=leaf.contract_path.as_posix(),
-            landed=LandedCommits(code=code_tip, memory_content=converted_tip),
-        )
-    refusal = str(raised.value)
+    # Architect ruling L111-A-LEGACY-FORMAT (R6): the validator refusal is
+    # answered, not raised; its nonlegacy fact is unchanged, so only the read
+    # site moves to the answer while every compared substance stays.
+    answer = worktree_tools.worktree_record_landing_tool(
+        fixture.cfg,
+        contract_path=leaf.contract_path.as_posix(),
+        landed=LandedCommits(code=code_tip, memory_content=converted_tip),
+    )
+    assert answer["ok"] is False
+    refusal = answer["detail"]
     assert not is_legacy_format_refusal(refusal)
     direct = _landing_request(leaf, fixture.memory, code_tip, converted_tip)
     assert not isinstance(direct, str)
@@ -355,6 +367,60 @@ def test_record_landing_converted_candidate_on_legacy_line_reaches_its_validator
         _byte_tree(leaf.code_worktree),
         _byte_tree(leaf.memory_worktree),
     ) == refs_before
+
+
+def test_record_landing_converted_lines_elsewhere_names_sync_and_keeps_the_marker(
+    tmp_path: Path,
+) -> None:
+    """Ruling L111-THE-NEXT-STEP branch 2: converted lines elsewhere name the sync.
+
+    The official line and the landed commit are unconverted, but the repository holds
+    converted memory on another line, so the answer names worktree_sync merge-memory.
+    Following the named step keeps the converted lines it names held. The world path
+    holds the sentence's own converted-lines words, so the branch follows the probe,
+    not the words.
+    """
+
+    fixture = QueueFixture(
+        tmp_path / "Converted memory of this repository is on scratch" / "world",
+        memory_mode="external",
+        converted=False,
+    )
+    leaf = load_contract(fixture.contracts[MASTER_A].contract_path)
+    assert leaf.memory_worktree is not None and leaf.code_worktree is not None
+    code_tip = git(fixture.code, "rev-parse", "main")
+    memory_tip = git(fixture.memory, "rev-parse", "main")
+    work = fixture.memory / "scratch-conv"
+    git(fixture.memory, "worktree", "add", "--detach", work.as_posix(), "main")
+    (work / "knowledge").mkdir(parents=True, exist_ok=True)
+    (work / "knowledge" / "layout.json").write_text(LAYOUT, encoding="utf-8")
+    git(work, "add", "knowledge/layout.json")
+    git(work, "commit", "-q", "-m", "Converted scratch commit")
+    converted_tip = git(work, "rev-parse", "HEAD")
+    git(fixture.memory, "worktree", "remove", "--force", work.as_posix())
+    git(fixture.memory, "branch", "-f", "scratch-converted", converted_tip)
+    answer = worktree_tools.worktree_record_landing_tool(
+        fixture.cfg,
+        contract_path=leaf.contract_path.as_posix(),
+        landed=LandedCommits(code=code_tip, memory_content=memory_tip),
+    )
+    assert answer["ok"] is False
+    assert answer["code"] == "legacy-format"
+    next_step = answer["nextStep"]
+    assert next_step["nextTool"] == "worktree_sync"
+    assert next_step["nextArgs"]["memory_sync_choice"] == "merge-memory"
+    # The trap is set: the world path holds the sentence's converted-lines words, yet
+    # the branch follows the probe, which found converted lines here.
+    assert "Converted memory of this repository is on scratch" in answer["detail"]
+    # Ruling L111-THE-STEP-IS-A-CALL (R13): call the tool that next names with exactly
+    # the arguments that next carries; the converted lines it names stay held.
+    tool_args = next_step["nextArgs"]
+    worktree_tools.worktree_sync_tool(
+        fixture.cfg,
+        contract_path=tool_args["contract_path"],
+        memory_sync_choice=tool_args["memory_sync_choice"],
+    )
+    assert converted_memory(fixture.memory, converted_tip)
 
 
 def test_unprobable_official_line_is_named_never_collapsed(tmp_path: Path) -> None:
@@ -382,9 +448,19 @@ def test_unprobable_official_line_is_named_never_collapsed(tmp_path: Path) -> No
 
 
 def test_record_landing_refusal_writes_nothing(tmp_path: Path) -> None:
-    """L46-R1-B03: a legacy record-landing refusal changes no ref, file or contract."""
+    """L46-R1-B03: a legacy record-landing refusal changes no ref, file or contract.
 
-    fixture = QueueFixture(tmp_path / "world", memory_mode="external", converted=False)
+    The world path holds the sentence's own converted-lines words, so the branch
+    follows the probe — which found no converted memory here — not the words. The
+    roots hold a space, a single quote and a dollar sign, so the shown line must
+    run as shown.
+    """
+
+    fixture = QueueFixture(
+        tmp_path / "Converted memory of this repository is on scratch's $line" / "world",
+        memory_mode="external",
+        converted=False,
+    )
     leaf = load_contract(fixture.contracts[MASTER_A].contract_path)
     assert leaf.memory_worktree is not None and leaf.code_worktree is not None
     code_tip = git(fixture.code, "rev-parse", "main")
@@ -397,14 +473,40 @@ def test_record_landing_refusal_writes_nothing(tmp_path: Path) -> None:
         _byte_tree(leaf.code_worktree),
         _byte_tree(leaf.memory_worktree),
     )
-    # The public record route raises the refusal (as every record refusal does);
-    # the envelope proof is that nothing was written before the raise.
-    with pytest.raises(RuntimeError, match="code legacy-format"):
-        worktree_tools.worktree_record_landing_tool(
-            fixture.cfg,
-            contract_path=leaf.contract_path.as_posix(),
-            landed=LandedCommits(code=code_tip, memory_content=memory_tip),
-        )
+    # Architect ruling L111-A-LEGACY-FORMAT (R6): the legacy-format refusal of
+    # this packet tool is answered with ok false, the code legacy-format, the
+    # central sentence unchanged and the conversion named; only the read site
+    # moves, and the envelope proof is that nothing was written before it.
+    answer = worktree_tools.worktree_record_landing_tool(
+        fixture.cfg,
+        contract_path=leaf.contract_path.as_posix(),
+        landed=LandedCommits(code=code_tip, memory_content=memory_tip),
+    )
+    assert answer["ok"] is False
+    assert answer["code"] == "legacy-format"
+    assert is_legacy_format_refusal(answer["error"])
+    assert is_legacy_format_refusal(answer["detail"])
+    # Ruling L111-THE-NEXT-STEP (R11), branch 3: this never-converted repository
+    # takes the first conversion, named with the roots filled in as a step that
+    # is no tool call of this server (MIK-R111 rule 7: the next step where there
+    # is one; no tool is invented for a CLI conversion).
+    next_step = answer["nextStep"]
+    assert "nextTool" not in next_step
+    memory_root = leaf.memory_worktree
+    assert memory_root is not None
+    # Ruling L111-THE-STEP-IS-A-CALL (R13): the step is the call with separate values.
+    values = next_step["nextArgs"]
+    assert values == [
+        "agents-remember",
+        "knowledge-convert",
+        memory_root.as_posix(),
+        "--code",
+        leaf.code_repo_path.as_posix(),
+    ]
+    assert shlex.split(next_step["command"]) == values
+    # The trap is set: the world path holds the sentence's converted-lines words, yet
+    # the branch follows the probe, which found no converted memory here.
+    assert "Converted memory of this repository is on scratch" in answer["detail"]
     assert leaf.contract_path.read_bytes() == contract_before
     assert (
         _refs(fixture.code),
@@ -413,6 +515,53 @@ def test_record_landing_refusal_writes_nothing(tmp_path: Path) -> None:
         _byte_tree(leaf.code_worktree),
         _byte_tree(leaf.memory_worktree),
     ) == refs_before
+    # Follow the shown step and rebuild nothing: the values come from the answer, the
+    # program name alone is replaced by this build's interpreter, and the child
+    # process converts the memory, which then holds the layout marker.
+    src_root = Path(agents_remember.__file__).resolve().parent
+    env = dict(os.environ)
+    prior_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{src_root}{os.pathsep}{prior_pythonpath}" if prior_pythonpath else str(src_root)
+    )
+    run = subprocess.run(
+        [sys.executable, "-m", "agents_remember.cli", *values[1:]],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert run.returncode == 0, run.stderr
+    assert (memory_root / "knowledge" / "layout.json").is_file()
+
+
+def test_record_landing_unknown_probe_carries_no_next_step(tmp_path: Path) -> None:
+    """Ruling L111-THE-NEXT-STEP branch 4: an unanswerable probe names no step.
+
+    The central sentence stays whole (it still carries the legacy code); with no
+    decision in it, the mapping names no next step.
+    """
+
+    repo = tmp_path / "Converted memory of this repository is on scratch" / "mem"
+    repo.mkdir(parents=True)
+    (repo / ".git").write_text("gitdir: /nonexistent-ar-probe-target", encoding="utf-8")
+    sentence = legacy_format_refusal(
+        repo, operation="worktree_record_landing", subject="the memory"
+    )
+    assert is_legacy_format_refusal(sentence)
+    assert "unknown" in sentence
+    # The trap is set: the path holds the sentence's own converted-lines words, yet
+    # the branch follows the probe's unknown case, not the words.
+    assert "Converted memory of this repository is on scratch" in sentence
+    assert (
+        _legacy_format_next_step(
+            contract_path="contract",
+            memory_root="memory",
+            code_repo="code",
+            case=sentence.case,
+        )
+        is None
+    )
 
 
 def test_fast_forward_of_two_unconverted_sides_refuses_with_sides(tmp_path: Path) -> None:

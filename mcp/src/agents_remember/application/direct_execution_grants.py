@@ -593,11 +593,17 @@ def direct_execution_grant_tool(
 
 
 def _grant_refusal(status: str, detail: str, *, next_action: str) -> dict[str, Any]:
+    # The reason the caller reads: the overflow guard keeps short scalar
+    # fields but never a long detail, so the refusal names its reason up
+    # front in summary (the detail file keeps it whole). The first clause
+    # carries it; capped at the scalar length the guard measures.
+    summary = detail.split(";", maxsplit=1)[0].strip()[:200].rstrip() or status
     return {
         "ok": False,
         "operation": "direct_execution_grant",
         "state": "refused",
         "status": status,
+        "summary": summary,
         "detail": detail,
         "nextAction": next_action,
         "changed": False,

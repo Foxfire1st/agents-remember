@@ -28,6 +28,7 @@ its own error; it is never called "legacy" (MIK-R46 preservation).
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -45,6 +46,8 @@ __all__ = [
     "FIRST_CONVERSION_SKILL",
     "LEGACY_FORMAT_CODE",
     "CutoverProbeError",
+    "LegacyFormatCase",
+    "LegacyFormatRefusal",
     "converted_memory_location",
     "cutover_lock_refusal",
     "first_conversion_procedure",
@@ -228,9 +231,38 @@ def cutover_lock_refusal(repository: Path | None, *, operation: str, line: str) 
     )
 
 
+@dataclass(frozen=True)
+class LegacyFormatCase:
+    """The probe case behind one legacy-format refusal, made once where the probe runs.
+
+    ``kind`` is ``"converted-lines"`` (with the lines' names in ``note``),
+    ``"no-converted-memory"``, or ``"unknown"`` (with the probe error in ``note``).
+    The sentence and any next step are both built from this one value.
+    """
+
+    kind: str
+    note: str = ""
+
+
+class LegacyFormatRefusal(str):
+    """The central legacy message with its probe case attached.
+
+    Text-equal to a plain string everywhere it is compared, rendered, logged or
+    serialized; the case travels on the value so no code reads the sentence to
+    learn it.
+    """
+
+    case: LegacyFormatCase
+
+    def __new__(cls, text: str, case: LegacyFormatCase) -> LegacyFormatRefusal:
+        refusal = super().__new__(cls, text)
+        refusal.case = case
+        return refusal
+
+
 def legacy_format_refusal(
     repository: Path | None, *, operation: str, subject: str, database_file: bool = False
-) -> str:
+) -> LegacyFormatRefusal:
     """Word the refusal of a route that was handed memory in the legacy format (MIK-R46 rule 2).
 
     The canonical knowledge database is retired: knowledge is read and written as files, so a
@@ -240,29 +272,37 @@ def legacy_format_refusal(
     when the line it syncs from is converted; otherwise the first conversion of MIK-R46 rule 6
     (``agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY``, as the
     ``c-13-install-and-onboard`` skill describes). When Git can say, it names the line of
-    ``repository`` that already holds converted memory. It decides nothing; the caller established
-    the legacy input. It carries the code ``legacy-format``.
+    ``repository`` that already holds converted memory. It decides nothing; the caller
+    established the legacy input. It carries the code ``legacy-format``.
+
+    The probe case travels on the returned value (:class:`LegacyFormatRefusal`): the sentence
+    and any next step are both built from that one value, and no code reads the sentence to
+    learn the case (architect ruling L111-THE-CASE-IS-A-VALUE).
     """
 
     held = "This memory repository holds no converted memory yet."
+    case = LegacyFormatCase(kind="no-converted-memory")
     if repository is not None and repository.is_dir():
         try:
             where = _converted_lines(repository)
         except CutoverProbeError as error:
             held = f"Whether this memory repository holds converted memory is unknown ({error})."
+            case = LegacyFormatCase(kind="unknown", note=str(error))
         else:
             if where:
                 held = f"Converted memory of this repository is on {where}; read it there."
+                case = LegacyFormatCase(kind="converted-lines", note=where)
     what = (
         "it is a knowledge database file, the legacy format, and no route opens one: name the "
         "root directory of a converted memory tree instead"
         if database_file
         else f"it is memory in the legacy format (code legacy-format; no {LAYOUT_MARKER_PATH})"
     )
-    return (
+    return LegacyFormatRefusal(
         f"{operation} refuses {subject}: {what}. The canonical knowledge database is retired "
         "(MIK-R26), so knowledge is read and written only as files. A line that descends from a "
         "converted line converts through the crossing sync: run worktree_sync with merge-memory "
         "once the line it syncs from holds converted memory (MIK-R24 rule 8). A repository that "
-        f"was never converted {first_conversion_procedure()}. {held}"
+        f"was never converted {first_conversion_procedure()}. {held}",
+        case,
     )

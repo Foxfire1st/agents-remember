@@ -57,6 +57,11 @@ owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycl
 evidence_node = "mcp/tests/test_dependency_ownership_ast_helpers.py::test_repository_inputs_reach_their_supported_consumers"
 
 [[contract]]
+id = "tool-answer-l111-shaped-rows"
+owner = "mcp/tests/tool_answer_l111_test_support.py"
+evidence_node = "mcp/tests/test_tool_answer_rows_l111.py::ToolAnswerL111ShapedRowsTests::test_every_l111_tool_has_a_shaped_row"
+
+[[contract]]
 id = "tool-log-sandbox-witness"
 owner = "mcp/tests/tool_log_witness.py"
 evidence_node = "mcp/tests/tool_log_witness.py::main"
@@ -246,6 +251,7 @@ consumers = [
   "mcp/tests/test_knowledge_name_projection.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_paseo_agent_tools.py",
@@ -258,6 +264,7 @@ consumers = [
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
   "mcp/tests/test_paseo_role_agents.py",
+  "mcp/tests/test_paseo_role_answers_l111.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -273,7 +280,10 @@ consumers = [
   "mcp/tests/test_role_message_files.py",
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_structural_dispatch_recovery.py",
+  "mcp/tests/test_task_doc_ordinary_l111.py",
+  "mcp/tests/test_task_document_copies_l111.py",
   "mcp/tests/test_tool_answer_log.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_controls.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -338,6 +348,7 @@ consumers = [
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
@@ -355,6 +366,7 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -552,6 +564,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_landing_report.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_leaf_agent_archive.py",
   "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
@@ -595,6 +608,7 @@ consumers = [
   "mcp/tests/test_sprint_archive_phases.py",
   "mcp/tests/test_standalone_master_retirement.py",
   "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_reopen_series_extension.py",
@@ -603,6 +617,7 @@ consumers = [
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_terminal_refusal_leaves_everything.py",
   "mcp/tests/test_tool_answer_rows_citation.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_rows_quality.py",
   "mcp/tests/test_tool_answer_table.py",
@@ -1130,8 +1145,10 @@ permanence_rationale = "The context_packet row's largest case pins the final fie
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -1152,8 +1169,10 @@ permanence_rationale = "The context_packet row's ordinary case pins the final fi
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -1174,8 +1193,10 @@ permanence_rationale = "The knowledge_diff row's largest case pins the final fie
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::L109LargestProductionTests::test_knowledge_diff_largest_is_operation_produced"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -1196,8 +1217,10 @@ permanence_rationale = "The knowledge_diff row's ordinary case pins the final fi
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -1218,8 +1241,10 @@ permanence_rationale = "The knowledge_read row's largest case pins the final fie
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::L109LargestProductionTests::test_knowledge_read_largest_is_operation_produced"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -1240,8 +1265,10 @@ permanence_rationale = "The knowledge_read row's ordinary case pins the final fi
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -1262,8 +1289,10 @@ permanence_rationale = "The read_ar_files row's largest case pins the final fiel
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::L109LargestProductionTests::test_read_ar_files_largest_is_operation_produced"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -1284,8 +1313,10 @@ permanence_rationale = "The read_ar_files row's ordinary case pins the final fie
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_l109_shaped_rows_are_the_table_rows"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -1620,6 +1651,7 @@ consumers = [
   "mcp/tests/test_knowledge_worklist_leaf.py",
   "mcp/tests/test_knowledge_writer.py",
   "mcp/tests/test_landing_report.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_landing_unreadable_inputs.py",
   "mcp/tests/test_layering.py",
   "mcp/tests/test_leaf_agent_archive.py",
@@ -1694,6 +1726,7 @@ consumers = [
   "mcp/tests/test_paseo_no_harness_name.py",
   "mcp/tests/test_paseo_node.py",
   "mcp/tests/test_paseo_role_agents.py",
+  "mcp/tests/test_paseo_role_answers_l111.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -1824,12 +1857,14 @@ consumers = [
   "mcp/tests/test_sync_scripts.py",
   "mcp/tests/test_task_decision_product_records.py",
   "mcp/tests/test_task_doc_graph_publication.py",
+  "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_task_doc_review_public.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_document.py",
   "mcp/tests/test_task_document_application_1.py",
   "mcp/tests/test_task_document_body_lookup.py",
   "mcp/tests/test_task_document_copies.py",
+  "mcp/tests/test_task_document_copies_l111.py",
   "mcp/tests/test_task_document_master.py",
   "mcp/tests/test_task_documents_graph_projection.py",
   "mcp/tests/test_task_execution_topology.py",
@@ -1860,6 +1895,7 @@ consumers = [
   "mcp/tests/test_tool_answer_guard.py",
   "mcp/tests/test_tool_answer_log.py",
   "mcp/tests/test_tool_answer_rows_citation.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_rows_quality.py",
   "mcp/tests/test_tool_answer_table.py",
@@ -2135,6 +2171,7 @@ consumers = [
   "mcp/tests/test_knowledge_reopen_governing_rows.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
@@ -2145,6 +2182,7 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -2246,6 +2284,7 @@ consumers = [
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_views.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
@@ -2263,6 +2302,7 @@ consumers = [
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -2318,11 +2358,13 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_onboarding_gate.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -2451,6 +2493,7 @@ consumers = [
   "mcp/tests/test_paseo_catalog.py",
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
+  "mcp/tests/test_paseo_role_answers_l111.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
   "mcp/tests/test_paseo_status.py",
@@ -2490,6 +2533,7 @@ consumers = [
   "mcp/tests/test_paseo_launch.py",
   "mcp/tests/test_paseo_launch_repeat.py",
   "mcp/tests/test_paseo_role_agents.py",
+  "mcp/tests/test_paseo_role_answers_l111.py",
   "mcp/tests/test_paseo_role_bridge.py",
   "mcp/tests/test_paseo_role_messages.py",
   "mcp/tests/test_paseo_role_tools.py",
@@ -2557,9 +2601,15 @@ permanence_rationale = "The read-boundary cases and the protected-read roster sh
 replacement_contract = "node:mcp/tests/test_knowledge_read_boundary_controls.py::test_an_unauthorized_object_fails_the_oracle_without_an_attributed_comparison"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_abandoned_series_closeout.py",
+  "mcp/tests/test_closeout_refusal_aftermath.py",
+  "mcp/tests/test_direct_landing_leaf_identity.py",
+  "mcp/tests/test_enclosure_without_remains.py",
+  "mcp/tests/test_knowledge_gate_routes.py",
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_read_boundary_controls.py",
   "mcp/tests/test_knowledge_read_boundary_roster.py",
+  "mcp/tests/test_master_chain_public_routes.py",
 ]
 
 [[artifact]]
@@ -2599,6 +2649,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_source_endpoints.py",
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
@@ -2608,6 +2659,7 @@ consumers = [
   "mcp/tests/test_review_family_member_sources.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
   "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -2815,13 +2867,41 @@ permanence_rationale = "The twelve landed rows and their proof helpers need one 
 replacement_contract = "node:mcp/tests/test_tool_answer_table.py::ToolAnswerTableTests::test_every_registered_tool_has_an_authored_row_and_no_extras"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_guard.py",
   "mcp/tests/test_tool_answer_log.py",
   "mcp/tests/test_tool_answer_rows_citation.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_rows_packaging.py",
   "mcp/tests/test_tool_answer_rows_quality.py",
+  "mcp/tests/test_tool_answer_table.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/tool_answer_l111_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "tool-answer-l111-shaped-rows"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the authored L111 answer-table rows with their genuine per-tool bounds, extracted out of test_tool_answer_table.py: ToolAnswerRow is the row shape and _apply_l111_shaped_rows plus the per-tool largest-case builders are the authored roster the table and rows modules assert; the location-separating target comparator and the whole-result identity check the L111 oracles assert by"
+introduced_by = "260928-MIK-L111"
+lifetime = "permanent"
+permanence_rationale = "The L111 shaped-row roster is asserted from both the answer-table module and the rows module; a second copy of the roster would let the two readings of the same bound disagree."
+replacement_contract = "contract:tool-answer-l111-shaped-rows"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_landing_state_refusals.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_paseo_role_answers_l111.py",
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_task_doc_ordinary_l111.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
@@ -2848,10 +2928,14 @@ consumers = [
   "mcp/tests/test_knowledge_name_projection.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_route_chain.py",
+  "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_task_doc_ordinary_l111.py",
+  "mcp/tests/test_task_document_copies_l111.py",
   "mcp/tests/test_tool_answer_log.py",
+  "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_controls.py",
   "mcp/tests/test_tool_entry_point_sweep.py",

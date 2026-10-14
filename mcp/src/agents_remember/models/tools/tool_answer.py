@@ -147,6 +147,34 @@ SHAPED_TOOL_BOUNDS: dict[tuple[str, str | None], int] = {
     ("memory_carryover_plan", None): 500,
     ("memory_carryover_apply", None): 800,
     ("curator_coherence", None): 850,
+    # MIK-R111 has landed: its tools carry governed shaped bounds here,
+    # measured in freeze-manifest-a06.md's evidence (see the note below).
+    ("task_doc", None): TOOL_ANSWER_MAX_TOKENS,
+    ("worktree_start", None): 600,
+    ("worktree_attach", None): 500,
+    ("worktree_status", None): 600,
+    ("worktree_sync", None): 400,
+    ("worktree_pause", None): 500,
+    ("worktree_closeout_preview", None): 1000,
+    ("worktree_closeout_apply", None): 600,
+    ("worktree_integrate", None): 500,
+    ("worktree_checkpoint_landing", None): 600,
+    ("worktree_record_landing", None): 700,
+    ("worktree_operation_control", None): 500,
+    ("worktree_cleanup", None): 500,
+    ("worktree_abandon", None): 600,
+    ("direct_landing", None): 500,
+    ("lifecycle_finalize_task", None): 600,
+    ("closeout_queue", None): 500,
+    ("task_reopen", None): 900,
+    ("role_start", None): 300,
+    ("role_message", None): 150,
+    # A waited reply rides the exception bound (MIK-R111 rule 5): over it the
+    # reply goes to the detail file and the answer keeps its beginning. The
+    # wait row documents that guard, not the shaped bound of plain answers.
+    ("role_message", "wait"): 4000,
+    ("direct_execution_grant", None): 150,
+    ("worktree_enclosure_adopt", None): 900,
 }
 
 # Rule 7: until its leaf lands, a tool stands in the table as an interim row
@@ -174,7 +202,6 @@ INTERIM_TOOL_LEAF: dict[str, str] = {
     "worktree_cleanup": "L111",
     "worktree_abandon": "L111",
     "direct_landing": "L111",
-    "direct_execution_grant": "L111",
     "task_doc": "L111",
     "lifecycle_finalize_task": "L111",
     "closeout_queue": "L111",
@@ -216,6 +243,57 @@ RUNTIME_INSTALL_ANSWER_FIELDS = frozenset(
     }
 )
 
+# MIK-R111: these tools have shaped rows in the rule-6 table and name no
+# interim leaf. ``task_doc`` carries its shaped bound; the rest keep the
+# interim bound as their limit.
+L111_SHAPED_TOOLS = frozenset(
+    {
+        "worktree_start",
+        "worktree_attach",
+        "worktree_status",
+        "worktree_sync",
+        "worktree_pause",
+        "worktree_closeout_preview",
+        "worktree_closeout_apply",
+        "worktree_integrate",
+        "worktree_checkpoint_landing",
+        "worktree_record_landing",
+        "worktree_operation_control",
+        "worktree_cleanup",
+        "worktree_abandon",
+        "direct_landing",
+        "task_doc",
+        "lifecycle_finalize_task",
+        "closeout_queue",
+        "task_reopen",
+        "role_start",
+        "role_message",
+        "direct_execution_grant",
+        "worktree_enclosure_adopt",
+    }
+)
+
+# MIK-R111: the shaped bound of a landed tool. A ``task_doc`` write answers
+# within 100 tokens ordinary; the bound holds the largest dry run (the diff
+# alone may ride 1,000 tokens) at the rule-4 default for shaped answers.
+# Every other bound below is a genuine measured maximum, not a wholesale
+# ceiling: each was measured on a real fixture through the production MCP
+# path (success, drift, thirty-path previews, diverged sync, dry refusals),
+# plus a 300-token root-variance margin calibrated from the observed
+# deep-root vs short-root deltas (worst +284), rounded up to the next 100.
+# Measured maxima (short roots): start 260, status 273, preview 653,
+# integrate 187, cleanup 142, checkpoint 277, abandon 232, pause 172,
+# attach 190, control 122, record 366, sync 81, apply 236, finalize 259,
+# reopen 534, adopt 529, direct 141, role_start 160, role_message non-wait
+# 131. Role answers carry relative paths and fixed ids, so they are
+# root-invariant: their margin is 100, giving role_start 300 and
+# role_message 150. ``task_doc`` keeps the rule-4 default: its genuine ceiling is the
+# 1,000-token dry-diff cap plus answer overhead. ``closeout_queue`` answers
+# live: status measures 82 short-root (118 undeclared) and 167 under a
+# 200-character root with two declared masters, so 500 covers the genuine
+# class with root-variance margin; the 256-problem model ceiling stays under
+# the guard alone.
+
 
 def bound_for(tool_name: str, operation: str | None = None) -> int:
     """Return the answer bound in tokens for one tool (and operation).
@@ -250,8 +328,7 @@ def shaped_bound_for(tool_name: str, operation: str | None = None) -> int | None
 def interim_leaf_for(tool_name: str) -> str | None:
     """Return the leaf that owns one tool's answer, while it is interim.
 
-    Every interim row names its exact rule-7 leaf, exception rows included:
-    ``role_message`` answers from ``role_agents.py`` (L111). A tool with no
+    Every interim row names its exact rule-7 leaf. A tool with no
     interim row -- a landed leaf's final tool, or an exception passthrough
     like ``server_info`` -- has no owning leaf. A tool with a governed shaped
     bound has landed and owns its answer itself, so it names no leaf either.

@@ -265,6 +265,11 @@ class PreviewFixture:
         return {"paths": paths, "repositories": repositories}
 
 
+def _whole(answer: dict[str, Any]) -> dict[str, Any]:
+    """The whole result the answer was shaped from, via its log file."""
+    return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize("commanded", [False, True])
 def test_registered_first_leaf_preview_is_repeatable_without_publication(
     tmp_path: Path, commanded: bool
@@ -280,7 +285,7 @@ def test_registered_first_leaf_preview_is_repeatable_without_publication(
         payload = result.structuredContent
         assert payload["ok"], payload
         assert payload["state"] == "would-start"
-        contract = payload["contract"]
+        contract = _whole(payload)["contract"]
         assert contract["parent_contract_path"] == world.parent_path.as_posix()
         assert contract["code_source_branch"] == f"ar/{MASTER}"
         assert contract["code_base_commit"] == git(world.code, "rev-parse", world.source)
@@ -368,7 +373,7 @@ def test_public_apply_re_resolves_source_and_persisted_parent_preview_stays_read
     assert not result.isError, result
     assert result.structuredContent is not None and result.structuredContent["ok"], result
     parent = load_contract(world.parent_path)
-    leaf = load_contract(Path(result.structuredContent["contract_path"]))
+    leaf = load_contract(Path(result.structuredContent["nextArgs"]["contract_path"]))
     assert parent.code_base_commit == leaf.code_base_commit == new_base
     assert parent.code_source_branch == "super"
     assert require_parent_series(leaf, operation="apply preservation") == parent
@@ -592,7 +597,7 @@ def test_organizational_direct_super_preview_keeps_its_distinct_parent_route(
     assert not result.isError, result
     assert result.structuredContent is not None
     assert result.structuredContent["state"] == "would-start"
-    contract = result.structuredContent["contract"]
+    contract = _whole(result.structuredContent)["contract"]
     assert contract["code_source_branch"] == contract["memory_source_branch"] == "super"
     assert not contract["parent_contract_path"]
     after = world.snapshot()
@@ -666,7 +671,7 @@ def test_public_partial_bootstrap_preview_is_read_only_then_apply_recovers_same_
     assert not recovered.isError, recovered
     assert recovered.structuredContent is not None and recovered.structuredContent["ok"]
     parent = load_contract(world.parent_path)
-    leaf = load_contract(Path(recovered.structuredContent["contract_path"]))
+    leaf = load_contract(Path(recovered.structuredContent["nextArgs"]["contract_path"]))
     assert require_parent_series(leaf, operation="recovered apply") == parent
     assert observe_atomic_series(parent).state == "active"
     assert parent.code_base_commit == leaf.code_base_commit == world.base

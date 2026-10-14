@@ -20,6 +20,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.cli import role_launch_preparation as preparation
+from agents_remember.cli.role_launch_routes import _missing_copies_receipt_warning
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.role_launcher import LauncherRole, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -375,6 +376,146 @@ class TaskDocumentCopyTests(unittest.TestCase):
             for p in (group / "task-documents").rglob("*")
             if p.is_file()
         }
+
+    def _write_requirement_fixture(self) -> None:
+        (self.repo_tasks / "master" / "requirements").mkdir(exist_ok=True)
+        (self.repo_tasks / "master" / "requirements" / "REQ-1.md").write_text(
+            "# REQ-1\n", encoding="utf-8"
+        )
+        leaf_json = self.repo_tasks / "master" / "leaf.json"
+        data = json.loads(leaf_json.read_text(encoding="utf-8"))
+        data["requirements"] = [
+            "[REQ-1](requirements/REQ-1.md) \u2014 the rule.",
+            "[Missing](requirements/NOPE.md) \u2014 absent.",
+        ]
+        data["references"] = ["[Master](task.md)"]
+        leaf_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def test_requirement_files_are_copied_beside_the_leaf_and_nothing_else(self) -> None:
+        self._write_requirement_fixture()
+        group = self.groups[0]
+        rows = copies.prepare_task_document_copies(
+            self.config.coordination_root, group, self.refs[2]
+        )
+        self.assertTrue((group / "task-documents/master/leaf.md").is_file())
+        requirement = group / "task-documents/master/requirements/REQ-1.md"
+        self.assertTrue(requirement.is_file())
+        self.assertFalse(requirement.is_symlink())
+        self.assertEqual(
+            requirement.read_bytes(),
+            (self.repo_tasks / "master/requirements/REQ-1.md").read_bytes(),
+        )
+        self.assertFalse((group / "task-documents/master/task.md").exists())
+        self.assertFalse((group / "task-documents/sprint").exists())
+        self.assertFalse((group / "task-documents/other").exists())
+        index = json.loads((group / "task-documents/INDEX.json").read_text())
+        self.assertEqual(len(index["documents"]), 3)
+        by_path = {row["path"]: row for row in index["documents"]}
+        self.assertEqual(
+            set(by_path),
+            {"master/leaf.md", "master/requirements/REQ-1.md", "master/requirements/NOPE.md"},
+        )
+        requirement_row = by_path["master/requirements/REQ-1.md"]
+        self.assertEqual(requirement_row["kind"], "requirement")
+        self.assertEqual(
+            requirement_row["copySha256"], hashlib.sha256(requirement.read_bytes()).hexdigest()
+        )
+        missing_row = by_path["master/requirements/NOPE.md"]
+        self.assertTrue(missing_row["missing"])
+        self.assertEqual(missing_row["reference"], "master/requirements/NOPE.md")
+        self.assertEqual(
+            sorted(
+                Path(row["path"]).relative_to(group / "task-documents").as_posix()
+                for row in rows
+                if row.get("kind") == "requirement"
+            ),
+            ["master/requirements/NOPE.md", "master/requirements/REQ-1.md"],
+        )
+
+    def test_missing_requirement_is_named_in_handover_lists_and_receipt_warning(self) -> None:
+        self._write_requirement_fixture()
+        group = self.groups[0]
+        copies.prepare_task_document_copies(self.config.coordination_root, group, self.refs[2])
+        context = resolve_role_launch_context(self.config, self.selection("worker"))
+        rows = [
+            {"taskDocumentRef": doc.ref.model_dump(mode="json")}
+            for doc in (context.sprint, context.master, context.task)
+            if doc
+        ]
+        metadata, _first = preparation._task_document_read_metadata(
+            self.config, context, {"path": str(group)}, rows
+        )
+        self.assertIn(
+            (group / "task-documents/master/requirements/REQ-1.md").as_posix(),
+            metadata["copies"],
+        )
+        self.assertEqual(metadata["missingCopies"], ["master/requirements/NOPE.md"])
+
+        warning = _missing_copies_receipt_warning(metadata)
+        self.assertIn("master/requirements/NOPE.md", warning["warning"])
+
+    def test_write_adding_a_requirement_adds_its_copy(self) -> None:
+        group = self.groups[0]
+        copies.prepare_task_document_copies(self.config.coordination_root, group, self.refs[2])
+        (self.repo_tasks / "master" / "requirements").mkdir(exist_ok=True)
+        (self.repo_tasks / "master" / "requirements" / "REQ-2.md").write_text(
+            "# REQ-2\n", encoding="utf-8"
+        )
+        with (
+            patch.object(
+                copies, "iter_leaf_enclosure_contracts", return_value=list(self.contracts)
+            ),
+            patch.object(copies, "load_contract", side_effect=self.contracts.__getitem__),
+        ):
+            task_doc_tool(
+                self.config,
+                TaskDocTarget(repo_id="demo", task_name="master", slug="leaf"),
+                operation="set_field",
+                edit=TaskDocEdit(fields={"requirements": ["[REQ-2](requirements/REQ-2.md)"]}),
+            )
+        added = group / "task-documents/master/requirements/REQ-2.md"
+        self.assertEqual(
+            added.read_bytes(), (self.repo_tasks / "master/requirements/REQ-2.md").read_bytes()
+        )
+
+    def test_changed_source_is_named_and_next_write_refreshes(self) -> None:
+        self._write_requirement_fixture()
+        group = self.groups[0]
+        copies.prepare_task_document_copies(self.config.coordination_root, group, self.refs[2])
+        self.assertIsNone(copies.stale_copy_line(self.config.coordination_root, group))
+        (self.repo_tasks / "master" / "requirements" / "REQ-1.md").write_text(
+            "# REQ-1 amended\n", encoding="utf-8"
+        )
+        line = copies.stale_copy_line(self.config.coordination_root, group)
+        self.assertIsNotNone(line)
+        assert line is not None
+        self.assertIn("master/requirements/REQ-1.md", line)
+        self.assertNotIn("\n", line)
+        with (
+            patch.object(
+                copies, "iter_leaf_enclosure_contracts", return_value=list(self.contracts)
+            ),
+            patch.object(copies, "load_contract", side_effect=self.contracts.__getitem__),
+        ):
+            task_doc_tool(
+                self.config,
+                TaskDocTarget(repo_id="demo", task_name="master", slug="leaf"),
+                operation="set_field",
+                edit=TaskDocEdit(fields={"title": "leaf amended"}),
+            )
+        self.assertIsNone(copies.stale_copy_line(self.config.coordination_root, group))
+        self.assertEqual(
+            (group / "task-documents/master/requirements/REQ-1.md").read_bytes(),
+            (self.repo_tasks / "master/requirements/REQ-1.md").read_bytes(),
+        )
+
+    def test_cleanup_removes_requirement_copies(self) -> None:
+        self._write_requirement_fixture()
+        group = self.groups[0]
+        copies.prepare_task_document_copies(self.config.coordination_root, group, self.refs[2])
+        self.assertTrue((group / "task-documents/master/requirements/REQ-1.md").is_file())
+        remove_group_role_folders(next(iter(self.contracts.values())), dry_run=False)
+        self.assertFalse((group / "task-documents").exists())
 
 
 class TaskDocumentCopyScopeTests(unittest.TestCase):

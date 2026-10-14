@@ -247,10 +247,12 @@ class RecordLandingTests(unittest.TestCase):
             _git(contract.code_repo_path, "commit", "-m", "never merged")
             unlanded = _git(contract.code_repo_path, "rev-parse", "side")
 
-            with self.assertRaises(RuntimeError) as raised:
-                _record(contract, landed_code_commit=unlanded)
+            result = _record(contract, landed_code_commit=unlanded)
 
-            self.assertIn("not reachable from any landing target", str(raised.exception))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.payload["state"], "refused")
+            self.assertEqual(result.payload["code"], "commit-not-on-landing-target")
+            self.assertIn("not reachable from any landing target", str(result.payload["error"]))
             self.assertEqual(
                 load_contract(contract.contract_path).integration_status, "not-started"
             )
@@ -271,10 +273,12 @@ class RecordLandingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             contract = _fixture(Path(tmp))
 
-            with self.assertRaises(RuntimeError) as raised:
-                _record(contract)
+            result = _record(contract)
 
-            self.assertIn("requires landed_code_commit", str(raised.exception))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.payload["state"], "refused")
+            self.assertEqual(result.payload["code"], "commit-missing")
+            self.assertIn("requires landed_code_commit", str(result.payload["error"]))
 
     def test_dry_run_records_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

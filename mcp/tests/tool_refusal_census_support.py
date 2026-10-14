@@ -165,13 +165,16 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         },
         "worktree_cleanup": {"contract_path": contract, "dry_run": True},
         "worktree_abandon": {"contract_path": contract, "dry_run": True},
-        # MIK-R82's adoption tool arrived with no census row (the census failed
-        # closed at set equality until this row); a contract outside the
-        # coordination root is refused by name at the boundary, which raises.
+        # An unreadable pre-locator enclosure answers a typed refusal (state,
+        # detail, nextAction); no product change, measured on the census probe.
+        # One probe per tool by census design: the older absent-group variant
+        # was a dead duplicate key (F601) and is removed; the group-mismatch
+        # refusal is still probed here.
         "worktree_enclosure_adopt": {
-            "contract_path": "/none/absent-contract.md",
-            "expected_worktree_group": "/none/absent-group",
+            "contract_path": contract,
+            "expected_worktree_group": (world.coord / "tasks" / REPO).as_posix(),
             "rationale": "refusal census",
+            "dry_run": True,
         },
         "task_reopen": {"contract_path": contract, "dry_run": True},
         "lifecycle_finalize_task": {"contract_path": contract, "dry_run": True},

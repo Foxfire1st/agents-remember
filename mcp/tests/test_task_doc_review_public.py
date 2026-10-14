@@ -9,8 +9,10 @@ from typing import Any
 
 import pytest
 from agents_remember.application.task_docs import task_doc_tools as tools
+from agents_remember.application.task_docs.task_doc_response import review_state_payload
 from agents_remember.application.task_docs.task_doc_route_review import (
     _with_route_review_state,
+    review_settings_limit,
 )
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
@@ -19,7 +21,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
 from test_task_document import _config
 
@@ -77,6 +79,26 @@ def _call(
         operation=operation,
         edit=TaskDocEdit(review=review, fields=fields),
     )
+
+
+def _leaf_doc(config: McpRuntimeConfig) -> TaskDocument:
+    """The authored leaf document itself: the surviving home of every get fact.
+
+    MIK-R111 rule 2: identity, progress, checklist and recorded review state read
+    from the JSON file (and its rendered markdown), never a get answer.
+    """
+    return read_task_doc(
+        config.coordination_root / "tasks" / "agents-remember" / "review-api" / "review_api.json"
+    )
+
+
+def _effective_limit(config: McpRuntimeConfig, stored_additional_rounds: int) -> int:
+    """The limit in force: the settings number plus approved extra rounds.
+
+    The same recomputation the begin path applies on every begin
+    (``begin_task_review``); the removed get answered this number read-only.
+    """
+    return review_settings_limit(config.coordination_root) + stored_additional_rounds
 
 
 def test_public_review_operations_seal_then_shrink_findings(tmp_path: Path) -> None:
@@ -284,9 +306,9 @@ def test_begin_review_takes_limit_from_settings(tmp_path: Path) -> None:
     config = _config(tmp_path)
     _create(config)
 
-    fresh = _call(config, "get")
-    assert fresh["reviewState"]["round"] == 0
-    assert fresh["reviewState"]["limit"] == 2
+    fresh = review_state_payload(_leaf_doc(config), review_settings_limit(config.coordination_root))
+    assert fresh["round"] == 0
+    assert fresh["limit"] == 2
 
     first = _call(config, "begin_review", review={})
     assert (first["reviewState"]["round"], first["reviewState"]["limit"]) == (1, 2)
@@ -411,9 +433,8 @@ def test_begin_review_refused_when_settings_unreadable(tmp_path: Path) -> None:
     with pytest.raises(TaskDocError, match="review-settings-unreadable"):
         _call(config, "begin_review", review={})
 
-    # No round was counted, and a get stays readable while the file is broken.
-    gotten = _call(config, "get")
-    assert gotten["reviewState"]["round"] == 0
+    # No round was counted, and the document stays readable while the file is broken.
+    assert _leaf_doc(config).reviewState is None
 
     _write_user_settings({"orchestration": {"loops": {"defaults": {"maxRounds": 2}}}})
     begun = _call(config, "begin_review", review={})
@@ -451,9 +472,10 @@ def test_replayed_claim_after_a_tracked_mutation_is_refused_before_write(
             "record_review",
             review={"verdict": "pass", "remainingFindingIds": [], "candidateTree": claimed},
         )
-    reread = _call(config, "get")
-    assert reread["reviewState"]["round"] == 1
-    assert reread["reviewState"]["remainingFindingIds"] == ["A"]
+    reread = _leaf_doc(config).reviewState
+    assert reread is not None
+    assert reread.round == 1
+    assert reread.remainingFindingIds == ["A"]
 
 
 def test_unrecorded_tree_claim_is_adopted_but_the_binding_governs(
@@ -513,10 +535,11 @@ def test_legacy_pre_limit_get_carries_the_effective_settings_number(
             },
         },
     )
-    answer = _call(config, "get")
-    assert answer["reviewState"]["limit"] == 5
-    assert answer["reviewState"]["round"] == 2
-    assert answer["reviewState"]["remainingFindingIds"] == ["A"]
+    stored = _leaf_doc(config).reviewState
+    assert stored is not None
+    assert stored.round == 2
+    assert stored.remainingFindingIds == ["A"]
+    assert _effective_limit(config, stored.additionalRounds) == 5
 
 
 def test_legacy_pre_limit_get_adds_approved_extra_rounds(tmp_path: Path) -> None:
@@ -543,9 +566,10 @@ def test_legacy_pre_limit_get_adds_approved_extra_rounds(tmp_path: Path) -> None
             },
         },
     )
-    answer = _call(config, "get")
-    assert answer["reviewState"]["limit"] == 7
-    assert answer["reviewState"]["developerApproval"] == "two extra rounds"
+    stored = _leaf_doc(config).reviewState
+    assert stored is not None
+    assert stored.developerApproval == "two extra rounds"
+    assert _effective_limit(config, stored.additionalRounds) == 7
 
 
 def test_direct_first_record_carries_the_settings_number(tmp_path: Path) -> None:
@@ -580,9 +604,10 @@ def test_clean_recorded_round_does_not_reseal_without_begin(tmp_path: Path) -> N
                 "candidateTree": "cd" * 20,
             },
         )
-    reread = _call(config, "get")
-    assert reread["reviewState"]["round"] == 1
-    assert reread["reviewState"]["remainingFindingIds"] == []
+    reread = _leaf_doc(config).reviewState
+    assert reread is not None
+    assert reread.round == 1
+    assert reread.remainingFindingIds == []
 
 
 def test_untracked_addition_between_records_is_refused(tmp_path: Path) -> None:
@@ -607,8 +632,9 @@ def test_untracked_addition_between_records_is_refused(tmp_path: Path) -> None:
             "record_review",
             review={"verdict": "pass", "remainingFindingIds": [], "candidateTree": claimed},
         )
-    reread = _call(config, "get")
-    assert reread["reviewState"]["remainingFindingIds"] == ["A"]
+    reread = _leaf_doc(config).reviewState
+    assert reread is not None
+    assert reread.remainingFindingIds == ["A"]
 
 
 def test_route_sibling_record_carries_the_plane_tree_and_the_binding(
@@ -667,9 +693,10 @@ def test_failed_identity_reads_refuse_around_a_real_mutation(tmp_path: Path, mon
             "record_review",
             review={"verdict": "pass", "remainingFindingIds": [], "candidateTree": claimed},
         )
-    reread = _call(config, "get")
-    assert reread["reviewState"]["round"] == 1
-    assert reread["reviewState"]["remainingFindingIds"] == ["A"]
+    reread = _leaf_doc(config).reviewState
+    assert reread is not None
+    assert reread.round == 1
+    assert reread.remainingFindingIds == ["A"]
     # Failure before record: a recorded round with no binding admits no
     # same-round record even when the caller replays the recorded tree.
     monkeypatch.setattr(tools, "resolve_candidate_identity", lambda root: None)

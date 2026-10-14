@@ -96,6 +96,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from read_boundary_oracle_test_support import _snapshot
 from test_knowledge_closeout_gate import (
     CODE_A,
     LEAF,
@@ -148,17 +149,26 @@ def _answer(world: Gated) -> None:
     _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
 
 
-def _record(world: Gated, memory_commit: str) -> Any:
+def _record(world: Gated, memory_commit: str, *, code: str = "knowledge-gate-refused") -> Any:
     """``record_landing_result`` as a dry run: the leaf's landing on ``main`` is recorded."""
 
-    return record_landing.record_landing_result(
+    # Fixture publication precedes the no-write baseline; contract_path() authors it.
+    path = world.contract_path()
+    before = _snapshot({"world": world.root})
+    result = record_landing.record_landing_result(
         WorktreeArgs(
-            contract_path=world.contract_path(),
+            contract_path=path,
             dry_run=True,
             landed_code_commit=world.code_base,
             landed_memory_content_commit=memory_commit,
         )
     )
+    assert result.returncode == 2
+    assert result.payload["code"] == code
+    assert result.payload["state"] == "refused"
+    assert result.payload["error"] == str(result.payload["detail"]).splitlines()[0]
+    assert _snapshot({"world": world.root}) == before
+    return result
 
 
 # --------------------------------------------------------------------------------------------------
@@ -198,9 +208,9 @@ def test_a_hand_closed_leaf_file_is_refused_at_closeout_validation_and_record_la
     assert refusal is not None and "R09-history-rows" in refusal and "RLZ-A00001" in refusal
 
     landed = commit(world.memory, {}, trailer=world.code_base)
-    with pytest.raises(RuntimeError, match="R09-history-rows") as refused:
-        _record(world, landed)
-    assert "RLZ-A00001" in str(refused.value)
+    refused = _record(world, landed)
+    assert "R09-history-rows" in refused.payload["detail"]
+    assert "RLZ-A00001" in refused.payload["detail"]
 
     # L37 review R5-1: the same file landed one commit later is refused all the same. A parent
     # that holds the file closed freezes nothing: only a closeout the contract records does.
@@ -212,9 +222,9 @@ def test_a_hand_closed_leaf_file_is_refused_at_closeout_validation_and_record_la
         world.memory, "merge", "-q", "--no-ff", "-m", f"m\n\nCode-Commit: {world.code_base}", "side"
     )
     for later in (child, git(world.memory, "rev-parse", "HEAD")):
-        with pytest.raises(RuntimeError, match="R09-history-rows") as refused:
-            _record(world, later)
-        assert "RLZ-A00001" in str(refused.value)
+        refused = _record(world, later)
+        assert "R09-history-rows" in refused.payload["detail"]
+        assert "RLZ-A00001" in refused.payload["detail"]
 
 
 # --------------------------------------------------------------------------------------------------
@@ -281,8 +291,8 @@ def test_record_landing_refuses_through_its_route_entry(world: Gated, ports: Non
     """M01: an invalid converted memory commit is refused before anything is recorded."""
 
     broken = commit(world.memory, {"onboarding/pkg/a.py.md": "# a [4]\n"}, trailer=world.code_base)
-    with pytest.raises(RuntimeError, match=r"R22\.3-markers"):
-        _record(world, broken)
+    refused = _record(world, broken)
+    assert "R22.3-markers" in refused.payload["detail"]
 
 
 def test_a_hand_edited_enclosure_contract_refuses_through_the_public_recorded_route(
@@ -297,17 +307,26 @@ def test_a_hand_edited_enclosure_contract_refuses_through_the_public_recorded_ro
     edited = text.replace(f"  base_commit: {world.memory_base}", "  base_commit: ", 1)
     assert edited != text
     path.write_text(edited, encoding="utf-8")
-    with pytest.raises(RuntimeError) as refused:
-        record_landing.record_landing_result(
-            WorktreeArgs(
-                contract_path=path,
-                dry_run=True,
-                landed_code_commit=world.code_base,
-                landed_memory_content_commit=world.memory_base,
-            )
+    before = _snapshot({"world": world.root})
+    refused = record_landing.record_landing_result(
+        WorktreeArgs(
+            contract_path=path,
+            dry_run=True,
+            landed_code_commit=world.code_base,
+            landed_memory_content_commit=world.memory_base,
         )
-    assert "records no memory base commit" in str(refused.value)
-    assert "MIK-R52 rule 2" in str(refused.value)
+    )
+    assert refused.returncode == 2
+    assert refused.payload["code"] == "knowledge-gate-refused"
+    assert "records no memory base commit" in str(refused.payload["detail"])
+    assert "MIK-R52 rule 2" in str(refused.payload["detail"])
+    assert refused.payload["error"] == (
+        "record_landing refused: the leaf contract records no memory base commit, so the "
+        "landed pair cannot be judged (MIK-R52 rule 2); close the leaf out through the "
+        "tools, which record the base the landed pair is judged against"
+    )
+    assert refused.payload["detail"] == refused.payload["error"]
+    assert _snapshot({"world": world.root}) == before
 
 
 # -- direct landing: its public entry, with a configured series ----------------------------------
@@ -884,18 +903,18 @@ def test_record_landing_on_unconverted_memory_refuses_before_reading_the_landed_
     unreadable = "f" * 40
     # Converted: an unreadable commit refuses, named -- through the rule-1 pair judgment, which
     # reads the judged pair where the old probe read the landed commit (MIK-R52 rule 2).
-    refused = pytest.raises(RuntimeError, match="cannot read the judged pair")
-    with refused:
-        _record(world, unreadable)  # converted: an unreadable commit refuses, named
+    refused = _record(world, unreadable)
+    assert "cannot read the judged pair" in refused.payload["detail"]
     for branch in ("main", "leaf"):
         git(world.memory, "checkout", "-q", branch)
         git(world.memory, "rm", "-q", "knowledge/layout.json")
         commit(world.memory, {})
     world.memory_base = git(world.memory, "rev-parse", "main")
-    with pytest.raises(RuntimeError, match="code legacy-format"):
-        _record(world, world.memory_base)  # unconverted: refused with the conversion step
-    with pytest.raises(RuntimeError, match="cannot read"):
-        _record(world, unreadable)  # unconverted + unreadable: the probe error, never legacy
+    refused = _record(world, world.memory_base, code="legacy-format")
+    assert "code legacy-format" in refused.payload["detail"]
+    assert refused.payload["nextStep"]["summary"]
+    refused = _record(world, unreadable)
+    assert "cannot read" in refused.payload["detail"]
 
 
 # --------------------------------------------------------------------------------------------------

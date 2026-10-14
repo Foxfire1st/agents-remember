@@ -18,7 +18,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from agents_remember.tasks import Step, SubStep
 from agents_remember.tasks.document import REMOVED_STEP_DECISION_PREFIX, SKIP_STEP_DECISION_PREFIX
 
 from .task_doc_route_review import TaskDocError
@@ -260,21 +259,3 @@ def skip_step(
             "rationale": reason,
         }
     )
-
-
-def step_payloads(steps: list[Step]) -> list[dict[str, Any]]:
-    """Each unit's addressing and progress facts, with its substeps nested underneath."""
-    return [
-        {
-            "id": step.id,
-            "title": step.title,
-            "status": step.status,
-            "note": step.note,
-            "substeps": [_substep_payload(sub) for sub in step.substeps],
-        }
-        for step in steps
-    ]
-
-
-def _substep_payload(sub: SubStep) -> dict[str, Any]:
-    return {"id": sub.id, "title": sub.title, "status": sub.status, "note": sub.note}

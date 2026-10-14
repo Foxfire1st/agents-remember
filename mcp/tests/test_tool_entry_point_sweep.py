@@ -74,6 +74,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -119,20 +120,13 @@ class _ToolCallTimeout(AssertionError):
 
 # ---------------------------------------------------------------------------------------
 # T34's original nine tools remain repaired; their positive/regression checks stay below.
-# Since b52adc8b (L26's landing), the admitted sweep contract reaches these four existing
-# lifecycle preconditions, which raise instead of returning a refusal envelope. L111 owns
-# their product repair (MIK-R111 rule 7); this pin only records the measured surface.
+# Since b52adc8b (L26's landing), the admitted sweep contract reached four existing
+# lifecycle preconditions, which raised instead of returning a refusal envelope. L111 owned
+# their product repair (MIK-R111 rule 7) and has repaired all four, so the pin is empty.
 # Repair one and remove its entry in the same change. Exact equality below checks both
 # directions, so a new raiser or an entry whose tool no longer raises still fails.
 # ---------------------------------------------------------------------------------------
-ENVELOPE_LOSING_RAISERS: frozenset[str] = frozenset(
-    {
-        "worktree_checkpoint_landing",
-        "worktree_cleanup",
-        "worktree_integrate",
-        "worktree_record_landing",
-    }
-)
+ENVELOPE_LOSING_RAISERS: frozenset[str] = frozenset()
 
 # What the repaired tools must answer with now. Derived from the roster rather than
 # hard-coded, so the case below cannot rot. MIK-R112 removed the eight code-search
@@ -441,6 +435,13 @@ class EntryPointWorld:
                     },
                     "providers": {},
                     "benchmarksEnabled": True,
+                    # The delegation policy rides the authority file as the
+                    # supported legacy fallback (its home is the global agentic
+                    # settings file). It must NOT be written to the removed
+                    # coordination system/settings.json location: that file
+                    # trips the settings-location guard for every tool that
+                    # reads runtime settings, including dry runs.
+                    "orchestration": {"gateDelegation": {"policy": "manager-decides-leaf-gates"}},
                 }
             ),
             encoding="utf-8",
@@ -461,22 +462,34 @@ class EntryPointWorld:
             ),
             encoding="utf-8",
         )
-        self.server = create_server(
-            McpRuntimeConfig(
-                config_path=self.settings,
-                coordination_root=self.coord,
-                workspace_root=self.root,
-                transcript_root=self.coord / "logs" / "mcp",
-                harness_skill_root=self.skills,
-                benchmarks_enabled=True,
-                repositories={
-                    REPO: RepositoryScope(repo_id=REPO, path=self.code, memory_root=self.memory),
-                    ADOPT_REPO: RepositoryScope(
-                        repo_id=ADOPT_REPO, path=self.adopt, memory_root=self.adopt
-                    ),
-                },
+        # The authority-file gateDelegation below is a knowingly-used legacy
+        # fallback: its one-cycle migration warning is informational, and
+        # pytest turns it into an error inside tool calls. Suppress exactly
+        # that warning here; the fallback stays honored, guards untouched.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="orchestration.gateDelegation moved.*",
+                category=UserWarning,
             )
-        )
+            self.server = create_server(
+                McpRuntimeConfig(
+                    config_path=self.settings,
+                    coordination_root=self.coord,
+                    workspace_root=self.root,
+                    transcript_root=self.coord / "logs" / "mcp",
+                    harness_skill_root=self.skills,
+                    benchmarks_enabled=True,
+                    repositories={
+                        REPO: RepositoryScope(
+                            repo_id=REPO, path=self.code, memory_root=self.memory
+                        ),
+                        ADOPT_REPO: RepositoryScope(
+                            repo_id=ADOPT_REPO, path=self.adopt, memory_root=self.adopt
+                        ),
+                    },
+                )
+            )
         self.enclosure = self.coord / "tasks" / REPO / MASTER / "enclosures" / LEAF_ID.lower()
         self.contract = self.enclosure / "series-contract.md"
         self.task_ref = {"repository": REPO, "path": f"{MASTER}/task.json"}
@@ -514,12 +527,28 @@ class EntryPointWorld:
     def call(self, name: str, args: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
         """Invoke one registered tool exactly as a consumer does, and read back what arrived."""
 
-        try:
-            result = anyio.run(self._call, name, args)
-        except _ToolCallTimeout:
-            raise
-        except BaseException as exc:
-            return f"RAISED {type(exc).__name__}", None
+        # The authority-file gateDelegation duality the fixture authors on
+        # purpose (legacy fallback beside its documented home) warns once
+        # per process; pytest escalates warnings to errors inside tool
+        # calls, so silence exactly those two migration notices here, as at
+        # server creation. The fallback stays honored, guards untouched.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="orchestration.gateDelegation moved.*",
+                category=UserWarning,
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message="orchestration.gateDelegation in the MCP authority file.*",
+                category=UserWarning,
+            )
+            try:
+                result = anyio.run(self._call, name, args)
+            except _ToolCallTimeout:
+                raise
+            except BaseException as exc:
+                return f"RAISED {type(exc).__name__}", None
         if result.isError:
             text = "\n".join(
                 text for content in result.content if (text := getattr(content, "text", None))
@@ -897,19 +926,27 @@ class EntryPointWorld:
         if uncased:
             raise AssertionError(f"roster tools with no case: {uncased}")
         results: dict[str, dict[str, Any]] = {}
-        for tool in PUBLIC_TOOLS:
-            self.prepare(tool)
-            prepared = self.ambient_state()
-            outcome = self.call(tool, arguments[tool])
-            arm, detail = classify(tool, outcome)
-            results[tool] = {
-                "arm": arm,
-                "detail": detail,
-                "outcome": outcome,
-                "payload": outcome[1],
-                "prepared_state": prepared,
-                "state_after": self.ambient_state(),
-            }
+        # Same known legacy fallback as at server creation: suppress exactly
+        # its migration warning for the run; the fallback stays honored.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="orchestration.gateDelegation moved.*",
+                category=UserWarning,
+            )
+            for tool in PUBLIC_TOOLS:
+                self.prepare(tool)
+                prepared = self.ambient_state()
+                outcome = self.call(tool, arguments[tool])
+                arm, detail = classify(tool, outcome)
+                results[tool] = {
+                    "arm": arm,
+                    "detail": detail,
+                    "outcome": outcome,
+                    "payload": outcome[1],
+                    "prepared_state": prepared,
+                    "state_after": self.ambient_state(),
+                }
         return results
 
     def matrix(self) -> dict[str, list[str]]:

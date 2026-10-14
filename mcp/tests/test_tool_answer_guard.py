@@ -54,7 +54,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         answer = {"ok": True, "state": "started"}
         tokens = count_response_tokens(answer)
         self.assertLessEqual(tokens, TOOL_ANSWER_MAX_TOKENS)
-        self.assertEqual(bound_for("worktree_start"), TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
+        self.assertEqual(bound_for("worktree_start"), 600)
 
     def test_over_bound_answer_gets_the_short_form(self) -> None:
         big = {"ok": True, "blob": _big_blob(), "count": 7, "verbose": "y" * 500}

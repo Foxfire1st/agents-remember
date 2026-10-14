@@ -32,6 +32,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from agents_remember.worktrees.cutover_lock import (
+    FIRST_CONVERSION_COMMAND,
+    LegacyFormatCase,
+    LegacyFormatRefusal,
+    is_legacy_format_refusal,
+)
 from agents_remember.worktrees.disabled_memory import (
     is_disabled_contract,
     opt_out_detail_for_contract,
@@ -59,6 +65,10 @@ from agents_remember.worktrees.modules.landing_record import (
     record_landed_integration,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.state_refusals import (
+    RefusalNext,
+    state_refusal_result,
+)
 from agents_remember.worktrees.series_closeout import landed_chain_refusal
 from agents_remember.worktrees.services import LandingGateRequest
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
@@ -323,6 +333,51 @@ def _unconverted_line_landing_refusal(
     return leaf_cutover_refusal(contract, "record_landing")
 
 
+def _legacy_format_next_step(
+    *,
+    contract_path: str,
+    memory_root: str,
+    code_repo: str,
+    case: LegacyFormatCase | None,
+) -> RefusalNext | None:
+    """The conversion step for one probe case value, or ``None``.
+
+    Architect rulings L111-THE-NEXT-STEP and L111-THE-CASE-IS-A-VALUE: the step follows
+    the case the probe made once where it ran — read from the value, never from the
+    sentence or any text. Converted lines convert through worktree_sync with
+    merge-memory; no converted memory takes the filled first conversion as a
+    summary-only step (MIK-R111 rule 7: the next step where there is one; no tool is
+    invented for a CLI conversion); an unanswerable probe carries no step.
+    """
+
+    if case is not None and case.kind == "converted-lines":
+        return RefusalNext(
+            tool="worktree_sync",
+            args={"contract_path": contract_path, "memory_sync_choice": "merge-memory"},
+            summary=(
+                "Convert the memory line with worktree_sync merge-memory, "
+                "then record the landing again."
+            ),
+        )
+    if case is not None and case.kind == "no-converted-memory":
+        argv = tuple(
+            memory_root
+            if word == "MEMORY_ROOT"
+            else code_repo
+            if word == "CODE_REPOSITORY"
+            else word
+            for word in FIRST_CONVERSION_COMMAND.split()
+        )
+        return RefusalNext(
+            argv=argv,
+            summary=(
+                "Convert this never-converted memory first with the shown "
+                "conversion command, then record the landing again."
+            ),
+        )
+    return None
+
+
 def _landing_request(
     contract: WorktreeContract, repository: Path, code_commit: str, memory_commit: str
 ) -> LandingGateRequest | str:
@@ -360,14 +415,6 @@ def _landing_request(
     )
 
 
-def _require_knowledge_gate(
-    contract: WorktreeContract, code_commit: str, memory_commit: str
-) -> None:
-    refusal = _knowledge_gate_refusal(contract, code_commit, memory_commit)
-    if refusal is not None:
-        raise RuntimeError(refusal)
-
-
 def _identity_payload(contract: WorktreeContract) -> dict[str, str]:
     return {
         "taskId": contract.task_id,
@@ -375,6 +422,88 @@ def _identity_payload(contract: WorktreeContract) -> dict[str, str]:
         "lifecycleId": contract.lifecycle_id,
         "contractPath": contract.contract_path.as_posix(),
     }
+
+
+def _record_preconditions(
+    contract: WorktreeContract, commit: str, memory_commit: str
+) -> tuple[WorktreeCommandResult | None, list[str]]:
+    """The commit, target and gate preconditions before the first write.
+
+    Returns the refusal where one fails -- the check's own sentence, answered
+    instead of raised (MIK-R111 rule 7) -- else ``None``, plus the verified
+    landing targets the record claims.
+    """
+
+    if not commit:
+        return state_refusal_result(
+            contract,
+            state="refused",
+            code="commit-missing",
+            error=(
+                "record_landing requires landed_code_commit: the commit the pull request "
+                "landed on the protected branch"
+            ),
+        ), []
+    targets = _landing_targets(contract)
+    if not targets:
+        return state_refusal_result(
+            contract,
+            state="refused",
+            code="landing-target-missing",
+            error=(
+                "record_landing refused: neither the recorded source branch "
+                f"{contract.code_source_branch!r} nor a local default branch exists, so the "
+                "landing cannot be verified"
+            ),
+        ), []
+    if not any(is_ancestor(contract.code_repo_path, commit, target) for target in targets):
+        return state_refusal_result(
+            contract,
+            state="refused",
+            code="commit-not-on-landing-target",
+            error=(
+                f"record_landing refused: {commit} is not reachable from any landing target "
+                f"({', '.join(targets)}). Pull the protected branch locally after the merge, "
+                "then record the commit it landed."
+            ),
+        ), []
+    gate_refusal = _knowledge_gate_refusal(contract, commit, memory_commit)
+    if gate_refusal is not None:
+        lines = gate_refusal.splitlines()
+        # Architect ruling L111-A-LEGACY-FORMAT (R6): a legacy-format refusal of a
+        # packet tool is answered with the code legacy-format; a validator refusal
+        # keeps its own carrier code (its nonlegacy fact is not relabeled). Ruling
+        # L111-THE-NEXT-STEP (R11): the next step follows the probe case value made
+        # once where the probe ran — sync where a line holds converted memory, the
+        # filled first-conversion command where the repository holds none (a
+        # summary-only step; no tool is invented for a CLI conversion), no step
+        # where the probe could not say. Ruling L111-THE-CASE-IS-A-VALUE (R12): the
+        # case is read from the value, never from the sentence or any text.
+        if is_legacy_format_refusal(gate_refusal):
+            code = "legacy-format"
+            case = gate_refusal.case if isinstance(gate_refusal, LegacyFormatRefusal) else None
+            memory_root = contract.memory_worktree or contract.memory_repo_path
+            next_step = _legacy_format_next_step(
+                contract_path=contract.contract_path.as_posix(),
+                memory_root=memory_root.as_posix() if memory_root is not None else "",
+                code_repo=contract.code_repo_path.as_posix(),
+                case=case,
+            )
+        else:
+            code = "knowledge-gate-refused"
+            next_step = None
+        refusal = state_refusal_result(
+            contract,
+            state="refused",
+            code=code,
+            error=lines[0] if lines else gate_refusal,
+            next=next_step,
+        )
+        return WorktreeCommandResult(
+            refusal.returncode,
+            {**refusal.payload, "detail": gate_refusal[:8192]},
+        ), []
+    return None, list(targets)
 
 
 def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
@@ -413,26 +542,11 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
     commit = args.landed_code_commit.strip()
-    if not commit:
-        raise RuntimeError(
-            "record_landing requires landed_code_commit: the commit the pull request landed on "
-            "the protected branch"
-        )
-    targets = _landing_targets(contract)
-    if not targets:
-        raise RuntimeError(
-            "record_landing refused: neither the recorded source branch "
-            f"{contract.code_source_branch!r} nor a local default branch exists, so the landing "
-            "cannot be verified"
-        )
-    if not any(is_ancestor(contract.code_repo_path, commit, target) for target in targets):
-        raise RuntimeError(
-            f"record_landing refused: {commit} is not reachable from any landing target "
-            f"({', '.join(targets)}). Pull the protected branch locally after the merge, then "
-            "record the commit it landed."
-        )
-    claimed = list(targets)
-    _require_knowledge_gate(contract, commit, args.landed_memory_content_commit.strip())
+    refusal, claimed = _record_preconditions(
+        contract, commit, args.landed_memory_content_commit.strip()
+    )
+    if refusal is not None:
+        return refusal
     if args.dry_run:
         return WorktreeCommandResult(
             0,
@@ -441,7 +555,7 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 "state": "would-record",
                 "landedCodeCommit": commit,
                 "landingTargets": claimed,
-                "summary": f"Would record {commit} as landed on {', '.join(targets)}.",
+                "summary": f"Would record {commit} as landed on {', '.join(claimed)}.",
             },
         )
     updated = record_landed_integration(
@@ -461,7 +575,7 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "landedCodeCommit": commit,
             "landingTargets": claimed,
             "summary": (
-                f"Recorded integration of {commit} on {', '.join(targets)} via the pull-request "
+                f"Recorded integration of {commit} on {', '.join(claimed)} via the pull-request "
                 "route. Cleanup and the series abandon guard now read this work as landed."
             ),
         },

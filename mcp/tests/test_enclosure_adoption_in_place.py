@@ -20,6 +20,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.mcp.tools.enclosure_adoption import (
     EnclosureAdoptionRequest,
+    _adopt_tool,
     worktree_enclosure_adopt_payload,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
@@ -110,9 +111,10 @@ def _expected_artifact(name: str) -> dict[str, object]:
 def test_dry_run_lists_in_place_records_and_writes_nothing(tmp_path: Path) -> None:
     """The dry run names the in-place state and lists each record with hash and size."""
 
+    # MIK-R111 rule 1: records and artifact hashes live in the retained result.
     config, contract_path, group = _in_place_world(tmp_path)
 
-    payload = worktree_enclosure_adopt_payload(config, _request(contract_path, group, dry_run=True))
+    payload = _adopt_tool(config, _request(contract_path, group, dry_run=True))
 
     assert payload["ok"] is True
     assert payload["state"] == "would-adopt-enclosure-found-in-place"
@@ -136,11 +138,12 @@ def test_dry_run_lists_in_place_records_and_writes_nothing(tmp_path: Path) -> No
 def test_real_run_receipts_in_place_without_copy_or_move(tmp_path: Path) -> None:
     """Approval writes a found-in-place receipt; the records stay where they are."""
 
+    # MIK-R111 rule 1: records and artifact hashes live in the retained result.
     config, contract_path, group = _in_place_world(tmp_path)
-    preview = worktree_enclosure_adopt_payload(config, _request(contract_path, group, dry_run=True))
+    preview = _adopt_tool(config, _request(contract_path, group, dry_run=True))
     request_id = preview["publicationRequestId"]
 
-    applied = worktree_enclosure_adopt_payload(
+    applied = _adopt_tool(
         config,
         _request(
             contract_path,
@@ -165,7 +168,7 @@ def test_real_run_receipts_in_place_without_copy_or_move(tmp_path: Path) -> None
     observation = inspect_lifecycle_operation_locator(config.coordination_root, contract_path)
     assert observation.state == "addressable"
 
-    repeated = worktree_enclosure_adopt_payload(
+    repeated = _adopt_tool(
         config,
         _request(
             contract_path,
@@ -178,9 +181,7 @@ def test_real_run_receipts_in_place_without_copy_or_move(tmp_path: Path) -> None
     assert repeated["ok"] is True
     assert repeated["publicationRequestId"] == request_id
 
-    preview_again = worktree_enclosure_adopt_payload(
-        config, _request(contract_path, group, dry_run=True)
-    )
+    preview_again = _adopt_tool(config, _request(contract_path, group, dry_run=True))
     assert preview_again["ok"] is True
     assert preview_again["state"] == "would-adopt-enclosure-found-in-place"
     assert preview_again["publicationRequestId"] == request_id

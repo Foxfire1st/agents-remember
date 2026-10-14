@@ -884,7 +884,12 @@ def _file_long_reply(
     waited: dict[str, Any],
     result: dict[str, Any],
 ) -> None:
-    """File a wait reply longer than the limit whole, and cut the answer (rule 6)."""
+    """File a wait reply longer than the limit whole (rule 6).
+
+    The whole result keeps the full reply so the call's detail file holds
+    it; the answer pipeline cuts it to its beginning with the location
+    (MIK-R111 rule 5).
+    """
     reply = waited.get("text")
     if not isinstance(reply, str) or len(reply) <= limit:
         return
@@ -908,8 +913,8 @@ def _file_long_reply(
             recipient_task=filed.sender.subject,
             message_id=str(uuid.uuid4()),
             text=(
-                f"Reply to message {filed.message_id}; the answer carries its first "
-                f"{limit} characters."
+                f"Reply to message {filed.message_id}; the whole reply is filed "
+                f"here, the delivered answer carries its beginning."
             ),
             body=reply,
         )
@@ -918,18 +923,18 @@ def _file_long_reply(
         path = store_message_file(filed.folder, stem, content)
         digest = sha256_file(path)
     except (MessageFileError, OSError) as error:
-        waited["text"] = reply[:limit]
+        waited["text"] = reply
         waited["textTruncated"] = True
         waited["detail"] = (
             f"{waited.get('detail', '')} The whole reply could not be filed ({error}); "
-            f"the answer carries its first {limit} characters."
+            f"it rides the call's detail file whole."
         )
         result["warning"] = (
             f"{result.get('warning', '')} The whole wait reply could not be filed "
             f"({error}).".strip()
         )
         return
-    waited["text"] = reply[:limit]
+    waited["text"] = reply
     waited["textTruncated"] = True
     waited["detail"] = (
         f"{waited.get('detail', '')} The whole reply is filed at {path.as_posix()} "

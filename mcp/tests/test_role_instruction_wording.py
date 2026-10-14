@@ -1090,12 +1090,20 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
 
         described = asyncio.run(descriptions())
         self.assertEqual(sorted(described), ["role_message", "role_start", "role_start_set"])
+        reference = " ".join(
+            (REPOSITORY_ROOT / "docs/reference/mcp-tools.md").read_text("utf-8").split()
+        )
         for name, text in described.items():
             with self.subTest(tool=name):
                 self.assertEqual(forbidden_in(text), [])
-                self.assertIn("Only a role agent that AR launched can call this", text)
+                if name == "role_message":
+                    self.assertIn("Reference: docs/reference/mcp-tools.md.", text)
+                    self.assertIn("Only a role agent that AR launched can call it", reference)
+                else:
+                    self.assertIn("Only a role agent that AR launched can call this", text)
         self.assertIn("in Paseo", described["role_start"])
         told = {name: " ".join(text.split()) for name, text in described.items()}
+        told["role_message"] += " " + reference
         for name, sentence in (
             (
                 "role_start",
@@ -1104,38 +1112,38 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
             ("role_start", "Starts run one at a time."),
             (
                 "role_message",
-                "When the host cannot say which turn consumed the message, the call returns "
-                "accepted without a text and detail says that the reply must be read later.",
+                "When the host cannot say which turn consumed the message, the call "
+                "returns `accepted` without a text and detail says the reply must be read later.",
             ),
             (
                 "role_message",
-                "A reply to a message delivered during a turn can be that running turn's text; "
+                "A reply to a message delivered during a turn can be the running turn's text; "
                 "detail says so then.",
             ),
             (
                 "role_message",
-                "Every message the host cannot take now is held by the product instead of "
-                "refused: a recipient whose start has not finished, that waits for a permission "
-                "decision, or that is in a turn the host cannot write into.",
+                "A recipient waiting on a permission decision, whose start has not finished, "
+                "or that is in a turn the host cannot write into is answered `held`, not refused:",
             ),
             (
                 "role_message",
-                "The answer says that the message is held and why, and names the permission as "
-                "the host names it",
+                "the reason (`heldReason`), what waits and why (`detail`), "
+                "the permission as the host names it or null when unnamed (`permission`)",
             ),
             (
                 "role_message",
-                "At most twenty held messages wait for one recipient; a message beyond that is "
-                "refused as busy and none is dropped.",
+                "Code `recipient-busy` is refused outright only when the recipient already holds "
+                "twenty messages",
             ),
             (
                 "role_message",
-                "Without wait the call returns status accepted once the host accepted the "
-                "message, or status held once the product held it.",
+                "Only the host request is promised: without wait the call answers once the host "
+                "accepted the message",
             ),
             (
                 "role_message",
-                "A wait on a held message at a permission answers permission-pending as well.",
+                "with wait it answers when the consuming turn ends "
+                "(finished, failed, cancelled, permission, timeout)",
             ),
             (
                 "role_start_set",
@@ -1146,14 +1154,14 @@ class RoleToolDescriptionWordingTests(unittest.TestCase):
                 "A repeat with the same request id reconciles the same three agents: it "
                 "creates no fourth and opens no held seat.",
             ),
-            ("role_message", "An address by role never means the caller itself."),
+            ("role_message", "an address by role never means the caller itself."),
             ("role_start", "rejected (the launch is closed; no usable agent exists)"),
         ):
             with self.subTest(tool=name, sentence=sentence[:40]):
                 self.assertIn(sentence, told[name])
         self.assertIn(
-            '"From <role> · <task id or Projects> · agent <sender agent id>"',
-            described["role_message"],
+            "`From <role> · <task id or Projects> · agent <sender agent id>`",
+            told["role_message"],
         )
 
 

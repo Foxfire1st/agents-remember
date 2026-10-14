@@ -909,18 +909,27 @@ def test_remaining_preview_plan_and_queue_reads_write_nothing(
     assert isinstance(synced, dict), synced
     # Checkpoint landing needs an atomic series contract: the closeout fixture's
     # contract is not one, so even the dry run names that refusal before touching
-    # anything. A raising preview is still a preview for rule 6: it must write nothing.
-    with pytest.raises(RuntimeError, match="atomic series contract"):
-        worktree_checkpoint_landing_payload(config, contract.contract_path.as_posix(), dry_run=True)
+    # anything. An answered refusal is still a preview for rule 6: it must write nothing.
+    checkpoint = worktree_checkpoint_landing_payload(
+        config, contract.contract_path.as_posix(), dry_run=True
+    )
+    assert checkpoint["ok"] is False
+    assert checkpoint["code"] == "contract-not-a-series"
+    assert checkpoint["error"] == (
+        "worktree_checkpoint_landing requires an atomic series contract: "
+        "a leaf lands through closeout and worktree_integrate instead."
+    )
     # Recording a landing the protected branch never saw refuses before touching
     # anything, dry run or not: the all-zero tip is reachable from no landing target.
-    with pytest.raises(RuntimeError, match="not reachable from any landing target"):
-        worktree_record_landing_payload(
-            config,
-            contract.contract_path.as_posix(),
-            landed=LandedCommits(code="0" * 40),
-            dry_run=True,
-        )
+    recorded = worktree_record_landing_payload(
+        config,
+        contract.contract_path.as_posix(),
+        landed=LandedCommits(code="0" * 40),
+        dry_run=True,
+    )
+    assert recorded["ok"] is False
+    assert recorded["code"] == "commit-not-on-landing-target"
+    assert "not reachable from any landing target" in recorded["error"]
     # The adopted seat keeps branch memory outside the coordination root, so the plan
     # names that authority refusal before reading anything. A raising plan is still a
     # plan for rule 6: it must write nothing.

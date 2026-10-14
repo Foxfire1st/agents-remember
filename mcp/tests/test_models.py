@@ -125,8 +125,13 @@ class PublicToolResponseModelTests(unittest.TestCase):
             # without the four envelope fields.
             finalized = complete_tool_response("lifecycle_finalize_task", dict(emitted.payload))
             self.assertEqual(finalized["state"], "finalized")
-            self.assertIn("atomicSeriesActivation", finalized)
-            self.assertIn("atomicSeriesActivationRelease", finalized)
+            # MIK-R111 rule 1: both release facts stay in the validated whole
+            # above, not the outcome/next-step answer. No call context supplies
+            # a log here, so this model pin reads the retained validation result.
+            self.assertIn("atomicSeriesActivation", whole)
+            self.assertIn("atomicSeriesActivationRelease", whole)
+            self.assertNotIn("atomicSeriesActivation", finalized)
+            self.assertNotIn("atomicSeriesActivationRelease", finalized)
             for field in ("tokens", "tokenizer", "tokenCountExact", "operation"):
                 self.assertNotIn(field, finalized)
 

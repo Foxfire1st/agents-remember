@@ -312,6 +312,7 @@ def _summary_from_status_payload(
         nextArgs=payload.get("nextArgs"),
         nextRequiredArgs=payload.get("nextRequiredArgs"),
         unknownContractCells=payload.get("unknown_contract_cells"),
+        taskDocumentCopies=payload.get("task_document_copies"),
         lifecycleOperation=lifecycle_operation,
         syncOperation=sync_operation,
         atomicSeriesActivation=(

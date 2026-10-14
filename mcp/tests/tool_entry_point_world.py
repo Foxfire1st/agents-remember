@@ -746,9 +746,14 @@ class EntryPointWorld:
             # that only they used; their rows leave with them, no replacement.
             "task_doc": {
                 "repo_id": REPO,
-                "operation": "read_steps",
+                "operation": "append_decision",
                 "task_name": MASTER,
                 "slug": "1_leaf",
+                "decision": {
+                    "at": "2026-10-08",
+                    "decision": "entry-point sweep",
+                    "rationale": "The sweep exercises one write; reads are files.",
+                },
             },
             # This server is unbound: role tools refuse before reading, starting or sending.
             "role_start": {

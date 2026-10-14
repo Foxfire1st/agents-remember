@@ -9,14 +9,16 @@ schema before it is written.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from agents_remember.application.direct_execution_grants import refuse_open_direct_sibling
-from agents_remember.kernel.direct_execution_grants import DirectGrantError, grants_for_task
+from agents_remember.kernel.direct_execution_grants import DirectGrantError
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
@@ -60,6 +62,7 @@ from agents_remember.worktrees.worktree_contract import (
 
 from . import task_doc_steps, task_sprint_linkage
 from .task_doc_discard import DiscardUnstartedRequest, discard_unstarted_subtask
+from .task_doc_phrases import _MUTABLE_FIELDS, _updated_phrase
 from .task_doc_publication import (
     TaskDocPublication,
     preview_task_doc_projection_effects,
@@ -67,9 +70,9 @@ from .task_doc_publication import (
     task_doc_publication_transaction,
     validate_task_doc_transaction,
 )
+from .task_doc_removed_operations import removed_read_operation_refusal
 from .task_doc_response import (
     graph_titles_for,
-    review_state_payload,
     task_doc_preview,
     task_doc_result,
 )
@@ -117,7 +120,6 @@ VALID_OPERATIONS = (
     "add_step",
     "remove_step",
     "skip_step",
-    "read_steps",
     "set_subtask",
     "remove_subtask",
     "set_section",
@@ -127,35 +129,14 @@ VALID_OPERATIONS = (
     "record_route_review",
     "author_execution_graph",
     "set_field",
-    "get",
     # L14: sprint↔master linkage (application/task_docs/task_sprint_linkage.py).
     *task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS,
 )
 
-# set_field may only touch these (scalars + flat string lists); structural edits
-# go through create / replace / the step plane / append_decision.
-_MUTABLE_FIELDS = frozenset(
-    {
-        "title",
-        "type",
-        "status",
-        "objective",
-        "design",
-        "requirements",
-        "openQuestions",
-        "references",
-        "lifecycleId",
-        "master",
-        "codeExamplesNote",
-        "statusNote",
-        "orchestrates",
-        "integrationBranch",
-        "executionNature",
-        "executionGraph",
-        "knowledgeMaintenanceScope",
-        "expectedKnowledgeEffects",
-    }
-)
+# set_field may only touch the allowlist the phrases module owns (scalars +
+# flat string lists); structural edits go through create / replace / the step
+# plane / append_decision. Imported here so the applier and the phrase share
+# one definition: an ignored field is never claimed changed.
 
 
 @dataclass(frozen=True)
@@ -187,10 +168,16 @@ class TaskDocEdit:
     subtask: dict[str, Any] | None = None
     section: dict[str, Any] | None = None
     review: dict[str, Any] | None = None
+    # MIK-R111 rule 2: a text goes in inline or by file. Where a write takes
+    # a text, the caller may name a file in its place instead: the whole of
+    # ``fields`` (create, replace, set_field) or a section body (set_section)
+    # as a file at an absolute path, read once.
+    fields_file: str | None = None
+    section_body_file: str | None = None
 
 
 NO_EDIT = TaskDocEdit()
-"""The read-only form, for operations (``get``) that change nothing."""
+"""The empty edit, for operations that take no edit payload of their own."""
 
 
 @dataclass(frozen=True)
@@ -264,6 +251,95 @@ def _refuse_open_direct_sibling_for_task_doc(
         ) from error
 
 
+# By-file text inputs (fields/section bodies) are KB-scale; this budget stops
+# a pathological file from turning a write into unbounded work, refusing
+# loudly with the bound instead of reading on.
+_TASK_DOC_INPUT_MAX_BYTES = 1024 * 1024
+
+
+def _read_text_file(path: str) -> tuple[str, str]:
+    """Read one by-file text input once, or refuse the call in one sentence."""
+
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        raise TaskDocError(f"task_doc file input must name an absolute path, not {path!r}.")
+    if not candidate.is_file():
+        raise TaskDocError(f"task_doc file input is no regular file: {path}.")
+    try:
+        raw = candidate.read_bytes()
+    except OSError as exc:
+        raise TaskDocError(f"task_doc file input cannot be read: {path} ({exc}).") from exc
+    if len(raw) > _TASK_DOC_INPUT_MAX_BYTES:
+        raise TaskDocError(
+            f"task_doc file input too large: {path} holds {len(raw)} bytes, over the "
+            f"{_TASK_DOC_INPUT_MAX_BYTES} byte budget; pass the text inline instead."
+        )
+    digest = hashlib.sha256(raw).hexdigest()
+    try:
+        return raw.decode("utf-8"), digest
+    except UnicodeDecodeError as exc:
+        raise TaskDocError(f"task_doc file input is not UTF-8 text: {path}.") from exc
+
+
+def _resolve_file_texts(
+    operation: str, edit: TaskDocEdit
+) -> tuple[TaskDocEdit, list[tuple[str, str]]]:
+    """Apply by-file text inputs to one edit, or refuse the malformed call.
+
+    Returns the edit with the file's text in place of the inline one, plus
+    the (path, SHA-256) rows the answer names. A text goes in inline or by
+    file, never both; a file serves only the operations that take that text.
+    """
+
+    rows: list[tuple[str, str]] = []
+    if edit.fields_file is not None:
+        if operation not in ("create", "replace", "set_field"):
+            raise TaskDocError(
+                f"task_doc {operation} takes no fields file: fields_file serves "
+                "create, replace and set_field."
+            )
+        if edit.fields is not None:
+            raise TaskDocError(
+                "task_doc takes fields inline or by file, not both: pass only one of "
+                "fields and fields_file."
+            )
+        text, digest = _read_text_file(edit.fields_file)
+        try:
+            fields = json.loads(text)
+        except ValueError as exc:
+            raise TaskDocError(
+                f"task_doc fields file is not a JSON object: {edit.fields_file}."
+            ) from exc
+        if not isinstance(fields, dict):
+            raise TaskDocError(f"task_doc fields file is not a JSON object: {edit.fields_file}.")
+        rows.append((edit.fields_file, digest))
+        edit = replace(edit, fields=fields, fields_file=None)
+    if edit.section_body_file is not None:
+        if operation != "set_section":
+            raise TaskDocError(
+                f"task_doc {operation} takes no section body file: section_body_file "
+                "serves set_section."
+            )
+        section = edit.section or {}
+        if section.get("body") is not None:
+            raise TaskDocError(
+                "task_doc takes a section body inline or by file, not both: pass only "
+                "one of section.body and section_body_file."
+            )
+        text, digest = _read_text_file(edit.section_body_file)
+        rows.append((edit.section_body_file, digest))
+        edit = replace(edit, section={**section, "body": text}, section_body_file=None)
+    return edit, rows
+
+
+def _with_file_rows(result: dict[str, Any], file_rows: list[tuple[str, str]]) -> dict[str, Any]:
+    """Name the by-file text input the write took in the answer."""
+
+    if file_rows:
+        result["inputFile"], result["inputFileSha256"] = file_rows[0]
+    return result
+
+
 def task_doc_tool(
     config: McpRuntimeConfig,
     target: TaskDocTarget,
@@ -272,10 +348,16 @@ def task_doc_tool(
     edit: TaskDocEdit = NO_EDIT,
     call: TaskDocCall = DEFAULT_TASK_DOC_CALL,
 ) -> dict[str, Any]:
+    if operation in ("get", "read_steps"):  # removed reads refuse with the file names
+        task_root, _contract = _resolve(
+            config, target.repo_id, target.task_name, target.contract_path
+        )
+        return removed_read_operation_refusal(task_root, target.slug, operation)
     if operation not in VALID_OPERATIONS:
         raise TaskDocError(
             f"unknown operation {operation!r}; expected one of {', '.join(VALID_OPERATIONS)}"
         )
+    edit, file_rows = _resolve_file_texts(operation, edit)
     _enforce_branch_addressed_policy(
         config, operation, call.branch_addressed, _branch_addressed_leaf(target)
     )
@@ -297,7 +379,9 @@ def task_doc_tool(
         )
     )
     if special is not None:
-        return special
+        if special.get("ok") is True and "updated" not in special:
+            special["updated"] = _updated_phrase(operation, edit, special)
+        return _with_file_rows(special, file_rows)
 
     prepared = _prepare_task_doc_edit(
         _TaskDocPrepareRequest(
@@ -328,7 +412,9 @@ def task_doc_tool(
         selected_snapshot,
     )
     _validate_task_doc_candidate(candidate_context)
-    return _publish_task_doc_candidate(candidate_context, dry_run=call.dry_run)
+    return _with_file_rows(
+        _publish_task_doc_candidate(candidate_context, dry_run=call.dry_run), file_rows
+    )
 
 
 def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
@@ -376,7 +462,19 @@ def _publish_task_doc_candidate(
     try:
         master_sync = plan_master_sync(task_root, doc)
     except MasterSyncError as exc:
-        raise TaskDocError(str(exc)) from exc
+        # MIK-R111 rule 2: the sync failure rides the answer, and the leaf
+        # stays exactly what it was -- the edit is refused, not raised.
+        failure = str(exc)
+        result = task_doc_result(
+            operation, doc, json_path_for(task_root, doc), markdown_path_for(task_root, doc)
+        )
+        result["ok"] = False
+        result["code"] = "master-sync-failed"
+        result["error"] = failure
+        result["detail"] = failure
+        result["masterSync"] = {"status": "failed", "error": failure}
+        result["nextAction"] = "Repair the parent master document, then retry the write."
+        return result
     docs: list[TaskDocument] = [doc]
     source_snapshots = [context.selected_snapshot]
     if master_sync.source_snapshot is not None:
@@ -397,6 +495,7 @@ def _publish_task_doc_candidate(
         )
         validate_task_doc_transaction(task_doc_publication_transaction(preview_context))
         result = task_doc_preview(operation, doc, task_root, master_sync=master_sync)
+        result["updated"] = _updated_phrase(operation, context.edit, result)
         result["projectionEffects"] = [
             effect.model_dump(mode="json")
             for effect in preview_task_doc_projection_effects(preview_context)
@@ -414,6 +513,7 @@ def _publish_task_doc_candidate(
     publication = publish_task_doc_set(publication_context)
     json_path, markdown_path = publication.written[0]
     result = task_doc_result(operation, doc, json_path, markdown_path, master_sync=master_sync)
+    result["updated"] = _updated_phrase(operation, context.edit, result)
     result["projectionEffects"] = [
         effect.model_dump(mode="json") for effect in publication.projection_effects
     ]
@@ -479,25 +579,6 @@ def _prepare_task_doc_edit(
     return _PreparedTaskDocEdit(original, doc, selected_snapshot)
 
 
-def _read_steps(context: _TaskDocSpecialContext) -> dict[str, Any]:
-    """The focused checklist read: steps and substeps, never the whole authored document.
-
-    ``get`` returns the document identity and none of its checklist, so an agent otherwise
-    read the raw JSON or the rendered markdown by hand to find out what a unit is called
-    and whether it is resolved. Read-only, like ``get``: it publishes nothing.
-    """
-    json_path = _existing_json(context.task_root, context.target.slug)
-    doc = read_task_doc(json_path)
-    result = task_doc_result(
-        context.operation,
-        doc,
-        json_path,
-        markdown_path_for(context.task_root, doc),
-    )
-    result["steps"] = task_doc_steps.step_payloads(doc.steps)
-    return result
-
-
 def _sprint_doc_identity(
     context: _TaskDocSpecialContext, result: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -530,83 +611,7 @@ def _sprint_doc_identity(
     }
 
 
-def _get_task_doc_result(context: _TaskDocSpecialContext) -> dict[str, Any]:
-    """Read one task document, carrying the effective settings limit.
-
-    L116-F02: a stored limit of zero means the record predates per-task
-    limits, not a zero-round budget. When the settings file resolves, a
-    recorded state with no stored limit answers the settings number plus its
-    approved extra rounds; historical count, sealed lists, approval and extra
-    rounds are untouched, and the document itself is not rewritten. When the
-    settings file cannot be read, the get stays readable on the stored record.
-    """
-    json_path = _existing_json(context.task_root, context.target.slug)
-    doc = read_task_doc(json_path)
-    try:
-        get_limit: int | None = review_settings_limit(context.config.coordination_root)
-    except TaskDocError:
-        # A get stays readable when the settings file cannot be read; a
-        # recorded state still carries the limit its last begin computed.
-        get_limit = None
-    result = task_doc_result(
-        context.operation,
-        doc,
-        json_path,
-        markdown_path_for(context.task_root, doc),
-    )
-    state = doc.reviewState
-    if get_limit is not None:
-        if state is None:
-            result["reviewState"] = review_state_payload(doc, get_limit)
-        elif state.limit == 0:
-            result["reviewState"] = {
-                **result["reviewState"],
-                "limit": get_limit + state.additionalRounds,
-            }
-    # L14-R5: a sprint's read surface carries its linkage drift facts.
-    facts = task_sprint_linkage.linkage_facts_for_get(
-        context.config.coordination_root, context.target.repo_id, json_path, doc
-    )
-    if facts is not None:
-        result["linkageFacts"] = facts
-    return result
-
-
-def _get_direct_grant_payload(
-    context: _TaskDocSpecialContext, doc: TaskDocument
-) -> dict[str, Any] | None:
-    """The leaf's live grant for a get answer, read from the one record.
-
-    ``None`` for non-leaves and when no readable grant exists: a get answer
-    never breaks on a missing or broken grant file (gates still refuse it).
-    """
-    if doc.kind != "subTask":
-        return None
-    try:
-        grants = grants_for_task(
-            context.config.coordination_root,
-            context.target.repo_id,
-            context.task_root.name,
-        )
-    except OSError:
-        return None
-    grant = grants.get(f"{context.task_root.name}/{doc.slug}.json")
-    return grant.model_dump() if grant is not None else None
-
-
 def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, Any] | None:
-    if context.operation == "get":
-        # L116 behaviour (settings limit, linkage facts) via the shared helper,
-        # plus MIK-R94 rule 4: the get answer carries the leaf's live grant.
-        result = _get_task_doc_result(context)
-        json_path = _existing_json(context.task_root, context.target.slug)
-        doc = read_task_doc(json_path)
-        direct_grant = _get_direct_grant_payload(context, doc)
-        if direct_grant is not None:
-            result["directGrant"] = direct_grant
-        return result
-    if context.operation == "read_steps":
-        return _read_steps(context)
     if context.operation in task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS:
         try:
             result = task_sprint_linkage.sprint_linkage_operation(

@@ -24,6 +24,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.mcp.registration.worktrees import register_worktree_tools
 from agents_remember.mcp.tools.enclosure_adoption import (
     EnclosureAdoptionRequest,
+    _adopt_tool,
     worktree_enclosure_adopt_payload,
 )
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
@@ -140,7 +141,7 @@ def test_dry_run_is_the_default_and_writes_nothing(tmp_path: Path) -> None:
     assert apply_args["dry_run"] is False
     assert apply_args["approved"] is True
     assert apply_args["expected_publication_request_id"] == payload["publicationRequestId"]
-    assert [item["name"] for item in payload["artifacts"]] == [_LEGACY_ARTIFACT]
+    assert [item["name"] for item in whole["artifacts"]] == [_LEGACY_ARTIFACT]
 
     observation = inspect_lifecycle_operation_locator(config.coordination_root, contract_path)
     assert observation.state == "missing"
@@ -184,11 +185,12 @@ def test_blank_rationale_is_refused(tmp_path: Path) -> None:
 def test_real_run_with_approval_adopts_and_repeats(tmp_path: Path) -> None:
     """Approval publishes the locator; repeating proves the same receipt."""
 
+    # MIK-R111 rule 1: the receipt hashes stay in the retained whole result.
     config, contract_path, group = _scratch_world(tmp_path)
-    preview = worktree_enclosure_adopt_payload(config, _request(contract_path, group, dry_run=True))
+    preview = _adopt_tool(config, _request(contract_path, group, dry_run=True))
     request_id = preview["publicationRequestId"]
 
-    applied = worktree_enclosure_adopt_payload(
+    applied = _adopt_tool(
         config,
         _request(
             contract_path,
@@ -213,7 +215,7 @@ def test_real_run_with_approval_adopts_and_repeats(tmp_path: Path) -> None:
     assert (group / ".lifecycle" / _LEGACY_ARTIFACT).is_file()
     assert not (group / "reports" / _LEGACY_ARTIFACT).exists()
 
-    repeated = worktree_enclosure_adopt_payload(
+    repeated = _adopt_tool(
         config,
         _request(
             contract_path,
@@ -227,9 +229,7 @@ def test_real_run_with_approval_adopts_and_repeats(tmp_path: Path) -> None:
     assert repeated["state"] == "enclosure-adopted"
     assert repeated["publicationRequestId"] == request_id
 
-    preview_again = worktree_enclosure_adopt_payload(
-        config, _request(contract_path, group, dry_run=True)
-    )
+    preview_again = _adopt_tool(config, _request(contract_path, group, dry_run=True))
     assert preview_again["ok"] is True
     assert preview_again["publicationRequestId"] == request_id
 

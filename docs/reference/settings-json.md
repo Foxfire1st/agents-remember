@@ -889,14 +889,13 @@ are unlinked without following them to delete their targets. Scratch is reclaime
 non-leaf execution folders are reclaimed when that execution is archived or replaced.
 
 Task documents are read as rendered Markdown with the harness's own file tools. For leaf
-Worker, Reviewer and Curator starts, the product publishes a real copy of its own leaf document under `task-documents/` in the enclosure group before the first turn, preserving its canonical relative path. `INDEX.json` has one entry with the canonical reference,
-JSON and copy SHA-256 digests, and publication time. Writes rendering that leaf refresh its
+Worker, Reviewer and Curator starts, the product publishes a real copy of its own leaf document under `task-documents/` in the enclosure group before the first turn, preserving its canonical relative path. `INDEX.json` holds one row per copied file with its kind, reference, repository, source and copy SHA-256 digests, path, publication time, and a missing flag for named-but-absent files. Writes rendering that leaf refresh its
 copy in every existing enclosure for that leaf atomically per file;
 cleanup removes the copies with the enclosure. Copies stay outside code and memory Git worktrees.
 Change documents through `task_doc` only; edits to copies are never read back and are replaced by
 its next publication. Controllers read their own canonical rendered file without a copy; the
-start answer names when that path is outside their working folder. Taskless roles have no task
-file. The handover names the paths. `task_doc get` and `read_ar_files` keep their existing behavior.
+start whole result (log file) names the paths and whether they sit outside the working folder. Taskless roles have no task
+file. The handover names the paths. `read_ar_files` keeps its existing behavior; task documents are read as rendered files, not through `task_doc`.
 `server_info` advertises read-only annotations; the other AR tools remain available under the mode.
 
 Claude launches send the installed host's per-tool session grant for `server_info` on `agents-remember-task`, before the first message. Other tools stay under the mode; no harness settings file is written. Prompt behavior depends on the provider and its effective configuration. Codex's host preapproval removes other tools from that server via enabled_tools;

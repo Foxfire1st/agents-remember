@@ -8,6 +8,8 @@ schema rules, and rendering of master links / the generated master index.
 
 from __future__ import annotations
 
+import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,7 +21,10 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
+from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tokens import count_response_tokens
 from agents_remember.tasks import (
     Decision,
     Section,
@@ -167,6 +172,68 @@ class SprintLinkageTests(unittest.TestCase):
     # --- detach ---------------------------------------------------------------
 
     # --- linkage report ---------------------------------------------------------
+
+    def test_linkage_report_answers_with_counts_and_location(self) -> None:
+        """MIK-R111 rule 2, evidence item 3: the report is a file, not fields.
+
+        The answer carries the counts and the location; the facts ride the
+        report file, whole in the detail file too. A dry run computes the
+        same facts and writes no file.
+        """
+
+        self._write_master(MASTER_A)
+        self._write_sprint()
+        target = TaskDocTarget(repo_id=REPOSITORY, task_name="sprint")
+
+        with tool_call_context("task_doc", {"operation": "linkage_report"}, config=self.cfg):
+            answer = task_doc_payload(
+                self.cfg, target, operation="linkage_report", edit=TaskDocEdit(fields={})
+            )
+        self.assertTrue(answer["ok"])
+        self.assertNotIn("linkageFacts", answer)
+        self.assertIn("linkage facts", str(answer["updated"]))
+        self.assertTrue(answer["factKinds"])
+        self.assertEqual(sum(answer["factKinds"].values()), int(str(answer["updated"]).split()[0]))
+        report = json.loads(Path(str(answer["reportPath"])).read_text(encoding="utf-8"))
+        self.assertEqual(
+            report["facts"],
+            json.loads(Path(answer["log"]).read_text(encoding="utf-8"))["linkageFacts"],
+        )
+        self.assertEqual(report["factKinds"], answer["factKinds"])
+        # Evidence item 3's 100 tokens are the shaped row: the framework log
+        # location rides beside it per MIK-R108. Random path segments are
+        # fixed to equal-length runs and the root stands at 40 characters,
+        # so the bound is deterministic.
+        coord = str(self.coord)
+        content = {
+            key: (
+                re.sub(
+                    r"\d{12}",
+                    "0" * 12,
+                    re.sub(r"[0-9a-f]{8}", "0" * 8, value.replace(coord, "C" * 40)),
+                )
+                if isinstance(value, str)
+                else value
+            )
+            for key, value in answer.items()
+            if key != "log"
+        }
+        self.assertLessEqual(count_response_tokens(content), 100)
+
+        with tool_call_context(
+            "task_doc", {"operation": "linkage_report", "dry_run": True}, config=self.cfg
+        ):
+            dry = task_doc_payload(
+                self.cfg,
+                target,
+                operation="linkage_report",
+                edit=TaskDocEdit(fields={}),
+                call=TaskDocCall(dry_run=True),
+            )
+        self.assertTrue(dry["ok"])
+        self.assertFalse(dry["wouldLose"])
+        self.assertNotIn("reportPath", dry)
+        self.assertIn("linkage facts", str(dry["updated"]))
 
     # --- row completion through set_subtask ------------------------------------
 

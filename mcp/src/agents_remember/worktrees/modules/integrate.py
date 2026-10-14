@@ -68,6 +68,13 @@ from agents_remember.worktrees.modules.landing_record import (
     record_landed_integration,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.state_refusals import (
+    _integrate_state_refusal,
+    closeout_queue_refusal,
+    handover_gate_blocked,
+    state_refusal_result,
+)
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.series_closeout import (
     SeriesCheckpointRefs,
     capture_series_checkpoint_refs,
@@ -366,16 +373,26 @@ def _dry_run_result(
     *,
     preview: IntegratePreview,
 ) -> WorktreeCommandResult:
-    # The preview EVALUATES (never enforces) the seam guard, so the c-09-mandated
-    # dry_run preflight cannot promise "would-integrate" and then have the real run
-    # refuse with handover-gate-blocked. Nothing on this path persists a contract
-    # mutation.
-    summary = (
-        "Dry run completed; integration preflight can proceed with the selected strategy."
-        if preview.guard.permitted
-        else "Dry run completed; the real run would refuse with handover-gate-blocked — "
-        "decide the addressed master-handover-approval gate first."
-    )
+    # The preview EVALUATES the seam guard, and a closed gate binds the dry
+    # run exactly as it binds the real run: the dry run answers blocked, never
+    # "would-integrate" the real call would refuse. Nothing on this path
+    # persists a contract mutation.
+    if not preview.guard.permitted:
+        return handover_gate_blocked(
+            contract,
+            summary=(
+                "Dry run completed; the real run would refuse with handover-gate-blocked — "
+                "decide the addressed master-handover-approval gate first."
+            ),
+            gate_id=preview.guard.gate_id or "unaddressed",
+            reason=preview.guard.reason,
+            handover_gate={
+                "permitted": preview.guard.permitted,
+                "gateId": preview.guard.gate_id,
+                "reason": preview.guard.reason,
+            },
+        )
+    summary = "Dry run completed; integration preflight can proceed with the selected strategy."
     payload: dict[str, object] = {
         "state": "would-integrate",
         **status_payload(contract),
@@ -539,11 +556,23 @@ def _checkpoint_dry_run_result(
 ) -> WorktreeCommandResult:
     """The checkpoint's preview: the same eligibility the apply enforces, and nothing moved."""
 
+    if not preview.guard.permitted:
+        return handover_gate_blocked(
+            contract,
+            summary=(
+                "Dry run completed; the real run would refuse with handover-gate-blocked — "
+                "decide the addressed master-handover-approval gate first."
+            ),
+            gate_id=preview.guard.gate_id or "unaddressed",
+            reason=preview.guard.reason,
+            handover_gate={
+                "permitted": preview.guard.permitted,
+                "gateId": preview.guard.gate_id,
+                "reason": preview.guard.reason,
+            },
+        )
     summary = (
         "Dry run completed; this unfinished master can be checkpointed with the selected strategy."
-        if preview.guard.permitted
-        else "Dry run completed; the real run would refuse with handover-gate-blocked — "
-        "decide the addressed master-handover-approval gate first."
     )
     payload: dict[str, object] = {
         "state": "would-checkpoint",
@@ -663,14 +692,23 @@ def integrate_result(
     else:
         require_ordinary_worktree(contract, operation="worktree_integrate")
     integration_targets(contract)
-    validate_integrate_contract(contract)
+    try:
+        validate_integrate_contract(contract)
+    except RuntimeError as error:
+        return _integrate_state_refusal(contract, error, next_args=contract_next_args(contract))
     # THE ONE INTEGRATION RULE, read from Git: the leaf's source branch must not
     # have moved since the candidate was verified. code_replay_required and
     # memory_replay_required are is_ancestor reads of the live source tip against
     # the candidate commit; a source that moved off that ancestry blocks the
     # integration in _blocked_non_ff_result.
     sources = _integration_replay_requirements(contract)
-    return _continue_integration(contract, args, sources, None)
+    try:
+        return _continue_integration(contract, args, sources, None)
+    except CloseoutQueueError as error:
+        # The series authority the apply re-proves (a master that completes
+        # between preflight and publication) answers with its code and
+        # sentence, never raises.
+        return closeout_queue_refusal(contract, error, next_args=contract_next_args(contract))
 
 
 def checkpoint_landing_result(
@@ -703,12 +741,34 @@ def checkpoint_landing_result(
     if is_disabled_contract(contract):
         # A contract that carries the removed mode never checkpoint-lands (MIK-R50 R4a).
         return opt_out_refusal_result(contract, "worktree_checkpoint_landing")
+    if contract.kind != "series":
+        # MIK-R111 rule 7: a checkpoint on a contract that is no series is a
+        # task-state refusal, not a raise. The kind check is the first line of
+        # the authority the next line would demand, so order is unchanged.
+        return state_refusal_result(
+            contract,
+            state="refused",
+            code="contract-not-a-series",
+            error=(
+                "worktree_checkpoint_landing requires an atomic series contract: "
+                "a leaf lands through closeout and worktree_integrate instead."
+            ),
+        )
     require_series_contract_authority(contract, operation="worktree_checkpoint_landing")
     integration_targets(contract)
-    landing = checkpoint_landing_eligibility(contract)
+    try:
+        landing = checkpoint_landing_eligibility(contract)
+    except CloseoutQueueError as error:
+        # A master that completed before its checkpoint answers with the
+        # authority's code and sentence (next: integrate), never raises.
+        return closeout_queue_refusal(contract, error, next_args=contract_next_args(contract))
     # A checkpoint is still a landing, so it earns the same Git-read protection as a final one: the
     # recorded source branch must not have moved off the ancestry the candidate was verified at.
-    return _continue_integration(contract, args, landing.sources, None, checkpoint=landing)
+    try:
+        return _continue_integration(contract, args, landing.sources, None, checkpoint=landing)
+    except CloseoutQueueError as error:
+        # The series authority the apply re-proves answers, never raises.
+        return closeout_queue_refusal(contract, error, next_args=contract_next_args(contract))
 
 
 def _continue_integration(
@@ -762,26 +822,16 @@ def _handover_or_apply_integration(
         parent_task_name=contract.parent_task_name,
     )
     if not args.dry_run and not guard.permitted:
-        summary = (
-            "Integration is blocked by the addressed master-handover-approval gate; "
-            "inspect the structural gate and decide it before rerunning integration."
-        )
-        guidance = {
-            "nextOperation": "review_handover_gate",
-            "nextTool": "gate_list",
-            "nextArgs": {},
-        }
-        return WorktreeCommandResult(
-            2,
-            {
-                "state": "handover-gate-blocked",
-                "gateId": guard.gate_id,
-                "reason": guard.reason,
-                **status_payload(contract),
-                "summary": summary,
-                **guidance,
-                "nextStep": {"summary": summary, **guidance},
-            },
+        # The dry run answers this same refusal through handover_gate_blocked:
+        # preview and real paths agree on blocked states.
+        return handover_gate_blocked(
+            contract,
+            summary=(
+                "Integration is blocked by the addressed master-handover-approval gate; "
+                "inspect the structural gate and decide it before rerunning integration."
+            ),
+            gate_id=guard.gate_id or "unaddressed",
+            reason=guard.reason,
         )
 
     blocked = integration_gate_block(

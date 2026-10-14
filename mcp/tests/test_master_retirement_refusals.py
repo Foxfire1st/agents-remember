@@ -27,6 +27,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
 )
 from agents_remember.application.task_docs.task_retirement_records import proof_path
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write_task_doc
 from test_master_retirement import World
@@ -69,14 +70,24 @@ def test_public_retirement_refuses_existing_unreadable_canonical_proof_objects(w
             assert stored.readlink().as_posix() == "missing-proof.json"
 
 
+def _whole(answer: dict[str, Any]) -> dict[str, Any]:
+    # World.retire calls task_doc_tool: that application result is already
+    # whole and never has a protocol log. Adapter calls instead keep the
+    # MIK-R111 rule-2 omitted fields in the detail file the answer names.
+    if "taskArchive" in answer:
+        return answer
+    return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+
+
 def _edit(world: World, sprint: str, operation: str, **fields: Any) -> dict[str, Any]:
-    return task_doc_payload(
-        world.cfg,
-        TaskDocTarget(repo_id=REPOSITORY, task_name=sprint),
-        operation=operation,
-        edit=TaskDocEdit(fields=fields),
-        call=TaskDocCall(),
-    )
+    with tool_call_context("task_doc", {"operation": operation}, config=world.cfg):
+        return task_doc_payload(
+            world.cfg,
+            TaskDocTarget(repo_id=REPOSITORY, task_name=sprint),
+            operation=operation,
+            edit=TaskDocEdit(fields=fields),
+            call=TaskDocCall(),
+        )
 
 
 def _second_sprint(world: World, *commanded: str, name: str = "sprint2") -> None:
@@ -170,7 +181,7 @@ def test_a_master_document_that_cannot_be_read_refuses_every_request_and_is_name
             document.chmod(mode)
             document.write_bytes(original)
         assert world.snapshot() == before, damage
-    assert case.retire(dry_run=True)["state"] == "would-retire"
+    assert _whole(case.retire(dry_run=True))["state"] == "would-retire"
 
 
 @pytest.mark.parametrize("field", ["orchestrates", "subTasks"])
@@ -184,7 +195,10 @@ def test_a_task_document_with_a_malformed_list_field_refuses_and_is_named(world,
         assert str(document) in said and "Repair or remove that file" in said
         assert world.snapshot() == before
     document.unlink()
-    assert world.retire(dry_run=True)["state"] == "would-retire"
+    with tool_call_context(
+        "task_doc", {"operation": "retire_master", "dry_run": True}, config=world.cfg
+    ):
+        assert _whole(world.retire(dry_run=True))["state"] == "would-retire"
 
 
 def test_a_request_addressed_to_an_unreadable_document_names_it_before_anything_else(world):
@@ -198,7 +212,10 @@ def test_a_request_addressed_to_an_unreadable_document_names_it_before_anything_
         assert f"was called on {sprint.as_posix()}, which cannot be opened, decoded" in said
         assert "Repair that file, then repeat task_doc.retire_master" in said
     sprint.write_bytes(intact)
-    assert world.retire(dry_run=True)["state"] == "would-retire"
+    with tool_call_context(
+        "task_doc", {"operation": "retire_master", "dry_run": True}, config=world.cfg
+    ):
+        assert _whole(world.retire(dry_run=True))["state"] == "would-retire"
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="nothing is closed by mode to the superuser")
@@ -237,7 +254,8 @@ def test_a_master_put_back_without_a_typed_row_is_removed_by_the_edit_the_refusa
         write_task_doc(world.tasks / "sprint", TaskDocument.model_validate(data))
     case = Case(world, sprint=True)
     # No successor edge is left to affirm, so the request is the same with a graph and without.
-    assert world.retire()["ok"]
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        assert world.retire()["ok"]
     case.archive.rename(case.live)
     fields: dict[str, Any] = {"orchestrates": [*world.sprint().orchestrates, "master-a"]}
     if graph:
@@ -259,8 +277,9 @@ def test_a_master_put_back_without_a_typed_row_is_removed_by_the_edit_the_refusa
         lambda: _edit(world, "sprint", "detach_master", masterRef=world.refs[0].model_dump())
     )
     assert _carry_out_removals(world, refusal) == ["set_field on sprint"]
-    done = world.retire()
-    assert done["ok"] and done["retirementResumed"] and case.archive.is_dir()
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        done = world.retire()
+    assert done["ok"] and _whole(done)["retirementResumed"] and case.archive.is_dir()
     assert world.sprint().orchestrates == ["master-b", "master-c"]
     assert not graph or len(world.validate()) == 2
 
@@ -279,7 +298,7 @@ def test_a_lone_masters_record_names_the_edit_that_works_on_the_sprint_that_took
     assert "detach_master" not in refusal
     assert _carry_out_removals(world, refusal) == ["set_field on sprint2"]
     done = case.retire()
-    assert done["ok"] and done["retirementResumed"] and case.archive.is_dir()
+    assert done["ok"] and _whole(done)["retirementResumed"] and case.archive.is_dir()
 
 
 def test_several_commanding_sprints_are_each_named_with_the_edit_that_works_there(world):
@@ -327,13 +346,14 @@ def test_several_commanding_sprints_are_each_named_with_the_edit_that_works_ther
         "set_field on sprint2",
     ]
     fields = {"masterRef": world.refs[0].model_dump(), "reason": "retired through sprint3"}
-    done = task_doc_payload(
-        world.cfg,
-        TaskDocTarget(repo_id=REPOSITORY, task_name="sprint3"),
-        operation="retire_master",
-        edit=TaskDocEdit(fields=fields),
-        call=TaskDocCall(),
-    )
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        done = task_doc_payload(
+            world.cfg,
+            TaskDocTarget(repo_id=REPOSITORY, task_name="sprint3"),
+            operation="retire_master",
+            edit=TaskDocEdit(fields=fields),
+            call=TaskDocCall(),
+        )
     assert done["ok"] and (world.tasks / "0_archive" / "master-a").is_dir()
 
 
@@ -355,7 +375,10 @@ def test_the_named_edit_says_that_the_sprint_must_declare_its_integration_branch
         lambda: _edit(world, "sprint2", "set_field", orchestrates=["master-z"])
     )
     _edit(world, "sprint2", "set_field", orchestrates=["master-z"], integrationBranch="super")
-    assert world.retire(dry_run=True)["state"] == "would-retire"
+    with tool_call_context(
+        "task_doc", {"operation": "retire_master", "dry_run": True}, config=world.cfg
+    ):
+        assert _whole(world.retire(dry_run=True))["state"] == "would-retire"
 
 
 def test_an_entry_that_names_two_masters_is_refused_with_an_edit_that_works(world):
@@ -371,14 +394,18 @@ def test_an_entry_that_names_two_masters_is_refused_with_an_edit_that_works(worl
         assert named in refusal
     assert "detach_master" not in refusal and "task_doc.set_field" in refusal
     # The named edit: the master that is not meant gets a title of its own.
-    task_doc_payload(
-        world.cfg,
-        TaskDocTarget(repo_id=REPOSITORY, task_name="master-b"),
-        operation="set_field",
-        edit=TaskDocEdit(fields={"title": "Human master-b"}),
-        call=TaskDocCall(),
-    )
-    assert world.retire(dry_run=True)["state"] == "would-retire"
+    with tool_call_context("task_doc", {"operation": "set_field"}, config=world.cfg):
+        task_doc_payload(
+            world.cfg,
+            TaskDocTarget(repo_id=REPOSITORY, task_name="master-b"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"title": "Human master-b"}),
+            call=TaskDocCall(),
+        )
+    with tool_call_context(
+        "task_doc", {"operation": "retire_master", "dry_run": True}, config=world.cfg
+    ):
+        assert _whole(world.retire(dry_run=True))["state"] == "would-retire"
 
 
 # -- a refused request leaves nothing behind ------------------------------------------------------
@@ -445,10 +472,14 @@ def test_a_new_retirement_row_never_takes_a_number_that_is_in_use(world):
     write_task_doc(world.tasks / "sprint", TaskDocument.model_validate(data))
     fields = {"masterRef": world.refs[1].model_dump(), "reason": "No row stood for it."}
     edge = world.edges[1]
-    preview = world.retire(fields=fields, dry_run=True)
-    assert preview["retirementRow"]["number"] == "master-b-3"
-    done = world.retire(fields=fields)
-    assert done["ok"] and done["retirementRow"]["number"] == "master-b-3" and edge
+    with tool_call_context(
+        "task_doc", {"operation": "retire_master", "dry_run": True}, config=world.cfg
+    ):
+        preview = world.retire(fields=fields, dry_run=True)
+    assert _whole(preview)["retirementRow"]["number"] == "master-b-3"
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        done = world.retire(fields=fields)
+    assert done["ok"] and _whole(done)["retirementRow"]["number"] == "master-b-3" and edge
     numbers = [row.number for row in world.sprint().subTasks]
     assert numbers == ["0", "master-b", "master-b-2", "2", "master-b-3"]
     assert len(set(numbers)) == len(numbers)
@@ -464,7 +495,8 @@ def test_a_new_retirement_row_never_takes_a_number_that_is_in_use(world):
 @pytest.mark.parametrize("sprint", [True, False], ids=["with-a-sprint", "without-a-sprint"])
 def test_a_recorded_master_whose_folder_is_at_both_places_is_refused(world, sprint):
     case = Case(world, sprint=sprint)
-    assert case.retire()["ok"]
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        assert case.retire()["ok"]
     shutil.copytree(case.archive, case.live)
     wanted = r"must exist at exactly one of" if sprint else r"exists at both"
     for dry_run in (True, False):
@@ -499,23 +531,28 @@ def test_what_an_interrupted_write_left_is_no_record_and_goes_with_the_next_writ
     other = case.retire(dry_run=True, reason="the request that died")
     if sprint:
         retired = world.sprint().model_dump(mode="json")
-        retired["subTasks"][0] = other["retirementRow"]
+        retired["subTasks"][0] = _whole(other)["retirementRow"]
         retired["orchestrates"] = ["master-b", "master-c"]
         left = _leftover(world.tasks / "sprint" / "task.json", json.dumps(retired))
     else:
-        left = _leftover(proof_path(case.live), json.dumps(other["retirementProof"]))
+        left = _leftover(proof_path(case.live), json.dumps(_whole(other)["retirementProof"]))
     receipt = _leftover(
         case.live / "notes" / "reports" / "review-artifact-cleanup.json",
         json.dumps({"attempt": 7, "state": "deleted", "failures": []}),
     )
     preview = case.retire(dry_run=True)
-    assert preview["retirementState"] == "not-recorded" and not preview["retirementResumed"]
-    assert preview["taskArchive"]["reviewArtifacts"]["attempt"] == 1
+    assert (
+        _whole(preview)["retirementState"] == "not-recorded"
+        and not _whole(preview)["retirementResumed"]
+    )
+    assert _whole(preview)["taskArchive"]["reviewArtifacts"]["attempt"] == 1
     assert case.records() == []
     done = case.retire()
-    assert done["ok"] and not done["retirementResumed"] and len(case.records()) == 1
+    assert done["ok"] and not _whole(done)["retirementResumed"] and len(case.records()) == 1
     reason = REASON if not sprint else world.fields["reason"]
-    recorded = done["retirementRow"]["retirement"] if sprint else done["retirementProof"]
+    recorded = (
+        _whole(done)["retirementRow"]["retirement"] if sprint else _whole(done)["retirementProof"]
+    )
     assert recorded["reason"] == reason
     assert [entry["attempt"] for entry in case.receipts()] == [1]
     moved = case.archive / receipt.relative_to(case.live)

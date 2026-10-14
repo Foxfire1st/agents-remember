@@ -174,71 +174,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         timeout_seconds: Annotated[int, Field(ge=1, le=MAX_WAIT_SECONDS)] = DEFAULT_WAIT_SECONDS,
         withdraw_held_message_id: str | None = None,
     ) -> dict[str, object]:
-        """Send one text message to one role agent; with wait, return its reply.
-
-        Only a role agent that AR launched can call this. Name the recipient either by agent_id
-        (the id a role start returned, or the id in the first line of a message you received), or
-        by role plus the task references its class requires. A role that matches several live
-        agents is refused with their ids in candidateAgentIds; the tool never picks one. On a
-        leaf's seat two live agents refuse the same way: one seat holds one agent.
-
-        The text is the wake-up: at most the limit the settings name (1,000 where they name
-        none). A longer text is refused as message-too-long with the count and the limit; put
-        the full text in body (any length) or attach its files with attach instead. body goes
-        into the message file under the message and nowhere else. attach takes the paths of
-        files that exist: each is written into the message file with its SHA-256, copied into
-        the folder first where it lies outside the task's record and the leaf workspaces. A
-        verdict or report that is a file already is attached, not repeated in body.
-
-        The tool writes one file per message before handing it to the host, in the folder of
-        the narrowest task sender and recipient share (the leaf, else the master, else the
-        sprint; beside the start briefs of the sender's class for agents without a shared
-        task). The name carries the time in UTC, the sender and the recipient. The recipient
-        reads the sender line and the message, and where the message has a body or an
-        attachment, one last line with the path of the message file and its SHA-256. A
-        delivery the host refuses keeps its file under a name ending in .undelivered.md, and
-        the refusal names the file.
-
-        The recipient reads the text behind one line that names the sender:
-        "From <role> · <task id or Projects> · agent <sender agent id>". A message to a held
-        seat delivers the seat's handover and the message in one turn, and the answer says
-        that the seat was opened; a held seat is refused neither as busy nor as unfinished.
-
-        Every message the host cannot take now is held by the product instead of refused:
-        a recipient whose start has not finished, that waits for a permission decision, or
-        that is in a turn the host cannot write into. The answer says that the message is
-        held and why, and names the permission as the host names it, or "not supplied"; it
-        does not say accepted. When the recipient can be written to, the product hands over
-        everything it holds for that recipient in one delivery, in the order taken. At most
-        twenty held messages wait for one recipient; a message beyond that is refused as
-        busy and none is dropped. The answer names how many messages of the sender wait for
-        the recipient, and a sender withdraws an earlier one with withdraw_held_message_id.
-        A recipient whose session is closed is resumed first; an archived or missing recipient
-        is refused and stays as it is. Where an archived recipient named by id has a live
-        successor on the same selection, the refusal names that agent: send the message again
-        to it. A new turn on a completed task-bound Investigator
-        needs one of that selection's eight open slots before delivery or resume; a full selection
-        refuses with the eight request IDs and the close/archive remedy. An address by role
-        never means the caller itself. A return goes to the parent's role with its task
-        references, never to an id read from an earlier message.
-
-        Without wait the call returns status accepted once the host accepted the message, or
-        status held once the product held it. With wait it returns when the turn that consumed
-        the message ends: turn-finished with its final text in text (cut at the limit, the
-        whole reply filed beside the message and named by the answer), turn-failed or
-        turn-cancelled; or permission-pending when the recipient waits for a permission
-        decision; or timeout after timeout_seconds (default 300, at most 1800), with the
-        message still delivered and the reply to be read later. A wait on a held message at
-        a permission answers permission-pending as well. When the host cannot say which turn
-        consumed the message, the call returns accepted
-        without a text and detail says that the reply must be read later. A reply to a message
-        delivered during a turn can be that running turn's text; detail says so then.
-        Refusals: recipient-busy, recipient-not-found, recipient-archived, recipient-ambiguous,
-        recipient-cannot-be-resumed, investigator-capacity, scope-check-failed, caller-has-no-binding,
-        no-paseo-runtime-configured, host-unreachable, message-too-long, message-file-failed,
-        settings-invalid. A finished turn is a fact about the
-        recipient's turn, never AR acceptance of a requirement. Reference: docs/reference/mcp-tools.md.
-        """
+        """Send one text message to one role agent. Name the recipient by agent_id or by role plus task references. Only the host request is promised: without wait the call answers once the host accepted the message; with wait it answers when the consuming turn ends (finished, failed, cancelled, permission, timeout). A mid-turn recipient gets the message in its turn, which the host may cancel; a waiting, unstarted or unwritable recipient is answered `held` with reason, permission, counts and id. Only a full hold store (twenty) is refused as `recipient-busy`. Reference: docs/reference/mcp-tools.md."""
         call = RoleMessageCall(
             text=text,
             agent_id=agent_id,

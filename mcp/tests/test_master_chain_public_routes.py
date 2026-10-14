@@ -49,6 +49,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from read_boundary_oracle_test_support import _snapshot
 from test_checkpoint_landing import (
     _git,
     _set_master,
@@ -315,9 +316,12 @@ def test_a_foreign_commit_refuses_through_the_public_recorded_route(
     _git(code, "checkout", "-q", "super")
     _git(code, "merge", "-q", "--ff-only", "ar/master")
     mem_tip = _git(memory, "rev-parse", "ar/master")
-    with pytest.raises(RuntimeError) as refused:
-        _recorded(contract.contract_path, code=top, memory=mem_tip)
-    assert foreign in str(refused.value)
+    before = _snapshot({"world": tmp_path})
+    refused = _recorded(contract.contract_path, code=top, memory=mem_tip)
+    assert refused.returncode == 2
+    assert refused.payload["code"] == "knowledge-gate-refused"
+    assert foreign in str(refused.payload["detail"])
+    assert _snapshot({"world": tmp_path}) == before
 
 
 def test_a_hand_merge_refuses_through_the_public_recorded_route(
@@ -343,9 +347,12 @@ def test_a_hand_merge_refuses_through_the_public_recorded_route(
     _git(code, "checkout", "-q", "super")
     _git(code, "merge", "-q", "--ff-only", "ar/master")
     mem_tip = _git(memory, "rev-parse", "ar/master")
-    with pytest.raises(RuntimeError) as refused:
-        _recorded(contract.contract_path, code=top, memory=mem_tip)
-    assert side in str(refused.value)
+    before = _snapshot({"world": tmp_path})
+    refused = _recorded(contract.contract_path, code=top, memory=mem_tip)
+    assert refused.returncode == 2
+    assert refused.payload["code"] == "knowledge-gate-refused"
+    assert side in str(refused.payload["detail"])
+    assert _snapshot({"world": tmp_path}) == before
 
 
 def test_a_managed_sync_merge_passes_through_the_public_recorded_route(

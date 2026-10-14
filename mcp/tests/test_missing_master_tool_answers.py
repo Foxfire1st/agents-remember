@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agents_remember.application.closeout_queue import closeout_queue_tool
 from agents_remember.mcp.tools import closeout_queue_payload, curator_coherence_payload
 from agents_remember.memory_quality.incremental_scope.candidate import observe_contract_task
 from agents_remember.memory_quality.incremental_scope.errors import ScopeUnprovenError
@@ -22,6 +23,7 @@ from agents_remember.models.closeout.projection import MAX_CLOSEOUT_TEXT
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
 from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.queue import closeout_projection
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
@@ -45,20 +47,24 @@ def _archive_by_hand(tasks: Path, master: str = "master-b") -> Path:
     return archive / master / "task.json"
 
 
-def _queue(config: Any, sprint: TaskDocumentRef, action: str) -> dict[str, Any]:
+def _queue(
+    config: Any, sprint: TaskDocumentRef, action: str, *, whole: bool = False
+) -> dict[str, Any]:
     """Call ``closeout_queue`` as the registered tool does, as the sprint's architect."""
 
     address = sprint.model_dump()
-    return closeout_queue_payload(
-        config,
-        CloseoutQueueRequest.model_validate(
-            {
-                "action": action,
-                "sprint_task_document_ref": address,
-                "caller": {"role": "architect", "task_document_ref": address},
-            }
-        ),
+    request = CloseoutQueueRequest.model_validate(
+        {
+            "action": action,
+            "sprint_task_document_ref": address,
+            "caller": {"role": "architect", "task_document_ref": address},
+        }
     )
+    if whole:
+        # MIK-R111 rule 1: an oversized repair lives in the retained result;
+        # this in-process call has no configured call context or log pointer.
+        return finalize_tool_response("closeout_queue", closeout_queue_tool(config, request))
+    return closeout_queue_payload(config, request)
 
 
 def _coherence(fixture: QueueFixture, action: str) -> dict[str, Any]:
@@ -167,7 +173,7 @@ def test_a_text_longer_than_the_field_keeps_master_location_and_operation(tmp_pa
         shutil.copytree(world.tasks / "master-b", archive / name)
     shutil.rmtree(world.tasks / "master-b")
 
-    (problem,) = _queue(world.cfg, _world_sprint(), "status")["sourceProblems"]
+    (problem,) = _queue(world.cfg, _world_sprint(), "status", whole=True)["sourceProblems"]
 
     repair = problem["repairAction"]
     assert len(repair) == MAX_CLOSEOUT_TEXT

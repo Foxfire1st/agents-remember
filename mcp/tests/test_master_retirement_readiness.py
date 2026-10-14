@@ -400,7 +400,7 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     started = world.start(dry_run=False)
     assert not started.isError, started
     assert started.structuredContent is not None and started.structuredContent["ok"], started
-    path = Path(started.structuredContent["enclosure_path"])
+    path = Path(started.structuredContent["nextArgs"]["contract_path"])
     child = readiness.load_contract(path)
     assert child.code_worktree is not None and child.memory_worktree is not None
     assert child.code_worktree.exists() and child.memory_worktree.exists()
@@ -468,7 +468,10 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     repeated = anyio.run(world._call, "task_doc", arguments)
     world.record("same-retirement-repeated", repeated.model_dump(mode="json"))
     assert not repeated.isError and repeated.structuredContent is not None, repeated
-    assert repeated.structuredContent["state"] == "would-retire"
+    assert (
+        json.loads(Path(repeated.structuredContent["log"]).read_text(encoding="utf-8"))["state"]
+        == "would-retire"
+    )
     assert git(world.code, "branch", "--list", child.code_work_branch) == ""
     assert git(world.memory, "branch", "--list", child.memory_work_branch) == ""
     assert child.leaf_id == LEAF
@@ -482,7 +485,7 @@ def test_abandon_dry_run_names_populated_logs_and_changes_nothing(
     world = paired_world
     started = world.start(dry_run=False)
     assert started.structuredContent is not None and started.structuredContent["ok"], started
-    path = Path(started.structuredContent["enclosure_path"])
+    path = Path(started.structuredContent["nextArgs"]["contract_path"])
     child = readiness.load_contract(path)
     group = child.worktree_group
     assert isinstance(group, Path)

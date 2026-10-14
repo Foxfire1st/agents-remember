@@ -39,7 +39,6 @@ from agents_remember.kernel.direct_execution_grants import (
     write_grant_file,
 )
 from agents_remember.kernel.primitives.runtime_config import load_config
-from agents_remember.mcp.tools.worktree import worktree_closeout_preview_payload
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.services import (
     bind_worktree_services,
@@ -73,7 +72,6 @@ def main() -> None:
     from agents_remember.application.worktree_services import build_default_worktree_services
     from agents_remember.application.worktree_tool_requests import CloseoutApproval, CloseoutCommitMessages
     from agents_remember.kernel.primitives.runtime_config import load_config
-    from agents_remember.mcp.tools.worktree import worktree_closeout_preview_payload
     from agents_remember.tasks import read_task_doc, write_task_doc
     from agents_remember.worktrees.services import bind_worktree_services, reset_worktree_services
     from agents_remember.worktrees.worktree_contract import load_contract
@@ -102,7 +100,7 @@ def main() -> None:
         config = load_config(fixture.config_path)
         result = {}
         leaf_path = str(contract.contract_path)
-        result["leaf_preview"] = worktree_closeout_preview_payload(config, leaf_path, messages)
+        result["leaf_preview"] = worktree_tools.worktree_closeout_preview_tool(config, leaf_path, messages)
         assert result["leaf_preview"].get("ok"), result["leaf_preview"]
         result["leaf_apply"] = worktree_tools.worktree_closeout_apply_tool(
             config, leaf_path, messages, approval
@@ -115,7 +113,7 @@ def main() -> None:
         assert result["leaf_integrated"].get("ok"), result["leaf_integrated"]
         assert result["leaf_integrated"].get("state") == "integrated", result["leaf_integrated"]
         series_path = str(load_contract(fixture.tasks / "master-a" / "series-contract.md").contract_path)
-        result["series_preview"] = worktree_closeout_preview_payload(config, series_path, messages)
+        result["series_preview"] = worktree_tools.worktree_closeout_preview_tool(config, series_path, messages)
         assert result["series_preview"].get("ok"), result["series_preview"]
         result["series_apply"] = worktree_tools.worktree_closeout_apply_tool(
             config, series_path, messages, approval
@@ -295,7 +293,9 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
         """The full leaf-then-series closeout/integrate chain; exact responses."""
 
         result: dict[str, Any] = {}
-        result["leaf_preview"] = worktree_closeout_preview_payload(config, leaf_path, MESSAGES)
+        result["leaf_preview"] = worktree_tools.worktree_closeout_preview_tool(
+            config, leaf_path, MESSAGES
+        )
         self.assertTrue(result["leaf_preview"].get("ok"), result["leaf_preview"])
         result["leaf_apply"] = worktree_tools.worktree_closeout_apply_tool(
             config, leaf_path, MESSAGES, APPROVAL
@@ -309,7 +309,9 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
         self.assertEqual(
             result["leaf_integrated"].get("state"), "integrated", result["leaf_integrated"]
         )
-        result["series_preview"] = worktree_closeout_preview_payload(config, series_path, MESSAGES)
+        result["series_preview"] = worktree_tools.worktree_closeout_preview_tool(
+            config, series_path, MESSAGES
+        )
         self.assertTrue(result["series_preview"].get("ok"), result["series_preview"])
         result["series_apply"] = worktree_tools.worktree_closeout_apply_tool(
             config, series_path, MESSAGES, APPROVAL

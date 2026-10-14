@@ -214,26 +214,27 @@ class ChokePointControlTests(unittest.TestCase):
     def test_a_key_inside_a_retained_list_item_is_unvalidatable(self) -> None:
         """MIK-R130 rule 2 at depth: a retained list item does not launder a new key.
 
-        The fixture leaf's checklist step sits in the whole result, so the old
-        top-level-only check waved this through; the recursive walk names the
-        indexed path.
+        A named file row sits in the whole result, so the old top-level-only
+        check waved this through; the recursive walk names the indexed path.
+        Task-document reads were removed; the live reader supplies the retained list.
         """
 
         world = EntryPointWorld()
         self.addCleanup(world.close)
         world.build()
-        kind, answer = world.call("task_doc", world.benign()["task_doc"])
+        arguments = {**world.benign()["read_ar_files"], "files": ["README.md"]}
+        kind, answer = world.call("read_ar_files", arguments)
         self.assertEqual("RETURNED", kind)
         assert answer is not None
-        steps = answer["steps"]
-        self.assertIsInstance(steps, list)
+        files = answer["files"]
+        self.assertIsInstance(files, list)
         self.assertTrue(
-            steps and isinstance(steps[0], dict), "the control needs a real retained item"
+            files and isinstance(files[0], dict), "the control needs a real retained item"
         )
-        corrupted = {**answer, "steps": [{**steps[0], "undeclaredStepKey": 1}, *steps[1:]]}
-        arm, detail = classify("task_doc", ("RETURNED", corrupted))
+        corrupted = {**answer, "files": [{**files[0], "undeclaredFileKey": 1}, *files[1:]]}
+        arm, detail = classify("read_ar_files", ("RETURNED", corrupted))
         self.assertEqual("unvalidatable", arm, detail)
-        self.assertIn("steps[0].undeclaredStepKey", detail)
+        self.assertIn("files[0].undeclaredFileKey", detail)
 
     def test_a_wrapper_over_an_uncut_list_is_unvalidatable(self) -> None:
         """MIK-R130 rule 2 at depth: the shaping cuts only over-long lists.

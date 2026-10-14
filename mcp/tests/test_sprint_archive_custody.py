@@ -14,16 +14,31 @@ import shutil
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
 from test_sprint_archive import ArchiveWorld
 from test_task_execution_topology import REPOSITORY, _master
 
 pytestmark = pytest.mark.integration
+
+
+def _whole(answer):
+    return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+
+
+def _archive(world, *, dry_run=False, fields=None, task_name="sprint"):
+    arguments: dict[str, Any] = {"operation": "archive_sprint"}
+    if dry_run:
+        arguments["dry_run"] = True
+    with tool_call_context("task_doc", arguments, config=world.cfg):
+        return world.archive(dry_run=dry_run, fields=fields, task_name=task_name)
 
 
 @pytest.fixture
@@ -77,8 +92,8 @@ def test_recorded_retry_refuses_missing_master_custody(world):
 
 
 def test_recorded_retry_refuses_changed_archived_sprint_bytes(world):
-    result = world.archive()
-    assert result["ok"] and result["state"] == "archived"
+    result = _archive(world)
+    assert result["ok"] and _whole(result)["state"] == "archived"
     sprint_json = world.tasks / "0_archive" / "sprint" / "task.json"
     data = json.loads(sprint_json.read_text())
     data["status"] = "inProgress"
@@ -124,9 +139,9 @@ def test_resumed_prefix_failure_restores_all_and_removes_record(world):
     assert not (world.tasks / "sprint" / "notes" / "reports" / "sprint-archive.json").exists()
     assert world.snapshot() == original
     # Complete restoration removed the record, so the next same request starts fresh.
-    result = world.archive()
-    assert result["ok"] and result["state"] == "archived"
-    assert not result["archiveResumed"]
+    result = _archive(world)
+    assert result["ok"] and _whole(result)["state"] == "archived"
+    assert not _whole(result)["archiveResumed"]
 
 
 def test_resumed_retry_dry_run_previews_remaining_moves(world):
@@ -136,16 +151,22 @@ def test_resumed_retry_dry_run_previews_remaining_moves(world):
     ):
         world.archive()
     before = world.snapshot()
-    preview = world.archive(dry_run=True)
-    assert preview["ok"] and preview["state"] == "would-archive"
-    assert preview["archiveResumed"] and preview["archiveState"] == "recorded"
-    moves = [change for change in preview["wouldChange"] if change.startswith("task folder: move")]
+    preview = _archive(world, dry_run=True)
+    assert preview["ok"] and _whole(preview)["state"] == "would-archive"
+    assert _whole(preview)["archiveResumed"] and _whole(preview)["archiveState"] == "recorded"
+    moves = [
+        change
+        for change in _whole(preview)["wouldChange"]
+        if change.startswith("task folder: move")
+    ]
     assert len(moves) == 2
     assert all("0_archive/sprint" not in change for change in moves)
-    assert all("sprint-archive.json" not in change for change in preview["wouldChange"])
+    assert all("sprint-archive.json" not in change for change in _whole(preview)["wouldChange"])
     assert world.snapshot() == before
-    result = world.archive()
-    assert result["ok"] and result["state"] == "archived" and result["archiveResumed"]
+    result = _archive(world)
+    assert (
+        result["ok"] and _whole(result)["state"] == "archived" and _whole(result)["archiveResumed"]
+    )
 
 
 def test_open_legacy_seat_row_refuses_and_terminal_passes(world):
@@ -182,8 +203,8 @@ def test_open_legacy_seat_row_refuses_and_terminal_passes(world):
         }
     )
     write_task_doc(world.tasks / "sprint", sprint)
-    result = world.archive()
-    assert result["ok"] and result["state"] == "archived"
+    result = _archive(world)
+    assert result["ok"] and _whole(result)["state"] == "archived"
 
 
 def test_unknown_seat_row_refuses(world):
@@ -271,11 +292,10 @@ def _fifteen_master_world(world: ArchiveWorld):
 def test_fifteen_master_preview_bounded_and_exact(world):
     refs = _fifteen_master_world(world)
     before = world.snapshot()
-    # The fifteen-master preview is over the answer bound, so since L108
-    # (663f51ae, MIK-R108 rules 3-4) the delivered answer is the overflow short
-    # form and the whole preview lies in the file the answer names in `log`.
-    # The call context below is what the server dispatch installs on the wire;
-    # without it no log is written and the answer points nowhere.
+    # MIK-R111 rule 2 projects a dry run to its loss and diff, so the whole
+    # fifteen-master preview need not force the answer into overflow anymore.
+    # Measure the delivered answer itself; keep every exact move/cleanup
+    # assertion on the unchanged whole result in the named detail file.
     with tool_call_context(
         "task_doc",
         {"operation": "archive_sprint"},
@@ -285,8 +305,8 @@ def test_fifteen_master_preview_bounded_and_exact(world):
         ),
     ):
         preview = world.archive(dry_run=True)
-    assert preview["ok"] and preview["state"] == "would-archive"
-    assert preview["overflow"] is True
+    assert preview["ok"] and _whole(preview)["state"] == "would-archive"
+    assert count_response_tokens(preview) <= bound_for("task_doc", "archive_sprint")
     assert preview["log"].endswith(".json")
     whole = json.loads(Path(preview["log"]).read_text(encoding="utf-8"))
     assert len(whole["wouldChange"]) <= 16
@@ -298,12 +318,12 @@ def test_fifteen_master_preview_bounded_and_exact(world):
     }
     assert len(whole["taskArchive"]["cleanups"]) == 16
     assert world.snapshot() == before
-    result = world.archive()
-    assert result["ok"] and result["state"] == "archived"
+    result = _archive(world)
+    assert result["ok"] and _whole(result)["state"] == "archived"
     for ref in refs:
         assert (world.tasks / "0_archive" / Path(ref.path).parent / "task.json").is_file()
-    # The archived-state preview carries the sixteen cleanups, so it too is
-    # over the bound: same short form, same file-backed read.
+    # The repeat still retains all sixteen cleanups in its detail file;
+    # its projected dry-run answer is measured against the same bound.
     with tool_call_context(
         "task_doc",
         {"operation": "archive_sprint"},
@@ -313,8 +333,8 @@ def test_fifteen_master_preview_bounded_and_exact(world):
         ),
     ):
         repeat = world.archive(dry_run=True)
-    assert repeat["ok"] and repeat["state"] == "archived"
-    assert repeat["overflow"] is True
+    assert repeat["ok"] and _whole(repeat)["state"] == "archived"
+    assert count_response_tokens(repeat) <= bound_for("task_doc", "archive_sprint")
     repeat_whole = json.loads(Path(repeat["log"]).read_text(encoding="utf-8"))
     assert repeat_whole["wouldChange"] == []
 
@@ -329,15 +349,19 @@ def test_shared_keeper_preview_and_hook_failure_preview(world):
         }
     )
     write_task_doc(world.tasks / "other-sprint", other)
-    preview = world.archive(dry_run=True)
-    assert preview["ok"] and preview["state"] == "would-archive"
-    assert [entry["masterRef"]["path"] for entry in preview["stayedMasters"]] == [
+    preview = _archive(world, dry_run=True)
+    assert preview["ok"] and _whole(preview)["state"] == "would-archive"
+    assert [entry["masterRef"]["path"] for entry in _whole(preview)["stayedMasters"]] == [
         "master-b/task.json"
     ]
-    moves = [change for change in preview["wouldChange"] if change.startswith("task folder: move")]
+    moves = [
+        change
+        for change in _whole(preview)["wouldChange"]
+        if change.startswith("task folder: move")
+    ]
     assert len(moves) == 2
     assert all("master-b" not in change for change in moves)
-    result = world.archive()
+    result = _archive(world)
     assert result["ok"] and (world.tasks / "master-b").is_dir()
 
     world2 = ArchiveWorld(world.coord.parent / "hook-preview")
@@ -358,11 +382,11 @@ def test_shared_keeper_preview_and_hook_failure_preview(world):
         return unlink(path, *args, **kwargs)
 
     with patch.object(Path, "unlink", autospec=True, side_effect=partial_delete):
-        failed_run = world2.archive()
+        failed_run = _archive(world2)
         assert not failed_run["ok"]
-        assert failed_run["state"] == "archived-with-hook-failures"
-        preview = world2.archive(dry_run=True)
-        assert preview["state"] == "would-clean-up"
-        assert any("delete 1" in change for change in preview["wouldChange"])
-        assert len(preview["wouldChange"]) <= 16
-        assert len(preview["wouldWrite"]) <= 16
+        assert _whole(failed_run)["state"] == "archived-with-hook-failures"
+        preview = _archive(world2, dry_run=True)
+        assert _whole(preview)["state"] == "would-clean-up"
+        assert any("delete 1" in change for change in _whole(preview)["wouldChange"])
+        assert len(_whole(preview)["wouldChange"]) <= 16
+        assert len(_whole(preview)["wouldWrite"]) <= 16

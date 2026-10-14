@@ -10,8 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -146,7 +144,9 @@ def test_cleanup_dry_keeps_the_recovery_leaf_refusal_otherwise(tmp_path: Path) -
     _repo_with_leaf(code_repo, CODE_BRANCH, merged=True)
     _repo_with_leaf(memory_repo, MEMORY_BRANCH, merged=False)
     contract_path = _contract(tmp_path, code_repo, memory_repo)
-    with pytest.raises(RuntimeError, match="recovery leaf"):
-        cleanup_module.cleanup_result(WorktreeArgs(contract_path=contract_path, dry_run=True))
+    result = cleanup_module.cleanup_result(WorktreeArgs(contract_path=contract_path, dry_run=True))
+    assert result.returncode == 2
+    assert result.payload.get("code") == "carryover-required"
+    assert "recovery leaf" in str(result.payload.get("error", ""))
     assert _branch_present(code_repo, CODE_BRANCH)
     assert _branch_present(memory_repo, MEMORY_BRANCH)

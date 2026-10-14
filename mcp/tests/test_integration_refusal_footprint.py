@@ -170,19 +170,23 @@ def test_refused_record_landing_writes_nothing(world: Gated, ports: None) -> Non
     """F02 record route: a refused recorded landing changes no contract, ref, or file."""
 
     broken = commit(world.memory, {"onboarding/pkg/a.py.md": "# a [4]\n"}, trailer=world.code_base)
-    candidate = Path(world.contract.contract_path)
-    before = _snapshot(world, world.contract)
-    with pytest.raises(RuntimeError, match=r"R22\.3-markers"):
-        record_landing.record_landing_result(
-            WorktreeArgs(
-                contract_path=candidate,
-                dry_run=False,
-                approved=True,
-                landed_code_commit=world.code_base,
-                landed_memory_content_commit=broken,
-            )
+    contract = world.contract
+    candidate = Path(contract.contract_path)
+    before = _snapshot(world, contract)
+    refused = record_landing.record_landing_result(
+        WorktreeArgs(
+            contract_path=candidate,
+            dry_run=False,
+            approved=True,
+            landed_code_commit=world.code_base,
+            landed_memory_content_commit=broken,
         )
-    _assert_untouched(world, world.contract, before)
+    )
+    assert refused.returncode == 2
+    assert refused.payload["code"] == "knowledge-gate-refused"
+    assert "R22.3-markers" in str(refused.payload["detail"])
+    assert refused.payload["error"] == str(refused.payload["detail"]).splitlines()[0]
+    _assert_untouched(world, contract, before)
 
 
 def test_edited_closeout_cell_is_judged_as_edited(world: Gated, ports: None) -> None:

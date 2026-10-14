@@ -296,7 +296,11 @@ def resolve_log_roots(config: Any | None, tool_name: str | None = None) -> Resol
     transcript_root: Path | None = None
     if config is not None:
         coordination_root = Path(config.coordination_root)
-        transcript_root = Path(config.transcript_root)
+        # Minimal fixture configs name only the coordination root; a real
+        # serving config always carries transcript_root. Absent it, the
+        # default folder below applies (MIK-R108 rule 3).
+        transcript_root = getattr(config, "transcript_root", None)
+        transcript_root = Path(transcript_root) if transcript_root is not None else None
         tool_log = getattr(config, "tool_log", None)
         keep_days = int(getattr(tool_log, "keep_days", TOOL_LOG_KEEP_DAYS_DEFAULT))
         max_bytes = int(getattr(tool_log, "max_bytes", TOOL_LOG_MAX_BYTES_DEFAULT))
@@ -971,6 +975,34 @@ def prepare_call_detail(
         )
     folder_state.own_by_day[today] = folder_state.own_by_day.get(today, 0) + detail_bytes
     return detail_path.as_posix(), None, None
+
+
+def write_diff_report(
+    log_dir: Path,
+    tool_name: str,
+    diff: str,
+    *,
+    day: str | None = None,
+    max_bytes: int = 1_048_576,
+) -> str | None:
+    """Write one whole caller diff as its own report (MIK-R111 rule 2/F01.9).
+
+    The report sits beside the day's detail files, so day-folder eviction
+    bounds it like everything else. Returns its path, or ``None`` when the
+    diff is over budget or cannot be written: the caller then keeps the
+    detail-file promise (or the unretained marker), never a fabricated one.
+    """
+    raw = diff.encode("utf-8")
+    if len(raw) > max_bytes:
+        return None
+    try:
+        target = detail_file_for(detail_dir_for(log_dir, day), tool_name, None)
+        report = target.with_suffix(".diff.md")
+        report.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(report, diff)
+    except Exception:
+        return None
+    return report.as_posix()
 
 
 def _call_line_dict(

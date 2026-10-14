@@ -293,6 +293,28 @@ def _role_launch_result_endpoint(
         _DISPATCH_LOCK.release()
 
 
+def _missing_copies_receipt_warning(document_files: object) -> dict[str, str]:
+    """The receipt warning for requirement files the leaf names but lack.
+
+    MIK-R111 rule 3, failure behavior: the start succeeds, and INDEX.json,
+    the answer and the handover name the missing file. The handover names it
+    through ``taskDocumentFiles.missingCopies``; this carries it onto the
+    receipt, from which the start answer reads its warning.
+    """
+
+    missing = document_files.get("missingCopies") if isinstance(document_files, dict) else None
+    if not missing:
+        return {}
+    names = ", ".join(str(name) for name in missing)
+    return {
+        "warning": (
+            f"Task document copies missing: {names}. The start succeeds; the "
+            "next task_doc write on the leaf document refreshes the copies once "
+            "the files exist."
+        )
+    }
+
+
 def _prepared_message_binding_projection(
     prepared: dict[str, Any], request_id: uuid.UUID
 ) -> tuple[dict[str, Any], dict[str, str]]:
@@ -589,6 +611,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         "instructionComposition": prepared.get("instructionComposition"),
         "taskDocumentFiles": prepared.get("taskDocumentFiles"),
         "predecessorReports": prepared.get("predecessorReports"),
+        **_missing_copies_receipt_warning(prepared.get("taskDocumentFiles")),
         "choices": session_options.get("choices", {}),
         "capsuleOperation": prepared["capsuleOperation"],
         "taskDocumentDigest": prepared["taskDocumentDigest"],

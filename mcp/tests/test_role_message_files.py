@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.cli import paseo_role_tools, role_message_delivery
 from agents_remember.cli.role_launch_workspace import link_leaf_workspace_messages
 from agents_remember.cli.role_message_files import (
@@ -265,7 +266,7 @@ class MessageFileTests(RoleToolsTestCase):
         with patch.object(paseo_role_tools, "role_message_limit", return_value=50):
             result = self.message(self.architect, agent_id=worker, wait=True)
         self.assertEqual(result["status"], "turn-finished")
-        self.assertEqual(result["text"], "R" * 50)
+        self.assertEqual(result["text"], reply)
         self.assertTrue(result["textTruncated"])
         reply_file = Path(result["messageFile"])
         self.assertRegex(
@@ -622,7 +623,8 @@ class RegisteredRefusalTests(RoleToolsTestCase):
         async def invoke() -> dict[str, Any]:
             server = FastMCP("role-message-registered")
             register_role_agent_tools(server, self.config)
-            _content, structured = await server.call_tool("role_message", arguments)
+            with tool_call_context("role_message", arguments, config=self.config):
+                _content, structured = await server.call_tool("role_message", arguments)
             return cast(dict[str, Any], structured)
 
         with patch.dict(os.environ, caller.environment()):
@@ -636,7 +638,9 @@ class RegisteredRefusalTests(RoleToolsTestCase):
         with patch.object(paseo_role_tools, "role_message_limit", return_value=12):
             accepted = self.registered(caller, {"text": "123456789012", "agent_id": worker})
             self.assertEqual(accepted["status"], "accepted")
-            self.assertTrue(accepted["messageFile"])
+            whole = json.loads(Path(accepted["log"]).read_text(encoding="utf-8"))
+            self.assertEqual(whole["status"], accepted["status"])
+            self.assertTrue(whole["messageFile"])
             refused = self.registered(caller, {"text": "1234567890123", "agent_id": worker})
         self.assertEqual(
             (refused["ok"], refused["status"], refused["refusal"]),

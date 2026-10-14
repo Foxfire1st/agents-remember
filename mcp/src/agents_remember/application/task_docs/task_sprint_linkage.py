@@ -25,12 +25,21 @@ errors (L14-R7 backward tolerance), and it never raises.
 
 from __future__ import annotations
 
+import json
+from collections import Counter
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from pydantic import field_validator
 
+from agents_remember.application.tool_answer_log import (
+    detail_dir_for,
+    detail_file_for,
+    resolve_log_roots,
+)
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -55,6 +64,7 @@ from agents_remember.tasks.sprint_membership_refusal import (
     missing_master_detail,
 )
 from agents_remember.tasks.sprint_rows import SEAT_DOC_FILE, correlate_seat_row
+from agents_remember.worktrees.task_document_copies import LINKAGE_REPORT_KEEP
 
 from .task_doc_graph_titles import build_publication_batch_graph_titles
 from .task_doc_publication import (
@@ -154,6 +164,7 @@ def sprint_linkage_operation(operation: str, call: SprintLinkageCall) -> dict[st
         slug=call.slug,
         fields=call.fields,
         dry_run=call.dry_run,
+        config=call.config,
     )
     if operation == "retire_master":
         return retire_master(request)
@@ -213,9 +224,12 @@ def attach_master(request: SprintLinkageRequest) -> dict[str, Any]:
             for effect in preview_task_doc_transaction_projection_effects(transaction)
         ]
         result["dryRun"] = True
-        result["documents"] = [
-            _document_preview(ref, root, document) for ref, root, document in documents
-        ]
+        previews = [_document_preview(ref, root, document) for ref, root, document in documents]
+        result["documents"] = previews
+        # The bounded answer carries the aggregate diff and loss across the
+        # nested previews; the whole per-document diffs ride the whole result.
+        result["diff"] = "".join(preview["diff"] for preview in previews)
+        result["wouldLose"] = any(preview["wouldLose"] for preview in previews)
         return result
     published_documents, effects = _publish(
         request,
@@ -286,9 +300,12 @@ def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
             for effect in preview_task_doc_transaction_projection_effects(transaction)
         ]
         result["dryRun"] = True
-        result["documents"] = [
-            _document_preview(ref, root, document) for ref, root, document in documents
-        ]
+        previews = [_document_preview(ref, root, document) for ref, root, document in documents]
+        result["documents"] = previews
+        # The bounded answer carries the aggregate diff and loss across the
+        # nested previews; the whole per-document diffs ride the whole result.
+        result["diff"] = "".join(preview["diff"] for preview in previews)
+        result["wouldLose"] = any(preview["wouldLose"] for preview in previews)
         return result
     published_documents, effects = _publish(
         request,
@@ -306,30 +323,116 @@ def detach_master(request: SprintLinkageRequest) -> dict[str, Any]:
 
 
 def linkage_report(request: SprintLinkageRequest) -> dict[str, Any]:
-    """The read-only sprint linkage drift report (L14-R5); never mutates anything."""
+    """The read-only sprint linkage drift report (L14-R5); never mutates anything.
+
+    MIK-R111 rule 2: the facts are written as a report file of their own (MIK-R108
+    rule 3) and the result answers with the counts and the location. A dry run
+    computes the same facts and writes nothing.
+    """
 
     topology, sprint_ref, _sprint, _source = _sprint_context(request, "linkage_report")
+    facts = collect_linkage_facts(topology, sprint_ref)
+    kinds = dict(sorted(Counter(str(fact.get("kind", "?")) for fact in facts).items()))
+    report_path: str | None = None
+    if not request.dry_run:
+        report_path = write_linkage_report_file(request, sprint_ref, kinds, facts)
     return {
         "ok": True,
         "operation": "task_doc.linkage_report",
         "sprintTaskDocumentRef": sprint_ref.model_dump(mode="json"),
-        "linkageFacts": collect_linkage_facts(topology, sprint_ref),
+        "linkageFacts": facts,
+        "factKinds": kinds,
+        "reportPath": report_path,
+        **({"wouldLose": False} if request.dry_run else {}),
     }
 
 
-def linkage_facts_for_get(
-    coordination_root: Path, repo_id: str, json_path: Path, doc: TaskDocument
-) -> list[dict[str, Any]] | None:
-    """The ``linkageFacts`` surface for ``task_doc.get``; None for non-sprint targets."""
+def write_linkage_report_file(
+    request: SprintLinkageRequest,
+    sprint_ref: TaskDocumentRef,
+    kinds: dict[str, int],
+    facts: list[dict[str, Any]],
+) -> str:
+    """Write one linkage report file; return its path as written.
 
-    if not doc.is_sprint:
-        return None
-    topology = TaskDocumentTopology(coordination_root)
+    Under ``<enclosure>/reports/`` for a caller whose log lies in an
+    enclosure, in the detail folder of the day otherwise (MIK-R108 rule 3).
+    A file that cannot be written fails the call: the report is the facts'
+    only location in the answer.
+    """
+
+    dest = resolve_log_roots(request.config, "task_doc")
+    if dest.enclosure_dir is not None:
+        folder = dest.enclosure_dir.parent / "reports"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise SprintLinkageError(
+                f"task-sprint-linkage-report-unwritable: cannot make {folder} ({exc})."
+            ) from exc
+        path = detail_file_for(folder, "linkage-report")
+    elif dest.coord_log_dir is not None:
+        path = detail_file_for(detail_dir_for(dest.coord_log_dir), "linkage-report")
+    else:
+        raise SprintLinkageError(
+            "task-sprint-linkage-report-unwritable: no coordination root names a folder."
+        )
+    text = json.dumps(
+        {
+            "sprint": sprint_ref.model_dump(mode="json"),
+            "factKinds": kinds,
+            "facts": facts,
+        },
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
     try:
-        sprint_ref = topology.canonical_ref(repo_id, json_path)
-    except TaskDocumentRefError:
-        return None
-    return collect_linkage_facts(topology, sprint_ref)
+        atomic_write_text(path, text)
+    except OSError as exc:
+        raise SprintLinkageError(
+            f"task-sprint-linkage-report-unwritable: cannot write {path} ({exc})."
+        ) from exc
+    _reclaim_old_linkage_reports(path.parent, path.name)
+    return path.as_posix()
+
+
+def _report_group(name: str) -> str:
+    """The tool-kind group of a detail filename (timestamp/detail-agnostic)."""
+    stem = name[: -len(".json")] if name.endswith(".json") else name
+    _stamp, _, rest = stem.partition("-")
+    group, _, _detail = rest.rpartition("-")
+    return group
+
+
+def _reclaim_old_linkage_reports(folder: Path, keep: str) -> None:
+    """Keep the newest linkage reports bounded, best effort, never failing.
+
+    Report files would otherwise accumulate without bound, one per
+    linkage_report call. The newest ``LINKAGE_REPORT_KEEP`` of the same
+    tool-kind group stay; older group members go. Membership is by tool
+    kind, never by timestamp prefix: every file carries its own timestamp,
+    so a timestamp-derived prefix would match only the file just written
+    and reclaim nothing. The file just written is never deleted. Any
+    failure is ignored: reclamation must not fail the call that just wrote
+    its report.
+    """
+    try:
+        group = _report_group(keep)
+        siblings = sorted(
+            (entry for entry in folder.iterdir() if entry.is_file()),
+            key=lambda entry: entry.name,
+        )
+        own = [
+            entry
+            for entry in siblings
+            if entry.name != keep and _report_group(entry.name) == group and group
+        ]
+        for stale in own[: max(0, len(own) - (LINKAGE_REPORT_KEEP - 1))]:
+            with suppress(OSError):
+                stale.unlink()
+    except OSError:
+        pass
 
 
 def collect_linkage_facts(

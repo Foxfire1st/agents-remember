@@ -50,6 +50,12 @@ DEFAULT_DOCKER_CONTROL_SECONDS = 120
 
 _logger = logging.getLogger(__name__)
 
+#: Authority-file paths (with shadowed state) that already emitted the
+#: one-cycle gateDelegation migration warning in this process. The warning
+#: is a boot warning; per-call settings re-resolution must not re-emit it
+#: (pytest escalates warnings to errors inside tool calls).
+_LEGACY_GATE_DELEGATION_WARNED: set[tuple[str, bool]] = set()
+
 # The documented timeout caps (see examples/mcp/settings.example.json and
 # docs/reference/settings-json.md). Unknown keys are rejected so a typo
 # (e.g. "providerSetupSecond") fails loudly instead of being silently stored and
@@ -767,6 +773,10 @@ def _warn_legacy_gate_delegation(
     shadowed: bool,
 ) -> None:
     """One-cycle migration warning (GQ1): the authority-file key must move home."""
+    key = (str(config_path), shadowed)
+    if key in _LEGACY_GATE_DELEGATION_WARNED:
+        return
+    _LEGACY_GATE_DELEGATION_WARNED.add(key)
     new_home = user_agentic_settings_path()
     if shadowed:
         message = (

@@ -472,7 +472,7 @@ class SeriesExtensionRouteTests(unittest.TestCase):
         started = world.start_leaf()
         self.assertTrue(started["ok"], started.get("summary"))
         self.assertEqual(started["state"], "started")
-        self._leaf = load_contract(Path(started["contract_path"]))
+        self._leaf = load_contract(Path(started["nextArgs"]["contract_path"]))
         self.assertEqual((self._leaf.kind, self._leaf.leaf_id), ("leaf", LEAF))
         self.assertTrue(self._leaf.code_worktree.exists())
         assert self._leaf.memory_worktree is not None

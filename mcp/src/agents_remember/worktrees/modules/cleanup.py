@@ -27,6 +27,7 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_terminal_worktree,
 )
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
+    TerminalCleanupContractAuthority,
     terminal_archive_required_result,
     terminal_contract_authority_if_present,
 )
@@ -35,6 +36,13 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_commit
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.state_refusals import (
+    RefusalNext,
+    provider_setup_blocked,
+    shaped_terminal_blockers,
+    state_refusal_result,
+    terminal_state_refusal,
+)
 from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
 from agents_remember.worktrees.modules.terminal_branch_retirement import (
     _TERMINAL_MUTATION_CAPABILITY,
@@ -521,17 +529,15 @@ def _cleanup_without_remains_result(
     without_remains = terminal_without_remains_reason(contract, operation="worktree_cleanup")
     if without_remains is None:
         return None
-    if not args.dry_run and worktree_services().provider_lifecycle.setup_running(contract):
-        return WorktreeCommandResult(
-            2,
-            {
-                **status_payload(contract),
-                "state": "blocked",
-                "summary": (
-                    "Provider setup is still running for this worktree; wait for a "
-                    "terminal providers state (worktree_status) before cleanup."
-                ),
-            },
+    # The liveness read is side-effect free: the dry run evaluates it too, so
+    # a dry run never promises a cleanup the real call would refuse.
+    if worktree_services().provider_lifecycle.setup_running(contract):
+        return provider_setup_blocked(
+            contract,
+            summary=(
+                "Provider setup is still running for this worktree; wait for a "
+                "terminal providers state (worktree_status) before cleanup."
+            ),
         )
     return with_terminal_atomic_series_release(
         contract,
@@ -632,89 +638,224 @@ def _require_series_terminal_release(contract: WorktreeContract) -> None:
         require_atomic_series_terminal_release(contract)
 
 
+def _carryover_or_kept_line_value(
+    contract: WorktreeContract,
+) -> dict[str, object] | WorktreeCommandResult | None:
+    """Answer a missing carryover, or the kept-line record (``None`` passes vacuously).
+
+    05m: carryover must have run first -- it reads the parked memory branch
+    this step deletes. The signal is the official ledger (carryover_done), not
+    a contract stamp; a disabled-memory contract has no memory worktree to
+    carry and passes vacuously.
+    """
+    try:
+        return _carryover_or_kept_line(contract)
+    except RuntimeError as error:
+        refused = terminal_state_refusal(contract, error)
+        if refused is None:
+            raise
+        return refused
+
+
+def _cleanup_disabled_refusal(
+    contract: WorktreeContract,
+) -> WorktreeCommandResult | None:
+    """Refuse a removed-mode contract, or ``None`` when cleanup applies.
+
+    MIK-R50 R4a: a contract that carries the removed mode is never cleaned
+    up; the way out is abandon and a fresh start, not cleanup.
+    """
+    if not is_disabled_contract(contract):
+        return None
+    return opt_out_refusal_result(contract, "worktree_cleanup")
+
+
+def _cleanup_terminal_branch(
+    contract: WorktreeContract,
+    terminal: TerminalCleanupContractAuthority,
+    args: WorktreeArgs,
+) -> tuple[WorktreeContract, WorktreeCommandResult | None, dict[str, object] | None]:
+    """Follow the terminal archive branch, answering or handing back the contract."""
+    accepted_arguments = TerminalWorktreeCleanupArguments(
+        teardown_providers=args.teardown_providers
+    )
+    if (
+        terminal.archive.cleanupOperation != "worktree_cleanup"
+        or terminal.archive.cleanupArguments != accepted_arguments
+    ):
+        return (
+            contract,
+            _terminal_archive_observation(
+                contract,
+                teardown_providers=args.teardown_providers,
+            ),
+            None,
+        )
+    if terminal.state == "cleanup-completed":
+        result = with_terminal_atomic_series_release(
+            contract,
+            _already_completed_cleanup(
+                contract,
+                teardown_providers=args.teardown_providers,
+            ),
+            dry_run=args.dry_run,
+        )
+        agents = archive_terminal_agents(contract, dry_run=args.dry_run)
+        return (
+            contract,
+            WorktreeCommandResult(
+                result.returncode,
+                {**result.payload, **({"agentArchive": agents} if agents else {})},
+            ),
+            None,
+        )
+    # MIK-R129 rule 1 per L129-THE-GATE-IS-NOT-JUDGED-AGAIN-RULING: on the archive
+    # branch the gate is not judged again. TerminalEnclosureArchive declares no
+    # kept-line record of that judgement (and forbids extra fields), so the repeat
+    # carries no record; its answer may lack landedTips but invents none.
+    return terminal.archived_contract, None, None
+
+
+def _cleanup_preflight_refusal(
+    contract: WorktreeContract, preflight: TerminalPreflight
+) -> WorktreeCommandResult | None:
+    """Answer terminal-preflight blockers, dry run or real, or ``None`` when clear.
+
+    MIK-R111 rule 1: the state and the blockers agree, in a dry run as in a
+    real call. A dry run promises nothing the real call would refuse on the
+    same state, so a dry run with blockers answers blocked with the blockers,
+    never would-cleanup. Every blocker carries its code and one sentence
+    beside the producer's keys.
+    """
+    if not preflight.blockers:
+        return None
+    return WorktreeCommandResult(
+        2,
+        {
+            **status_payload(contract),
+            "state": "blocked",
+            "code": "cleanup-blocked",
+            "error": "Cleanup terminal preflight refused before any mutation.",
+            "summary": "Cleanup terminal preflight refused before any mutation.",
+            "blockers": shaped_terminal_blockers(preflight.blockers),
+        },
+    )
+
+
+def _cleanup_provider_refusal(
+    contract: WorktreeContract,
+) -> WorktreeCommandResult | None:
+    """Answer a running provider setup, dry run or real, or ``None`` when settled.
+
+    The liveness read is side-effect free, so the dry run evaluates it too: a
+    dry run never promises a cleanup the real call would refuse.
+    """
+    if not worktree_services().provider_lifecycle.setup_running(contract):
+        return None
+    # Teardown must not race the live background setup thread (GitHub #53);
+    # a dead thread surfaces as a stale heartbeat and does not block.
+    return provider_setup_blocked(
+        contract,
+        summary=(
+            "Provider setup is still running for this worktree; wait for a "
+            "terminal providers state (worktree_status) before cleanup."
+        ),
+    )
+
+
+def _cleanup_integration_refusal(
+    contract: WorktreeContract,
+) -> WorktreeCommandResult | None:
+    """Answer a cleanup before its integration completed, or ``None`` when done.
+
+    MIK-R111 rule 7: a cleanup before the integration completed is a
+    task-state refusal, not a raise. The next step is the one call
+    that follows.
+    """
+    if contract.integration_status == "completed":
+        return None
+    return state_refusal_result(
+        contract,
+        state="blocked",
+        code="integration-incomplete",
+        error="cleanup requires integration.status completed",
+        next=RefusalNext(
+            tool="worktree_integrate",
+            args={"contract_path": contract.contract_path.as_posix()},
+            summary="Integrate the closeout, then clean up again.",
+        ),
+    )
+
+
+def _series_terminal_release_refusal(
+    contract: WorktreeContract,
+) -> WorktreeCommandResult | None:
+    """Answer a failed series terminal release, or ``None`` when released.
+
+    Reachable terminal preconditions answer with their code and sentence;
+    anything unrecognized stays a raise (fail closed).
+    """
+    try:
+        _require_series_terminal_release(contract)
+        require_terminal_worktree(contract, operation="worktree_cleanup")
+    except RuntimeError as error:
+        refused = terminal_state_refusal(contract, error)
+        if refused is None:
+            raise
+        return refused
+    return None
+
+
 def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:  # noqa: PLR0911
     if not args.approved and not args.dry_run:
         raise RuntimeError("cleanup requires --approved after successful integration")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
-    if is_disabled_contract(contract):
-        # A contract that carries the removed mode is never cleaned up (MIK-R50
-        # R4a): the way out is abandon and a fresh start, not cleanup.
-        return opt_out_refusal_result(contract, "worktree_cleanup")
+    disabled = _cleanup_disabled_refusal(contract)
+    if disabled is not None:
+        return disabled
     terminal = terminal_contract_authority_if_present(contract)
     if terminal is not None:
-        accepted_arguments = TerminalWorktreeCleanupArguments(
-            teardown_providers=args.teardown_providers
-        )
-        if (
-            terminal.archive.cleanupOperation != "worktree_cleanup"
-            or terminal.archive.cleanupArguments != accepted_arguments
-        ):
-            return _terminal_archive_observation(
-                contract,
-                teardown_providers=args.teardown_providers,
-            )
-        if terminal.state == "cleanup-completed":
-            result = with_terminal_atomic_series_release(
-                contract,
-                _already_completed_cleanup(
-                    contract,
-                    teardown_providers=args.teardown_providers,
-                ),
-                dry_run=args.dry_run,
-            )
-            agents = archive_terminal_agents(contract, dry_run=args.dry_run)
-            return WorktreeCommandResult(
-                result.returncode,
-                {**result.payload, **({"agentArchive": agents} if agents else {})},
-            )
-        contract = terminal.archived_contract
-        # MIK-R129 rule 1 per L129-THE-GATE-IS-NOT-JUDGED-AGAIN-RULING: on the archive
-        # branch the gate is not judged again. TerminalEnclosureArchive declares no
-        # kept-line record of that judgement (and forbids extra fields), so the repeat
-        # carries no record; its answer may lack landedTips but invents none.
-        kept_line = None
+        contract, terminal_result, kept_line = _cleanup_terminal_branch(contract, terminal, args)
+        if terminal_result is not None:
+            return terminal_result
     else:
-        _require_series_terminal_release(contract)
-        require_terminal_worktree(contract, operation="worktree_cleanup")
-        if contract.integration_status != "completed":
-            raise RuntimeError("cleanup requires integration.status completed")
+        released = _series_terminal_release_refusal(contract)
+        if released is not None:
+            return released
+        incomplete = _cleanup_integration_refusal(contract)
+        if incomplete is not None:
+            return incomplete
         # MIK-R82 rule 5: an enclosure with no locator and no remains finishes
         # here, before the carryover gate -- there is no parked memory branch
         # left to carry from, and nothing to archive or delete.
         without_remains = _cleanup_without_remains_result(args, contract)
         if without_remains is not None:
             return without_remains
-        # 05m: carryover must have run first -- it reads the parked memory branch this step deletes.
-        # The signal is the official ledger (carryover_done), not a contract stamp; a disabled-memory
-        # contract has no memory worktree to carry and passes vacuously.
-        kept_line = _carryover_or_kept_line(contract)
-    if not args.dry_run and worktree_services().provider_lifecycle.setup_running(contract):
-        # Teardown must not race the live background setup thread (GitHub #53);
-        # a dead thread surfaces as a stale heartbeat and does not block.
-        return WorktreeCommandResult(
-            2,
-            {
-                **status_payload(contract),
-                "state": "blocked",
-                "summary": (
-                    "Provider setup is still running for this worktree; wait for a "
-                    "terminal providers state (worktree_status) before cleanup."
-                ),
-            },
-        )
+        kept_line = _carryover_or_kept_line_value(contract)
+        if isinstance(kept_line, WorktreeCommandResult):
+            return kept_line
+    return _cleanup_settled(args, contract, kept_line)
+
+
+def _cleanup_settled(
+    args: WorktreeArgs,
+    contract: WorktreeContract,
+    kept_line: dict[str, object] | None,
+) -> WorktreeCommandResult:
+    """Run the settled tail: provider guard, terminal preflight, reservation.
+
+    The liveness read is side-effect free: the dry run evaluates it too, so
+    a dry run never promises a cleanup the real call would refuse.
+    """
+    provider_blocked = _cleanup_provider_refusal(contract)
+    if provider_blocked is not None:
+        return provider_blocked
 
     preflight = terminal_preflight(contract, mode="cleanup", force=False)
-    if preflight.blockers and not args.dry_run:
-        return WorktreeCommandResult(
-            2,
-            {
-                **status_payload(contract),
-                "state": "blocked",
-                "summary": "Cleanup terminal preflight refused before any mutation.",
-                "blockers": list(preflight.blockers),
-            },
-        )
+    blocked = _cleanup_preflight_refusal(contract, preflight)
+    if blocked is not None:
+        return blocked
 
     return with_terminal_atomic_series_release(
         contract,

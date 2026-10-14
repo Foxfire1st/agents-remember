@@ -40,7 +40,16 @@ def role_message_payload(config: McpRuntimeConfig, call: RoleMessageCall) -> dic
     # the role from the resolved recipient's durable receipt instead.
     token = call_target_role.set(call.role)
     try:
-        return _tool_payload("role_message", send_role_message(config, call))
+        result = send_role_message(config, call)
+        # A held answer carries its own facts -- why, the permission, the
+        # waiting counts and the issued held id (MIK-R100 rules 4a/4b): give
+        # the projector that mapping explicitly so the shaped row keeps
+        # them. Withdrawal and the issued id ride inside it, unchanged; the
+        # guard, the log line and the whole detail still apply downstream.
+        # Completion stays inside the scoped role so the observer event
+        # keeps the recipient role; reset follows, even on exception.
+        held = isinstance(result, dict) and result.get("status") == "held"
+        return _tool_payload("role_message", result, answer=result if held else None)
     finally:
         call_target_role.reset(token)
 

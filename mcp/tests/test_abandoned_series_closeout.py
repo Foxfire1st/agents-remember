@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 from unittest import mock
@@ -46,6 +47,7 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from checkpoint_landing_test_support import close_out_leaf, closeout_messages
+from read_boundary_oracle_test_support import _snapshot
 from test_closeout_queue import MASTER_B, NOW, REPO, QueueFixture
 from test_task_execution_topology import REPOSITORY, _config, _master
 from test_worktree_support import commit_file, git, init_repo
@@ -494,10 +496,15 @@ def test_the_closeout_preview_names_a_live_row_without_its_document_and_the_acti
         contract.task_root,
         master.model_copy(update={"subTasks": [landed_row, *master.subTasks[1:]]}),
     )
-    with pytest.raises(
-        ValueError, match=r"master 'MASTER-B'.*row 'LEAF-B'.*no task-document file.*set_subtask"
-    ):
-        _preview(fixture, contract)
+    before = _snapshot({"world": tmp_path})
+    refused = _preview(fixture, contract)
+    assert refused["ok"] is False
+    assert refused["code"] == "atomic-series-leaf-task-set-invalid"
+    assert re.search(
+        r"master 'MASTER-B'.*row 'LEAF-B'.*no task-document file.*set_subtask",
+        refused["error"],
+    )
+    assert _snapshot({"world": tmp_path}) == before
     _master_edit(fixture, "set_subtask", subtask={"number": "LEAF-B", "file": "leaf-b.md"})
     assert _preview(fixture, contract)["state"] == "would-closeout"
 

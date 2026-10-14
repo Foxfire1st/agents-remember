@@ -27,6 +27,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
 )
 from agents_remember.application.task_docs.task_retirement_records import proof_path
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
 from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -69,22 +70,30 @@ class Case:
 
     def retire(self, *, dry_run: bool = False, **fields: Any) -> dict[str, Any]:
         """The recorded request, sent to the document that owns the record."""
-        if self.sprint:
-            return self.world.retire(dry_run=dry_run, fields={**self.world.fields, **fields})
-        return retire_lone(self.world, self.name, self.ref, dry_run=dry_run, **fields)
+        arguments: dict[str, object] = {"operation": "retire_master"}
+        if dry_run:
+            arguments["dry_run"] = True
+        with tool_call_context("task_doc", arguments, config=self.world.cfg):
+            if self.sprint:
+                return self.world.retire(dry_run=dry_run, fields={**self.world.fields, **fields})
+            return retire_lone(self.world, self.name, self.ref, dry_run=dry_run, **fields)
 
     def elsewhere(self, *, dry_run: bool = False) -> dict[str, Any]:
         """The same request, sent to the other document: the master itself, or the sprint."""
-        if self.sprint:
-            return task_doc_payload(
-                self.world.cfg,
-                TaskDocTarget(repo_id=REPOSITORY, task_name=self.name),
-                operation="retire_master",
-                edit=TaskDocEdit(fields=self.world.fields),
-                call=TaskDocCall(dry_run=dry_run),
-            )
-        fields = {"masterRef": self.ref.model_dump(), "reason": REASON}
-        return self.world.retire(dry_run=dry_run, fields=fields)
+        arguments: dict[str, object] = {"operation": "retire_master"}
+        if dry_run:
+            arguments["dry_run"] = True
+        with tool_call_context("task_doc", arguments, config=self.world.cfg):
+            if self.sprint:
+                return task_doc_payload(
+                    self.world.cfg,
+                    TaskDocTarget(repo_id=REPOSITORY, task_name=self.name),
+                    operation="retire_master",
+                    edit=TaskDocEdit(fields=self.world.fields),
+                    call=TaskDocCall(dry_run=dry_run),
+                )
+            fields = {"masterRef": self.ref.model_dump(), "reason": REASON}
+            return self.world.retire(dry_run=dry_run, fields=fields)
 
     def records(self) -> list[str]:
         """Every retirement record of the master, wherever one lies."""
@@ -115,6 +124,15 @@ class Case:
         )
 
 
+def _whole(answer: dict[str, Any]) -> dict[str, Any]:
+    # World.retire calls task_doc_tool: that application result is already
+    # whole and never has a protocol log. Adapter calls instead keep the
+    # MIK-R111 rule-2 omitted fields in the detail file the answer names.
+    if "taskArchive" in answer:
+        return answer
+    return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+
+
 def _refused_without_change(case: Case, call, match: str) -> None:
     before = case.world.snapshot()
     with pytest.raises(ValueError, match=match):
@@ -124,23 +142,25 @@ def _refused_without_change(case: Case, call, match: str) -> None:
 
 
 def _attach(world: World, ref: TaskDocumentRef, number: str) -> None:
-    task_doc_payload(
-        world.cfg,
-        world.target,
-        operation="attach_master",
-        edit=TaskDocEdit(fields={"masterRef": ref.model_dump(), "number": number}),
-        call=TaskDocCall(),
-    )
+    with tool_call_context("task_doc", {"operation": "attach_master"}, config=world.cfg):
+        task_doc_payload(
+            world.cfg,
+            world.target,
+            operation="attach_master",
+            edit=TaskDocEdit(fields={"masterRef": ref.model_dump(), "number": number}),
+            call=TaskDocCall(),
+        )
 
 
 def _detach(world: World, ref: TaskDocumentRef) -> None:
-    task_doc_payload(
-        world.cfg,
-        world.target,
-        operation="detach_master",
-        edit=TaskDocEdit(fields={"masterRef": ref.model_dump()}),
-        call=TaskDocCall(),
-    )
+    with tool_call_context("task_doc", {"operation": "detach_master"}, config=world.cfg):
+        task_doc_payload(
+            world.cfg,
+            world.target,
+            operation="detach_master",
+            edit=TaskDocEdit(fields={"masterRef": ref.model_dump()}),
+            call=TaskDocCall(),
+        )
 
 
 KILLS = {
@@ -222,7 +242,7 @@ def _files_listed(case: Case, preview: dict[str, Any]) -> set[str]:
     tasks = case.world.tasks
     return {
         Path(name).relative_to(tasks).as_posix().removeprefix("0_archive/")
-        for name in preview["wouldWrite"]
+        for name in _whole(preview)["wouldWrite"]
     }
 
 
@@ -272,23 +292,27 @@ def test_a_death_at_any_transition_leaves_a_state_the_same_request_completes(wor
     _refused_while_unreadable(case, world.tasks / "sprint" / "task.json")
     # A dry run of the same request says what state it found and what is left to do.
     preview = case.retire(dry_run=True)
-    assert preview["retirementState"] == wanted and preview["dryRun"]
-    assert any("move" in step for step in preview["wouldChange"]) == case.live.is_dir()
-    assert preview["wouldChange"][-1].startswith("cleanup receipt: write receipt")
+    assert _whole(preview)["retirementState"] == wanted and _whole(preview)["dryRun"]
+    assert any("move" in step for step in _whole(preview)["wouldChange"]) == case.live.is_dir()
+    assert _whole(preview)["wouldChange"][-1].startswith("cleanup receipt: write receipt")
     # The same request completes the retirement from wherever the death left it.
     before = world.snapshot()
     done = case.retire()
     # The dry run listed every file the real run wrote. What it listed beyond that was written
     # with the bytes it already had: the sprint's pair of a completing request, and a lock file.
     written, listed = _files_written(case, before, world.snapshot()), _files_listed(case, preview)
-    assert written <= listed, (sorted(written - listed), preview["wouldWrite"])
+    assert written <= listed, (sorted(written - listed), _whole(preview)["wouldWrite"])
     assert listed - written <= {
         "sprint/task.json",
         "sprint/task.md",
         "sprint/artifacts/closeout-candidates.json.lock",
     }, sorted(listed - written)
-    assert done["ok"] and done["state"] == "retired" and done["retirementState"] == "hook-finished"
-    assert done["retirementResumed"] == recorded
+    assert (
+        done["ok"]
+        and _whole(done)["state"] == "retired"
+        and done["retirementState"] == "hook-finished"
+    )
+    assert _whole(done)["retirementResumed"] == recorded
     assert case.archive.is_dir() and not case.live.exists()
     assert len(world.validate()) == (2 if sprint else 3) and len(case.records()) == 1
     # Every deletion is in a receipt, and the receipts are numbered without a gap.
@@ -307,19 +331,21 @@ def test_a_death_at_any_transition_leaves_a_state_the_same_request_completes(wor
     if sprint:
         # The completing request refreshes the sprint's queue projection, as a fresh one does.
         assert case.projection_is_current()
-        assert bool(done["projectionEffects"]) == (found != "folder-archived" or seam == "refresh")
+        assert bool(_whole(done)["projectionEffects"]) == (
+            found != "folder-archived" or seam == "refresh"
+        )
     # The completed retirement is as closed to a request it cannot check as every state before.
     _refused_while_unreadable(case, world.tasks / "sprint" / "task.json")
     # A further repeat has nothing to do, and a dry run says so.
     before = world.snapshot()
     again = case.retire()
     assert again["ok"] and again["retirementState"] == "hook-finished"
-    assert again["taskArchive"]["reviewArtifacts"]["receipt"] == "unchanged"
-    assert again["projectionEffects"] == [] and world.snapshot() == before
+    assert _whole(again)["taskArchive"]["reviewArtifacts"]["receipt"] == "unchanged"
+    assert _whole(again)["projectionEffects"] == [] and world.snapshot() == before
     nothing = case.retire(dry_run=True)
-    assert nothing["state"] == "retired" and nothing["wouldChange"] == []
-    assert nothing["taskArchive"]["state"] == "archived"
-    assert "Nothing would change" in nothing["detail"] and world.snapshot() == before
+    assert _whole(nothing)["state"] == "retired" and _whole(nothing)["wouldChange"] == []
+    assert _whole(nothing)["taskArchive"]["state"] == "archived"
+    assert "Nothing would change" in _whole(nothing)["detail"] and world.snapshot() == before
 
 
 def test_a_half_written_sprint_pair_is_completed_and_rendered_again(world):
@@ -331,15 +357,15 @@ def test_a_half_written_sprint_pair_is_completed_and_rendered_again(world):
     page.write_bytes(stale)
     # The dry run lists the rewrite of the page, which the real run performs.
     preview = case.retire(dry_run=True)
-    assert preview["retirementState"] == "sprint-edited"
-    assert "write its task.json and its rendered task.md again" in preview["wouldChange"][0]
-    assert page.as_posix() in preview["wouldWrite"]
-    assert (world.tasks / "sprint" / "task.json").as_posix() in preview["wouldWrite"]
-    (document,) = preview["documents"]
+    assert _whole(preview)["retirementState"] == "sprint-edited"
+    assert "write its task.json and its rendered task.md again" in _whole(preview)["wouldChange"][0]
+    assert page.as_posix() in _whole(preview)["wouldWrite"]
+    assert (world.tasks / "sprint" / "task.json").as_posix() in _whole(preview)["wouldWrite"]
+    (document,) = _whole(preview)["documents"]
     assert document["renderedPath"] == page.as_posix() and document["diff"]
     assert page.read_bytes() == stale
     done = case.retire()
-    assert done["ok"] and done["retirementResumed"] and len(world.validate()) == 2
+    assert done["ok"] and _whole(done)["retirementResumed"] and len(world.validate()) == 2
     assert "Retired agents-remember/master-a/task.json" in page.read_text()
     assert case.projection_is_current()
 
@@ -362,7 +388,7 @@ def test_a_master_attached_again_between_two_attempts_stays_where_its_sprint_res
     assert len(world.validate()) == 3 and case.live.is_dir()
     _detach(world, case.ref)
     done = case.retire()
-    assert done["ok"] and done["retirementResumed"] and len(world.validate()) == 2
+    assert done["ok"] and _whole(done)["retirementResumed"] and len(world.validate()) == 2
     assert case.archive.is_dir() and case.records() == ["row 0"]
 
 
@@ -388,12 +414,15 @@ def test_a_lone_master_that_a_sprint_commands_now_is_not_archived_from_under_it(
     if way_out == "detach":
         _detach(world, case.ref)
         done = case.retire()
-        assert done["retirementResumed"] and case.records() == [str(proof_path(case.archive))]
+        assert _whole(done)["retirementResumed"] and case.records() == [
+            str(proof_path(case.archive))
+        ]
     else:
         stored.unlink()
         fields = {"masterRef": case.ref.model_dump(), "reason": "retired through its sprint"}
-        done = world.retire(fields=fields)
-        assert not done["retirementResumed"] and case.records() == ["row 9"]
+        with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+            done = world.retire(fields=fields)
+        assert not _whole(done)["retirementResumed"] and case.records() == ["row 9"]
     assert done["ok"] and case.archive.is_dir() and len(world.validate()) == 3
 
 
@@ -430,17 +459,21 @@ def test_a_request_on_the_master_itself_writes_no_second_record(world):
     target = TaskDocTarget(repo_id=REPOSITORY, task_name="master-a")
     for edit in (other, TaskDocEdit(fields=world.fields)):
         for dry_run in (True, False):
-            _refused_without_change(
-                case,
-                lambda edit=edit, dry_run=dry_run: task_doc_payload(
-                    world.cfg,
-                    target,
-                    operation="retire_master",
-                    edit=edit,
-                    call=TaskDocCall(dry_run=dry_run),
-                ),
-                r"recorded on row '0' of sprint .*repeat task_doc.retire_master on that sprint",
-            )
+            arguments: dict[str, object] = {"operation": "retire_master"}
+            if dry_run:
+                arguments["dry_run"] = True
+            with tool_call_context("task_doc", arguments, config=world.cfg):
+                _refused_without_change(
+                    case,
+                    lambda edit=edit, dry_run=dry_run: task_doc_payload(
+                        world.cfg,
+                        target,
+                        operation="retire_master",
+                        edit=edit,
+                        call=TaskDocCall(dry_run=dry_run),
+                    ),
+                    r"recorded on row '0' of sprint .*repeat task_doc.retire_master on that sprint",
+                )
     assert case.records() == ["row 0"] and world.sprint().subTasks[0] == row
     assert case.live.is_dir() and not proof_path(case.live).exists()
 
@@ -457,16 +490,23 @@ def test_a_sprint_is_not_a_master_and_stays_a_sprint_when_it_lost_its_last_maste
     data.update(orchestrates=["master-a"], subTasks=[data["subTasks"][0]], executionGraph=None)
     data["sections"] = []
     write_task_doc(world.tasks / "sprint", TaskDocument.model_validate(data))
-    assert world.retire()["ok"] and world.sprint().orchestrates == []
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        assert world.retire()["ok"] and world.sprint().orchestrates == []
     before = world.snapshot()
     for dry_run in (True, False):
         with pytest.raises(ValueError, match=r"is a sprint, not a master.*archive_sprint") as said:
             world.retire(dry_run=dry_run, fields=sprint_fields)
         assert "records the retirement" in str(said.value) and world.snapshot() == before
-    report = task_doc_payload(
-        world.cfg, world.target, operation="linkage_report", edit=TaskDocEdit(), call=TaskDocCall()
-    )
-    assert report["ok"] and report["linkageFacts"] == []
+    with tool_call_context("task_doc", {"operation": "linkage_report"}, config=world.cfg):
+        report = task_doc_payload(
+            world.cfg,
+            world.target,
+            operation="linkage_report",
+            edit=TaskDocEdit(),
+            call=TaskDocCall(),
+        )
+    assert report["ok"]
+    assert json.loads(Path(report["reportPath"]).read_text(encoding="utf-8"))["facts"] == []
     _attach(world, world.refs[1], "7")
     assert world.sprint().orchestrates == ["master-b"]
     assert world.sprint().subTasks[0].retirement is not None
@@ -490,8 +530,13 @@ def test_the_restart_notice_follows_the_record_and_nothing_else(world):
     assert "Restart required" not in str(said.value)
     edge = world.edges[1]
     named = {**world.fields, "removeEdges": [{k: edge[k] for k in ("predecessor", "successor")}]}
-    assert "Restart required" in world.retire(fields=named, dry_run=True)["detail"]
-    assert world.retire(fields=named)["ok"] and case.retire()["ok"]
+    with tool_call_context(
+        "task_doc", {"operation": "retire_master", "dry_run": True}, config=world.cfg
+    ):
+        restart_preview = world.retire(fields=named, dry_run=True)
+    assert "Restart required" in _whole(restart_preview)["detail"]
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        assert world.retire(fields=named)["ok"] and case.retire()["ok"]
     # Once a record exists, every refusal carries it: the named master's record ...
     refusals = [
         lambda: world.retire(fields={**named, "reason": "  "}),
@@ -526,20 +571,22 @@ def test_a_dry_run_after_a_partial_cleanup_lists_exactly_what_remains(world):
     _refused_while_unreadable(case, world.tasks / "sprint" / "task.json")
     before = world.snapshot()
     preview = case.retire(dry_run=True)
-    assert preview["ok"] and preview["state"] == "would-clean-up"
-    assert preview["taskArchive"]["state"] == "archived" and preview["documents"] == []
+    assert preview["ok"] and _whole(preview)["state"] == "would-clean-up"
+    assert (
+        _whole(preview)["taskArchive"]["state"] == "archived" and _whole(preview)["documents"] == []
+    )
     reports = case.archive / "notes" / "reports"
-    assert preview["wouldChange"] == [
+    assert _whole(preview)["wouldChange"] == [
         "review artifacts: delete 1 (listed under taskArchive.reviewArtifacts)",
         f"cleanup receipt: write receipt 2 at {reports / 'review-artifact-cleanup.json'}",
     ]
-    assert preview["wouldWrite"] == [
+    assert _whole(preview)["wouldWrite"] == [
         (reports / "review-artifact-cleanup.attempt-1.json").as_posix(),
         (reports / "review-artifact-cleanup.json").as_posix(),
     ]
     # The state is the one of the module's table: the last attempt failed and work is left.
-    assert preview["retirementState"] == "hook-failed"
-    remaining = preview["taskArchive"]["reviewArtifacts"]
+    assert _whole(preview)["retirementState"] == "hook-failed"
+    remaining = _whole(preview)["taskArchive"]["reviewArtifacts"]
     assert [entry["path"] for entry in remaining["datasetCopies"]] == [failed.as_posix()]
     assert [entry["artifact"] for entry in remaining["alreadyAbsent"]] == [deleted.as_posix()]
     assert world.snapshot() == before
@@ -555,10 +602,16 @@ def test_a_master_that_is_missing_is_named_with_an_action_that_works(world):
     live.rename(archive)
     with pytest.raises(ValueError, match=r"0_archive.*task_doc.retire_master"):
         world.validate()
-    report = task_doc_payload(
-        world.cfg, world.target, operation="linkage_report", edit=TaskDocEdit(), call=TaskDocCall()
-    )
-    fact = next(f for f in report["linkageFacts"] if f["kind"] == "orchestrates-entry-unresolved")
+    with tool_call_context("task_doc", {"operation": "linkage_report"}, config=world.cfg):
+        report = task_doc_payload(
+            world.cfg,
+            world.target,
+            operation="linkage_report",
+            edit=TaskDocEdit(),
+            call=TaskDocCall(),
+        )
+    facts = json.loads(Path(report["reportPath"]).read_text(encoding="utf-8"))["facts"]
+    fact = next(f for f in facts if f["kind"] == "orchestrates-entry-unresolved")
     assert fact["archivePaths"] == [(archive / "task.json").as_posix()]
     assert "task_doc.retire_master" in fact["detail"] and "0_archive" in fact["detail"]
     with pytest.raises(
@@ -567,7 +620,8 @@ def test_a_master_that_is_missing_is_named_with_an_action_that_works(world):
         world.retire()
     # The named action: put the folder back, then retire the master through its sprint.
     archive.rename(live)
-    assert world.retire()["ok"] and len(world.validate()) == 2 and archive.is_dir()
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        assert world.retire()["ok"] and len(world.validate()) == 2 and archive.is_dir()
 
 
 def test_any_task_document_that_cannot_be_read_stops_a_retirement_and_is_named(world):
@@ -587,4 +641,5 @@ def test_any_task_document_that_cannot_be_read_stops_a_retirement_and_is_named(w
             )
         assert world.snapshot() == before
     (elsewhere / "task.json").unlink()
-    assert world.retire()["ok"]
+    with tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg):
+        assert world.retire()["ok"]

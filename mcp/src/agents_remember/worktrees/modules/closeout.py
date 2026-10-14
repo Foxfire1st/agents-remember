@@ -76,11 +76,13 @@ from agents_remember.worktrees.modules.onboarding import (
     route_index_refresh_plan_for_context,
     route_overview_metadata_refresh_plan,
 )
+from agents_remember.worktrees.modules.state_refusals import closeout_queue_refusal
 from agents_remember.worktrees.queue.closeout_preview import (
     closeout_order,
     closeout_summary,
     proposed_closeout_commits,
 )
+from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
     accepted_code_commit,
@@ -303,10 +305,16 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         )
         if early is not None and early != GATE_NOT_APPLICABLE:
             return _gate_refused_preview(contract, early)
-    require_closeout_publication_authority(contract)
+    try:
+        require_closeout_publication_authority(contract)
+    except CloseoutQueueError as error:
+        return _closeout_queue_blocked_preview(contract, error)
     verdict = candidate_gate_verdict(contract, args.candidate_tree or code_candidate_tree(contract))
     if verdict is not None and verdict != GATE_NOT_APPLICABLE:
         return _gate_refused_preview(contract, verdict)
+    gate_guard = _closeout_gate_guard(contract, args)
+    if gate_guard is not None and not gate_guard.permitted:
+        return _closeout_gate_blocked_preview(contract, gate_guard)
     code_dirty = contract.kind == "leaf" and worktree_dirty(contract.code_worktree)
     memory_dirty = (
         contract.kind == "leaf"
@@ -360,6 +368,22 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
 
 
 GATE_REFUSED_PREVIEW = "knowledge-gate-refused"
+
+# Every preview state that answers a refusal instead of a plan: the entry
+# marks the preview returncode from this set, so a blocked preview never
+# rides a success returncode.
+REFUSED_CLOSEOUT_PREVIEW_STATES = frozenset(
+    {
+        GATE_REFUSED_PREVIEW,
+        OPT_OUT_STATUS,
+        "closeout-gate-blocked",
+        # The series-authority previews answer state "blocked" with the
+        # check's code beside it, like every other answered refusal.
+        "blocked",
+    }
+)
+
+
 MAX_PREVIEW_FINDINGS = 50
 
 
@@ -388,6 +412,84 @@ def _opt_out_preview(contract, operation: str) -> dict[str, object]:
         "summary": fields["detail"],
         "commit_approval_required": False,
         "nextStep": {"summary": str(fields.get("nextAction"))},
+    }
+
+
+def _closeout_gate_blocked_preview(contract, guard: CloseoutGuard) -> dict[str, object]:
+    """The preview of a closeout the closeout-approval gate blocks: never ``would-closeout``.
+
+    This file is the right home: the preview builder already reports the
+    gate verdict, and the apply refuses on this same guard. A preview that
+    promised ``would-closeout`` while the apply would refuse on the gate is
+    exactly the dry/real disagreement MIK-R111 rule 1 forbids. The shape
+    mirrors :func:`_gate_refused_preview`: the gate's own sentence, its
+    verdict facts, one coded blocker, and its own next step, so the response
+    is not followed by the hint to ask for the commit approval.
+    """
+
+    summary = f"The closeout would be refused, and nothing would be committed: {guard.reason}"
+    step = (
+        f"{summary}. Decide the addressed closeout-approval gate, then preview the closeout again."
+    )
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
+    sentence = (
+        f"Closeout-approval gate {guard.gate_id or 'unaddressed'} is undecided "
+        f"({guard.reason}); decide it, then preview again."
+    )
+    return {
+        "state": "closeout-gate-blocked",
+        "code": "closeout-gate-blocked",
+        "error": summary,
+        **status,
+        "nextOperation": "continue_work",
+        "summary": summary,
+        "commit_approval_required": False,
+        "closeout_gate": _closeout_gate_payload(guard),
+        "blockers": [{"code": "closeout-gate-blocked", "sentence": sentence}],
+        "nextStep": {"summary": step, "nextTool": "gate_list", "nextArgs": {}},
+    }
+
+
+def _closeout_queue_blocked_preview(contract, error: CloseoutQueueError) -> dict[str, object]:
+    """The preview of a closeout the series authority refuses: never ``would-closeout``.
+
+    The check's code rides as the state and the code, its sentence as the
+    error, unchanged. The next call exists only where exactly one follows
+    (an abandoned master is abandoned); otherwise the sentence names the
+    repair. Like the gate previews, no commit-approval hint follows.
+    """
+
+    summary = f"The closeout would be refused, and nothing would be committed: {error.detail}"
+    step = f"{summary}. "
+    if error.status == "atomic-series-closeout-master-abandoned":
+        step += "Reclaim the abandoned master with worktree_abandon."
+        next_step: dict[str, object] = {
+            "summary": step,
+            "nextTool": "worktree_abandon",
+            "nextArgs": {"contract_path": contract.contract_path.as_posix()},
+        }
+    else:
+        step += "Repair the master the sentence names, then preview the closeout again."
+        next_step = {"summary": step}
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
+    return {
+        "state": "blocked",
+        "code": error.status,
+        "error": error.detail,
+        **status,
+        "nextOperation": "continue_work",
+        "summary": summary,
+        "commit_approval_required": False,
+        "blockers": [{"code": error.status, "sentence": error.detail}],
+        "nextStep": next_step,
     }
 
 
@@ -700,7 +802,14 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
         write_contract(current.contract_path, updated)
         return memory, integration_reopen, updated
 
-    memory, integration_reopen, updated = publish_closeout_under_authority(contract, publication)
+    try:
+        memory, integration_reopen, updated = publish_closeout_under_authority(
+            contract, publication
+        )
+    except CloseoutQueueError as error:
+        # The series authority the recovery re-proves answers with its code
+        # and sentence, never raises.
+        return closeout_queue_refusal(contract, error, next_args=contract_next_args(contract))
     payload = _closed_result_payload(
         updated,
         _CloseoutResultFacts(
@@ -903,15 +1012,20 @@ def closeout_result(
     # before it claims its approval or commits either side; the memory commit asks again.
     refuse_ungated_candidate(contract, accepted_candidate_tree)
 
-    return _publish_closeout_candidate(
-        contract,
-        _CloseoutPublicationFacts(
-            args=args,
-            effective_input=effective_input,
-            worklist=worklist,
-            approval_note=approval_note,
-        ),
-    )
+    try:
+        return _publish_closeout_candidate(
+            contract,
+            _CloseoutPublicationFacts(
+                args=args,
+                effective_input=effective_input,
+                worklist=worklist,
+                approval_note=approval_note,
+            ),
+        )
+    except CloseoutQueueError as error:
+        # The series authority the publication re-proves answers with its
+        # code and sentence, never raises.
+        return closeout_queue_refusal(contract, error, next_args=contract_next_args(contract))
 
 
 @dataclass(frozen=True)
@@ -1017,6 +1131,6 @@ def _closeout_entry(
     refuse_series_workbench_commit(contract)
     if args.dry_run:
         preview = closeout_preview_payload(contract, args)
-        refused = preview["state"] in (GATE_REFUSED_PREVIEW, OPT_OUT_STATUS)
+        refused = preview["state"] in REFUSED_CLOSEOUT_PREVIEW_STATES
         return contract, effective_input, WorktreeCommandResult(2 if refused else 0, preview)
     return contract, effective_input, None

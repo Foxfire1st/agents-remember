@@ -225,13 +225,11 @@ BARE_RAISERS: frozenset[str] = frozenset(
         "route_index_refresh",
         "task_reopen",
         "lifecycle_finalize_task",
-        "task_doc",
+        # `task_doc` was pinned here and left with the MIK-R111 repair: removed
+        # reads refuse before parsing and terminal preconditions answer, so the
+        # entry leaves in the same change per the rule above.
         "worktree_attach",
         "worktree_status",
-        # MIK-R82's adoption tool: a contract outside the coordination root is
-        # refused by name at the boundary, which raises (measured 2026-10-11).
-        # Owned by the worktree-tool leaves (L111 reshapes these answers).
-        "worktree_enclosure_adopt",
         "memory_carryover_plan",
         "memory_carryover_apply",
     }

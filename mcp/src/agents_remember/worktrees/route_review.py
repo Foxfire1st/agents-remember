@@ -227,11 +227,16 @@ def route_review_refusal_projection(
                 "contract_path": contract_path,
             }
             if plan.inspection_tool == "task_doc":
-                next_args["operation"] = "get"
-            result["nextTool"] = plan.inspection_tool
-            result["nextArgs"] = next_args
-            next_step["nextTool"] = plan.inspection_tool
-            next_step["nextArgs"] = next_args
+                # MIK-R111 rule 2: the inspection is a file read (the rendered
+                # task document), not a task_doc read call (removed). The
+                # summary and nextAction name it; no nextTool is emitted.
+                # (nextStep stays a strict NextStep: no file keys ride it.)
+                result["taskDocumentPath"] = contract.task_artifact.as_posix()
+            else:
+                result["nextTool"] = plan.inspection_tool
+                result["nextArgs"] = next_args
+                next_step["nextTool"] = plan.inspection_tool
+                next_step["nextArgs"] = next_args
         elif plan.next_action == "record_route_review":
             next_args = {
                 "repo_id": contract.repo_name,

@@ -26,13 +26,9 @@ from ..tools import (
 def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def closeout_queue(request: CloseoutQueueRequest) -> dict[str, Any]:
-        """Inspect or idempotently rebuild one sprint's disposable closeout projection.
-        The artifact is either exact-current valid-built or non-admitting invalid-empty. Rebuild
-        first persists invalid-empty, then derives membership and ordering only from current task
-        truth and current waiting contract-owned door generations. Old rows are never seeds,
-        history, or authority. A missing, malformed, or source-mismatched projection reports the
-        exact task-or-sprint-addressed rebuild action. This surface never declares, selects,
-        defers, withdraws, or otherwise mutates closeout intent."""
+        """Inspect or rebuild one sprint's disposable waiting-only closeout projection: exact-
+        current valid-built or non-admitting invalid-empty, derived from the current task plus
+        waiting-door facts. States: valid-built, invalid-empty, blocked. Reference: docs/reference/mcp-tools.md."""
         return closeout_queue_payload(config, request)
 
 
@@ -71,16 +67,10 @@ def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig)
 def _register_task_reopen_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def task_reopen(contract_path: str, dry_run: bool = False) -> dict[str, Any]:
-        """Reopen a COMPLETED leaf under its exact same leaf id (no -rN suffix). A state
-        reset, not a worktree creator: the enclosure contract's review/closeout/integration
-        state returns to virgin (cleanup=reopened, stale lifecycle binding cleared) and the
-        leaf's task document goes back to planning (lifecycleId cleared, master sub-task
-        index entry flipped, audit decision appended). MUTATING (contract + task docs; no
-        git effects). Refuses masters, in-flight leaves, and leaves whose worktrees still
-        exist. Afterwards: edit the doc's steps via task_doc, then run a NORMAL
-        worktree_start with the same leaf id — it recreates worktrees/branches off the
-        current source tips, promotes/mints a fresh lifecycle, and restamps the doc, so
-        doc/chat/dashboard bindings hold by construction. Preview with dry_run=true."""
+        """Reopen a COMPLETED leaf under its exact same leaf id: review, closeout and integration
+        state returns to virgin and the leaf document goes back to planning. Afterwards edit
+        steps via task_doc, then run a normal worktree_start. States: reopened, blocked;
+        preview with dry_run. Reference: docs/reference/mcp-tools.md."""
         return task_reopen_payload(config, contract_path, dry_run=dry_run)
 
 
@@ -95,20 +85,11 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         *,
         teardown_providers: bool = True,
     ) -> dict[str, Any]:
-        """Finalize one parent-child task lifecycle edge. The task's landed commit must be
-        reachable from the contract's local target/source branch; PR-gated flows must complete the
-        PR merge and pull first, making the proof structurally identical to a non-PR edge. After
-        landed-state and memory carryover checks, the contract identity resolves the one exact leaf
-        document (an omitted task_doc_path adopts it; a supplied path must match it) and refuses
-        before cleanup unless every declared parent/nested step is done. When that leaf declares an
-        existing immediate parent, or names none and its folder's task.json master lists it, the
-        finalizer always derives and reconciles its exact row, even when both optional parent
-        assertions are omitted; a sub-task naming none whose folder task.json is not a master is
-        refused. master_doc_path and subtask_number are independent identity assertions; when
-        present, each must match that derived edge. Standalone/no-parent leaves remain supported;
-        the parent task itself and recursive ancestors are not completed. No step is auto-checked
-        and no squash-merge equivalence is attempted. Preview with dry_run=true; unresolved steps
-        also refuse previews."""
+        """Prove the landed edge and complete one parent-child task lifecycle edge: refuses before
+        cleanup unless every declared step is done, then reconciles the exact parent row.
+        Standalone leaves supported; ancestors are not completed. States: finalized,
+        would-finalize, blocked. Answers the state, what blocks
+        and the next call; preview with dry_run. Reference: docs/reference/mcp-tools.md."""
         return lifecycle_finalize_task_payload(
             config,
             contract_path,
@@ -122,160 +103,7 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         )
 
 
-_TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-document/v1) and re-render its
-        markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
-        parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
-
-        operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'add_step' | 'remove_step' |
-        'skip_step' | 'read_steps' | 'set_subtask' | 'remove_subtask' |
-        'set_section' | 'append_decision' | 'begin_review' | 'record_review' | 'record_route_review' |
-        'author_execution_graph' | 'attach_master' | 'detach_master' | 'retire_master' | 'archive_sprint' | 'linkage_report' |
-        'set_field' | 'get'. Locate the doc by task_name (also resolves the
-        contract for the lifecycle key) or contract_path; pass slug for a series sub-task
-        ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
-        title, kind ['subTask'|'master'] (the former 'light' kind is refused), repo, type,
-        createdAt, objective, requirements,
-        steps, ... — a master takes subTasks + ordered sections instead of steps, and an
-        orchestration sprint is scaffolded with empty canonical Judgment and Priority Register
-        sections); 'replace' takes a
-        full replacement document in fields and rewrites the existing JSON+markdown after schema
-        validation; the step plane is split by intent and addresses one exact existing unit by
-        step={id, parent?}, where parent selects top level (absent) or that parent's substeps.
-        'set_step' updates exactly one existing unit ({id, title?, status?, note?, parent?}) and
-        never creates; an explicit status clears an earlier skip disposition. 'add_step' creates
-        exactly one unit and requires {id, title} (plus optional status/note/parent); it refuses an
-        id that already exists in its scope. 'remove_step' deletes exactly one existing unit and
-        requires a nonblank step.reason; it records a decision entry, and may remove a done unit or
-        operate on a Completed document once that reason is given. 'read_steps' is the read-only
-        focused checklist read (id/title/status/note plus nested substeps).
-        'skip_step' takes exact existing step={id, reason, parent?}, sets only that unit done, and
-        records intentional-skip provenance without cascading. A nonblank reason is required.
-        'set_subtask' (master) takes subtask={number, name,
-        file?, status?, scope?}; 'remove_subtask' (master) normally takes
-        subtask={number, keep_file?} for a terminal row and drops that row plus its leaf doc
-        (json+md) unless keep_file=true. To discard planning work that never started, pass
-        subtask={number, disposition:'discard-unstarted', reason}; this forbids keep_file, proves
-        absence of canonical enclosure/operation/seat/review/commit evidence under the same short
-        task-publication CAS used by worktree_start, removes the child sources, and retains a typed
-        parent audit. Started or ambiguous evidence refuses with the exact next lifecycle route;
-        retries converge from the parent audit. 'set_section' (master) takes
-        section={heading, kind?, body?} — a section carrying a canonical register heading must keep
-        the exact register table shape (write-time validation);
-        'record_route_review' takes review={verdict, verdictRef, routes:[{route, verdict,
-        evidenceRef}]}; the control plane stamps the current Git candidate tree and time, and every
-        evidence path must be a real task-relative file. It overwrites the prior candidate's review.
-        'begin_review' takes an empty review object and increments the task review round before
-        reviewer work (a repeated begin resumes the pending round). The round limit is the
-        settings number (orchestration.loops.defaults.maxRounds) plus approved
-        extra rounds, read from the settings file at each begin. Beyond the limit a round needs an
-        approval with additionalRounds: approval {by architect|developer, text} (the earlier
-        developerApproval words still read); without one the answer is review-budget-exhausted
-        with count and limit. An unreadable settings file refuses the begin with its reason.
-        'record_review' takes
-        {verdict, findings:[{findingId, description}] for the first result, or
-        remainingFindingIds:[...] for later results, verdictRef?, candidateTree?}; successors may
-        only shrink the sealed finding set. A check of a repaired Worker record alone, with the
-        candidate unchanged, is recorded on the last round without a new begin (no round is
-        counted); on a changed candidate the tool refuses and names begin_review as the next step.
-        'record_route_review' uses the same bounded state transition while
-        preserving its existing candidate/evidence/currentness checks; call 'begin_review' before
-        either publication. The response reviewState carries round, pending,
-        baseline findings, remaining IDs, and limit.
-        Standalone and organizational leaves use their bound leaf contract. For an atomic master,
-        the operation targets the canonical task-root master document and binds the accumulated
-        master candidate, canonical child membership/intents, and evidence; an atomic child does
-        not publish an independent leaf review. Master review is required only at master-to-parent
-        integration. For direct execution of a granted leaf (no leaf worktree), pass branch_addressed=true
-        to bind the task-root series contract and stamp the candidate tree from the branch HEAD
-        (grant-gated: the leaf must hold a direct-execution grant); a canonical atomic child remains deferred to its master.
-        'author_execution_graph' applies one validated atomic batch of structural mutations to a
-        sprint's executionGraph: fields={mutations:[...]} where each mutation is one of
-        {op:'add_node', ref:{repository,path}, kind?:'master'|'segment', leafIds?:[...]},
-        {op:'remove_node', ref, leafId?:sample}, {op:'add_edge', predecessor, successor, reason,
-        judgmentId}, {op:'remove_edge', predecessor, successor, judgmentId}, {op:'move_leaf', ref,
-        leafId, toSegment:sampleLeafId, judgmentId}, or {op:'set_nature', ref, executionNature,
-        judgmentId}. On a graph-less sprint the first add_node batch bootstraps the graph (the
-        result reports bootstrapped:true); final validation requires exact orchestrates membership
-        and an explicit nature for every commanded master. Edge endpoints are a bare
-        {repository,path} (the master's sole node) or
-        {ref, leafId} addressing the segment containing that leaf. Judgment-bearing mutations
-        (edges, segmentation, nature) require a judgmentId row in the sprint's Judgment Register
-        section; the mechanism never invents one. The batch refuses segment nodes on atomic
-        masters, leaf placements overlapping or incomplete against the live subTasks, and unknown
-        leaf ids; unplaced-leaf derived placements and leaf-numbering inversions across waves are
-        reported as facts (the latter never refuse). dry_run previews the rendered diff and
-        wouldLose without writing.
-        'attach_master' (orchestration sprint) attaches one master as a single validated atomic
-        batch: fields={masterRef:{repository,path}, number, name?, scope?, status?,
-        executionNature?, judgmentId?} write the typed subTask row (masterRef, rendered as a real
-        link), the orchestrates slug, and — only when the sprint has an executionGraph — the lump
-        graph node (graph-less sprints report graphNode:'deferred-no-graph-default' and keep the
-        atomic-sequential default). A nature-less master requires executionNature plus a
-        judgmentId from the sprint Judgment Register; disagreeing with an existing nature refuses.
-        Validation precedes the one batch write, so a partial attach is structurally impossible.
-        'detach_master' takes fields={masterRef} and removes the typed row, the membership slug,
-        and the graph node; it refuses while any edge touches the node and never deletes files.
-        'retire_master' is the ONE operation that archives a master; finalizing a master never
-        archives it. fields={masterRef, reason, removeEdges?:[{predecessor, successor}]}. It has
-        one route and writes one retirement record, and it finds out itself whether a sprint
-        commands the master or has recorded its retirement; a request sent to the wrong document
-        is refused and names the right one. A master that a sprint commands is retired on that
-        sprint: the operation removes its membership, graph nodes and touching edges, leaves one
-        plain abandoned row with the reason, time and recovery proof (in place of the master's
-        typed row or its one correlated legacy seat row, else at the end), then archives the folder
-        and runs the review-artifact archive hook. Outgoing edges to successors not Completed
-        require their exact endpoints in removeEdges. A master that no sprint commands is retired
-        on its own document (masterRef is that master itself, no removeEdges): no sprint is edited
-        and the record is notes/reports/master-retirement.json in its folder. A sprint document is
-        refused (a sprint is not a master, also after its last master was retired). Readiness
-        refuses open work of the master's leaves, and an unfinished or unreadable operation of
-        the master's own enclosure: a leaf worktree directory that exists, a leaf branch with
-        commits its landing line does not reach, an operation record that is unfinished or cannot
-        be read. The refusal names each one and the action that removes it: the lifecycle tools,
-        or, where they cannot act on the enclosure (no live operation locator), what is done by
-        hand (the Git command for a worktree or branch, the move for an operation record). The
-        layout or age of a contract, a leaf branch with nothing unlanded, and the master's own
-        branch and worktree never refuse; they are readinessFacts in the answer and in the
-        record. While any task.json of the repository cannot be read, the request is refused and
-        names that file. A sprint's only graphed master cannot be retired (a graph cannot be
-        empty), and a master nested inside another task's
-        folder is refused (only root task folders have a 0_archive/<name> location). dry_run
-        reports exactly what would change (wouldChange) and every file a real run writes
-        (wouldWrite), and that nothing would change after a completed retirement.
-        Repeating the same request resumes from the record wherever an attempt stopped; a request
-        that differs from the record is refused; when the hook failed in part (ok=false, state
-        retired-with-hook-failures) the repeat retries the cleanup only, and every attempt keeps a
-        numbered receipt. A retired row cannot be changed or dropped by any other operation.
-        'archive_sprint' (sprint) archives a Completed sprint as a whole with fields={reason}.
-        It refuses before anything changes — in a dry run as in a real run, naming each row or
-        file and the clearing action — unless the sprint status is Completed, every row
-        commanding a master is Completed, abandoned, or a retirement row, and every commanded
-        master passes the retire-operation readiness check (no open work in its leaves). The
-        sprint's own folder moves first, then every moving commanded master's folder, all under
-        tasks/<repository>/0_archive/; a master also commanded by another live sprint stays and
-        the result names that sprint in stayedMasters. Before the first move it writes
-        notes/reports/sprint-archive.json into the sprint folder (reason, time, every master
-        with folder, every staying master and why, and the same-request comparison basis),
-        protected like a retirement record: a repeat is compared by reason and selection and a
-        differing request is refused. A failure before the moves end restores every folder and
-        removes the record this request wrote. After the moves the review-artifact archive hook
-        runs for every archived folder; a hook failure keeps the archive with ok=false and
-        state archived-with-hook-failures plus per-folder deleted/failed lists under
-        taskArchive.cleanups, a repeat with the same reason retries only the remaining cleanup
-        with receipts per attempt, and a different reason is refused. dry_run reports exactly
-        what would change (wouldChange) and every file a real run writes (wouldWrite).
-        An abandoned row never blocks a master: it needs no enclosure, no landing and no document.
-        A master that a sprint commands stays in place when it is finalized, with its sprint row
-        Completed.
-        'linkage_report' (sprint) is the read-only drift report: seat-doc rows, slug-only
-        membership, row/membership mismatches, the seat documents a retired master left
-        (retired-master-seat-documents), and uncommanded masters named in sprint decisions
-        surface as facts, never as hard errors; 'get' on a sprint carries the same facts as
-        linkageFacts.
-        'append_decision' takes decision={at, decision, rationale}; 'set_field' takes fields with
-        scalar/list updates; 'set_status' takes fields.status. Completed refuses while any declared
-        step/substep (or master row) remains unresolved. dry_run=true builds + validates and
-        returns rendered/diff/wouldLose WITHOUT writing — the preview before adopting a hand .md."""
+_TASK_DOC_TOOL_DESCRIPTION = """Write task documents: ar-task-document/v1 JSON plus rendered markdown (JSON rules; markdown is generated). Read the .md as a file. A write names its kind ['subTask'|'master']. Operations: create, replace, set_status, set_step, add_step, remove_step, skip_step, set_subtask, remove_subtask, set_section, append_decision, begin_review, record_review, record_route_review, author_execution_graph, attach_master, detach_master, retire_master, archive_sprint, linkage_report, set_field. Writes answer ok; dry runs answer wouldLose and the diff. Reference: docs/reference/mcp-tools.md."""
 
 
 def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -295,6 +123,8 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         review: dict[str, Any] | None = None,
         dry_run: bool = False,
         branch_addressed: bool = False,
+        fields_file: str | None = None,
+        section_body_file: str | None = None,
     ) -> dict[str, Any]:
         return task_doc_payload(
             config,
@@ -312,6 +142,8 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
                 subtask=subtask,
                 section=section,
                 review=review,
+                fields_file=fields_file,
+                section_body_file=section_body_file,
             ),
             call=TaskDocCall(dry_run=dry_run, branch_addressed=branch_addressed),
         )

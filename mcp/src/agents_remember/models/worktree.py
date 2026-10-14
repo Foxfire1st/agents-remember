@@ -305,6 +305,9 @@ class WorktreeSummary(StrictResponseModel):
     # field on this summary was computed from the substituted values -- this is the notice
     # that they were substituted, and the file heals the next time a lifecycle tool writes it.
     unknownContractCells: list[str] | None = None
+    # MIK-R111 rule 3: one line naming task-document copies that differ from
+    # their sources. Present only when something differs; absent is clean.
+    taskDocumentCopies: str | None = None
     error: str | None = None
     errorEvidence: dict[str, object] | None = None
     status: str | None = None

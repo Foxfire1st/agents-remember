@@ -139,16 +139,19 @@ def test_record_landing_with_unreadable_recorded_code_refuses_without_writing(
     before = candidate.read_bytes()
     code_before = _git(world.code, "rev-parse", "leaf")
     memory_before = _git(world.memory, "rev-parse", "leaf")
-    with pytest.raises(RuntimeError) as refused:
-        record_landing.record_landing_result(
-            WorktreeArgs(
-                contract_path=candidate,
-                dry_run=True,
-                landed_code_commit=world.code_base,
-                landed_memory_content_commit=world.memory_base,
-            )
+    refused = record_landing.record_landing_result(
+        WorktreeArgs(
+            contract_path=candidate,
+            dry_run=True,
+            landed_code_commit=world.code_base,
+            landed_memory_content_commit=world.memory_base,
         )
-    assert BOGUS in str(refused.value)
+    )
+    assert refused.returncode == 2
+    assert refused.payload["code"] == "knowledge-gate-refused"
+    assert BOGUS in str(refused.payload["detail"])
+    assert "recorded closeout code" in str(refused.payload["detail"])
+    assert refused.payload["error"] == str(refused.payload["detail"]).splitlines()[0]
     assert candidate.read_bytes() == before
     assert _git(world.code, "rev-parse", "leaf") == code_before
     assert _git(world.memory, "rev-parse", "leaf") == memory_before

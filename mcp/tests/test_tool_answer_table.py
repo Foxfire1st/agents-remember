@@ -27,7 +27,7 @@ import tempfile
 import threading
 import unittest
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -74,6 +74,7 @@ from agents_remember.models.tools.tool_answer import (
     ENVELOPE_STRIPPED_FIELDS,
     INTERIM_LEAVES,
     INTERIM_TOOL_LEAF,
+    L111_SHAPED_TOOLS,
     L112_FINAL_BOUNDS,
     LOG_ERROR_LOCATION_OMITTED,
     RUNTIME_INSTALL_ANSWER_FIELDS,
@@ -108,34 +109,9 @@ from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.worktree_contract import load_contract
 from tool_answer_l110_rows import L110_ROW_DATA
+from tool_answer_l111_test_support import ToolAnswerRow, _apply_l111_shaped_rows
 from tool_entry_point_world import REPO as ENTRY_POINT_WORLD_REPO
 from tool_entry_point_world import EntryPointWorld
-
-
-@dataclass(frozen=True)
-class ToolAnswerRow:
-    """One rule-6 table row: the fields an answer may hold and its bound.
-
-    ``fields=None`` with empty ``uses`` is an interim row (rule 7) or an
-    unshaped exception passthrough: no field list, held to the bound by the
-    guard alone. A shaped row names every field and the caller step using it
-    (a non-empty string). Rows whose owning leaf proves cases through live
-    tool runs carry no static payloads (``ordinary_case``/``largest_case``
-    None) and instead name the real tool paths their cases are derived
-    through in ``production_paths``; rows with static payloads keep them,
-    measured by the product counter -- never claimed integers.
-    """
-
-    tool: str
-    operations: tuple[str | None, ...]
-    fields: frozenset[str] | None
-    uses: dict[str, str]
-    bound: int
-    interim_leaf: str | None
-    ordinary_case: dict[str, Any] | None
-    largest_case: dict[str, Any] | None
-    production_paths: tuple[str, ...] = ()
-
 
 # Answer keys the row framework itself adds around row fields: a row case
 # may carry these without naming them as fields.
@@ -190,7 +166,6 @@ AUTHORED_INTERIM_OWNERS: dict[str, str] = {
     # it stands interim under L111 like its siblings.
     "worktree_enclosure_adopt": "L111",
     "direct_landing": "L111",
-    "direct_execution_grant": "L111",
     "task_doc": "L111",
     "lifecycle_finalize_task": "L111",
     "closeout_queue": "L111",
@@ -992,11 +967,11 @@ def build_tool_answer_table() -> dict[tuple[str, str | None], ToolAnswerRow]:
     """The rule-6 table: one row per authored tool (and per operation).
 
     Rows come only from the authored roster above plus the landed leaves'
-    final rows (L109's four rebuilt reads, L112's three retained tools),
-    never synthesized from the registry: a tool without an authored entry
-    has no row. A leaf that lands later and adds or changes a tool edits
-    that roster, setting ``fields`` to the answer's field list with every
-    use, the case sizes, and clearing ``interim_leaf``.
+    final rows (L109's four rebuilt reads, L111's shaped rows, L112's three
+    retained tools), never synthesized from the registry: a tool without an
+    authored entry has no row. A leaf that lands later and adds or changes a
+    tool edits that roster, setting ``fields`` to the answer's field list with
+    every use, the case sizes, and clearing ``interim_leaf``.
     """
     table: dict[tuple[str, str | None], ToolAnswerRow] = {}
     for tool in sorted(AUTHORED_INTERIM_OWNERS):
@@ -1020,6 +995,7 @@ def build_tool_answer_table() -> dict[tuple[str, str | None], ToolAnswerRow]:
         table[key] = shaped
     for key in sorted(L109_SHAPED_ROWS):
         table[key] = L109_SHAPED_ROWS[key]
+    _apply_l111_shaped_rows(table)
     return table
 
 
@@ -1032,6 +1008,11 @@ def authored_row_owners() -> dict[str, str | None]:
         owners[tool] = None
     for tool, _operation in L109_SHAPED_ROWS:
         owners[tool] = None
+    # L111's landed finals own no leaf; tools the interim map still names
+    # keep their leaf (their table rows are interim until the applier covers
+    # them, and the implementation's interim map agrees).
+    for tool in L111_SHAPED_TOOLS:
+        owners.setdefault(tool, None)
     return owners
 
 
@@ -1256,7 +1237,7 @@ class ToolAnswerTableTests(unittest.TestCase):
             if key in TOOL_ANSWER_EXCEPTIONS or row.fields is not None:
                 continue
             if row.fields is not None:
-                continue  # landed shaped rows (L110, L112 finals) hold their own bound
+                continue  # landed shaped rows (L110, L111, L112 finals) hold their own bound
             self.assertEqual(row.bound, TOOL_ANSWER_EXCEPTION_MAX_TOKENS, f"row {key}")
             self.assertIsNone(row.fields, f"row {key}")
             self.assertIn(row.interim_leaf, INTERIM_LEAVES, f"row {key}")
@@ -1273,13 +1254,16 @@ class ToolAnswerTableTests(unittest.TestCase):
         )
 
     def test_each_later_leaf_still_owns_rows(self) -> None:
-        # A leaf does not land while a row names it: L100 and L111 each
-        # still own interim rows. L109 has landed (MIK-R109 rules 1-4) and
-        # L110 has landed (MIK-R110 rule 6); each owns none, and the next
-        # tests say so for each.
+        # A leaf does not land while a row names it: only L100 still
+        # owns interim rows. L109 has landed (MIK-R109 rules 1-4), L110 has
+        # landed (MIK-R110 rule 6) and L112 has landed (MIK-R112 rule 9); each
+        # owns none, and the next tests say so for each. L111's leaf is still
+        # open, but every roster row it names is shaped by its own applier, so
+        # no row names it either (the shaped-rows tests say so).
         owners = {row.interim_leaf for row in TOOL_ANSWER_TABLE.values()}
-        for leaf in ("L100", "L111"):
-            self.assertIn(leaf, owners, f"{leaf} owns no row")
+        self.assertIn("L100", owners, "L100 owns no row")
+        for leaf in ("L109", "L110", "L111", "L112"):
+            self.assertNotIn(leaf, owners, f"{leaf} still owns a row")
 
     def test_no_row_names_l112(self) -> None:
         # MIK-R112 rule 9: L112 has landed. No interim row names it -- not
@@ -1575,7 +1559,7 @@ class ToolAnswerGuardTests(unittest.TestCase):
         answer = {"ok": True, "state": "started"}
         tokens = count_response_tokens(answer)
         self.assertLessEqual(tokens, TOOL_ANSWER_MAX_TOKENS)
-        self.assertEqual(bound_for("worktree_start"), TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
+        self.assertEqual(bound_for("worktree_start"), 600)
 
     def test_over_bound_answer_gets_the_short_form(self) -> None:
         big = {"ok": True, "blob": _big_blob(), "count": 7, "verbose": "y" * 500}

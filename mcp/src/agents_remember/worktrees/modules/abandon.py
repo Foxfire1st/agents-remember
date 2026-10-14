@@ -32,6 +32,7 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_terminal_worktree,
 )
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
+    TerminalCleanupContractAuthority,
     terminal_archive_required_result,
     terminal_contract_authority_if_present,
 )
@@ -47,6 +48,11 @@ from agents_remember.worktrees.modules.cleanup import (
 )
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.state_refusals import (
+    provider_setup_blocked,
+    shaped_terminal_blockers,
+    terminal_state_refusal,
+)
 from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
 from agents_remember.worktrees.modules.terminal_branch_retirement import (
     _TerminalMutationAuthority,
@@ -98,6 +104,52 @@ class _AbandonBranchTarget:
     source_branch: str
 
 
+def _abandon_terminal_branch(
+    contract: WorktreeContract,
+    terminal: TerminalCleanupContractAuthority,
+    args: WorktreeArgs,
+) -> tuple[WorktreeContract, WorktreeCommandResult | None]:
+    """Follow the terminal archive branch, answering or handing back the contract."""
+    accepted_arguments = TerminalWorktreeAbandonArguments(force=args.force)
+    if (
+        terminal.archive.cleanupOperation != "worktree_abandon"
+        or terminal.archive.cleanupArguments != accepted_arguments
+    ):
+        return contract, _terminal_archive_observation(contract, force=args.force)
+    if terminal.state == "cleanup-completed":
+        result = with_terminal_atomic_series_release(
+            contract,
+            _already_abandoned(contract, force=args.force),
+            dry_run=args.dry_run,
+        )
+        agents = archive_terminal_agents(contract, dry_run=args.dry_run)
+        return contract, WorktreeCommandResult(
+            result.returncode,
+            {**result.payload, **({"agentArchive": agents} if agents else {})},
+        )
+    return terminal.archived_contract, None
+
+
+def _abandon_series_release_refusal(
+    contract: WorktreeContract,
+) -> WorktreeCommandResult | None:
+    """Answer a failed series terminal release, or ``None`` when released.
+
+    Reachable terminal preconditions answer with their code and sentence;
+    anything unrecognized stays a raise (fail closed).
+    """
+    try:
+        if contract.kind == "series":
+            require_atomic_series_terminal_release(contract)
+        require_terminal_worktree(contract, operation="worktree_abandon")
+    except RuntimeError as error:
+        refused = terminal_state_refusal(contract, error)
+        if refused is None:
+            raise
+        return refused
+    return None
+
+
 def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if not args.approved and not args.dry_run:
         raise RuntimeError("abandon requires --approved (use dry_run to preview)")
@@ -105,45 +157,25 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract(args.contract_path)
     terminal = terminal_contract_authority_if_present(contract)
     if terminal is not None:
-        accepted_arguments = TerminalWorktreeAbandonArguments(force=args.force)
-        if (
-            terminal.archive.cleanupOperation != "worktree_abandon"
-            or terminal.archive.cleanupArguments != accepted_arguments
-        ):
-            return _terminal_archive_observation(contract, force=args.force)
-        if terminal.state == "cleanup-completed":
-            result = with_terminal_atomic_series_release(
-                contract,
-                _already_abandoned(contract, force=args.force),
-                dry_run=args.dry_run,
-            )
-            agents = archive_terminal_agents(contract, dry_run=args.dry_run)
-            return WorktreeCommandResult(
-                result.returncode,
-                {**result.payload, **({"agentArchive": agents} if agents else {})},
-            )
-        contract = terminal.archived_contract
+        contract, terminal_result = _abandon_terminal_branch(contract, terminal, args)
+        if terminal_result is not None:
+            return terminal_result
     else:
-        if contract.kind == "series":
-            require_atomic_series_terminal_release(contract)
-        require_terminal_worktree(contract, operation="worktree_abandon")
-    if (
-        not args.dry_run
-        and not args.force
-        and worktree_services().provider_lifecycle.setup_running(contract)
-    ):
+        series_refused = _abandon_series_release_refusal(contract)
+        if series_refused is not None:
+            return series_refused
+    # The liveness read is side-effect free: the dry run evaluates it too, so
+    # a dry run never promises an abandon the real call would refuse. Force
+    # still overrides; a dry run is not force.
+    if not args.force and worktree_services().provider_lifecycle.setup_running(contract):
         # Teardown must not race the live background setup thread (GitHub #53);
         # a dead thread surfaces as a stale heartbeat and does not block.
-        return WorktreeCommandResult(
-            2,
-            {
-                **status_payload(contract),
-                "state": "blocked",
-                "summary": (
-                    "Provider setup is still running for this worktree; wait for a "
-                    "terminal providers state (worktree_status) or pass force=true."
-                ),
-            },
+        return provider_setup_blocked(
+            contract,
+            summary=(
+                "Provider setup is still running for this worktree; wait for a "
+                "terminal providers state (worktree_status) or pass force=true."
+            ),
         )
 
     without_remains = terminal_without_remains_reason(contract, operation="worktree_abandon")
@@ -154,21 +186,37 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
             dry_run=args.dry_run,
         )
     preflight = terminal_preflight(contract, mode="abandon", force=args.force)
-    if preflight.blockers and not args.dry_run:
-        return WorktreeCommandResult(
-            2,
-            {
-                **status_payload(contract),
-                "state": "abandon-blocked",
-                "summary": "Abandon terminal preflight refused before any mutation.",
-                "blockers": list(preflight.blockers),
-            },
-        )
+    blocked = _abandon_preflight_refusal(contract, preflight)
+    if blocked is not None:
+        return blocked
 
     return with_terminal_atomic_series_release(
         contract,
         _abandon_reserved(args, contract, preflight),
         dry_run=args.dry_run,
+    )
+
+
+def _abandon_preflight_refusal(
+    contract: WorktreeContract, preflight: TerminalPreflight
+) -> WorktreeCommandResult | None:
+    """Answer terminal-preflight blockers, dry run or real, or ``None`` when clear.
+
+    A dry run never promises an abandon the real call would refuse. Every
+    blocker carries its code and one sentence beside the producer's keys.
+    """
+    if not preflight.blockers:
+        return None
+    return WorktreeCommandResult(
+        2,
+        {
+            **status_payload(contract),
+            "state": "abandon-blocked",
+            "code": "abandon-blocked",
+            "error": "Abandon terminal preflight refused before any mutation.",
+            "summary": "Abandon terminal preflight refused before any mutation.",
+            "blockers": shaped_terminal_blockers(preflight.blockers),
+        },
     )
 
 

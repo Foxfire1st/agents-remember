@@ -9,7 +9,9 @@ that cannot work, and a master can be attached to it again.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,6 +20,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -63,14 +66,24 @@ def world(tmp_path):
     return made
 
 
+def _whole(answer: dict[str, Any]) -> dict[str, Any]:
+    # World.retire calls task_doc_tool: that application result is already
+    # whole and never has a protocol log. Adapter calls instead keep the
+    # MIK-R111 rule-2 omitted fields in the detail file the answer names.
+    if "taskArchive" in answer:
+        return answer
+    return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+
+
 def _task_doc(world: World, operation: str, **fields: Any) -> dict[str, Any]:
-    return task_doc_payload(
-        world.cfg,
-        world.target,
-        operation=operation,
-        edit=TaskDocEdit(fields=fields),
-        call=TaskDocCall(),
-    )
+    with tool_call_context("task_doc", {"operation": operation}, config=world.cfg):
+        return task_doc_payload(
+            world.cfg,
+            world.target,
+            operation=operation,
+            edit=TaskDocEdit(fields=fields),
+            call=TaskDocCall(),
+        )
 
 
 def _read_as_a_sprint(world: World) -> dict[str, Any]:
@@ -82,6 +95,7 @@ def _read_as_a_sprint(world: World) -> dict[str, Any]:
         actor=QueueActor(role="architect", task_document_ref=SPRINT),
     )
     listed = read_closeout_queues(world.coord, now=datetime.now(UTC))
+    linkage_answer = _task_doc(world, "linkage_report")
     return {
         "altitude": topology.altitude(SPRINT),
         "architect": topology.validate_role(SPRINT, "architect"),
@@ -90,8 +104,10 @@ def _read_as_a_sprint(world: World) -> dict[str, Any]:
             master.ref.path for master in topology.commanded_masters(topology.resolve(SPRINT))
         ],
         "queue": (queue["state"], queue.get("nextAction")),
-        "linkage": _task_doc(world, "linkage_report")["linkageFacts"],
-        "get": _task_doc(world, "get").get("linkageFacts"),
+        "linkage": json.loads(Path(linkage_answer["reportPath"]).read_text(encoding="utf-8"))[
+            "facts"
+        ],
+        "get": _task_doc(world, "get").get("code"),
         "listed": len(listed),
     }
 
@@ -106,17 +122,17 @@ def test_a_sprint_that_lost_its_last_master_is_read_as_a_sprint_by_every_tool(wo
         "commanded": ["master-a/task.json"],
         "queue": ("valid-built", None),
         "linkage": [],
-        "get": [],
+        "get": "operation-removed",
         "listed": 1,
     }
     preview = world.retire(dry_run=True)
-    assert preview["state"] == "would-retire"
+    assert _whole(preview)["state"] == "would-retire"
     done = world.retire()
-    assert done["ok"] and done["state"] == "retired" and "nextAction" not in done
+    assert done["ok"] and _whole(done)["state"] == "retired" and "nextAction" not in done
     # The answer names no action that cannot work: the sprint's queue was rebuilt.
     assert [
         (effect["rebuild"]["outcome"], effect.get("nextAction"))
-        for effect in done["projectionEffects"]
+        for effect in _whole(done)["projectionEffects"]
     ] == [("published", None)]
     sprint = world.sprint()
     assert sprint.orchestrates == [] and sprint.is_sprint
@@ -165,7 +181,7 @@ def test_an_emptied_sprint_is_edited_and_commands_a_master_again(world):
     edited = _task_doc(world, "set_field", title="The sprint, renamed")
     assert [
         (effect["sprintTaskDocumentRef"]["path"], effect["rebuild"]["outcome"])
-        for effect in edited["projectionEffects"]
+        for effect in _whole(edited)["projectionEffects"]
     ] == [("sprint/task.json", "published")]
     sprint = world.sprint()
     assert sprint.title == "The sprint, renamed" and sprint.integrationBranch == "super"
@@ -193,7 +209,10 @@ def test_an_emptied_sprint_is_edited_and_commands_a_master_again(world):
         update={"integrationBranch": "super-2"}
     )
     write_task_doc(world.tasks / "sprint2", other)
-    with pytest.raises(ValueError, match=r"task-sprint-linkage-target-is-sprint"):
+    with (
+        pytest.raises(ValueError, match=r"task-sprint-linkage-target-is-sprint"),
+        tool_call_context("task_doc", {"operation": "attach_master"}, config=world.cfg),
+    ):
         task_doc_payload(
             world.cfg,
             TaskDocTarget(repo_id=REPOSITORY, task_name="sprint2"),

@@ -14,7 +14,6 @@ from agents_remember.worktrees.modules.integrate import (
     checkpoint_landing_result,
     integrate_result,
 )
-from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,
@@ -212,17 +211,21 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         code_before = rev(self.series.code_repo_path, self.series.code_source_branch)
         memory_before = rev(memory, self.series.memory_source_branch)
 
-        with self.assertRaises(RuntimeError) as raised:
-            integrate_result(
-                WorktreeArgs(
-                    contract_path=self.series.contract_path,
-                    strategy="ff-only",
-                    approved=True,
-                ),
-                self._unclosed_contract(),
-            )
+        result = integrate_result(
+            WorktreeArgs(
+                contract_path=self.series.contract_path,
+                strategy="ff-only",
+                approved=True,
+            ),
+            self._unclosed_contract(),
+        )
 
-        self.assertIn("integration requires closeout.status completed", str(raised.exception))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.payload["state"], "blocked")
+        self.assertEqual(result.payload["code"], "closeout-incomplete")
+        self.assertIn(
+            "integration requires closeout.status completed", payload_text(result.payload, "error")
+        )
         self.assertEqual(
             rev(self.series.code_repo_path, self.series.code_source_branch), code_before
         )
@@ -236,26 +239,29 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         messages = closeout_messages()
         code_before = rev(self.series.code_repo_path, self.series.code_source_branch)
 
-        with self.assertRaises(CloseoutQueueError, msg="the preview must refuse") as preview:
-            worktree_tools.worktree_closeout_preview_tool(
+        with self.subTest("the preview answers the refusal"):
+            preview = worktree_tools.worktree_closeout_preview_tool(
                 self.fixture.cfg,
                 self.series.contract_path.as_posix(),
                 messages,
             )
-
-        self.assertEqual(preview.exception.status, "atomic-series-closeout-master-incomplete")
+        self.assertFalse(preview["ok"])
+        self.assertEqual(preview["state"], "blocked")
+        self.assertEqual(preview["code"], "atomic-series-closeout-master-incomplete")
         # The 19-blocker shape that started this: the refusal carries the exact completion facts.
-        self.assertIn("exact completion facts", str(preview.exception))
+        self.assertIn("exact completion facts", preview["error"])
 
-        with self.assertRaises(CloseoutQueueError, msg="the apply must refuse") as applied:
-            worktree_tools.worktree_closeout_apply_tool(
+        with self.subTest("the apply answers the same refusal"):
+            applied = worktree_tools.worktree_closeout_apply_tool(
                 self.fixture.cfg,
                 self.series.contract_path.as_posix(),
                 messages,
                 worktree_tools.CloseoutApproval(intent_note="developer approved"),
             )
-
-        self.assertEqual(applied.exception.status, "atomic-series-closeout-master-incomplete")
+        self.assertFalse(applied["ok"])
+        self.assertEqual(applied["state"], "blocked")
+        self.assertEqual(applied["code"], "atomic-series-closeout-master-incomplete")
+        self.assertIn("exact completion facts", applied["error"])
         self.assertEqual(
             rev(self.series.code_repo_path, self.series.code_source_branch), code_before
         )
@@ -339,13 +345,17 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertEqual(leaf.closeout_status, "not-started")
         code_before = rev(leaf.code_repo_path, leaf.code_source_branch)
 
-        with self.assertRaises(RuntimeError) as raised:
-            integrate_result(
-                WorktreeArgs(contract_path=leaf.contract_path, strategy="ff-only", approved=True),
-                leaf,
-            )
+        result = integrate_result(
+            WorktreeArgs(contract_path=leaf.contract_path, strategy="ff-only", approved=True),
+            leaf,
+        )
 
-        self.assertIn("integration requires closeout.status completed", str(raised.exception))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.payload["state"], "blocked")
+        self.assertEqual(result.payload["code"], "closeout-incomplete")
+        self.assertIn(
+            "integration requires closeout.status completed", payload_text(result.payload, "error")
+        )
         self.assertEqual(rev(leaf.code_repo_path, leaf.code_source_branch), code_before)
 
     def test_the_open_master_refusal_names_the_route_that_can_land_it(self) -> None:
@@ -360,44 +370,66 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self._unclosed_contract()
 
         leaf = load_contract(self.leaf.contract_path)
-        with self.assertRaises(RuntimeError) as leaf_raised:
-            integrate_result(
-                WorktreeArgs(contract_path=leaf.contract_path, strategy="ff-only", approved=True),
-                leaf,
-            )
+        # Architect ruling L111-A-LEGACY-FORMAT (R6): the closeout-incomplete
+        # refusal is answered, not raised; the read site moves to the answer
+        # while the message frames stay exactly as the adapted block asserts.
+        leaf_result = integrate_result(
+            WorktreeArgs(contract_path=leaf.contract_path, strategy="ff-only", approved=True),
+            leaf,
+        )
 
-        leaf_refusal = str(leaf_raised.exception)
+        leaf_refusal = payload_text(leaf_result.payload, "error")
+        self.assertNotEqual(leaf_result.returncode, 0)
+        self.assertIn("integration requires closeout.status completed", leaf_refusal)
+        self.assertNotIn("worktree_checkpoint_landing", leaf_refusal)
+
+        # The adapted re-check keeps its frame: the enclosure is still unclosed
+        # here, so the refusal repeats identically (a refusal writes nothing).
+        # It cannot run after the helper below, which closes the leaf out.
+        leaf = load_contract(self.leaf.contract_path)
+        leaf_result = integrate_result(
+            WorktreeArgs(contract_path=leaf.contract_path, strategy="ff-only", approved=True),
+            leaf,
+        )
+
+        leaf_refusal = payload_text(leaf_result.payload, "error")
+        self.assertNotEqual(leaf_result.returncode, 0)
         self.assertIn("integration requires closeout.status completed", leaf_refusal)
         self.assertNotIn("worktree_checkpoint_landing", leaf_refusal)
 
         # The helper lands the leaf through its own route, so it runs after the leaf
-        # half, which needs the enclosure unclosed.
+        # halves, which need the enclosure unclosed.
         accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
 
-        with self.assertRaises(RuntimeError) as raised:
-            integrate_result(
-                WorktreeArgs(
-                    contract_path=self.series.contract_path, strategy="ff-only", approved=True
-                ),
-                self._unclosed_contract(),
-            )
+        result = integrate_result(
+            WorktreeArgs(
+                contract_path=self.series.contract_path, strategy="ff-only", approved=True
+            ),
+            self._unclosed_contract(),
+        )
 
-        refusal = str(raised.exception)
+        refusal = payload_text(result.payload, "error")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.payload["code"], "closeout-incomplete")
         self.assertIn("integration requires closeout.status completed", refusal)
         self.assertIn("worktree_checkpoint_landing", refusal)
 
     def test_a_completed_master_is_still_refused_by_the_checkpoint(self) -> None:
-        # The other surviving refusal, driven through the PUBLIC operation. It fires at preflight,
+        # The converted refusal, driven through the PUBLIC operation. It fires at preflight,
         # so the preview refuses identically and cannot promise a pause the apply would reject.
         set_master_status(self.series, status="Completed", row_status="Completed")
 
-        with self.assertRaises(CloseoutQueueError) as raised:
-            checkpoint(self.fixture, self.series, dry_run=True)
-        self.assertEqual(raised.exception.status, "atomic-series-checkpoint-master-complete")
+        preview = checkpoint(self.fixture, self.series, dry_run=True)
+        self.assertFalse(preview["ok"])
+        self.assertEqual(preview["code"], "atomic-series-checkpoint-master-complete")
+        self.assertIn("land it with worktree_integrate", preview["error"])
+        self.assertEqual(preview["nextStep"]["nextTool"], "worktree_integrate")
 
-        with self.assertRaises(CloseoutQueueError) as applied:
-            checkpoint(self.fixture, self.series, dry_run=False)
-        self.assertEqual(applied.exception.status, "atomic-series-checkpoint-master-complete")
+        applied = checkpoint(self.fixture, self.series, dry_run=False)
+        self.assertFalse(applied["ok"])
+        self.assertEqual(applied["code"], "atomic-series-checkpoint-master-complete")
+        self.assertIn("land it with worktree_integrate", applied["error"])
+        self.assertEqual(applied["nextStep"]["nextTool"], "worktree_integrate")
 
     def test_a_code_advance_without_memory_attribution_can_checkpoint(self) -> None:
         # The architect's checkpoint ruling: a commit no leaf landed cannot be
@@ -494,3 +526,41 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
             )
 
         self.assertIn("explicit developer approval", str(raised.exception))
+
+    def test_cleanup_on_a_series_with_live_children_answers_children_code(self) -> None:
+        # F01.5, driven through the PUBLIC operation: unretired children answer
+        # children-not-retired instead of raising, and nothing moves.
+        code_before = rev(self.series.code_repo_path, self.series.code_source_branch)
+        cleaned = worktree_tools.worktree_cleanup_tool(
+            self.fixture.cfg,
+            contract_path=self.series.contract_path.as_posix(),
+            dry_run=True,
+        )
+        self.assertFalse(cleaned["ok"])
+        self.assertEqual(cleaned["code"], "children-not-retired")
+        self.assertIn("every child leaf", cleaned["error"])
+        self.assertEqual(
+            rev(self.series.code_repo_path, self.series.code_source_branch), code_before
+        )
+
+    def test_closeout_preview_on_an_abandoned_master_answers_abandoned_code(self) -> None:
+        # F01.5, driven through the PUBLIC operation: the abandoned master
+        # answers its code with the one call that follows, in preview and apply.
+        set_master_status(self.series, status="abandoned", row_status="abandoned")
+        messages = closeout_messages()
+        preview = worktree_tools.worktree_closeout_preview_tool(
+            self.fixture.cfg,
+            self.series.contract_path.as_posix(),
+            messages,
+        )
+        self.assertFalse(preview["ok"])
+        self.assertEqual(preview["code"], "atomic-series-closeout-master-abandoned")
+        self.assertEqual(preview["nextStep"]["nextTool"], "worktree_abandon")
+        applied = worktree_tools.worktree_closeout_apply_tool(
+            self.fixture.cfg,
+            self.series.contract_path.as_posix(),
+            messages,
+            worktree_tools.CloseoutApproval(intent_note="developer approved"),
+        )
+        self.assertFalse(applied["ok"])
+        self.assertEqual(applied["code"], "atomic-series-closeout-master-abandoned")

@@ -13,12 +13,6 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
 )
 from agents_remember.application.skill_resources import CapsuleCompileRequest, compile_task_capsule
-from agents_remember.application.task_docs.task_doc_tools import (
-    TaskDocCall,
-    TaskDocEdit,
-    TaskDocTarget,
-    task_doc_tool,
-)
 from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_task
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli import (
@@ -368,24 +362,23 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                         self.assertEqual(row["contentDigest"], digest(source))
                         self.assertEqual(row["documentIdentity"]["repositoryId"], source["repo"])
                         read_args = row["taskDocReadArgs"]
-                        self.assertEqual(read_args["operation"], "get")
+                        # MIK-R111 rule 2: the removed task_doc read operation
+                        # is gone; the handover names the files to read.
+                        self.assertNotIn("operation", read_args)
                         self.assertEqual(read_args["repo_id"], resolved.ref.repository)
                         self.assertEqual(read_args["task_name"], resolved.path.parent.name)
                         self.assertEqual(read_args["slug"], resolved.path.stem)
                         self.assertFalse(read_args["slug"].endswith(".json"))
-                        read_result = task_doc_tool(
-                            scoped_config,
-                            TaskDocTarget(
-                                repo_id=read_args["repo_id"],
-                                task_name=read_args["task_name"],
-                                slug=read_args["slug"],
-                            ),
-                            operation=read_args["operation"],
-                            edit=TaskDocEdit(),
-                            call=TaskDocCall(),
+                        self.assertEqual(
+                            read_args["json_path"], resolved.path.with_suffix(".json").as_posix()
                         )
-                        self.assertTrue(read_result["ok"])
-                        self.assertEqual(read_result["docPath"], resolved.path.as_posix())
+                        self.assertEqual(
+                            read_args["rendered_path"],
+                            resolved.path.with_suffix(".md").as_posix(),
+                        )
+                        read_back = json.loads(Path(read_args["json_path"]).read_text())
+                        self.assertEqual(read_back["id"], source["id"])
+                        self.assertTrue(Path(read_args["rendered_path"]).is_file())
                     self.assertEqual(prepared["taskDocumentDigest"], digest(documents))
 
                     outcome = compile_task_capsule(

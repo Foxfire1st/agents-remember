@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import re
+import unittest
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +13,9 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
+from agents_remember.application.tool_response import complete_tool_response
+from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.leaf_doc import plan_leaf_doc_lifecycle_restamp
@@ -89,11 +95,13 @@ class ApplicationTests1(ApplicationTests):
         leaf_before = leaf_path.read_text(encoding="utf-8")
         master_path.write_text('{"schema": "ar-task-document/v1",', encoding="utf-8")
 
-        with self.assertRaises(TaskDocError) as raised:
-            self._call("set_field", fields={"title": "Renamed"})
+        result = self._call("set_field", fields={"title": "Renamed"})
 
-        self.assertIn("cannot read parent master task document", str(raised.exception))
-        self.assertIn("task.json", str(raised.exception))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "master-sync-failed")
+        self.assertIn("cannot read parent master task document", str(result["error"]))
+        self.assertIn("task.json", str(result["error"]))
+        self.assertEqual(result["masterSync"]["status"], "failed")
         self.assertEqual(leaf_path.read_text(encoding="utf-8"), leaf_before)
         self.assertEqual(read_task_doc(leaf_path).title, "Smoke")
 
@@ -137,10 +145,12 @@ class ApplicationTests1(ApplicationTests):
                 )
             }
 
-            with self.subTest(expected=expected), self.assertRaises(TaskDocError) as raised:
-                self._call("set_field", fields={"title": "Refused rename"})
+            with self.subTest(expected=expected):
+                result = self._call("set_field", fields={"title": "Refused rename"})
 
-            self.assertIn(expected, str(raised.exception))
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["code"], "master-sync-failed")
+            self.assertIn(expected, str(result["error"]))
             self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_leaf_sync_demotes_completed_master_when_work_becomes_unresolved(self) -> None:
@@ -505,9 +515,9 @@ class ApplicationTests1(ApplicationTests):
         self.assertIn("- [ ] Bare — bare step note", rendered)
         self.assertIn("- [ ] ship it — outcome step note", rendered)
 
-    def test_read_steps_returns_the_checklist_and_changes_nothing(self) -> None:
+    def test_removed_read_operations_are_refused_with_file_names(self) -> None:
         created = self._create(
-            objective="an objective the focused read must not drag along",
+            objective="an objective no read call may drag along",
             steps=[
                 {
                     "id": "S1",
@@ -524,37 +534,23 @@ class ApplicationTests1(ApplicationTests):
         markdown_path = Path(str(created["renderedPath"]))
         before = (leaf_path.read_bytes(), markdown_path.read_bytes())
 
-        result = self._call("read_steps")
+        for operation in ("get", "read_steps"):
+            result = self._call(operation)
 
-        self.assertEqual(result["operation"], "task_doc.read_steps")
-        self.assertEqual(
-            result["steps"],
-            [
-                {
-                    "id": "S1",
-                    "title": "One",
-                    "status": "done",
-                    "note": "top note",
-                    "substeps": [
-                        {"id": "C1", "title": "Child", "status": "pending", "note": "sub note"}
-                    ],
-                }
-            ],
-        )
-        self.assertNotIn("an objective the focused read must not drag along", str(result))
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["code"], "operation-removed")
+            self.assertIn("was removed", str(result["error"]))
+            self.assertIn(markdown_path.as_posix(), str(result["error"]))
+            self.assertIn(leaf_path.as_posix(), str(result["error"]))
+            self.assertIn("file tool", str(result["nextAction"]))
         self.assertEqual((leaf_path.read_bytes(), markdown_path.read_bytes()), before)
 
-    def test_read_steps_response_validates_against_the_model_the_tool_advertises(self) -> None:
-        """The focused read must survive its own declared response contract.
+    def test_removed_read_refusal_validates_against_the_model_the_tool_advertises(self) -> None:
+        """The removal refusal must survive its own declared response contract.
 
-        ``_read_steps`` has always emitted a top-level ``steps`` list with nested ``substeps`` while
-        ``TaskDocResponse`` declared only ``stepsDone``/``stepsTotal``. Under
-        ``StrictResponseModel``'s ``extra="forbid"`` the envelope therefore rejected the payload the
-        handler had just produced -- ``steps: Extra inputs are not permitted`` -- so ``read_steps``
-        was unusable on every document, and every caller since the foundation read the leaf JSON by
-        hand instead. Validating the real handler's payload through the model
-        ``TOOL_RESPONSE_MODELS`` advertises is the one place that mismatch is visible, and the
-        negative control keeps the fix from being a blanket widening of the envelope.
+        The refusal carries the document identity plus ``code``/``error`` and
+        nothing else new: an undeclared key still fails, so the envelope is
+        not widened to smuggle reads back in.
         """
         self._create(
             steps=[
@@ -573,22 +569,11 @@ class ApplicationTests1(ApplicationTests):
 
         response = finalize_tool_response("task_doc", payload)
 
-        self.assertEqual(
-            response["steps"],
-            [
-                {
-                    "id": "S1",
-                    "title": "One",
-                    "status": "done",
-                    "note": "top note",
-                    "substeps": [
-                        {"id": "C1", "title": "Child", "status": "pending", "note": "sub note"}
-                    ],
-                }
-            ],
-        )
-        # The declaration is one field with the handler's shape, not a relaxed envelope: an
-        # undeclared key still fails, so deleting ``steps`` again reddens this case.
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["code"], "operation-removed")
+        self.assertNotIn("steps", response)
+        # The declaration is the refusal shape, not a relaxed envelope: an
+        # undeclared key still fails.
         with self.assertRaises(ValidationError):
             finalize_tool_response("task_doc", {**payload, "undeclaredStepKey": []})
 
@@ -725,3 +710,253 @@ class LeafDocMasterLinkBindingTests(ApplicationTests):
         untouched = self._plan("LC-FRESH")
         self.assertFalse(untouched.changed)
         self.assertIsNone(untouched.candidate)
+
+
+class ApplicationWriteAnswers(ApplicationTests):
+    """MIK-R111 rule 2, evidence items 3, 11, 12: what writes answer."""
+
+    def _answer(
+        self, _operation: str, arguments: dict[str, Any], payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        with tool_call_context("task_doc", arguments, config=self.cfg):
+            answer = complete_tool_response("task_doc", dict(payload), config=self.cfg)
+        answer["_measured_tokens"] = count_response_tokens(dict(answer))
+        return answer
+
+    def _deterministic_tokens(self, answer: dict[str, Any]) -> int:
+        """Count one answer with random segments fixed (evidence item 3).
+
+        The framework names the detail file ``<12-digit stamp>-<tool>-<8 hex>.json``
+        and the test root is a random ``tmpXXXXXXXX``. All three vary run to run, and
+        the product counter (tiktoken BPE) counts their characters differently,
+        so a bound assertion on the raw answer is flaky by a wide margin. The
+        replacements below fix the stamp and hex segments to equal-length runs
+        and stand the coordination root at a fixed length of 40 characters: the
+        bound is for the shape of the answer in the ordinary case, and an
+        installation's path length is not the tool's to choose.
+        """
+
+        coord = str(self.coord)
+        fixed = {}
+        for key, value in answer.items():
+            if key == "_measured_tokens":
+                continue
+            if isinstance(value, str):
+                text = value.replace(coord, "C" * 40)
+                text = re.sub(r"\d{12}", "0" * 12, text)
+                text = re.sub(r"[0-9a-f]{8}", "0" * 8, text)
+            else:
+                text = value
+            fixed[key] = text
+        return count_response_tokens(fixed)
+
+    def test_ordinary_writes_answer_within_100_tokens(self) -> None:
+        self._create(
+            steps=[{"id": "S1", "title": "One", "status": "pending"}],
+        )
+        calls: list[tuple[str, dict[str, Any], str]] = [
+            ("set_step", {"step": {"id": "S1", "status": "done"}}, "operation"),
+            (
+                "append_decision",
+                {"decision": {"at": "2026-10-08", "decision": "d", "rationale": "r"}},
+                "operation",
+            ),
+            ("set_field", {"fields": {"title": "Renamed"}}, "operation"),
+            ("set_status", {"fields": {"status": "inProgress"}}, "operation"),
+        ]
+        for operation, kwargs, _ in calls:
+            payload = self._call(operation, **kwargs)
+            answer = self._answer(operation, {"operation": operation}, payload)
+            tokens = self._deterministic_tokens(answer)
+            self.assertLessEqual(
+                tokens,
+                100,
+                f"{operation} answer is {tokens} tokens: {sorted(answer)}",
+            )
+            self.assertTrue(answer["ok"])
+            self.assertIn("updated", answer)
+            self.assertNotIn("masterSync", answer)
+            self.assertNotIn("renderedPath", answer)
+            self.assertNotIn("reviewState", answer)
+            self.assertNotIn("projectionEffects", answer)
+
+    def test_create_names_only_the_rendered_file(self) -> None:
+        created = self._create()
+        answer = self._answer("create", {"operation": "create"}, created)
+        self.assertTrue(answer["ok"])
+        self.assertIn("created", str(answer["updated"]))
+        self.assertEqual(answer["renderedPath"], created["renderedPath"])
+        self.assertLessEqual(self._deterministic_tokens(answer), 100, str(sorted(answer)))
+
+    def test_begin_review_carries_review_state(self) -> None:
+        self._create()
+        payload = task_doc_tool(
+            self.cfg,
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
+            operation="begin_review",
+            edit=TaskDocEdit(review={}),
+            call=TaskDocCall(),
+        )
+        self.assertTrue(payload["ok"])
+        answer = self._answer("begin_review", {"operation": "begin_review"}, payload)
+        self.assertIn("reviewState", answer)
+        self.assertIn("round", str(answer["updated"]))
+
+    def test_dry_run_answers_within_bound_and_nothing_of_the_master(self) -> None:
+        master_title = "Master of unusual size for dry-run evidence"
+        self._create_parent_master(title=master_title, objective="objective\n" + "x" * 12000)
+        self._create(
+            master="task.md",
+            steps=[{"id": "S1", "title": "One", "status": "pending"}],
+        )
+        payload = self._call("set_field", fields={"title": "Renamed"}, dry_run=True)
+        answer = self._answer("set_field", {"operation": "set_field", "dry_run": True}, payload)
+        self.assertLessEqual(answer["_measured_tokens"], 1500, str(sorted(answer)))
+        self.assertIn("wouldLose", answer)
+        self.assertIn("diff", answer)
+        self.assertIn("log", answer)
+        self.assertNotIn("rendered", answer)
+        self.assertNotIn("masterSync", answer)
+        self.assertNotIn(master_title, str(answer))
+
+    def test_section_body_file_matches_inline_and_names_sha256(self) -> None:
+        body = "section body line\n" * 750
+        assert len(body) >= 12000
+        section_file = Path(self.coord) / "section-body.md"
+        section_file.write_text(body, encoding="utf-8")
+        digest = hashlib.sha256(body.encode()).hexdigest()
+
+        target = TaskDocTarget(repo_id="agents-remember", task_name="3c-x")
+        self._create_parent_master(
+            sections=[{"heading": "Notes", "kind": "freeform", "body": "old"}],
+        )
+        by_file = task_doc_tool(
+            self.cfg,
+            target,
+            operation="set_section",
+            edit=TaskDocEdit(
+                section={"heading": "Notes", "kind": "freeform"},
+                section_body_file=section_file.as_posix(),
+            ),
+            call=TaskDocCall(),
+        )
+        self.assertTrue(by_file["ok"])
+        self.assertEqual(by_file["inputFile"], section_file.as_posix())
+        self.assertEqual(by_file["inputFileSha256"], digest)
+
+        task_root = self.coord / "tasks" / "agents-remember" / "3c-x"
+        file_bytes = (task_root / "task.json").read_bytes()
+
+        by_inline = task_doc_tool(
+            self.cfg,
+            target,
+            operation="set_section",
+            edit=TaskDocEdit(section={"heading": "Notes", "kind": "freeform", "body": body}),
+            call=TaskDocCall(),
+        )
+        self.assertTrue(by_inline["ok"])
+        self.assertEqual(
+            (task_root / "task.json").read_bytes(), file_bytes, "file and inline differ"
+        )
+
+        with self.assertRaises(TaskDocError) as raised:
+            task_doc_tool(
+                self.cfg,
+                target,
+                operation="set_section",
+                edit=TaskDocEdit(
+                    section={"heading": "Notes", "kind": "freeform", "body": body},
+                    section_body_file=section_file.as_posix(),
+                ),
+                call=TaskDocCall(),
+            )
+        self.assertIn("not both", str(raised.exception))
+
+        with self.assertRaises(TaskDocError) as raised:
+            task_doc_tool(
+                self.cfg,
+                target,
+                operation="set_section",
+                edit=TaskDocEdit(section_body_file=(self.coord / "no-such-file.md").as_posix()),
+                call=TaskDocCall(),
+            )
+        self.assertIn("no regular file", str(raised.exception))
+
+
+class TaskDocReadRemovalSweepTests(unittest.TestCase):
+    """MIK-R111 rule 6, evidence item 7: no role text, skill or capsule tells a read.
+
+    ``task_doc`` writes and does not read: no instruction may call ``get`` or
+    ``read_steps``, and the deleted read helpers stay deleted. Documentary
+    mentions of the removal (the refusal itself, the reference) are not
+    instructions and are scoped out by shape, not by path.
+    """
+
+    ROOTS = (
+        "mcp/src/agents_remember",
+        "mcp/src/agents_remember/package_data/runtime/skills",
+        "skills",
+        "docs",
+    )
+
+    # Call shapes: an instruction that reads through task_doc.
+    CALL_SHAPES = (
+        re.compile(r"""operation\s*=\s*["']get["']"""),
+        re.compile(r'''"operation":\s*"get"'''),
+        re.compile(r"""task_doc\.get\b"""),
+        re.compile(r"""task_doc\s+get\b"""),
+    )
+
+    def _files(self) -> list[Path]:
+        root = Path(__file__).resolve().parent.parent.parent
+        found: list[Path] = []
+        for rel in self.ROOTS:
+            base = root / rel
+            if not base.exists():
+                continue
+            if base.is_file():
+                found.append(base)
+            else:
+                found.extend(
+                    path
+                    for path in sorted(base.rglob("*"))
+                    if path.is_file() and path.suffix in {".py", ".md"}
+                )
+        return found
+
+    def test_no_instruction_calls_task_doc_get(self) -> None:
+        hits = []
+        for path in self._files():
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for shape in self.CALL_SHAPES:
+                for match in shape.finditer(text):
+                    line = text.count("\n", 0, match.start()) + 1
+                    hits.append(f"{path}:{line}: {match.group(0)}")
+        self.assertEqual(hits, [])
+
+    def test_read_steps_survives_only_where_the_removal_is_named(self) -> None:
+        hits = []
+        for path in self._files():
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            for number, line in enumerate(lines, start=1):
+                if "read_steps" in line and "emov" not in line.lower():
+                    hits.append(f"{path}:{number}")
+        self.assertEqual(hits, [])
+
+    def test_deleted_read_helpers_stay_deleted(self) -> None:
+        hits = []
+        for path in self._files():
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for name in ("linkage_facts_for_get", "step_payloads"):
+                if name in text:
+                    hits.append(f"{path}: {name}")
+        self.assertEqual(hits, [])

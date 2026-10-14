@@ -6,9 +6,12 @@ import difflib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+
+if TYPE_CHECKING:
+    from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
@@ -57,6 +60,11 @@ class SprintLinkageRequest:
     slug: str | None
     fields: dict[str, Any]
     dry_run: bool
+    # MIK-R111 rule 2: linkage_report writes its report as a file. The config
+    # locates it: the enclosure's reports folder for a caller whose log lies
+    # in an enclosure, the detail folder of the day otherwise. Absent (older
+    # callers, unit fixtures) the report still answers its counts with no file.
+    config: McpRuntimeConfig | None = None
 
 
 class _Payload(BaseModel):

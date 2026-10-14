@@ -934,9 +934,9 @@ def _task_start_authority_refusal(error: TaskLeafBindingError) -> WorktreeComman
             "summary": error.detail,
             "detail": error.detail,
             **error.facts,
+            # MIK-R111 rule 2: the recovery is a file read or a repair the
+            # prose names, not a task_doc read call (removed). No nextTool.
             "nextAction": next_action,
-            "nextTool": "task_doc",
-            "nextArgs": {"operation": "get"},
         },
     )
 

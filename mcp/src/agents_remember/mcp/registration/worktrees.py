@@ -58,38 +58,9 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         retry_provider_setup: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Create or load a task contract plus code (and external-memory) git worktrees. Publishes
-        one exact address-only locator, immutable enclosure-root manifest, and initial contract
-        generation before the checkout is exposed; exact crash retries converge and conflicting
-        reservations refuse. Mutating: creates branches/worktrees on disk. Preview with
-        dry_run=true. Driven by the
-        c-09-git-worktree-manager skill workflow; workflow_kind is the task format ('light-task' or 'chat-task').
-        memory_mode is 'external' (the only startable mode; a start that names no mode uses it).
-        The removed 'internal' mode is refused by name with status 'memory-mode-unsupported',
-        and the removed 'disabled' mode (including the 'disabled-memory' recovery answer) is
-        refused by name with status 'memory-opt-out-refused', both before any worktree exists.
-        Memory cannot be disabled for a task; a contract that carries the removed mode is
-        abandoned and started again.
-
-        A leaf whose cleanup already completed must be reset explicitly through
-        task_reopen first. In that terminal state this tool returns reopen-required with
-        the exact task_reopen preview arguments instead of attempting descendant-lineage
-        checks against branches cleanup deliberately removed.
-
-        Stale-base preflight (issue #54): start refuses when a source branch is behind or
-        diverged from its remote tracking branch (a stale base produces wrong code and
-        defeats the provider seed fast-path). On a blocked 'choose_stale_base_recovery'
-        result, advance the protected source through its repository landing plane and retry,
-        or re-run with stale_base_choice='proceed-stale' as an explicit override. A missing
-        external-memory source branch is a topology refusal; start never creates or advances
-        protected source refs.
-
-        Returns within seconds: provider setup runs in the background and the response's
-        providers block reports state 'starting' with a progressFile. Poll worktree_status
-        until providers reaches a terminal state (seed copy = seconds; a refused seed falls
-        back to a full reindex = minutes, flagged as seedFallback). On a failed or stale
-        setup, re-run with retry_provider_setup=true to relaunch it for the existing
-        contract."""
+        """Create or load a task contract with its code and memory worktrees. Answers the state
+        reached (started, would-start, blocked) and the next call with its arguments; the whole
+        result is in the log file. Poll worktree_status for progress. Reference: docs/reference/mcp-tools.md."""
         return worktree_start_payload(
             config,
             TaskIdentity(
@@ -128,12 +99,11 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         approved: bool = False,
         expected_publication_request_id: str | None = None,
     ) -> dict[str, Any]:
-        """Explicitly adopt one readable pre-locator enclosure. Dry-run by default.
-
-        This is the only old-layout address migration. It validates one exact contract/root,
-        preserves source digests and an audit receipt, and never runs from normal status,
-        control, contract writes, or schema-1 repair.
-        """
+        """Explicitly adopt one readable pre-locator enclosure. Dry-run by default. This is the
+        only old-layout address migration. It validates one exact contract/root, preserves
+        source digests and an audit receipt, and never runs from normal status, control,
+        contract writes, or schema-1 repair. Answers the state reached. Reference:
+        docs/reference/mcp-tools.md."""
         return worktree_enclosure_adopt_payload(
             config,
             EnclosureAdoptionRequest(
@@ -156,11 +126,9 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         *,
         on_unsaved: str | None = None,
     ) -> dict[str, Any]:
-        """Re-attach to an existing task contract without mutating git, resuming its lifecycle
-        through the strict contract-addressed locator -> enclosure-root manifest chain. Normal
-        attach never scans task/worktree paths, infers a root, or uses reports as authority.
-        Read-only; resume a task by task_name or contract_path. If an unsaved fleeting lifecycle is
-        active, on_unsaved='save' (promote) or 'discard' (abandon) resolves the save gate."""
+        """Re-attach to an existing task contract without mutating Git. Answers the state reached
+        (attached, attached-existing-contract, blocked) and the next call; the whole result is
+        in the log file. Reference: docs/reference/mcp-tools.md."""
         return worktree_attach_payload(
             config,
             TaskRef(
@@ -187,13 +155,11 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         parent_task: str | None = None,
         caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
-        """Resolve the exact independent locator and enclosure-root manifest/journal, then report a
-        task's operation generation, lifecycle phase, dirty flags, source freshness, and executable
-        next-step hints. Queue presence is neither required nor operation authority. A missing,
-        unreadable, or mismatched address chain refuses without scanning or inference. Read-only.
-        While background provider setup runs, the providers block carries the live phase,
-        heartbeat age, and seedFallback; terminal states are ok / ready-with-failed-phases /
-        failed (stale = setup thread died; retry via worktree_start retry_provider_setup)."""
+        """Report a task worktree's lifecycle status: the phase reached (worktree-started,
+        integration-pending, closeout-pending, integration-blocked, carryover-pending,
+        cleanup-pending, cleanup-completed, abandoned), what blocks, the one
+        following call, and whether task-document copies differ from their sources. Lineage and
+        refresh detail stays in the log file. Reference: docs/reference/mcp-tools.md."""
         return worktree_status_payload(
             config,
             TaskRef(
@@ -213,31 +179,11 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         resolution_action: SyncResolutionAction | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Pull the moved official line into a live worktree (issue #54). Mutating: fetches
-        upstreams, merges the source branch into the code work branch (ff when unchanged),
-        fast-forwards the memory work branch under parked memory, and advances the contract's
-        recorded base pair atomically (the new code tip must be ledger-mapped at the official
-        memory tip — a mid-cycle official line blocks with guidance to run carryover first).
-        Preview with dry_run=true. worktree_status's freshness block recommends this tool when
-        the recorded bases fall behind the local source branch tips. If the memory work branch
-        has local commits and official memory moved, the result blocks with
-        memory_sync_choice='merge-memory' or preflight-only 'skip-memory'. A code or chosen
-        memory merge conflict is retained for agent resolution; stage the resolution and call
-        again with resolution_action='continue', or explicitly restore the pinned pre-sync heads
-        with resolution_action='cancel'. Converted memory merges structurally on every sync
-        (MIK-R24 rule 8 step 3): knowledge records merge field by field and cards by section, a
-        true conflict is left in the file as a {"crossing-conflict": ...} value (records) or as
-        Git's markers (cards), and the result names the report that lists each one. Resolve them
-        in the files, stage, and call again with resolution_action='continue'; the file validator
-        runs before the merge is committed. Sync early — before memories are written — for the
-        friction-free fast-forward path.
-
-        Sync movement: after the sync has changed the leaf's code or memory, the review and the
-        sync result say that the latest recorded review was made before the sync, and offer to
-        record a new one. It never blocks. Both compare trees, not branch history. A rebase,
-        cherry-pick or revert that ends in the same tree reads as the same. How a branch got
-        there is not measured.
-        """
+        """Pull the moved official line into a live worktree. Answers the state reached (synced,
+        already-current, would-sync, sync-active, sync-resolution-required,
+        memory-sync-choice-required, blocked) and the next call with its arguments; the whole
+        result is in the log file. Sync movement compares trees and never blocks. Reference:
+        docs/reference/mcp-tools.md."""
         return worktree_sync_payload(
             config,
             contract_path,
@@ -254,16 +200,7 @@ def _register_worktree_stop_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     def worktree_pause(
         contract_path: str,
     ) -> dict[str, Any]:
-        """PAUSE an atomic master: stop it and hand control back to the developer. Publishes
-        NOTHING — it moves no ref, creates no commit, lands nothing and writes no ledger row. It
-        releases the master's atomic-series activation selection, so the master really does stop
-        being the one exposing implementation work, and the master keeps its code and memory work
-        branches, its worktrees, its enclosure and every unstarted leaf exactly as they were. The
-        result proposes no next step: control is the developer's until they ask for the master
-        again, at which point resuming is the normal attach/start route. Use
-        worktree_checkpoint_landing for the separate, explicitly requested PUBLICATION that lands
-        an unfinished master's accumulated line into its source branch; pausing never does that.
-        MUTATING (releases the atomic-series selection only)."""
+        """PAUSE an atomic master: it stops, hands control back, and releases the master's atomic-series activation selection. Publishes NOTHING: publication is a separate, explicitly requested PUBLICATION through worktree_checkpoint_landing. States: paused, blocked. Answers the state reached and the next call. Reference: docs/reference/mcp-tools.md."""
         return worktree_pause_payload(
             config,
             contract_path,

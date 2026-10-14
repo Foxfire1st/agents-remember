@@ -698,13 +698,13 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
 
     # -- T7: task_doc / steps ----------------------------------------------------------
 
-    def test_task_doc_read_steps_validates_and_returns_the_checklist(self) -> None:
-        """T7: ``read_steps`` is advertised in the schema and used to always error.
+    def test_task_doc_removed_reads_refuse_with_file_names(self) -> None:
+        """MIK-R111 rule 2: ``get`` and ``read_steps`` are removed reads.
 
-        The witness is ``"steps" in payload`` with the checklist non-empty: the guard is
-        ``_read_steps`` itself, and a fixture that ran any *other* operation would produce a
-        payload without the key. The ``get`` control on the same world proves the harness is
-        not what failed.
+        Both answer ``ok: false`` with ``operation-removed`` and the rendered
+        file plus the JSON beside it -- never a checklist, never a read. The
+        ``get`` control on the same world proves the harness is not what
+        failed: it refuses exactly like ``read_steps``.
         """
 
         coord = self.world("tsip-l4-taskdoc-")
@@ -754,24 +754,24 @@ class ToolResponseFiringStateTests(ScratchWorldTests):
             ]
         )
 
-        control = task_doc_payload(coord, target, operation="get")
-        self.assertTrue(control["ok"])
-        self.assertNotIn("steps", control)
-
-        with tool_call_context(
-            "task_doc", {"operation": "read_steps", "slug": "l4_demo"}, config=coord
-        ):
-            payload = task_doc_payload(coord, target, operation="read_steps")
-        self.assertIn("steps", payload, "fixture did not reach the emitting branch")
-        self.assertEqual(["S1"], [step["id"] for step in payload["steps"]])
-        self.assertEqual(["C1"], [sub["id"] for sub in payload["steps"][0]["substeps"]])
+        for operation in ("get", "read_steps"):
+            with tool_call_context(
+                "task_doc", {"operation": operation, "slug": "l4_demo"}, config=coord
+            ):
+                payload = task_doc_payload(coord, target, operation=operation)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["code"], "operation-removed")
+            self.assertIn("l4_demo.md", str(payload["error"]))
+            self.assertIn("l4_demo.json", str(payload["error"]))
+            self.assertNotIn("steps", payload)
         # MIK-R108: the model contract belongs to the whole result (read back
-        # from the answer's detail file); the answer carries the checklist
+        # from the answer's detail file); the answer holds the refusal
         # without the four envelope fields.
         self.assertIn("log", payload)
         whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
         response = TaskDocResponse.model_validate(whole)
         self.assertEqual("task_doc.read_steps", response.operation)
+        self.assertEqual("operation-removed", response.code)
         for field in ("tokens", "tokenizer", "tokenCountExact", "operation"):
             self.assertNotIn(field, payload)
 

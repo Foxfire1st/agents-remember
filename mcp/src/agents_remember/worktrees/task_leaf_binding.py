@@ -256,6 +256,36 @@ def require_current_leaf_enclosure_binding(  # noqa: PLR0913
     return plan
 
 
+def binding_recovery_next_args(
+    contract: WorktreeContract, error: TaskLeafBindingError
+) -> dict[str, object]:
+    """The ``task_doc.replace`` call that republishes the exact leaf binding.
+
+    The repository (a required task_doc argument) and the leaf contract pin
+    the leaf; the leaf document slug rides when the binding names a document.
+    A missing document invents no slug: the call still addresses the leaf
+    through its own contract, never the master document. When the unreadable
+    document is the parent authority (``task.json``), no leaf slug can be
+    derived safely, so no replace target is offered here: the refusal names
+    the nonmutating file repair instead (see :func:`leaf_enclosure_binding_refusal`).
+    """
+    task_document = error.facts.get("taskDocument")
+    leaf_slug = (
+        Path(task_document).stem if isinstance(task_document, str) and task_document else None
+    )
+    parent_authority = (contract.task_root / "task.json").as_posix()
+    if leaf_slug == "task" or (
+        isinstance(task_document, str) and task_document == parent_authority
+    ):
+        leaf_slug = None
+    return {
+        "operation": "replace",
+        "repo_id": contract.repo_name,
+        "contract_path": contract.contract_path.as_posix(),
+        **({"slug": leaf_slug} if leaf_slug else {}),
+    }
+
+
 def leaf_enclosure_binding_refusal(
     contract: WorktreeContract,
 ) -> WorktreeCommandResult | None:
@@ -275,6 +305,28 @@ def leaf_enclosure_binding_refusal(
             "recoveryOperation",
             "publish the exact leaf/enclosure binding through task_doc.replace, then retry closeout",
         )
+        recovery_args = binding_recovery_next_args(contract, error)
+        if "slug" in recovery_args:
+            next_action = "repair-task-enclosure-binding"
+            next_tool: str | None = "task_doc"
+            next_required_args = ["fields"]
+        else:
+            # The unreadable document is the parent authority (or nothing names
+            # a leaf): no replace target can be derived safely, so no mutating
+            # call is offered. The recovery is a truthful nonmutating file
+            # repair of the exact named document, never the master.
+            document = str(error.facts.get("taskDocument", ""))
+            recovery = (
+                f"read {document} with the file tool, repair the document, then retry closeout"
+            )
+            next_action = recovery
+            next_tool = None
+            next_required_args = []
+            recovery_args = {
+                "repo_id": contract.repo_name,
+                "contract_path": contract.contract_path.as_posix(),
+                "path": document,
+            }
         return WorktreeCommandResult(
             2,
             {
@@ -287,12 +339,10 @@ def leaf_enclosure_binding_refusal(
                 "taskDocument": error.facts.get("taskDocument", ""),
                 "contractPath": contract.contract_path.as_posix(),
                 "recoveryOperation": recovery,
-                "nextAction": "repair-task-enclosure-binding",
-                "nextTool": "task_doc",
-                "nextArgs": {
-                    "operation": "get",
-                    "contract_path": contract.contract_path.as_posix(),
-                },
+                "nextAction": next_action,
+                "nextTool": next_tool,
+                "nextArgs": recovery_args,
+                "nextRequiredArgs": next_required_args,
             },
         )
     return None

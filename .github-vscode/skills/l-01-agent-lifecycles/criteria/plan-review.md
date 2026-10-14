@@ -50,7 +50,7 @@ judgment; graph order and stable task order are only equal-grade tie-breaks.
 **Validate the adopted topology choice and derive its execution mechanically.** In both modes,
 every commanded master has an explicit `executionNature`, the typed subTasks `masterRef` rows agree
 exactly with `orchestrates`, and the plan carries evidence-backed dependency, priority, and
-coherence judgments (`task_doc.linkage_report` / `linkageFacts` on `task_doc.get` re-derives the
+coherence judgments (`task_doc.linkage_report` re-derives the
 linkage facts; a finding it already reports is still a plan finding, not an excuse).
 
 When an `executionGraph` exists, its node set must also equal `orchestrates` and the classified

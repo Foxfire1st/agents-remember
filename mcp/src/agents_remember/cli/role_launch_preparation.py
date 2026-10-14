@@ -29,12 +29,6 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
     selection_binding,
 )
-from agents_remember.application.task_docs.task_doc_tools import (
-    TaskDocCall,
-    TaskDocEdit,
-    TaskDocTarget,
-    task_doc_tool,
-)
 from agents_remember.application.task_scoped_mcp import (
     task_scoped_mcp_config_for_reader,
 )
@@ -288,6 +282,33 @@ def _prepare_task_document_files(
     )
 
 
+def _task_document_copy_lists(workspace: dict[str, str]) -> dict[str, Any]:
+    """The published task-document copies one handover names (MIK-R111 rule 3).
+
+    Absolute copy paths the agent opens with its own file tools, and the
+    repo-relative requirement files the leaf names but that do not exist.
+    No index (a controller, or a leaf before its copies) names nothing.
+    """
+
+    copies: list[str] = []
+    missing: list[str] = []
+    try:
+        rows = json.loads(
+            (Path(workspace["path"]) / "task-documents" / "INDEX.json").read_text(encoding="utf-8")
+        ).get("documents", [])
+    except (OSError, ValueError, KeyError):
+        rows = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+                continue
+            if row.get("missing") is True:
+                missing.append(str(row.get("reference", row["path"])))
+            else:
+                copies.append((Path(workspace["path"]) / "task-documents" / row["path"]).as_posix())
+    return {"copies": copies, "missingCopies": missing}
+
+
 def _task_document_read_metadata(
     config: McpRuntimeConfig,
     context: RoleLaunchContext,
@@ -323,6 +344,7 @@ def _task_document_read_metadata(
         else "controller-document-outside-working-folder"
         if any(not Path(path).is_relative_to(Path(workspace["path"])) for path in primary_files)
         else "inside-working-folder",
+        **_task_document_copy_lists(workspace),
     }
     first_read = (
         "Read this rendered task document first with your harness's own file tools: "
@@ -977,33 +999,27 @@ def _owner_relation(
 
 
 def _read_task_doc(config: McpRuntimeConfig, resolved: ResolvedTaskDocument) -> dict[str, Any]:
-    read_args = {
-        "repo_id": resolved.ref.repository,
-        "operation": "get",
-        "task_name": resolved.path.parent.name,
-        "slug": resolved.path.stem,
-    }
-    target = TaskDocTarget(
-        repo_id=read_args["repo_id"],
-        task_name=read_args["task_name"],
-        slug=read_args["slug"],
-    )
-    result = task_doc_tool(
-        config,
-        target,
-        operation=read_args["operation"],
-        edit=TaskDocEdit(),
-        call=TaskDocCall(),
-    )
-    if result.get("ok") is not True or result.get("docPath") != resolved.path.as_posix():
+    # MIK-R111 rule 2: a task document is read as a file. The resolution
+    # already loaded the document; the tool's removed read operation is not
+    # called to read it back.
+    del config
+    json_path = resolved.path.with_suffix(".json")
+    rendered_path = resolved.path.with_suffix(".md")
+    if not json_path.is_file():
         raise ValueError(
-            str(result.get("detail") or "AR task_doc did not resolve the selected canonical task.")
+            f"AR task_doc did not resolve the selected canonical task: {json_path} is not a file."
         )
     document = resolved.document.model_dump(mode="json", by_alias=True, exclude_none=True)
     return {
         "taskDocumentRef": resolved.ref.model_dump(mode="json"),
         "canonicalTaskPath": resolved.ref.key,
-        "taskDocReadArgs": read_args,
+        "taskDocReadArgs": {
+            "repo_id": resolved.ref.repository,
+            "task_name": resolved.path.parent.name,
+            "slug": resolved.path.stem,
+            "json_path": json_path.as_posix(),
+            "rendered_path": rendered_path.as_posix(),
+        },
         "documentIdentity": {
             "id": document["id"],
             "slug": document["slug"],

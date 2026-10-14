@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
 from agents_remember.application.task_docs.task_sprint_linkage import (
     SPRINT_LINKAGE_OPERATIONS,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.mcp.tools.task_doc import task_doc_payload
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write_task_doc
@@ -67,13 +69,17 @@ class ArchiveWorld:
         self.fields = {"reason": REASON}
 
     def archive(self, *, dry_run: bool = False, fields=None, task_name: str = "sprint"):
-        return task_doc_payload(
-            self.cfg,
-            TaskDocTarget(repo_id=REPOSITORY, task_name=task_name),
-            operation="archive_sprint",
-            edit=TaskDocEdit(fields=fields or self.fields),
-            call=TaskDocCall(dry_run=dry_run),
-        )
+        arguments: dict[str, object] = {"operation": "archive_sprint"}
+        if dry_run:
+            arguments["dry_run"] = True
+        with tool_call_context("task_doc", arguments, config=self.cfg):
+            return task_doc_payload(
+                self.cfg,
+                TaskDocTarget(repo_id=REPOSITORY, task_name=task_name),
+                operation="archive_sprint",
+                edit=TaskDocEdit(fields=fields or self.fields),
+                call=TaskDocCall(dry_run=dry_run),
+            )
 
     def snapshot(self):
         return {
@@ -91,12 +97,22 @@ def world(tmp_path):
     return ArchiveWorld(tmp_path)
 
 
+def _whole(answer):
+    return json.loads(Path(answer["log"]).read_text(encoding="utf-8"))
+
+
 def test_archive_dry_run_reports_exact_moves_and_real_run_archives(world):
     before = world.snapshot()
     preview = world.archive(dry_run=True)
-    assert preview["ok"] and preview["state"] == "would-archive"
-    assert preview["archiveState"] == "not-recorded" and not preview["archiveResumed"]
-    moves = [change for change in preview["wouldChange"] if change.startswith("task folder: move")]
+    assert preview["ok"] and _whole(preview)["state"] == "would-archive"
+    assert (
+        _whole(preview)["archiveState"] == "not-recorded" and not _whole(preview)["archiveResumed"]
+    )
+    moves = [
+        change
+        for change in _whole(preview)["wouldChange"]
+        if change.startswith("task folder: move")
+    ]
     assert moves == [
         f"task folder: move {(world.tasks / 'sprint').as_posix()} "
         f"to {(world.tasks / '0_archive' / 'sprint').as_posix()}",
@@ -105,22 +121,22 @@ def test_archive_dry_run_reports_exact_moves_and_real_run_archives(world):
         f"task folder: move {(world.tasks / 'master-b').as_posix()} "
         f"to {(world.tasks / '0_archive' / 'master-b').as_posix()}",
     ]
-    assert preview["wouldChange"][0].startswith("archive record: write sprint-archive.json")
+    assert _whole(preview)["wouldChange"][0].startswith("archive record: write sprint-archive.json")
     assert (world.tasks / "sprint" / "notes" / "reports" / "sprint-archive.json").as_posix() in (
-        preview["wouldWrite"]
+        _whole(preview)["wouldWrite"]
     )
     assert world.snapshot() == before
 
     result = world.archive()
-    assert result["ok"] and result["state"] == "archived"
-    assert result["archiveState"] == "hook-finished" and not result["archiveResumed"]
-    assert {entry["masterRef"]["path"] for entry in result["archivedMasters"]} == {
+    assert result["ok"] and _whole(result)["state"] == "archived"
+    assert result["archiveState"] == "hook-finished" and not _whole(result)["archiveResumed"]
+    assert {entry["masterRef"]["path"] for entry in _whole(result)["archivedMasters"]} == {
         "master-a/task.json",
         "master-b/task.json",
     }
-    assert result["stayedMasters"] == []
-    assert result["sprintArchive"]["reason"] == REASON
-    assert {entry["folder"] for entry in result["sprintArchive"]["masters"]} == {
+    assert _whole(result)["stayedMasters"] == []
+    assert _whole(result)["sprintArchive"]["reason"] == REASON
+    assert {entry["folder"] for entry in _whole(result)["sprintArchive"]["masters"]} == {
         "master-a",
         "master-b",
     }
@@ -129,7 +145,7 @@ def test_archive_dry_run_reports_exact_moves_and_real_run_archives(world):
         assert not (world.tasks / name).exists()
     record = world.tasks / "0_archive" / "sprint" / "notes" / "reports" / "sprint-archive.json"
     assert record.is_file()
-    cleanups = result["taskArchive"]["cleanups"]
+    cleanups = _whole(result)["taskArchive"]["cleanups"]
     assert [entry["archivePath"] for entry in cleanups] == [
         (world.tasks / "0_archive" / name).as_posix() for name in ("sprint", "master-a", "master-b")
     ]
@@ -146,9 +162,9 @@ def test_archive_moves_sprint_first_then_masters_and_records_move_order(world):
 
     with patch.object(Path, "rename", autospec=True, side_effect=record_order):
         result = world.archive()
-    assert result["ok"] and result["state"] == "archived"
+    assert result["ok"] and _whole(result)["state"] == "archived"
     assert destinations == ["sprint", "master-a", "master-b"]
-    assert result["sprintArchive"]["moveOrder"] == ["sprint", "master-a", "master-b"]
+    assert _whole(result)["sprintArchive"]["moveOrder"] == ["sprint", "master-a", "master-b"]
 
 
 def test_archive_refuses_non_completed_sprint_naming_file_and_fix(world):
@@ -199,11 +215,11 @@ def test_shared_master_stays_and_names_remaining_live_sprint(world):
     )
     write_task_doc(world.tasks / "other-sprint", other)
     result = world.archive()
-    assert result["ok"] and result["state"] == "archived"
-    assert [entry["masterRef"]["path"] for entry in result["stayedMasters"]] == [
+    assert result["ok"] and _whole(result)["state"] == "archived"
+    assert [entry["masterRef"]["path"] for entry in _whole(result)["stayedMasters"]] == [
         "master-b/task.json"
     ]
-    assert "other-sprint/task.json" in result["stayedMasters"][0]["reason"]
+    assert "other-sprint/task.json" in _whole(result)["stayedMasters"][0]["reason"]
     assert (world.tasks / "master-b").is_dir()
     assert (world.tasks / "0_archive" / "master-a").is_dir()
     assert (world.tasks / "0_archive" / "sprint").is_dir()
@@ -221,7 +237,10 @@ def test_only_graphed_master_retire_refusal_names_archive_sprint(world):
     data["sections"] = [_register_section("J-1").model_dump()]
     write_task_doc(world.tasks / "sprint", TaskDocument.model_validate(data))
     before = world.snapshot()
-    with pytest.raises(ValueError, match=r"a graph cannot be empty.*task_doc\.archive_sprint"):
+    with (
+        pytest.raises(ValueError, match=r"a graph cannot be empty.*task_doc\.archive_sprint"),
+        tool_call_context("task_doc", {"operation": "retire_master"}, config=world.cfg),
+    ):
         task_doc_payload(
             world.cfg,
             world.target,

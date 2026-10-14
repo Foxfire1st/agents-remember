@@ -1238,14 +1238,16 @@ class DirectExecutionGrantTest(unittest.TestCase):
         self.assertIn("architect a1", line)
         self.assertNotIn("directExecutionEnabled", "\n".join(granted))
 
-    def test_get_answer_carries_live_grant_and_who_gave_it(self) -> None:
-        target = TaskDocTarget(repo_id="repo-a", task_name=MASTER_NAME, slug=LEAF_SLUG)
-        self.assertNotIn("directGrant", task_doc_tool(self.config, target, operation="get"))
+    def test_grant_store_carries_live_grant_and_who_gave_it(self) -> None:
+        # MIK-R111 rule 2: the live grant reads from the one record, never a get answer.
+        leaf_key = f"{MASTER_NAME}/{LEAF_SLUG}.json"
+        store = grants_for_task(self.config.coordination_root, "repo-a", MASTER_NAME)
+        self.assertNotIn(leaf_key, store)
         change = give_grant(self.config, self.leaf_ref, granted_by=DEVELOPER_GRANTER)
         assert change.grant is not None
-        answer = task_doc_tool(self.config, target, operation="get")
+        store = grants_for_task(self.config.coordination_root, "repo-a", MASTER_NAME)
         self.assertEqual(
-            answer["directGrant"],
+            store[leaf_key].model_dump(),
             {
                 "leaf": {"path": self.leaf_ref.path, "repository": "repo-a"},
                 "grantedBy": "developer",
@@ -1253,16 +1255,14 @@ class DirectExecutionGrantTest(unittest.TestCase):
                 "grantedAt": change.grant.granted_at,
             },
         )
-        # The master answer carries no grant field.
-        master = task_doc_tool(
-            self.config,
-            TaskDocTarget(repo_id="repo-a", task_name=MASTER_NAME),
-            operation="get",
-        )
-        self.assertNotIn("directGrant", master)
-        # Taking the grant back removes it from the next answer: nothing is stored twice.
+        # The store carries no grant record for any other document of the task.
+        self.assertEqual(set(store), {leaf_key})
+        # Taking the grant back removes it from the store: nothing is stored twice.
         revoke_grant(self.config, self.leaf_ref)
-        self.assertNotIn("directGrant", task_doc_tool(self.config, target, operation="get"))
+        self.assertNotIn(
+            leaf_key,
+            grants_for_task(self.config.coordination_root, "repo-a", MASTER_NAME),
+        )
 
     def test_task_document_model_carries_no_grant_field(self) -> None:
         # Rule 1: no task_doc write can make a leaf direct; the model is unchanged.

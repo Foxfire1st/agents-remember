@@ -102,7 +102,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         self.assertEqual(payload["status"], "atomic-series-contract-unreadable")
         # `contract_path` is a long path: the short form sheds it under a
         # long test root, so read it from the whole refusal in `log`.
-        whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+        whole = self._whole(result)
         self.assertEqual(whole["contract_path"], contract.contract_path.as_posix())
         self.assertIn("invalid contract kind:", whole["detail"])
         self.assertLessEqual(len(whole["detail"]), 8192)
@@ -130,13 +130,23 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
             admission["statusAction"]["args"]["contract_path"],
             contract.contract_path.as_posix(),
         )
-        self.assertIn("before retrying", payload["retryPrecondition"])
+        self.assertIn("before retrying", whole["retryPrecondition"])
         self.assertEqual(payload["nextTool"], "worktree_status")
         self.assertEqual(whole["nextArgs"]["repo_id"], "repo-a")
         self.assertEqual(whole["nextArgs"]["contract_path"], contract.contract_path.as_posix())
         self.assertIn("invalid contract kind:", json.dumps(whole))
         self.assertIn("worktree_status", self._text(result))
         self.assertEqual(contract.contract_path.read_bytes(), malformed_bytes)
+
+    def _whole(self, result):
+        # MIK-R111 rule 1: admission and parser fact pins read the validated
+        # whole result; the bounded answer may shed their evidence.
+        assert result.structuredContent is not None
+        payload = result.structuredContent
+        self.assertIsInstance(payload.get("log"), str)
+        whole = json.loads(Path(payload["log"]).read_text(encoding="utf-8"))
+        self.assertEqual(whole["ok"], payload["ok"])
+        return whole
 
     def _publish_locator(self, contract) -> None:
         publish_new_lifecycle_operation_location(
@@ -176,12 +186,12 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
 
         self.assertFalse(result.isError)
         assert result.structuredContent is not None
-        payload = result.structuredContent
-        self.assertEqual(payload["atomicSeriesActivation"]["state"], "active")
+        whole = self._whole(result)
+        self.assertEqual(whole["atomicSeriesActivation"]["state"], "active")
         self.assertEqual(
-            payload["atomicSeriesActivation"]["address"], selected.activation_path.as_posix()
+            whole["atomicSeriesActivation"]["address"], selected.activation_path.as_posix()
         )
-        self.assertGreaterEqual(payload["atomicSeriesActivation"]["record"]["revision"], 1)
+        self.assertGreaterEqual(whole["atomicSeriesActivation"]["record"]["revision"], 1)
         self.assertEqual(selected.activation_path.read_bytes(), before)
 
     def test_registered_sync_refusal_addresses_only_this_contracts_own_state(self) -> None:
@@ -210,7 +220,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         assert result.structuredContent is not None
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
-        admission = payload["admission"]
+        admission = self._whole(result)["admission"]
         self.assertNotIn("classification", admission)
         self.assertNotIn("blocking", admission)
         self.assertNotIn("sourcePair", admission)
@@ -226,7 +236,9 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
         self.assertIn("not sufficient to continue", admission["retryPrecondition"])
         self.assertNotIn("master-b/task.json", self._text(result))
-        self.assertIn("worktree_status", self._text(result))
+        # MIK-R111 rule 1: the bounded text may shed admission guidance;
+        # its whole-result log retains the same status-address sentence.
+        self.assertIn("worktree_status", self._whole(result)["summary"])
         self.assertEqual(path_a.read_bytes(), before)
 
     def test_registered_sync_refusal_distinguishes_vacant_and_unreadable(self) -> None:
@@ -246,11 +258,11 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
         self.assertFalse(vacant.isError)
         assert vacant.structuredContent is not None
-        vacant_payload = vacant.structuredContent
-        self.assertNotIn("blocking", vacant_payload["admission"])
-        self.assertEqual(vacant_payload["admission"]["activation"]["observedState"], "vacant")
-        self.assertIn("not sufficient to continue", vacant_payload["retryPrecondition"])
-        self.assertIn("not sufficient to continue", self._text(vacant))
+        vacant_whole = self._whole(vacant)
+        self.assertNotIn("blocking", vacant_whole["admission"])
+        self.assertEqual(vacant_whole["admission"]["activation"]["observedState"], "vacant")
+        self.assertIn("not sufficient to continue", vacant_whole["retryPrecondition"])
+        self.assertIn("not sufficient to continue", json.dumps(vacant_whole))
 
         path.write_text("{broken", encoding="utf-8")
         unreadable = anyio.run(
@@ -264,12 +276,10 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
         self.assertFalse(unreadable.isError)
         assert unreadable.structuredContent is not None
-        unreadable_payload = unreadable.structuredContent
+        unreadable_whole = self._whole(unreadable)
+        self.assertEqual(unreadable_whole["admission"]["activation"]["observedState"], "unreadable")
         self.assertEqual(
-            unreadable_payload["admission"]["activation"]["observedState"], "unreadable"
-        )
-        self.assertEqual(
-            unreadable_payload["admission"]["activation"]["errorType"],
+            unreadable_whole["admission"]["activation"]["errorType"],
             "ValidationError",
         )
         self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
@@ -295,7 +305,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
 
         self.assertFalse(status.isError)
         assert status.structuredContent is not None
-        status_activation = status.structuredContent["atomicSeriesActivation"]
+        status_activation = self._whole(status)["atomicSeriesActivation"]
         self.assertEqual(status_activation["state"], "unreadable")
         self.assertEqual(status_activation["errorType"], "ValidationError")
         self.assertLessEqual(len(status_activation["detail"]), 8192)
@@ -322,7 +332,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         # refusal above: short form on the wire, whole admission in `log`.
         self.assertTrue(sync_payload["overflow"])
         self.assertEqual(sync_payload["nextTool"], "worktree_sync")
-        admission = json.loads(Path(sync_payload["log"]).read_text(encoding="utf-8"))["admission"]
+        admission = self._whole(sync)["admission"]
         self.assertEqual(admission["activation"]["observedState"], "unreadable")
         self.assertEqual(admission["activation"]["errorType"], "ValidationError")
         self.assertLessEqual(len(admission["activation"]["detail"]), 8192)
@@ -371,13 +381,12 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-edge-mismatch")
-        self.assertEqual(
-            payload["admission"]["expected"]["branchEdge"]["codeSourceBranch"], "super"
-        )
-        self.assertEqual(payload["admission"]["observed"]["branchEdge"]["codeSourceBranch"], "main")
+        whole = self._whole(result)
+        self.assertEqual(whole["admission"]["expected"]["branchEdge"]["codeSourceBranch"], "super")
+        self.assertEqual(whole["admission"]["observed"]["branchEdge"]["codeSourceBranch"], "main")
         self.assertEqual(payload["nextTool"], "worktree_status")
-        self.assertEqual(payload["nextArgs"]["repo_id"], "repo-a")
-        self.assertEqual(payload["nextArgs"]["contract_path"], contract.contract_path.as_posix())
+        self.assertEqual(whole["nextArgs"]["repo_id"], "repo-a")
+        self.assertEqual(whole["nextArgs"]["contract_path"], contract.contract_path.as_posix())
         self.assertIn("declared edge", self._text(result))
 
     def test_registered_start_reread_refusal_preserves_edges_and_guidance(self) -> None:
@@ -425,13 +434,12 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-edge-mismatch")
-        self.assertEqual(
-            payload["admission"]["expected"]["branchEdge"]["codeSourceBranch"], "super"
-        )
-        self.assertEqual(payload["admission"]["observed"]["branchEdge"]["codeSourceBranch"], "main")
+        whole = self._whole(result)
+        self.assertEqual(whole["admission"]["expected"]["branchEdge"]["codeSourceBranch"], "super")
+        self.assertEqual(whole["admission"]["observed"]["branchEdge"]["codeSourceBranch"], "main")
         self.assertEqual(payload["nextTool"], "worktree_status")
-        self.assertEqual(payload["nextArgs"]["repo_id"], "repo-a")
-        self.assertEqual(payload["nextArgs"]["contract_path"], contract.contract_path.as_posix())
+        self.assertEqual(whole["nextArgs"]["repo_id"], "repo-a")
+        self.assertEqual(whole["nextArgs"]["contract_path"], contract.contract_path.as_posix())
         self.assertIn("declared edge", self._text(result))
 
     def test_registered_start_unreadable_contract_keeps_parser_reason(self) -> None:
@@ -474,10 +482,11 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "atomic-series-contract-unreadable")
-        self.assertIn("worktree contract must start with a front matter block", payload["detail"])
+        whole = self._whole(result)
+        self.assertIn("worktree contract must start with a front matter block", whole["detail"])
         self.assertIn(
             "worktree contract must start with a front matter block",
-            payload["admission"]["observed"]["detail"],
+            whole["admission"]["observed"]["detail"],
         )
         self.assertEqual(payload["nextTool"], "worktree_status")
         self.assertIn("worktree_status", self._text(result))
