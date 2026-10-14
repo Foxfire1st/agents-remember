@@ -59,7 +59,7 @@ from knowledge_census_test_support import (
     status_document,
     wave_one_files,
 )
-from knowledge_validator_test_support import code, edit_json, encode, tree, write_tree
+from knowledge_validator_test_support import LEGACY_COUNT, code, edit_json, encode, tree, write_tree
 from pydantic import ValidationError
 
 SKILLS_CARD = ROUTE_ARTIFACT["skills"]
@@ -309,7 +309,11 @@ def test_census_rules_are_registered_and_refusing() -> None:
     registered = {rule.id: rule for rule in registered_rules()}
     assert set(CENSUS_RULES) <= set(registered)
     assert not any(registered[rule].report_only for rule in CENSUS_RULES)
-    assert _validate(wave_one_files()).ok
+    # Wave one's census marks every route migrated, so its carried legacy debt refuses
+    # (MIK-R53 rule 11: one finding per record once the migration is complete).
+    files = wave_one_files()
+    report = _validate(files, (files,))
+    assert _census_rules(report) == {LEGACY_COUNT}, report.render()
 
 
 def test_a_recorded_assessment_is_never_edited_and_a_correction_appends() -> None:
@@ -321,20 +325,20 @@ def test_a_recorded_assessment_is_never_edited_and_a_correction_appends() -> Non
 
     edited = edit_json(base, path, set_verdict)
     report = _validate(edited, (base,))
-    assert _census_rules(report) == {"R20.6-assessment-append-only"}, report.render()
+    assert _census_rules(report) == {"R20.6-assessment-append-only", LEGACY_COUNT}, report.render()
     assert "a correction appends a new assessment" in report.render()
 
     def correct(document: dict[str, Any]) -> None:
         document["claims"][0]["assessments"].append(assessment("concern_found"))
         document["claims"][0]["disposition"] = "discarded_false"
 
-    assert _validate(edit_json(base, path, correct), (base,)).ok
+    assert _census_rules(_validate(edit_json(base, path, correct), (base,))) == {LEGACY_COUNT}
 
     def drop_claim(document: dict[str, Any]) -> None:
         del document["claims"][0]
 
     report = _validate(edit_json(base, path, drop_claim), (base,))
-    assert _census_rules(report) == {"R20.6-assessment-append-only"}
+    assert _census_rules(report) == {"R20.6-assessment-append-only", LEGACY_COUNT}
     assert "was removed" in report.render()
 
 
@@ -346,9 +350,12 @@ def test_route_statuses_are_append_only_and_merges_keep_both_parents() -> None:
         document["statuses"][0]["reason"] = "rewritten"
 
     assert _census_rules(_validate(edit_json(base, path, rewrite), (base,))) == {
-        "R20.3-status-append-only"
+        "R20.3-status-append-only",
+        LEGACY_COUNT,
     }
     deleted = {key: value for key, value in base.items() if key != path}
+    # Without its status file the route's migration state is unknown again, so the carried
+    # debt reports while the append-only rule refuses.
     assert _census_rules(_validate(deleted, (base,))) == {"R20.3-status-append-only"}
 
     def append(status: str, at: str) -> Any:
@@ -360,7 +367,8 @@ def test_route_statuses_are_append_only_and_merges_keep_both_parents() -> None:
     left = edit_json(base, path, append("blocked", "2026-09-29T10:00:00+02:00"))
     right = edit_json(base, path, append("excluded", "2026-09-29T11:00:00+02:00"))
     both = edit_json(left, path, append("excluded", "2026-09-29T11:00:00+02:00"))
-    assert _validate(both, (left, right)).ok
+    assert _census_rules(_validate(both, (left, right))) == {LEGACY_COUNT}
+    # The blocked route is not migrated or excluded, so the carried debt reports again.
     assert _census_rules(_validate(left, (left, right))) == {"R20.3-status-append-only"}
 
 
@@ -371,7 +379,7 @@ def test_the_baseline_and_inventory_are_pinned() -> None:
         document["sources"].pop()
 
     report = _validate(edit_json(base, inventory_path(CENSUS), drop_row), (base,))
-    assert _census_rules(report) == {"R20.1-census-pinned"}
+    assert _census_rules(report) == {"R20.1-census-pinned", LEGACY_COUNT}
     assert "a new baseline is a new census" in report.render()
 
 
@@ -526,14 +534,16 @@ def test_a_recorded_claims_identity_and_cohort_fields_are_stable(
         document["claims"][0][field] = value
 
     report = _validate(edit_json(base, claims_path(CENSUS, "skills"), change), (base,))
-    assert _census_rules(report) == {rule}, report.render()
+    assert _census_rules(report) == {rule, LEGACY_COUNT}, report.render()
     if rule == "R20.2-claim-stable":
         assert f"'s {field} changed" in report.render()
 
     def settle(document: dict[str, Any]) -> None:
         document["claims"][0]["disposition"] = "pending"
 
-    assert _validate(edit_json(base, claims_path(CENSUS, "skills"), settle), (base,)).ok
+    assert _census_rules(
+        _validate(edit_json(base, claims_path(CENSUS, "skills"), settle), (base,))
+    ) == {LEGACY_COUNT}
 
 
 def test_an_interrupted_create_leaves_no_baseline_and_can_be_repeated(
@@ -587,7 +597,8 @@ def test_model_refusals_in_the_writer_are_census_write_errors(tmp_path: Path) ->
 
 
 def test_the_census_rule_cache_keeps_no_tree_after_validation() -> None:
-    report = _validate(wave_one_files())
-    assert report.ok
+    files = wave_one_files()
+    report = _validate(files, (files,))
+    assert {violation.rule for violation in report.refusals} == {LEGACY_COUNT}
     gc.collect()
     assert rules_census._FINDINGS == {}

@@ -88,7 +88,8 @@ def validate_plan(
     """Rule 8 step 5 over a plan: its refusing violations against the converted sides.
 
     Production enforces step 5 at the merge commit (``memory_commit_refusal``); this runs the same
-    validator over the pure plan.
+    validator over the pure plan. The bases are the merge's sides, so the route is a sync merge
+    (MIK-R53 rule 10): ``merge_reports`` findings report instead of refusing.
     """
 
     files = {path: data for path, data in plan.files.items() if data is not None}
@@ -276,7 +277,10 @@ def test_a_crossing_moves_the_leaf_markers_converts_each_side_and_merges(tmp_pat
     assert plan.report["converted"] == ["base", "own"]
     assert plan.report["cards"]["fromOwn"] == 1  # the other card converts to the base bytes
     code_paths = frozenset(git(code.root, "ls-tree", "-r", "--name-only", code.head).split("\n"))
-    assert validate_plan(plan, (incoming.files,), code_paths, "merged") == []
+    # Step 5 runs over converted sides, as production's base converter supplies them (MIK-R24
+    # rule 7): the raw own side is unconverted and would trip R22.6-base-converted.
+    converted_own = convert_memory(own, objects, paired_commit=code.head)
+    assert validate_plan(plan, (converted_own.files, incoming.files), code_paths, "merged") == []
     with pytest.raises(CrossingError, match="no tree of this merge is converted"):
         cross(
             (base, own, own), objects, own_paired_commit=code.head, repository=base_root, owner=None
@@ -302,7 +306,7 @@ def test_many_long_markers_move_into_one_valid_history_row() -> None:
         database=None,
     )
 
-    rows = marker_rows(base, own)
+    rows = marker_rows(base, own, code_blobs={"src/pkg/app.py": "a" * 40})
 
     assert sum(len(one) for one in rows[0]["markers"]) > 20_000
     assert rows[0]["markers"][: len(lines)] == lines
@@ -646,7 +650,12 @@ def test_the_commit_route_validates_against_the_conversion_of_an_unconverted_bas
     base_module.converted_base = spy  # type: ignore[assignment]
     try:
         validation = GitKnowledgeValidation(base_converter=GitBaseConverter())
-        assert validation.refusal(**arguments) is None
+        converted_refusal = validation.refusal(**arguments)
+        # The base converter ran, so R22.6-base-converted is gone; the fixture's stale anchor
+        # is refused at the commit route (MIK-R53 rule 10: merge_reports refuses everywhere
+        # but a sync merge).
+        assert converted_refusal is not None and "R22.6-base-converted" not in converted_refusal
+        assert "carried-stale" in converted_refusal
     finally:
         base_module.converted_base = real
     assert seen == [code.first]  # the base's own Code-Commit, not the candidate's code.head

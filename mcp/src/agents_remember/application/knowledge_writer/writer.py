@@ -102,6 +102,11 @@ class WriteRequest:
     """The code commit an unconverted ``HEAD`` without a ``Code-Commit`` trailer is converted at
     (MIK-R24 rule 7): a leaf's code base B, the gate's and the worklist's fallback, so all three
     share one cached base. Without it, the code tree's ``HEAD``."""
+    memory_base: str | None = None
+    """The leaf's paired memory base commit: the gate's K_B for the onboarding card comparison
+    (MIK-R53 rule 2), so writer and gate agree in preclosed and reopened leaves. A persisted
+    worklist flag never overrides it. Without it the operation's own ``HEAD`` is compared
+    when no persisted worklist names the subject."""
 
 
 def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) -> WriteReport:
@@ -131,6 +136,9 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         reconsiderations=_reconsideration_items(request.worklist),
         worklist_items=_worklist_items(request.worklist),
         trace_items=_trace_items(request.worklist),
+        onboarding_sources=_onboarding_sources(request.worklist),
+        onboarding_counted=_onboarding_counted(request.worklist),
+        memory_base=request.memory_base,
     )
     authoring.run(document)
     carried = carry_entries(state, snapshot, request.owner)
@@ -264,6 +272,50 @@ def _trace_items(worklist: Mapping[str, Any] | None) -> tuple[tuple[str, str], .
     return tuple(found)
 
 
+def _onboarding_sources(
+    worklist: Mapping[str, Any] | None,
+) -> dict[str, tuple[str, ...]]:
+    """The persisted worklist's onboarding items' covered sources, by subject (MIK-R53 rule 1).
+
+    An overview row's sources are the files its item covers; a file card's path comes from its
+    subject. Without a persisted worklist no overview row can bind its sources.
+    """
+
+    found: dict[str, tuple[str, ...]] = {}
+    for item in (worklist or {}).get("items") or ():
+        if not isinstance(item, Mapping) or item.get("kind") != "onboarding_trace":
+            continue
+        subject = item.get("subject")
+        facts = item.get("facts")
+        sources = facts.get("sources") if isinstance(facts, Mapping) else None
+        if (
+            isinstance(subject, str)
+            and isinstance(sources, list)
+            and all(isinstance(one, str) for one in sources)
+        ):
+            found[subject] = tuple(sources)
+    return found
+
+
+def _onboarding_counted(worklist: Mapping[str, Any] | None) -> dict[str, bool]:
+    """The persisted worklist's onboarding items' counted change, by subject (MIK-R53 rule 2).
+
+    The worklist is computed against the leaf's paired base, so its ``countedChange`` is the
+    gate's own comparison; the writer follows it instead of the operation's own HEAD.
+    """
+
+    found: dict[str, bool] = {}
+    for item in (worklist or {}).get("items") or ():
+        if not isinstance(item, Mapping) or item.get("kind") != "onboarding_trace":
+            continue
+        subject = item.get("subject")
+        facts = item.get("facts")
+        counted = facts.get("countedChange") if isinstance(facts, Mapping) else None
+        if isinstance(subject, str) and isinstance(counted, bool):
+            found[subject] = counted
+    return found
+
+
 def _append_raised(request: WriteRequest, raised: list[tuple[str, str]]) -> tuple[Problem, ...]:
     """MIK-R14: a committing run's raise questions reach the task document before any file."""
 
@@ -286,9 +338,20 @@ def _writer_split(
     deferred = writer_reported_rule_ids()
     refusals = tuple(one for one in validation.refusals if one.rule not in deferred)
     reported = tuple(
-        replace(one, report_only=True) for one in validation.refusals if one.rule in deferred
+        replace(one, report_only=True, message=f"{one.message}; {_writer_report_note()}")
+        for one in validation.refusals
+        if one.rule in deferred
     )
     return refusals, tuple(sorted((*validation.reports, *reported)))
+
+
+def _writer_report_note() -> str:
+    """Why the writer reports a refusing rule, and what still refuses it (MIK-R53 rule 11)."""
+
+    return (
+        "the writer reports this finding so the leaf can repair it across runs (MIK-R12); "
+        "the commit/landing route refuses it"
+    )
 
 
 def _finish(

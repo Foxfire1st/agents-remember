@@ -106,7 +106,7 @@ def _landed(tmp_path: Path, name: str = "landed") -> dict:
     fixture = _converted_series_fixture(tmp_path / name)
     world = fixture["world"]
     code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
     bind_worktree_services(build_default_worktree_services())
     landed = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
     assert landed["ok"], landed
@@ -366,7 +366,7 @@ def _interrupted(tmp_path: Path, name: str = "interrupted") -> dict:
     fixture = _converted_series_fixture(tmp_path / name)
     world = fixture["world"]
     code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
     bind_worktree_services(build_default_worktree_services())
     with mock.patch.object(
         direct_landing_execution, "prove_git_commit", side_effect=RuntimeError("cut")
@@ -487,7 +487,7 @@ def test_old_shape_cancelled_direct_is_offered_nothing(tmp_path: Path) -> None:
     fixture = _converted_series_fixture(tmp_path / "old-shape-cancelled")
     world = fixture["world"]
     code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
     bind_worktree_services(build_default_worktree_services())
     with mock.patch.object(
         direct_landing_owner,
@@ -655,7 +655,7 @@ def _admitted_running(tmp_path: Path, name: str = "first-leg") -> dict:
     fixture = _converted_series_fixture(tmp_path / name)
     world = fixture["world"]
     code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
     bind_worktree_services(build_default_worktree_services())
     with mock.patch.object(
         direct_landing_owner,
@@ -790,7 +790,7 @@ def test_owner_retire_converted_successor_names_another_leaf(tmp_path: Path) -> 
     fixture = _converted_series_fixture(tmp_path / "converted-successor")
     world = fixture["world"]
     code = commit(world.code, {A: CODE_A.replace("return value", "return -value")})
-    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
     bind_worktree_services(build_default_worktree_services())
 
     first = direct_landing_tool(fixture["config"], _converted_request(fixture, code))
@@ -808,7 +808,7 @@ def test_owner_retire_converted_successor_names_another_leaf(tmp_path: Path) -> 
             (
                 world.invariant_row("INV-AAAAAA", before),
                 family_row({"INV-AAAAAA": 1, "INV-BBBBBB": 1}),
-                *trace_rows(*TRACES),
+                *trace_rows(world, *TRACES),
             )
         )
     ]

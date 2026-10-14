@@ -21,6 +21,7 @@ import pytest
 from agents_remember.application.knowledge_gate import KnowledgeGate
 from agents_remember.application.knowledge_gate import gate as gate_module
 from agents_remember.application.knowledge_gate import landing as landing_gate
+from agents_remember.application.knowledge_worklist.leaf import recompute_leaf_worklist
 from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
 from agents_remember.kernel.coordination_context.models import StorageSettings
 from agents_remember.memory.conversion.base import GitBaseConverter
@@ -116,6 +117,11 @@ def _rows_for_the_edit(*, traces: bool = True) -> dict[str, Any]:
 
 
 def _write(world: Gated, document: dict[str, Any], worklist: Any = None) -> Any:
+    if worklist is None:
+        # MIK-R53 rule 1: an overview row binds the worklist item's sources, so the writer
+        # reads the leaf's recomputed worklist when the caller names none.
+        recomputed = recompute_leaf_worklist(world.contract)
+        worklist = recomputed[0] if recomputed is not None else None
     report = write_knowledge(
         WriteRequest(
             memory_root=world.memory,
@@ -201,16 +207,21 @@ def test_a_reopened_leaf_writes_its_next_attempt_and_its_history_is_every_file(
     assert world.gate().ok  # reopened, nothing changed yet: nothing to answer
 
     # Attempt 2: a new edit of `land`. The closed invariant row no longer holds (its entry is stale
-    # at C), and neither does the family row; the closed trace rows still count, because they are
-    # current, so the traces are not asked again.
+    # at C), and neither does the family row. MIK-R53 rule 3: the edit also reopens the onboarding
+    # items -- the closed trace rows bind the first edit's blobs, so the traces are asked again.
     _edit(world, CODE_A.replace("return value", "return +value"))
     refused = world.gate()
-    assert set(_open(refused)) == {"touched_invariant INV-AAAAAA", "reached_family FAM-F00001"}
+    assert set(_open(refused)) == {
+        "touched_invariant INV-AAAAAA",
+        "reached_family FAM-F00001",
+        "onboarding_trace onboarding:pkg/a.py",
+        "onboarding_trace onboarding:pkg/overview",
+    }
     assert "RLZ-A00001 is stale" in _open(refused)["touched_invariant INV-AAAAAA"]
     assert history_path(LEAF, 2) in str(refused.refusal())  # where the rows now go
 
     # The writer writes the reopened leaf's rows into its second attempt; the closed file is frozen.
-    report = _write(world, _rows_for_the_edit(traces=False))
+    report = _write(world, _rows_for_the_edit())
     assert all(row.history == SECOND for row in report.rows)
     assert (world.memory / FIRST).read_bytes() == closed_bytes
     second = parse_history_document(SECOND, (world.memory / SECOND).read_text())
@@ -218,13 +229,13 @@ def test_a_reopened_leaf_writes_its_next_attempt_and_its_history_is_every_file(
     passed = world.gate()  # the validator inside the gate reads both files, and passes
     assert passed.ok, passed.refusal()
 
-    # The history the gate reads: the later rows supersede, the closed trace rows still count.
+    # The history the gate reads: the later rows supersede, including the traces named again.
     snapshot = directory_snapshot(world.memory)
     parsed = parse_tree(snapshot)
     history = parsed.histories[LEAF]
     by_subject = {row.subject: row for row in history.rows}
     assert by_subject["INV-AAAAAA"] in second.rows
-    assert all(by_subject[subject] not in second.rows for subject in TRACES)
+    assert all(by_subject[subject] in second.rows for subject in TRACES)
     assert set(parsed.history_files) == {FIRST, SECOND}
     index_path = world.root / "index.sqlite"
     build_index(snapshot, index_path)
@@ -652,7 +663,9 @@ def test_a_leaf_that_continues_after_its_closeout_writes_its_next_attempt(
     assert "touched_invariant INV-AAAAAA" in refusal
     assert json.loads((world.memory / SECOND).read_text())["closed"] is False  # restored open
 
-    _write(world, _handoff(*_rows_for_the_edit(traces=False)["history"], *comment))
+    # MIK-R53 rule 3: the continued edit reopened the onboarding items too, so the traces are
+    # named again beside the re-anchor and the sibling's comment row.
+    _write(world, _handoff(*_rows_for_the_edit()["history"], *comment))
     # The writer carried the sibling's entry: its blob is re-recorded, so the frozen row about
     # INV-BBBBBB names an anchor the entry no longer has. A frozen file is not judged again; an
     # attempt that is not frozen would be refused for it, and no later row supersedes this one.
@@ -662,10 +675,13 @@ def test_a_leaf_that_continues_after_its_closeout_writes_its_next_attempt(
     committed = json.loads(git(world.memory, "show", f"{second_memory}:{SECOND}"))
     assert (committed["attempt"], committed["closed"]) == (2, True)
     assert git(world.memory, "show", f"{second_memory}:{FIRST}").encode() + b"\n" == closed_bytes
-    # The frozen attempt's trace rows still count; its invariant row is superseded by attempt 2.
+    # The first attempt's rows are superseded by attempt 2, including the traces named again
+    # after the continued edit; its invariant row about INV-BBBBBB is frozen, not judged again.
     assert {row["subject"] for row in committed["rows"]} == {
         "INV-AAAAAA",
         "FAM-F00001",
+        "onboarding:pkg/a.py",
+        "onboarding:pkg/overview",
         *(row["subject"] for row in comment),
     }
     # Landing: the contract records this closeout, so what it was made on is frozen as it was at
@@ -801,7 +817,9 @@ def test_the_latest_row_about_a_subject_governs_across_attempts(
     # its flag; its row about a subject the second attempt answers again is superseded.
     world.closed_out = None
     _edit(world, CODE_A.replace("return value", "return +value"))
-    _write(world, _rows_for_the_edit(traces=False))  # re-anchors the entry the first row covers
+    # MIK-R53 rule 3: the second edit reopens the onboarding items too, so the traces are named
+    # again beside the re-anchor the first row covers.
+    _write(world, _rows_for_the_edit())
     second_code = commit(world.code, {})
     assert world.gate().ok, world.gate().refusal()
     closed = _closeout(world, second_code).memory_commit

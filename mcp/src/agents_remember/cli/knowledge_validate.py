@@ -37,6 +37,36 @@ from agents_remember.memory_quality.knowledge_validator.validator import (
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
+    # Keep the rule table's line breaks: the default formatter would reflow the epilog and split
+    # rule IDs across lines at narrow widths.
+    parser.formatter_class = argparse.RawDescriptionHelpFormatter
+    parser.description = (
+        "Validate a converted memory tree with every registered knowledge-validator rule. "
+        "MIK-R53 rules 10-12 decide the ten rules that used to only report."
+    )
+    parser.epilog = """the ten decided rules (MIK-R53 rule 11):
+
+  refuses; merge_reports (refuse at every commit and landing route, report only at a sync merge):
+    R27.2-existing-record      an existing record whose checkable admission criterion
+                               no longer holds
+    R04.1-carried-route-absent a family route whose directory is gone
+    R04.4-unrealized-family    a live family none of whose members has a realization
+    R22.6-carried-stale        an anchor at a path that is gone
+    R09-history-rows-merged    a row whose entry a merge moved (reports at the merge only;
+                               the next leaf publication refuses the row)
+  migration_debt (a base-carried finding reports until every onboarding route is migrated
+  or excluded; a new finding refuses at once):
+    R22.3-sidecar-without-markdown  entries whose card is gone
+    R22.3-unresolved-target         a citation the conversion could not resolve
+    R04.4-route-unassigned          an exported family with no route
+    R27.4-legacy-unassessed         an exported record nobody assessed
+                                     (one finding per record once it refuses)
+  refuses:
+    R13.3-governs              a decision that links nothing it governs
+
+The five refusing rules report inside the writer (writer_reports) and refuse at every
+commit route. Every reported finding names its reason and the route that will refuse it.
+"""
     parser.add_argument("memory_root", type=Path, help="The memory working tree to validate.")
     parser.add_argument(
         "--code", required=True, type=Path, help="The paired code checkout (anchor paths)."

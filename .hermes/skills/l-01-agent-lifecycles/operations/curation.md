@@ -152,7 +152,15 @@ family's own revision. Never let an implementation
    for the full operation, and every curator-actionable finding it returns is repaired or escalated as
    blocked with its exact returned code. Run it at intake and after every repair until
    `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`. When the coherence record is then missing or stale, clear the coherence gate as §Authority gates states, before the closeout.
-7. **Repair, then republish.** After each repair, re-run the full operation before handoff.
+7. **Undergo the independent fact-check (second reader, MIK-R53 rule 5).** Before the closeout of a leaf
+   on converted memory, a seat that wrote none of the leaf's cards or records fact-checks the
+   curation: every changed card, sidecar and record statement by statement against the leaf's final
+   code; every history row's disposition, effect and reason against the code diff; and that nothing
+   important about the change is left unsaid. The check runs the fact-check criteria in
+   `../criteria/onboarding-memory.md` (they replace that file's Update History criteria). Blocking
+   findings are repaired before the closeout, with a re-run of the full operation after each repair.
+   This is a lifecycle step: the closeout does not check it.
+8. **Repair, then republish.** After each repair, re-run the full operation before handoff.
 
 ## Scope before ingest
 

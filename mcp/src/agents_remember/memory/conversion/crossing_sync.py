@@ -58,6 +58,7 @@ from agents_remember.models.knowledge_files.documents import (
     RECORD_DIRECTORIES,
     history_path,
 )
+from agents_remember.models.knowledge_files.history import ABSENT
 from agents_remember.models.knowledge_files.ids import mint_id
 
 Step = Literal["markers", "convert", "merge", "validate"]
@@ -109,8 +110,33 @@ def _card_subject(card: str) -> str:
     return f"onboarding:{relative.removesuffix('.md')}"
 
 
-def marker_rows(base: MemoryInput, own: MemoryInput) -> list[dict[str, Any]]:
-    """The own leaf's no-impact markers, as ``onboarding_trace`` rows (step 1)."""
+def _marker_sources(card: str, code_blobs: Mapping[str, str | None]) -> list[dict[str, Any]]:
+    """The row's ``sources`` from the paired code commit (MIK-R53 rule 4).
+
+    A file card binds its source file's blob (``absent`` for a deleted file). A route overview
+    binds every tracked file under its directory: provenance for the attestation, not a future
+    answer -- the gate compares against the changed files only, so the curator names the row
+    again there.
+    """
+
+    if PurePosixPath(card).name == OVERVIEW:
+        route = route_of(card)
+        if route == ".":
+            paths = sorted(code_blobs)
+        else:
+            paths = sorted(path for path in code_blobs if path.startswith(f"{route}/"))
+        return [{"path": path, "blob": code_blobs[path] or ABSENT} for path in paths]
+    source = card.removeprefix(f"{ONBOARDING_ROOT}/").removesuffix(".md")
+    return [{"path": source, "blob": code_blobs.get(source) or ABSENT}]
+
+
+def marker_rows(
+    base: MemoryInput, own: MemoryInput, *, code_blobs: Mapping[str, str | None]
+) -> list[dict[str, Any]]:
+    """The own leaf's no-impact markers, as ``onboarding_trace`` rows (step 1).
+
+    Each row binds its card's sources at the paired code commit (MIK-R53 rule 4).
+    """
 
     rows: list[dict[str, Any]] = []
     for card in sorted(own.files):
@@ -134,6 +160,7 @@ def marker_rows(base: MemoryInput, own: MemoryInput) -> list[dict[str, Any]]:
                     "disposition": "no_impact",
                     "reason": MARKER_ROW_REASON,
                     "markers": markers,
+                    "sources": _marker_sources(card, code_blobs),
                     "items": [],
                 }
             )
@@ -240,7 +267,14 @@ def cross(
     rows: list[dict[str, Any]] = []
     if owner is not None and owner.kind == "leaf" and not own.converted:
         try:
-            rows = marker_rows(base, own)
+            blobs = objects.tree(own_paired_commit)
+        except Exception as error:
+            raise CrossingError(
+                "markers",
+                f"the paired code commit {own_paired_commit!r} cannot be read: {error}",
+            ) from error
+        try:
+            rows = marker_rows(base, own, code_blobs=blobs)
         except (UnicodeDecodeError, ValueError) as error:
             raise CrossingError("markers", str(error)) from error
     converted = _convert_sides(sides, objects, own_paired_commit, version)

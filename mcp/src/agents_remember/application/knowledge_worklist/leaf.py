@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -80,9 +81,8 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.kernel.memory_attribution import MemoryAttributionError, attributed_commits
-from agents_remember.memory.conversion.base import (
-    pinned_version,
-)
+from agents_remember.memory.conversion.base import pinned_version
+from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.knowledge_index import (
     MemoryTreeError,
     MemoryTreeSnapshot,
@@ -576,6 +576,16 @@ def worklist_over(contract: WorktreeContract, sides: ExplicitSides) -> dict[str,
     document = worklist_for_sides(sides)
     if document is None:
         return None
+    if document.get("state") != "complete":
+        return _settled_unexplained(document)
+    try:
+        code_blobs = _candidate_code_blobs(sides, document)
+    except (CodeReadError, subprocess.SubprocessError) as error:
+        return incomplete_worklist(
+            Incomplete("C", f"the code candidate's blobs cannot be read: {error}"),
+            owner=document.get("owner"),
+            pairing=document.get("pairing"),
+        )
     candidate = sides.memory_candidate
     request = TraceSideRequest(
         owner=sides.owner or contract.leaf_id or contract.task_name,
@@ -588,8 +598,30 @@ def worklist_over(contract: WorktreeContract, sides: ExplicitSides) -> dict[str,
         held_base_tree=sides.held_base_tree,
     )
     # MIK-R30's items join the one list (ruling Q2), over the worklist's own B..C paths.
-    document = worklist_onboarding(document, contract, request)
+    document = worklist_onboarding(document, contract, request, code_blobs=code_blobs)
     return _settled_unexplained(document)
+
+
+def _candidate_code_blobs(
+    sides: ExplicitSides, document: Mapping[str, Any]
+) -> dict[str, str | None]:
+    """Each changed source file's blob at the code candidate C (MIK-R53 rule 3).
+
+    Read from the worklist run's own candidate tree, so the blobs agree with the B..C paths
+    the run judged. A tree Git cannot read makes the run incomplete, named: it never counts
+    as unchanged.
+    """
+
+    pairing = document.get("pairing") or {}
+    tree = (pairing.get("candidate") or {}).get("tree")
+    if not isinstance(tree, str) or not tree:
+        raise CodeReadError("the worklist names no code candidate tree")
+    blobs = CodeObjects(sides.code_repository).tree(tree)
+    return {
+        str(change["path"]): blobs.get(str(change["path"]))
+        for change in document.get("changes", [])
+        if isinstance(change, Mapping) and isinstance(change.get("path"), str)
+    }
 
 
 def _settled_unexplained(document: dict[str, Any]) -> dict[str, Any]:

@@ -529,12 +529,33 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   would replace the `changed` row. Name the `changed` row again, with `examined`. In the same
   way a later `no_impact` row after an `assigned` or `rerouted` row reopens the route condition:
   name that row again with its disposition.
-- An onboarding row (MIK-R30, converted memory only) has the subject `onboarding:<source path>` or
-  `onboarding:<route>/overview` (`onboarding:overview` for the root route) and the disposition
-  `no_impact`, and nothing else. It records that a changed source file's card, or its governing
-  route overview, was reviewed and needs no change. A counted change of the card or overview
-  (its Markdown, or a sidecar field other than an anchor's `blob`, line numbers and `content`)
-  needs no row.
+- An onboarding row (MIK-R30, MIK-R53 rules 1–3, converted memory only) has the subject
+  `onboarding:<source path>` or `onboarding:<route>/overview` (`onboarding:overview` for the
+  root route). Its disposition is `updated` when the card or overview was brought up to date —
+  which needs a counted change of the card between the memory base and the candidate (its
+  Markdown, or its sidecar's `references` beyond mechanical anchor fields; a
+  `realizes`/`proves`-only edit is not counted, and the writer refuses an `updated` row without
+  one) — or `no_impact` when the reviewed file needs no change, and nothing else. The hand-off
+  names the subject, the disposition and the reason; the writer binds the row to every source
+  file the item covers, with each file's blob at the code candidate (`sources`). When a covered
+  file changes again after the row was written, the item reopens: name the row again. A row
+  without `sources` from before MIK-R53 stays valid in a closed history file and answers nothing
+  in an open one.
+- A membership row (MIK-R53 rule 6, converted memory only) records that a new invariant belongs
+  to no family. Its subject is `membership:<invariant ID>`; its disposition is `no_family`; it
+  adds `considered`, the family IDs examined (which may be empty), and nothing else. It answers
+  an `unassigned_invariant` worklist item: a live invariant of the candidate that no family lists
+  and that is new, or that a family of the memory base listed. The row must be at the invariant's
+  current revision; listing the invariant in a family removes the item. The writer refuses the row
+  for an invariant that a family of the produced tree lists.
+- A record row (MIK-R53 rule 8, converted memory only) records a judgment about a decision,
+  incident, assumption, limitation, failure mode, scenario, diagnostic or term record. Its subject
+  is the record's ID; its disposition is `changed` (the record's meaning changed, with its
+  `effect`), `retired` (its status became `retired`, with effect `retire`), or `no_impact`,
+  and it adds `effect`/`because` like an invariant row. It answers a `touched_record` worklist
+  item: such a record of the memory base whose JSON or Markdown differs in the candidate (a new
+  record raises nothing; the writer's own `under_reconsideration` marking for a `raise` row
+  raises nothing). Evidence for a record another leaf authored is stored in this row.
 - A planned row (MIK-R11, converted memory only) answers a `planned_untouched` worklist item: an
   effect the leaf's task document declared in `expectedKnowledgeEffects` that no row delivered.
   Its subject is the item's, `planned:<declared subject>#<effect>`; its disposition is
@@ -553,7 +574,8 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   nothing else. The other answers need no such row: attach a `target` to a stored invariant
   (`invariant_id`, not a retired one) or author a new invariant over the change. A delete-only hunk
   admits only `no_invariant`. An item in an uncovered file is answered by the file's onboarding
-  trace (a counted change of its card, or its `onboarding:<path>` row), not by this row.
+  trace (its current `onboarding:<path>` row; a counted change of its card alone never
+  answers), not by this row.
 - A reconsideration row (MIK-R14, converted memory only) answers a `reconsideration_candidate`
   worklist item: a target a decision's `reconsider_on` link names changed in this leaf. Its subject
   is the item's, `reconsider:<DEC-ID>#<alternative index>`; it carries the common fields and nothing
@@ -591,10 +613,13 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
 - `revision` goes up by one when a record's meaning differs from the memory base. `admission`,
   `status` and `origin` are not meaning.
 - `origin` records the task, the leaf or wave, the list, the entry and the evidence.
-- Each history row gets its row ID and the revision of the invariant or family the row is about.
-  It also gets each examined member's revision and each cover's `before` anchor (from the memory
-  base) and `after` anchor. The `after`
+- Each history row gets its row ID and the revision of the invariant, family, membership invariant
+  or record the row is about. It also gets each examined member's revision and each cover's
+  `before` anchor (from the memory base) and `after` anchor. The `after`
   anchor is written into the entry in the same run.
+- An onboarding row gets its `sources`: one `{path, blob}` per covered source file at the code
+  candidate (`absent` for a deleted file), read from the code tree the writer runs against. A
+  membership row gets the invariant's current revision; a record row the record's.
 - Every file is written in the canonical formatting.
 - Every row of the leaf's history file must still agree with the result: covered anchors, the
   invariant's or family's own revision and each examined member's revision. A row a later run
@@ -610,7 +635,10 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
 - Any problem refuses the whole run. The report names every problem and nothing is written.
 - Report-only findings are listed but never refuse. The family route rules (MIK-R04: route
   directory, Coverage, Non-empty) are reported inside the writer too, so a leaf can place routes
-  across several runs; the closeout and every other commit route still refuse them.
+  across several runs; the closeout and every other commit route still refuse them. The same holds
+  for MIK-R53's five refusing rules (`R13.3-governs`, `R27.2-existing-record`,
+  `R04.1-carried-route-absent`, `R04.4-unrealized-family`, `R22.6-carried-stale`): inside the
+  writer they report, and every commit route refuses.
 - Without `--commit`, the run plans, validates and reports, and writes nothing.
 - `--authorization-ref` must not be blank. The report records it.
 

@@ -13,10 +13,11 @@ new or carried, because a decision that breaks them cannot be read as a decision
 * ``R13.3-reconsider-on`` (refusing): a ``reconsider_on`` link's ``alternative`` indexes an existing
   ``rejected`` or ``deferred`` alternative, so MIK-R14's subject ``reconsider:<DEC-ID>#<index>`` is
   always a real one;
-* ``R13.3-governs`` (report-only): a decision with no ``explains``, ``constrains`` or
+* ``R13.3-governs`` (refusing): a decision with no ``explains``, ``constrains`` or
   ``motivated_change_to`` link governs nothing, so no record, file or route it would be read from
-  shows it. Reported, never refused: whether a lifted decision still governs code is the curator's
-  judgment.
+  shows it. Whether a lifted decision still governs code is the curator's judgment to record by
+  linking what it governs; inside the writer the rule reports (``writer_reports``), and every
+  commit route refuses (MIK-R53 rule 11).
 
 ``origin`` naming the task is MIK-R21's shape (``origin.task`` is required), and ``admission`` is
 MIK-R27's (``rules_admission``). An unresolved requirement endpoint is never a violation: the
@@ -139,7 +140,7 @@ DECISION_RULES = (
         "MIK-R13 rule 3",
         "a decision links what it governs",
         check_governs,
-        report_only=True,
+        writer_reports=True,
     ),
 )
 

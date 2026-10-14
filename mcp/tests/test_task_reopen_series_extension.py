@@ -42,6 +42,7 @@ from typing import Any, cast
 
 import test_suite_budget
 from agents_remember.application import worktree_tools
+from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
@@ -537,6 +538,14 @@ class SeriesExtensionRouteTests(unittest.TestCase):
                 "disposition": "no_impact",
                 "reason": "The extension file carries no invariant.",
                 "items": [],
+                "sources": [
+                    {
+                        "path": "extension.txt",
+                        "blob": CodeSnapshot.capture(self._leaf.code_worktree).blobs[
+                            "extension.txt"
+                        ],
+                    }
+                ],
             }
         )
         history_path.write_text(

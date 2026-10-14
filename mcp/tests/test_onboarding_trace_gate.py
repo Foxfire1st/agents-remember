@@ -28,6 +28,7 @@ from agents_remember.application.knowledge_worklist.code import CodeTrees
 from agents_remember.application.knowledge_worklist.onboarding_trace import (
     TraceSideRequest,
     onboarding_trace_sides,
+    worktree_code_blobs,
 )
 from agents_remember.application.knowledge_writer.memory_state import Owner
 from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
@@ -182,7 +183,7 @@ class Leaf:
             onboarding_root=self.memory / "onboarding",
         )
 
-    def write(self, owner_rows: list[dict[str, Any]]) -> Any:
+    def write(self, owner_rows: list[dict[str, Any]], worklist: Any = None) -> Any:
         return write_knowledge(
             WriteRequest(
                 memory_root=self.memory,
@@ -191,6 +192,7 @@ class Leaf:
                 handoff_path="handoff.json",
                 document={"history": owner_rows},
                 commit=True,
+                worklist=worklist,
             )
         )
 
@@ -227,7 +229,17 @@ def leaf(tmp_path: Path) -> Leaf:
 def _gate(leaf: Leaf, changed: list[str]) -> Any:
     sides = leaf_onboarding_trace_sides(load_contract(leaf.contract()))
     assert sides is not None and sides.incomplete is None
-    return onboarding_trace_result(leaf.context(), changed, sides)
+    return onboarding_trace_result(
+        leaf.context(), changed, sides, code_blobs=worktree_code_blobs(leaf.code, changed)
+    )
+
+
+def _worklist(leaf: Leaf) -> Any:
+    """The leaf's recomputed worklist, for writer runs whose rows need an item's sources."""
+
+    found = recompute_leaf_worklist(load_contract(leaf.contract()))
+    assert found is not None
+    return found[0]
 
 
 def _by_subject(result: Any) -> dict[str, Any]:
@@ -280,11 +292,26 @@ def test_only_an_anchors_blob_line_numbers_and_content_do_not_count() -> None:
     assert not counted_sidecar_change(before, before)
     for authored in (
         variant(references__1__note="Other."),
-        variant(realizes__0__rationale="Changed."),
-        variant(realizes__0__anchor__locator={"kind": "symbol", "name": "land"}),
         variant(references__1__targets__0__anchor__path="pkg/other.py"),
     ):
         assert counted_sidecar_change(before, authored)
+    # MIK-R53 rule 2: a change of realizes or proves alone is not counted.
+    for entry_only in (
+        variant(realizes__0__rationale="Changed."),
+        variant(realizes__0__anchor__locator={"kind": "symbol", "name": "land"}),
+        variant(
+            realizes=[
+                {
+                    "id": "RLZ-A00002",
+                    "invariant": "INV-AAAAAA",
+                    "anchor": dict(anchor),
+                    "role": "support",
+                    "rationale": "R.",
+                }
+            ]
+        ),
+    ):
+        assert not counted_sidecar_change(before, entry_only)
     assert counted_sidecar_change(None, before) and counted_sidecar_change(before, None)
     assert counted_markdown_change(b"# a\n", b"# a\n\nMore.\n")
     assert counted_markdown_change(None, b"# new\n") and not counted_markdown_change(b"x", b"x")
@@ -302,11 +329,17 @@ def test_the_conforming_example_and_the_route_case(leaf: Leaf) -> None:
     # Nothing traced yet: both cards and their nearest route (pkg, not the root) are open.
     open_now = {item.subject for item in _gate(leaf, changed).open_items}
     assert open_now == {"onboarding:pkg/a.py", "onboarding:pkg/b.py", "onboarding:pkg/overview"}
-    # The curator updates A's journal paragraph; B and the route get no_impact rows by the writer.
+    # The curator updates A's journal paragraph and names its updated row; B and the
+    # route get no_impact rows by the writer. A counted card edit alone never answers.
     card = leaf.memory / f"onboarding/{A}.md"
     card.write_text(card.read_text() + "\nNegates values now [1].\n", encoding="utf-8")
     report = leaf.write(
         [
+            {
+                "subject": "onboarding:pkg/a.py",
+                "disposition": "updated",
+                "reason": "The card now negates values.",
+            },
             {
                 "subject": "onboarding:pkg/b.py",
                 "disposition": "no_impact",
@@ -317,13 +350,14 @@ def test_the_conforming_example_and_the_route_case(leaf: Leaf) -> None:
                 "disposition": "no_impact",
                 "reason": "The route model is unchanged.",
             },
-        ]
+        ],
+        _worklist(leaf),
     )
     assert report.state == "written", report.render()
     result = _gate(leaf, changed)
     items = _by_subject(result)
     assert result.ok and not result.repair_findings()
-    assert items["onboarding:pkg/a.py"].counted and items["onboarding:pkg/a.py"].row is None
+    assert items["onboarding:pkg/a.py"].counted and items["onboarding:pkg/a.py"].row is not None
     assert items["onboarding:pkg/b.py"].row is not None and not items["onboarding:pkg/b.py"].counted
     assert items["onboarding:pkg/overview"].sources == (A, B)
     assert "onboarding:overview" not in items  # only the nearest governing route is gated
@@ -337,14 +371,18 @@ def test_a_missing_trace_is_one_named_repair_finding_and_the_closeout_refuses(le
     contract = load_contract(leaf.contract())
     sides = leaf_onboarding_trace_sides(contract)
     assert sides is not None
-    result, findings = onboarding_trace_gate_for_context(leaf.context(), [A], sides)
+    result, findings = onboarding_trace_gate_for_context(
+        leaf.context(), [A], sides, code_blobs=worktree_code_blobs(leaf.code, [A])
+    )
     assert [finding["code"] for finding in findings] == [MISSING_CODE, MISSING_CODE]
     card = next(finding for finding in findings if finding["path"] == f"onboarding/{A}.md")
-    assert "pkg/a.py" in card["message"] and '"onboarding:pkg/a.py"' in card["message"]
+    assert "no onboarding row answers onboarding:pkg/a.py" in card["message"]
     assert "knowledge/history/260928-MIK-L98.json" in card["message"]
     assert card["itemId"] == result.open_items[0].id
     with pytest.raises(RuntimeError, match="requires an onboarding trace") as refused:
-        validate_onboarding_traces_for_context(leaf.context(), [A], sides)
+        validate_onboarding_traces_for_context(
+            leaf.context(), [A], sides, code_blobs=worktree_code_blobs(leaf.code, [A])
+        )
     assert f"onboarding/{A}.md" in str(refused.value)
     assert "onboarding/pkg/overview.md" in str(refused.value)
 
@@ -374,23 +412,29 @@ def test_rows_are_only_about_changed_files_and_the_registry_rule_is_both_halves(
             {"subject": "onboarding:pkg/a.py", "disposition": "no_impact", "reason": "Comment."},
             {"subject": "onboarding:pkg/overview", "disposition": "no_impact", "reason": "Same."},
             {"subject": "onboarding:pkg/b.py", "disposition": "no_impact", "reason": "Unneeded."},
-        ]
+        ],
+        _worklist(leaf),
     )
     assert report.state == "written", report.render()
     result = _gate(leaf, [A])
     assert result.ok
     (unneeded,) = result.report_only_findings()
     assert "onboarding:pkg/b.py" in unneeded["message"] and "not an error" in unneeded["message"]
-    # The registered kind (MIK-R08 rule 1): four declarations, and its two satisfying halves.
+    # The registered kind (MIK-R08 rule 1): five declarations, and its two satisfying halves.
     kind = ITEM_KINDS["onboarding_trace"]
     assert kind.owner == "MIK-R30" and kind.accepts_subject("onboarding:pkg/overview")
+    assert kind.facts == ("sources", "markdown", "sidecar", "countedChange", "sourceBlobs")
     history_text = (leaf.memory / f"knowledge/history/{LEAF}.json").read_text()
     history = HistoryFile.model_validate(json.loads(history_text))
     assert satisfying_row("onboarding_trace", "onboarding:pkg/a.py", history) is not None
     assert satisfying_row("onboarding_trace", "onboarding:pkg/c.py", history) is None
     counted = {"subject": "onboarding:pkg/c.py", "facts": {"countedChange": True}}
-    assert not onboarding_item_open(counted, {})
+    # MIK-R53 rule 1: a counted card edit alone never answers; only a bound row does.
+    assert onboarding_item_open(counted, {})
     assert onboarding_item_open({**counted, "facts": {"countedChange": False}}, {})
+    rowed = {**counted, "satisfiedBy": "ROW-000001"}
+    assert not onboarding_item_open(rowed, {"onboarding:pkg/c.py": "ROW-000001"})
+    assert onboarding_item_open({**counted, "satisfiedBy": "counted-change"}, {})
     # The writer refuses fields an onboarding row does not have, and dispositions it does not.
     refused = leaf.write(
         [{"subject": "onboarding:pkg/c.py", "disposition": "changed", "reason": "No."}]
@@ -398,10 +442,12 @@ def test_rows_are_only_about_changed_files_and_the_registry_rule_is_both_halves(
     assert refused.state == "refused"
 
 
-def test_a_moved_marker_row_satisfies_its_item_and_survives_a_rewrite(leaf: Leaf) -> None:
-    """Rule 4: an open leaf's Update History markers, moved by MIK-R24 rule 8 step 1, count."""
+def test_a_moved_marker_row_binds_its_sources_and_reopens_on_change(leaf: Leaf) -> None:
+    """MIK-R53 rule 4: the crossing's moved marker row answers while its sources hold."""
 
     (leaf.code / A).write_text(SOURCE + "\n# tail\n", encoding="utf-8")
+    blob = worktree_code_blobs(leaf.code, [A])[A]
+    assert blob is not None
     marker = "- 2026-09-20T10:00+02:00 — reviewed. No content impact: a comment only."
     history = leaf.memory / f"knowledge/history/{LEAF}.json"
     history.parent.mkdir(parents=True)
@@ -419,13 +465,15 @@ def test_a_moved_marker_row_satisfies_its_item_and_survives_a_rewrite(leaf: Leaf
                         "reason": "Moved by the crossing sync.",
                         "items": [],
                         "markers": [marker],
+                        "sources": [{"path": A, "blob": blob}],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    assert _by_subject(_gate(leaf, [A]))["onboarding:pkg/a.py"].row == "ROW-AAAAAA"
+    item = _by_subject(_gate(leaf, [A]))["onboarding:pkg/a.py"]
+    assert item.row == "ROW-AAAAAA" and not item.open
     report = leaf.write(
         [{"subject": "onboarding:pkg/a.py", "disposition": "no_impact", "reason": "Re-reviewed."}]
     )
@@ -433,6 +481,11 @@ def test_a_moved_marker_row_satisfies_its_item_and_survives_a_rewrite(leaf: Leaf
     (row,) = json.loads(history.read_text())["rows"]
     assert row["id"] == "ROW-AAAAAA" and row["markers"] == [marker]
     assert row["reason"] == "Re-reviewed."
+    assert row["sources"] == [{"path": A, "blob": blob}]
+    # One more edit reopens the item until the row is named again.
+    (leaf.code / A).write_text(SOURCE + "\n# tail\n# more\n", encoding="utf-8")
+    reopened = _by_subject(_gate(leaf, [A]))["onboarding:pkg/a.py"]
+    assert reopened.open and "changed after" in reopened.required_action(LEAF)
 
 
 def test_mixed_formats_are_an_incomplete_side_never_a_vacuous_pass(leaf: Leaf) -> None:
@@ -446,7 +499,9 @@ def test_mixed_formats_are_an_incomplete_side_never_a_vacuous_pass(leaf: Leaf) -
         sides = leaf_onboarding_trace_sides(contract)
         assert sides is not None and reason in str(sides.incomplete)
         with pytest.raises(RuntimeError, match=reason) as refusal:
-            validate_onboarding_traces_for_context(leaf.context(), [A], sides)
+            validate_onboarding_traces_for_context(
+                leaf.context(), [A], sides, code_blobs=worktree_code_blobs(leaf.code, [A])
+            )
         assert ": :" not in str(refusal.value)
         found = recompute_leaf_worklist(contract)
         assert found is not None and found[1] is not None
@@ -520,7 +575,10 @@ def test_unreadable_history_and_unestablished_sides_are_findings_never_a_pass(
     result = _gate(leaf, [A])
     assert not result.ok and result.problems[0][1] == f"knowledge/history/{LEAF}.json"
     incomplete = onboarding_trace_result(
-        leaf.context(), [A], OnboardingTraceSides(owner=LEAF, incomplete="pairing: none")
+        leaf.context(),
+        [A],
+        OnboardingTraceSides(owner=LEAF, incomplete="pairing: none"),
+        code_blobs=worktree_code_blobs(leaf.code, [A]),
     )
     assert not incomplete.ok and "pairing: none" in incomplete.repair_findings()[0]["message"]
     # A base no official memory commit pairs with (MIK-R07 rule 0) is an incomplete side, named.
@@ -529,7 +587,9 @@ def test_unreadable_history_and_unestablished_sides_are_findings_never_a_pass(
     leaf.code_base = stranger
     sides = leaf_onboarding_trace_sides(load_contract(leaf.contract()))
     assert sides is not None and sides.incomplete is not None and stranger in sides.incomplete
-    (finding,) = onboarding_trace_result(leaf.context(), [A], sides).repair_findings()
+    (finding,) = onboarding_trace_result(
+        leaf.context(), [A], sides, code_blobs=worktree_code_blobs(leaf.code, [A])
+    ).repair_findings()
     assert finding["code"] == "onboarding-trace-incomplete"
 
 
@@ -575,7 +635,9 @@ def test_the_conversion_itself_counts_for_nothing_at_the_converting_leaf(tmp_pat
     def items() -> dict[str, Any]:
         sides = onboarding_trace_sides(request)
         assert sides is not None and sides.pairing["convertedBase"] is True
-        return _by_subject(onboarding_trace_result(context, [A], sides))
+        return _by_subject(
+            onboarding_trace_result(context, [A], sides, code_blobs=worktree_code_blobs(code, [A]))
+        )
 
     before = items()
     (cached,) = cache.glob("*.json.gz")  # the worklist's cache now holds the gate's Markdown too
@@ -720,7 +782,8 @@ def test_the_memory_quality_run_counts_each_missing_trace_toward_the_actionable_
         [
             {"subject": "onboarding:pkg/a.py", "disposition": "no_impact", "reason": "Comment."},
             {"subject": "onboarding:pkg/overview", "disposition": "no_impact", "reason": "Same."},
-        ]
+        ],
+        _worklist(leaf),
     )
     response, _ = _run_controller(leaf, (A,))
     assert response["curatorActionableCount"] == 0

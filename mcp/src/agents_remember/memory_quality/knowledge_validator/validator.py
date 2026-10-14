@@ -45,7 +45,11 @@ from agents_remember.memory_quality.knowledge_validator import (
 )
 from agents_remember.memory_quality.knowledge_validator.parsed import parse_tree
 from agents_remember.memory_quality.knowledge_validator.registry import (
+    Finding,
     ValidationContext,
+    ValidationRule,
+    debt_reports_at,
+    merge_reports_at,
     registered_rules,
 )
 from agents_remember.memory_quality.knowledge_validator.report import (
@@ -65,6 +69,22 @@ class LeafCommit:
     """
 
     frozen: tuple[KnowledgeTree, ...] = ()
+
+
+def _reports_at_route(rule: ValidationRule, context: ValidationContext, finding: Finding) -> bool:
+    """Whether ``rule``'s ``finding`` is reported instead of refused at this route (MIK-R53 rule 10).
+
+    A ``merge_reports`` rule reports only at a sync merge (and at a standalone conversion, which
+    authors the tree). A ``migration_debt`` rule reports a finding a comparison base already
+    holds while the migration is not complete; a new finding refuses at once, and every finding
+    refuses once the migration is complete. Every other rule refuses.
+    """
+
+    if rule.merge_reports:
+        return merge_reports_at(context)
+    if rule.migration_debt:
+        return debt_reports_at(context, carried=finding.carried)
+    return False
 
 
 def validate_tree(
@@ -90,6 +110,21 @@ def validate_tree(
 
     if code is None and not conversion:
         raise ValueError("anchor path existence needs the paired code tree")
+    if conversion and (bases or code is not None or leaf_publication):
+        combined = sorted(
+            part
+            for part, present in (
+                ("bases", bool(bases)),
+                ("code", code is not None),
+                ("publication", bool(leaf_publication)),
+            )
+            if present
+        )
+        raise ValueError(
+            "a standalone conversion carries no comparison base, paired code tree or leaf "
+            f"publication, but this run combines conversion with {', '.join(combined)} "
+            "(MIK-R53 rule 10)"
+        )
     context = ValidationContext(
         candidate=candidate,
         parsed=parse_tree(candidate),
@@ -105,7 +140,7 @@ def validate_tree(
             field=finding.field,
             rule=rule.id,
             message=finding.message,
-            report_only=rule.report_only,
+            report_only=_reports_at_route(rule, context, finding),
         )
         for rule in registered_rules()
         for finding in rule.check(context)

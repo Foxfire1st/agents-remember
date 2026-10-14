@@ -9,21 +9,25 @@ A converted tree has neither, so where K_B or K_C holds the layout marker the ga
   changed path (MIK-R21 rule 1: the nearest ancestor directory of ``onboarding/<path>.md`` holding an
   ``overview.md`` in K_C) raises one item with subject ``onboarding:<route>/overview``
   (``onboarding:overview`` for the root route, as MIK-R24's marker move writes it). Only the nearest
-  route is gated, as today. An item's facts are the changed source files it covers.
+  route is gated, as today. An item's facts are the changed source files it covers, each with its
+  blob at the code candidate (MIK-R53 rule 3).
 * **Satisfied** by a *counted change* of the item's Markdown or sidecar between K_B and K_C (rule
-  3), or by the leaf's history row with the item's subject and disposition ``no_impact``.
-* **Counted change (rule 3).** Any change of the Markdown counts. A sidecar change counts unless it
-  is limited to anchors' ``blob``, line numbers (a ``line_range`` locator's ``start``/``end``) and
-  ``content``: those are the writer's and the fixer's mechanical updates, and a curator making only
-  them has not reviewed anything either. Creating or deleting either file counts.
+  3 of MIK-R30 as replaced by MIK-R53 rule 2), or by the leaf's history row with the item's subject
+  whose ``sources`` equal the facts' blobs (MIK-R53 rule 3). A row without ``sources`` in a closed
+  file stays valid; in an open file it answers nothing (rule 4).
+* **Counted change (MIK-R53 rule 2).** Any change of the Markdown counts. A sidecar change counts
+  when its ``references`` change beyond anchors' ``blob``, line numbers and ``content``: those are
+  the writer's and the fixer's mechanical updates, and a curator making only them has not reviewed
+  anything either. A change of ``realizes`` or ``proves`` alone is not counted. Creating or
+  deleting either file counts.
 * **Findings.** Each open item is one repair finding naming the card or route and the required
   action. A row naming a subject the leaf raised no item for is reported as unnecessary
   (report-only, never an error). An unreadable history file or unresolvable sides are one finding
   each, so the gate never lapses into silence.
 
 The trees reach this module as path-to-bytes mappings; the application layer resolves them (the
-converted base of MIK-R24 rule 7 included). Nothing here reads Git, so the rule is a pure function
-of its inputs.
+converted base of MIK-R24 rule 7 included) and reads each changed source file's blob at C.
+Nothing here reads Git, so the rule is a pure function of its inputs.
 """
 
 from __future__ import annotations
@@ -46,9 +50,8 @@ from agents_remember.models.knowledge_files.documents import (
     parse_history_document,
 )
 from agents_remember.models.knowledge_files.history import (
-    HistoryFile,
+    ABSENT,
     OnboardingTraceRow,
-    merged_leaf_history,
 )
 
 ITEM_KIND: Final = "onboarding_trace"
@@ -79,6 +82,42 @@ def route_subject(route: str) -> str:
     return (
         f"{SUBJECT_PREFIX}overview" if route == ROOT_ROUTE else f"{SUBJECT_PREFIX}{route}/overview"
     )
+
+
+def card_paths(subject: str) -> tuple[str, str] | None:
+    """The ``(markdown, sidecar)`` card paths a row subject names, or ``None``.
+
+    ``onboarding:<source path>`` names the file card, ``onboarding:<route>/overview`` the
+    route overview (``onboarding:overview`` the root one): the inverse of :func:`card_subject`
+    and :func:`route_subject`.
+    """
+
+    if not subject.startswith(SUBJECT_PREFIX):
+        return None
+    rest = subject.removeprefix(SUBJECT_PREFIX)
+    if not rest:
+        return None
+    if rest == "overview":
+        return f"{ONBOARDING_ROOT}/overview.md", f"{ONBOARDING_ROOT}/overview.json"
+    if rest.endswith("/overview"):
+        route = rest.removesuffix("/overview")
+        return (
+            f"{ONBOARDING_ROOT}/{route}/overview.md",
+            f"{ONBOARDING_ROOT}/{route}/overview.json",
+        )
+    return f"{ONBOARDING_ROOT}/{rest}.md", f"{ONBOARDING_ROOT}/{rest}.json"
+
+
+def row_sources_current(row: OnboardingTraceRow, blobs: Mapping[str, str]) -> bool:
+    """Whether ``row`` is current for facts carrying ``blobs`` (MIK-R53 rule 3).
+
+    A row without ``sources`` predates the binding and is never current here; whether a closed
+    file keeps it valid is the item's own rule, not this comparison.
+    """
+
+    if row.sources is None:
+        return False
+    return {source.path: source.blob for source in row.sources} == dict(blobs)
 
 
 def _route_directory(route: str) -> str:
@@ -127,6 +166,18 @@ def _sidecar_meaning(data: bytes) -> Any:
         return _UNREADABLE
 
 
+def _references_meaning(data: bytes) -> Any:
+    """The sidecar's ``references`` without mechanical anchor fields, or ``_UNREADABLE``."""
+
+    try:
+        document = parse_json(data.decode("utf-8"))
+    except (UnicodeDecodeError, CanonicalFormatError):
+        return _UNREADABLE
+    if not isinstance(document, dict):
+        return _UNREADABLE
+    return _without_mechanical_fields(document.get("references", {}))
+
+
 def sidecar_unreadable(tree: Mapping[str, bytes], sidecar: str) -> bool:
     """Whether ``tree`` holds a sidecar at ``sidecar`` that cannot be parsed."""
 
@@ -141,20 +192,28 @@ def counted_markdown_change(before: bytes | None, after: bytes | None) -> bool:
 
 
 def counted_sidecar_change(before: bytes | None, after: bytes | None) -> bool:
-    """A sidecar change counts unless only anchors' ``blob``, line numbers and ``content`` moved."""
+    """A sidecar change counts when its ``references`` moved beyond mechanical fields.
+
+    A change of ``realizes`` or ``proves`` alone is not counted (MIK-R53 rule 2): adding a
+    realization entry closes nothing by itself. An absent sidecar means empty references,
+    like the sidecar the writer creates: absent↔empty-reference realizes/proves-only
+    sidecars do not count, while absent↔authored-nonempty references does.
+    """
 
     if before == after:
         return False
-    if before is None or after is None:
-        return True
-    old, new = _sidecar_meaning(before), _sidecar_meaning(after)
+    old = {} if before is None else _references_meaning(before)
+    new = {} if after is None else _references_meaning(after)
     if new is _UNREADABLE:
         return False  # an unreadable sidecar never counts as a trace (review N5)
     return old is _UNREADABLE or old != new  # a readable repair of an unreadable one counts
 
 
 def counted_change(
-    base: Mapping[str, bytes], candidate: Mapping[str, bytes], markdown: str, sidecar: str
+    base: Mapping[str, bytes | None],
+    candidate: Mapping[str, bytes | None],
+    markdown: str,
+    sidecar: str,
 ) -> bool:
     """Whether the document ``markdown`` or its ``sidecar`` has a counted change from K_B to K_C."""
 
@@ -193,7 +252,17 @@ class TraceItem:
     sources: tuple[str, ...]
     counted: bool
     row: str | None
-    """The ID of the satisfying ``no_impact`` row, when the leaf's history file has one."""
+    """The ID of the leaf's row with this subject, when its history file has one."""
+    blobs: dict[str, str] = field(default_factory=dict)
+    """Each covered source file's blob at C, ``"absent"`` for a deleted file (rule 3)."""
+    row_current: bool = True
+    """Whether the row still binds these blobs: a stale row answers nothing (rules 3, 4)."""
+    row_answers: bool = False
+    """Whether the row answers this item: current, eligible and authored (rules 1-4).
+
+    A counted card edit alone never answers; only a current ``no_impact`` row, a current
+    ``updated`` row with a counted change, or a sourceless row frozen in a closed file.
+    """
     route: bool = False
     unreadable: bool = False
     """K_C's sidecar cannot be parsed: the item stays open until the leaf repairs it (N5, R2-2)."""
@@ -204,7 +273,7 @@ class TraceItem:
 
     @property
     def open(self) -> bool:
-        return self.unreadable or (not self.counted and self.row is None)
+        return self.unreadable or not self.row_answers
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -216,9 +285,10 @@ class TraceItem:
                 "markdown": self.markdown,
                 "sidecar": self.sidecar,
                 "countedChange": self.counted and not self.unreadable,
+                "sourceBlobs": dict(self.blobs),
                 **({"sidecarUnreadable": f"{self.sidecar} in K_C"} if self.unreadable else {}),
             },
-            "satisfiedBy": None if self.open else "counted-change" if self.counted else self.row,
+            "satisfiedBy": self.row if not self.open and self.row is not None else None,
         }
 
     def required_action(self, owner: str) -> str:
@@ -229,11 +299,24 @@ class TraceItem:
                 "it through the writer (knowledge-ingest) -- an unreadable sidecar never satisfies "
                 "a trace"
             )
+        if self.row is None:
+            return (
+                f"no onboarding row answers {self.subject}: read the {what} {self.markdown} and "
+                f"name {self.subject} in {history_path(owner)} as an 'updated' row when the card "
+                f"carries the change, else as 'no_impact', through knowledge-ingest -- a counted "
+                "card edit alone never answers the item"
+            )
+        if not self.row_current:
+            return (
+                f"the source file(s) {', '.join(self.sources)} changed after row {self.row} "
+                f"was written: read the change and name {self.subject} again in "
+                f"{history_path(owner)} as an 'updated' or 'no_impact' row through "
+                "knowledge-ingest, so the writer binds the current blobs"
+            )
         return (
-            f"update the {what} {self.markdown} (its Markdown, or a sidecar field other than an "
-            f"anchor's blob, line numbers and content), or record in {history_path(owner)} a row "
-            f'{{subject: "{self.subject}", disposition: "no_impact", reason}} through '
-            "knowledge-ingest"
+            f"row {self.row} does not answer {self.subject}: name {self.subject} again in "
+            f"{history_path(owner)} through knowledge-ingest -- an 'updated' row needs a counted "
+            f"card change, a sourceless row answers nothing in an open file"
         )
 
 
@@ -275,8 +358,13 @@ class OnboardingTraceResult:
                 "code": MISSING_CODE,
                 "path": item.markdown,
                 "message": (
-                    f"{item.subject} has no trace for the changed source file(s) "
-                    f"{', '.join(item.sources)}: {item.required_action(self.owner)}"
+                    f"{item.subject}'s row {item.row} no longer binds the changed source "
+                    f"file(s) {', '.join(item.sources)}: {item.required_action(self.owner)}"
+                    if item.row is not None and not item.row_current
+                    else (
+                        f"{item.subject} has no trace for the changed source file(s) "
+                        f"{', '.join(item.sources)}: {item.required_action(self.owner)}"
+                    )
                 ),
                 "itemId": item.id,
             }
@@ -310,7 +398,9 @@ class OnboardingTraceResult:
         )
         return (
             "external-memory closeout requires an onboarding trace for every changed source file "
-            "and its governing route overview (MIK-R30): " + "; ".join(lines)
+            "and its governing route overview (MIK-R30, MIK-R53): a leaf open when the binding "
+            "landed has open items after its next sync, and its curator names one row per item "
+            "through the writer; " + "; ".join(lines)
         )
 
     def brief(self, limit: int = 50) -> dict[str, Any]:
@@ -343,11 +433,13 @@ class OnboardingTraceResult:
 
 def _history_rows(
     sides: OnboardingTraceSides,
-) -> tuple[dict[str, str], tuple[str, str, str] | None]:
-    """The leaf's ``no_impact`` onboarding rows by subject, or the problem reading its files.
+) -> tuple[dict[str, tuple[OnboardingTraceRow, bool]], tuple[str, str, str] | None]:
+    """The leaf's onboarding rows by subject with their file's ``closed`` flag.
 
     Every history file of the leaf counts: a leaf reopened after its closeout has its closed file and
-    a later attempt, read as one history (L37 ruling).
+    a later attempt, read as one history (L37 ruling). A later attempt's row about a subject
+    supersedes the earlier one, and the flag kept is the winning row's own file: a sourceless row
+    in a closed file stays valid and frozen, while in an open file it answers nothing (rule 4).
     """
 
     paths = sorted(
@@ -355,10 +447,10 @@ def _history_rows(
         for path in sides.candidate
         if (attempt := owner_history_attempt(path, sides.owner)) is not None
     )
-    histories: list[HistoryFile] = []
+    rows: dict[str, tuple[OnboardingTraceRow, bool]] = {}
     for _attempt, path in paths:
         try:
-            histories.append(parse_history_document(path, sides.candidate[path].decode("utf-8")))
+            history = parse_history_document(path, sides.candidate[path].decode("utf-8"))
         except (UnicodeDecodeError, ValueError, ValidationError) as error:
             return {}, (
                 HISTORY_UNREADABLE_CODE,
@@ -366,14 +458,38 @@ def _history_rows(
                 f"the leaf's history file cannot be read, so no onboarding row can satisfy an "
                 f"item: {str(error).splitlines()[0]}",
             )
-    history = merged_leaf_history(histories)
-    if history is None:
-        return {}, None
-    return {
-        row.subject: row.id
-        for row in history.rows
-        if isinstance(row, OnboardingTraceRow) and row.disposition == "no_impact"
-    }, None
+        for row in history.rows:
+            if isinstance(row, OnboardingTraceRow):
+                rows[row.subject] = (row, history.closed)
+    return rows, None
+
+
+def _row_current(row: OnboardingTraceRow, closed: bool, blobs: Mapping[str, str]) -> bool:
+    """Whether ``row`` still binds ``blobs`` (rules 3 and 4)."""
+
+    if row.sources is None:
+        return closed  # a sourceless row in a closed file stays valid and frozen
+    return row_sources_current(row, blobs)
+
+
+def onboarding_row_answers(
+    row: OnboardingTraceRow, closed: bool, blobs: Mapping[str, str], counted: bool
+) -> bool:
+    """Whether ``row`` answers an item covering ``blobs`` (MIK-R53 rules 1-4).
+
+    Only a current eligible authored row answers: a sourceless row only frozen in a
+    closed file, an ``updated`` row only with a counted card change, ``no_impact``
+    with neither. A counted card edit alone never answers; the row is required.
+    ``closed`` unknown (``False``) answers nothing sourceless.
+    """
+
+    if row.sources is None:
+        return closed
+    if not row_sources_current(row, blobs):
+        return False
+    if row.disposition == "updated":
+        return counted
+    return row.disposition == "no_impact"
 
 
 def _routes(candidate: Mapping[str, bytes]) -> frozenset[str]:
@@ -414,10 +530,25 @@ def _card_sources(context: Any, changed_paths: Iterable[str]) -> list[str]:
     return sources
 
 
+def _item_blobs(sources: Iterable[str], code_blobs: Mapping[str, str | None]) -> dict[str, str]:
+    """Each covered source file's blob at C, ``"absent"`` for a deleted file (rule 3)."""
+
+    return {source: code_blobs.get(source) or ABSENT for source in sources}
+
+
 def onboarding_trace_result(
-    context: Any, changed_paths: Sequence[str], sides: OnboardingTraceSides
+    context: Any,
+    changed_paths: Sequence[str],
+    sides: OnboardingTraceSides,
+    *,
+    code_blobs: Mapping[str, str | None],
 ) -> OnboardingTraceResult:
-    """Evaluate MIK-R30 for the changed source files ``changed_paths`` over ``sides``."""
+    """Evaluate MIK-R30/MIK-R53 for the changed source files ``changed_paths`` over ``sides``.
+
+    ``code_blobs`` maps every changed source path to its Git blob at the code candidate C
+    (``None`` for a deleted file); the application layer reads them, and an unreadable blob
+    makes the worklist run incomplete instead of reaching this pure function.
+    """
 
     if sides.incomplete is not None:
         return OnboardingTraceResult(
@@ -441,14 +572,24 @@ def onboarding_trace_result(
         if not any(path in tree for tree in (base, candidate) for path in (markdown, sidecar)):
             continue  # no card on either side: today's missing-onboarding check owns it
         subject = card_subject(source)
+        blobs = _item_blobs((source,), code_blobs)
+        found = rows.get(subject)
+        counted = counted_change(base, candidate, markdown, sidecar)
         items.append(
             TraceItem(
                 subject=subject,
                 markdown=markdown,
                 sidecar=sidecar,
                 sources=(source,),
-                counted=counted_change(base, candidate, markdown, sidecar),
-                row=rows.get(subject),
+                counted=counted,
+                row=None if found is None else found[0].id,
+                blobs=blobs,
+                row_current=True if found is None else _row_current(*found, blobs),
+                row_answers=(
+                    False
+                    if found is None
+                    else onboarding_row_answers(found[0], found[1], blobs, counted)
+                ),
                 unreadable=sidecar_unreadable(candidate, sidecar),
             )
         )
@@ -462,14 +603,24 @@ def onboarding_trace_result(
         directory = _route_directory(route)
         markdown, sidecar = f"{directory}/{OVERVIEW}", f"{directory}/overview.json"
         subject = route_subject(route)
+        blobs = _item_blobs(sorted(sources), code_blobs)
+        found = rows.get(subject)
+        counted = counted_change(base, candidate, markdown, sidecar)
         items.append(
             TraceItem(
                 subject=subject,
                 markdown=markdown,
                 sidecar=sidecar,
                 sources=tuple(sorted(sources)),
-                counted=counted_change(base, candidate, markdown, sidecar),
-                row=rows.get(subject),
+                counted=counted,
+                row=None if found is None else found[0].id,
+                blobs=blobs,
+                row_current=True if found is None else _row_current(*found, blobs),
+                row_answers=(
+                    False
+                    if found is None
+                    else onboarding_row_answers(found[0], found[1], blobs, counted)
+                ),
                 route=True,
                 unreadable=sidecar_unreadable(candidate, sidecar),
             )
@@ -491,17 +642,24 @@ def onboarding_trace_result(
     return OnboardingTraceResult(
         owner=sides.owner,
         items=tuple(items),
-        unnecessary=tuple(sorted((s, r) for s, r in rows.items() if s not in raised)),
+        unnecessary=tuple(sorted((s, r.id) for s, (r, _closed) in rows.items() if s not in raised)),
         problems=tuple(problems),
         pairing=sides.pairing,
     )
 
 
 def onboarding_item_open(item: Mapping[str, Any], rows_by_subject: Mapping[str, str]) -> bool:
-    """The kind's satisfying rule over an item document, for the generic gate (MIK-R09 rule 7)."""
+    """The kind's satisfying rule over an item document, for the generic gate (MIK-R09 rule 7).
+
+    Only a current eligible authored row answers: the item is open unless the producer
+    bound it to a row (``satisfiedBy``) that the leaf's history still holds. A counted
+    card edit alone (``satisfiedBy: counted-change`` from an older producer) never answers.
+    """
 
     facts = item.get("facts")
     if not isinstance(facts, Mapping) or "sidecarUnreadable" in facts:
         return True  # an unreadable leaf-side sidecar never satisfies a trace (N5, R2-1)
-    counted = facts.get("countedChange") is True
-    return not counted and item.get("subject") not in rows_by_subject
+    satisfied = item.get("satisfiedBy")
+    if not isinstance(satisfied, str) or satisfied == "counted-change":
+        return True
+    return item.get("subject") not in rows_by_subject

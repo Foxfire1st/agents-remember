@@ -4,7 +4,8 @@ The worklist cases reuse MIK-R08's real Git code and converted memory repositori
 (``test_knowledge_worklist.World``): ``pkg/review.py`` carries four realization entries in K_B, so it
 is *covered*; a new file is covered only when its governing onboarding route is ``migrated``. The
 curator's answers go through the real writer, and every run checks that the stored-item predicate the
-gate uses (:func:`unexplained_item_open`) agrees with the worklist's own ``satisfiedBy``.
+gate uses (:func:`predicates.unexplained_row_open <agents_remember.application.knowledge_gate.predicates>`)
+agrees with the worklist's own ``satisfiedBy``.
 """
 
 from __future__ import annotations
@@ -12,15 +13,23 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
+from agents_remember.application.knowledge_gate.predicates import (
+    GateContext,
+    unexplained_row_open,
+)
 from agents_remember.application.knowledge_worklist import (
     ITEM_KINDS,
     leaf_onboarding_trace_sides,
     leaf_worklist,
 )
-from agents_remember.application.knowledge_worklist.onboarding_trace import trace_context
+from agents_remember.application.knowledge_worklist.onboarding_trace import (
+    trace_context,
+    worktree_code_blobs,
+)
 from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
 from agents_remember.application.knowledge_writer.memory_state import Owner
 from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
@@ -28,13 +37,13 @@ from agents_remember.application.memory_quality.controller import _needed_rows_d
 from agents_remember.memory_quality.knowledge_worklist_section import knowledge_worklist_lines
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history import (
+    HistoryFile,
     UnexplainedChangeRow,
     row_kind_for_subject,
 )
 from agents_remember.models.knowledge_files.unexplained import (
     hunk_item_id,
     unexplained_item_open,
-    unexplained_satisfied_by,
 )
 from agents_remember.worktrees.modules.onboarding_trace import onboarding_trace_result
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -84,10 +93,21 @@ def unexplained(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
     assert document["state"] == "complete", document.get("incomplete")
     found = {item["subject"]: item for item in document["items"] if item["kind"] in UNEXPLAINED}
-    rows = _rows(document)
+    location = Path(document["pairing"]["memoryCandidate"]["location"])
+    path = location / f"knowledge/history/{LEAF}.json"
+    history = (
+        HistoryFile.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        if path.is_file()
+        else None
+    )
+    candidate = SimpleNamespace(revision=lambda record_id: None)
+    context = GateContext(
+        owner=LEAF, history=history, candidate=cast(Any, candidate), code=cast(Any, None)
+    )
     for item in found.values():
-        assert unexplained_satisfied_by(item, rows) == item["satisfiedBy"], item
-        assert unexplained_item_open(item, rows) is (item["satisfiedBy"] is None)
+        assert (unexplained_row_open(item, context) is None) == (item["satisfiedBy"] is not None), (
+            item
+        )
     return found
 
 
@@ -425,6 +445,9 @@ def test_symlinks_deleted_non_text_and_uncovered_deletions_take_their_own_record
     assert deleted["facts"]["deleteOnly"] and deleted["facts"]["admits"] == ["onboarding_trace"]
     assert deleted["facts"]["onboardingTrace"]["subject"] == f"onboarding:{TESTS}"
     # The scratch census is minimal, so the rows are committed as a history file directly.
+    # MIK-R53 rule 4: the onboarding row binds its sources; a sourceless row in an open file
+    # answers nothing.
+    target_blob = git(world.code, "rev-parse", f"{code}:{TESTS}")
     rows = {
         link["subject"]: "ROW-AAAAA1",
         gone["subject"]: "ROW-BBBBB2",
@@ -441,6 +464,11 @@ def test_symlinks_deleted_non_text_and_uncovered_deletions_take_their_own_record
                 "disposition": "no_impact" if subject.startswith("onboarding:") else "no_invariant",
                 "reason": "Judged.",
                 "items": [],
+                **(
+                    {"sources": [{"path": TESTS, "blob": target_blob}]}
+                    if subject.startswith("onboarding:")
+                    else {}
+                ),
             }
             for subject, row_id in rows.items()
         ],
@@ -473,10 +501,12 @@ def test_an_uncovered_new_file_is_satisfied_by_its_onboarding_trace(
     assert document is not None
     item = only(document, FRESH)
     assert item["facts"]["coverage"]["state"] == "uncovered" and item["satisfiedBy"] is None
+    blob = git(world.code, "rev-parse", f"HEAD:{FRESH}")
     assert item["facts"]["onboardingTrace"] == {
         "subject": f"onboarding:{FRESH}",
         "item": None,
         "countedChange": False,
+        "sourceBlobs": {FRESH: blob},
     }
     # A no_invariant row is not the record an uncovered file takes.
     stray = written(world, {"history": [no_invariant(item["facts"]["row"])]}).rows[0]
@@ -489,14 +519,30 @@ def test_an_uncovered_new_file_is_satisfied_by_its_onboarding_trace(
     lines = knowledge_worklist_lines(rowed, "w.json")
     assert any(f"needs the onboarding trace `onboarding:{FRESH}`" in line for line in lines)
 
-    # The curator writes the file's card: a counted onboarding change satisfies the item.
+    # The curator writes the file's card: a counted onboarding change alone never
+    # satisfies the item (MIK-R53 rule 1); only the file's current row does.
     (world.memory / f"onboarding/{FRESH}.md").parent.mkdir(parents=True, exist_ok=True)
     (world.memory / f"onboarding/{FRESH}.md").write_text("# fresh\n\nA value.\n", encoding="utf-8")
     document = leaf_worklist(contract)
     assert document is not None
+    assert only(document, FRESH)["satisfiedBy"] is None
+    row = written(
+        world,
+        {
+            "history": [
+                {
+                    "subject": f"onboarding:{FRESH}",
+                    "disposition": "no_impact",
+                    "reason": "Read the fresh file; the card describes it.",
+                }
+            ]
+        },
+    ).rows[0]
+    document = leaf_worklist(contract)
+    assert document is not None
     settled = only(document, FRESH)
     trace = next(one for one in document["items"] if one["subject"] == f"onboarding:{FRESH}")
-    assert settled["id"] == item["id"] and settled["satisfiedBy"] == "counted-change"
+    assert settled["id"] == item["id"] and settled["satisfiedBy"] == row.id
     assert settled["facts"]["onboardingTrace"]["item"] == trace["id"]
     assert document["unexplained"]["openCount"] == len(
         [one for one in unexplained(document).values() if one["satisfiedBy"] is None]
@@ -612,7 +658,9 @@ def test_an_onboarding_row_that_answers_an_uncovered_item_is_not_reported_unnece
     # The memory-quality run's report-only findings leave the answering row out the same way.
     sides = leaf_onboarding_trace_sides(contract)
     assert sides is not None
-    gate = onboarding_trace_result(trace_context(contract), [FRESH], sides)
+    gate = onboarding_trace_result(
+        trace_context(contract), [FRESH], sides, code_blobs=worktree_code_blobs(world.code, [FRESH])
+    )
     reported = {one["subject"] for one in gate.report_only_findings()}
     assert reported == {f"onboarding:{FRESH}", stray}
     response: dict[str, object] = {"onboardingTrace": gate.brief()}

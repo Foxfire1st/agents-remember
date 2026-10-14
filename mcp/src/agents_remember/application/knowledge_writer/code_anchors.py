@@ -39,7 +39,11 @@ from agents_remember.models.knowledge_files.anchor_content import (
 from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 
-_FILE_MODES: Final = frozenset({"100644", "100755"})
+_FILE_MODES: Final = frozenset({"100644", "100755", "120000"})
+"""Tree entry modes bound as source blobs: regular files and symlinks (MIK-R53 rule 3).
+
+A symlink binds its target blob, so an extant link is never ``absent``; only a deletion is.
+The blob is the link target's bytes, never parsed for symbol anchors."""
 
 
 class AnchorResolutionError(ValueError):
@@ -54,6 +58,8 @@ class CodeSnapshot:
     tree: str
     blobs: Mapping[str, str]
     _bytes: dict[str, bytes] = field(default_factory=dict)
+    symlinks: frozenset[str] = frozenset()
+    """Paths whose tree entry is a symlink (mode 120000): never parsed for symbols."""
 
     @classmethod
     def capture(cls, root: Path) -> CodeSnapshot:
@@ -79,17 +85,21 @@ class CodeSnapshot:
 
     @classmethod
     def of_tree(cls, root: Path, tree: str) -> CodeSnapshot:
-        """Read the regular files of ``tree`` in ``root``'s object store."""
+        """Read the regular files and symlinks of ``tree`` in ``root``'s object store."""
 
         blobs: dict[str, str] = {}
+        symlinks: set[str] = set()
         for row in read_git_tree_bytes(root, tree).split(b"\0"):
             if not row:
                 continue
             metadata, path = row.split(b"\t", 1)
             mode, kind, object_id = metadata.decode("ascii").split(" ")
             if kind == "blob" and mode in _FILE_MODES:
-                blobs[os.fsdecode(path)] = object_id
-        return cls(root=root, tree=tree, blobs=blobs)
+                decoded = os.fsdecode(path)
+                blobs[decoded] = object_id
+                if mode == "120000":
+                    symlinks.add(decoded)
+        return cls(root=root, tree=tree, blobs=blobs, symlinks=frozenset(symlinks))
 
     def has_file(self, path: str) -> bool:
         return path in self.blobs
@@ -126,8 +136,18 @@ class CodeSnapshot:
         )
 
     def resolve(self, path: str, locator: Mapping[str, Any]) -> Anchor:
-        """Return the anchor ``locator`` names in ``path`` at C, without ``path`` (the caller adds it)."""
+        """Return the anchor ``locator`` names in ``path`` at C, without ``path`` (the caller adds it).
 
+        A symbol locator on a symlink is refused before the extractor runs: link bytes are
+        never parsed for symbol anchors (MIK-R53 rule 3). File and line-range locators read
+        the entry bytes as before.
+        """
+
+        if locator.get("kind") == "symbol" and path in self.symlinks:
+            raise AnchorResolutionError(
+                f"{path!r} is a symlink (mode 120000): symbol anchors are never parsed "
+                "from link bytes; cite a line_range or the file instead"
+            )
         data = self.blob_bytes(path)
         start, end = _range(path, locator, data)
         located = data if locator.get("kind") == "file" else _range_bytes(data, start, end)

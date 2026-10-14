@@ -35,7 +35,11 @@ from agents_remember.models.knowledge_files.anchor_content import (
     range_bytes,
 )
 
-_FILE_MODES: Final = frozenset({"100644", "100755"})
+_FILE_MODES: Final = frozenset({"100644", "100755", "120000"})
+"""Tree entry modes bound as source blobs: regular files and symlinks (MIK-R53 rule 3).
+
+A symlink binds its target blob, so an extant link is never ``absent``; only a deletion is.
+The blob is the link target's bytes, never parsed for symbol anchors."""
 _BLOB_BATCH: Final = 1500
 
 
@@ -55,6 +59,8 @@ class CodeObjects:
     repository: Path
     _commits: dict[str, str | None] = field(default_factory=dict)
     _trees: dict[str, dict[str, str]] = field(default_factory=dict)
+    _modes: dict[str, dict[str, str]] = field(default_factory=dict)
+    """Tree entry modes by path, for each tree :meth:`tree` read (MIK-R53 rule 3)."""
     _blobs: dict[str, bytes] = field(default_factory=dict)
     _definitions: dict[tuple[str, str], dict[str, list[extents.Extent]]] = field(
         default_factory=dict
@@ -109,10 +115,11 @@ class CodeObjects:
         )
 
     def tree(self, commit: str) -> Mapping[str, str]:
-        """Map each regular file of ``commit``'s tree to its blob ID."""
+        """Map each regular file and symlink of ``commit``'s tree to its blob ID."""
 
         if commit not in self._trees:
             blobs: dict[str, str] = {}
+            modes: dict[str, str] = {}
             for row in read_git_tree_bytes(self.repository, commit).split(b"\0"):
                 if not row:
                     continue
@@ -120,8 +127,22 @@ class CodeObjects:
                 mode, kind, object_id = metadata.decode("ascii").split(" ")
                 if kind == "blob" and mode in _FILE_MODES:
                     blobs[os.fsdecode(path)] = object_id
+                    modes[os.fsdecode(path)] = mode
             self._trees[commit] = blobs
+            self._modes[commit] = modes
         return self._trees[commit]
+
+    def tree_modes(self, commit: str) -> Mapping[str, str]:
+        """Tree entry modes by path for ``commit``'s tree (``120000`` marks a symlink)."""
+
+        self.tree(commit)
+        return self._modes[commit]
+
+    @staticmethod
+    def link_paths(modes: Mapping[str, str]) -> frozenset[str]:
+        """Paths of ``modes`` whose tree entry is a symlink (MIK-R53 rule 3)."""
+
+        return frozenset(path for path, mode in modes.items() if mode == "120000")
 
     def prefetch(self, blob_ids: Iterable[str]) -> None:
         """Read every named blob not yet cached, in batches of one ``cat-file --batch`` each."""
@@ -168,15 +189,30 @@ class CodeObjects:
         return kind.stdout.strip() == "blob"
 
     def symbol_span(
-        self, path: str, blob_id: str, name: str, *, top_level: bool = False
+        self,
+        path: str,
+        blob_id: str,
+        name: str,
+        *,
+        top_level: bool = False,
+        symlinks: frozenset[str] = frozenset(),
     ) -> tuple[int, int] | None:
         """The one extent the extractor binds for ``name`` in ``path`` at ``blob_id``, or ``None``.
 
         ``top_level`` is the export's reading of a recorded claim whose name the extractor binds
         more than once (a module-level ``def run`` and a local ``run = ...``): when exactly one of
         the spans is nested in no other definition of the file, that one is the claim's construct.
+
+        ``symlinks`` names the tree paths whose entry is a symlink (mode 120000): a symbol
+        anchor there is refused before the extractor runs, since link bytes are never parsed
+        for symbol anchors (MIK-R53 rule 3).
         """
 
+        if path in symlinks:
+            raise CodeObjectError(
+                f"{path!r} is a symlink (mode 120000): symbol anchors are never parsed "
+                "from link bytes; cite a line_range or the file instead"
+            )
         grammar = grammars.grammar_of(path)
         if grammar is None:
             return None
@@ -205,15 +241,23 @@ class CodeObjects:
         path: str,
         *,
         top_level: bool = False,
+        symlinks: frozenset[str] = frozenset(),
     ) -> str | None:
-        """``content`` of ``locator`` in the blob, or ``None`` when it does not resolve there."""
+        """``content`` of ``locator`` in the blob, or ``None`` when it does not resolve there.
+
+        ``symlinks`` names the tree paths whose entry is a symlink: a symbol locator there
+        raises :class:`CodeObjectError` before the extractor runs (MIK-R53 rule 3); file and
+        line-range locators read the link bytes as before.
+        """
 
         data = self.blob(blob_id)
         kind = locator["kind"]
         if kind == "file":
             return content_identity(data)
         if kind == "symbol":
-            span = self.symbol_span(path, blob_id, str(locator["name"]), top_level=top_level)
+            span = self.symbol_span(
+                path, blob_id, str(locator["name"]), top_level=top_level, symlinks=symlinks
+            )
             if span is None:
                 return None
             start, end = span

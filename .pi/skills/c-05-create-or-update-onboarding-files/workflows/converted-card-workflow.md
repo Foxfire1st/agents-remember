@@ -153,16 +153,16 @@ Do the entries first, then the card.
    move to another file (then it is a move, above).
 3. **Other cards** that cite the deleted file are reported stale. Re-author the reference to cite what replaced
    the file, or remove it (above).
-4. **The governing route** still needs its answer: a counted change of its overview, or an
-   `onboarding:<route>/overview` trace row.
+4. **The governing route** still needs its answer: its current `onboarding:<route>/overview`
+   row (a counted change of its overview alone never answers; MIK-R53 rules 1 and 2).
 
 ## When the card needs no change
 
-The onboarding gate (MIK-R30) asks, for every changed source file and its nearest governing route, for one of two
-things:
-- a counted change of the card or overview (Markdown, or a sidecar field other than an anchor's blob, line numbers
-  and content); or
-- a trace row in the leaf's history file.
+The onboarding gate (MIK-R30) asks, for every changed source file and its nearest governing route, for its
+current row in the leaf's history file (MIK-R53 rules 1 and 2):
+- an `updated` row with a counted change of the card or overview (Markdown, or its sidecar's `references`
+  beyond mechanical anchor fields); or
+- a `no_impact` row when the card still holds.
 
 The row is written through the writer (`knowledge-ingest`, the hand-off's `history` section):
 

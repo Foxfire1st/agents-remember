@@ -21,8 +21,14 @@ satisfied. An item whose kind has no predicate is open: nothing that cannot be d
 * ``family_route_condition`` -- :func:`family_route_item_open` over the parsed history file, decided
   by the item's **subject** ``<FAM-ID>#<condition>``, so an item whose ID changed between recomputes
   (L06 review N2) is answered by the same row.
-* ``onboarding_trace`` -- :func:`onboarding_item_open`: a counted change, or the ``no_impact`` row.
-* ``unexplained_hunk`` / ``unexplained_file`` -- :func:`unexplained_item_open`.
+* ``onboarding_trace`` -- :func:`onboarding_row_open`: a counted change, or the leaf's current
+  onboarding row about the subject -- its ``sources`` equal the facts' blobs (MIK-R53 rule 3).
+* ``unexplained_hunk`` / ``unexplained_file`` -- :func:`unexplained_row_open`: a covered item by
+  its ``no_invariant`` row; an uncovered item by the same current onboarding row (MIK-R53 rule 3).
+* ``unassigned_invariant`` -- :func:`membership_row_open`: the leaf's ``membership`` row at the
+  invariant's current revision (MIK-R53 rule 6).
+* ``touched_record`` -- :func:`record_row_open`: the leaf's ``record`` row at the candidate
+  revision with the disposition the change takes (MIK-R53 rule 8).
 * ``planned_untouched`` -- :func:`planned_item_open`.
 * ``reconsideration_candidate`` -- :func:`reconsideration_item_open`: an unanswered candidate
   blocks closeout (D29).
@@ -56,14 +62,26 @@ from agents_remember.models.knowledge_files.history import (
     FamilyRow,
     HistoryFile,
     InvariantRow,
+    MembershipRow,
+    OnboardingTraceRow,
+    RecordRow,
     changed_family_row_violation,
     changed_record_row_violation,
+    membership_invariant,
+    winning_row_closed,
 )
 from agents_remember.models.knowledge_files.planned import planned_item_open
 from agents_remember.models.knowledge_files.reconsideration import reconsideration_item_open
 from agents_remember.models.knowledge_files.sidecars import ProofEntry
-from agents_remember.models.knowledge_files.unexplained import unexplained_item_open
-from agents_remember.worktrees.modules.onboarding_trace import onboarding_item_open
+from agents_remember.models.knowledge_files.unexplained import (
+    COVERED,
+    UNCOVERED,
+    unexplained_satisfied_by,
+)
+from agents_remember.worktrees.modules.onboarding_trace import (
+    onboarding_row_answers,
+    row_sources_current,
+)
 
 __all__ = [
     "GATE_PREDICATES",
@@ -318,12 +336,193 @@ def _route_condition_open(item: Mapping[str, Any], context: GateContext) -> str 
     return "no family row about the family has a satisfying disposition"
 
 
+# --------------------------------------------------------------------------------------------------
+# Onboarding rows (MIK-R53 rules 1-4)
+# --------------------------------------------------------------------------------------------------
+
+
+def _row_own_closed(context: GateContext, subject: str, history: HistoryFile | None) -> bool | None:
+    """The winning row's own file ``closed`` flag for ``subject`` (MIK-R53 rule 4).
+
+    A merged history carries only its latest file's flag, losing the owning file's
+    provenance across attempts. The candidate's parsed history files keep every file,
+    so the winning row's own flag is resolved from them, mirroring the trace module's
+    per-file reading. Falls back to the merged flag where the parsed files are absent.
+    """
+
+    fallback = None if history is None else history.closed
+    candidate = getattr(context, "candidate", None)
+    parsed = getattr(candidate, "parsed", None)
+    files = getattr(parsed, "history_files", None)
+    if not isinstance(files, dict) or context.owner is None:
+        return fallback
+    owned = [one for one in files.values() if getattr(one, "owner_id", None) == context.owner]
+    if not owned:
+        return fallback
+    return winning_row_closed(owned).get(subject, fallback)
+
+
+def _onboarding_trace_open(
+    subject: str,
+    facts: Mapping[str, Any],
+    history: HistoryFile | None,
+    context: GateContext | None = None,
+) -> str | None:
+    """Why the onboarding trace ``subject`` is open over stored ``facts`` (MIK-R53 rules 1-4).
+
+    Only a current eligible authored row answers it: the leaf's latest row about the
+    subject answers while its ``sources`` equal the facts' blobs, with ``updated`` rows
+    additionally requiring the facts' counted change; a sourceless row stays valid in a
+    closed file and answers nothing in an open one. A counted card edit alone never
+    answers; the row is required.
+    """
+
+    if not isinstance(facts, Mapping) or "sidecarUnreadable" in facts:
+        return "the card's sidecar cannot be parsed in K_C; repair it through the writer"
+    row = None if history is None else history.row_about(subject)
+    if not isinstance(row, OnboardingTraceRow):
+        return f"the leaf's history file holds no onboarding row about {subject}"
+    if context is None:
+        closed = None if history is None else history.closed
+    else:
+        closed = _row_own_closed(context, subject, history)
+    return _onboarding_row_currency(row, subject, facts, closed)
+
+
+def _onboarding_row_currency(
+    row: OnboardingTraceRow, subject: str, facts: Mapping[str, Any], closed: bool | None
+) -> str | None:
+    """Why the leaf's ``row`` about ``subject`` is open over the stored ``facts``."""
+
+    blobs = facts.get("sourceBlobs")
+    counted = facts.get("countedChange") is True
+    if onboarding_row_answers(
+        row, closed is True, blobs if isinstance(blobs, dict) else {}, counted
+    ):
+        return None
+    if row.sources is None:
+        return (
+            f"row {row.id} predates the source binding and answers nothing in an open file; "
+            f"name {subject} again through the writer so the row binds the current blobs"
+        )
+    if not isinstance(blobs, dict) or not blobs:
+        return (
+            f"the item for {subject} carries no source blobs; recompute the worklist and name "
+            f"{subject} again through the writer"
+        )
+    if not row_sources_current(row, blobs):
+        return (
+            f"the source file(s) changed after row {row.id} was written; read the change and "
+            f"name {subject} again through the writer so the row binds the current blobs"
+        )
+    return (
+        f"row {row.id} is an updated row but the card has no counted change between the "
+        f"memory base and the candidate; update the card or name {subject} again as a "
+        "no_impact row through the writer"
+    )
+
+
+def onboarding_row_open(item: Mapping[str, Any], context: GateContext) -> str | None:
+    """Rule 3's onboarding-row currency for an ``onboarding_trace`` item."""
+
+    return _onboarding_trace_open(
+        str(item.get("subject")), item.get("facts") or {}, context.history, context
+    )
+
+
+def unexplained_row_open(item: Mapping[str, Any], context: GateContext) -> str | None:
+    """MIK-R10's satisfying rule over a stored item, with MIK-R53's currency for uncovered files.
+
+    A covered item is answered by its ``no_invariant`` row, as before. An uncovered item is
+    answered by the same current onboarding row that answers the file's own trace item.
+    """
+
+    facts = item.get("facts") or {}
+    coverage = facts.get("coverage") or {}
+    state = coverage.get("state") if isinstance(coverage, Mapping) else None
+    if state == COVERED:
+        if unexplained_satisfied_by(item, context.rows_by_subject) is not None:
+            return None
+        return "no no_invariant row answers it"
+    if state != UNCOVERED:
+        return "the item states no coverage, so nothing can answer it"
+    trace = facts.get("onboardingTrace")
+    if not isinstance(trace, Mapping):
+        return "the item names no onboarding trace, so nothing answers it"
+    return _onboarding_trace_open(str(trace.get("subject")), trace, context.history, context)
+
+
+# --------------------------------------------------------------------------------------------------
+# Membership and record rows (MIK-R53 rules 6 and 8)
+# --------------------------------------------------------------------------------------------------
+
+
+def membership_row_open(item: Mapping[str, Any], context: GateContext) -> str | None:
+    """Rule 6's membership-row currency for an ``unassigned_invariant`` item."""
+
+    subject = str(item.get("subject"))
+    row = None if context.history is None else context.history.row_about(subject)
+    if not isinstance(row, MembershipRow):
+        return f"the leaf's history file holds no membership row about {subject}"
+    invariant = membership_invariant(subject)
+    revision = None if invariant is None else context.candidate.revision(invariant)
+    if revision is not None and row.revision != revision:
+        return (
+            f"row {row.id} records revision {row.revision}, but {invariant} is at revision "
+            f"{revision} in K_C; name {subject} again in the hand-off's 'history' and let "
+            "the writer record the current revision"
+        )
+    return None
+
+
+def record_row_open(item: Mapping[str, Any], context: GateContext) -> str | None:
+    """Rule 8's record-row currency for a ``touched_record`` item."""
+
+    subject = str(item.get("subject"))
+    row = None if context.history is None else context.history.row_about(subject)
+    if not isinstance(row, RecordRow):
+        return f"the leaf's history file holds no record row about {subject}"
+    facts = item.get("facts") or {}
+    if row.revision != facts.get("revision"):
+        return (
+            f"row {row.id} records revision {row.revision}, but {subject} is at revision "
+            f"{facts.get('revision')} in K_C; name {subject} again in the hand-off's "
+            "'history' and let the writer record the current revision"
+        )
+    expected = _expected_record_disposition(facts)
+    if row.disposition != expected:
+        return (
+            f"row {row.id} is a {row.disposition} row, but {subject} takes a {expected} row "
+            f"(revision {facts.get('baseRevision')} to {facts.get('revision')}, status "
+            f"{facts.get('baseStatus')} to {facts.get('status')}); name {subject} again as "
+            f"a {expected} row through the writer"
+        )
+    return None
+
+
+def _expected_record_disposition(facts: Mapping[str, Any]) -> str:
+    """The disposition a ``touched_record`` item takes (MIK-R53 rule 8).
+
+    Newly retired wins at any revision; ``changed`` applies to a higher revision that is
+    not newly retired; otherwise ``no_impact``.
+    """
+
+    if facts.get("status") == "retired" and facts.get("baseStatus") != "retired":
+        return "retired"
+    base_revision, revision = facts.get("baseRevision"), facts.get("revision")
+    if isinstance(base_revision, int) and isinstance(revision, int) and revision > base_revision:
+        return "changed"
+    return "no_impact"
+
+
 register_gate_predicate("touched_invariant", invariant_row_open)
 register_gate_predicate("stale_invariant", invariant_row_open)
 register_gate_predicate("reached_family", family_row_open)
 register_gate_predicate("family_route_condition", _route_condition_open)
-register_gate_predicate("onboarding_trace", _by_rows(onboarding_item_open))
-register_gate_predicate("unexplained_hunk", _by_rows(unexplained_item_open))
-register_gate_predicate("unexplained_file", _by_rows(unexplained_item_open))
+register_gate_predicate("onboarding_trace", onboarding_row_open)
+register_gate_predicate("unexplained_hunk", unexplained_row_open)
+register_gate_predicate("unexplained_file", unexplained_row_open)
 register_gate_predicate("planned_untouched", _by_rows(planned_item_open))
 register_gate_predicate("reconsideration_candidate", _by_rows(reconsideration_item_open))
+register_gate_predicate("unassigned_invariant", membership_row_open)
+register_gate_predicate("touched_record", record_row_open)

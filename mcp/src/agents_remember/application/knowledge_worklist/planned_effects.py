@@ -136,10 +136,13 @@ class PlannedReconciliation:
     entries: tuple[dict[str, Any], ...] = field(default=())
 
     def mark(self, item: dict[str, Any]) -> dict[str, Any]:
-        """``item`` with its ``planning`` mark, for the invariant and family kinds (rule 4)."""
+        """``item`` with its ``planning`` mark (rule 4).
 
-        if item.get("kind") not in _MARKED_KINDS:
-            return item
+        Declared subjects are invariant and family subjects, so only those items can be
+        ``planned``; every other kind is ``unplanned``. Every item is marked, so an undeclared
+        run marks its whole list ``unplanned`` (rule 6).
+        """
+
         return {
             **item,
             "planning": PLANNED if item["subject"] in self.planned_subjects else UNPLANNED,

@@ -160,8 +160,11 @@ def test_a_decision_a_realization_and_a_tested_evidence_produce_validated_files(
     assert proof["facet"] == "a pair lands as one value"
     (evidence,) = report.evidence
     assert [test.state for test in evidence.tests] == ["proof_written"]
+    base = knowledge_tree_from_git(world.memory, "HEAD")
     validation = validate_tree(
-        knowledge_tree_from_directory(world.memory), code=CodeDirectory("code", world.code)
+        knowledge_tree_from_directory(world.memory),
+        bases=(base,),
+        code=CodeDirectory("code", world.code),
     )
     assert validation.ok, validation.render()
 
@@ -737,6 +740,10 @@ def test_a_moved_row_whose_after_names_another_path_relocates_the_entry(tmp_path
     moved = "pkg/moved/landing.py"
     (world.code / "pkg/moved").mkdir(parents=True)
     git(world.code, "mv", CODE_FILE, moved)
+    # MIK-R53 rule 10: the moved entry's new sidecar needs its card in the same run -- a new
+    # sidecar without Markdown is new debt and refuses at once.
+    (world.memory / "onboarding/pkg/moved").mkdir(parents=True)
+    (world.memory / "onboarding/pkg/moved/landing.py.md").write_text("# landing\n")
     cover = {"id": BASE_REALIZATION, "path": moved}
     refused = _write(
         world,

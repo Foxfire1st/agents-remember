@@ -28,9 +28,10 @@ the digest, so the closeout gate (MIK-R09) consumes one list.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Final
 
 from agents_remember.application.knowledge_worklist.base_cache import converted_base_files
@@ -49,6 +50,7 @@ from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import StorageSettings
 from agents_remember.kernel.recorded_reads import observed_exists
 from agents_remember.memory.conversion.base import pinned_version
+from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory_quality.knowledge_validator.trees import (
     KnowledgeTree,
     knowledge_tree_from_directory,
@@ -56,6 +58,7 @@ from agents_remember.memory_quality.knowledge_validator.trees import (
 )
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.worktrees.modules.context import contract_context
+from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding_trace import (
     ITEM_KIND,
     OnboardingTraceResult,
@@ -71,6 +74,7 @@ __all__ = [
     "trace_context",
     "with_onboarding_items",
     "worklist_onboarding",
+    "worktree_code_blobs",
 ]
 
 ONBOARDING_TRACE_KIND: Final = register_item_kind(
@@ -78,11 +82,12 @@ ONBOARDING_TRACE_KIND: Final = register_item_kind(
         name=ITEM_KIND,
         subject="onboarding card or route overview (onboarding:<path> | onboarding:<route>/overview)",
         subject_pattern=r"^onboarding:\S",
-        facts=("sources", "markdown", "sidecar", "countedChange"),
+        facts=("sources", "markdown", "sidecar", "countedChange", "sourceBlobs"),
         satisfying_row=(
-            "a counted change of the card's or overview's Markdown or sidecar between K_B and K_C "
-            "(facts.countedChange), or the leaf's onboarding_trace row with this subject and "
-            "disposition no_impact (MIK-R30 rules 2 and 7)"
+            "the leaf's current onboarding_trace row with this subject: disposition updated "
+            "with a counted change of the card's or overview's Markdown or sidecar references "
+            "between K_B and K_C (facts.countedChange), or disposition no_impact, with sources "
+            "equal to facts.sourceBlobs (MIK-R30 rules 2 and 7, MIK-R53 rules 1-3)"
         ),
         row_lookup=subject_row(ITEM_KIND),
         owner="MIK-R30",
@@ -214,13 +219,27 @@ class _TraceContext:
     code_repository_name: str
 
 
+def worktree_code_blobs(code_worktree: Path, paths: Iterable[str]) -> dict[str, str | None]:
+    """Each of ``paths``' blob in the code worktree's candidate tree (MIK-R53 rule 3).
+
+    The capture holds committed and uncommitted changes, the same C the writer fills a row's
+    ``sources`` from; a path the tree does not hold maps to ``None`` (``absent``). A tree Git
+    cannot read raises, and the caller names it: it never counts as unchanged.
+    """
+
+    with TemporaryDirectory(prefix="ar-onboarding-blobs-") as scratch:
+        tree = worktree_candidate_tree(Path(code_worktree), Path(scratch) / "index")
+    blobs = CodeObjects(Path(code_worktree)).tree(tree)
+    return {path: blobs.get(path) for path in paths}
+
+
 def with_onboarding_items(
     document: Mapping[str, Any], result: OnboardingTraceResult
 ) -> dict[str, Any]:
     """The worklist ``document`` with the gate's items in its one list (ruling Q2).
 
-    Each item carries its facts and ``satisfiedBy`` (``counted-change``, the satisfying row's ID,
-    or ``None`` while open). The digest covers them. Rows about files the leaf did not change are
+    Each item carries its facts and ``satisfiedBy`` (the satisfying row's ID, or ``None``
+    while open). The digest covers them. Rows about files the leaf did not change are
     listed under ``onboardingTrace.unnecessaryRows`` (report-only). A history file the gate cannot
     read makes the worklist ``incomplete``, naming it, so no list is ever silently short.
     """
@@ -249,7 +268,11 @@ def with_onboarding_items(
 
 
 def worklist_onboarding(
-    document: dict[str, Any], contract: WorktreeContract, request: TraceSideRequest
+    document: dict[str, Any],
+    contract: WorktreeContract,
+    request: TraceSideRequest,
+    *,
+    code_blobs: Mapping[str, str | None],
 ) -> dict[str, Any]:
     """Compute the gate over the worklist's own changed paths and merge its items (ruling Q2)."""
 
@@ -270,5 +293,6 @@ def worklist_onboarding(
         return document
     changed = sorted({change["path"] for change in document.get("changes", [])})
     return with_onboarding_items(
-        document, onboarding_trace_result(trace_context(contract), changed, sides)
+        document,
+        onboarding_trace_result(trace_context(contract), changed, sides, code_blobs=code_blobs),
     )

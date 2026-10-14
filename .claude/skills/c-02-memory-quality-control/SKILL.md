@@ -108,16 +108,19 @@ undocumented historical files from flooding the report.
 **On converted memory** (the tree holds the knowledge layout marker), the checks below that read the legacy card
 format report `not-applicable-converted`:
 - currentness comes from anchors instead: the `knowledge.converted` check runs the knowledge validator, and stale
-  sidecar references are reported, never failed;
-- every changed source file is answered through the onboarding gate (MIK-R30): a counted change of its card, or an
-  `onboarding_trace` row;
+  carried sidecar references refuse at every commit and landing route and report only at a sync merge (MIK-R53
+  `merge_reports`); repair them with `citation_fix` or curator re-authoring before closeout;
+- every changed source file is answered through the onboarding gate (MIK-R30): a current
+  `onboarding_trace` row about the file (MIK-R53 rules 1-3; a counted change of its card alone
+  never answers);
 - cards and their references are authored as the c-05 skill's converted-card workflow describes.
 
 The drift check measures the reference anchors of onboarding cards and the validity of the tree:
 how many anchors are current, how many are stale against the code, and which files the knowledge
 validator refuses. Whether an invariant is still current is answered by `knowledge_read` and
-`knowledge_integrity_check`, not here. A stale reference is reported and never blocks by itself;
-a leaf that changes a source file must change that file's card or record why not. Nothing is
+`knowledge_integrity_check`, not here. A stale reference is reported and never blocks by itself; a reference
+whose path is gone refuses the leaf's closeout or landing and is only reported at a sync merge; a leaf
+that changes a source file must change that file's card or record why not. Nothing is
 repaired by this check: `citation_fix` re-records anchors that only moved, and a curator
 re-authors a stale one.
 
@@ -214,6 +217,39 @@ A curator-actionable finding count that looks implausible for this change set is
 measurement problem to investigate, never permission to pass incomplete
 onboarding. Tests and code-quality checks may be scoped to the change set;
 curation may not.
+
+### 6b. Judge Validator Findings by Their MIK-R53 Decision
+
+No validator rule only reports without a stated reason (MIK-R53 rules 10-12).
+A rule either refuses, or it reports for a named reason and names the route
+that refuses in its place. The ten decided rules:
+
+| Rule | State it names | Decision |
+| --- | --- | --- |
+| `R13.3-governs` | a decision that links nothing it governs | refuses |
+| `R27.2-existing-record` | a record whose checkable admission criterion no longer holds | refuses; `merge_reports` |
+| `R04.1-carried-route-absent` | a family route whose directory is gone | refuses; `merge_reports` |
+| `R04.4-unrealized-family` | a live family none of whose members has a realization | refuses; `merge_reports` |
+| `R22.6-carried-stale` | an anchor at a path that is gone | refuses; `merge_reports` |
+| `R09-history-rows-merged` | a row whose entry a merge moved | `merge_reports`, by design: it reports at the merge only, and the next leaf publication refuses the row |
+| `R22.3-sidecar-without-markdown` | entries whose card is gone | `migration_debt` |
+| `R22.3-unresolved-target` | a citation the conversion could not resolve | `migration_debt` |
+| `R04.4-route-unassigned` | an exported family with no route | `migration_debt` |
+| `R27.4-legacy-unassessed` | an exported record nobody assessed | `migration_debt`; one finding per record once it refuses |
+
+- `merge_reports`: refuse at every commit and landing route, report only at a
+  sync merge (two or more bases, no leaf publication). A merge can create the
+  state from two valid sides, and it is repaired only after the merge exists.
+  Repair before the leaf's closeout or landing.
+- `migration_debt`: a finding a comparison base already holds reports while the
+  migration is not complete (not every onboarding route is `migrated` or
+  `excluded`) and refuses at every route once it is; a finding no base holds is
+  new and refuses at once. The conversion writes these states, not a leaf. A
+  reported debt finding names the number of routes not yet migrated.
+- The five refusing rules report inside the writer (`writer_reports`) and
+  refuse at every commit route: repair them before closeout.
+- Every reported finding names its reason and the route that will refuse. No
+  finding is reported without a stated reason.
 
 ### 7. Publish the Curator Coherence Authority When the Checklist Requires It
 

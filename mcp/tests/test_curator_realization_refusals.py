@@ -206,6 +206,9 @@ def test_a_targets_path_resolves_in_the_captured_candidate_tree_including_uncomm
 
     one = world(tmp_path / "world", converted=True)
     (one.code_root / "pkg" / "live_only.py").write_text("def live():\n    return 1\n", "utf-8")
+    # MIK-R53 rule 10: the entry's new sidecar needs its card in the same run -- a new sidecar
+    # without Markdown is new debt and refuses at once.
+    (one.memory_root / "onboarding/pkg/live_only.py.md").write_text("# live only\n", "utf-8")
     uncommitted = entry("B-live")
     _target(uncommitted).update(
         {"path": "pkg/live_only.py", "locator": {"kind": "symbol", "value": "live"}}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -973,13 +974,15 @@ def onboarding_trace_gate_for_context(
     sides: OnboardingTraceSides,
     *,
     working_paths: list[str] | None = None,
+    code_blobs: Mapping[str, str | None],
 ) -> tuple[OnboardingTraceResult, list[dict[str, str]]]:
     """MIK-R30 on a converted tree, for the curator's memory-quality run: never raises.
 
     Returns the gate's result and its repair findings: one per missing trace (rule 6), one per
     unreadable input, and one for changed sources without onboarding (today's refusal, unchanged).
+    ``code_blobs`` maps every changed path to its blob at the code candidate (MIK-R53 rule 3).
     """
-    result = onboarding_trace_result(context, changed_paths, sides)
+    result = onboarding_trace_result(context, changed_paths, sides, code_blobs=code_blobs)
     findings = result.repair_findings()
     try:
         _require_onboarded_sources(context, changed_paths, working_paths)
@@ -1002,10 +1005,11 @@ def validate_onboarding_traces_for_context(
     sides: OnboardingTraceSides,
     *,
     working_paths: list[str] | None = None,
+    code_blobs: Mapping[str, str | None],
 ) -> OnboardingTraceResult:
     """MIK-R30 on a converted tree, for the closeout validator: refuse naming every missing trace."""
     _require_onboarded_sources(context, changed_paths, working_paths)
-    result = onboarding_trace_result(context, changed_paths, sides)
+    result = onboarding_trace_result(context, changed_paths, sides, code_blobs=code_blobs)
     if not result.ok:
         raise RuntimeError(result.refusal())
     return result

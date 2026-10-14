@@ -202,6 +202,10 @@ class CodeTrees:
     base_tree: str
     candidate_tree: str
     _hunks: dict[tuple[str, str], tuple[Hunk, ...] | None] = field(default_factory=dict)
+    _candidate_symlinks: frozenset[str] | None = field(default=None, repr=False)
+    """Paths of C whose tree entry is a symlink, once read (MIK-R53 rule 3)."""
+    _base_symlinks: frozenset[str] | None = field(default=None, repr=False)
+    """Paths of B whose tree entry is a symlink, once read (MIK-R53 rule 3)."""
 
     @classmethod
     def open(cls, repository: Path, base_tree: str, candidate_tree: str) -> CodeTrees:
@@ -272,18 +276,56 @@ class CodeTrees:
         except CodeObjectError as error:
             raise CodeReadError(str(error)) from error
 
+    def candidate_symlinks(self) -> frozenset[str]:
+        """Paths of C whose tree entry is a symlink (mode 120000), read once and cached."""
+
+        if self._candidate_symlinks is None:
+            self._candidate_symlinks = self._side_symlinks(self.candidate_tree)
+        return self._candidate_symlinks
+
+    def base_symlinks(self) -> frozenset[str]:
+        """Paths of B whose tree entry is a symlink (mode 120000), read once and cached."""
+
+        if self._base_symlinks is None:
+            self._base_symlinks = self._side_symlinks(self.base_tree)
+        return self._base_symlinks
+
+    def _side_symlinks(self, tree: str) -> frozenset[str]:
+        try:
+            modes = self.objects.tree_modes(tree)
+        except Exception as error:
+            raise CodeReadError(f"the code tree {tree} cannot be read: {error}") from error
+        return CodeObjects.link_paths(modes)
+
     def resolve(
-        self, path: str, locator: Mapping[str, Any], recorded_blob: str, blob: str
+        self,
+        path: str,
+        locator: Mapping[str, Any],
+        recorded_blob: str,
+        blob: str,
+        *,
+        side: str = "candidate",
     ) -> Resolved | None:
-        """Where ``locator`` (recorded against ``recorded_blob``) lands in ``blob`` of ``path``."""
+        """Where ``locator`` (recorded against ``recorded_blob``) lands in ``blob`` of ``path``.
+
+        ``side`` names the tree ``blob`` comes from: ``"base"`` guards symbol resolution
+        with B's modes, anything else with C's. A symbol locator on a symlink of that
+        side is refused before the extractor runs (MIK-R53 rule 3).
+        """
 
         kind = locator.get("kind")
         data = self._blob(blob)
         if kind == "file":
             return Resolved(blob, (1, max(line_count(data), 1)), content_identity(data))
         if kind == "symbol":
+            symlinks = self.base_symlinks() if side == "base" else self.candidate_symlinks()
             try:
-                span = self.objects.symbol_span(path, blob, str(locator.get("name", "")))
+                span = self.objects.symbol_span(
+                    path,
+                    blob,
+                    str(locator.get("name", "")),
+                    symlinks=symlinks,
+                )
             except CodeObjectError as error:
                 raise CodeReadError(str(error)) from error
         else:

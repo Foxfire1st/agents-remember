@@ -51,9 +51,10 @@ from agents_remember.application.knowledge_reader.records import (
 from agents_remember.application.knowledge_reader.selection import READ_FAILURES, ReaderSelection
 from agents_remember.application.knowledge_reader.timeline import record_timeline
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
-from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex, Record
+from agents_remember.memory.knowledge_index import Entry, HistoryRow, KnowledgeIndex, Record
 from agents_remember.memory_quality.knowledge_census import census_reports, read_censuses
 from agents_remember.models.knowledge_files.documents import RECORD_DIRECTORIES
+from agents_remember.models.knowledge_files.history import membership_subject
 from agents_remember.models.knowledge_files.records import RECORD_MODELS
 from agents_remember.serving.scope import language_for
 
@@ -83,6 +84,10 @@ def record_view(selection: ReaderSelection, record_id: str) -> dict[str, Any] | 
     part, entries = _kind_part(selection, record, decisions)
     document.update(part)
     history = index.history_rows_about(record.id).value
+    if record.kind == "invariant":
+        # A membership row's subject names the invariant after its prefix, so it is read
+        # beside the rows about the invariant itself (MIK-R53 rule 6).
+        history = (*history, *index.history_rows_about(membership_subject(record.id)).value)
     document["timeline"] = record_timeline(selection, record, entries, history)
     return document
 
@@ -178,6 +183,7 @@ def _invariant(selection: ReaderSelection, record: Record, decisions: Decisions)
     for row in linked:
         if row["record"].get("kind") == "decision":
             row["decision"] = decision_document(decisions, row["record"]["id"])
+    membership = index.history_rows_about(membership_subject(record.id)).value
     return {
         "state": None if own is None else own.state,
         "currentness": _currentness_header(selection, currentness, problem),
@@ -185,6 +191,22 @@ def _invariant(selection: ReaderSelection, record: Record, decisions: Decisions)
         "proofs": [entry_document(one, currentness) for one in knowledge.proofs],
         "families": [record_summary(index, one) for one in knowledge.families],
         "linked": linked,
+        "membership": [_membership_document(row) for row in membership],
+    }
+
+
+def _membership_document(row: HistoryRow) -> dict[str, Any]:
+    """One membership row as the invariant view shows it (MIK-R53 rule 6)."""
+
+    return {
+        "owner": row.owner,
+        "ownerKind": row.owner_kind,
+        "closed": row.closed,
+        "path": row.path,
+        "row": row.id,
+        "subject": row.subject,
+        "disposition": row.disposition,
+        "document": row.document,
     }
 
 

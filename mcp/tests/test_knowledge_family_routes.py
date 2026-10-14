@@ -99,7 +99,7 @@ def _add_realization(files: dict[str, bytes], path: str, entry: str) -> dict[str
 def test_the_doc14_family_example_validates_with_every_route_holding_realizations() -> None:
     files = fixture_tree_files()
 
-    report = _validate(files)
+    report = _validate(files, bases=[tree(dict(files), "K_B")])
     state = family_route_state(
         _family(files), realization_locations(parse_tree(tree(files)).sidecars)
     )
@@ -132,7 +132,9 @@ def test_the_doc14_family_example_validates_with_every_route_holding_realization
 def test_a_realization_outside_every_route_violates_coverage_naming_family_and_path() -> None:
     files = _add_realization(fixture_tree_files(), KERNEL_FILE, "RLZ-KERN31")
 
-    report = _validate(files, code=code(CODE_PATHS | {KERNEL_FILE}))
+    report = _validate(
+        files, bases=[tree(dict(files), "K_B")], code=code(CODE_PATHS | {KERNEL_FILE})
+    )
 
     assert _rules(report) == {"R04.2-coverage"}, report.render()
     [line] = [violation.render() for violation in report.refusals]
@@ -144,7 +146,7 @@ def test_a_route_that_no_longer_contains_a_realization_violates_non_empty() -> N
     files = fixture_tree_files()
     del files[f"onboarding/{MANIFEST}.json"]
 
-    report = _validate(files)
+    report = _validate(files, bases=[tree(dict(files), "K_B")])
 
     assert _rules(report) == {"R04.2-non-empty"}, report.render()
     [line] = [violation.render() for violation in report.refusals]
@@ -159,7 +161,7 @@ def test_a_route_holding_only_a_proof_entry_violates_non_empty() -> None:
         fixture_tree_files(), routes=[WORKTREES, MODELS_KNOWLEDGE, APPLICATION, "mcp/tests"]
     )
 
-    report = _validate(files)
+    report = _validate(files, bases=[tree(dict(files), "K_B")])
 
     assert _rules(report) == {"R04.2-non-empty"}, report.render()
     [line] = [violation.render() for violation in report.refusals]
@@ -178,7 +180,7 @@ def test_one_broad_route_satisfies_the_rules_and_the_suggestion_offers_the_local
         _family(files), realization_locations(parsed.sidecars), CODE_PATHS | {KERNEL_FILE}
     )
 
-    assert _validate(files).ok
+    assert _validate(files, bases=[tree(dict(files), "K_B")]).ok
     assert suggestion.routes == (APPLICATION, MODELS_KNOWLEDGE, WORKTREES)
     assert suggestion.label == MECHANICAL
 
@@ -202,20 +204,26 @@ def test_an_added_route_must_be_a_directory_of_the_code_tree() -> None:
     assert f"route {absent} is not a directory of the paired code tree code" in line
 
 
-def test_a_carried_route_whose_directory_is_gone_is_reported_not_refused() -> None:
+def test_a_carried_route_whose_directory_is_gone_refuses_off_merge() -> None:
     files = fixture_tree_files()
     without_application = frozenset(p for p in CODE_PATHS if not p.startswith(APPLICATION))
 
-    report = _validate(files, bases=[tree(files, "K_B")], code=code(without_application))
+    leaf = _validate(files, bases=[tree(files, "K_B")], code=code(without_application))
 
-    assert report.ok, report.render()
-    assert _rules(report, refusing=False) == {
+    assert not leaf.ok, leaf.render()
+    assert _rules(leaf) == {
         "R22.6-carried-stale",
         "R04.1-carried-route-absent",
-        LEGACY_COUNT,
-    }
-    [line] = [v.render() for v in report.reports if v.rule == "R04.1-carried-route-absent"]
+    }, leaf.render()
+    assert _rules(leaf, refusing=False) == {LEGACY_COUNT}, leaf.render()
+    [line] = [v.render() for v in leaf.refusals if v.rule == "R04.1-carried-route-absent"]
     assert f"carried route {APPLICATION} is absent from code: route_path_absent" in line
+
+    merged = _validate(
+        files, bases=[tree(files, "left"), tree(files, "right")], code=code(without_application)
+    )
+    assert merged.ok, merged.render()
+    assert "R04.1-carried-route-absent" in _rules(merged, refusing=False), merged.render()
     # With no base the same route is added by the tree, and refused.
     assert "R04.1-route-directory" in _rules(_validate(files, code=code(without_application)))
 
@@ -246,15 +254,19 @@ def test_the_refusing_route_rules_are_reported_inside_the_writer() -> None:
         "R04.1-route-directory",
         "R04.2-coverage",
         "R04.2-non-empty",
+        "R04.1-carried-route-absent",
+        "R04.4-unrealized-family",
     }
     assert {rule.id for rule in ROUTE_RULES if rule.writer_reports} == {
         "R04.1-route-directory",
         "R04.2-coverage",
         "R04.2-non-empty",
+        "R04.1-carried-route-absent",
+        "R04.4-unrealized-family",
     }
     files = fixture_tree_files()
     del files[f"onboarding/{MANIFEST}.json"]
-    report = _validate(files)
+    report = _validate(files, bases=[tree(dict(files), "K_B")])
     assert not report.ok
     assert {violation.rule for violation in report.refusals} <= writer_reported_rule_ids()
 
@@ -291,7 +303,9 @@ def test_the_root_route_covers_a_realization_at_the_repository_root() -> None:
     files = _add_realization(fixture_tree_files(), "setup.py", "RLZ-R00TF1")
     covered = _with_family(files, routes=[WORKTREES, MODELS_KNOWLEDGE, APPLICATION, "."])
 
-    uncovered = _validate(files, code=code(CODE_PATHS | {"setup.py"}))
+    uncovered = _validate(
+        files, bases=[tree(dict(files), "K_B")], code=code(CODE_PATHS | {"setup.py"})
+    )
     report = _validate(covered, bases=[tree(files, "K_B")], code=code(CODE_PATHS | {"setup.py"}))
 
     assert _rules(uncovered) == {"R04.2-coverage"}, uncovered.render()
@@ -310,30 +324,37 @@ def test_the_root_route_alone_is_non_empty_whenever_the_family_is_realized() -> 
 # --------------------------------------------------------------------------------------------------
 
 
-def test_an_unrealized_family_is_reported_and_non_empty_is_waived() -> None:
-    files = _new_family(fixture_tree_files(), routes=[WORKTREES], admission=ADMITTED)
+def test_an_unrealized_family_refuses_off_merge_and_non_empty_is_waived() -> None:
+    base = fixture_tree_files()
+    files = _new_family(base, routes=[WORKTREES], admission=ADMITTED)
 
-    report = _validate(files)
+    leaf = _validate(files, bases=[tree(base, "K_B")])
 
-    assert report.ok, report.render()
-    assert _rules(report, refusing=False) == {"R04.4-unrealized-family", LEGACY_COUNT}
-    (unrealized,) = (one for one in report.reports if one.rule == "R04.4-unrealized-family")
+    assert not leaf.ok, leaf.render()
+    assert _rules(leaf) == {"R04.4-unrealized-family"}, leaf.render()
+    (unrealized,) = (one for one in leaf.refusals if one.rule == "R04.4-unrealized-family")
     assert unrealized.path == NEW_FAMILY
+
+    merged = _validate(files, bases=[tree(base, "left"), tree(base, "right")])
+    assert merged.ok, merged.render()
+    assert "R04.4-unrealized-family" in _rules(merged, refusing=False), merged.render()
 
 
 def test_an_unrealized_family_still_needs_a_route_unless_it_is_an_unassessed_export() -> None:
-    files = _new_family(fixture_tree_files(), routes=[], admission=ADMITTED)
+    base = fixture_tree_files()
+    files = _new_family(base, routes=[], admission=ADMITTED)
 
-    report = _validate(files)
+    report = _validate(files, bases=[tree(base, "K_B")])
 
-    assert _rules(report) == {"R04.2-coverage"}, report.render()
-    assert "lists no route and is not legacy-unassessed" in report.refusals[0].message
+    assert _rules(report) == {"R04.2-coverage", "R04.4-unrealized-family"}, report.render()
+    (coverage,) = (one for one in report.refusals if one.rule == "R04.2-coverage")
+    assert "lists no route and is not legacy-unassessed" in coverage.message
 
 
-def test_an_exported_family_without_routes_is_route_unassigned_and_coverage_is_waived() -> None:
-    files = _with_family(fixture_tree_files(), routes=[])
+def test_a_carried_exported_family_without_routes_is_migration_debt() -> None:
+    base = _with_family(fixture_tree_files(), routes=[])
 
-    report = _validate(files)
+    report = _validate(dict(base), bases=[tree(dict(base), "K_B")])
 
     assert report.ok, report.render()
     assert _rules(report, refusing=False) == {"R04.4-route-unassigned", LEGACY_COUNT}
@@ -342,9 +363,10 @@ def test_an_exported_family_without_routes_is_route_unassigned_and_coverage_is_w
 
 
 def test_a_family_without_routes_that_is_not_legacy_unassessed_violates_coverage() -> None:
-    files = _with_family(fixture_tree_files(), routes=[], admission=ADMITTED)
+    base = fixture_tree_files()
+    files = _with_family(base, routes=[], admission=ADMITTED)
 
-    report = _validate(files)
+    report = _validate(files, bases=[tree(base, "K_B")])
 
     assert _rules(report) == {"R04.2-coverage"}, report.render()
     message = report.refusals[0].message

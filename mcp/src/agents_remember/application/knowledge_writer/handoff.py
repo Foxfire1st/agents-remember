@@ -19,8 +19,9 @@ nothing.
 ``id``, ``schema``, ``origin`` and ``revision`` and refuses them there.
 
 **History** rows are ``{subject, disposition, reason, items?, covers?, effect?, because?,
-examined?}``. The writer mints the row ID, fills the invariant's or family's own revision and each
-examined member's revision, and writes each covered entry's ``before`` and ``after`` anchor.
+examined?, considered?, ref?}``. The writer mints the row ID, fills the invariant's, family's or
+record's own revision and each examined member's revision, fills an onboarding row's ``sources``
+from the code candidate, and writes each covered entry's ``before`` and ``after`` anchor.
 A changed family row requires its authored effect; other family dispositions refuse that field.
 A cover of a ``moved`` row may name another source ``path``: the entry moves there and is
 re-anchored at C. A cover may carry a ``rationale``: the covered realization entry keeps its ID
@@ -51,7 +52,18 @@ HANDLE_PREFIX: Final = "handoff:"
 WRITER_OWNED_FIELDS: Final = frozenset({"id", "schema", "origin", "revision"})
 SECTIONS: Final = ("entries", "records", "history")
 _ROW_KEYS: Final = frozenset(
-    {"subject", "disposition", "reason", "items", "covers", "effect", "because", "examined", "ref"}
+    {
+        "subject",
+        "disposition",
+        "reason",
+        "items",
+        "covers",
+        "effect",
+        "because",
+        "examined",
+        "considered",
+        "ref",
+    }
 )
 # The architect's ruling (L21 review, finding 6): the template's ``incidental`` has no spelling in the
 # file format and is written as ``support``.
@@ -240,6 +252,8 @@ class RowRequest:
     effect_supplied: bool = False
     because: tuple[Any, ...] = ()
     examined: tuple[str, ...] = ()
+    considered: tuple[str, ...] = ()
+    """A membership row's examined families (MIK-R53 rule 6)."""
     ref: Mapping[str, Any] | None = None
     """A planned row's ``ref`` (MIK-R11 rule 5)."""
 
@@ -671,16 +685,31 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
     if not isinstance(raw, Mapping):
         problems.append(Problem(where, "a row is a JSON object"))
         return None
-    owned = sorted({"id", "revision"} & set(raw))
+    owned = sorted({"id", "revision", "sources"} & set(raw))
     if owned:
         problems.append(Problem(where, f"the writer owns {owned}; remove them from the row"))
-    unknown = sorted(set(raw) - _ROW_KEYS - {"id", "revision"})
+    unknown = sorted(set(raw) - _ROW_KEYS - {"id", "revision", "sources"})
     if unknown:
         problems.append(Problem(where, f"unknown row key(s) {unknown}; known: {sorted(_ROW_KEYS)}"))
     if raw.get("because") is not None and not isinstance(raw.get("because"), list):
         problems.append(Problem(where, "'because' is a list of decision IDs and requirements"))
     if raw.get("ref") is not None and not isinstance(raw.get("ref"), Mapping):
         problems.append(Problem(where, "'ref' is an object naming one row, invariant, ..."))
+    considered_raw = raw.get("considered")
+    if considered_raw is not None and (
+        not isinstance(considered_raw, list)
+        or not all(isinstance(one, str) and one.strip() for one in considered_raw)
+    ):
+        # Malformed members are named and refused here, never laundered into a different
+        # examination: an intentional empty list stays the only empty form (MIK-R53 rule 6).
+        problems.append(
+            Problem(
+                where,
+                f"'considered' is a list of family IDs, not {considered_raw!r}; "
+                "name every examined family as a non-blank string",
+            )
+        )
+        return None
     subject, disposition, reason = (
         _text(raw.get("subject")),
         _text(raw.get("disposition")),
@@ -706,5 +735,6 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         effect_supplied="effect" in raw,
         because=tuple(because) if isinstance(because, list) else (),
         examined=_identifiers(raw.get("examined")),
+        considered=_identifiers(raw.get("considered")),
         ref=raw["ref"] if isinstance(raw.get("ref"), Mapping) else None,
     )

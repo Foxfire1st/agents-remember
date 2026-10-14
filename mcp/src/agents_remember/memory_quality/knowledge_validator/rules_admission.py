@@ -19,12 +19,16 @@ maintenance**, so the same failure is refused on a new record and only reported 
   facts the derived index (MIK-R23) projects -- do not support. A record with no criterion at all
   does not parse (MIK-R21 rule 4: ``criteria`` has at least one item) and is refused by the shape
   rule, naming ``admission.criteria``.
-* **Reported on every other record** (``R27.2-existing-record``, report-only): a claimed
+* **Reported on every other record** (``R27.2-existing-record``, ``merge_reports``): a claimed
   ``spans_locations`` or ``guarded_by_test`` that no longer holds -- a test was deleted, a
-  realization moved into the same file. An unrelated commit, or a master's own landing, is never
-  blocked by an old record's admission.
-* **Counted** (``R27.4-legacy-unassessed``, report-only): the live records still marked
-  ``legacy-unassessed``, until the migration (MIK-R19) assesses or demotes each one.
+  realization moved into the same file. The finding refuses at every commit and landing route
+  and reports only at a sync merge, which can join two valid sides; an unrelated commit, or a
+  master's own landing, is never blocked by an old record's admission.
+* **Counted** (``R27.4-legacy-unassessed``, ``migration_debt``): the live records still marked
+  ``legacy-unassessed``, until the migration (MIK-R19) assesses or demotes each one. A finding a
+  comparison base already holds is reported while the migration is not complete, and refused at
+  every route once it is -- then one finding per record; a finding no base holds is new and
+  refuses at once.
 * **Refused at every route** (``R27.4-record-kept``, MIK-R52 rule 6): every record ID a
   comparison base holds still exists in the candidate. A record is never deleted: it leaves use
   by ``status: retired``, never by removing its file.
@@ -48,10 +52,15 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import Final
 
+from agents_remember.memory_quality.knowledge_validator.parsed import parse_tree
 from agents_remember.memory_quality.knowledge_validator.registry import (
     Finding,
     ValidationContext,
     ValidationRule,
+    debt_report_note,
+    debt_reports_at,
+    merge_report_note,
+    merge_reports_at,
     register_rule,
     sidecar_entries,
 )
@@ -195,6 +204,27 @@ def _exported(record: AdmittedRecord) -> bool:
     return bool(legacy_id) and derived_record_id(type(record).record_kind, legacy_id) == record.id
 
 
+def _base_live_unassessed_ids(bases: Iterable[KnowledgeTree]) -> frozenset[str]:
+    """The IDs of the records a comparison base holds as a live unassessed finding (rule 10).
+
+    Carried debt is the actual base finding -- a record the base holds assessed or retired does
+    not carry the candidate's unassessed state, so assessed-to-unassessed and newly live states
+    refuse at once (review round F10).
+    """
+
+    found: set[str] = set()
+    for base in bases:
+        for record_file in parse_tree(base).records:
+            record = record_file.record
+            if (
+                isinstance(record, InvariantRecord | FamilyRecord | DecisionRecord)
+                and record.admission == LEGACY_UNASSESSED
+                and not _retired(record)
+            ):
+                found.add(record.id)
+    return frozenset(found)
+
+
 def _retired(record: AdmittedRecord) -> bool:
     return not isinstance(record, DecisionRecord) and record.status == "retired"
 
@@ -278,33 +308,64 @@ def check_new_record_admission(context: ValidationContext) -> Iterator[Finding]:
 
 def check_existing_record_admission(context: ValidationContext) -> Iterator[Finding]:
     facts = _entry_facts(context)
+    reporting = merge_reports_at(context)
     for admitted in _admitted_records(context):
         if admitted.new or _retired(admitted.record):
             continue
         for criterion, why in _unsupported(admitted, facts):
+            message = (
+                f"{admitted.kind} {admitted.id} {why}; admission governs "
+                f"creation (reassess {criterion} or demote the record)"
+            )
+            if reporting:
+                message += f"; {merge_report_note(context)}"
             yield Finding(
                 admitted.path,
                 "admission.criteria",
-                f"{admitted.kind} {admitted.id} {why}; reported, not refused: admission governs "
-                f"creation (reassess {criterion} or demote the record)",
+                message,
             )
 
 
 def check_legacy_unassessed(context: ValidationContext) -> Iterator[Finding]:
-    counts: Counter[str] = Counter(
-        admitted.kind
+    migration = context.migration
+    base_ids = _base_live_unassessed_ids(context.bases)
+    unassessed = [
+        admitted
         for admitted in _admitted_records(context)
         if admitted.record.admission == LEGACY_UNASSESSED and not _retired(admitted.record)
-    )
-    if not counts:
-        return
-    parts = ", ".join(f"{counts[kind]} {kind}(s)" for kind in sorted(counts))
-    yield Finding(
-        KNOWLEDGE_ROOT,
-        "admission",
-        f"{sum(counts.values())} live record(s) are still legacy-unassessed ({parts}); the "
-        "migration (MIK-R19) assesses or demotes each one",
-    )
+    ]
+    carried = [admitted for admitted in unassessed if admitted.id in base_ids]
+    new = [admitted for admitted in unassessed if admitted.id not in base_ids]
+    if carried and debt_reports_at(context, carried=True):
+        counts: Counter[str] = Counter(admitted.kind for admitted in carried)
+        parts = ", ".join(f"{counts[kind]} {kind}(s)" for kind in sorted(counts))
+        yield Finding(
+            KNOWLEDGE_ROOT,
+            "admission",
+            f"{len(carried)} live record(s) are still legacy-unassessed ({parts}); the "
+            f"migration (MIK-R19) assesses or demotes each one; {debt_report_note(migration)}",
+            carried=True,
+        )
+    refusing = [(admitted, True) for admitted in new]
+    if migration.complete:
+        refusing += [(admitted, False) for admitted in carried]
+    for admitted, is_new in refusing:
+        if is_new:
+            message = (
+                f"{admitted.kind} {admitted.id} is legacy-unassessed but no comparison base "
+                "holds it: a new record states the criterion it meets with a one-sentence "
+                "justification, which only exported records may skip by carrying "
+                "legacy-unassessed (MIK-R53 rule 10)"
+            )
+        else:
+            message = (
+                f"{admitted.kind} {admitted.id} is still legacy-unassessed and the migration "
+                "is complete (every onboarding route migrated or excluded): assess the record "
+                "or demote it (MIK-R19, MIK-R53 rule 10)"
+            )
+        if debt_reports_at(context, carried=not is_new):
+            message += f"; {debt_report_note(migration)}"
+        yield Finding(admitted.path, "admission", message)
 
 
 def check_record_kept(context: ValidationContext) -> Iterator[Finding]:
@@ -337,16 +398,17 @@ ADMISSION_RULES = (
     ValidationRule(
         "R27.2-existing-record",
         "MIK-R27 rule 2",
-        "an existing record whose checkable admission criterion no longer holds is reported",
+        "an existing record whose checkable admission criterion no longer holds refuses, merge_reports",
         check_existing_record_admission,
-        report_only=True,
+        writer_reports=True,
+        merge_reports=True,
     ),
     ValidationRule(
         "R27.4-legacy-unassessed",
         "MIK-R27 rule 4",
-        "records still legacy-unassessed are counted",
+        "records still legacy-unassessed are migration debt, one finding per record once refused",
         check_legacy_unassessed,
-        report_only=True,
+        migration_debt=True,
     ),
     ValidationRule(
         "R27.4-record-kept",

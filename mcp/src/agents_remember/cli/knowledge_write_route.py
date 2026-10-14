@@ -27,7 +27,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.application.knowledge_worklist.leaf import read_leaf_worklist
+from agents_remember.application.knowledge_worklist.leaf import (
+    paired_memory_commit,
+    read_leaf_worklist,
+)
 from agents_remember.application.knowledge_writer import (
     Owner,
     WriteReport,
@@ -200,6 +203,23 @@ class LeafQuestions:
         )
 
 
+def _leaf_memory_base(contract: WorktreeContract) -> str | None:
+    """The leaf's paired memory base commit (the gate's K_B), or ``None`` when it cannot be
+    resolved: the card comparison then keeps the operation's own base (MIK-R53 rule 2)."""
+
+    if contract.memory_worktree is None or not contract.memory_source_branch:
+        return None
+    try:
+        return paired_memory_commit(
+            contract.memory_worktree,
+            contract.memory_source_branch,
+            contract.code_repo_path,
+            contract.code_base_commit,
+        )
+    except Exception:
+        return None
+
+
 def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
     """``knowledge-ingest`` on a converted memory worktree: the leaf writes through the file writer."""
 
@@ -226,6 +246,7 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
             questions=LeafQuestions(args, contract),
             worklist=read_leaf_worklist(contract.contract_path),
             code_base=contract.code_base_commit or None,
+            memory_base=_leaf_memory_base(contract),
         )
     )
     _print(report, bool(args.as_json))

@@ -66,6 +66,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.next_step import next_step_for
 from agents_remember.application.provider_runtime import setup_progress_path
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
@@ -775,6 +776,11 @@ class WorkflowChainObservation:
         started = self._record("worktree_start")
         assert started.kind == "RETURNED", started
 
+        # The work precedes its source-bound judgment.
+        contract = load_contract(self.world.contract)
+        (contract.code_worktree / CODE_CHANGE).write_text("work\n", encoding="utf-8")
+        code = CodeSnapshot.capture(contract.code_worktree)
+
         # Converted memory: the leaf's closeout judges the work file against the invariant
         # gate, which needs the file's onboarding trace. Seed L1's open history with the
         # trace row; the closeout extends it with its own rows.
@@ -795,16 +801,12 @@ class WorkflowChainObservation:
                             "disposition": "no_impact",
                             "reason": "The work file carries no invariant.",
                             "items": [],
+                            "sources": [{"path": CODE_CHANGE, "blob": code.blobs[CODE_CHANGE]}],
                         }
                     ],
                 }
             ),
             encoding="utf-8",
-        )
-
-        # The work itself: one real change inside the code worktree.
-        (load_contract(self.world.contract).code_worktree / CODE_CHANGE).write_text(
-            "work\n", encoding="utf-8"
         )
 
         self._record("worktree_status", "phase-guidance")

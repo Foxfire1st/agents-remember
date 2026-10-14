@@ -25,13 +25,13 @@ import posixpath
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
 
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
     run_git,
 )
+from agents_remember.memory_quality.knowledge_census.files import onboarding_routes
 from agents_remember.memory_quality.knowledge_validator.trees import (
     KnowledgeTreeReadError,
     code_tree_from_git,
@@ -45,8 +45,6 @@ from agents_remember.models.knowledge_files.census import (
 )
 from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
 from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH
-
-ROUTE_CARD: Final = "overview.md"
 
 
 class CensusBaselineError(ValueError):
@@ -76,21 +74,6 @@ def _paths_at(repository: Path, commit: str, *, side: str) -> frozenset[str]:
         raise CensusBaselineError(
             f"unreadable baseline: cannot list the {side} commit {commit}: {error}"
         ) from error
-
-
-def onboarding_routes(memory_paths: Iterable[str]) -> frozenset[str]:
-    """The onboarding routes of a memory tree: ``.`` or the directory holding an ``overview.md``."""
-
-    routes: set[str] = set()
-    for path in memory_paths:
-        directory, _, name = path.rpartition("/")
-        if name != ROUTE_CARD:
-            continue
-        if directory == ONBOARDING_ROOT:
-            routes.add(ROOT_ROUTE_PATH)
-        elif directory.startswith(f"{ONBOARDING_ROOT}/"):
-            routes.add(directory.removeprefix(f"{ONBOARDING_ROOT}/"))
-    return frozenset(routes)
 
 
 def governing_route(onboarding_location: str, routes: frozenset[str]) -> str | None:

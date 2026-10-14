@@ -1,8 +1,9 @@
 """What the validator returns: violations, the report, and the refusal (MIK-R22, Failure behavior).
 
-Every violation names its file, its field and its rule. A violation of a rule the registry marks
-report-only is carried in the report but never refuses. A refusal lists every refusing violation,
-and a formatting violation names the formatter command that fixes it.
+Every violation names its file, its field and its rule. A violation the validator reports at the
+route (a ``merge_reports`` finding at a sync merge, a ``migration_debt`` finding a base holds
+while the migration is incomplete) is carried in the report but never refuses. A refusal lists
+every refusing violation, and a formatting violation names the formatter command that fixes it.
 """
 
 from __future__ import annotations

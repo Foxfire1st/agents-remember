@@ -282,8 +282,9 @@ def test_empty_missing_and_unbuildable_base_trees(tmp_path: Path) -> None:
     ), finding
 
 
-def test_carried_anchor_is_reported_stale_never_refused_as_new(tmp_path: Path) -> None:
-    """Rule 4: with the leaf base a carried deleted anchor is stale, not a new refusal."""
+def test_carried_anchor_is_refused_as_carried_stale_never_as_new(tmp_path: Path) -> None:
+    """Rule 4 as decided by MIK-R53 rule 11: with the leaf base a carried deleted anchor is
+    stale, refused as carried-stale at the leaf route -- never as a new anchor-path refusal."""
 
     code = _code_tree(tmp_path)
     memory = _converted_memory(tmp_path, "candidate")
@@ -315,7 +316,8 @@ def test_carried_anchor_is_reported_stale_never_refused_as_new(tmp_path: Path) -
         code_repository_root=code, context=_context(memory, tmp_path), base=_leaf_base
     )
     assert based["states"] == {"current": 0, "stale": 1}, based
-    assert based["actionableCount"] == 1 and based["violationCount"] == 0, based
+    assert based["actionableCount"] == 1 and based["violationCount"] == 1, based
+    assert based["violationSample"][0]["rule"] == "R22.6-carried-stale", based
 
 
 def _world(tmp_path: Path) -> tuple[Path, Path]:
@@ -679,6 +681,10 @@ def test_descriptions_say_what_the_check_is() -> None:
         text = _normalized_text(copy)
         for phrase in (*_MEASUREMENT, *_CURRENTNESS, *_ADVISORY):
             assert phrase in text, (copy, phrase)
+        # F12: converted drift doctrine requires the current row; a counted card edit alone
+        # never answers.
+        assert "a current `onboarding_trace` row about the file" in text, copy
+        assert "a counted change of its card alone never answers" in text, copy
 
     acceptance_copies = _skill_copies("c-10-adopt-memory-baseline")
     assert len(acceptance_copies) == 10, [str(path) for path in acceptance_copies]
@@ -817,7 +823,9 @@ def test_context_packet_leaf_route_binds_the_leaf_base(tmp_path: Path) -> None:
 
 
 def test_context_packet_agrees_with_the_summary_on_carried_anchors(tmp_path: Path) -> None:
-    """L44-C1-05: leaf route and summary agree a carried deleted anchor is stale only."""
+    """L44-C1-05 as amended (MIK-R53 rule 11, Supersedes names MIK-R44 v2 for this kind):
+    leaf route and summary agree a carried deleted anchor is stale, and both refuse it as
+    R22.6-carried-stale."""
 
     scratch = tmp_path / "chain"
     scratch.mkdir()
@@ -849,8 +857,14 @@ def test_context_packet_agrees_with_the_summary_on_carried_anchors(tmp_path: Pat
             cast(Any, SimpleNamespace(path=scope.code_root)),
         ),
     )
-    assert tooled["violationCount"] == 0, tooled
-    assert fold["violationCount"] == 0, fold
+    tooled_rules = {entry["rule"] for entry in tooled["violationSample"]}
+    fold_rules = {entry["rule"] for entry in fold["violationSample"]}
+    assert tooled_rules == {"R22.6-carried-stale"}, tooled
+    assert fold_rules == {"R22.6-carried-stale"}, fold
+    assert tooled["violationSample"] == fold["violationSample"], (tooled, fold)
+    # Exact fixture count: two stale reference targets (references.1/.8 at the deleted
+    # docs/guide.md) plus the realizes anchor at the gone src/pkg/deleted.py.
+    assert tooled["violationCount"] == fold["violationCount"] == 3, (tooled, fold)
     assert tooled["actionableCount"] >= 1, tooled
     assert fold["states"] == tooled["states"], (fold, tooled)
     assert fold["actionableCount"] == tooled["actionableCount"], (fold, tooled)

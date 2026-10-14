@@ -59,6 +59,7 @@ from agents_remember.application.knowledge_worklist.code import (
     hits_old,
 )
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
+from agents_remember.application.knowledge_worklist.membership import membership_items
 from agents_remember.application.knowledge_worklist.planned_effects import (
     Declaration,
     reconcile_planned_effects,
@@ -79,6 +80,7 @@ from agents_remember.application.knowledge_worklist.route_conditions import (
     RouteInputs,
     family_route_conditions,
 )
+from agents_remember.application.knowledge_worklist.touched_records import touched_record_items
 from agents_remember.application.knowledge_worklist.unexplained import (
     RouteCoverage,
     UnexplainedSides,
@@ -279,8 +281,13 @@ class _Run:
             [
                 *(planned.mark(item.to_document()) for item in items),
                 *planned.items,
-                *unexplained.items,
-                *reconsideration.items,
+                *(planned.mark(item) for item in unexplained.items),
+                *(planned.mark(item) for item in reconsideration.items),
+                *(planned.mark(item) for item in membership_items(inputs.base, inputs.candidate)),
+                *(
+                    planned.mark(item)
+                    for item in touched_record_items(inputs.base, inputs.candidate, inputs.owner)
+                ),
             ],
             key=lambda item: (item["kind"], item["subject"]),
         )
@@ -568,7 +575,7 @@ class _Run:
             document["fileLevel"] = {"linked": self._file_covered(path)}
         if hunks is None:
             return document
-        base_spans = self._spans(self.inputs.base, path, base_blob)
+        base_spans = self._spans(self.inputs.base, path, base_blob, tree_side="base")
         candidate_spans = self._spans(self.inputs.candidate, path, candidate_blob)
         document["hunks"] = [
             {**hunk.to_document(), "linked": _linked(hunk, base_spans, candidate_spans)}
@@ -581,14 +588,16 @@ class _Run:
     ) -> tuple[Hunk, ...] | None:
         return change_hunks(self.inputs.code, change, base_blob, candidate_blob)
 
-    def _spans(self, side: KnowledgeSide, path: str, blob: str | None) -> list[tuple[int, int]]:
+    def _spans(
+        self, side: KnowledgeSide, path: str, blob: str | None, *, tree_side: str = "candidate"
+    ) -> list[tuple[int, int]]:
         if blob is None:
             return []
         spans: list[tuple[int, int]] = []
         for entry_id in side.entries_by_path.get(path, ()):
             anchor = side.entries[entry_id].entry.anchor
             resolved = self.inputs.code.resolve(
-                path, anchor.locator.to_document(), anchor.blob, blob
+                path, anchor.locator.to_document(), anchor.blob, blob, side=tree_side
             )
             if resolved is not None:
                 spans.append(resolved.span)

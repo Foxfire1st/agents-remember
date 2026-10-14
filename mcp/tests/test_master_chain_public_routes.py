@@ -545,7 +545,7 @@ def _public_leaf(tmp_path: Path) -> WorktreeContract:
     """
 
     world = build_gated(tmp_path / "leaf")
-    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(*TRACES))
+    _answered(world, world.reanchor("RLZ-A00001"), *trace_rows(world, *TRACES))
     for repo in (world.code, world.memory):
         _git(repo, "branch", "ar/gate_case", "main")
         _git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "main"))

@@ -20,8 +20,9 @@ intersecting no entry:
   admits only ``no_invariant``). Otherwise the leaf's ``no_invariant`` row answers it, with subject
   ``hunk:<item id>`` or ``file:<path>@<blob>`` (:func:`row_subject`). An onboarding change never
   does.
-* **uncovered**: the file's onboarding trace (MIK-R30) -- a counted change of its card, or the
-  leaf's ``onboarding:<path>`` ``no_impact`` row. A ``no_invariant`` row does not.
+* **uncovered**: the file's onboarding trace (MIK-R53 rule 1) -- only the leaf's current
+  eligible ``onboarding:<path>`` row answers it. A ``no_invariant`` row does not, and a
+  counted card edit alone never does.
 
 :func:`unexplained_satisfied_by` is that rule over a stored item; the worklist computes its
 ``satisfiedBy`` with it and the closeout gate (MIK-R09) applies :func:`unexplained_item_open`, so
@@ -38,7 +39,6 @@ from agents_remember.kernel.canonical_json import prefixed_sha256_digest
 
 __all__ = [
     "ABSENT",
-    "COUNTED_CHANGE",
     "COVERED",
     "FILE_ITEM_KIND",
     "HUNK_ITEM_KIND",
@@ -60,8 +60,6 @@ NO_INVARIANT: Final = "no_invariant"
 ABSENT: Final = "absent"
 COVERED: Final = "covered"
 UNCOVERED: Final = "uncovered"
-COUNTED_CHANGE: Final = "counted-change"
-"""``satisfiedBy`` of an uncovered item whose card carries a counted onboarding change."""
 
 _IDENTITY: Final = r"(?:sha256:[0-9a-f]{64}|absent)"
 _BLOB: Final = r"(?:[0-9a-f]{40}|[0-9a-f]{64}|absent)"
@@ -123,10 +121,10 @@ def unexplained_satisfied_by(
     """What satisfies a stored ``unexplained_*`` item, or ``None`` while it is open.
 
     ``rows_by_subject`` maps each history-row subject of the leaf to its row ID. A covered item is
-    answered only by its ``no_invariant`` row; an uncovered item only by the file's onboarding trace:
-    a counted change (``facts.onboardingTrace.countedChange``) or the ``onboarding:<path>`` row. An
-    unreadable card sidecar never satisfies a trace (MIK-R30), and an item whose coverage is not
-    stated is open.
+    answered only by its ``no_invariant`` row; an uncovered item only by the file's onboarding
+    trace row (``onboarding:<path>``). A counted card edit alone never answers; the row is
+    required (MIK-R53 rule 1). An unreadable card sidecar never satisfies a trace (MIK-R30),
+    and an item whose coverage is not stated is open.
     """
 
     facts = item.get("facts")
@@ -142,8 +140,6 @@ def unexplained_satisfied_by(
     trace = facts.get("onboardingTrace")
     if not isinstance(trace, Mapping) or trace.get("sidecarUnreadable"):
         return None
-    if trace.get("countedChange") is True:
-        return COUNTED_CHANGE
     subject = trace.get("subject")
     return rows_by_subject.get(subject) if isinstance(subject, str) else None
 

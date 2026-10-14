@@ -125,10 +125,16 @@ class BuildReport:
 
 
 def parse_tree(snapshot: MemoryTreeSnapshot) -> ParsedTree:
-    """Parse every indexed file of ``snapshot``; a file that fails is a problem, not an error."""
+    """Parse every indexed JSON file of ``snapshot``; a file that fails is a problem, not an error.
+
+    Markdown prose companions ride along as bytes for worklist comparison (MIK-R53) and are
+    never parsed here.
+    """
 
     parsed = ParsedTree()
     for path in sorted(snapshot.files):
+        if path.endswith(".md"):
+            continue
         try:
             _parse_file(parsed, path, snapshot.files[path].decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as error:
