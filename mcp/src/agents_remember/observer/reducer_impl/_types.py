@@ -12,14 +12,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalRecord
-from agents_remember.controlplane.records import GateRecord
 from agents_remember.observer.projection import (
-    AgentPickupNode,
     CloseoutQueueNode,
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
-    ExpectationRowNode,
     LedgerNode,
     ProviderNode,
     RouteCoverageNode,
@@ -54,13 +51,12 @@ class AnalyticalInputs:
     """The pre-image of :class:`Analytics` (slice 3b): what the analytical surfaces are built
     from, and nothing else.
 
-    Broad because ``Analytics`` is broad. It publishes thirteen independent surfaces, and these
-    sixteen fields are exactly what produces them. Ten map to one surface by name
-    (``drift_snapshots`` -> ``driftSnapshots``, ``route_coverage`` -> ``routeCoverage``,
-    ``ledgers`` -> ``ledgers``, ...); the other six produce the three DERIVED surfaces, in
-    pairs -- ``sidecar_staleness`` + ``stalest_limit`` -> ``stalestSidecars``,
-    ``engine_process_facts`` + ``engine_start_progress`` -> ``engineProcesses``, ``gates`` +
-    ``attention_dismissals`` -> ``attentionQueue``.
+    Broad because ``Analytics`` is broad. It publishes eleven independent surfaces. Eight
+    fields map to one surface by name (``drift_snapshots`` -> ``driftSnapshots``,
+    ``route_coverage`` -> ``routeCoverage``, ``ledgers`` -> ``ledgers``, ...); five more produce
+    the three DERIVED surfaces -- ``sidecar_staleness`` + ``stalest_limit`` ->
+    ``stalestSidecars``, ``engine_process_facts`` + ``engine_start_progress`` ->
+    ``engineProcesses``, ``attention_dismissals`` -> ``attentionQueue``.
 
     So there is no sub-concept left to split out. The surfaces are independent cockpit panels
     with nothing binding any subset of them, which means a grouping here would have to be a
@@ -71,9 +67,9 @@ class AnalyticalInputs:
     Optional as a set, not one by one: a caller wanting only the structural tree (the 3a
     contract) passes none of them. Several feed more than one surface -- ``setup_progress``
     alone is read by the Engine Room join, the analytics rollup and the attention queue -- so
-    the whole set is threaded to each builder rather than re-selected per call. Two also leave
+    the whole set is threaded to each builder rather than re-selected per call. One also leaves
     through a second door: ``sidecar_staleness`` is counted into
-    ``WorkspaceProjection.metrics``, and ``gates`` is materialized onto ``lifecycle.gate``.
+    ``WorkspaceProjection.metrics``.
     """
 
     drift_snapshots: list[DriftSnapshotNode] = field(default_factory=list)
@@ -82,14 +78,11 @@ class AnalyticalInputs:
     setup_progress: list[SetupProgressNode] = field(default_factory=list)
     route_coverage: list[RouteCoverageNode] = field(default_factory=list)
     tool_reports: list[ToolReportNode] = field(default_factory=list)
-    agent_pickups: list[AgentPickupNode] = field(default_factory=list)
-    expectation_rows: list[ExpectationRowNode] = field(default_factory=list)
     ledgers: list[LedgerNode] = field(default_factory=list)
     task_documents: list[TaskDocNode] = field(default_factory=list)
     series: list[SeriesNode] = field(default_factory=list)
     closeout_queues: list[CloseoutQueueNode] = field(default_factory=list)
     engine_process_facts: list[EngineProcessFacts] = field(default_factory=list)
     engine_start_progress: list[dict[str, Any]] = field(default_factory=list)
-    gates: list[GateRecord] = field(default_factory=list)
     attention_dismissals: dict[str, AttentionDismissalRecord] = field(default_factory=dict)
     stalest_limit: int = 10

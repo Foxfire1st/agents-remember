@@ -19,16 +19,13 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
-from agents_remember.controlplane.records import GateRecord
 from agents_remember.observer.event_retention import prune_expired_lifecycle_event_logs
 from agents_remember.observer.events import Event
 from agents_remember.observer.projection import (
-    AgentPickupNode,
     CloseoutQueueNode,
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
-    ExpectationRowNode,
     LedgerNode,
     ProviderNode,
     RouteCoverageNode,
@@ -50,12 +47,9 @@ from agents_remember.serving.projections.contract_snapshot import (
 )
 from agents_remember.serving.projections.drift_snapshots import prune_orphaned_drift_snapshots
 from agents_remember.serving.projections.snapshots import (
-    read_agent_pickups,
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
-    read_expectation_rows,
-    read_gates,
     read_providers,
     read_series_documents,
     read_setup_progress_nodes,
@@ -136,15 +130,12 @@ class ProjectionInputs:
     setup_progress: list[SetupProgressNode]
     route_coverage: list[RouteCoverageNode]
     tool_reports: list[ToolReportNode]
-    agent_pickups: list[AgentPickupNode]
-    expectation_rows: list[ExpectationRowNode]
     ledgers: list[LedgerNode]
     task_documents: list[TaskDocNode]
     series: list[SeriesNode]
     closeout_queues: list[CloseoutQueueNode]
     engine_process_facts: list[EngineProcessFacts]
     engine_start_progress: list[dict[str, Any]]
-    gates: list[GateRecord]
     attention_dismissals: dict[str, AttentionDismissalRecord]
     active_worktree_groups: list[str]
 
@@ -208,14 +199,11 @@ class ProjectionInputState:
         self._setup_summaries: list[SetupSummaryNode] = []
         self._setup_progress: list[SetupProgressNode] = []
         self._tool_reports: list[ToolReportNode] = []
-        self._agent_pickups: list[AgentPickupNode] = []
-        self._expectation_rows: list[ExpectationRowNode] = []
         self._task_documents: list[TaskDocNode] = []
         self._series: list[SeriesNode] = []
         self._closeout_queues: list[CloseoutQueueNode] = []
         self._engine_process_facts: list[EngineProcessFacts] = []
         self._engine_start_progress: list[dict[str, Any]] = []
-        self._gates: list[GateRecord] = []
         self._attention_dismissals: dict[str, AttentionDismissalRecord] = {}
         self._provider_groups: set[str] = set()
         self._engine_groups: set[str] = set()
@@ -247,7 +235,7 @@ class ProjectionInputState:
         self._refresh_providers(config, pass_, providers)
         self._refresh_engine_facts(config, pass_, engines, landing_state=readers.landing_state)
         self._refresh_drift(config, pass_)
-        self._refresh_workspace(config, pass_, observer_root=observer_root)
+        self._refresh_workspace(pass_, observer_root=observer_root)
         self._refresh_progress(config, pass_)
 
         sidecars, routes, ledgers = readers.repo_surfaces(config, now)
@@ -262,15 +250,12 @@ class ProjectionInputState:
             setup_progress=self._setup_progress,
             route_coverage=routes,
             tool_reports=self._tool_reports,
-            agent_pickups=self._agent_pickups,
-            expectation_rows=self._expectation_rows,
             ledgers=ledgers,
             task_documents=self._task_documents,
             series=self._series,
             closeout_queues=self._closeout_queues,
             engine_process_facts=self._engine_process_facts,
             engine_start_progress=self._engine_start_progress,
-            gates=self._gates,
             attention_dismissals=self._attention_dismissals,
             active_worktree_groups=sorted(engine_groups),
         )
@@ -371,23 +356,9 @@ class ProjectionInputState:
         prune_orphaned_drift_snapshots(config, contracts=self._contracts)
         self._drift_snapshots = read_drift_snapshots(config.coordination_root, now=pass_.now)
 
-    def _refresh_workspace(
-        self,
-        config: McpRuntimeConfig,
-        pass_: RefreshPass,
-        *,
-        observer_root: Path,
-    ) -> None:
-        if not (
-            pass_.refresh.is_heartbeat
-            or pass_.refresh.affects(ProjectionDomain.WORKSPACE)
-            or pass_.refresh.affects(ProjectionDomain.LIFECYCLES)
-        ):
+    def _refresh_workspace(self, pass_: RefreshPass, *, observer_root: Path) -> None:
+        if not (pass_.refresh.is_heartbeat or pass_.refresh.affects(ProjectionDomain.WORKSPACE)):
             return
-        now = pass_.now
-        self._gates = read_gates(config.coordination_root, now=now)
-        self._agent_pickups = read_agent_pickups(config.coordination_root, now=now)
-        self._expectation_rows = read_expectation_rows(config.coordination_root, now=now)
         self._attention_dismissals = AttentionDismissalStore(observer_root).current()
 
     def _refresh_progress(self, config: McpRuntimeConfig, pass_: RefreshPass) -> None:
@@ -415,7 +386,6 @@ class ProjectionInputState:
             self._setup_progress, "heartbeatAgeSeconds", elapsed
         )
         self._tool_reports = _advance_model_age(self._tool_reports, "ageSeconds", elapsed)
-        self._agent_pickups = _advance_model_age(self._agent_pickups, "ageSeconds", elapsed)
         self._task_documents = _advance_model_age(self._task_documents, "ageSeconds", elapsed)
         self._series = _advance_model_age(self._series, "ageSeconds", elapsed)
         self._engine_start_progress = [

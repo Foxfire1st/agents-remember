@@ -3,13 +3,9 @@
 The retirement finds its caller by the stored role binding that ``role_start`` trusts --
 the binding of the tool server this call runs on -- and admits the agent whose id the
 launch record names as the parent of the seat. It archives the agent on the host without
-giving it a turn, and writes the retirement into the launch record with the caller and
+gives it a turn, and writes the retirement into the launch record with the caller and
 the reason. After it, a message to that agent is refused as for an archived agent, and
 the address by role no longer finds it.
-
-The retirement of seats under the earlier launch mechanism (the structural
-``retire_child`` path through plane identity) keeps working as it does; this module is
-only the native receipt-tracked path, chosen when the call names an agent id.
 """
 
 from __future__ import annotations

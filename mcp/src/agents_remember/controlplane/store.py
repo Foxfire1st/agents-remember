@@ -7,11 +7,14 @@ beside that lifecycle's ``events.jsonl``; lifecycle-less gates go to
 set, so a gate's whole history stays on disk and the current state is a pure
 read.
 
-CONCURRENCY -- this log has TWO writing processes, and this is the store that
-carries authority. The MCP server mints, decides, applies and deletes gates; the
-dashboard raises and resolves ``agent-question`` gates for adapter-owned sessions
-(``serving/hosted_interactions.py``) and its entire purpose is to decide gates for
-lifecycles owned by other sessions. This docstring used to claim one writer per
+CONCURRENCY -- this log had TWO writing processes, and this is the store that
+carries authority. The MCP server minted, decided, applied and deleted gates; the
+dashboard raised and resolved ``agent-question`` gates for the sessions the product
+hosted itself, and its entire purpose there was to decide gates for lifecycles owned
+by other sessions. Neither part exists any more: what writes this log today is the
+landing chain's :meth:`GateStore.claim_approval`. The account below is of the
+two-writer time and is why the lock discipline is what it is. This docstring used
+to claim one writer per
 file "in practice because a lifecycle is owned by one live session", borrowed from
 the event store next door. That was false on both counts -- the compactor was a
 third participant again, running on the dashboard's projection tick -- and the
@@ -49,17 +52,17 @@ The contract is now declared rather than assumed: see
 Appends and rewrites exclude each other through the log's own lockfile, always
 and in every process -- that is what makes the loss zero. Reclamation is named as
 the MCP process's, but nothing in this module enforces that: :meth:`GateStore.compact`
-takes the lock and rewrites, and a dashboard call would go through. The guard is at
-the CALL SITE (``application/gate_tools.py``, which asks
+takes the lock and rewrites, and a dashboard call would go through. The guard belongs
+at the CALL SITE (a caller asks
 :meth:`~agents_remember.controlplane.durable_store.StoreOwnership.is_compaction_owner`
-before reclaiming) and STRUCTURALLY, in that the dashboard's projection tick no
+before reclaiming) and is STRUCTURAL, in that the dashboard's projection tick no
 longer rewrites this log at all. Both are advisory and neither raises; the
 durability rests on the lock. Do not read ownership as more than it is.
 
 READS ARE DELIBERATELY NOT UNIFORM (leaf 260731-EFA-L5 R8). :meth:`read` is STRICT
 and raises on a torn line, because it backs :meth:`current`, :meth:`find` and
-:meth:`all_current` -- the enforcement fold ``serving/hosted_interactions.py`` and
-``worktrees/modules/integrate.py`` consult before a mutation. Skipping a malformed
+:meth:`all_current` -- the enforcement fold ``worktrees/modules/integrate.py``
+consults before a mutation. Skipping a malformed
 record there could drop an ``applied`` marker and let the fold conclude the
 approval was never consumed. :meth:`projected_current` is TOLERANT and is for the
 dashboard projection only, which must degrade rather than crash on a 1s tick; it
@@ -264,10 +267,10 @@ class GateStore:
         and rewrites, and a call from any process proceeds. ``rewrite_lines`` checks only that
         the lock is held (``require_lock_held``), never who is calling.
 
-        The ownership guard is at the CALL SITE: ``application/gate_tools.py`` asks
+        The ownership guard belongs at the CALL SITE: a caller asks
         :meth:`~agents_remember.controlplane.durable_store.StoreOwnership.is_compaction_owner`
         and skips the reclaim when it is not the owner. It has to live there rather than here for
-        the reason that predicate's docstring gives -- the decide path is shared code executed by
+        the reason that predicate's docstring gives -- the decide path was shared code executed by
         both processes -- and note that
         :meth:`~agents_remember.controlplane.durable_store.StoreOwnership.check_declared_writer`
         could not have served as the guard in any case: the dashboard IS a declared gate writer

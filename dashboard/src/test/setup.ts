@@ -86,8 +86,8 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof globalThis.ResizeObserver;
 }
 
-// jsdom omits scrollIntoView; cmdk (the sessions command palette) calls it on the
-// selected item. Inert stub — tests assert selection state, never scroll geometry.
+// jsdom omits scrollIntoView; the readers and the reviewer call it on the element they bring
+// into view. Inert stub — tests assert selection state, never scroll geometry.
 if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = () => {};
 }
@@ -108,9 +108,8 @@ for (const ctor of [
   proto.getPointAtLength = () => ({ x: 0, y: 0 });
 }
 
-// CodeMirror's vim mode measures the cursor via Range.getClientRects(); jsdom's Range omits it,
-// and the exception used to print while the test still passed. An empty rect list is the honest
-// jsdom answer (no layout), and CodeMirror treats it as "no measurable position".
+// CodeMirror measures positions via Range.getClientRects(); jsdom's Range omits it. An empty rect
+// list is the honest jsdom answer (no layout), and CodeMirror treats it as "no measurable position".
 if (typeof Range !== "undefined" && typeof Range.prototype.getClientRects !== "function") {
   Range.prototype.getClientRects = (() => []) as unknown as typeof Range.prototype.getClientRects;
   Range.prototype.getBoundingClientRect = (() => ({

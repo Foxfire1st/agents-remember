@@ -39,6 +39,13 @@ GateState = Literal[
     "expired",
 ]
 
+# What a refusal by a stored gate says beside its reason: no part of the product decides a
+# gate any more, so the gate logs are removed on the user's word (MIK-R113 rule 5).
+STORED_GATE_WAY_OUT = (
+    "No part of the product decides a stored gate any more: "
+    "`agents-remember removed-stores` names the gate logs and removes them on your word"
+)
+
 GATE_KINDS: tuple[GateKind, ...] = get_args(GateKind)
 
 

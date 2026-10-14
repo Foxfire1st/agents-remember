@@ -2,7 +2,7 @@
 
 Covers the pure per-entity projection diff (``serving.delta``), the shared projector's
 prime/current/subscribe fan-out (``serving.projector``), the SSE event sequence
-(``serving.app.stream_events`` -- snapshot then deltas), the FastAPI app endpoints via
+(``serving._app_common.stream_events`` -- snapshot then deltas), the FastAPI app endpoints via
 TestClient (``/api/state``, ``/api/actions``, static mount), the shipped static-bundle
 resolver (``serving.static``), and the umbrella ``agents-remember dashboard`` CLI parsing.
 
@@ -47,10 +47,10 @@ from agents_remember.observer.projection import (
 )
 from agents_remember.serving import change_watcher as watcher_module
 from agents_remember.serving import projector as projector_module
+from agents_remember.serving._app_common import stream_events
 from agents_remember.serving.app import (
     LiveProjectionInputs,
     create_app,
-    stream_events,
 )
 from agents_remember.serving.change_watcher import ChangePacer, ProjectionInputWatcher
 from agents_remember.serving.projections import landing_state as landing_module
@@ -81,9 +81,7 @@ def _config(tmp: Path) -> McpRuntimeConfig:
     )
 
 
-def _lifecycle(
-    ident: str, *, stateEnteredAt: str = "", state: State = "running"
-) -> LifecycleProjection:
+def _lifecycle(ident: str, *, state: State = "running") -> LifecycleProjection:
     return LifecycleProjection(
         id=ident,
         state=state,
@@ -91,7 +89,6 @@ def _lifecycle(
         fleeting=False,
         startedAt=_TS,
         lastEventTs=_TS,
-        stateEnteredAt=stateEnteredAt,
     )
 
 
@@ -225,14 +222,12 @@ class StateEtagTests(unittest.TestCase):
             self.assertEqual(still.headers["etag"], etag)
 
             # A real content change mints a new revision: 200 with a fresh ETag + fresh body.
-            held[0] = _projection(
-                lifecycles=(_lifecycle("L1", stateEnteredAt="2026-06-14T11:00:00Z"),)
-            )
+            held[0] = _projection(lifecycles=(_lifecycle("L1", state="paused"),))
             changed = self._get_until(client, etag=etag, want_status=200)
             self.assertEqual(changed.status_code, 200)
             self.assertNotEqual(changed.headers["etag"], etag)
             body = changed.json()
-            self.assertEqual(body["lifecycles"][0]["stateEnteredAt"], "2026-06-14T11:00:00Z")
+            self.assertEqual(body["lifecycles"][0]["state"], "paused")
 
 
 class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):

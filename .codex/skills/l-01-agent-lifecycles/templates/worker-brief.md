@@ -1,18 +1,14 @@
 # Template — Worker Brief
 
-The dispatch packet a spawning seat (manager / orchestrator) compiles for a worker. **The brief is
-the worker's entire session start** — it replaces the front half the spawner already ran (trust
-checkpoint, reframe, plan). Compile it fresh per leaf from this shape.
+What a starting seat (manager / orchestrator) makes sure the leaf's documents hold before it
+starts a worker with `role_start_set` or `role_start`. The call carries no brief: the worker's
+first message is compiled from the documents.
 
 **This template feeds inputs; it does not author rules.** Where the packet states a rule, the rule's
 single home is `../roles/worker.md` (the seat's own duties), `../operations/implementation.md` and
 `../operations/closeout.md` (the build procedure and the targeted-check contract), or
 `../core/acceptance.md` (the acceptance envelope, attempt lineage, and completion truth). The rows
 below carry the *values* for this leaf; if a value here disagrees with those files, they win.
-
-Dispatch with `dispatch_agent(task_document_ref=<canonical leaf document>, role="worker",
-brief=<this complete brief>)`. The control plane claims the `(leaf document, worker)` seat and
-privately binds its current occupant; the brief never carries a runtime address.
 
 ---
 
@@ -41,7 +37,7 @@ You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Yo
   final verification uses native reads), `context_packet`.
 - When the master line moves, run the supported `worktree_sync` for your own leaf and hand the new
   freeze to the Reviewer. Send memory conflicts directly to the Curator; ask the Manager only for a
-  step the sync contract reserves to it. For a native memory-file conflict, the Curator repairs content; the Manager captures, verifies and stages it, then the Worker continues `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. No other `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`,
+  step the sync contract reserves to it. For a native memory-file conflict, the Curator repairs content; the Manager captures, verifies and stages it, then the Worker continues `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. No other `worktree_*`, `lifecycle_finalize_task`, `task_doc`,
   `memory_*`, or `route_index_refresh` —
   generated route indexes are regenerated with a local `build_route_indexes(...)` from the memory
   worktree.

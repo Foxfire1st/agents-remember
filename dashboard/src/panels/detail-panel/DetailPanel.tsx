@@ -1,6 +1,6 @@
-// The DetailPanel: the selected lifecycle's detail surface — phase stepper, the canonical Gate
-// Respond surface (durable gates only), the task-document reader family, the lifecycle → worktree →
-// provider spine, and tokens. The reader family lives in taskReader.tsx, doc selection in
+// The DetailPanel: the selected lifecycle's detail surface — phase stepper, the task-document
+// reader family, the lifecycle → worktree → provider spine, and tokens. The reader family lives
+// in taskReader.tsx, doc selection in
 // model.ts, selection state in state.ts, and the render families in taskDocPanels.tsx and
 // lifecycleBody.tsx; this file owns the container and its dispatch.
 import { memo } from 'react';

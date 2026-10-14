@@ -50,7 +50,7 @@
       "reportsField": "reports",
       "repositoryBundleArgument": "repository-bundle",
       "retainedReportsArgument": "retained-reports",
-      "runtimeDigest": "f548428409700e69ffeceab6fae21f68383f3666847b1b562545ceb955bddd7d",
+      "runtimeDigest": "6e341c07e1694fed6be27285d77aeb5d17dbe149c03d6a74ad0379dcc63083b2",
       "sourceArgument": "source",
       "version": "0.21.8"
     }
@@ -179,36 +179,9 @@
       ]
     }
   ],
-  "profileDigest": "a66eaaa8f35e8f72424774d50ca4ffbbdf0f0ede6a0ce8ad8b1d9a39357b9e75",
+  "profileDigest": "7f4efbba3575b1f70029f009b5b030bccfc2925aba423c56f4700e6ac9453207",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
-    {
-      "maxBytes": 134217728,
-      "mediaType": "application/json",
-      "path": "ambient-role-chat-e2e/run-1.json",
-      "publisherGates": [
-        4
-      ],
-      "required": false
-    },
-    {
-      "maxBytes": 134217728,
-      "mediaType": "application/json",
-      "path": "ambient-role-chat-e2e/run-2.json",
-      "publisherGates": [
-        4
-      ],
-      "required": false
-    },
-    {
-      "maxBytes": 134217728,
-      "mediaType": "application/json",
-      "path": "ambient-role-chat-e2e/summary.json",
-      "publisherGates": [
-        4
-      ],
-      "required": false
-    },
     {
       "maxBytes": 134217728,
       "mediaType": "application/json",
@@ -346,15 +319,6 @@
         1,
         2,
         3,
-        4
-      ],
-      "required": false
-    },
-    {
-      "maxBytes": 4194304,
-      "mediaType": "application/octet-stream",
-      "path": "rail-evidence/ambient-role-chat-e2e@1.0.0.log",
-      "publisherGates": [
         4
       ],
       "required": false
@@ -623,27 +587,9 @@
     {
       "maxBytes": 4194304,
       "mediaType": "application/octet-stream",
-      "path": "rail-evidence/teardown-process-cleanliness@1.0.0.log",
-      "publisherGates": [
-        4
-      ],
-      "required": false
-    },
-    {
-      "maxBytes": 4194304,
-      "mediaType": "application/octet-stream",
       "path": "rail-evidence/test-selection-ownership@1.0.0.log",
       "publisherGates": [
         1
-      ],
-      "required": false
-    },
-    {
-      "maxBytes": 134217728,
-      "mediaType": "application/json",
-      "path": "teardown-proof.json",
-      "publisherGates": [
-        4
       ],
       "required": false
     },
@@ -666,144 +612,9 @@
         4
       ],
       "required": false
-    },
-    {
-      "maxBytes": 1000000,
-      "mediaType": "application/json",
-      "path": "source-selection/ambient-role.json",
-      "publisherGates": [
-        4
-      ],
-      "required": true
     }
   ],
   "rails": [
-    {
-      "conditionalPrerequisites": [],
-      "correctiveOwner": "repository-quality",
-      "evidenceContract": [
-        {
-          "evidenceId": "ambient-role-chat-e2e-evidence",
-          "maxBytes": 10485760,
-          "mediaType": "application/octet-stream"
-        }
-      ],
-      "execution": {
-        "adapterId": "ambient-role-chat-e2e-adapter",
-        "adapterKind": "container-command",
-        "cleanRoom": true,
-        "command": [
-          "/opt/ar-venv/bin/python",
-          "scripts/e2e_harness/run.py",
-          "--mode",
-          "{selection-mode}",
-          "--diff-base",
-          "{diff-base}",
-          "--reports",
-          "{reports}",
-          "--source-selection",
-          "{source-selection:ambient-role-dependencies}"
-        ],
-        "environmentContract": [
-          "AR_QUALITY_INVOCATION",
-          "CI",
-          "HOME",
-          "PYTHONPATH",
-          "TMPDIR"
-        ],
-        "executionEvidence": "profile://agents-remember/rails/ambient-role-chat-e2e",
-        "inputSelectors": [],
-        "resourcePolicyId": "clean-room-bounded",
-        "resultDecoderId": "quality-terminal-result",
-        "scopeProviderId": null,
-        "skippedExitCodes": [],
-        "successExitCodes": [
-          0
-        ],
-        "teardownPolicy": "always",
-        "timeoutSeconds": 3600,
-        "workingDirectory": "."
-      },
-      "gate": 4,
-      "identity": {
-        "railId": "ambient-role-chat-e2e",
-        "version": "1.0.0"
-      },
-      "orderKey": "ambient-role-chat-e2e",
-      "outputArtifacts": [
-        {
-          "artifactId": "ambient-role-summary",
-          "mediaType": "application/json",
-          "requiredOnPass": true,
-          "schemaVersion": "agents-remember-quality-artifact/v1"
-        }
-      ],
-      "ownerClass": "repository-quality",
-      "posture": "enforcing",
-      "prerequisites": [
-        {
-          "railId": "dashboard-diff-coverage",
-          "version": "1.0.0"
-        },
-        {
-          "railId": "python-crap",
-          "version": "1.0.0"
-        },
-        {
-          "railId": "python-diff-coverage",
-          "version": "1.0.0"
-        }
-      ],
-      "railClass": "integration-test",
-      "requiredArtifacts": [],
-      "runtimeInputs": {
-        "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
-        "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
-        "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
-      },
-      "sourceApplicability": {
-        "dependencyPrefixes": [
-          ".codex/config.toml",
-          ".dagger/src/agents_remember_quality/",
-          ".dagger/src/agents_remember_quality/main.py",
-          "mcp/certification-profile-v1.json",
-          "mcp/src/agents_remember/application/structural/",
-          "mcp/src/agents_remember/certification/models.py",
-          "mcp/src/agents_remember/certification/repository_profiles/source_selection/",
-          "mcp/src/agents_remember/controlplane/",
-          "mcp/src/agents_remember/kernel/_agentic_settings_",
-          "mcp/src/agents_remember/kernel/agentic_settings.py",
-          "mcp/src/agents_remember/kernel/primitives/checkout_coordination.py",
-          "mcp/src/agents_remember/kernel/primitives/observer_paths.py",
-          "mcp/src/agents_remember/kernel/primitives/runtime_config.py",
-          "mcp/src/agents_remember/mcp/public_surface.py",
-          "mcp/src/agents_remember/mcp/registration/",
-          "mcp/src/agents_remember/mcp/tools/structural_agent.py",
-          "mcp/src/agents_remember/models/conversations/control_wire.py",
-          "mcp/src/agents_remember/models/structural/",
-          "mcp/src/agents_remember/models/task_document_ref.py",
-          "mcp/src/agents_remember/models/terminal_catalog.py",
-          "mcp/src/agents_remember/models/tools/tool_registry.py",
-          "mcp/src/agents_remember/serving/",
-          "mcp/src/agents_remember/tasks/",
-          "mcp/src/agents_remember/worktrees/modules/git.py",
-          "mcp/src/agents_remember/worktrees/source_lineage.py",
-          "mcp/src/agents_remember/worktrees/worktree_contract.py",
-          "mcp/test_support/agents_remember_test_support/testing/dagger_admission.py",
-          "scripts/e2e_harness/",
-          "scripts/harness/",
-          "skills/l-01-agent-lifecycles/"
-        ],
-        "evidencePath": "source-selection/ambient-role.json",
-        "notApplicableReason": "no changed path intersects the declared ambient-role dependency surface",
-        "schemaVersion": "source-path-applicability/v1",
-        "selectorId": "ambient-role-dependencies",
-        "version": "1.0.0"
-      }
-    },
     {
       "conditionalPrerequisites": [],
       "correctiveOwner": "repository-quality",
@@ -2929,103 +2740,6 @@
         "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
       },
       "sourceApplicability": null
-    },
-    {
-      "conditionalPrerequisites": [
-        {
-          "railId": "ambient-role-chat-e2e",
-          "version": "1.0.0"
-        }
-      ],
-      "correctiveOwner": "repository-quality",
-      "evidenceContract": [
-        {
-          "evidenceId": "teardown-process-cleanliness-evidence",
-          "maxBytes": 10485760,
-          "mediaType": "application/octet-stream"
-        }
-      ],
-      "execution": {
-        "adapterId": "teardown-process-cleanliness-adapter",
-        "adapterKind": "container-command",
-        "cleanRoom": true,
-        "command": [
-          "/opt/ar-venv/bin/python",
-          "-m",
-          "agents_remember_test_support.code_quality.profile_rails",
-          "verify-teardown",
-          "--summary",
-          "{reports}/ambient-role-chat-e2e/summary.json",
-          "--proof",
-          "{reports}/teardown-proof.json",
-          "--source-selection",
-          "{source-selection:ambient-role-dependencies}"
-        ],
-        "environmentContract": [
-          "AR_QUALITY_INVOCATION",
-          "CI",
-          "HOME",
-          "PYTHONPATH",
-          "TMPDIR"
-        ],
-        "executionEvidence": "profile://agents-remember/rails/teardown-process-cleanliness",
-        "inputSelectors": [],
-        "resourcePolicyId": "clean-room-bounded",
-        "resultDecoderId": "quality-terminal-result",
-        "scopeProviderId": null,
-        "skippedExitCodes": [],
-        "successExitCodes": [
-          0
-        ],
-        "teardownPolicy": "always",
-        "timeoutSeconds": 600,
-        "workingDirectory": "."
-      },
-      "gate": 4,
-      "identity": {
-        "railId": "teardown-process-cleanliness",
-        "version": "1.0.0"
-      },
-      "orderKey": "teardown-process-cleanliness",
-      "outputArtifacts": [
-        {
-          "artifactId": "teardown-proof",
-          "mediaType": "application/json",
-          "requiredOnPass": true,
-          "schemaVersion": "agents-remember-quality-artifact/v1"
-        }
-      ],
-      "ownerClass": "repository-quality",
-      "posture": "enforcing",
-      "prerequisites": [
-        {
-          "railId": "ambient-role-chat-e2e",
-          "version": "1.0.0"
-        },
-        {
-          "railId": "codex-read-only-probe",
-          "version": "1.0.0"
-        },
-        {
-          "railId": "dashboard-browser-e2e",
-          "version": "1.0.0"
-        },
-        {
-          "railId": "provider-runtime-integration",
-          "version": "1.0.0"
-        }
-      ],
-      "railClass": "integration-test",
-      "requiredArtifacts": [],
-      "runtimeInputs": {
-        "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
-        "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
-        "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
-      },
-      "sourceApplicability": null
     }
   ],
   "repositoryId": "agents-remember",
@@ -3052,28 +2766,6 @@
           },
           "nullParentPolicy": "invalid",
           "nullPolicy": "ignore-reference"
-        },
-        {
-          "cardinality": "single",
-          "fieldPath": {
-            "segments": [
-              "ambientRoleChatEvidence",
-              "summary"
-            ]
-          },
-          "nullParentPolicy": "ignore-reference",
-          "nullPolicy": "ignore-reference"
-        },
-        {
-          "cardinality": "list",
-          "fieldPath": {
-            "segments": [
-              "ambientRoleChatEvidence",
-              "runs"
-            ]
-          },
-          "nullParentPolicy": "ignore-reference",
-          "nullPolicy": "invalid"
         }
       ],
       "consumingGates": [
@@ -3258,10 +2950,6 @@
           "population": "full clean-room integration population",
           "railIds": [
             {
-              "railId": "ambient-role-chat-e2e",
-              "version": "1.0.0"
-            },
-            {
               "railId": "codex-read-only-probe",
               "version": "1.0.0"
             },
@@ -3271,10 +2959,6 @@
             },
             {
               "railId": "provider-runtime-integration",
-              "version": "1.0.0"
-            },
-            {
-              "railId": "teardown-process-cleanliness",
               "version": "1.0.0"
             }
           ],
@@ -3431,10 +3115,6 @@
           "population": "targeted clean-room integration population",
           "railIds": [
             {
-              "railId": "ambient-role-chat-e2e",
-              "version": "1.0.0"
-            },
-            {
               "railId": "codex-read-only-probe",
               "version": "1.0.0"
             },
@@ -3444,10 +3124,6 @@
             },
             {
               "railId": "provider-runtime-integration",
-              "version": "1.0.0"
-            },
-            {
-              "railId": "teardown-process-cleanliness",
               "version": "1.0.0"
             }
           ],
@@ -3766,7 +3442,7 @@
         "--output",
         "{selector-output}"
       ],
-      "configurationDigest": "618b626c7430341f2c1d54966ae8eb27153fbdbc679410818d4a0f2ac7938fd9",
+      "configurationDigest": "bdbcdb2eeddcad9b356f540142d61f58bb974e439fd7ec1d5e4bb5539a51f583",
       "externalInputs": [],
       "inputUniverse": [
         "configuration and generated projections",

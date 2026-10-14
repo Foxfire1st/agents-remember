@@ -9,7 +9,6 @@ import {
   taskDocumentRefForDoc,
   type TaskSelection,
 } from '../../data/taskIdentity';
-import type { TaskDocumentRef } from '../../types/terminalCatalog';
 import { useTaskDocumentBody } from '../../data/useTaskDocumentBody';
 import type {
   Analytics,
@@ -17,6 +16,7 @@ import type {
   LifecycleProjection,
   SeriesNode,
   TaskDocNode,
+  TaskDocumentRef,
 } from '../../types/projection';
 import { displayedLeafDoc, displayedReaderDoc, docPathForTaskRef } from './model';
 

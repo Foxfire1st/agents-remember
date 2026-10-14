@@ -43,7 +43,6 @@ from agents_remember.mcp.tools.core import (
     context_packet_payload,
     server_info_payload,
 )
-from agents_remember.mcp.tools.gates import gate_list_payload
 from agents_remember.mcp.tools.memory import (
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
@@ -407,8 +406,6 @@ def test_miscellaneous_description_called_reads_write_nothing(
     assert isinstance(info, dict) and info.get("ok") is True, info
     # `resolve_context` is removed (MIK-R109 rule 5): no removed tool rides
     # the miscellaneous-read battery; `context_packet` covers its readers.
-    gates = gate_list_payload(config, lifecycle_id=None)
-    assert isinstance(gates, dict), gates
     code_files = sorted(
         p for p in endpoints.contract.code_repo_path.rglob("*.py") if ".git" not in p.parts
     )

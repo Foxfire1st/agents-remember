@@ -13,11 +13,8 @@ not a maintenance posture and re-entering it to "tidy" a working installation is
 repository that resolves but whose **knowledge foundation** is not recorded is reached by this
 operation's step 7 rather than by a re-entry.
 
-**How the carrier is started:** as a **free agent**, not a task seat. A regular session opens a
-session with `role=bootstrap` and **no task document**, and the role travels into the new session's
-environment (`AR_SPAWN_ROLE`). The role is admitted by name as a taskless seat, so that call opens
-rather than refusing. There is no brief, because nothing dispatches it; the operation's instructions
-reach that session as the compiled capsule. This operation therefore never waits for a task document to
+**How the carrier is started:** as a **free agent**, not a task seat, with **no task document**.
+There is no brief. This operation therefore never waits for a task document to
 appear, and never treats its absence as a condition to repair.
 
 ## Who carries it, and their job

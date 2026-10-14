@@ -32,7 +32,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.mcp.registration.memory import register_memory_tools
 from agents_remember.mcp.tools import PUBLIC_TOOLS, citation_fix_payload
 from agents_remember.models.tools.tool_registry import (
-    PUBLIC_TOOL_RESPONSE_MODELS,
+    TOOL_RESPONSE_MODELS,
 )
 
 
@@ -69,7 +69,7 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
             names = {tool.name for tool in asyncio.run(server.list_tools())}
         self.assertNotIn("citation_migrate", names)
         self.assertNotIn("citation_migrate", PUBLIC_TOOLS)
-        self.assertNotIn("citation_migrate", PUBLIC_TOOL_RESPONSE_MODELS)
+        self.assertNotIn("citation_migrate", TOOL_RESPONSE_MODELS)
 
     def test_citation_tools_name_a_configured_contract_authority_refusal(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

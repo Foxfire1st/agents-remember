@@ -118,8 +118,8 @@ rank = 4
 path = "controlplane/"
 present = true
 charter = """
-Durable interaction records and the policy over them: gates, the operator inbox,
-expectations, escalation and retention rules, and the single-writer durable-store
+Durable interaction records and the policy over them: gates, attention dismissals, the
+closeout queue's records, retention rules, and the single-writer durable-store
 contract they share. Lowest of the stateful interaction services because it is the
 substrate the rest observe, project and act on, so the primitives its own records are aged
 and folded by are defined here rather than borrowed from a package above.
@@ -275,11 +275,10 @@ path = "serving/"
 present = true
 deleted_by = "260731-EFA-L12"
 charter = """
-The served process as it stands today: the HTTP application, the terminal host, the
-harness control bridge, the conversation runtime and the adapters behind them. Everything
-here is a PERFORMER -- if a module in `serving/` is a pure decision, a predicate, a router
-or a policy, its home is the domain package that owns the substrate it decides about, not
-this one. 260731-EFA-L10 and 260731-EFA-L11 move the adapters and five packages out of it;
+The served process as it stands today: the HTTP application, its projections and the
+routes behind the dashboard. Everything here is a PERFORMER -- if a module in `serving/`
+is a pure decision, a predicate, a router or a policy, its home is the domain package that
+owns the substrate it decides about, not this one. 260731-EFA-L10 and 260731-EFA-L11 move the adapters and five packages out of it;
 260731-EFA-L12 takes the web surface into `dashboard/` and deletes what is left.
 """
 

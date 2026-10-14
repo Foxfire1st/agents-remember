@@ -204,7 +204,7 @@ existing worker and creates no new fix leaf. Integration branches are not repair
   Non-leaf review begins and results remain the seam owner's acts.
 - Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states;
   the task's architect or the developer must authorize an extra pass, and the Manager records that authorization in the leaf's decisions.
-- Operator knobs (`harness`, `model`, `effort`, `serviceTier`, `launchArgs`, `sessionCommands`, `promptKeywords`) are settings, not
+- Operator knobs (`harness`, `model`, `effort`, `serviceTier`) are settings, not
   yours to set.
 
 ## Stop and escalate — you do not escalate, you report

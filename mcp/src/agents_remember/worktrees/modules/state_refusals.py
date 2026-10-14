@@ -19,6 +19,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
+from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
@@ -256,14 +257,20 @@ def handover_gate_blocked(
     The dry run enforces the same gate the real run enforces: a dry run
     never promises ``would-integrate``/``would-checkpoint`` the real call
     would refuse. The verdict facts (gate id, reason, gate payload) ride
-    the answer so the refusal stays actionable.
+    the answer so the refusal stays actionable. No tool decides a stored
+    gate (MIK-R113): the answer names no next tool, and its sentence ends
+    with the way out.
     """
     sentence = (
-        f"Master-handover-approval gate {gate_id} is undecided ({reason}); "
-        "decide it before rerunning."
+        f"Master-handover-approval gate {gate_id} is undecided ({reason}). {STORED_GATE_WAY_OUT}."
     )
+    status = {
+        key: value
+        for key, value in status_payload(contract).items()
+        if key not in ("nextTool", "nextArgs", "nextRequiredArgs")
+    }
     payload: dict[str, object] = {
-        **status_payload(contract),
+        **status,
         "state": "handover-gate-blocked",
         "code": "handover-gate-blocked",
         "error": summary,
@@ -272,13 +279,7 @@ def handover_gate_blocked(
         "reason": reason,
         "blockers": [{"code": "handover-gate-blocked", "sentence": sentence}],
         "nextOperation": "review_handover_gate",
-        "nextTool": "gate_list",
-        "nextArgs": {},
-        "nextStep": {
-            "summary": summary,
-            "nextTool": "gate_list",
-            "nextArgs": {},
-        },
+        "nextStep": {"summary": summary, "nextOperation": "review_handover_gate"},
     }
     if handover_gate is not None:
         payload["handover_gate"] = handover_gate

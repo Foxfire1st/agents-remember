@@ -206,7 +206,7 @@ Providers are optional — memory, onboarding, drift, and task workflows all wor
 
 ## Start Working
 
-Sessions route by role through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and, for ordinary role-shaped work, creates or resolves the durable sprint and first leaf, compiles the canonical architect brief, then calls `dispatch_agent` once on that sprint document with role `architect`. An explicit developer-declared task-seat takeover instead targets the named role on its canonical task document. This identity-free ambient launcher hands over only after the exact brief is durable. Later plane-hosted seats use the same tool under structural child-scope authority; a plane refusal never falls back to ambient. Spawned backend seats follow their role briefs. For normal tasks the agent should:
+Sessions route by role through the `l-01-agent-lifecycles` skill: developer-facing free chat answers a question inline and, for work on a managed repository, creates or resolves the sprint document, writes the request of the developer into it, starts an Architect with `role_start` (the call for an Architect names no document), and tells the developer that the agent is in the dashboard and which sprint document holds the request. Another role is started this way only when the developer names the role and the task. Role agents follow their handovers. For normal tasks the agent should:
 
 1. resolve the repository context with `c-08-ar-coordination-context-resolver`
 2. run `c-02-memory-quality-control` before planning against onboarding

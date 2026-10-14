@@ -1,6 +1,6 @@
 // The reviewer's inline / side-by-side choice for changed intent wording (MIK-R35 rule 4). It is a
 // browser-local UI preference, in the house persisted-store idiom (vanilla zustand seeded from
-// localStorage, as data/conversation/thinkingPreference.ts). It is not review state and no server
+// localStorage). It is not review state and no server
 // store holds it. When storage is unavailable, the passage defaults to inline and the toggle still
 // works for the page's lifetime.
 

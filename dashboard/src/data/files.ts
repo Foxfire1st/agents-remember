@@ -1,5 +1,5 @@
 // Same-origin client for the read-only files API (mcp/.../serving/files.py).
-// House style mirrors data/stream.ts / data/terminal.ts: a `base` arg (same-origin
+// House style mirrors data/stream.ts: a `base` arg (same-origin
 // default), typed results, a thrown status error, and NO store mutation — the File
 // Viewer owns its own component state. Endpoints (all GET, camelCase JSON):
 //   /api/files/repos                                  -> the repo + {mainline ∪ enclosures} catalog
@@ -106,8 +106,8 @@ export const qs = (params: Record<string, string>): string =>
 
 // The boot catalog read: the always-mounted File Viewer fires it per mount (StrictMode
 // doubles that), so concurrent callers share one in-flight GET — settle clears the slot,
-// so a retry after a failure re-fires. BOUNDED like the catalog poll: an unbounded hung
-// socket would wedge every caller single-flighted behind it.
+// so a retry after a failure re-fires. BOUNDED: an unbounded hung socket would wedge every
+// caller single-flighted behind it.
 export const FILES_REPOS_REQUEST_TIMEOUT_MS = 10_000;
 
 export const fetchRepos = (base = ""): Promise<RepoCatalog> =>

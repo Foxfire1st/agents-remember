@@ -5,7 +5,6 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { sessionStore } from "../data/sessions";
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
 import { AttentionQueue } from "../panels/AttentionQueue";
@@ -13,7 +12,6 @@ import { DetailPanel } from "../panels/detail-panel/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
 import { EventRiver } from "../panels/EventRiver";
 import { FileViewer } from "../panels/file-viewer/FileViewer";
-import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
 import { DocumentChat } from "./document-chat/DocumentChat";
@@ -33,11 +31,6 @@ function seed(stateName: string) {
   if (!fixture) throw new Error(`fixture not found: ${stateName}`);
   dashboardStore.getState().applySnapshot(fixture.projection);
 }
-
-// Mock the lazy Terminal so toggling the rail to chat never pulls xterm (a canvas probe) into jsdom.
-vi.mock("../panels/Terminal", () => ({
-  Terminal: ({ sessionId }: { sessionId: string }) => <div data-testid={`term-${sessionId}`} />,
-}));
 
 function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPath" | "id">): TaskDocNode {
   return wireTaskDoc({
@@ -71,9 +64,7 @@ function seedDrillableMaster() {
     repoId: "repo-a",
     startedAt: "2026-06-20T09:00:00+00:00",
     lastEventTs: "2026-06-20T09:00:30+00:00",
-    stateEnteredAt: "2026-06-20T09:00:00+00:00",
     inferred: false,
-    actions: [],
   };
   const master = taskDoc({
     id: "master-x",
@@ -118,8 +109,6 @@ function seedDrillableMaster() {
       series: [],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -128,7 +117,6 @@ function seedDrillableMaster() {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  sessionStore.setState({ sessions: [], activeId: null, count: 0 });
   dashboardStore.getState().reset();
   window.localStorage.clear(); // the rail toggle now persists its choice; isolate it between tests
 });
@@ -176,9 +164,7 @@ function taskReaderProjection(): WorkspaceProjection {
     enclosure: `/contracts/${enclosure}`,
     startedAt: "2026-07-12T10:00:00+00:00",
     lastEventTs: "2026-07-12T10:00:30+00:00",
-    stateEnteredAt: "2026-07-12T10:00:00+00:00",
     inferred: false,
-    actions: [],
   });
   const master = taskDoc({
     id: "ops-master",
@@ -264,8 +250,6 @@ function taskReaderProjection(): WorkspaceProjection {
       ],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   };
 }
@@ -300,12 +284,6 @@ function stubTaskReaderFetch(
     }
     if (url === "/api/files/repos") {
       return { ok: true, status: 200, json: async () => ({ repos: [] }) } as Response;
-    }
-    if (url === "/api/harnesses") {
-      return { ok: true, status: 200, json: async () => ({ harnesses: [] }) } as Response;
-    }
-    if (url === "/api/terminal/sessions") {
-      return { ok: true, status: 200, json: async () => ({ sessions: [] }) } as Response;
     }
     if (url.startsWith("/api/changeset/")) {
       return {
@@ -861,7 +839,6 @@ describe("persistent layers are exported memoized (260721 tab-switch CPU)", () =
       ["LifecycleList", LifecycleList],
       ["EventRiver", EventRiver],
       ["DocumentChat", DocumentChat],
-      ["HighlightComposer", HighlightComposer],
       ["NotesReaderViewer", NotesReaderViewer],
     ];
     for (const [name, component] of layers) {
@@ -885,12 +862,6 @@ describe("the attention queue behind the bell, on the gallery states the browser
     const view = openBell("alarm");
     expect(view.getByTestId("attention-queue").textContent).toContain("waiting");
     expect(view.getAllByTestId("attn-item")[0].textContent).toContain("down");
-  });
-
-  it("keeps the projected gate ask in the queue (state=blocked)", () => {
-    const queue = openBell("blocked").getByTestId("attention-queue");
-    expect(queue.textContent).toContain("Approve the plan?");
-    expect(queue.textContent).toContain("Gate — input needed");
   });
 
   it("renders the empty state without items (state=empty)", () => {
@@ -923,9 +894,7 @@ describe("the left rail shows lifecycle states and attention severities at the s
       repoId: "repo-a",
       startedAt: "2026-06-20T09:00:00+00:00",
       lastEventTs: "2026-06-20T09:00:30+00:00",
-      stateEnteredAt: "2026-06-20T09:00:00+00:00",
       inferred: false,
-      actions: [],
     };
     return {
       version: 2,
@@ -956,8 +925,6 @@ describe("the left rail shows lifecycle states and attention severities at the s
         series: [],
         attentionQueue,
         engineProcesses: [],
-        agentPickups: [],
-        expectationRows: [],
       },
     };
   }

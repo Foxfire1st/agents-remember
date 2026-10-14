@@ -3,11 +3,7 @@
 // only joins each to its live lifecycle. Provider state left the surface (MIK-R112).
 // No semantics are re-derived here.
 
-import type {
-  EngineProcessNode,
-  GateNode,
-  LifecycleProjection,
-} from "../../types/projection";
+import type { EngineProcessNode, LifecycleProjection } from "../../types/projection";
 
 /** One enclosure process plus the live session (if any) driving it. */
 export interface EngineProcessView {
@@ -19,7 +15,6 @@ export interface EngineProcessView {
   enclosureKey: string;
   node: EngineProcessNode;
   lifecycle?: LifecycleProjection;
-  gate?: GateNode;
 }
 
 /** The Engine Room's render model: enclosure process pods. */

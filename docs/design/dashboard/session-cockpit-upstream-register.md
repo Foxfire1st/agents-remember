@@ -1,5 +1,9 @@
 # Session cockpit upstream register and Chats decision brief
 
+**Status:** History as of MIK-R113 (2026-10-12), which removed the session
+cockpit panels this register handed off. Kept as the record of the serving
+asks and the Chats decision, not as live asks.
+
 The frontend deliberately renders missing serving contracts as gaps instead of fabricating them.
 This register is the FEUI handoff to the developer/architect. It separates serving asks from the
 Chats product decision so either can evolve without packing more policy into the main dashboard

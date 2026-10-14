@@ -39,6 +39,7 @@ from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
     install_ambient,
+    new_ulid,
     observer_root,
     reset_ambient,
 )
@@ -523,7 +524,7 @@ def lifecycle(tmp_path: Path) -> Any:
     ambient = AmbientLifecycle(
         EventStore(observer_root(config)), timing=AmbientTiming(heartbeat_seconds=3600)
     )
-    ambient.start(fleeting=True)
+    ambient.attach(new_ulid(), enclosure=str(tmp_path / "contract.json"))
     install_ambient(ambient)
 
     def read(paths: list[str]) -> dict[str, Any]:

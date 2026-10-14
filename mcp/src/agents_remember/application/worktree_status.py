@@ -20,9 +20,7 @@ from agents_remember.application.lifecycle.configured_contract_admission import 
     project_configured_contract_refusal,
 )
 from agents_remember.application.lifecycle.lifecycle_control_authority import (
-    LifecycleCallerError,
     completed_disposition_authorized,
-    resolve_lifecycle_caller,
 )
 from agents_remember.application.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocation,
@@ -350,21 +348,11 @@ def project_contract_status(
         result.update(project_configured_contract_refusal(terminal, operation="worktree_status"))
         _replace_operation_status(result, [])
         return result
-    try:
-        resolved_caller = resolve_lifecycle_caller(config, caller)
-    except LifecycleCallerError as exc:
-        return {
-            "ok": False,
-            "operation": "worktree_status",
-            "state": "refused",
-            "status": exc.status,
-            "detail": exc.detail,
-        }
     read_failure = result.get("contractReadFailure")
     if isinstance(read_failure, dict):
         operations = unreadable_status_operations(config, result, path, read_failure)
     else:
-        operations = _readable_status_operations(config, result, path, resolved_caller)
+        operations = _readable_status_operations(config, result, path, caller)
     _restore_reader_reason(result, read_failure)
     _replace_operation_status(result, operations)
     return result

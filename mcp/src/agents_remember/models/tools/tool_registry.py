@@ -29,7 +29,6 @@ from agents_remember.models.direct_execution_grant import DirectExecutionGrantRe
 from agents_remember.models.direct_landing import DirectLandingResponse
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceResponse
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
-from agents_remember.models.lifecycles.responses import LifecycleBlockResponse
 from agents_remember.models.memory import (
     CitationFixResponse,
     MemoryBaselineAdoptResponse,
@@ -40,13 +39,6 @@ from agents_remember.models.memory import (
     MemoryQualityCheckResponse,
     RouteIndexRefreshResponse,
 )
-from agents_remember.models.operator_inbox import (
-    OperatorInboxConsumeResponse,
-    OperatorInboxPollResponse,
-    OperatorInboxPostResponse,
-    OperatorInboxSupersedeResponse,
-)
-from agents_remember.models.orchestration import OrchestrationNudgeManagerResponse
 from agents_remember.models.queue.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.read_files import ReadArFilesResponse
 from agents_remember.models.role_agents import (
@@ -55,23 +47,8 @@ from agents_remember.models.role_agents import (
     RoleStartSetResponse,
 )
 from agents_remember.models.runtime import RuntimeInstallResponse
-from agents_remember.models.structural.agent import DispatchAgentResponse, RetireChildResponse
-from agents_remember.models.structural.gates import (
-    GateCreateResponse,
-    GateResponseWaitResponse,
-    GateWaitResponse,
-    InternalGateDecideResponse,
-    InternalGateListResponse,
-    InternalLifecycleGateResponse,
-)
+from agents_remember.models.structural.agent import RetireChildResponse
 from agents_remember.models.task_doc import TaskDocResponse, TaskReopenResponse
-from agents_remember.models.terminal import (
-    AttachTerminalSessionToTaskResponse,
-    HostedSessionReadinessResponse,
-    SessionRenameResponse,
-    SessionRetireResponse,
-    SpawnAgentSessionResponse,
-)
 from agents_remember.models.tools.knowledge_responses import (
     KnowledgeDiffResponse,
     KnowledgeIntegrityCheckResponse,
@@ -94,45 +71,15 @@ from agents_remember.models.worktree import (
     WorktreeSyncResponse,
 )
 
-INTERNAL_COMPAT_TOOL_NAMES = frozenset(
-    {
-        "lifecycle_block",
-        "lifecycle_gate_internal",
-        "gate_decide_internal",
-        "gate_list_internal",
-        "gate_create",
-        "gate_wait",
-        "gate_response_wait",
-        # Trusted exact-id/admin payload builders retained below the public MCP boundary.
-        "attach_terminal_session_to_task",
-        "spawn_agent_session",
-        "hosted_session_readiness",
-        "session_retire",
-        "session_rename",
-        "operator_inbox_post",
-        "operator_inbox_poll",
-        "operator_inbox_consume",
-        "operator_inbox_supersede",
-        "orchestration_nudge_manager",
-    }
-)
-"""Lower-level compatibility payload builders, not advertised MCP tools."""
-
 # ``type[ResponseEnvelope]``, not ``type[BaseModel]``: every registered model is a
 # ``ResponseModel`` or a ``FlexibleResponseEnvelope``, and saying so is what lets the choke
-# point set ``nextStep``/``agentNotifierBanner`` on the validated response before the dump.
-# ``BaseModel`` here made those two fields unreachable by type, which is how they ended up
+# point set ``nextStep`` on the validated response before the dump.
+# ``BaseModel`` here made that field unreachable by type, which is how it ended up
 # being written into the already-dumped dict instead.
 TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "server_info": ServerInfoResponse,
     "context_packet": SlimContextPacket,
     "read_ar_files": ReadArFilesResponse,
-    "attach_terminal_session_to_task": AttachTerminalSessionToTaskResponse,
-    "spawn_agent_session": SpawnAgentSessionResponse,
-    "hosted_session_readiness": HostedSessionReadinessResponse,
-    "session_retire": SessionRetireResponse,
-    "session_rename": SessionRenameResponse,
-    "dispatch_agent": DispatchAgentResponse,
     "retire_child": RetireChildResponse,
     "runtime_install": RuntimeInstallResponse,
     "memory_quality_check": MemoryQualityCheckResponse,
@@ -158,34 +105,16 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "memory_baseline_adopt": MemoryBaselineAdoptResponse,
     "memory_carryover_plan": MemoryCarryoverPlanResponse,
     "memory_carryover_apply": MemoryCarryoverApplyResponse,
-    "lifecycle_block": LifecycleBlockResponse,
     "lifecycle_finalize_task": LifecycleFinalizeTaskResponse,
     "task_doc": TaskDocResponse,
     "curator_coherence": CuratorCoherenceResponse,
     "closeout_queue": CloseoutQueueResponse,
     "direct_landing": DirectLandingResponse,
     "direct_execution_grant": DirectExecutionGrantResponse,
-    "lifecycle_gate_internal": InternalLifecycleGateResponse,
-    "gate_create": GateCreateResponse,
-    "gate_decide_internal": InternalGateDecideResponse,
-    "gate_wait": GateWaitResponse,
-    "gate_response_wait": GateResponseWaitResponse,
-    "gate_list_internal": InternalGateListResponse,
-    "operator_inbox_post": OperatorInboxPostResponse,
-    "operator_inbox_poll": OperatorInboxPollResponse,
-    "operator_inbox_consume": OperatorInboxConsumeResponse,
-    "operator_inbox_supersede": OperatorInboxSupersedeResponse,
-    "orchestration_nudge_manager": OrchestrationNudgeManagerResponse,
     "role_start": RoleStartResponse,
     "role_start_set": RoleStartSetResponse,
     "role_message": RoleMessageResponse,
     "knowledge_read": KnowledgeReadResponse,
     "knowledge_diff": KnowledgeDiffResponse,
     "knowledge_integrity_check": KnowledgeIntegrityCheckResponse,
-}
-
-PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
-    name: model
-    for name, model in TOOL_RESPONSE_MODELS.items()
-    if name not in INTERNAL_COMPAT_TOOL_NAMES
 }

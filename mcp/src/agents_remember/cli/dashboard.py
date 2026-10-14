@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import os
 import threading
-from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -19,10 +18,6 @@ from typing import Any, NamedTuple
 import uvicorn
 
 import agents_remember
-from agents_remember.application.task_docs.task_execution_registration import (
-    register_operator_inbox_execution_evidence,
-    register_terminal_catalog_execution_evidence,
-)
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.cli.role_launch_archive import LeafAgentArchive
@@ -64,24 +59,19 @@ _DEV_HEARTBEAT_ENV = "AR_DASHBOARD_DEV_HEARTBEAT"
 # forever on SIGTERM: the listening socket closes (port released) but the process hangs as a zombie
 # with its landing sweep still spawning git/gh -- exactly the three survivors observed live, killable
 # only by SIGKILL. A bounded graceful window makes SIGTERM force-cancel the lingering streams and run
-# the lifespan shutdown (which cancels the projector/landing/agent-notifier tasks) within a few seconds.
+# the lifespan shutdown (which cancels the projector/landing tasks) within a few seconds.
 # Fast API/JSON requests finish well inside this window; only the intentionally-endless SSE streams
 # are force-closed, which is exactly the desired behaviour on shutdown. uvicorn types this as whole
 # seconds (``int | None``), so keep it an int.
 DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS = 3
-EXECUTION_REGISTRATION_COLLABORATORS = ServingCollaborators(
-    register_terminal_execution_evidence=register_terminal_catalog_execution_evidence,
-    register_inbox_execution_evidence=register_operator_inbox_execution_evidence,
-)
 
 
 def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     """The collaborators one dashboard app is composed with, bound to this configuration.
 
-    The capsule compiler is an ``application``-rank callable and ``serving`` may not import it, so
-    this composition root — the one place that already knows which configuration the app serves —
-    binds it here. Every ``create_app`` call in this module goes through this function, so a
-    dashboard process can never serve a role-configured launch with no compiler behind it.
+    The review and knowledge-reader adapters are ``application``-rank callables and ``serving``
+    may not import them, so this composition root — the one place that already knows which
+    configuration the app serves — binds them here.
     """
 
     from agents_remember.application.knowledge_reader import (  # noqa: PLC0415 - composition
@@ -99,9 +89,6 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     )
     from agents_remember.application.review_tree_knowledge import (  # noqa: PLC0415 - composition
         read_review_trees,
-    )
-    from agents_remember.application.role_capsules.launch import (  # noqa: PLC0415 - composition
-        compile_launch_capsule,
     )
 
     worklist_processes = ReviewerWorklistProcesses()
@@ -167,9 +154,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return read_knowledge_reader(config, query)
 
-    return replace(
-        EXECUTION_REGISTRATION_COLLABORATORS,
-        capsule_launch=partial(compile_launch_capsule, config),
+    return ServingCollaborators(
         knowledge_review=review_port,
         knowledge_review_entries=review_entries_port,
         review_source_content=review_source_content_port,

@@ -7,9 +7,8 @@ actually wrote. Nothing hand-supplies a value the product is supposed to produce
 * the delivery mode and the per-run record come from ``install_runtime`` / its payload;
 * the occurrence counts come from the bytes on disk under the scratch coordination root
   (side A) and from the capsule the production compile route produces (side B);
-* the version strings the record carries are compared against the sha256 of
-  ``skills/l-01-agent-lifecycles/composition-manifest.json`` and the pins in
-  ``eve_runtime/package.json``, both computed here from the file.
+* the version string the record carries is compared against the sha256 of
+  ``skills/l-01-agent-lifecycles/composition-manifest.json``, computed here from the file.
 
 The two fingerprints this module counts are asserted to resolve in their canonical
 source before they are counted, so a corpus edit that moves one of them fails loudly
@@ -22,6 +21,7 @@ import hashlib
 import json
 import shutil
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -31,22 +31,23 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(MCP_SRC) not in sys.path:
     sys.path.insert(0, str(MCP_SRC))
 
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.install import experiment as install_experiment
 from agents_remember.install import runtime as install_runtime
 from agents_remember.kernel.agentic_settings import (
     default_agentic_settings_seed_text,
-    user_agentic_settings_path,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.mcp.tools.core import runtime_install_payload
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
+from agents_remember.serving.projections.snapshots import read_tool_reports
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_AGENTS_MD = REPOSITORY_ROOT / "agents-md-files"
 CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
-CANONICAL_EVE_APPLICATION = REPOSITORY_ROOT / "eve_runtime"
 CANONICAL_PROVIDER_REQUIREMENTS = REPOSITORY_ROOT / "providers" / "requirements"
 
 CORPUS_FINGERPRINT = "**You set one repository up and report what actually happened.**"
@@ -100,8 +101,8 @@ def create_install_source(root: Path) -> Path:
     """One install source tree built from this repository's canonical assets.
 
     The package-data layout, the four startup targets, the canonical corpus the
-    compiler reads, the provider requirement files ``require_runtime_tree`` insists
-    on, and the pinned eve application source the experiment installs.
+    compiler reads, and the provider requirement files ``require_runtime_tree``
+    insists on.
     """
 
     source = root / "package_data"
@@ -116,9 +117,6 @@ def create_install_source(root: Path) -> Path:
             CANONICAL_PROVIDER_REQUIREMENTS / name,
             runtime_root / "providers" / "requirements" / name,
         )
-    application = source / install_experiment.PACKAGED_APPLICATION_PATH
-    for relative in ("package.json", "package-lock.json", "agent/agent.ts"):
-        _copy(CANONICAL_EVE_APPLICATION / relative, application / relative)
     return source
 
 
@@ -248,10 +246,10 @@ def compiled_capsule_text() -> str:
     )
     launch = compile_launch_capsule(
         config,
-        LaunchCapsuleRequest(role="bootstrap", harness="codex", workspace_root=REPOSITORY_ROOT),
+        LaunchCapsuleRequest(role="bootstrap", workspace_root=REPOSITORY_ROOT),
     )
-    assert launch.codex_delivery is not None, launch.explain()
-    instructions = launch.codex_delivery.trusted_instructions
+    assert launch.delivery is not None, launch.explain()
+    instructions = launch.delivery.trusted_instructions
     assert isinstance(instructions, str) and instructions
     return instructions
 
@@ -276,7 +274,6 @@ def test_an_unselected_run_installs_the_legacy_startup_chain(tmp_path: Path) -> 
     assert summary.experiment is None
     for target in install_experiment.WITHHELD_STARTUP_TARGETS:
         assert (coordination_root / target).is_file(), target
-    assert not (coordination_root / install_experiment.INSTALLED_APPLICATION_PATH).exists()
     assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 1
 
 
@@ -290,10 +287,6 @@ def test_a_selected_run_cuts_over_to_the_capsule_path(tmp_path: Path) -> None:
     assert summary.experiment.delivery.mode == "capsule"
     for target in install_experiment.WITHHELD_STARTUP_TARGETS:
         assert not (coordination_root / target).exists(), target
-    application = coordination_root / install_experiment.INSTALLED_APPLICATION_PATH
-    assert (application / "package.json").is_file()
-    assert (application / "agent" / "agent.ts").is_file()
-    assert not (application / "node_modules").exists()
     assert fingerprint_count(coordination_root, LEGACY_FINGERPRINT) == 0
     # The one canonical authored source is still installed: it is the compiler's input.
     assert (coordination_root / "skills" / "l-01-agent-lifecycles" / "core").is_dir()
@@ -385,21 +378,6 @@ def test_a_selected_run_with_an_unavailable_capsule_path_refuses_and_writes_noth
     assert not (coordination_root / "AGENTS.md").exists()
 
 
-def test_a_pin_mismatch_refuses_the_install_and_names_the_capability(tmp_path: Path) -> None:
-    source = create_install_source(tmp_path)
-    package_json = source / install_experiment.PACKAGED_APPLICATION_PATH / "package.json"
-    declared = json.loads(package_json.read_text(encoding="utf-8"))
-    declared["dependencies"]["eve"] = "^0.56.0"
-    package_json.write_text(json.dumps(declared, indent=2), encoding="utf-8")
-    coordination_root = tmp_path / "ar-coordination"
-
-    with pytest.raises(install_experiment.ExperimentError) as raised:
-        run_install(source, coordination_root, experiment="role-capsules")
-
-    assert "pinned-eve-dependencies" in str(raised.value)
-    assert not coordination_root.exists()
-
-
 def test_a_dry_run_reports_the_cutover_and_writes_nothing(tmp_path: Path) -> None:
     source = create_install_source(tmp_path)
     coordination_root = tmp_path / "ar-coordination"
@@ -410,7 +388,6 @@ def test_a_dry_run_reports_the_cutover_and_writes_nothing(tmp_path: Path) -> Non
     assert summary.experiment is not None
     assert summary.experiment.delivery.mode == "capsule"
     assert (coordination_root / "AGENTS.md").is_file()
-    assert not (coordination_root / install_experiment.INSTALLED_APPLICATION_PATH).exists()
 
 
 def test_the_legacy_fingerprint_is_present_when_disabled_and_absent_when_opted_in(
@@ -452,7 +429,7 @@ def test_the_canonical_corpus_reaches_an_opted_in_run_once_through_the_capsule()
     assert LEGACY_FINGERPRINT_SOURCE.read_text(encoding="utf-8").count(CORPUS_FINGERPRINT) == 0
 
 
-def test_the_run_record_carries_the_packet_shape_and_the_independent_versions(
+def test_the_run_record_carries_the_packet_shape_and_the_independent_version(
     tmp_path: Path,
 ) -> None:
     source = create_install_source(tmp_path)
@@ -464,26 +441,25 @@ def test_the_run_record_carries_the_packet_shape_and_the_independent_versions(
     record = payload["record"]
     assert isinstance(record, dict)
 
-    for key in ("experiment", "source", "harness", "instructionSource", "eveVersion", "mode"):
-        assert key in record, key
+    assert set(record) == {
+        "experiment",
+        "source",
+        "instructionSource",
+        "mode",
+        "reason",
+        "selectionSource",
+        "corpusAnchor",
+        "capabilities",
+    }
     record = dict(record)
+    assert [item["name"] for item in record["capabilities"]] == ["canonical-corpus-anchor"]
 
     anchor_digest = hashlib.sha256(
         install_experiment.corpus_anchor_path(source).read_bytes()
     ).hexdigest()
     assert record["instructionSource"] == f"sha256:{anchor_digest}"
-
-    declared = json.loads((CANONICAL_EVE_APPLICATION / "package.json").read_text(encoding="utf-8"))[
-        "dependencies"
-    ]
-    assert record["eveVersion"] == declared["eve"]
     assert record["mode"] == "capsule"
     assert record["experiment"] == install_experiment.ROLE_CAPSULES
-    assert record["harness"] == "eve"
-    assert (
-        record["installedApplicationRoot"]
-        == (coordination_root / install_experiment.INSTALLED_APPLICATION_PATH).as_posix()
-    )
 
 
 def test_the_selection_is_recorded_per_run_and_never_persisted(tmp_path: Path) -> None:
@@ -505,7 +481,7 @@ def test_the_selection_is_recorded_per_run_and_never_persisted(tmp_path: Path) -
 
     source = create_install_source(tmp_path)
     coordination_root = tmp_path / "ar-coordination"
-    config_path = user_agentic_settings_path()
+    config_path = user_settings_path_for_write()
 
     config_path.parent.mkdir(parents=True)
     config_path.write_text(default_agentic_settings_seed_text(), encoding="utf-8")
@@ -665,63 +641,115 @@ def test_a_selected_install_writes_nothing_into_the_install_source_tree(
     assert after == digests
 
 
-def test_the_installed_application_keeps_its_machine_local_trees_out_of_the_mirror(
-    tmp_path: Path,
-) -> None:
-    """The source's dependency tree is never copied, and the install's own is never pruned.
-
-    Both halves matter on one machine: copying the source's ``node_modules`` would ship a
-    machine-local tree into every install, and pruning the install's would delete the
-    operator's own dependency install on the next run.
-    """
-
-    source = create_install_source(tmp_path)
-    source_modules = source / install_experiment.PACKAGED_APPLICATION_PATH / "node_modules"
-    (source_modules / "eve").mkdir(parents=True)
-    (source_modules / "eve" / "package.json").write_text('{"version":"machine-local"}\n')
-    coordination_root = tmp_path / "ar-coordination"
-    installed_modules = (
-        coordination_root / install_experiment.INSTALLED_APPLICATION_PATH / "node_modules"
-    )
-    installed_modules.mkdir(parents=True)
-    (installed_modules / "operator-install.marker").write_text("kept\n", encoding="utf-8")
-
-    run_install(source, coordination_root, experiment="role-capsules")
-
-    assert not (installed_modules / "eve").exists()
-    assert (installed_modules / "operator-install.marker").is_file()
-    # The hermeticity rule the report states depends on this: root `.gitignore` is
-    # ``node_modules/`` *with a trailing slash*, which git matches against a directory only, so a
-    # symlinked tree would be untracked-not-ignored and would stage as mode 120000. The installer
-    # creates a real directory, and this asserts the property the claim rests on.
-    assert installed_modules.is_dir()
-    assert not installed_modules.is_symlink()
-
-
-def test_the_rollback_plan_names_the_installed_artifacts_and_the_restore_command(
-    tmp_path: Path,
-) -> None:
+def test_the_rollback_plan_names_the_restore_command(tmp_path: Path) -> None:
     source = create_install_source(tmp_path)
     coordination_root = tmp_path / "ar-coordination"
-    state_root = tmp_path / "state"
 
-    rows = install_experiment.experiment_rollback_plan(
-        coordination_root=coordination_root, state_root=state_root
-    )
+    rows = install_experiment.experiment_rollback_plan(coordination_root=coordination_root)
 
-    by_path = {row.path: row for row in rows}
-    application = (coordination_root / install_experiment.INSTALLED_APPLICATION_PATH).as_posix()
-    assert application in by_path
-    assert by_path[application].undo_command == f"rm -rf {application}"
-    assert by_path[state_root.as_posix()].undo_command == f"rm -rf {state_root.as_posix()}"
-    restore = by_path[(coordination_root / "AGENTS.md").as_posix()]
-    assert "no experiment selected" in restore.undo_command
+    assert [row.path for row in rows] == [(coordination_root / "AGENTS.md").as_posix()]
+    assert "no experiment selected" in rows[0].undo_command
 
     summary = run_install(source, coordination_root, experiment="role-capsules")
     assert summary.experiment is not None
     payload_rows = summary.experiment.payload()["rollback"]
     assert isinstance(payload_rows, list)
-    payload_paths = {row["path"] for row in payload_rows}
-    # The run carried no state root, so its own plan is the plan without that row.
-    assert payload_paths == {row.path for row in rows} - {state_root.as_posix()}
-    assert application in payload_paths
+    assert [row["path"] for row in payload_rows] == [row.path for row in rows]
+
+
+EARLIER_EXPERIMENT_PART = r"""
+{
+ "selection": {"requested": "role-capsules", "experiment": "role-capsules", "selected": true, "source": "request", "reason": "experiment 'role-capsules' selected through request"},
+ "delivery": {"mode": "capsule", "reason": "experiment 'role-capsules' selected through request; the capsule path is available for this installation"},
+ "record": {
+  "experiment": "role-capsules",
+  "source": "/srv/checkpoint/package_data",
+  "harness": "eve",
+  "instructionSource": "sha256:3fae356dfa9d2c469e49f0e31c0ea0a69a50f9fe5700edc53292037aac0490fe",
+  "eveVersion": "0.56.0",
+  "mode": "capsule",
+  "reason": "experiment 'role-capsules' selected through request; the capsule path is available for this installation",
+  "selectionSource": "request",
+  "corpusAnchor": "/srv/checkpoint/package_data/runtime/skills/l-01-agent-lifecycles/composition-manifest.json",
+  "applicationRoot": "/srv/checkpoint/package_data/runtime/eve-runtime",
+  "installedApplicationRoot": "/srv/ar-coordination/runtime/eve-agent",
+  "dependencyInstallCommand": "cd /srv/ar-coordination/runtime/eve-agent && PATH=<node 24 bin>:$PATH npm ci --no-audit --no-fund",
+  "dependenciesInstalled": false,
+  "capabilities": [
+   {"name": "canonical-corpus-anchor", "ok": true, "blocking": true, "detail": "sha256:3fae356dfa9d2c469e49f0e31c0ea0a69a50f9fe5700edc53292037aac0490fe", "remedy": "the canonical corpus anchor is not installed with the runtime assets; run scripts/sync-skills.py and scripts/sync-runtime.py"},
+   {"name": "packaged-eve-application", "ok": true, "blocking": true, "detail": "source /srv/checkpoint/package_data/runtime/eve-runtime -> install /srv/ar-coordination/runtime/eve-agent", "remedy": "re-run scripts/sync-runtime.py to refresh the packaged application source"},
+   {"name": "pinned-eve-dependencies", "ok": true, "blocking": true, "detail": "{\"declared\": {\"@ai-sdk/openai-compatible\": \"3.0.49\", \"ai\": \"7.0.102\", \"eve\": \"0.56.0\", \"zod\": \"4.6.5\"}, \"mismatched\": {}, \"unpinnedExtras\": []}", "remedy": "the packaged application is not the pinned one; re-run scripts/sync-runtime.py against the canonical eve_runtime/ tree"},
+   {"name": "eve-lockfile-integrity", "ok": true, "blocking": true, "detail": "{\"eveIntegrity\": \"sha512-pGTQhdA6SyZLN0Xht38jTqq3jIvZNrCjW3YjYgcxGmRrphLPShBN5i0GrTtYICI+hc9c1U7g07+iuuNaAVkZhg==\", \"lockfileVersion\": 3, \"missing\": [], \"resolved\": {\"@ai-sdk/openai-compatible\": {\"integrity\": true, \"version\": \"3.0.49\"}, \"ai\": {\"integrity\": true, \"version\": \"7.0.102\"}, \"eve\": {\"integrity\": true, \"version\": \"0.56.0\"}, \"zod\": {\"integrity\": true, \"version\": \"4.6.5\"}}, \"wrong\": {}}", "remedy": "re-run scripts/sync-runtime.py against the canonical eve_runtime/ tree"},
+   {"name": "node-runtime", "ok": false, "blocking": false, "detail": "{\"executable\": \"/usr/local/bin/node\", \"minimumMajor\": 24, \"version\": \"v22.23.2\"}", "remedy": "the pinned eve release needs Node.js >= 24; name one with AR_EVE_NODE (the launch path also searches $HOME/.nvm)"},
+   {"name": "eve-dependencies-installed", "ok": false, "blocking": false, "detail": "/srv/checkpoint/package_data/runtime/eve-runtime/node_modules is absent; the runtime refuses to stage a launch without it", "remedy": "cd /srv/ar-coordination/runtime/eve-agent && PATH=<node 24 bin>:$PATH npm ci --no-audit --no-fund"}
+  ]
+ },
+ "withheldStartupTargets": ["AGENTS.md", "system/AGENTS.md", "skills/AGENTS.md", "tasks/AGENTS.md"],
+ "rollback": [
+  {"path": "/srv/ar-coordination/runtime/eve-agent", "action": "created", "undoCommand": "rm -rf /srv/ar-coordination/runtime/eve-agent"},
+  {"path": "/srv/ar-coordination/AGENTS.md", "action": "restored", "undoCommand": "re-run the installer with no experiment selected (RuntimeInstallRequest(experiment=None)) to copy the legacy startup chain back"}
+ ]
+}
+"""
+"""The ``experiment`` part of one install result, as the build before the application's removal made it.
+
+Copied from a run of that build (``experiment="role-capsules"``); only the three machine paths are
+replaced. Its record carries ``harness`` and the application's five fields, and its probe the five
+application capabilities. That build repeated the probe under ``capabilities``, which
+:func:`earlier_install_result` restores.
+"""
+
+
+def earlier_install_result() -> dict[str, object]:
+    """One whole install result of that build, as the ``runtime_install`` tool filed it."""
+
+    experiment = json.loads(EARLIER_EXPERIMENT_PART)
+    experiment["capabilities"] = {"ok": True, "capabilities": experiment["record"]["capabilities"]}
+    return {
+        "ok": True,
+        "operation": "runtime_install",
+        "dryRun": False,
+        "coordinationRoot": "/srv/ar-coordination",
+        "includeBenchmarks": False,
+        "installProviderDeps": False,
+        "experiment": experiment,
+    }
+
+
+def test_an_install_over_an_earlier_experimental_installation_fails_on_none_of_its_stores(
+    tmp_path: Path,
+) -> None:
+    """What an experimental install of the earlier build left stays, and no install fails on it.
+
+    Two of its stores are in the root: the report the tool filed, whose run record still carries
+    the application's fields and capabilities, and the application copy under
+    ``runtime/eve-agent``. No part of the product parses a filed record, so there is no loader to
+    hold to the earlier shape: the report listing, the one reader of that folder, names the file,
+    and an unselected and a selected install both run over it and leave its bytes alone. The
+    application copy is named as a store of a removed part and nothing in it is pruned.
+    """
+
+    source = create_install_source(tmp_path)
+    coordination_root = tmp_path / "ar-coordination"
+    earlier = earlier_install_result()
+    report = write_tool_report(coordination_root, "runtime_install", earlier, label="install")
+    filed = report.read_bytes()
+    application = coordination_root / "runtime" / "eve-agent"
+    kept = {
+        application / "package.json": "{}\n",
+        application / "node_modules" / "eve" / "package.json": '{"version": "0.56.0"}\n',
+    }
+    for file, content in kept.items():
+        file.parent.mkdir(parents=True)
+        file.write_text(content, encoding="utf-8")
+
+    for experiment in (None, "role-capsules"):
+        summary = run_install(source, coordination_root, experiment=experiment)
+
+        assert report.read_bytes() == filed
+        assert json.loads(report.read_text(encoding="utf-8")) == earlier
+        assert {file: file.read_text(encoding="utf-8") for file in kept} == kept
+        assert [item["path"] for item in summary.removed_part_stores] == [application.as_posix()]
+
+    listed = read_tool_reports(coordination_root, now=datetime.now(UTC))
+    assert [(node.tool, node.path) for node in listed] == [("runtime_install", report.as_posix())]

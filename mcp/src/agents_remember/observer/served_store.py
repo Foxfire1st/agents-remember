@@ -24,7 +24,7 @@ single-writer assumption the event and gate stores make.
 
 This is a *record*, not a public MCP response: it carries no token fields and is
 never returned by a tool, so it is not registered in
-``PUBLIC_TOOL_RESPONSE_MODELS``.
+``TOOL_RESPONSE_MODELS``.
 
 Two classes, one substrate: :class:`ServedStore` is the file (paths, append, read,
 fold), and :class:`ServedLedger` is the live read-through cache over it that the

@@ -69,19 +69,10 @@ DEFAULT_DASHBOARD_PORT = 8765
 # Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
 # boot, not silently leave the daemon unsupervised.
 KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
-# Completion-seat cleanup is boot-snapshot MCP authority. The two historical edge gates keep
-# their names for compatibility; ``autoCloseCompletedSeats`` selects retire (default) versus the
-# old landed/archive behavior when an enabled completion edge runs. The legacy autoRetire* names
-# remain migration aliases for the edge gates in existing local authority files.
-KNOWN_RETIREMENT_FIELDS = frozenset(
-    {
-        "autoLandOnIntegration",
-        "autoLandOnFinalize",
-        "autoCloseCompletedSeats",
-        "autoRetireOnIntegration",
-        "autoRetireOnFinalize",
-    }
-)
+# MIK-R113 rule 4: top-level sections an earlier build read and this one does not. A file that
+# holds one loads; nothing in it is read or checked, and its keys are named once as no longer
+# used (``McpRuntimeConfig.unused_settings_keys``).
+UNUSED_SETTINGS_SECTIONS = ("retirement",)
 # MIK-R108 rule 3: the tool-call log keeping. Unknown keys fail loud, like
 # every other settings family.
 KNOWN_TOOL_LOG_FIELDS = frozenset({"keepDays", "maxBytes", "enclosureMaxBytes"})
@@ -131,20 +122,6 @@ class OrchestrationSettings:
     require_reviewer_verdict_at_seams: bool = False
 
 
-@dataclass(frozen=True)
-class RetirementSettings:
-    """The optional ``retirement`` settings object: completion-seat cleanup.
-
-    The edge gates and auto-close behavior default ON. A successful completion edge therefore
-    retires report-bearing leaf-altitude seats and frees their tmux processes. Turning only
-    ``auto_close_completed_seats`` off restores the prior landed/archive behavior end to end.
-    """
-
-    auto_land_on_integration: bool = True
-    auto_land_on_finalize: bool = True
-    auto_close_completed_seats: bool = True
-
-
 # MIK-R108 rule 3: the tool-call log keeping. 14 days when absent.
 TOOL_LOG_KEEP_DAYS_DEFAULT = 14
 # MIK-R108 rule 3: the log-folder budgets in bytes (D1-D4). 256 MiB for the
@@ -187,8 +164,9 @@ class McpRuntimeConfig:
     provider_degradation: ProviderDegradationSettings = field(
         default_factory=ProviderDegradationSettings
     )
-    retirement: RetirementSettings = field(default_factory=RetirementSettings)
     tool_log: ToolLogSettings = field(default_factory=ToolLogSettings)
+    # MIK-R113 rule 4: the keys this file holds that are no longer read, as dotted names.
+    unused_settings_keys: tuple[str, ...] = ()
 
     @property
     def paseo_runtime(self) -> PaseoRuntimeSettings | None:
@@ -343,7 +321,6 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         coordination_root=coordination_root,
         config_path=config_path,
     )
-    retirement = parse_retirement_settings(data.get("retirement"))
     tool_log = parse_tool_log_settings(data.get("toolLog"))
     warn_per_harness_paseo(data, config_path, coordination_root)
 
@@ -360,8 +337,8 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         dashboard=dashboard,
         orchestration=orchestration,
         provider_degradation=provider_degradation,
-        retirement=retirement,
         tool_log=tool_log,
+        unused_settings_keys=unused_settings_keys(data),
     )
 
 
@@ -645,28 +622,18 @@ def parse_dashboard_settings(raw: object) -> DashboardSettings:
     return DashboardSettings(auto_start=auto_start, port=port)
 
 
-def parse_retirement_settings(raw: object) -> RetirementSettings:
-    if raw is None:
-        return RetirementSettings()
-    if not isinstance(raw, dict):
-        raise ConfigError("retirement settings must be an object")
-    unknown = sorted(set(raw) - KNOWN_RETIREMENT_FIELDS)
-    if unknown:
-        allowed = ", ".join(sorted(KNOWN_RETIREMENT_FIELDS))
-        unknown_text = ", ".join(unknown)
-        raise ConfigError(f"unsupported retirement setting(s): {unknown_text}; allowed: {allowed}")
-    for key in sorted(KNOWN_RETIREMENT_FIELDS):
-        if key in raw and not isinstance(raw[key], bool):
-            raise ConfigError(f"retirement.{key} must be a boolean")
-    auto_land_on_integration = raw.get(
-        "autoLandOnIntegration", raw.get("autoRetireOnIntegration", True)
-    )
-    auto_land_on_finalize = raw.get("autoLandOnFinalize", raw.get("autoRetireOnFinalize", True))
-    return RetirementSettings(
-        auto_land_on_integration=auto_land_on_integration,
-        auto_land_on_finalize=auto_land_on_finalize,
-        auto_close_completed_seats=raw.get("autoCloseCompletedSeats", True),
-    )
+def unused_settings_keys(data: dict[str, Any]) -> tuple[str, ...]:
+    """The keys of the sections that are no longer read, as dotted names (MIK-R113 rule 4)."""
+    names: list[str] = []
+    for section in UNUSED_SETTINGS_SECTIONS:
+        if section not in data:
+            continue
+        held = data[section]
+        if isinstance(held, dict) and held:
+            names.extend(f"{section}.{key}" for key in sorted(held))
+        else:
+            names.append(section)
+    return tuple(names)
 
 
 def parse_tool_log_settings(raw: object) -> ToolLogSettings:
@@ -911,9 +878,4 @@ def _checkout_runtime_config(
         benchmarks_enabled=False,
         dashboard=DashboardSettings(auto_start=False),
         orchestration=OrchestrationSettings(),
-        retirement=RetirementSettings(
-            auto_land_on_integration=False,
-            auto_land_on_finalize=False,
-            auto_close_completed_seats=False,
-        ),
     )

@@ -26,13 +26,11 @@ The curator never runs the closeout preview, never stages a sync resolution or r
 never decides whether a leaf lands.
 
 The manager's half is a **leaf**-entry fact. On the repository-foundation entry there is no leaf, no
-manager and no brief. The roles the opener admits without a document are the taskless seats `chat`,
-`terminal`, `bootstrap` and — since the developer's **2026-09-24 ruling** — `curator`; every other
-role is refused (`400 task-binding-required`, "named role scope is required"). So the foundation is
-reached the way the `c-14-knowledge-bootstrap` skill states: a **taskless curator session** authors it
-under this role's own rules, the taskless **bootstrap** seat carries the read-and-report step, a
-curator seat opened on a **task document** authors it on that task's line, and the taskless writer is
-run by an instructed session whose admission is the writer's own (see below).
+manager and no brief. The foundation is
+reached the way the `c-14-knowledge-bootstrap` skill states: the taskless **bootstrap** seat carries
+the read-and-report step, a curator seat opened on a **task document** authors it on that task's
+line, and the taskless writer is run by an instructed session that follows this role's own rules and
+whose admission is the writer's own (see below).
 
 ## Required inputs
 
@@ -183,18 +181,18 @@ existing project. Its procedure is the `c-14-knowledge-bootstrap` skill.
 
 What stays identical is the ownership: the reconciliation and the authored knowledge — supported
 invariants and facets, justified family guarantees with their members, applicability, essential
-conditions, exclusions and source realizations — belong to this seat either way, and
+conditions, exclusions and source realizations — belong to this role either way, and
 there is still exactly one admitted writer. What changes is the
 **carrier**, the admission and the scope:
 
 | | Leaf coherence pass | Repository-foundation entry |
 | --- | --- | --- |
-| Carrier | this seat, opened on the leaf's task document | a **taskless curator seat** (developer ruling 2026-09-24) which authors under this role's own rules, or the taskless **bootstrap** seat for the read-and-report step |
+| Carrier | this seat, opened on the leaf's task document | an **instructed session** with no task document, which runs the taskless writer and authors under this role's own rules, or the taskless **bootstrap** seat for the read-and-report step |
 | Scope | this leaf's captured pre-closeout change set | the requested project scope |
 | Required inputs | the brief, the change set, `notes/`, the enclosure contract | the declared repository entry, the resolved context, the requested scope, the available sources, the current knowledge state |
 | Writer entry | `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --commit` | `agents-remember knowledge-bootstrap --repo <repo_id> … --commit`, from a session with **no enclosure in scope** — the taskless writer refuses one (`enclosure_in_scope`) so a bootstrap can never write onto a task's line |
 | Onboarding | written by this pass | optional input: the foundation neither requires onboarding to exist nor writes any |
-| Missing inputs | intake is rejected | there is no brief, no change set and no enclosure contract to intake, and no task document is fabricated to give this entry an argument list — the carrier is a taskless seat, which is exactly why the curator seat is admitted without one |
+| Missing inputs | intake is rejected | there is no brief, no change set and no enclosure contract to intake, and no task document is fabricated to give this entry an argument list — the carrier holds no task document, and no curator seat is opened on an invented one |
 
 Neither entry substitutes for the other: `knowledge-ingest` needs an enclosure contract and is not the
 route for a repository that has no leaf, and no leaf, worktree, enclosure or task document is ever

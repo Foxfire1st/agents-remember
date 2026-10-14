@@ -15,15 +15,14 @@ code repository for resolver, onboarding, workflow, and closeout commands.
 
 ## Start Here — Route By Role
 
-Sessions route by role through the `l-01-agent-lifecycles` skill. A spawned
-agent follows its brief. A developer-facing session is free chat: it answers
-research inline and, for ordinary role-shaped work, creates or resolves a durable sprint
-and first leaf, compiles `templates/architect-brief.md`, and calls
-`dispatch_agent` once on that sprint document with role `architect`. The
-launcher hands over after the complete brief is durably pinned; it is never a
-global architect identity and never calls the internal session primitive.
-An explicit developer-declared task-seat takeover instead dispatches the named
-role on that role's canonical task document, as defined by the lifecycle skill.
+Sessions route by role through the `l-01-agent-lifecycles` skill. A role
+agent follows its handover. A developer-facing session is free chat: it answers
+a question inline and, for work on this repository, creates or resolves the sprint
+document, writes the request of the developer into it, starts an Architect with
+`role_start` (the call for an Architect names no document), and tells the developer
+that the agent is in the dashboard and which sprint document holds the request. The
+launcher is never a global architect identity.
+Another role is started this way only when the developer names the role and the task.
 Classify the job (bug / feature / triage / research) as a *lens* during
 reframe-research — a hint, re-pickable, never a gate.
 

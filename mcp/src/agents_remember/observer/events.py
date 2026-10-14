@@ -10,7 +10,7 @@ renders the camelCase wire form the rest of the package already uses.
 
 This is intentionally *not* a public MCP response model: it carries no token
 fields and is never returned by a tool, so it is not registered in
-``PUBLIC_TOOL_RESPONSE_MODELS``.
+``TOOL_RESPONSE_MODELS``.
 """
 
 from __future__ import annotations

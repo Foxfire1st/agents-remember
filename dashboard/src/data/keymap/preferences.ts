@@ -1,44 +1,33 @@
 import { useSyncExternalStore } from "react";
 
-import { CHROME_CHORDS, COMPOSER_CHORDS, REVIEW_CHORDS, type ZoneChord } from "./chords";
+import { REVIEW_CHORDS, type ZoneChord } from "./chords";
 import { BROWSER_FORBIDDEN } from "./reserved";
 
-// FEUI-L8 owns only a local, versioned preference seam. The settings-page editor belongs to
-// CFGUI; until then, same-tab callers use writeKeymapPreferences with this documented object
-// (raw writes from another tab remain reactive through the native storage event):
-// { "version": 1, "bindings": { "palette.open": "Control+P" },
-//   "composerProfile": "vim" }
+// The bindings with a user's overrides. The overrides are a local, versioned object in
+// localStorage. No screen writes it: a user edits it by hand, a load of the page reads it, and a
+// write from another tab arrives through the native storage event.
+// { "version": 1, "bindings": { "review.nextChange": "N" } }
 //
 // Validation is deliberately strict because localStorage is user-editable and survives upgrades.
 // Passing malformed tinykeys strings through would disable the whole keyboard layer; accepting a
 // duplicate/browser-owned chord could create a keyboard trap. Invalid entries therefore fall back
-// to their individual defaults and are named in the keyboard-reference overlay.
+// to their individual defaults. A stored object can be older than this build: a binding of a
+// command this build does not know, and every field besides `version` and `bindings`, is ignored.
 
+// The key keeps the name the overrides were first stored under, so a user's object is still read.
 export const KEYMAP_STORAGE_KEY = "cockpit.sessions.keymap.v1";
-const KEYMAP_CHANGED_EVENT = "cockpit:sessions-keymap-changed";
-
-export type ComposerProfile = "emacs" | "vim";
-
-export interface KeymapPreferences {
-  bindings?: Record<string, string>;
-  composerProfile?: ComposerProfile;
-}
 
 export interface EffectiveKeymap {
   bindings: readonly ZoneChord[];
-  composerProfile: ComposerProfile;
-  issues: readonly string[];
-  /** Stable dependency for binding effects and CodeMirror compartments. */
-  signature: string;
 }
 
-interface StoredKeymap extends KeymapPreferences {
+interface StoredKeymap {
   version: 1;
+  bindings?: Record<string, string>;
 }
 
-const DEFAULT_BINDINGS = [...CHROME_CHORDS, ...COMPOSER_CHORDS, ...REVIEW_CHORDS] as const;
+const DEFAULT_BINDINGS: readonly ZoneChord[] = REVIEW_CHORDS;
 const KNOWN_COMMANDS = new Set(DEFAULT_BINDINGS.map((entry) => entry.commandId));
-const IMMUTABLE_COMPOSER_ESCAPE_COMMAND = "focus.nextRegion";
 const MODIFIERS = new Map<string, string>([
   ["control", "Control"],
   ["ctrl", "Control"],
@@ -123,21 +112,6 @@ function zonesOverlap(a: ZoneChord, b: ZoneChord): boolean {
   return a.zones.some((zone) => b.zones.includes(zone));
 }
 
-/** Whether editable-target routing would deliberately pass this chord through as printable. */
-function isPrintableBinding(chord: string): boolean {
-  const tokens = chord.split("+");
-  if (tokens.some((token) => token === "Control" || token === "Alt" || token === "Meta")) {
-    return false;
-  }
-  const key = tokens[tokens.length - 1];
-  return (
-    /^[A-Z0-9?]$/.test(key) ||
-    ["Space", "Comma", "Period", "Semicolon", "Slash", "BracketLeft", "BracketRight"].includes(
-      key,
-    )
-  );
-}
-
 function readStoredObject(value: unknown): StoredKeymap | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -145,81 +119,37 @@ function readStoredObject(value: unknown): StoredKeymap | null {
   return record as unknown as StoredKeymap;
 }
 
-function readRawKeymap(raw: string | null): { stored: StoredKeymap | null; issues: string[] } {
-  const issues: string[] = [];
-  let stored: StoredKeymap | null = null;
-  if (raw !== null) {
-    try {
-      stored = readStoredObject(JSON.parse(raw));
-      if (!stored) issues.push("stored keymap has an unsupported shape or version; defaults restored");
-    } catch {
-      issues.push("stored keymap is not valid JSON; defaults restored");
-    }
-  }
-  return { stored, issues };
-}
-
-function resolveComposerProfile(stored: StoredKeymap | null, issues: string[]): ComposerProfile {
-  let composerProfile: ComposerProfile = "emacs";
-  if (stored?.composerProfile === "vim" || stored?.composerProfile === "emacs") {
-    composerProfile = stored.composerProfile;
-  } else if (stored?.composerProfile !== undefined) {
-    issues.push("unknown composer profile; emacs restored");
-  }
-  return composerProfile;
-}
-
-function normalizeOverride(
-  commandId: string,
-  candidate: unknown,
-  issues: string[],
-): string | null {
-  if (typeof candidate !== "string") {
-    issues.push(`${commandId}: binding must be text; default restored`);
+/** The stored object, or null (the defaults) when it is absent, not JSON, or of another shape. */
+function readRawKeymap(raw: string | null): StoredKeymap | null {
+  if (raw === null) return null;
+  try {
+    return readStoredObject(JSON.parse(raw));
+  } catch {
     return null;
   }
+}
+
+/** The validated chord of one stored binding, or null (its default) when it is not acceptable. */
+function normalizeOverride(candidate: unknown): string | null {
+  if (typeof candidate !== "string") return null;
   const chord = normalizeBinding(candidate);
-  if (!chord) {
-    issues.push(`${commandId}: malformed binding; default restored`);
-    return null;
-  }
+  if (!chord) return null;
   if (BROWSER_FORBIDDEN.includes(browserComparable(chord) as (typeof BROWSER_FORBIDDEN)[number])) {
-    issues.push(`${commandId}: browser-reserved ${bindingLabel(chord)} rejected; default restored`);
-    return null;
-  }
-  const defaultEntry = DEFAULT_BINDINGS.find((entry) => entry.commandId === commandId)!;
-  if (
-    commandId === IMMUTABLE_COMPOSER_ESCAPE_COMMAND &&
-    chord !== defaultEntry.chord
-  ) {
-    issues.push(`${commandId}: F6 is the fixed browser-safe composer escape; default restored`);
-    return null;
-  }
-  if (defaultEntry.zones.includes("composer") && isPrintableBinding(chord)) {
-    issues.push(`${commandId}: printable composer binding rejected; default restored`);
     return null;
   }
   return chord;
 }
 
-function collectOverrides(
-  stored: StoredKeymap | null,
-  issues: string[],
-): Map<string, string> {
+function collectOverrides(stored: StoredKeymap | null): Map<string, string> {
   const overrides = new Map<string, string>();
-  if (stored?.bindings !== undefined) {
-    if (typeof stored.bindings !== "object" || stored.bindings === null || Array.isArray(stored.bindings)) {
-      issues.push("bindings must be an object; binding defaults restored");
-    } else {
-      for (const [commandId, candidate] of Object.entries(stored.bindings)) {
-        if (!KNOWN_COMMANDS.has(commandId)) {
-          issues.push(`${commandId}: unknown command ignored`);
-          continue;
-        }
-        const chord = normalizeOverride(commandId, candidate, issues);
-        if (chord !== null) overrides.set(commandId, chord);
-      }
-    }
+  const bindings: unknown = stored?.bindings;
+  if (typeof bindings !== "object" || bindings === null || Array.isArray(bindings)) {
+    return overrides;
+  }
+  for (const [commandId, candidate] of Object.entries(bindings)) {
+    if (!KNOWN_COMMANDS.has(commandId)) continue;
+    const chord = normalizeOverride(candidate);
+    if (chord !== null) overrides.set(commandId, chord);
   }
   return overrides;
 }
@@ -242,9 +172,7 @@ function findCollisions(
 }
 
 export function resolveKeymap(raw: string | null): EffectiveKeymap {
-  const { stored, issues } = readRawKeymap(raw);
-  const composerProfile = resolveComposerProfile(stored, issues);
-  const overrides = collectOverrides(stored, issues);
+  const overrides = collectOverrides(readRawKeymap(raw));
 
   const withCandidates = DEFAULT_BINDINGS.map((entry) => ({
     ...entry,
@@ -254,23 +182,15 @@ export function resolveKeymap(raw: string | null): EffectiveKeymap {
       : entry.label,
   }));
   const rejectedForCollision = findCollisions(withCandidates, overrides);
-  for (const commandId of rejectedForCollision) {
-    issues.push(`${commandId}: duplicate binding rejected; default restored`);
-  }
 
   const bindings = withCandidates.map((entry) => {
     if (!rejectedForCollision.has(entry.commandId)) return entry;
     return DEFAULT_BINDINGS.find((fallback) => fallback.commandId === entry.commandId)!;
   });
-  const signature = JSON.stringify({
-    bindings: bindings.map(({ commandId, chord }) => [commandId, chord]),
-    composerProfile,
-    issues,
-  });
-  return { bindings, composerProfile, issues, signature };
+  return { bindings };
 }
 
-export function bindingLabel(chord: string): string {
+function bindingLabel(chord: string): string {
   const labels: Record<string, string> = {
     Control: "ctrl",
     Alt: "alt",
@@ -319,22 +239,6 @@ export function ariaKeyshortcuts(chord: string): string {
     .join("+");
 }
 
-/** Convert the validated tinykeys subset into CodeMirror's key notation. */
-export function codeMirrorBinding(chord: string): string {
-  const keys: Record<string, string> = {
-    Control: "Ctrl",
-    Comma: ",",
-    Period: ".",
-    Semicolon: ";",
-    Slash: "/",
-  };
-  return chord
-    .split("+")
-    .filter((token) => token !== "[Shift]")
-    .map((token) => keys[token] ?? token)
-    .join("-");
-}
-
 const DEFAULT_KEYMAP = resolveKeymap(null);
 let cachedRaw: string | null | undefined;
 let cachedSnapshot = DEFAULT_KEYMAP;
@@ -359,10 +263,8 @@ function subscribe(listener: () => void): () => void {
     if (event.key === KEYMAP_STORAGE_KEY) listener();
   };
   window.addEventListener("storage", onStorage);
-  window.addEventListener(KEYMAP_CHANGED_EVENT, listener);
   return () => {
     window.removeEventListener("storage", onStorage);
-    window.removeEventListener(KEYMAP_CHANGED_EVENT, listener);
   };
 }
 
@@ -370,45 +272,9 @@ export function useEffectiveKeymap(): EffectiveKeymap {
   return useSyncExternalStore(subscribe, readWindowSnapshot, () => DEFAULT_KEYMAP);
 }
 
-/**
- * Persist a complete v1 preference object and notify subscribers in this tab. Other tabs receive
- * the browser's native storage event. This is the public write seam for the future CFGUI editor;
- * direct same-tab localStorage writes cannot be reactive because browsers do not emit `storage`
- * back into the source document.
- */
-export function writeKeymapPreferences(preferences: KeymapPreferences): void {
-  if (typeof window === "undefined") return;
-  const next: StoredKeymap = { version: 1, ...preferences };
-  try {
-    window.localStorage.setItem(KEYMAP_STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    return;
-  }
-  cachedRaw = undefined;
-  window.dispatchEvent(new Event(KEYMAP_CHANGED_EVENT));
-}
-
-export function setComposerProfile(profile: ComposerProfile): void {
-  if (typeof window === "undefined") return;
-  let current: StoredKeymap = { version: 1 };
-  try {
-    const parsed = readStoredObject(JSON.parse(window.localStorage.getItem(KEYMAP_STORAGE_KEY) ?? "null"));
-    if (parsed) current = parsed;
-  } catch {
-    // Corrupt persisted input is replaced by the new valid preference below.
-  }
-  writeKeymapPreferences({ bindings: current.bindings, composerProfile: profile });
-}
-
 export function bindingFor(
   keymap: EffectiveKeymap,
   commandId: string,
 ): ZoneChord | undefined {
   return keymap.bindings.find((entry) => entry.commandId === commandId);
-}
-
-/** Vim owns Escape inside CodeMirror; every consumer uses this predicate so runtime and the
- * effective overlay suppress the same binding. */
-export function keymapCommandIsActive(keymap: EffectiveKeymap, commandId: string): boolean {
-  return !(keymap.composerProfile === "vim" && commandId === "focus.stageHeader");
 }

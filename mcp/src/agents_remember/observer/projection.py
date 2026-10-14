@@ -4,7 +4,7 @@ These are the *persisted and served* contract -- written atomically to
 ``latest-state.json`` / ``latest-metrics.json`` and (slice 04) streamed over
 SSE. Like :mod:`agents_remember.observer.events` they are deliberately **not**
 MCP response models: they carry no token-accounting fields, are never returned
-by a tool, and are absent from ``PUBLIC_TOOL_RESPONSE_MODELS``. Fields are
+by a tool, and are absent from ``TOOL_RESPONSE_MODELS``. Fields are
 camelCase to match the package's wire convention; ``extra="forbid"`` keeps the
 served contract honest.
 
@@ -67,29 +67,6 @@ class ActionAvailability(BaseModel):
     nextSafeAction: str | None = None
 
 
-class GateNode(BaseModel):
-    """A durable gate materialized into the projection (slice 6c): the dashboard's
-    review surface for a decision point on a lifecycle.
-
-    Distinct from the event-derived ``ask`` proto-gate -- this is the persisted
-    ``GateRecord`` (``controlplane``) the operator acts on. ``decisions`` is the set
-    of verbs the cockpit may POST for an open gate (empty once decided), so the UI
-    renders the affordances straight from the reducer, never inferring them.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    kind: str
-    state: str
-    decidedBy: str | None = None
-    decidedVia: str | None = None
-    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list)
-    decisions: list[str] = Field(default_factory=list)
-    packet: dict[str, Any] = Field(default_factory=dict)
-    ts: str
-
-
 class LifecycleProjection(BaseModel):
     """One lifecycle's resolved state, folded from its event log.
 
@@ -109,24 +86,11 @@ class LifecycleProjection(BaseModel):
     scope: str | None = None
     startedAt: str
     lastEventTs: str
-    # When the lifecycle last *entered its current written state* (seeded at
-    # ``startedAt``, advanced on every state-changing event in the fold). Unlike
-    # ``lastEventTs`` it is immune to heartbeats, so it is the stable
-    # triggering-signal anchor the attention queue uses to honor a lifecycle
-    # acknowledgement of an awaiting-developer / blocked item and to re-surface it on a *new*
-    # occurrence. Inferred transitions (stale -> paused) intentionally do not move it.
-    stateEnteredAt: str = ""
     staleSeconds: float | None = None
     # True when ``state`` was *derived* by the reducer (stale heartbeat -> paused;
     # dormant fleeting -> abandoned) rather than read from a written transition.
     # Keeps "never pretend declared is observed" enforceable from the data alone.
     inferred: bool = False
-    # The latest open block ask (the proto-gate); slice 06 materializes the record.
-    ask: dict[str, Any] | None = None
-    # The durable gate materialized from the GateStore (slice 6c): the dashboard's
-    # review surface. None when the lifecycle has no open gate.
-    gate: GateNode | None = None
-    actions: list[ActionAvailability] = Field(default_factory=list)
 
 
 class EnclosureNode(BaseModel):
@@ -372,65 +336,6 @@ class SetupProgressNode(BaseModel):
     heartbeatAgeSeconds: float | None = None
     completedCount: int = 0
     failedPhases: list[str] = Field(default_factory=list)
-
-
-class AgentPickupNode(BaseModel):
-    """A pending dashboard response waiting for a turn-boundary landing.
-
-    N16: the system acks -- a row lands when a correlated adapter acceptance reaches the
-    recipient at a turn boundary, so this list surfaces "pending / not yet landed" for the
-    dashboard. ``operator_inbox_consume`` is an optional attribution marker with nothing
-    mechanical attached. The attempt/backoff fields ride along so the panel can show
-    redelivery state without a second surface; the sweep predicates read the stores directly
-    and never this projection.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    entryId: str
-    lifecycleId: str | None = None
-    agentId: str | None = None
-    taskDocumentRef: TaskDocumentRef | None = None
-    subjectTaskDocumentRef: TaskDocumentRef | None = None
-    senderAgentId: str | None = None
-    senderRole: str | None = None
-    recipientRole: str | None = None
-    ownerRole: str | None = None
-    ownerTaskDocumentRef: TaskDocumentRef | None = None
-    ownerAgentId: str | None = None
-    ownerLifecycleId: str | None = None
-    gateId: str | None = None
-    messageKind: str = "message"
-    artifactPath: str | None = None
-    deliveryState: str = "queued"
-    deliveredToSession: str | None = None
-    attemptCount: int = 0
-    lastAttemptAt: str | None = None
-    nextAttemptAt: str | None = None
-    escalatedAt: str | None = None
-    state: str
-    ageSeconds: float | None = None
-    ttlSeconds: float
-
-
-class ExpectationRowNode(BaseModel):
-    """A durable what-must-happen-by-when row (R2/R5, 260707-HFX2-L1): projected for dashboard/
-    architect observability. An L2 predicate reads ``ExpectationRowStore`` directly, never this
-    node -- surfacing only, never the correctness path."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    kind: str
-    state: str
-    sourceId: str
-    subjectAgentId: str | None = None
-    subjectLifecycleId: str | None = None
-    taskDocumentRef: TaskDocumentRef | None = None
-    dueAt: str
-    overdue: bool = False
-    note: str | None = None
 
 
 class RouteCoverageNode(BaseModel):
@@ -973,11 +878,10 @@ class AttentionItem(BaseModel):
     detail: str | None = None
     waitSeconds: float | None = None
     lifecycleId: str | None = None
-    gateId: str | None = None
     enclosure: str | None = None
     repoId: str | None = None
     providerId: str | None = None
-    # The triggering signal's timestamp (state-entry / gate / snapshot time), used to
+    # The triggering signal's timestamp (last-event / snapshot time), used to
     # honor a current lifecycle acknowledgement: an item is suppressed while an
     # acknowledgement at-or-after this exists, and re-surfaces when a *newer* signal arrives.
     # ``None`` means no freshness anchor, so an acknowledgement holds until the underlying
@@ -1219,8 +1123,6 @@ class Analytics(BaseModel):
     setupProgress: list[SetupProgressNode] = Field(default_factory=list)
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
     toolReports: list[ToolReportNode] = Field(default_factory=list)
-    agentPickups: list[AgentPickupNode] = Field(default_factory=list)
-    expectationRows: list[ExpectationRowNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
     taskDocuments: list[TaskDocNode] = Field(default_factory=list)
     attentionQueue: list[AttentionItem] = Field(default_factory=list)

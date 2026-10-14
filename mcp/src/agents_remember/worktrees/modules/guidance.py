@@ -364,7 +364,7 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
 
     slice 09: a dirty worktree is NOT a commit-approval gate. `commit-approval-pending` is owned by the
     closeout preview (the real gate moment, set in closeout.py) and — once the slice-6 gate plane is
-    adopted — by a raised `closeout-approval` gate surfaced via GateNode; it is never inferred from
+    adopted — by a raised `closeout-approval` gate; it is never inferred from
     `git status`. A dirty tree falls through to the honest lifecycle-position phase below.
     """
     if contract.closeout_status == "completed":

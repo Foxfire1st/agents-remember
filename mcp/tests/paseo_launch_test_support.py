@@ -281,12 +281,18 @@ class GivenToAgentExpectations(unittest.TestCase):
             "env": {
                 "PYTHONPATH": self.source.parent.as_posix(),
                 # The fixture's Git/bytecode settings and its provided XDG homes survive the
-                # role tool-server hop; absent XDG variables are not invented here.
+                # role tool-server hop, the place of the user's settings among them; absent XDG
+                # variables are not invented here.
                 "GIT_OPTIONAL_LOCKS": "0",
                 "PYTHONPYCACHEPREFIX": (self.root / "pycache").as_posix(),
                 **{
                     name: os.environ[name]
-                    for name in ("XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME")
+                    for name in (
+                        "XDG_CONFIG_HOME",
+                        "XDG_DATA_HOME",
+                        "XDG_STATE_HOME",
+                        "XDG_CACHE_HOME",
+                    )
                     if os.environ.get(name)
                 },
                 # No seat identity reaches the tool server from the harness that starts it.

@@ -15,44 +15,19 @@ from typing import Any, cast
 
 import pytest
 from agents_remember.kernel.primitives.runtime_config import RepositoryScope
-from agents_remember.serving._app_common import Projector, _ServingRuntime, stream_events
+from agents_remember.serving._app_common import Projector, stream_events
 from agents_remember.serving._app_routes import _state_response, _task_document_response
-from agents_remember.serving._app_terminal_routes import _register_terminal_session_routes
-from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
-from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.changeset import register_changeset_routes
-from agents_remember.serving.conversation.authorization import LocalOperatorAuthorizationResolver
-from agents_remember.serving.conversation.runtime import ConversationRuntime, ConversationScope
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
-from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.harness_control_api import register_harness_control_routes
-from agents_remember.serving.harness_control_client import ControlPlaneClient
 from agents_remember.serving.requirements import register_requirements_routes
 from agents_remember.serving.review import register_review_routes
 from agents_remember.serving.review_summary import register_review_summary_route
 from agents_remember.serving.review_trees import register_review_trees_route
-from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog
-from agents_remember.serving.terminal_liveness import (
-    TerminalCatalogLivenessConfig,
-    TerminalCatalogLivenessSweeper,
-    utc_now,
-)
-from agents_remember.serving.terminal_observer_health import TerminalObserverHealthPublisher
-from agents_remember.serving.terminal_paste import TerminalPaster
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from read_boundary_oracle_test_support import _classify, _snapshot
 from test_knowledge_review_source_endpoints import build_endpoint_fixture
-
-
-class _NoLiveSessions:
-    """TerminalLivenessHost double: no live sessions, so per-session GETs refuse by name."""
-
-    def has_session(self, tmux_name: str) -> bool:
-        del tmux_name
-        return False
 
 
 def test_the_protected_read_roster_names_every_route_with_its_outcome(
@@ -195,90 +170,6 @@ def test_the_cockpit_boundary_names_its_outcomes_without_a_live_lifetime(
 
     with pytest.raises(TimeoutError):
         asyncio.run(_no_delta_without_a_ticking_lifetime())
-
-    after = _snapshot(roots)
-    findings = _classify(
-        before,
-        after,
-        coordination_roots=("enclosure/ar-coordination",),
-        reviewed_prefixes=("enclosure/diff",),
-    )
-    assert findings == [], findings
-
-
-def test_terminal_and_harness_gets_read_without_live_actors(
-    tmp_path: Path, worktree_services: Any
-) -> None:
-    """Rule 6 over the five live-surface GETs: real calls, seam-composed lifetimes.
-
-    The terminal bundle composes from an idle host (bound but never touched: no
-    session exists to act on), a file catalog and tmp-backed stores; the harness
-    bundle composes from the production local resolver, an empty registry and a
-    no-session host double. Sessions list empty, harnesses list detected installs,
-    and unknown harnesses/sessions refuse by name. Nothing starts: no PTY, no tmux,
-    no driver. Both lifetimes live inside the single snapshotted root, so the
-    closing classification covers every file either bundle could touch.
-    """
-
-    endpoints = build_endpoint_fixture(tmp_path / "live-gets")
-    observer = tmp_path / "live-gets" / "observer"
-    observer.mkdir(exist_ok=True)
-    scope = tmp_path / "live-gets" / "conversation"
-    scope.mkdir(exist_ok=True)
-    catalog = TerminalCatalog(tmp_path / "live-gets" / "terminal-sessions.json")
-    host = TerminalHost()
-    serving = _ServingRuntime(
-        config=endpoints.config,
-        projector=Projector(endpoints.config),
-        host=host,
-        catalog=catalog,
-        paster=TerminalPaster(),
-        liveness_clock=utc_now,
-        liveness_config=TerminalCatalogLivenessConfig(),
-        liveness_sweeper=TerminalCatalogLivenessSweeper(catalog, host),
-        build=ServingBuild(version="test", commit=None, booted_at="2026-10-10T00:00:00Z"),
-        heartbeat_store=AgentNotifierHeartbeatStore(observer),
-        observer_health=TerminalObserverHealthPublisher(observer, utc_now),
-        register_inbox_execution_evidence=None,
-        interval=1.0,
-    )
-    app = FastAPI()
-    _register_terminal_session_routes(app, serving)
-    client = TestClient(app)
-    roots = {"enclosure": tmp_path / "live-gets"}
-    before = _snapshot(roots)
-
-    sessions = client.get("/api/terminal/sessions")
-    assert sessions.status_code == 200, sessions.text[:400]
-    assert sessions.json() == {"sessions": []}, sessions.text[:400]
-    harnesses = client.get("/api/harnesses")
-    assert harnesses.status_code == 200, harnesses.text[:400]
-    assert isinstance(harnesses.json().get("harnesses"), list), harnesses.text[:400]
-
-    conversation = ConversationRuntime(
-        scope=ConversationScope(workspace_root=scope, coordination_root=scope),
-        catalog=TerminalCatalog(scope / "terminal-sessions.json"),
-        control_plane=ControlPlaneClient(),
-        host=_NoLiveSessions(),
-        harness_registry=lambda: [],
-        liveness_clock=utc_now,
-        liveness_config=TerminalCatalogLivenessConfig(),
-        capability_catalog=HarnessCapabilityCatalog(scope),
-        authorization=LocalOperatorAuthorizationResolver.for_workspace(scope),
-    )
-    control = FastAPI()
-    register_harness_control_routes(control, conversation)
-    control_client = TestClient(control)
-    capability = control_client.get("/api/harnesses/no-such-harness/capabilities")
-    assert capability.status_code == 404, capability.text[:400]
-    assert capability.json()["status"] == "capability-unavailable", capability.text[:400]
-    for path in (
-        "/api/terminal/no-such-session/capabilities",
-        "/api/terminal/no-such-session/submission-authority",
-    ):
-        missing = control_client.get(path)
-        assert missing.status_code == 404, (path, missing.text[:400])
-        assert missing.json()["status"] == "unknown-session", (path, missing.text[:400])
 
     after = _snapshot(roots)
     findings = _classify(

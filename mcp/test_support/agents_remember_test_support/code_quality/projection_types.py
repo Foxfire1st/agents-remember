@@ -7,16 +7,14 @@ dashboard contract remains complete without a second field list.
 
 The schema describes accepted model input, while the dashboard reads serialized output.
 Core projection and serving-build models use ``exclude_none=True``, so nullable fields are
-omitted and become optional TypeScript properties. AgentNotifier heartbeat and terminal
-observer health deliberately dump nulls, so their nullable properties remain required
-``T | null`` values. Non-null defaults
-are always serialized and therefore remain required on the output contract.
+omitted and become optional TypeScript properties. Non-null defaults are always serialized
+and therefore remain required on the output contract.
 
 The renderer rejects schema forms it does not understand.  JSON Schema owns runtime
-refinements that TypeScript cannot enforce structurally (for example a numeric minimum or
-maximum, or a string length); those refinements remain exact in the schema artifact and are
-emitted beside the affected TypeScript property as deterministic documentation.  Unknown
-keywords still fail closed instead of disappearing from either generated contract.
+refinements that TypeScript cannot enforce structurally (for example a numeric minimum or a
+string length); those refinements remain exact in the schema artifact and are emitted beside
+the affected TypeScript property as deterministic documentation.  Unknown keywords still
+fail closed instead of disappearing from either generated contract.
 """
 
 from __future__ import annotations
@@ -32,11 +30,7 @@ from agents_remember.serving.served_state import ServedWorkspaceProjection
 SCHEMA_OUTPUT = Path("dashboard/src/types/projection.schema.json")
 TYPESCRIPT_OUTPUT = Path("dashboard/src/types/projection.ts")
 
-DEFINITION_RENAMES = {
-    "ServingBuildPayload": "ServingBuild",
-    "AgentNotifierHeartbeatPayload": "AgentNotifierHeartbeat",
-    "TerminalObserverHealthPayload": "TerminalObserverHealth",
-}
+DEFINITION_RENAMES = {"ServingBuildPayload": "ServingBuild"}
 NAMED_VOCABULARIES = (
     ("LifecycleProjection", "state", "State"),
     ("LifecycleProjection", "phase", "Phase"),
@@ -45,19 +39,9 @@ NAMED_VOCABULARIES = (
     ("CommitRefNode", "factState", "ProcessFactState"),
     ("EngineProcessNode", "health", "ProcessHealth"),
 )
-NULL_PRESERVING_MODELS = frozenset(
-    {"AgentNotifierHeartbeatPayload", "TerminalObserverHealthPayload"}
-)
 SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "title"})
-SCHEMA_REFINEMENT_KEYWORDS = frozenset(
-    {"maxItems", "maxLength", "minLength", "maximum", "minimum", "pattern"}
-)
-"""The runtime refinements emitted beside a TypeScript property instead of being enforced.
-
-``maximum`` is here because a bounded counter is a contract the schema must state: the served
-observer-health row declares both serving-lifetime counts as unsigned 32-bit values, and a mirror
-that documents only ``minimum`` would understate the field it mirrors.
-"""
+SCHEMA_REFINEMENT_KEYWORDS = frozenset({"maxItems", "maxLength", "minLength", "minimum", "pattern"})
+"""The runtime refinements emitted beside a TypeScript property instead of being enforced."""
 SCHEMA_KEYWORDS = (
     SCHEMA_ANNOTATION_KEYWORDS
     | SCHEMA_REFINEMENT_KEYWORDS
@@ -229,7 +213,7 @@ def _schema_allowed_keywords(
     else:
         allowed = allowed | {"type"}
     if node.get("type") in {"integer", "number"}:
-        allowed = allowed | {"maximum", "minimum"}
+        allowed = allowed | {"minimum"}
     elif node.get("type") == "string":
         allowed = allowed | {"maxLength", "minLength", "pattern"}
     return allowed
@@ -410,16 +394,13 @@ def _without_null(node: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _property_line(
-    owner: str,
     name: str,
     node: Mapping[str, object],
     vocabularies: Mapping[tuple[str, ...], str],
 ) -> str:
-    preserve_null = owner in NULL_PRESERVING_MODELS
-    optional = _is_nullable(node) and not preserve_null
-    rendered_node = node if preserve_null else _without_null(node)
+    rendered_node = _without_null(node)
     rendered = _schema_type(rendered_node, vocabularies)
-    property_line = f"  {name}{'?' if optional else ''}: {rendered};"
+    property_line = f"  {name}{'?' if _is_nullable(node) else ''}: {rendered};"
     refinement = _refinement_comment(rendered_node)
     return property_line if refinement is None else f"{refinement}\n{property_line}"
 
@@ -435,7 +416,7 @@ def _model_interface(
     extension = " extends LifecycleStateCounts" if schema_name == "Metrics" else ""
     lines = [f"export interface {public_name}{extension} {{"]
     lines.extend(
-        _property_line(schema_name, name, _object(node, f"{schema_name}.{name}"), vocabularies)
+        _property_line(name, _object(node, f"{schema_name}.{name}"), vocabularies)
         for name, node in properties.items()
         if name not in omitted
     )

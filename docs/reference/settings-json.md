@@ -7,7 +7,7 @@ Agents Remember has five settings families with stated authorities:
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
 | Host runtime (`paseoRuntime`) | user configuration `agents-remember/settings.json`, shared by every harness | per use; install reads at each call |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
-| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy, roleMessageLimit) | **user configuration `agents-remember/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness ids, qualityGate resource policy, roleMessageLimit) | **user configuration `agents-remember/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
@@ -18,6 +18,40 @@ set) is the GLOBAL agentic settings file — it is NOT an MCP authority file (th
 and NOT a provider settings source (the old implicit fallback to it is
 removed; an explicit `--from-settings` path is still read wherever it points). MCP authority settings
 live outside the coordinator root; see `examples/mcp/settings.example.json`.
+
+### The user's file is closed to writing
+
+The installation keeps the user's file read-only (mode 444) and its folder
+closed to new and removed entries (mode 555), so nothing a role agent runs —
+a test, a helper, a script, the candidate's code — can write, replace or
+remove it. The product itself writes that file in one place only, the
+explicit `agents-remember upgrade-user-settings` move, and never opens the
+permissions by itself.
+
+Before an edit, open the folder and the file for yourself. The folder is
+opened with the file because an editor that saves by replacing the file makes
+a new entry in the folder:
+
+```sh
+chmod u+w "${XDG_CONFIG_HOME:-$HOME/.config}/agents-remember" "${XDG_CONFIG_HOME:-$HOME/.config}/agents-remember/settings.json"
+```
+
+and close both again afterwards:
+
+```sh
+chmod 444 "${XDG_CONFIG_HOME:-$HOME/.config}/agents-remember/settings.json" && chmod 555 "${XDG_CONFIG_HOME:-$HOME/.config}/agents-remember"
+```
+
+`${XDG_CONFIG_HOME:-$HOME/.config}` is the configuration folder the product
+reads, so both commands reach the same file under a custom `XDG_CONFIG_HOME`,
+and the quotes keep a path that holds a space whole.
+
+`server_info` names a file or folder it finds open to writing under
+`openUserSettings`, with both commands written out for the exact path, and
+names nothing while both are closed. `agents-remember upgrade-user-settings`
+always reports the state in its `protection` block, with the same two
+commands. Naming it changes nothing: the modes are read, and they and the
+file stay as they are.
 
 ## Memory Repo Example
 
@@ -398,8 +432,7 @@ detector that runs over the central provider metrics log. Defaults enable the
 detector and the critical fail-safe. The detector evaluates memory pressure,
 restart-loop signals, watcher/index lag, probe latency when a metrics row
 carries it, and setup-failure streak rows when present. State transitions write
-durable degradation state/events under `<coordinationRoot>/logs/observer/providers/`
-and post `degradation-alert` inbox rows to the orchestrator and active managers.
+durable degradation state/events under `<coordinationRoot>/logs/observer/providers/`.
 At `critical`, `failSafeEnabled: true` runs the always-legal `provider_watchers
 stop` path. Threshold keys are `memoryDegradedRatio`, `memoryCriticalRatio`,
 `degradedSamples`, `criticalSamples`, `healthySamples`,
@@ -409,18 +442,10 @@ stop` path. Threshold keys are `memoryDegradedRatio`, `memoryCriticalRatio`,
 `setupFailureCriticalStreak`, and `recentSampleLimit`. Unknown
 `providerDegradation` keys are rejected.
 
-`retirement` (optional) configures completion cleanup for worktree-backed tmux
-seats. `autoLandOnIntegration` and `autoLandOnFinalize` (both default `true`)
-gate whether cleanup runs after integrating a leaf or finalizing a master.
-`autoCloseCompletedSeats` defaults `true`: worker, reviewer, and curator seats
-with a durable turn report for that exact leaf are retired through the normal
-graceful-stop/tmux-kill path; their transcripts remain inspectable. A seat with
-no durable report remains live and is returned as deferred. Setting
-`autoCloseCompletedSeats` to `false` restores the previous landed/archive
-behavior, which removes those roles from the active rail without closing tmux.
-Manager and orchestrator seats are never included. The legacy `autoRetireOnIntegration` and
-`autoRetireOnFinalize` keys are accepted as aliases for existing settings files.
-Unknown `retirement` keys are rejected.
+`retirement` (optional) stays accepted but no code reads it in this build; `server_info`
+names the keys a file holds under `unusedSettingsKeys`. The worker, reviewer, and curator
+agents of a leaf are archived on the host when the leaf is finalized, cleaned up or
+abandoned; their reports stay. Manager and orchestrator seats are never included.
 
 `orchestration` in the authority file is LEGACY territory (260703-L13): the
 agentic family moved to the global agentic settings file documented below. For
@@ -482,7 +507,7 @@ a harness/MCP restart.
 
 **Defaults.** An absent file, or an absent key, means: all-human gate
 delegation, the loop defaults below, no role overrides, no concurrency caps,
-no spawn harness preference (detection-gated spawns), and a host-managed full
+no spawn harness preference, and a host-managed full
 quality gate with normal RAM and swap behavior (see `orchestration.qualityGate`).
 
 ### orchestration.gateDelegation
@@ -508,6 +533,10 @@ reviewer-verdict evidence. The delegable kinds are `plan-approval`,
 human-pinned and cannot be delegated. Boot-snapshot: restart required (see
 Read cadence above).
 
+No part of the product raises or decides a gate in this build. The policy is applied to the gates
+an earlier build stored: such a gate still refuses the operation it guards, and
+`agents-remember removed-stores` names the gate logs and removes them on the user's word.
+
 ### orchestration.roles, orchestration.rolesPerLevel
 
 Paseo role launches read these choices from the host's running catalog, not a built-in model table:
@@ -521,7 +550,7 @@ Paseo role launches read these choices from the host's running catalog, not a bu
 | `featureValues` | `featureValues` | Boolean for each toggle; option ID for each selection |
 | `serviceTier` | `featureValues.service_tier` | Speed selection; `fast` normalizes to native `priority` |
 | `notes` | `notes` (host page: When to use) | User's plain instruction text; user layer/profile only |
-| `launchArgs`, `promptKeywords`, `sessionCommands` | none | Accepted; terminal dispatch applies them. No effect on a Paseo role launch. |
+| `launchArgs`, `promptKeywords`, `sessionCommands` | none | Accepted; no code reads them in this build. `server_info` names the ones a file holds under `unusedSettingsKeys`. |
 
 A mode or `notes` in a repository's `system/settings.json` refuses loading, naming the file and
 key, in both `roles` and `rolesPerLevel`. Feature authority is classified by the product:
@@ -537,7 +566,7 @@ by its user in the host chat, never by a repeat, settings edit or landing.
 normalization. Equal native values resolve to one choice; conflicting values refuse loading.
 Claude's `fast_mode` is a separate toggle, not a service-tier alias.
 
-Role provider IDs are shape-checked at settings load and validated against the actual host catalog at launch. Custom host providers need no AR terminal-harness declaration. The separate AR registry and terminal adapter checks remain unchanged. Internal provenance retains the original file/key and provider/model binding through global, repository and per-level merges, so a repository provider override cannot reinterpret a lower user mode with an identically spelled ID. Ignored lower choices are recorded with their source and reason.
+Role provider IDs are shape-checked at settings load and validated against the actual host catalog at launch. Custom host providers need no AR harness declaration for a role. Internal provenance retains the original file/key and provider/model binding through global, repository and per-level merges, so a repository provider override cannot reinterpret a lower user mode with an identically spelled ID. Ignored lower choices are recorded with their source and reason.
 
 Each first start reads the host's profiles through a read-only bridge call. A profile matches a
 role when its `name` equals the role ID exactly; the first match in host order wins and the record
@@ -597,119 +626,37 @@ nor records it. `role_capsule_compile` alone compiles the baseline, not a live p
 ```
 
 These are complete shape examples; use only IDs/features the installation's current catalog offers.
-Legacy terminal dispatch retains its existing tier refusal and is not expanded by these keys.
-The existing terminal-specific role behavior follows below.
 
 `orchestration.roles.<role>` overrides a role file's knob block per role
 (`architect`, `orchestrator`, `designer`, `strategist`, `manager`, `worker`, `curator`,
 `investigator`, `reviewer`).
 The earlier key `orchestration.roles.system-specialist` applies to the Investigator with one notice per load naming the key, file and new ID. Equal entries under both IDs load; conflicting entries are refused with both keys named. Stored settings are not rewritten.
-Precedence: role-file defaults < global settings < repo-local settings. These
-settings are the sole developer-controlled spend surface for ordinary dispatched
-seats. Agent callers submit a canonical child task document and role to the structural
-dispatcher; the plane derives level and resolves the settings-owned launch selection. Agents do
-not submit `harness`/`model`/`effort` or direct launch/session spend controls. The
-knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
-with every parameter, vocabulary, and refusal is
-**`docs/reference/harnesses.md`**):
-
-1. **Validated native selection** — `harness` (a known harness id: builtin
-   `claude`/`codex`/`pi` or an `orchestration.harnesses`-defined one),
-   `model`, `effort`. Role-configured native spawns require all three. The spawn
-   path records model/effort in `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` provenance and
-   carries one typed selection to the adapter. The adapter discovers its token-free,
-   installed/account-accurate catalog, validates effort under the selected model, and
-   then applies Claude `--model`/`--effort`, Pi `--model`/`--thinking`, or Codex
-   `thread/start` model + `config.model_reasoning_effort`. Unknown values fail at the
-   runner launch boundary before the configured real vendor session starts.
-2. **`launchArgs`** (list of strings) — appended VERBATIM to the harness
-   base argv and recorded in spawn provenance. Adapter-owned selector conflicts refuse.
-3. **`sessionCommands`** (list of strings; each explicit line submitted through the protocol as
-   fresh-session launch configuration before task assignment) and **`promptKeywords`** (list of
-   strings prepended exactly once to the later post-readiness `dispatch-brief`). Never validated;
-   recorded in spawn provenance. For evidence-capable harness logs (currently Claude), the brief
-   retro-proves every launch command and re-issues only a missing/errored command; the durable brief
-   remains pending until all required proofs succeed. Other harnesses preserve launch-time transport
-   with an explicitly unproven outcome rather than entering an impossible proof retry loop.
-   Session-command application by itself does not prove brief delivery.
-
-These settings are consumed by the same public `dispatch_agent` transaction for both caller kinds.
-A plane-hosted seat is authorized from injected identity and direct-child scope; an identity-free
-developer launcher is authorized by canonical target-document resolution and target role altitude.
-The request does not carry caller identity or a mode selector, and a plane refusal never falls back
-to ambient. Harness/model/effort remain settings-owned in both modes.
-
-Inside the private control plane, hosted role dispatch uses an exact runtime correlation through
-three states: create returns `spawned-unbriefed`; readiness advances that occupant to
-harness-ready; one durable exact-pinned `dispatch-brief` starts the briefed-by deadline row. This
-correlation is never returned by `dispatch_agent`. Spawned-only and
-not-ready seats are not active work. Briefed requires both `deliveryState=delivered` and
-`deliveryDetail=harness-log-confirmed`; failure leaves the original row pending without duplicate
-brief or respawn.
-
-Native effort options are dynamic and model-gated. Claude currently advertises launch-settable
-`low|medium|high|xhigh|max`; `ultracode` is not converted into a session command. Pi validation also
-prevents its native silently-clamped thinking behavior from hiding a stale setting. After startup,
-Pi and Codex provide model/effort echo evidence; Claude echoes model while its initial effort is
-reported as catalog-validated native flag evidence because stream-json init has no effort echo.
+Precedence: role-file defaults < global settings < repo-local settings.
 
 `orchestration.rolesPerLevel.<level>.<role>` (ruling 2026-07-07T08:15) adds
 the per-LEVEL agent sets the L12 doctrine promises: `leaf` | `master` |
 `portfolio` (the `loops.perLevel` vocabulary), each holding the same
 knob-override shape. A level override deep-merges over the flat
 `orchestration.roles` default at field granularity (harness inherited unless overridden; arrays
-replace). The structural dispatcher derives `leaf`, `master`, or `portfolio` from the child role
-and its canonical document altitude. Full spend resolution chain:
+replace). The level follows the role: `leaf` for worker, reviewer and curator, `master` for
+manager, `portfolio` for architect, investigator and orchestrator. Resolution chain in the settings:
 repo-local level override > global level override > repo-local role default >
-global role default > detection-gated default. The resolved level rides spawn
-provenance (`spawnLevel`/`spawnLevelSource`). Legacy caller-supplied
-`harness`/`model`/`effort`, direct `launch_args`/`prompt_keywords`/
-`session_commands`, `env.AR_SPAWN_MODEL`/`env.AR_SPAWN_EFFORT`, or
-harness-native spend/endpoint env keys for the built-in Claude/Anthropic and
-Codex/OpenAI families refuse with `spend-override-unsupported` before
-spawning; move those choices into these settings families.
+global role default.
 
 ### orchestration.harnesses
 
-Extends/overrides the builtin harness registry (developer ruling 2026-07-07:
-the registry is good defaults, not a wall). Entries are keyed by harness id:
-a NEW id adds a harness (`command` and/or `argv` required — the command array
-launches it exactly the way you would run it yourself), an EXISTING id
-pre-customizes the builtin defaults (its `argv` replaces ours). Optional compatibility
-knob-mapping fields for a NEW non-native id: `name`, `modelFlag`, `effortFlag` + `effortFlagValues`,
-`effortSessionValues` + `effortSessionCommand` (pairs required together).
-Native Claude/Codex/Pi model and effort always belong to their adapter, even when settings override
-the builtin base argv.
-Detection still gates dispatch; an id known nowhere refuses loudly pointing
-at the manual. Schema, semantics, and a worked add-`hermes` example:
-`docs/reference/harnesses.md`.
+Entries are keyed by harness id: a NEW id adds that id to the ids `orchestration.spawn.harness`
+may name. The fields an earlier build read from an entry (`name`, `command`, `argv`, `modelFlag`,
+`effortFlag`, `effortFlagValues`, `effortSessionValues`, `effortSessionCommand`) stay accepted but
+no code reads them in this build; `server_info` names the ones a file holds under
+`unusedSettingsKeys`. Any other field is refused. The host's catalog names the agent kinds, models
+and efforts a role can use.
 
 ### orchestration.agentNotifier
 
-`orchestration.agentNotifier` configures the deterministic agent-notifier sweep (the
-supervisor renamed to its relay role). All fields are optional; an empty block keeps
-the safe defaults.
-
-> Compatibility window: the loader still accepts the legacy `orchestration.supervisor`
-> key as an explicit alias, with a loud deprecation warning, until the window closes
-> (the rename is carried by the agent-notifier reform master). A file setting both keys
-> is refused. Remove `orchestration.supervisor` from any live settings file and use
-> `orchestration.agentNotifier`.
-
-| Field | Default | Notes |
-| --- | --- | --- |
-| `enabled` | `true` | Turns the sweep loop on or off. |
-| `intervalSeconds` | `10` | Sweep cadence. |
-| `staleCutoffSeconds` | `60` | Age after which the agent-notifier heartbeat is reported stale. |
-| `redeliverRateLimitSeconds` | store default (`900`) | Per-row floor between redelivery attempts. Values below `900` seconds are refused. |
-| `signalCooldownSeconds` | `900` | Minimum interval between repeated pane/seat-liveness owner signals for the same target, leaf, finding kind, and detail. Values below `900` seconds are refused. |
-| `redeliverBudget` | `1` | Maximum inbox redelivery attempts per sweep. Harness-log confirmation is synchronous and bounded per input, so backlogs drain across sweeps without multiplying that wait inside one heartbeat tick. |
-| `escalationBudget` | `250` | Per-sweep load-shed cap on owner-signal emissions (seat-liveness + dead-upstream), the twin of `redeliverBudget`. Shed findings re-fire next sweep (level-triggered). Not a policy knob: the timed escalation ladder is retired. |
-
-`enabled: false` is the emergency kill switch for the agent-notifier loop. During the
-2026-07-09 redelivery-cadence incident the global coordinator settings disabled
-the agent-notifier until the 15-minute redelivery and signal-cooldown fix landed and
-passed smoke.
+`orchestration.agentNotifier`, the earlier key `orchestration.supervisor` and
+`orchestration.expectations` stay accepted but no code reads them in this build; `server_info`
+names the ones a file holds under `unusedSettingsKeys`.
 
 ### orchestration.qualityGate
 
@@ -758,15 +705,12 @@ that names zero, a negative number or no whole number is refused at load, naming
 `maxParallelMasters`, `maxParallelLeaves`, `maxSubAgents` (positive integers;
 omitted means uncapped). These keys stay accepted but no code reads or enforces them in this build. `maxParallelMasters` means concurrent masters, `maxParallelLeaves` means concurrent leaves (not agents), and `maxSubAgents` means sub-agents. Reaching one refuses no start; leaf limits are deliberately unenforced.
 
-`orchestration.spawn.harness` names the default harness the private launch seam uses when no
-role/level knob supplies one. Resolution order at that seam:
-role knobs (level-merged) > repo-local settings > global settings >
-detection-gated default (the first
-effective-registry harness found on PATH; the repo-local layer is selected by the canonical task
+`orchestration.spawn.harness` names the agent kind a role start uses when no
+role/level knob supplies one. Resolution order:
+role knobs (level-merged) > repo-local settings > global settings
+(the repo-local layer is selected by the canonical task
 document's repository). Values are validated against
-the effective harness ids (builtin + `orchestration.harnesses`) and gated by
-detection — a settings value can never inject a command through a reference;
-argv is definable only in the explicit `orchestration.harnesses` family.
+the effective harness ids (builtin + `orchestration.harnesses`).
 
 ```jsonc
 "orchestration": {

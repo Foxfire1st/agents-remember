@@ -174,18 +174,22 @@ select another AR runtime, coordination root, repository or Paseo home, and with
 that tie a process to the harness session the command was run from; `environment.py` lists each
 with its reason. Session variables are removed by exact name, never by the `CLAUDE_`,
 `CLAUDE_CODE_` or `CODEX_` prefix: harness logins, credentials and home selectors are kept. Each
-child's `PWD` is the directory it is started in. Seven variables are set: `TMUX_TMPDIR` (the
+child's `PWD` is the directory it is started in. Eight variables are set: `TMUX_TMPDIR` (the
 sandbox's own tmux server), `PYTHONPYCACHEPREFIX` and `GIT_OPTIONAL_LOCKS=0` (nothing is written
-into the checkout) and `AR_DAGGER_AUTHORITY_ROOT` (the registry of the quality tools lies in the
-sandbox), plus XDG_DATA_HOME, XDG_STATE_HOME and XDG_CACHE_HOME for this
-sandbox's product data, state and cache.
+into the checkout), `AR_DAGGER_AUTHORITY_ROOT` (the registry of the quality tools lies in the
+sandbox), `XDG_CONFIG_HOME` (the sandbox's own user settings file, see below), plus
+XDG_DATA_HOME, XDG_STATE_HOME and XDG_CACHE_HOME for this sandbox's product data, state and
+cache.
 
 A tool server that an agent's harness starts gets these variables only if the harness forwards
 its environment or the launch puts them into the tool server's definition. The launch code of the
-PNT build (`mcp/src/agents_remember/cli/paseo_launch.py`) does that for all seven: it carries
+PNT build (`mcp/src/agents_remember/cli/paseo_launch.py`) does that for all eight: it carries
 `GIT_OPTIONAL_LOCKS`, `PYTHONPYCACHEPREFIX`, `TMUX_TMPDIR`, `AR_DAGGER_AUTHORITY_ROOT`,
-`XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` into the
-definition whenever the launching process has them.
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` into the
+definition whenever the launching process has them. `XDG_CONFIG_HOME` is the one that decides
+which host an agent's role tools address: Codex and Hermes hand a tool server only a few
+variables of their own, so without it in the definition the tool server of a sandbox agent reads
+the developer's settings file.
 
 ## Pi
 
@@ -219,21 +223,22 @@ project the Eve entry is omitted and only the Hermes entry is written.
 
 The live roots are not among them. These are writes of other programs, in their own places:
 
-- **Harness programs started by the dashboard.** The build's dashboard starts the developer's
-  harness programs when its harness routes are called (`GET /api/harnesses/<harness>/capabilities`,
-  `GET /api/harnesses/<harness>/conversations`): `codex app-server`, `claude -p`, `pi --mode rpc`.
-  They write their own state in their homes: Codex its databases, model cache and plugin cache
-  under `~/.codex`; Claude Code `~/.claude.json`, sessions and a project folder under `~/.claude`;
-  Pi a session folder under `~/.pi/agent`. No model turn is made.
 - **Harness programs started by Paseo.** Agents use the developer's harness logins, so every
   agent writes its sessions into its harness's home, and Paseo's provider checks start the
-  harness programs as well.
-- **The installed AR tool server inside an agent.** Codex, Claude Code, Pi and Hermes each
-  carry the developer's installed AR tool server (named `agents-remember`, on the live roots) in
-  their user-level configuration. A Codex, Claude Code or Hermes agent in the sandbox therefore
-  sees it next to the sandbox's own `agents-remember-task`, and the harness starts it with every
-  session. It is the installed runtime, not the build under test; the sandbox cannot remove it
-  there. A Pi agent of the sandbox does not have it (see Pi above).
+  harness programs as well. They write their own state there: Codex its session files under
+  its home (`CODEX_HOME` when the caller's environment sets it, else `~/.codex`) and its
+  databases, model cache and plugin cache; Claude Code `~/.claude.json`, sessions and a project
+  folder under `~/.claude`; Hermes its sessions and logs under `~/.hermes`; Pi a session folder
+  under `~/.pi/agent`. The build's dashboard starts no harness program itself.
+- **The installed AR tool server inside an agent.** Where the developer's user-level
+  configuration of a harness lists the installed AR tool server (named `agents-remember`, on the
+  live roots), an agent of that harness in the sandbox gets it next to the sandbox's own
+  `agents-remember-task`. It is the installed runtime, not the build under test; the sandbox
+  cannot remove it there. For a role agent on Claude Code the launch keeps its tools out of what
+  the agent carries. Codex and Hermes offer nothing for one launch: there the harness starts
+  both servers, the role start's answer says that a second copy is loaded, and the hand-over
+  tells the agent to call `agents-remember-task` alone. A Pi agent of the sandbox does not have
+  it (see Pi above).
 - **Package-manager caches.** Installing Paseo writes npm's cache and logs (`~/.npm/_cacache`,
   `~/.npm/_logs`); creating the checkout's Python environment writes uv's cache.
 - **The Eve project.** `eve/app/node_modules` is a link into the developer's Eve project;

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.cli import paseo_role_tools, role_message_delivery
 from agents_remember.cli.role_launch_workspace import link_leaf_workspace_messages
@@ -21,7 +22,6 @@ from agents_remember.cli.role_message_files import (
     MessageFileError,
     store_message_file,
 )
-from agents_remember.kernel.primitives.user_settings_location import user_settings_path
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.worktrees import role_reports
 from mcp.server.fastmcp import FastMCP
@@ -64,7 +64,7 @@ class MessageLimitTests(RoleToolsTestCase):
 
     def write_user_settings(self, home: Path, orchestration: dict[str, Any]) -> Path:
         """One XDG settings file with the fixture's host block and one orchestration."""
-        real = user_settings_path()
+        real = user_settings_path_for_write()
         data = json.loads(real.read_text()) if real.is_file() else {}
         data["orchestration"] = orchestration
         target = home / "agents-remember" / "settings.json"

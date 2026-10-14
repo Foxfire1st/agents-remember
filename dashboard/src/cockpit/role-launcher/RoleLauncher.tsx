@@ -1,13 +1,12 @@
 import { css } from "../../../styled-system/css";
 import { launcherButton, launcherChip, launcherSelect } from "../../grammar/viewTabLook";
-import type { SeriesNode, TaskDocNode } from "../../types/projection";
+import type { SeriesNode, TaskDocNode, TaskDocumentRef } from "../../types/projection";
 import { sameTaskDocumentRef } from "../../data/taskIdentity";
 import { RoleExecutionStatus, RoleReviveControl } from "../RoleExecutionStatus";
 import { RoleLaunchDefaults, RoleLaunchFeatures } from "../RoleLaunchFeatures";
 
 
 import { LAUNCHER_ROLES, isTasklessRole, usesRequestReceipts, roleAgentOverrideFor, roleDocumentScope, masterOptionsForSprint, optionIndex, refAtOptionIndex, roleNeedsMaster, roleNeedsSprint, roleNeedsTask, sprintOptionsForDocs, taskOptionsForMaster, taskRefIdentity, type RoleAgentChoice, type RoleLaunchSelection, type LauncherRole, type RoleDefaults, type RoleFeatureChoice, type RoleScopedExecution, type RoleTaskOption } from "../roleLaunchModel";
-import type { TaskDocumentRef } from "../../types/terminalCatalog";
 import {
   displayedAgentLabel,
   displayedEffortLabel,

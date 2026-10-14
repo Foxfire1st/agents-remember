@@ -39,7 +39,7 @@ from pydantic import ValidationError
 
 from agents_remember.application.agent_binding import (
     AgentBinding,
-    harness_carries_one_server,
+    exclusion_keeps_copy_out,
     read_agent_binding,
 )
 from agents_remember.application.role_launch_context import (
@@ -216,9 +216,22 @@ def _no_binding(reason: str) -> _Refused:
         "caller-has-no-binding",
         "This tool server was not started by an AR role launch, so the caller has no binding "
         f"(agent id, role, task references).{reason}",
-        f"Only a role agent that AR launched can use {ROLE_START_TOOL} and {ROLE_MESSAGE_TOOL}; "
-        "start the role from the dashboard launcher.",
+        f"A chat without a role cannot use {ROLE_MESSAGE_TOOL}: the developer speaks with the "
+        f"agent in the dashboard. Such a chat starts a role with {ROLE_START_TOOL}.",
     )
+
+
+def _binding_absent(environment: Mapping[str, str] | None) -> bool:
+    """The caller carries no binding at all, rather than a malformed one.
+
+    Only a genuinely absent binding is a chat without a role (MIK-R113 rule 6);
+    a binding that names an agent but does not fit its role's class stays refused.
+    """
+
+    try:
+        return read_agent_binding(environment) is None
+    except ValueError:
+        return False
 
 
 def starting_agent(config: McpRuntimeConfig, binding: AgentBinding) -> StartingAgent:
@@ -355,13 +368,14 @@ def start_leaf_set(
         reviewer_opening = (
             f"{sender_line(sender)}\n{call.reviewer_message}" if call.reviewer_message else None
         )
-        return dispatch_leaf_set(
+        answer = dispatch_leaf_set(
             config,
             call,
             sender,
             reviewer_opening=reviewer_opening,
             lock_wait_seconds=LOCK_WAIT_SECONDS,
         )
+        return _with_second_copies(config, answer, selections)
     except _Refused as refused:
         return {**refused.payload(), "requestId": str(call.request_id)}
     except LaunchLockBusy:
@@ -377,6 +391,35 @@ def start_leaf_set(
             "nextAction": "Call role_start_set again with the same arguments; sets run one at a time.",
             "requestId": str(call.request_id),
         }
+
+
+def _with_second_copies(
+    config: McpRuntimeConfig, answer: dict[str, Any], selections: list[RoleSelection]
+) -> dict[str, Any]:
+    """Say for every seat that has an agent whether it carries the product's tools twice.
+
+    Read from the seat's receipt, as a single start reads it (MIK-R132 rule 5). A seat whose
+    receipt cannot be read, or names another agent, reads as loaded, like a receipt without a
+    record of what the launch handed the host.
+    """
+
+    seats = answer.get("seats")
+    if not isinstance(seats, dict):
+        return answer
+    for selection in selections:
+        seat = seats.get(selection.role)
+        if not isinstance(seat, dict) or not seat.get("agentId"):
+            continue
+        try:
+            receipt = _read_receipt(_receipt_path(config, selection))
+        except HTTPException:
+            receipt = None
+        seat["secondCopyLoaded"] = (
+            receipt is None
+            or _started_agent_id(receipt) != seat["agentId"]
+            or second_copy_loaded(receipt)
+        )
+    return answer
 
 
 def _set_selections(call: RoleStartSetCall) -> list[RoleSelection]:
@@ -410,10 +453,27 @@ def start_role(
     *,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Start one role agent for the selection, as the launcher's Start does, with a parent."""
+    """Start one role agent for the selection, as the launcher's Start does.
+
+    A role agent's call carries that agent as its parent. A call from a tool
+    server no role agent was started for -- a chat without a role -- starts
+    through the same table as the dashboard's start (MIK-R113 rule 6): every
+    role with its canonical selection, no replacement, no parent. The call
+    chooses nothing a role agent's call cannot choose, and no permission mode.
+    """
 
     try:
-        result = _start_role(config, call, _caller(config, environment))
+        binding: AgentBinding | None = _caller(config, environment)
+    except _Refused as refused:
+        if refused.refusal != "caller-has-no-binding" or not _binding_absent(environment):
+            return {
+                **refused.payload(),
+                "requestId": str(call.request_id),
+                "role": canonical_role(call.role),
+            }
+        binding = None
+    try:
+        result = _start_role(config, call, binding)
     except _Refused as refused:
         result = {
             **refused.payload(),
@@ -426,7 +486,7 @@ def start_role(
 
 
 def _start_role(
-    config: McpRuntimeConfig, call: RoleStartCall, binding: AgentBinding
+    config: McpRuntimeConfig, call: RoleStartCall, binding: AgentBinding | None
 ) -> dict[str, Any]:
     try:
         request = RoleDispatchRequest.model_validate(
@@ -439,18 +499,34 @@ def _start_role(
                 "agentOverride": _agent_override(call),
                 "replacesAgentId": call.replaces_agent_id,
                 "replacesInterruptTurn": call.replaces_interrupt_turn,
+                "chatStarted": binding is None,
             }
         )
     except (ValidationError, ValueError) as error:
         raise _launch_refused(f"The start request is not valid: {error}") from error
-    violated = start_rule_violation(binding, request)
-    if violated is not None:
-        raise _Refused(
-            violated[0],
-            violated[1],
-            "Start only roles this rule allows; anything else is the developer's or the "
-            "parent's to start.",
-        )
+    if binding is None:
+        # MIK-R113 rule 6: no parent, so no replacement: only the agent that
+        # started a seat, or the launcher, may replace its holder. The
+        # parentless table itself is checked by the dispatch endpoint, through
+        # the same table as the dashboard's start.
+        if call.replaces_agent_id is not None:
+            raise _Refused(
+                "role-may-not-start-role",
+                "A chat without a role may start an agent but may not replace the holder "
+                "of a seat; only the agent that started the seat, or the launcher, may.",
+                "Start again without a replacement, or replace the holder from the dashboard.",
+            )
+        starter = None
+    else:
+        violated = start_rule_violation(binding, request)
+        if violated is not None:
+            raise _Refused(
+                violated[0],
+                violated[1],
+                "Start only roles this rule allows; anything else is the developer's or the "
+                "parent's to start.",
+            )
+        starter = starting_agent(config, binding)
     # Agent, model and effort are checked against the catalog as the runtime reports it at the
     # time of this call; this process keeps no catalog between calls.
     forget_launcher_catalogs()
@@ -458,7 +534,7 @@ def _start_role(
         response = _role_launch_dispatch_endpoint(
             config,
             request,
-            started_by=starting_agent(config, binding),
+            started_by=starter,
             lock_wait_seconds=LOCK_WAIT_SECONDS,
         )
     except LaunchLockBusy as busy:
@@ -569,6 +645,27 @@ def _started_agent_id(receipt: dict[str, Any]) -> str | None:
     return agent_id if isinstance(agent_id, str) and agent_id else None
 
 
+def second_copy_loaded(receipt: dict[str, Any]) -> bool:
+    """Whether the started agent carries the product's tools a second time.
+
+    It follows from what the launch handed the host (MIK-R132 rule 5), never from the
+    harness's name: the copy is kept out only by a record of the mode the host reads. A
+    receipt without a record, and one with a record of an earlier build, which handed the
+    host nothing, read as loaded. An agent that was given no task server carries no second
+    copy. The record is read from the receipt, so a repeat answered from its receipt makes
+    no new call.
+    """
+
+    replay = receipt.get("replayRequest")
+    applied = replay.get("serverExclusion") if isinstance(replay, dict) else None
+    if applied is None:
+        # The receipt drops replayRequest after the launch; the record survives at its top.
+        applied = receipt.get("serverExclusion")
+    tool_server = receipt.get("toolServer")
+    carries_task_server = not isinstance(tool_server, dict) or bool(tool_server.get("applied"))
+    return carries_task_server and not exclusion_keeps_copy_out(applied)
+
+
 def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str, Any]:
     """The tool's answer, read from the receipt the start path wrote for this request."""
 
@@ -606,34 +703,6 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         "unknown": f"Call {ROLE_START_TOOL} again with the same request id and selection: it "
         "reconciles the same agent and never creates a second.",
     }[launch]
-    # The receipt records the resolved harness id under agent.id; no re-resolution here, so a
-    # repeat answered from its receipt makes no new call. Unknown/absent means two servers.
-    # secondCopyLoaded derives from the launch's applied exclusion mechanism (what the
-    # bridge input actually carries), not the harness name: receipts written before the
-    # record landed fall back to the harness rule. A second copy is loaded exactly when
-    # the agent carries a server the host also lists -- toolServer.applied with a
-    # task-server-only record. Pre-repair receipts (record present, copy still sent)
-    # therefore read True, which is what they did.
-    agent_record = receipt.get("agent")
-    launch_agent = agent_record.get("id") if isinstance(agent_record, dict) else None
-    replay = receipt.get("replayRequest")
-    applied = replay.get("serverExclusion") if isinstance(replay, dict) else None
-    if applied is None:
-        # The receipt drops replayRequest after launch; the applied record survives
-        # top-level (applied_to_agent), so the answer still derives from it.
-        top = receipt.get("serverExclusion")
-        applied = top if isinstance(top, dict) else None
-    if isinstance(applied, dict):
-        tool_server = receipt.get("toolServer")
-        carries = isinstance(tool_server, dict) and bool(tool_server.get("applied"))
-        # (c): derived from what was applied, not the harness name. On the host
-        # route nothing is applied, so every started agent carrying our copy
-        # loads a second one -- task-server-only and host-owned alike.
-        second_copy_loaded = carries
-    else:
-        second_copy_loaded = not harness_carries_one_server(
-            launch_agent if isinstance(launch_agent, str) else None
-        )
     result = {
         "ok": launch == "running",
         "status": launch,
@@ -641,7 +710,7 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         "requestId": str(request.request_id),
         "role": request.role,
         "agentId": agent_id,
-        "secondCopyLoaded": second_copy_loaded,
+        "secondCopyLoaded": second_copy_loaded(receipt),
         "parentAgentId": receipt.get("parentAgentId"),
         "reportPath": report.get("path") if isinstance(report, dict) else None,
         "handoverArtifactPath": artifact.get("path") if isinstance(artifact, dict) else None,

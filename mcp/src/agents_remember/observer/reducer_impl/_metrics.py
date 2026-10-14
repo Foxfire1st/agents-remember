@@ -99,8 +99,6 @@ def build_analytics(
         setupProgress=given.setup_progress,
         routeCoverage=given.route_coverage,
         toolReports=given.tool_reports,
-        agentPickups=given.agent_pickups,
-        expectationRows=given.expectation_rows,
         ledgers=given.ledgers,
         taskDocuments=given.task_documents,
         series=series if series is not None else given.series,

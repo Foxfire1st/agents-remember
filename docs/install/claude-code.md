@@ -69,26 +69,18 @@ with the directive text:
 ```markdown
 **Agents Remember — session start.**
 
-If `AR_SPAWN_ROLE` is set, it must resolve to its canonical role file and arrive
-with the plane-injected hosted-session identity. An unresolvable role or an
-incomplete hosted identity fails closed; it never falls through to a pasted
-brief or ambient free chat. With valid hosted identity—or when the first user
-message is a role brief and no hosted identity was declared—the brief is the
-session start.
-
-Otherwise you are the developer-facing **free chat**: read
-`ar-coordination/AGENTS.md`; answer research inline, or for ordinary role-shaped work create/resolve the
-durable sprint and first leaf, compile the canonical architect brief, and call
-`dispatch_agent` once on that sprint document with role `architect`.
+You are the developer-facing **free chat**: read
+`ar-coordination/AGENTS.md`. Answer a question inline; for work on a managed
+repository, create or resolve the sprint document, write the request of the
+developer into it, start an Architect with `role_start` (the call for an
+Architect names no document), and tell the developer that the agent is in the
+dashboard and which sprint document holds the request. Another role is started
+this way only when the developer names the role and the task.
 ```
 
-The directive is entry-only by design: a spawned role's session start is the
-role brief its orchestrating agent compiled, while free chat remains a launcher
-rather than a global role identity. An explicit developer-declared task-seat
-takeover instead targets the named role on its canonical task document. With no plane identity the call uses
-ambient target-document/role-altitude validation; later hosted dispatch uses
-plane identity and direct-child scope. Both pin the brief in one transaction,
-and a plane refusal never falls back to ambient.
+The directive is entry-only by design: the hook gives this text to a chat that
+the product did not start, and says nothing to a role agent that has a binding.
+Free chat remains a launcher rather than a global role identity.
 
 The starter package registers the hook in `.claude/settings.json`:
 

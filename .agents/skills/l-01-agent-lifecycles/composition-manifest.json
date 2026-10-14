@@ -130,7 +130,7 @@
   "core": {
     "authority": {
       "source": "core/authority.md",
-      "purpose": "Seat authority, seat binding, immutability, the dispatch transaction, takeover, the escalation ladder, clarification triage, delegated series authority, the decision relay."
+      "purpose": "Seat authority, seat binding, immutability, starting a role agent, takeover, the escalation ladder, clarification triage, delegated series authority, the decision relay."
     },
     "invariants": {
       "source": "core/invariants.md",
@@ -138,7 +138,7 @@
     },
     "lifecycle-frame": {
       "source": "core/lifecycle-frame.md",
-      "purpose": "The minimal lifecycle frame: the six signals, which seats run them, the trust checkpoint, provider-degradation handling."
+      "purpose": "The minimal lifecycle frame: the lifecycle the worktree tools adopt, the trust checkpoint, provider-degradation handling."
     },
     "loop": {
       "source": "core/loop.md",
@@ -578,7 +578,7 @@
     },
     "templates": {
       "source": "templates/",
-      "description": "Field schemas for dispatch briefs and handoff artifacts, and the plan/report template library for the seats that compile them.",
+      "description": "Field schemas for start handovers and handoff artifacts, and the plan/report template library for the seats that compile them.",
       "injected": false
     }
   },

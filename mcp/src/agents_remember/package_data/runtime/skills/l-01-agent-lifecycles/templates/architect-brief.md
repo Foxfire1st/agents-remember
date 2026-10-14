@@ -1,16 +1,12 @@
 # Template — Architect Brief
 
-The complete dispatch packet an identity-free developer-facing launcher compiles for the
-architect of one canonical sprint. **This brief is the architect's entire session start.** The
-launcher fills it from durable sprint truth, then calls
-`dispatch_agent(task_document_ref=<canonical sprint document>, role="architect",
-brief=<this complete brief>)` exactly once. Absence of plane-injected hosted identity selects
-ambient-launcher mode; the request does not carry caller identity. The control plane selects the
-settings-owned profile, creates the canonical `(sprint document, architect)` seat, and durably pins
-these exact bytes before returning `dispatched` or `dispatch-queued`.
+What a developer-facing chat without a role writes into the canonical sprint document before it
+starts the architect. The launcher fills it from durable sprint truth, then starts an Architect
+with `role_start` exactly once. The call carries no brief and, for an Architect, names no
+document: the developer names the sprint document to the Architect in the dashboard.
 
 **This template feeds inputs; it does not author rules.** The architect's duties live in
-`../roles/architect.md`, the launcher's in `../core/launcher.md`, and the dispatch transaction in
+`../roles/architect.md`, the launcher's in `../core/launcher.md`, and the start in
 `../core/authority.md`. The rows below carry the *values* for this sprint; if a value here disagrees
 with those files, they win.
 
@@ -24,7 +20,7 @@ ROLE BRIEF — architect
 You are the ARCHITECT for sprint `<sprint-id>` (repo: <repo-id>). Your lifecycle is
 `skills/l-01-agent-lifecycles/roles/architect.md`; this brief is your session start. Own the
 developer-facing design conversation and durable rulings for this sprint. Backend execution belongs
-to structurally dispatched role seats.
+to the role agents you start with `role_start`.
 
 ## Canonical scope
 
@@ -56,13 +52,11 @@ conversation history.
 - Retrieval already performed: `<read_ar_files / semantic / relationship / intent evidence>`.
 - Remaining trust-checkpoint work: `<exact work | none>`.
 
-## Dispatch boundary
+## Starting agents
 
-This architect seat is now plane-hosted. Use `dispatch_agent` for authorized sprint children with
-their canonical task documents, target roles, and complete briefs. Plane identity and structural
-child scope supply caller authority; never retry a plane refusal through ambient mode. Never call or
-name an internal session primitive, poll readiness, retain runtime occupant ids, or send a second
-brief when dispatch is queued.
+Start one Manager for one master, or one Orchestrator on the sprint when two or more masters are
+worked on at the same time, with `role_start`; send messages with `role_message`. A refusal never
+falls back to another tool.
 
 ## Opening move
 
@@ -76,16 +70,13 @@ Messages wake; files carry. A message says what is asked or what is handed over,
 
 ---
 
-**Compiler notes for the launcher.**
+**Notes for the launcher.**
 
-- Fill every `<placeholder>` before dispatch. An unresolved placeholder is not a brief.
-- Use the canonical sprint document as `task_document_ref`; do not substitute a master, leaf,
-  branch, checkout, runtime id, or transcript link.
-- Compile from current durable state immediately before the call. Do not invent fixture prose or
-  synthesize a second capsule after dispatch.
-- `dispatched` and `dispatch-queued` both prove the exact brief was persisted. Hand the developer
-  to the canonical architect chat and stop role work in the launcher; do not send the brief again.
-- A target-document or role-altitude refusal means the canonical address is wrong. A settings,
-  launch, or source-admission refusal keeps the same requested role but requires the reported repair.
-  A brief-persistence refusal rolls back the unbriefed occupant; repair the input/evidence and retry
-  the same one-call transaction. Never bypass any refusal with a session primitive or fallback mode.
+- Fill every `<placeholder>` before the start. An unresolved placeholder is not a handover.
+- Name the canonical sprint document in the *Canonical scope* row; do not substitute a master, leaf,
+  branch, checkout, runtime id, or transcript link. The `role_start` call for the Architect passes
+  no document reference: the sprint stays in this text, and a start that names a document is refused.
+- Write from current durable state immediately before the call. Do not invent fixture prose.
+- After the start, tell the developer that the agent is in the dashboard and which sprint document
+  holds the request, and stop role work in the launcher.
+- A refusal names its reason. Never bypass a refusal another way.

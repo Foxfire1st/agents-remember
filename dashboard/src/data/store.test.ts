@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { CloseoutQueueNode, WorkspaceProjection } from "../types/projection";
 import { asServedProjection } from "../test/servedProjection";
-import { reparsed, agentNotifierHeartbeat } from "../test/fixtures/wire";
+import { reparsed } from "../test/fixtures/wire";
 import { dashboardStore } from "./store";
 import snapshot from "../fixtures/snapshot.json";
 
@@ -150,56 +150,6 @@ describe("dashboard store change gate (260703-L15)", () => {
     expect(after.generatedAt).toBe(before.generatedAt); // ages/stamp coherence: no new content, no new stamp
   });
 
-  it("applies an idle re-snapshot with an unchanged agentNotifierHeartbeat (incl. null/null) with zero store writes", () => {
-    dashboardStore.getState().applySnapshot(projection); // agentNotifierHeartbeat stays null
-    const before = dashboardStore.getState();
-    expect(before.agentNotifierHeartbeat).toBeNull();
-    let notifications = 0;
-    const unsubscribe = dashboardStore.subscribe(() => {
-      notifications += 1;
-    });
-    dashboardStore.getState().applySnapshot(volatileBump(projection, 1)); // still no agentNotifierHeartbeat
-    unsubscribe();
-    expect(notifications).toBe(0);
-    expect(dashboardStore.getState()).toBe(before);
-    expect(dashboardStore.getState().agentNotifierHeartbeat).toBeNull();
-  });
-
-  it("applies an idle re-snapshot with a genuinely changed agentNotifierHeartbeat", () => {
-    const heartbeat = agentNotifierHeartbeat({ pendingInboxCount: 2, redeliverableInboxCount: 1 });
-    const withHeartbeat: WorkspaceProjection = { ...projection, agentNotifierHeartbeat: heartbeat };
-    dashboardStore.getState().applySnapshot(withHeartbeat);
-    const before = dashboardStore.getState();
-    let notifications = 0;
-    const unsubscribe = dashboardStore.subscribe(() => {
-      notifications += 1;
-    });
-    const advanced: WorkspaceProjection = {
-      ...withHeartbeat,
-      agentNotifierHeartbeat: { ...heartbeat, ageSeconds: 5 },
-    };
-    dashboardStore.getState().applySnapshot(advanced);
-    unsubscribe();
-    expect(notifications).toBe(1); // the tick advance IS a store write
-    const after = dashboardStore.getState();
-    expect(after).not.toBe(before);
-    expect(after.agentNotifierHeartbeat).toEqual(advanced.agentNotifierHeartbeat);
-    // everything else stays identity-stable — only agentNotifierHeartbeat rode through
-    expect(after.lifecycles).toBe(before.lifecycles);
-    expect(after.analytics).toBe(before.analytics);
-    expect(after.generatedAt).toBe(before.generatedAt);
-  });
-
-  it("accepts the legacy supervisorHeartbeat wire key during the rename window", () => {
-    // The served body carries both keys while the window is open; an older server may emit
-    // only the legacy key. The store must read either.
-    dashboardStore.getState().applySnapshot(projection); // both null first
-    const heartbeat = agentNotifierHeartbeat({ pendingInboxCount: 2, redeliverableInboxCount: 1 });
-    const legacyOnly: WorkspaceProjection = { ...projection, supervisorHeartbeat: heartbeat };
-    dashboardStore.getState().applySnapshot(legacyOnly);
-    expect(dashboardStore.getState().agentNotifierHeartbeat).toEqual(heartbeat);
-  });
-
   it("skips a redundant delta (volatile-only node) without a store write", () => {
     dashboardStore.getState().applySnapshot(projection);
     const before = dashboardStore.getState();
@@ -221,12 +171,12 @@ describe("dashboard store change gate (260703-L15)", () => {
     dashboardStore.getState().applySnapshot(projection);
     const before = dashboardStore.getState();
     const node = JSON.parse(JSON.stringify(before.lifecycles["sim-replay-lifecycle"]));
-    node.stateEnteredAt = "2026-06-14T09:09:09+00:00";
+    node.lastEventTs = "2026-06-14T09:09:09+00:00";
     node.staleSeconds = 1; // fresh ages ride along with real changes
     dashboardStore.getState().applyDelta("lifecycle", node);
     const after = dashboardStore.getState();
     expect(after).not.toBe(before);
-    expect(after.lifecycles["sim-replay-lifecycle"].stateEnteredAt).toBe("2026-06-14T09:09:09+00:00");
+    expect(after.lifecycles["sim-replay-lifecycle"].lastEventTs).toBe("2026-06-14T09:09:09+00:00");
   });
 
   it("reuses unchanged nodes by identity when a snapshot carries one real change", () => {
@@ -235,10 +185,10 @@ describe("dashboard store change gate (260703-L15)", () => {
     const next = volatileBump(projection, 7);
     const changed = next.lifecycles.find((x) => x.id === "sim-replay-lifecycle");
     if (!changed) throw new Error("fixture lifecycle missing");
-    changed.stateEnteredAt = "2026-06-14T09:09:09+00:00";
+    changed.lastEventTs = "2026-06-14T09:09:09+00:00";
     dashboardStore.getState().applySnapshot(next);
     const state = dashboardStore.getState();
-    expect(state.lifecycles["sim-replay-lifecycle"].stateEnteredAt).toBe("2026-06-14T09:09:09+00:00");
+    expect(state.lifecycles["sim-replay-lifecycle"].lastEventTs).toBe("2026-06-14T09:09:09+00:00");
     expect(state.lifecycles["fleeting-001"]).toBe(untouched); // identity preserved
   });
 
@@ -249,7 +199,7 @@ describe("dashboard store change gate (260703-L15)", () => {
     expect(first).toEqual(build);
     const next = volatileBump({ ...projection, servingBuild: { ...build } }, 3);
     const changed = next.lifecycles[0];
-    changed.stateEnteredAt = "2026-06-14T09:09:09+00:00"; // force a real apply
+    changed.lastEventTs = "2026-06-14T09:09:09+00:00"; // force a real apply
     dashboardStore.getState().applySnapshot(next);
     expect(dashboardStore.getState().servingBuild).toBe(first); // equal stamp -> same object
   });

@@ -6,6 +6,7 @@ import contextlib
 import filecmp
 import json
 import os
+import shlex
 import shutil
 import stat
 import time
@@ -16,7 +17,6 @@ from typing import Any
 
 from agents_remember.install.assets import long_path, packaged_source_root
 from agents_remember.install.experiment import (
-    INSTALLED_APPLICATION_PATH,
     WITHHELD_STARTUP_TARGETS,
     CapabilityReport,
     ExperimentError,
@@ -24,7 +24,6 @@ from agents_remember.install.experiment import (
     ExperimentSelection,
     InstallTargets,
     InstructionDelivery,
-    application_source_root,
     build_run_record,
     decide_instruction_delivery,
     experiment_rollback_plan,
@@ -45,6 +44,7 @@ from agents_remember.kernel.agentic_settings import (
     require_user_agentic_settings_path,
     user_agentic_settings_path,
 )
+from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
@@ -60,18 +60,6 @@ AGENTS_MD_TARGETS = {
 
 IGNORED_COPY_NAMES = {"__pycache__"}
 IGNORED_COPY_SUFFIXES = {".pyc", ".pyo"}
-APPLICATION_MACHINE_LOCAL_PATHS = frozenset(
-    {Path("node_modules"), Path(".eve"), Path(".output"), Path(".vercel")}
-)
-"""The pinned application's machine-local trees: never copied, never pruned.
-
-``node_modules`` is the operator's own dependency install and ``.eve``/``.output``/``.vercel`` are
-eve's generated state. They ride *both* halves of the mirror rule and the distinction matters:
-``copy_ignore`` keeps the source's copy out of the install, and ``preserve`` keeps a prune from
-deleting the install's own — a destination-side path in ``prune_ignore`` would do the opposite and
-delete exactly what this protects (caught by
-``test_the_installed_application_keeps_its_machine_local_trees_out_of_the_mirror``).
-"""
 BENCHMARKS_GITIGNORE_ENTRY = "benchmarks/"
 BENCHMARK_SOURCE_IGNORE_PATHS = {Path("workspaces"), Path("user-runs")}
 MAX_REMOVE_ATTEMPTS = 6
@@ -203,6 +191,7 @@ class InstallSummary:
     experiment: ExperimentInstall | None = None
     leftover_provider_folders: list[dict[str, Any]] = field(default_factory=list)
     unused_provider_keys: list[str] = field(default_factory=list)
+    removed_part_stores: list[dict[str, Any]] = field(default_factory=list)
 
     def report(self) -> str:
         base = (
@@ -221,6 +210,14 @@ class InstallSummary:
             base += f" leftover_provider_folders=[{names}] leftover_provider_bytes={total}"
         if self.unused_provider_keys:
             base += f" unused_provider_keys=[{', '.join(self.unused_provider_keys)}]"
+        stores = [item for item in self.removed_part_stores if not item["gateLog"]]
+        gate_logs = [item for item in self.removed_part_stores if item["gateLog"]]
+        if stores:
+            names = ", ".join(f"{item['path']} ({item['bytes']} bytes)" for item in stores)
+            base += f" removed_part_stores=[{names}]"
+        if gate_logs:
+            names = ", ".join(f"{item['path']} ({item['bytes']} bytes)" for item in gate_logs)
+            base += f" stored_gate_logs=[{names}] ({STORED_GATE_WAY_OUT})"
         return base
 
     def provider_watcher_report(self) -> dict[str, Any] | None:
@@ -240,6 +237,36 @@ def _tree_bytes(root: Path) -> int:
     return total
 
 
+# Stores the parts MIK-R113 removed wrote under the coordination root, relative to it
+# (rule 5). The writers are gone; the files and folders stay until the user says otherwise.
+REMOVED_PART_STORE_PATHS = (
+    "logs/dashboard/terminal-sessions.json",
+    "logs/observer/workspace/operator-inbox.jsonl",
+    "logs/observer/workspace/expectation-rows.jsonl",
+    "logs/observer/workspace/orchestration-nudges.jsonl",
+    "logs/observer/workspace/supervisor-signals.jsonl",
+    "logs/observer/workspace/supervisor-heartbeat.json",
+    "logs/observer/workspace/agent-notifier-death-watch.json",
+    "logs/observer/workspace/terminal-observer-health.json",
+    "runtime/harness-control",
+    "runtime/structural-seat-locks",
+    "runtime/eve-carriers",
+    "runtime/eve-agent",
+)
+# The gate logs. The landing chain still reads them, and no part of the product decides a
+# gate any more: removing them is the way out of a refusal by a stored gate.
+STORED_GATE_LOG_PATTERNS = (
+    "logs/observer/workspace/gates.jsonl",
+    "logs/observer/lifecycles/*/gates.jsonl",
+)
+# What an install's report says beside the count of such stores: where the list is and that
+# only the user's command removes them.
+REMOVED_STORES_NOTICE = (
+    "The install deleted none of them: `agents-remember removed-stores --dry-run` lists "
+    "them, and without `--dry-run` the command removes them on your word"
+)
+
+
 def leftover_provider_folders(coordination_root: Path) -> list[dict[str, Any]]:
     """Provider runtime folders the install preserves, with sizes (MIK-R112 rule 3).
 
@@ -252,6 +279,151 @@ def leftover_provider_folders(coordination_root: Path) -> list[dict[str, Any]]:
         if path.is_dir() and not path.is_symlink():
             found.append({"path": path.as_posix(), "bytes": _tree_bytes(path)})
     return found
+
+
+def _own_mode(path: Path, unreadable: dict[str, str]) -> int | None:
+    """The mode of ``path`` itself, never of what a link points to; none when it is absent.
+
+    A path that is there and cannot be examined goes into ``unreadable`` with the reason:
+    a store may lie there, so it is not taken for absent.
+    """
+    try:
+        return path.lstat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as error:
+        unreadable[path.as_posix()] = str(error)
+        return None
+
+
+def _entries(folder: Path, unreadable: dict[str, str]) -> list[Path]:
+    """A folder's entries in order; none for an absent folder, a reason for an unreadable one."""
+    try:
+        return sorted(folder.iterdir())
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    except OSError as error:
+        unreadable[folder.as_posix()] = str(error)
+        return []
+
+
+def _is_plain_file(path: Path, unreadable: dict[str, str]) -> bool:
+    mode = _own_mode(path, unreadable)
+    return mode is not None and stat.S_ISREG(mode)
+
+
+def _folder_files(folder: Path, unreadable: dict[str, str]) -> list[Path]:
+    """A store folder's whole content: its files, and its links as the links themselves."""
+    files: list[Path] = []
+    for path in _entries(folder, unreadable):
+        mode = _own_mode(path, unreadable)
+        if mode is None:
+            continue
+        if stat.S_ISDIR(mode):
+            files.extend(_folder_files(path, unreadable))
+        elif stat.S_ISLNK(mode) or stat.S_ISREG(mode):
+            files.append(path)
+    return files
+
+
+def _store_files(store: Path, unreadable: dict[str, str]) -> list[Path]:
+    """One store's files: a folder's whole content, or the file with what stands beside it.
+
+    Beside a store file stand its lock (``<name>.lock``, ``.<name>.lock``, ``<stem>.lock``) and
+    any copy an earlier repair left (``<name>.<anything>``). They are the store's files also
+    when the store file itself is gone. Nothing follows a symbolic link: a link inside a store
+    folder is one of the store's files as the link itself, and a store that is a link is none.
+    A folder that cannot be listed and a path that cannot be examined go into ``unreadable``.
+    """
+    mode = _own_mode(store, unreadable)
+    if mode is not None and stat.S_ISLNK(mode):
+        return []
+    if mode is not None and stat.S_ISDIR(mode):
+        return sorted(_folder_files(store, unreadable))
+    names = {f".{store.name}.lock", f"{store.name.split('.')[0]}.lock"}
+    beside = [
+        path
+        for path in _entries(store.parent, unreadable)
+        if path.name in names or path.name.startswith(f"{store.name}.")
+    ]
+    return [path for path in (store, *beside) if _is_plain_file(path, unreadable)]
+
+
+def _gate_logs(coordination_root: Path, unreadable: dict[str, str]) -> list[Path]:
+    """The gate logs the patterns name; a ``*`` stands for every entry of the folder before it."""
+    found: list[Path] = []
+    for pattern in STORED_GATE_LOG_PATTERNS:
+        folder, star, name = pattern.partition("*/")
+        candidates = (
+            [entry / name for entry in _entries(coordination_root / folder, unreadable)]
+            if star
+            else [coordination_root / pattern]
+        )
+        found.extend(path for path in candidates if _is_plain_file(path, unreadable))
+    return found
+
+
+def _files_bytes(files: list[Path]) -> int:
+    total = 0
+    for path in files:
+        try:
+            total += path.lstat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def removed_part_stores(
+    coordination_root: Path, unreadable: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """Stores of removed parts that the install preserves, with sizes (MIK-R113 rule 5).
+
+    The install never deletes these; only the explicit ``removed-stores``
+    command does. Reporting them here is the once-per-install notice. ``files`` are the
+    files that command removes for the store; a gate log is removed without its lock,
+    which the landing chain still takes.
+
+    ``unreadable``, when given, receives every place that is there and could not be read,
+    as path and reason. A store may lie in such a place, so the command names it instead
+    of reporting that nothing remains.
+    """
+    unreadable = {} if unreadable is None else unreadable
+    found: list[dict[str, Any]] = []
+    for relative in REMOVED_PART_STORE_PATHS:
+        store = coordination_root / relative
+        files = _store_files(store, unreadable)
+        if files:
+            found.append(_store_entry(store, files, gate_log=False))
+    for store in _gate_logs(coordination_root, unreadable):
+        found.append(_store_entry(store, [store], gate_log=True))
+    return found
+
+
+def _store_entry(store: Path, files: list[Path], *, gate_log: bool) -> dict[str, Any]:
+    return {
+        "path": store.as_posix(),
+        "bytes": _files_bytes(files),
+        "files": [path.as_posix() for path in files],
+        "gateLog": gate_log,
+    }
+
+
+def removed_part_stores_report(stores: list[dict[str, Any]]) -> dict[str, Any]:
+    """The part of an install's report on the stores of removed parts (MIK-R113 rule 5).
+
+    ``stores`` names every store with its path, size and files; it is what the filed report
+    keeps and the tool's answer leaves out. The count, the size and the sentence that names
+    the command ride in both, and the way out of a stored gate when a gate log is among them.
+    """
+    report: dict[str, Any] = {
+        "count": len(stores),
+        "bytes": sum(item["bytes"] for item in stores),
+        "notice": REMOVED_STORES_NOTICE,
+        "stores": stores,
+    }
+    if any(item["gateLog"] for item in stores):
+        report["storedGates"] = STORED_GATE_WAY_OUT
+    return report
 
 
 def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
@@ -270,6 +442,82 @@ def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
         summary.created_dirs += 1
 
 
+def _close_user_settings_permissions(path: Path) -> None:
+    """Leave the user's settings file read-only and its folder entry-closed (MIK-R137 rule 4).
+
+    The file keeps mode 444 and the folder holding it keeps mode 555, so no
+    process of the account can replace, remove or extend either without the
+    user opening them first. The product never opens them by itself and never
+    changes the file's content. Raises :class:`OSError` on a filesystem that
+    cannot take the modes; the caller reports that and goes on.
+    """
+    os.chmod(path, 0o444)
+    os.chmod(path.parent, 0o555)
+
+
+def _user_settings_commands(path: Path, *, file_exists: bool) -> tuple[str, str]:
+    """The user's two commands for the settings at ``path``: close, and open before an edit.
+
+    Both name the exact folder and file as quoted shell operands, so a path under a custom
+    ``XDG_CONFIG_HOME`` or one that holds a space is addressed whole. The edit command opens
+    the folder with the file: an editor that saves by replacing the file makes a new entry
+    in the folder. A file that does not exist is left out of both.
+    """
+    folder = str(path.parent)
+    close = [["chmod", "444", str(path)]] if file_exists else []
+    close.append(["chmod", "555", folder])
+    edit = ["chmod", "u+w", folder, *([str(path)] if file_exists else [])]
+    return " && ".join(shlex.join(command) for command in close), shlex.join(edit)
+
+
+def user_settings_protection_report() -> dict[str, Any]:
+    """Name an open settings file or folder, with the commands (MIK-R137 rule 5).
+
+    Every ``upgrade-user-settings`` answer carries this block, so an
+    installation whose file or folder is open to writing is named with the
+    command that closes it and the command the user runs before an edit.
+    A closed file and folder are reported as closed, not named.
+    """
+    path = user_agentic_settings_path()
+    folder = path.parent
+    try:
+        file_mode = stat.S_IMODE(path.stat().st_mode) if path.is_file() else None
+    except OSError:
+        file_mode = None
+    try:
+        folder_mode = stat.S_IMODE(folder.stat().st_mode) if folder.is_dir() else None
+    except OSError:
+        folder_mode = None
+    file_open = file_mode is not None and bool(file_mode & 0o222)
+    folder_open = folder_mode is not None and bool(folder_mode & 0o222)
+    close_command, edit_command = _user_settings_commands(path, file_exists=file_mode is not None)
+    return {
+        "userPath": str(path),
+        "fileExists": file_mode is not None,
+        "fileOpen": file_open,
+        "folderOpen": folder_open,
+        "closeCommand": close_command,
+        "editCommand": edit_command,
+    }
+
+
+def open_user_settings_notice() -> dict[str, Any] | None:
+    """The settings file or folder a state report names as open to writing (MIK-R137 rule 5).
+
+    ``server_info``, the report of an installation's state that every start reads, carries
+    this block while the user's file or its folder is open, with the command that closes
+    them and the command the user runs before an edit. Closed or absent, nothing is named.
+    Only the modes are read: no mode and no byte of what is reported changes. A settings
+    location that cannot be derived names nothing here; the refusal stays with the reader
+    of those settings.
+    """
+    try:
+        report = user_settings_protection_report()
+    except AgenticSettingsError:
+        return None
+    return report if report["fileOpen"] or report["folderOpen"] else None
+
+
 def upgrade_user_settings(coordination_root: Path, *, dry_run: bool) -> dict[str, Any]:
     """Move the entire old file once without overwriting an existing user file."""
     old = agentic_settings_path(coordination_root)
@@ -284,11 +532,14 @@ def upgrade_user_settings(coordination_root: Path, *, dry_run: bool) -> dict[str
             "oldPath": str(old),
             "userPath": str(new),
             "dryRun": dry_run,
+            "protection": user_settings_protection_report(),
+            "permissionsNote": None,
         }
     if old.is_symlink() or not old.is_file():
         raise AgenticSettingsError(
             f"agentic-settings-upgrade-source-not-regular: old: {old}; user: {new}"
         )
+    permissions_note: str | None = None
     if not dry_run:
         new.parent.mkdir(parents=True, exist_ok=True)
         # Exclusive creation also refuses a destination that appears after the check.
@@ -297,11 +548,20 @@ def upgrade_user_settings(coordination_root: Path, *, dry_run: bool) -> dict[str
             shutil.copyfileobj(source, destination)
         shutil.copystat(old, new)
         old.unlink()
+        # MIK-R137 rule 4: the installation keeps the user's file closed to
+        # writing. A filesystem that cannot take the modes keeps the moved
+        # file and says so in the report instead of failing the upgrade.
+        try:
+            _close_user_settings_permissions(new)
+        except OSError as error:
+            permissions_note = f"could not close the user's settings permissions: {error}"
     return {
         "state": "would-move" if dry_run else "moved",
         "oldPath": str(old),
         "userPath": str(new),
         "dryRun": dry_run,
+        "protection": user_settings_protection_report(),
+        "permissionsNote": permissions_note,
     }
 
 
@@ -512,36 +772,8 @@ def enabled_provider_names(settings: dict[str, Any]) -> list[str]:
     )
 
 
-def install_eve_application(
-    source_root: Path,
-    coordination_root: Path,
-    summary: InstallSummary,
-    dry_run: bool,
-) -> Path:
-    """Install the pinned eve application, and only its authored surface.
-
-    The dependency install is the operator's, and its exact one-line command is
-    reported rather than guessed: this copies ``package.json``, the committed
-    lockfile and ``agent/`` so the pinned versions travelled with the install,
-    and deliberately neither ships nor prunes ``node_modules``.
-    """
-
-    source = application_source_root(source_root)
-    destination = coordination_root / INSTALLED_APPLICATION_PATH
-    sync = RuntimeTreeSync(
-        source_root=source,
-        destination_root=destination,
-        preserve=APPLICATION_MACHINE_LOCAL_PATHS,
-        copy_ignore=APPLICATION_MACHINE_LOCAL_PATHS,
-    )
-    prune_tree(sync, summary, dry_run)
-    copy_tree(sync, summary, dry_run)
-    return destination
-
-
 def resolve_experiment_install(
     source_root: Path,
-    coordination_root: Path,
     experiment: ExperimentSelection | None,
     *,
     environ: Mapping[str, str] | None = None,
@@ -567,11 +799,7 @@ def resolve_experiment_install(
             CapabilityReport(capabilities=()),
             None,
         )
-    report = probe_capabilities(
-        source_root=source_root,
-        coordination_root=coordination_root,
-        environ=environ,
-    )
+    report = probe_capabilities(source_root=source_root)
     delivery = decide_instruction_delivery(
         selection,
         capsule_available=report.ok,
@@ -583,7 +811,6 @@ def resolve_experiment_install(
         report,
         InstallTargets(
             source_root=source_root,
-            coordination_root=coordination_root,
             source=source_identity(source_root, environ),
         ),
     )
@@ -647,12 +874,11 @@ def install_experimental_runtime(scope: RuntimeInstallScope) -> InstallSummary:
 
 
 def _capsule_cutover(
-    source_root: Path,
     coordination_root: Path,
     summary: InstallSummary,
     dry_run: bool,
 ) -> None:
-    """Withhold the legacy startup chain and install the pinned application.
+    """Withhold the legacy startup chain.
 
     The removal is the cutover, not housekeeping: a root that already carries an
     earlier install's ``AGENTS.md`` targets would otherwise hold both instruction
@@ -662,7 +888,6 @@ def _capsule_cutover(
 
     for target_rel in WITHHELD_STARTUP_TARGETS:
         remove_path(coordination_root / target_rel, summary, dry_run)
-    install_eve_application(source_root, coordination_root, summary, dry_run)
 
 
 def _install_assets(
@@ -699,6 +924,7 @@ def _install_assets(
     prune_tree(providers_sync, summary, dry_run)
     copy_tree(providers_sync, summary, dry_run)
     summary.leftover_provider_folders = leftover_provider_folders(coordination_root)
+    summary.removed_part_stores = removed_part_stores(coordination_root)
 
     if delivery.mode == "capsule":
         # One delivery path. The coordinator ``skills/`` tree copied above is the authored
@@ -707,7 +933,7 @@ def _install_assets(
         # (``packaged_source_root()/runtime/skills`` through ``application/skill_resources``),
         # so the installed copy is neither injected nor compiled. Running the installer again
         # with no experiment selected copies the withheld startup targets back: the undo.
-        _capsule_cutover(source_root, coordination_root, summary, dry_run)
+        _capsule_cutover(coordination_root, summary, dry_run)
     else:
         for source_rel, target_rel in AGENTS_MD_TARGETS.items():
             copy_file(runtime_root / source_rel, coordination_root / target_rel, summary, dry_run)
@@ -742,7 +968,7 @@ def _install_runtime(scope: RuntimeInstallScope) -> InstallSummary:
     require_runtime_tree(runtime_root)
 
     selection, delivery, capabilities, record = resolve_experiment_install(
-        source_root, coordination_root, scope.experiment
+        source_root, scope.experiment
     )
     if delivery.mode == "refused":
         raise ExperimentError(
@@ -881,6 +1107,10 @@ def install_runtime_from_config(
             "unusedProviderKeys": summary.unused_provider_keys,
         },
     }
+    # MIK-R113 rule 5: the install names the stores of removed parts it found, once, and
+    # deletes none of them.
+    if summary.removed_part_stores:
+        payload["removedPartStores"] = removed_part_stores_report(summary.removed_part_stores)
     if summary.experiment is not None:
         payload["experiment"] = summary.experiment.payload()
     else:

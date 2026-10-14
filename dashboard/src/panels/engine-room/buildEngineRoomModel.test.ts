@@ -48,9 +48,7 @@ const lifecycle = (
   fleeting: false,
   startedAt: "",
   lastEventTs: "",
-  stateEnteredAt: "",
   inferred: false,
-  actions: [],
   ...over,
 });
 
@@ -59,27 +57,6 @@ describe("buildEngineRoomModel", () => {
     const model = buildEngineRoomModel([node({ lifecycleId: "L1" })], [lifecycle({ id: "L1" })]);
     expect(model.processes).toHaveLength(1);
     expect(model.processes[0]?.lifecycle?.id).toBe("L1");
-  });
-
-  it("exposes the lifecycle gate on the process view", () => {
-    const model = buildEngineRoomModel(
-      [node({ lifecycleId: "L1" })],
-      [
-        lifecycle({
-          id: "L1",
-          gate: {
-            id: "G1",
-            kind: "closeout-approval",
-            state: "open",
-            evidenceRefs: [],
-            decisions: [],
-            packet: { question: "land?" },
-            ts: "",
-          },
-        }),
-      ],
-    );
-    expect(model.processes[0]?.gate?.kind).toBe("closeout-approval");
   });
 
   it("builds no provider fallback from an empty process surface (MIK-R112)", () => {

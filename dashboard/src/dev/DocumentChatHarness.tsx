@@ -5,7 +5,7 @@
 // Never shipped: `App.tsx` loads `DevApp` only under `import.meta.env.DEV`.
 import { useState } from "react";
 
-import type { TaskDocumentRef } from "../types/terminalCatalog";
+import type { TaskDocumentRef } from "../types/projection";
 import { RightRail } from "../cockpit/Cockpit";
 import { chatLeaf, chatMaster, chatSeries, chatSprint } from "../test/fixtures/documentChat";
 import type { DocumentAgent } from "../cockpit/document-chat/model";

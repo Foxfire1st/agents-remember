@@ -49,10 +49,3 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     # why the transaction completed and the caller got a validation error instead of the payload.
     atomicSeriesActivation: AtomicSeriesActivationFact | None = None
     atomicSeriesActivationRelease: AtomicSeriesActivationRelease | None = None
-    # Completion-seat cleanup is additive to finalization truth. Default-on auto-close reports the
-    # exact retired, missing-report, and per-seat-failure sets; the explicit settings opt-out uses
-    # the historical landed/archive field instead. All are empty on a dry run or disabled edge.
-    autoClosedSeats: list[str] = Field(default_factory=list)
-    autoCloseDeferredSeats: list[str] = Field(default_factory=list)
-    autoCloseFailedSeats: list[str] = Field(default_factory=list)
-    autoLandedSeats: list[str] = Field(default_factory=list)

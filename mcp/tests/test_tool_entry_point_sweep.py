@@ -99,6 +99,7 @@ from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.observer.ambient import ambient
+from agents_remember.observer.ulid import new_ulid
 from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import ValidationError
 from test_tool_answer_table import ROW_CASE_FRAMEWORK_KEYS
@@ -150,7 +151,7 @@ T34_REPAIRED_TOOLS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------------------
 STATE_DEPENDENT_RAISERS: dict[str, tuple[str, ...]] = {}
 
-AMBIENT_STATES = ("none", "running", "blocked", "awaiting-developer")
+AMBIENT_STATES = ("none", "running")
 
 # The population the matrix is measured over, derived by RULE from the roster rather than from
 # the pin: every lifecycle-state tool. MIK-R112 removed all of them except
@@ -736,11 +737,6 @@ class EntryPointWorld:
             "context_packet": {"repo_id": REPO},
             "read_ar_files": {"repo_id": REPO, "files": ["not-covered.md"]},
             "runtime_install": {"dry_run": True, "install_provider_deps": False},
-            "dispatch_agent": {
-                "task_document_ref": self.task_ref,
-                "role": "worker",
-                "brief": "entry-point sweep",
-            },
             "memory_quality_check": {
                 "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
             },
@@ -975,21 +971,10 @@ class EntryPointWorld:
             if current is not None and current.current is not None:
                 current.end("completed")
             return
-        if current is None or current.current is None:
-            if current is None:
-                raise AssertionError(f"could not place an ambient lifecycle for state {state!r}")
-            current.start()
-            current = ambient()
-        if current is None or current.current is None:
+        if current is None:
             raise AssertionError(f"could not place an ambient lifecycle for state {state!r}")
-        if current.current.state == "blocked" and state != "blocked":
-            current.resume()
-        elif current.current.state == "awaiting-developer" and state != "awaiting-developer":
-            current.resume_from_await()
-        if state == "blocked" and current.current.state != "blocked":
-            current.block(kind="plan-approval", prompt="entry-point matrix")
-        if state == "awaiting-developer" and current.current.state != "awaiting-developer":
-            current.await_developer(summary="entry-point matrix")
+        if current.current is None:
+            current.attach(new_ulid(), enclosure=self.contract.as_posix())
 
 
 class EntryPointCoverageTests(unittest.TestCase):
@@ -1149,7 +1134,7 @@ class EntryPointProbeTests(unittest.TestCase):
         """The second pin is measured, not declared -- and it is empty on purpose.
 
         MIK-R112 removed every tool that was a pure function of ambient state, so the
-        four-state matrix observes no raiser. The case still measures the matrix over the
+        matrix over the two states a process can hold observes no raiser. The case still measures the matrix over the
         derived population and asserts it equals the empty pin in both directions, so a
         tool that raises outside its envelope fails here by name.
         """

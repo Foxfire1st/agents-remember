@@ -44,12 +44,12 @@ import snapshot from '../fixtures/snapshot.json';
 //
 //   fixture ⊇ mirror — THE ORACLE ITSELF. Both directions above are measured against a hand-kept
 //     payload, so a field the fixture does not exercise is a field neither direction can see. A
-//     reviewer proved the cost: deleting `stateEnteredAt` and `gate.evidenceRefs`, and emptying
-//     `expectationRows` and `landing`, produced zero new `tsc` errors and a green suite. An empty
-//     array is worse than a missing field — it is blindness in BOTH directions at once, because
-//     `AsJsonModule` accepts `never[]` as assignable to anything and `ServedOnlyPaths<never, …>`
-//     is `never`, so a *required* field added to the mirror's `ExpectationRowNode` was not
-//     reported either. `fixtureMustSample` below closes that: it walks the mirror against the
+//     reviewer proved the cost: deleting two sampled fields and emptying two arrays of nodes
+//     produced zero new `tsc` errors and a green suite. An empty array is worse than a missing
+//     field — it is blindness in BOTH directions at once, because `AsJsonModule` accepts `never[]`
+//     as assignable to anything and `ServedOnlyPaths<never, …>` is `never`, so a *required* field
+//     added to the mirror's element type was not reported either. `fixtureMustSample` below
+//     closes that: it walks the mirror against the
 //     fixture's OWN type (`typeof snapshot` — the JSON module's exact shape, empty arrays and
 //     all) and names every declared path the payload does not reach.
 //
@@ -135,11 +135,11 @@ function mirrorMustDeclare<ServedOnly extends never>(...undeclaredPaths: ServedO
 // silently useless — an EMPTY ARRAY, whose element type is `never` and whose contents therefore
 // satisfy every check ever written about them.
 //
-// A path is reported once, at the highest level that is missing: deleting a lifecycle's `gate`
-// reports `projection.lifecycles[].gate`, not its eight children; emptying `expectationRows`
-// reports `projection.analytics.expectationRows[]`. Arrays are keyed by TYPE, not by element, so
-// one lifecycle carrying `staleSeconds` samples it for all of them — the fixture does not have to
-// be uniform, it has to be COMPLETE between them.
+// A path is reported once, at the highest level that is missing: deleting an enclosure's
+// `lifecycleOperation` reports `projection.enclosures[].lifecycleOperation`, not its children;
+// emptying `toolReports` reports `projection.analytics.toolReports[]`. Arrays are keyed by TYPE,
+// not by element, so one lifecycle carrying `staleSeconds` samples it for all of them — the
+// fixture does not have to be uniform, it has to be COMPLETE between them.
 // The scalar test comes FIRST and the empty-array test second, in that order on purpose: an empty
 // array of strings samples nothing and hides nothing (there is no structure inside a string to
 // walk), while an empty array of OBJECTS hides a whole model. Reversing them would demand a
@@ -179,15 +179,9 @@ type UnsampledMirrorPaths = MirrorOnlyPaths<WorkspaceProjection, typeof snapshot
 // hole being accepted rather than a formality. Both directions are checked below, so an entry
 // that becomes sampled — or that names a path the mirror no longer declares — fails too.
 //
-// Both of these are injected by the serving app at RESPONSE time (`serving/build_info.py`,
-// `serving/agent_notifier_heartbeat.py`), not by the reducer, and both are absent from the persisted
-// `latest-state.json` this fixture is shaped like. `store.test.ts` exercises them by construction
-// instead, including the "never ticked" (`lastTickAt: null`) reading that must not render as an
-// alarm — a reading a payload that always carries a heartbeat could not express.
-type KnownUnsampled =
-  | 'projection.servingBuild'
-  | 'projection.agentNotifierHeartbeat'
-  | 'projection.supervisorHeartbeat';
+// It is injected by the serving app at RESPONSE time (`serving/build_info.py`), not by the
+// reducer, and is absent from the persisted `latest-state.json` this fixture is shaped like.
+type KnownUnsampled = 'projection.servingBuild';
 
 /** Fails `tsc -b` naming every mirror path the fixture stopped sampling. */
 function fixtureMustSample<Unsampled extends never>(...unsampledPaths: Unsampled[]): void {
@@ -204,7 +198,6 @@ function allowlistMustStayEarned<Stale extends never>(...spentEntries: Stale[]):
 // key, so `ServedOnlyPaths` cannot report anything inside it and `MirrorOnlyPaths` cannot require
 // anything inside it — whatever the server puts there is unwalkable by construction. This used to
 // be a prose list of four in a comment; it was actually seven, and one of the three it missed
-// (`GateNode.evidenceRefs[]`, a `Record<string, unknown>[]`, so EVERY key of EVERY evidence ref)
 // was added by the same change that wrote the comment. `Record<AbsorbingPaths<…>, string>` is
 // exhaustive and closed, so the list cannot be short again and cannot list a site that has gone.
 type AbsorbingPaths<Mirror, Path extends string> = [NonNullable<Mirror>] extends [JsonScalar]
@@ -223,9 +216,6 @@ type AbsorbingPaths<Mirror, Path extends string> = [NonNullable<Mirror>] extends
         : never;
 
 const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, 'projection'>, string> = {
-  'projection.lifecycles[].ask': "the open question's shape is the gate kind's business",
-  'projection.lifecycles[].gate.packet': 'the decision packet is control-plane payload',
-  'projection.lifecycles[].gate.evidenceRefs[]': 'every key of every evidence ref is opaque',
   'projection.metrics.stalenessHistogram': 'buckets are named by the reducer, not by the mirror',
   'projection.analytics.driftSnapshots[].counts': 'drift categories come from the drift report',
   'projection.analytics.setupSummaries[].resultCounts': 'result buckets come from the setup action',
@@ -428,30 +418,6 @@ const VOCABULARIES: Record<
     'unreadable',
     'invalid',
   ],
-  // The observer-health row rides the SAME served body as the notifier heartbeat and is sampled
-  // here in its DEGRADED reading. That reading is not a convenience: three of these five unions are
-  // nullable (`activeFailureCategory`/`Type`/`Summary`), and a payload carrying the nulls of the
-  // healthy case could not satisfy a string vocabulary check at all — the drop to null is legal but
-  // unsampleable, so the fixture carries the served shape an operator actually needs to see.
-  'projection.terminalObserverHealth.status': ['initializing', 'degraded', 'healthy', 'stale'],
-  'projection.terminalObserverHealth.schemaVersion': ['ar-terminal-observer-health/v1'],
-  'projection.terminalObserverHealth.activeFailureCategory': [
-    'startup-refresh-failed',
-    'steady-state-refresh-failed',
-  ],
-  'projection.terminalObserverHealth.activeFailureSummary': [
-    'startup terminal observation failed',
-    'steady-state terminal observation failed',
-  ],
-  'projection.terminalObserverHealth.activeFailureType': [
-    'HarnessControlError',
-    'TimeoutError',
-    'ConnectionError',
-    'OSError',
-    'RuntimeError',
-    'ValueError',
-    'Exception',
-  ],
 };
 
 // Reads every value the payload carries at one of the registry's dotted paths. `[]` fans out over
@@ -493,7 +459,7 @@ describe('the mirror declares everything the server sends', () => {
 describe('the fixture samples everything the mirror declares', () => {
   it('reaches every declared path except the named residue', () => {
     // Fails `tsc -b` naming the path, e.g.
-    // `Type '"projection.lifecycles[].stateEnteredAt"' does not satisfy the constraint 'never'.`
+    // `Type '"projection.lifecycles[].staleSeconds"' does not satisfy the constraint 'never'.`
     fixtureMustSample<Exclude<UnsampledMirrorPaths, KnownUnsampled>>();
   });
 
@@ -546,7 +512,6 @@ describe('projection contract fixture', () => {
     for (const lifecycle of served.lifecycles) {
       expect(typeof lifecycle.id).toBe('string');
       expect(typeof lifecycle.fleeting).toBe('boolean');
-      expect(Array.isArray(lifecycle.actions)).toBe(true);
     }
   });
 });
@@ -573,9 +538,7 @@ describe('metrics bucket every live lifecycle state', () => {
       fleeting: false,
       startedAt: '2026-06-14T09:00:00+00:00',
       lastEventTs: '2026-06-14T09:00:00+00:00',
-      stateEnteredAt: '2026-06-14T09:00:00+00:00',
       inferred: false,
-      actions: [],
     }));
     const metrics = metricsFor(lifecycles) as unknown as Record<string, number>;
     for (const state of ACTIVE_STATES) {

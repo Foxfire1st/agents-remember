@@ -11,11 +11,11 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     resolve_role_launch_context,
 )
-from agents_remember.application.terminal_tools import _resolve_spawn_harness
 from agents_remember.cli import (
     paseo_catalog,
     role_launch_preparation,
@@ -41,7 +41,6 @@ from agents_remember.cli.role_launch_workspace import workspace_folder
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
     load_agentic_settings,
-    user_agentic_settings_path,
 )
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import parse_paseo_runtime_settings
@@ -274,7 +273,7 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
         self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
 
         # Runtime settings are user-owned live input, not a detached field of each config.
-        original_runtime = user_agentic_settings_path().read_bytes()
+        original_runtime = user_settings_path_for_write().read_bytes()
         other_runtimes = {
             "listen": (self.root / "listen-runtime", {"listen": "127.0.0.1:6834"}),
             "home": (self.root / "home-runtime", {"home": (self.root / "other-home").as_posix()}),
@@ -291,7 +290,7 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
                 self.assertEqual(len(bridge.calls), calls)
                 self.assertNotIn(elsewhere["catalogOrigin"], origins)
                 origins.add(elsewhere["catalogOrigin"])
-        user_agentic_settings_path().write_bytes(original_runtime)
+        user_settings_path_for_write().write_bytes(original_runtime)
         self.assertEqual(self.options(defaults())["catalogOrigin"], refreshed["catalogOrigin"])
         self.assertEqual(len(bridge.calls), 5)
 
@@ -414,7 +413,7 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
             self.assertEqual(raised.exception.status_code, status)
             self.assertIn(text, raised.exception.detail)
 
-        original_runtime = user_agentic_settings_path().read_bytes()
+        original_runtime = user_settings_path_for_write().read_bytes()
         with self.subTest("no Paseo runtime configured"):
             bridge = self.bridge()
             unconfigured = runtime_config(self.root / "unconfigured", listen=None)
@@ -424,8 +423,8 @@ class LauncherOptionsTests(PaseoCatalogTestCase):
             self.assertTrue(raised.exception.detail.startswith("no Paseo runtime configured: "))
             self.assertEqual(bridge.calls, [])
 
-        user_agentic_settings_path().parent.mkdir(parents=True, exist_ok=True)
-        user_agentic_settings_path().write_bytes(original_runtime)
+        user_settings_path_for_write().parent.mkdir(parents=True, exist_ok=True)
+        user_settings_path_for_write().write_bytes(original_runtime)
         with self.subTest("a cached catalog answers while the daemon is unreachable"):
             forget_launcher_catalogs()
             bridge = self.bridge(
@@ -596,7 +595,7 @@ if __name__ == "__main__":
 class R71RoleChoicesTests(PaseoCatalogTestCase):
     def write_user_settings(self, orchestration: dict[str, Any]) -> None:
         """Change the tested family in the fixture's one user file; retain its host."""
-        path = user_agentic_settings_path()
+        path = user_settings_path_for_write()
         document = json.loads(path.read_text())
         document["orchestration"] = orchestration
         path.write_text(json.dumps(document))
@@ -750,7 +749,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
             RoleAgentOverride.model_validate({"mode": "full-access"})
 
     def test_r71_repository_authority_refusal_both_families_and_alias_merge(self) -> None:
-        user = user_agentic_settings_path()
+        user = user_settings_path_for_write()
         repository = self.root / "code"
         local = repository / "system" / "settings.json"
         user.parent.mkdir(parents=True, exist_ok=True)
@@ -1254,7 +1253,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
         self.assertEqual(set(listed), {"server_info"})
 
     def test_r71_layer_binding_keeps_codex_auto_from_becoming_claude_auto(self) -> None:
-        user = user_agentic_settings_path()
+        user = user_settings_path_for_write()
         code = self.config.workspace_root / "demo"
         local = code / "system" / "settings.json"
         user.parent.mkdir(parents=True, exist_ok=True)
@@ -1323,7 +1322,7 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
     def test_r71_per_level_origins_bind_at_the_authored_layer_and_keep_provider_controls(
         self,
     ) -> None:
-        user = user_agentic_settings_path()
+        user = user_settings_path_for_write()
         code = self.config.workspace_root / "demo"
         local = code / "system/settings.json"
         user.parent.mkdir(parents=True, exist_ok=True)
@@ -1475,17 +1474,13 @@ class R71RoleChoicesTests(PaseoCatalogTestCase):
                 self.assertNotIn("reportCollectionFiles", archived)
                 self.assertEqual(archived["reportCollection"]["state"], "collected-closed")
 
-    def test_r71_host_custom_provider_requires_no_ar_terminal_declaration(self) -> None:
-        user = user_agentic_settings_path()
+    def test_r71_host_custom_provider_requires_no_ar_declaration(self) -> None:
+        user = user_settings_path_for_write()
         user.parent.mkdir(parents=True, exist_ok=True)
         self.write_user_settings({"roles": {"worker": {"harness": "hermes"}}})
         settings = load_agentic_settings(self.config.coordination_root)
         self.assertEqual(settings.role_knobs("worker").harness, "hermes")
-        self.assertIsNone(settings.find_harness("hermes"))
-        adapter, refusal = _resolve_spawn_harness(settings, "hermes", lambda _command: None)
-        self.assertIsNone(adapter)
-        assert refusal is not None
-        self.assertEqual(refusal["status"], "harness-unknown")
+        self.assertNotIn("hermes", settings.harness_ids)
         catalog = copy.deepcopy(CATALOG)
         catalog["providers"].append({"id": "hermes", "label": "Hermes", "models": [], "modes": []})
         forget_launcher_catalogs()

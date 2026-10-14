@@ -64,10 +64,9 @@ Run this sequence in order:
 5. Bootstrap: when a new memory repo was scaffolded, hand off to
    `c-03-repo-bootstrap` (running the fixer on the cards before the baseline),
    adopt the first baseline through `c-10-adopt-memory-baseline`, then reach the
-   repository's knowledge foundation through `c-14-knowledge-bootstrap`. That procedure is the curator's work, and the seat
-   that carries it — a **taskless curator session** (admitted by the developer's
-   2026-09-24 ruling), the taskless bootstrap seat before a task exists, or a
-   curator opened on a task document — is stated there.
+   repository's knowledge foundation through `c-14-knowledge-bootstrap`. That procedure is the curator's work, and the session
+   that carries it — the taskless bootstrap seat or an instructed session before a
+   task exists, or a curator opened on a task document — is stated there.
 6. Providers: when providers are enabled, start/refresh indexing and verify
    readiness.
 
@@ -95,6 +94,8 @@ Check, in order:
    Surface the resolved absolute paths because wrong paths are the common cause
    of resolver failures. Also report whether the global agentic settings file
    (`~/.config/agents-remember/settings.json`, under `XDG_CONFIG_HOME` when set) exists and carries `paseoRuntime`.
+   When `server_info` carries `openUserSettings`, that file or its folder is open to writing: tell the
+   developer so and give both of its commands as they stand; change no mode yourself.
    Starter setup supplies one block; runtime_install never writes this authority.
    If missing, calculate the complete five-key block below using the installation's
    actual absolute data/state folders. Empty or unset XDG values use the home
@@ -209,44 +210,22 @@ preference):
    (`perLevel`). Read per-use; edits apply on the next use, no restart.
 3. **Concurrency caps** (`orchestration.concurrency`) - `maxParallelMasters`,
    `maxParallelLeaves`, `maxSubAgents`. Default: uncapped.
-4. **Harness preference + role knobs** (`orchestration.spawn.harness`,
+4. **Agent kind + role knobs** (`orchestration.spawn.harness`,
    per-role `orchestration.roles.<role>`, per-level
-   `orchestration.rolesPerLevel.<level>.<role>`) - which installed harness
-   the public `dispatch_agent` transaction selects when no role/level knob supplies one, per-role
+   `orchestration.rolesPerLevel.<level>.<role>`) - which agent kind a role start
+   uses when no role/level knob supplies one, per-role
    harness/model/effort settings, and per-LEVEL settings
-   (leaf|master|portfolio) for tiered economics (e.g. a cheap leaf reviewer,
-   a smarter master-seam reviewer). Harness values must be known ids: the
-   builtin registry (`claude`, `codex`, `pi`) or an `orchestration.harnesses`
-   entry the developer defines (new TUIs, or a pre-customized launch argv for
-   a builtin). A configured native role supplies the complete harness/model/effort
-   selection. Do not teach a static builtin model or effort vocabulary: the native
-   adapter advertises the token-free per-install/account model catalog, with effort
-   nested under each model, and validates it before the configured vendor session
-   starts. Use the exact advertised model key (Pi keys are provider-qualified) and
-   one launch-settable effort advertised for that model. The adapter applies the
-   selection through native launch configuration; normalized model/effort is never
-   converted into composer paste or a generated session command. Mention the
-   FREE-FORM escape hatch - `launchArgs` (verbatim argv), `sessionCommands`
-   (explicit user-authored lines applied before the brief), `promptKeywords`
-   (prepended to the brief) - which is never validated or synthesized and is
-   recorded in spawn provenance. Ordinary spawning seats cannot
-   pass `harness`/`model`/`effort`, launch/session spend controls, or harness-native
-   spend/endpoint env keys directly; settings are the spend surface. Default:
-   detection-gated (the first detected harness). The full spawn-surface manual is
-   `docs/reference/harnesses.md`.
+   (leaf|master|portfolio). Do not teach a static builtin model or effort
+   vocabulary: the host's catalog names the agent kinds, their models and the
+   efforts of each model, and a start checks the selection against it.
+   `launchArgs`, `sessionCommands` and `promptKeywords` stay accepted but no
+   code reads them in this build. The reference is
+   `docs/reference/settings-json.md`.
 
-Verify the installed instructions teach one public spawn transaction and its two disjoint caller
-kinds:
-
-| Caller kind | Recognition | Authority | Required behavior |
-| --- | --- | --- | --- |
-| Plane-hosted seat | Plane-injected hosted identity is present | Current role seat plus direct-child scope | Call `dispatch_agent` with the canonical child document, target role, and complete brief |
-| Ambient launcher | Plane-injected hosted identity is absent | Canonical target-document resolution plus target role-altitude validation | Ordinary bootstrap: compile the canonical architect brief and call `dispatch_agent` once on the sprint document. Explicit task-seat takeover: compile the claimed role's complete brief and call the same tool once on that role's canonical task document. |
-
-The request never supplies caller identity or selects a mode. Both rows consume the same
-settings-owned harness/model/effort, internal readiness, exact brief pinning, rollback, and
-canonical seat publication. A plane refusal remains a refusal and never falls back to ambient.
-The internal session-creation primitive is not installed caller guidance.
+Verify the installed instructions tell a chat without a role to answer a question inline and,
+for work on a managed repository, to write the request into the sprint document and to start an
+Architect with `role_start` (the call for an Architect names no document), and that they name no
+removed tool.
 
 If the developer wants to skip the interview, confirm the built-in defaults
 apply and continue; tell them the file can be edited any time (picked up
@@ -416,8 +395,8 @@ baseline made. Stage 5 has three parts:
    `already-adopted` report means this half is already done.
 3. **Reach the repository's knowledge foundation** - hand off to
    `c-14-knowledge-bootstrap`. That procedure is the curator's work and states its own
-   carriers; before a task exists, a **taskless curator session** (admitted by the
-   developer's 2026-09-24 ruling) authors it and the taskless bootstrap seat reaches
+   carriers; before a task exists, an instructed session that holds that procedure
+   authors it under the curator's rules and the taskless bootstrap seat reaches
    the read-and-report step, as that procedure states. Read the state first:
    `memory_init` returns a `knowledge` block naming where the repository's
    foundation lives and what a read of that location finds now (`not-recorded`,
@@ -435,9 +414,9 @@ baseline made. Stage 5 has three parts:
    knowledge records through the curator's own writer, so this skill never
    writes knowledge records itself, never invents records to make setup look
    finished, and never creates a development leaf, worktree or enclosure to give
-   the writer an argument list it does not need — and it never names a role the
-   opener will not admit: a taskless curator seat IS admitted (the developer's
-   2026-09-24 ruling), so the authoring is handed on as `c-14-knowledge-bootstrap`
+   the writer an argument list it does not need — and it never names a seat that
+   cannot be started: a curator seat opens only on a leaf's task document, so before
+   a task exists the authoring is handed on as `c-14-knowledge-bootstrap`
    states rather than worked around. The knowledge write needs the developer's
    commit word, exactly as the other effectful stages do.
 

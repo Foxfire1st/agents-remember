@@ -21,7 +21,6 @@ from agents_remember_quality.profile_publication import (
     prepare_profile_reports,
 )
 
-AMBIENT_CODEX_PROTOCOL = profile_results.AMBIENT_CODEX_PROTOCOL
 BASELINE_CODEX_PROTOCOL = profile_results.BASELINE_CODEX_PROTOCOL
 _QualityProgress = profile_results.QualityProgress
 _profile_result_payload = profile_results.profile_result_payload

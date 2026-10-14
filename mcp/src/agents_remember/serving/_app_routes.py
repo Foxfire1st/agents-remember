@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import contextlib
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
@@ -13,61 +11,32 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
-from agents_remember.controlplane.expectation_rows import ExpectationRowStore
-from agents_remember.controlplane.gate_decisions import (
-    GateDecisionContext,
-    record_gate_decision,
-    record_lifecycle_gate_decision,
-)
-from agents_remember.controlplane.operator_inbox_records import (
-    InboxAddress,
-    InboxMessage,
-    InboxPoster,
-)
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.records import GateVerdict
-from agents_remember.controlplane.store import GateStore
-from agents_remember.models.operator_inbox import OperatorInboxPostResponse
-from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection import TaskDocNode
 from agents_remember.serving._app_common import (
-    OperatorInboxPostRequest,
     _if_none_match_matches,
     _projection_body_cache,
     _ServingRuntime,
     stream_events,
-)
-from agents_remember.serving._app_lifespan import (
-    _agent_notifier_heartbeat_payload,
-    _terminal_observer_health_payload,
 )
 from agents_remember.serving.actions import (
     ActionEvaluationContext,
     ActionOutcome,
     ActionRequest,
     DismissalIntent,
-    GateDecisionIntent,
     evaluate_action,
 )
 from agents_remember.serving.direct_execution_grants import (
     DeveloperGrantRequest,
     developer_grant_tool,
 )
-from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.serving.events import stream_raw_events
-from agents_remember.serving.operator_inbox_posts import (
-    OperatorInboxPostContext,
-    post_operator_inbox_entry,
-)
 from agents_remember.serving.projections.snapshots import read_task_document_body
 from agents_remember.serving.response_contract import (
     ACTION_RESPONSES,
     ActionAccepted,
     HttpDetailRefusal,
-    OperatorInboxDismissed,
-    StatusRefusal,
     StreamReadyMarker,
 )
 from agents_remember.serving.served_state import ServedWorkspaceProjection, served_state_tail
@@ -91,22 +60,14 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
     headers = {"ETag": f'W/"{revision}"', "Cache-Control": "no-cache"}
     if _if_none_match_matches(if_none_match, revision):
         return Response(status_code=304, headers=headers)
-    # The dump rides the per-instance memo; only the volatile tail
-    # (build stamp + at-response-time heartbeat) is computed per request, on a copy.
-    # This body is therefore ASSEMBLED rather than dumped from one model -- the memo and the
-    # ETag both depend on the tick-time half being reusable and the serve-time half not
-    # being. What it assembles to is nonetheless declared: it is a
+    # The dump rides the per-instance memo; only the tail (the build stamp) is added per
+    # request, on a copy. This body is therefore ASSEMBLED rather than dumped from one
+    # model. What it assembles to is nonetheless declared: it is a
     # ``served_state.ServedWorkspaceProjection``, and the conformance suite validates the
     # real route's output against that model. Validating here instead would re-parse ~1.3 MB
     # per request and hand back exactly what the memo exists to save.
     body = dict(_projection_body_cache.body(snapshot))
-    body.update(
-        served_state_tail(
-            build=runtime.build,
-            heartbeat=_agent_notifier_heartbeat_payload(runtime),
-            observer_health=_terminal_observer_health_payload(runtime),
-        )
-    )
+    body.update(served_state_tail(build=runtime.build))
     return JSONResponse(content=body, headers=headers)
 
 
@@ -118,7 +79,7 @@ def _task_document_response(runtime: _ServingRuntime, path: str) -> JSONResponse
         runtime.config.coordination_root,
         doc_path=path,
         enclosures=snapshot.enclosures,
-        now=runtime.liveness_clock(),
+        now=runtime.clock(),
     )
     if doc is None:
         raise HTTPException(status_code=404, detail="task document not found")
@@ -170,12 +131,7 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
         },
     )
     async def api_stream() -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_events(
-            runtime.projector,
-            build=runtime.build,
-            agent_notifier_heartbeat=_agent_notifier_heartbeat_payload(runtime),
-            terminal_observer_health=_terminal_observer_health_payload(runtime),
-        ):
+        async for event in stream_events(runtime.projector, build=runtime.build):
             yield event
 
     # The raw river: every ``event`` frame is a verbatim observer JSONL record replayed from
@@ -201,79 +157,7 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
             yield event
 
 
-# --- action + operator-inbox routes -------------------------------------------------------------
-
-
-def _recorded_gate_decision(
-    config: McpRuntimeConfig, decision: GateDecisionIntent
-) -> dict[str, Any]:
-    """Durably record one gate decision as developer-attributed, and answer with the gate.
-
-    Developer attribution is the un-forgeable half of the contract -- the agent's own path is
-    model-attributed -- and it is what server-side closeout enforcement consumes.
-
-    Every intent that arrives here is ADDRESSED. Whether a request names a gate to decide is a
-    question about the request, so it is settled once, in the layer that validates requests:
-    ``actions._gate_decision_outcome`` refuses a decision naming neither a lifecycle target nor a
-    gate id with 400 ``missing-target`` and never builds an intent for that shape. A decision
-    without a lifecycle id is therefore the gate-id-only cancel that guard let through.
-    """
-
-    root = observer_root(config)
-    context = GateDecisionContext(
-        store=GateStore(root),
-        inbox_store=OperatorInboxStore(root),
-        expectation_store=ExpectationRowStore(root),
-        policy=config.orchestration.gate_policy,
-        now=datetime.now(UTC),
-    )
-    verdict = GateVerdict(
-        decision=decision.decision,
-        by="developer",
-        via="dashboard",
-        note=decision.note,
-    )
-    if decision.lifecycle_id is not None:
-        payload = record_lifecycle_gate_decision(
-            context,
-            lifecycle_id=decision.lifecycle_id,
-            expected_gate_id=decision.gate_id,
-            verdict=verdict,
-            evidence_refs=None,
-        )
-        return finalize_tool_response("gate_decide_internal", payload)
-    assert decision.gate_id is not None
-    payload = record_gate_decision(
-        context,
-        gate_id=decision.gate_id,
-        lifecycle_id=None,
-        verdict=verdict,
-        evidence_refs=None,
-    )
-    return finalize_tool_response("gate_decide_internal", payload)
-
-
-def _gate_decision_response(
-    config: McpRuntimeConfig,
-    outcome: ActionOutcome,
-    decision: GateDecisionIntent,
-    *,
-    target: str | None,
-) -> Response:
-    """Record the operator's gate decision and answer with the gate it wrote."""
-
-    try:
-        gate = _recorded_gate_decision(config, decision)
-    except KeyError as exc:
-        return JSONResponse(
-            content={
-                "status": "stale-gate" if decision.gate_id else "no-open-gate",
-                "detail": str(exc),
-                "target": target,
-            },
-            status_code=409,
-        )
-    return JSONResponse(content={**outcome.body, "gate": gate}, status_code=outcome.status_code)
+# --- action routes ---------------------------------------------------------------------------------
 
 
 def _dismissal_response(
@@ -281,44 +165,27 @@ def _dismissal_response(
 ) -> Response:
     """Apply one attention dismissal.
 
-    Dismissals are current acknowledgements, not history. A gate-open item is consumed by
-    cancelling the gate itself, so it needs no acknowledgement row once the source is gone.
+    Dismissals are current acknowledgements, not history.
 
     Every intent that arrives here is SCOPED, because whether a request carries a scope is settled
     once, in the layer that validates requests: ``actions._dismiss_action_outcome`` refuses an
-    acknowledgement that names neither a lifecycle, nor a gate to cancel, nor the repo-level
-    ``actionable-drift`` signal with 400 ``missing-lifecycle``. So a dismissal that is not the gate
-    cancel below is one of the two the acknowledgement row can be written for.
+    acknowledgement that names neither a lifecycle nor the repo-level ``actionable-drift`` signal
+    with 400 ``missing-lifecycle``.
     """
 
-    gate: dict[str, Any] | None = None
-    if intent.kind == "gate-open" and intent.gate_id is not None:
-        with contextlib.suppress(KeyError):
-            gate = _recorded_gate_decision(
-                config,
-                GateDecisionIntent(
-                    lifecycle_id=intent.lifecycle_id,
-                    gate_id=intent.gate_id,
-                    decision="cancel",
-                    note=intent.note or "Dismissed from attention queue.",
-                ),
-            )
-    else:
-        AttentionDismissalStore(observer_root(config)).dismiss(
-            AttentionDismissalRecord(
-                itemId=intent.item_id,
-                dismissedAt=intent.dismissed_at,
-                kind=intent.kind,
-                lifecycleId=intent.lifecycle_id,
-                gateId=intent.gate_id,
-            )
+    AttentionDismissalStore(observer_root(config)).dismiss(
+        AttentionDismissalRecord(
+            itemId=intent.item_id,
+            dismissedAt=intent.dismissed_at,
+            kind=intent.kind,
+            lifecycleId=intent.lifecycle_id,
         )
-    body = outcome.body if gate is None else {**outcome.body, "gate": gate}
-    return JSONResponse(content=body, status_code=outcome.status_code)
+    )
+    return JSONResponse(content=outcome.body, status_code=outcome.status_code)
 
 
 def _action_response(runtime: _ServingRuntime, action: str, request: ActionRequest) -> Response:
-    """Route one action: acknowledge it, apply its dismissal, or record its gate decision."""
+    """Route one action: acknowledge it or apply its dismissal."""
 
     _, snapshot = runtime.projector.current()
     if snapshot is None:
@@ -330,75 +197,17 @@ def _action_response(runtime: _ServingRuntime, action: str, request: ActionReque
         ActionEvaluationContext(
             actor=request.actor,
             now=now_iso(),
-            gate_id=request.gateId,
-            note=request.note,
             item_id=request.itemId,
             kind=request.kind,
         ),
     )
     if outcome.dismissal is not None:
         return _dismissal_response(runtime.config, outcome, outcome.dismissal)
-    if outcome.gate_decision is not None:
-        return _gate_decision_response(
-            runtime.config, outcome, outcome.gate_decision, target=request.target
-        )
     return JSONResponse(content=outcome.body, status_code=outcome.status_code)
 
 
-def _operator_inbox_response(
-    runtime: _ServingRuntime, request: OperatorInboxPostRequest
-) -> Response:
-    # External-chat path: a dashboard response with no hosted session is written to the
-    # pull-based operator inbox. External agents read it through the MCP operator_inbox_poll /
-    # operator_inbox_consume tools; this endpoint only owns the developer/dashboard write side.
-    try:
-        payload = finalize_tool_response(
-            "operator_inbox_post",
-            post_operator_inbox_entry(
-                OperatorInboxPostContext(
-                    config=runtime.config,
-                    store=OperatorInboxStore(runtime.observer_root),
-                    delivery=HostedDelivery(
-                        enabled=request.deliver_to_hosted,
-                        catalog=runtime.catalog,
-                        host=runtime.host,
-                        paster=runtime.paster,
-                    ),
-                ),
-                address=InboxAddress(
-                    lifecycle_id=request.lifecycle_id,
-                    agent_id=request.agent_id,
-                    recipient_role=request.recipient_role,
-                ),
-                message=InboxMessage(
-                    ask=request.ask,
-                    response=request.response,
-                    message_kind=request.message_kind,
-                    gate_id=request.gate_id,
-                    artifact_path=request.artifact_path,
-                ),
-                poster=InboxPoster(
-                    created_by="developer",
-                    created_via="dashboard",
-                    sender_agent_id=request.sender_agent_id,
-                    sender_role=request.sender_role,
-                ),
-            ),
-        )
-    except ValueError as exc:
-        return JSONResponse(content={"status": "bad-address", "detail": str(exc)}, status_code=400)
-    return JSONResponse(content=payload, status_code=200)
-
-
-def _inbox_dismiss_response(runtime: _ServingRuntime, entry_id: str) -> Response:
-    removed = OperatorInboxStore(runtime.observer_root).delete(entry_id)
-    if not removed:
-        return JSONResponse(content={"status": "not-found", "entryId": entry_id}, status_code=404)
-    return JSONResponse(content={"status": "dismissed", "entryId": entry_id}, status_code=200)
-
-
 def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
-    """The write side the developer drives: the gate return channel and the operator inbox."""
+    """The write side the developer drives: actions and the direct-execution grant."""
 
     # ``status_code=202`` because that is the status this route actually answers with: an
     # accepted intent is recorded, not applied. Left implicit it declared its success shape at
@@ -413,22 +222,6 @@ def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     )
     def api_action(action: str, request: ActionRequest) -> Response:
         return _action_response(runtime, action, request)
-
-    @app.post(
-        "/api/operator-inbox",
-        response_model=OperatorInboxPostResponse,
-        responses={400: {"model": StatusRefusal, "description": "Unaddressable inbox message"}},
-    )
-    def api_operator_inbox(request: OperatorInboxPostRequest) -> Response:
-        return _operator_inbox_response(runtime, request)
-
-    @app.post(
-        "/api/operator-inbox/{entry_id}/dismiss",
-        response_model=OperatorInboxDismissed,
-        responses={404: {"model": OperatorInboxDismissed, "description": "No such inbox entry"}},
-    )
-    def api_operator_inbox_dismiss(entry_id: str) -> Response:
-        return _inbox_dismiss_response(runtime, entry_id)
 
     # The developer's direct-execution grant control (MIK-R94 rule 2): giving and
     # taking back a leaf's grant from the dashboard. The handler returns a

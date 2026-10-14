@@ -13,7 +13,8 @@ settings, so a rollback undoes only what the pass changed: the kept file goes ba
 into the file as it is now.
 
 The module also names the one setting whose value in the file the runtime status reports
-(``AGENT_TOOLS_SETTING``) and reads it from the file; that read changes nothing.
+(``AGENT_TOOLS_SETTING``) and reads it from the file, and it reads the tool rules that a
+provider's entry denies, which a role start repeats; neither read changes anything.
 """
 
 from __future__ import annotations
@@ -115,6 +116,28 @@ def agent_tools_setting(home: Path) -> dict[str, Any]:
         "configured": value,
         "differs": value is not AGENT_TOOLS_VALUE,
     }
+
+
+def provider_denied_tools(home: Path, provider: str) -> tuple[str, ...]:
+    """The tool rules ``config.json`` denies in the options of one provider's entry.
+
+    Paseo lays the provider options of a request to create an agent over these, and a list in
+    the request takes the place of the configured list (``mergeProviderOptions``). A start that
+    hands Paseo rules of its own therefore repeats these, or the user's rules were out of force
+    for that agent. The options are ``options``, and ``params`` where the entry has none, as
+    Paseo reads them. A missing or unreadable file, entry or list reads as no rule. The rules
+    of the entry's own ``disallowedTools`` are not here: Paseo adds those to every agent itself.
+    """
+    path = home / CONFIG_FILE
+    value: Any = _configuration(path.read_bytes()) if path.is_file() else None
+    for key in (*PROVIDER_ENTRIES.split("."), provider):
+        value = value.get(key) if isinstance(value, dict) else None
+    entry = value if isinstance(value, dict) else {}
+    options = entry.get("options") if entry.get("options") is not None else entry.get("params")
+    rules = options.get("disallowedTools") if isinstance(options, dict) else None
+    if not isinstance(rules, list):
+        return ()
+    return tuple(rule for rule in rules if isinstance(rule, str) and rule)
 
 
 def remove_stale_temporaries(home: Path) -> list[Path]:

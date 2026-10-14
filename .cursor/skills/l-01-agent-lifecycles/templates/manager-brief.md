@@ -1,11 +1,8 @@
 # Template — Manager Brief
 
-The dispatch packet the orchestrator compiles for a manager taking one master. Like the worker
-brief, **this brief is the manager's entire session start** — it replaces the front half the
-orchestrator already ran. Dispatch it with
-`dispatch_agent(task_document_ref=<canonical master document>, role="manager", brief=<this
-complete brief>)`. The control plane claims the `(master document, manager)` seat and privately
-binds its current occupant.
+What the orchestrator or the architect makes sure the master's documents hold before it starts a
+manager on one master. The start is `role_start` with role `manager` and the sprint and master
+references. The call carries no brief: the manager's first message is compiled from the documents.
 
 **This template feeds inputs; it does not author rules.** The manager's duties live in
 `../roles/manager.md`, the loop and closeout procedure in `../operations/coordination.md` and
@@ -55,9 +52,9 @@ master's leaf loop to the master-exit seam, then hand over.
 - Exact outstanding IDs: `<prior remaining IDs and digest | none for baseline>`.
 - Successor worker scope: `<fixes/evidence for listed IDs only>`.
 
-## Dispatch defaults
-- Worker dispatches: `templates/worker-brief.md`, with each canonical leaf document and role
-  `worker`; the control plane claims each `(leaf document, worker)` seat; knob overrides:
+## Start defaults
+- Leaf starts: one `role_start_set` call on each canonical leaf starts its Worker, Reviewer and
+  Curator; knob overrides per seat (agent, model, effort):
   <settings/orchestration notes or none>.
 - Before every worker dispatch, compile the leaf's one owned primary revision: stable ID, version,
   matching approved canonical packet, durable corpus-approval citation, deliverable evidence
@@ -128,26 +125,22 @@ master's leaf loop to the master-exit seam, then hand over.
   operation, and closeout and integration carry that result as a prerequisite instead of rerunning
   it. Worker targeted checks and the curator's complete onboarding result are reported truthfully,
   including failures and not-run checks.
-- Curator dispatches: `../templates/curator-brief.md`, fresh per leaf with the canonical leaf
-  document and role `curator`, so the plane claims the `(leaf document, curator)` seat; dispatch
-  when the Worker's first freeze exists. The Worker and Reviewer feed the frozen change set,
+- Curator: started held by the leaf's `role_start_set` call and opened by its first message.
+  The Worker and Reviewer feed the frozen change set,
   hand-off list and code verdict directly.
 - Concurrency: <max parallel leaf build work or "sequential">. Build concurrency does not grant
   landing order. An atomic block exposes no intermediate leaf to super. After a closeout claim,
   lifecycle/worker/commit/recovery evidence belongs only to the enclosure-root operation journal;
   observe it with `worktree_status` and execute only advertised
   `worktree_operation_control` actions. Queue absence or invalidation never strands that journal.
-- Provider degradation: on `messageKind="degradation-alert"`, do not start provider setup,
+- Provider degradation: on a provider degradation alert, do not start provider setup,
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
   no provider kill authority; provider stops and fixes route through the orchestrator and
   investigator.
-- Cleanup: `worktree_integrate` auto-closes a completed leaf's worker/reviewer/curator seats
-  (config-gated, default ON) only after each exact session has posted its durable turn report for
-  that exact leaf. Retirement kills tmux but preserves reports and transcripts; missing-report
-  seats remain live and are returned as deferred. `retirement.autoCloseCompletedSeats=false`
-  restores the previous landed/archive behavior. Manager/orchestrator seats are excluded. A
-  stuck/abandoned worker/reviewer/curator seat of YOUR OWN master is reported, never force-retired
-  by hand; server policy refuses any other target.
+- Cleanup: the worker/reviewer/curator agents of a leaf are archived on the host when the leaf
+  is finalized, cleaned up or abandoned; their reports stay. Manager/orchestrator seats are
+  excluded. The agent that started a seat retires the agent in it with `retire_child`; the tool
+  refuses any other caller.
 
 ## The exit
 - When the master reaches its completion boundary, prepare the master-handover packet with the
@@ -155,8 +148,6 @@ master's leaf loop to the master-exit seam, then hand over.
   check report, current refs, and concrete conflicts or failed/not-run checks. If the developer or
   approved brief requests a master-exit review, dispatch the reviewer on its canonical document
   and preserve the monotonic sealed finding list across rounds within the settings limit. The verdict is evidence, not a routine transaction gate.
-  Raise `master-handover-approval` only as required by the active gate policy; the orchestrator
-  decides the matching open gate structurally.
 - Escalation: to the orchestrator, never the developer. Human-pinned kinds you may meet:
   `integration-approval`, `push-approval`, `cleanup-approval`.
 

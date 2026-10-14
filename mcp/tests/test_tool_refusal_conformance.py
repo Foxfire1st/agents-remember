@@ -64,6 +64,7 @@ from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
     install_ambient,
+    new_ulid,
     observer_root,
 )
 from agents_remember.observer.ambient import reset_ambient
@@ -500,14 +501,13 @@ class FailurePathCensusTests:
         assert failures == [], "refusals that do not name themselves:\n" + "\n".join(failures)
 
     def test_no_path_cases_carry_no_tool_address(self) -> None:
-        """The two named no-path cases and their reason (L108, T54).
+        """The named no-path case and its reason (L108, T54).
 
-        `direct_landing` (absent contract) and `dispatch_agent` (absent task
-        document) declare no artifact path — a taskDocumentRef addresses a
-        missing document, which is what both refusals refuse — so the T54 guard
-        withholds the ambient hint and neither carries a tool-addressing key.
+        `direct_landing` (absent contract) declares no artifact path, so the T54
+        guard withholds the ambient hint and the refusal carries no
+        tool-addressing key.
         """
-        for tool in ("direct_landing", "dispatch_agent"):
+        for tool in ("direct_landing",):
             payload = self.census[tool]["payload"]
             assert payload.get("ok") is False, f"{tool} answered ok:{payload.get('ok')!r}"
             assert not _declares_artifact_path(payload), (
@@ -656,7 +656,7 @@ class FailurePathControlTests:
             reset_ambient()
             amb = AmbientLifecycle(EventStore(observer_root(self._bound_config(coord))))
             install_ambient(amb)
-            amb.start(fleeting=False)
+            amb.attach(new_ulid(), enclosure=str(coord / "contract.json"))
             try:
                 refusal = worktree_start_tool(
                     self._bound_config(coord),

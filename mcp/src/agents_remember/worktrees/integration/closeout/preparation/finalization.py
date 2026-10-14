@@ -26,6 +26,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     GatePolicyRule,
     make_gate_policy,
 )
+from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.lifecycles.mutation_evidence import (
@@ -200,7 +201,11 @@ def _approval(
         )
     )
     if not guard.permitted:
-        refuse("finalization-approval-refused", "current original approval", guard.reason)
+        refuse(
+            "finalization-approval-refused",
+            "current original approval",
+            f"{guard.reason}. {STORED_GATE_WAY_OUT}",
+        )
 
 
 def _cas(

@@ -9,11 +9,7 @@
 // derived state lives in scene.ts and the render layers in sceneLayers.tsx.
 import { useRef } from "react";
 
-import type {
-  EngineProcessNode,
-  GateNode,
-  LedgerNode,
-} from "../../types/projection";
+import type { EngineProcessNode, LedgerNode } from "../../types/projection";
 import { isBlocked } from "./geometry";
 import { resolveScene } from "./scene";
 import {
@@ -39,11 +35,9 @@ import { useShouldAnimate } from "./useShouldAnimate";
 
 export function EnclosureCanvas({
   node,
-  gateNode,
   officialLedger,
 }: {
   node: EngineProcessNode;
-  gateNode?: GateNode;
   officialLedger?: LedgerNode;
 }) {
   const animate = useShouldAnimate();
@@ -65,7 +59,6 @@ export function EnclosureCanvas({
         role="img"
         aria-label={`Engine room — ${node.leafId || node.taskName} — ${node.health}`}
         data-testid="enclosure-canvas"
-        data-gate-kind={gateNode?.kind}
       >
         <SceneHeader />
         <EnclosureShell animate={animate} hasMemory={scene.hasMemory} fleeting={scene.fleeting} codeWtMaterialised={scene.codeWtMaterialised} />

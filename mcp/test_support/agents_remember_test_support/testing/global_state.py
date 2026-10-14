@@ -197,13 +197,6 @@ PROCESS_MUTABLE_STATES = (
         "Every test module must establish its own filesystem exclusion capability.",
     ),
     _row(
-        "kernel.harnesses",
-        "RUNTIME_PROBES",
-        "Written only when readiness owner modules are imported, including deferred imports.",
-        None,
-        treatment="constant for tests",
-    ),
-    _row(
         "kernel.primitives.checkout_coordination",
         "_declared",
         "The execution-mode declaration is restored and a leaking test is named.",
@@ -290,21 +283,6 @@ PROCESS_MUTABLE_STATES = (
         _clear_cache,
     ),
     _row(
-        "serving.conversation.active.service",
-        "_SERVICES",
-        "Forget services derived for the module's own conversation runtimes.",
-    ),
-    _row(
-        "serving.conversation.control.service",
-        "_SERVICES",
-        "Forget controls derived for the module's own conversation runtimes.",
-    ),
-    _row(
-        "serving.conversation.library.factories",
-        "_shared_by_runtime",
-        "Forget library authorities derived for the module's own runtimes.",
-    ),
-    _row(
         "serving.daemon",
         "_spawned",
         "Terminate and reap only children tracked as spawned by this process.",
@@ -314,13 +292,6 @@ PROCESS_MUTABLE_STATES = (
         "serving.files",
         "_repo_catalog_cache",
         "Forget repository catalog TTL results between test modules.",
-    ),
-    _row(
-        "serving.pane_signals",
-        "_HARNESS_MID_TURN_PATTERNS",
-        "The empty harness vocabulary is assigned only at import and tests only read it.",
-        None,
-        treatment="constant for tests",
     ),
     _row(
         "serving.projections.projection_store",
@@ -341,38 +312,6 @@ PROCESS_MUTABLE_STATES = (
         "serving.projections.snapshots_impl._common",
         "_status_payload_cache",
         "Forget status TTL results between test modules.",
-    ),
-    _row(
-        "serving.structural_dispatch",
-        "_PROCESS_LOCKS",
-        "Forget seat lock bookkeeping after the module's contenders have ended.",
-    ),
-    _row(
-        "serving.terminal_tmux",
-        "_tmux_version",
-        "Each module resolves tmux against its own subprocess environment.",
-        _clear_cache,
-    ),
-    _row(
-        "serving.turn_state",
-        "_HARNESS_AWAITING_INPUT_PATTERNS",
-        "The empty harness vocabulary is assigned only at import and tests only read it.",
-        None,
-        treatment="constant for tests",
-    ),
-    _row(
-        "serving.turn_state",
-        "_HARNESS_TURN_ENDED_PATTERNS",
-        "The empty harness vocabulary is assigned only at import and tests only read it.",
-        None,
-        treatment="constant for tests",
-    ),
-    _row(
-        "serving.turn_state",
-        "_HARNESS_WORKING_PATTERNS",
-        "The empty harness vocabulary is assigned only at import and tests only read it.",
-        None,
-        treatment="constant for tests",
     ),
     _row(
         "worktrees.integration.atomic_series_terminal",

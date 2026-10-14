@@ -23,22 +23,6 @@ LAUNCH_CODE_PATTERNS = (
     "application/agent_binding.py",
     "application/role_launch_context.py",
 )
-# Modules the seam imports that are core modules of the line this build was copied from. Each
-# names a harness for a purpose of its own, and no launch decision of this build reads the name.
-INHERITED_MODULES = {
-    "application/role_capsules/launch.py": (
-        "the capsule compiler's launch step: it knows the two carriers of the base line by the "
-        "harness they were built for; this build compiles a capsule for no carrier"
-    ),
-    "serving/launch_capsule.py": (
-        "the launch capsule's model of the base line, which lists the harnesses that had a "
-        "carrier; the launch imports its request type only"
-    ),
-    "errors.py": (
-        "the package's error types, among them those of the base line's app-server client; the "
-        "runtime commands import the common base class only"
-    ),
-}
 # The one place in the scanned code where a harness's name stays: the dashboard command's help
 # text for --config names the folder in which its settings discovery looks. It is a folder name
 # the discovery (cli/discovery.py) reads; no launch decision depends on it, and the word cannot
@@ -82,29 +66,24 @@ def guard_passes(name: str, found: list[str]) -> bool:
 
 
 # Modules where a harness's name IS this build's launch decision, ruled by the architect
-# (MIK-R112 rule 6, choice b): the one-launch exclusion table that keeps the product's
-# other server out of a role agent. Unlike INHERITED_MODULES these are scanned (they stay
-# in the file list) but their harness names are admitted: the mapping cannot name the
-# harness it excludes without naming it.
+# (MIK-R112 rule 6, choice b; MIK-R132): what the role start hands the host so that one
+# agent does not load the product's other server. Their harness names are admitted: the
+# mapping cannot say for which harness the host offers a setting without naming it.
 RULE6_MODULES = {
     "application/agent_binding.py": (
-        "the rule-6 exclusion table (harness_tool_exclusion_argv, harness_carries_one_server, "
-        "with_server_exclusion): per-harness one-launch argv plus the mapping the brief gating "
-        "and the role-start answer read; Architect ruling L112-RULE6-MECHANISM-RULING.json"
+        "the exclusion record of MIK-R132 (launch_server_exclusion, exclusion_agent_options, "
+        "exclusion_keeps_copy_out): the one provider for which the pinned host reads a setting "
+        "of one launch, and the record the first message and the role-start answer derive from"
     ),
 }
 HARNESS_NAMES = ("codex", "claude", "pi", "hermes", "eve", "opencode", "copilot", "omp")
 # A word ends at anything that is not a letter, at an underscore and at a change of case, so a
 # harness's name is found inside an identifier too.
 WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+")
-# The one identifier of the capsule compiler that carries a harness's name and selects nothing.
-INHERITED_IDENTIFIER = "codex_delivery"
 
 
 def harness_names_in(text: str, excepted: str = "") -> list[str]:
-    scanned = text.replace(INHERITED_IDENTIFIER, "")
-    if excepted:
-        scanned = scanned.replace(excepted, "")
+    scanned = text.replace(excepted, "") if excepted else text
     return [word for word in WORD.findall(scanned) if word.lower() in HARNESS_NAMES]
 
 
@@ -158,8 +137,7 @@ def launch_code(package: Path) -> list[Path]:
         for name in imported_names(package, path)
         if (file := module_file(package, name)) is not None
     }
-    inherited = {package / name for name in INHERITED_MODULES}
-    return sorted((seam | importers | imported) - inherited)
+    return sorted(seam | importers | imported)
 
 
 class NoHarnessNameTests(unittest.TestCase):
@@ -185,12 +163,14 @@ class NoHarnessNameTests(unittest.TestCase):
             "kernel/primitives/paseo_runtime_settings.py",
         ):
             self.assertIn(expected, names)
-        # The modules excepted whole are exactly three, each still imported by the seam and each
-        # still naming a harness: an exception that no longer applies has to go.
-        self.assertEqual(
-            sorted(INHERITED_MODULES),
-            ["application/role_capsules/launch.py", "errors.py", "serving/launch_capsule.py"],
-        )
+        # No module is excepted whole: the capsule compiler's launch step, the launch capsule's
+        # model and the package's error types are scanned like the rest.
+        for scanned_too in (
+            "application/role_capsules/launch.py",
+            "serving/launch_capsule.py",
+            "errors.py",
+        ):
+            self.assertIn(scanned_too, names)
         # The ruled exception is exactly one module: an entry that no longer applies has to go.
         self.assertEqual(sorted(RULE6_MODULES), ["application/agent_binding.py"])
         for _name, reason in RULE6_MODULES.items():
@@ -199,20 +179,6 @@ class NoHarnessNameTests(unittest.TestCase):
         self.assertEqual(sorted(RULE21_MODULES), ["cli/paseo_catalog.py", "cli/paseo_launch.py"])
         for _name, reason in RULE21_MODULES.items():
             self.assertGreater(len(reason), 40)
-        imported_by_the_seam = {
-            name
-            for pattern in LAUNCH_CODE_PATTERNS
-            for path in PACKAGE.glob(pattern)
-            if path.suffix == ".py"
-            for name in imported_names(PACKAGE, path)
-        }
-        for name, reason in INHERITED_MODULES.items():
-            with self.subTest(inherited=name):
-                path = PACKAGE / name
-                self.assertNotIn(name, names)
-                self.assertIn(module_name(PACKAGE, path), imported_by_the_seam)
-                self.assertNotEqual(harness_names_in(path.read_text(encoding="utf-8")), [])
-                self.assertGreater(len(reason), 40)
         for path, name in zip(scanned, names, strict=True):
             with self.subTest(name):
                 text = path.read_text(encoding="utf-8")
@@ -239,8 +205,8 @@ class NoHarnessNameTests(unittest.TestCase):
                 found = sorted(set(harness_names_in(mutated)))
                 self.assertIn("eve", [word.lower() for word in found])
                 self.assertFalse(guard_passes(name, found), f"{name} admits {found}")
-        # The scan sees what it is meant to catch, inside an identifier too, and passes the one
-        # inherited identifier and words that merely contain a harness's letters.
+        # The scan sees what it is meant to catch, inside an identifier too, and passes words
+        # that merely contain a harness's letters.
         caught: dict[str, list[str]] = {
             'if provider == "eve":': ["eve"],
             "HARNESSES = ('Codex', 'pi')": ["Codex", "pi"],
@@ -248,7 +214,8 @@ class NoHarnessNameTests(unittest.TestCase):
             "if is_eve_provider(provider):": ["eve"],
             "EVE_ID = provider": ["EVE"],
             "isClaudeProvider(entry)": ["Claude"],
-            "capsule.codex_delivery.trusted_instructions": [],
+            "capsule.codex_delivery.trusted_instructions": ["codex"],
+            "capsule.delivery.trusted_instructions": [],
             "an api key, several steps, an event and every option": [],
         }
         for text, harnesses in caught.items():
@@ -283,14 +250,14 @@ class NoHarnessNameTests(unittest.TestCase):
                 "cli/bridge_rules.mjs": "export const rules = {}\n",
                 "cli/paseo_rules/__init__.py": "import json\n",
                 "cli/role_rules/tables.py": "import json\n",
+                # The package's error types: the launch imports them, so they are scanned.
+                "errors.py": "class AgentsRememberError(Exception): ...\n",
             }
             not_launch_code = {
                 # It imports nothing of the seam and the seam does not import it.
                 "kernel/harness_table.py": "import json\n",
                 # Two steps from the seam: a module the launch imports imports it.
                 "kernel/second_step.py": "import json\n",
-                # A module excepted by name, although the launch imports it.
-                "errors.py": "class AgentsRememberError(Exception): ...\n",
             }
             for name, text in {**files, **not_launch_code}.items():
                 path = package / name

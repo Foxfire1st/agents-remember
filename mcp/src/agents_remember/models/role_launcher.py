@@ -86,6 +86,10 @@ class RoleDispatchRequest(RoleSelection):
     # The word that the holder's turn, if it is in one, may be interrupted by the
     # replacement (rule 8). Without it a running holder is refused, as in retirement.
     replaces_interrupt_turn: bool = Field(default=False, alias="replacesInterruptTurn")
+    # A chat without a role started this through role_start (MIK-R113 rule 6): no
+    # parent, the parentless table applies, the launch record says so. Absent for
+    # every dashboard start and every role agent's start.
+    chat_started: bool = Field(default=False, alias="chatStarted")
 
 
 class RoleResultRequest(RoleSelection):

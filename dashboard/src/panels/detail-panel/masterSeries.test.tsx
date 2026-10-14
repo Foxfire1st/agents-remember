@@ -144,9 +144,7 @@ describe('DetailPanel master series navigation (6g)', () => {
       fleeting: false,
       startedAt: '2026-06-20T09:00:00+00:00',
       lastEventTs: '2026-06-20T09:00:30+00:00',
-      stateEnteredAt: '2026-06-20T09:00:00+00:00',
       inferred: false,
-      actions: [],
     };
     const master = taskDoc({
       lifecycleId: 'ROOT',
@@ -186,8 +184,6 @@ describe('DetailPanel master series navigation (6g)', () => {
         series: [],
         attentionQueue: [],
         engineProcesses: [],
-        agentPickups: [],
-        expectationRows: [],
       },
     });
 

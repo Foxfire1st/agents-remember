@@ -25,29 +25,13 @@ from repository_profile_test_support import (
     FakeFile,
     FakeSource,
 )
-from source_selection_test_support import source_selection_fixture
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DAGGER_MANIFEST = REPOSITORY_ROOT / "dagger.json"
 DAGGER_SOURCE_ROOT = REPOSITORY_ROOT / ".dagger/src"
 DAGGER_MODULE = DAGGER_SOURCE_ROOT / "agents_remember_quality/main.py"
 DAGGER_MODULE_ID = "agents_remember_quality.main"
-E2E_HARNESS_ROOT = REPOSITORY_ROOT / "scripts/e2e_harness"
 VALID_DAGGER_NONCE = "0123456789abcdef0123456789abcdef"
-E2E_HARNESS_PYTHON = (
-    "scripts/e2e_harness/codex_driver.py",
-    "scripts/e2e_harness/dispatch_sentinels.py",
-    "scripts/e2e_harness/fixture.py",
-    "scripts/e2e_harness/reporting.py",
-    "scripts/e2e_harness/responses_server.py",
-    "scripts/e2e_harness/responses_sse.py",
-    "scripts/e2e_harness/run.py",
-    "scripts/e2e_harness/scenario.py",
-    "scripts/e2e_harness/scenario_control.py",
-    "scripts/e2e_harness/scenario_evidence.py",
-    "scripts/e2e_harness/scenario_runtime.py",
-    "scripts/e2e_harness/selection.py",
-)
 
 
 def load_dagger_module() -> ModuleType:
@@ -100,7 +84,6 @@ def execution_manifest(
     mode: str,
     candidate: str = "c" * 40,
     diff_base: str = "b" * 40,
-    changed_paths: tuple[str, ...] = ("scripts/e2e_harness/run.py",),
 ) -> FakeFile:
     admitted = load_repository_profile(
         "agents-remember",
@@ -112,9 +95,6 @@ def execution_manifest(
         admitted.canonical,
         selection_id=selection_id,
         candidate_identity=CandidateIdentity(kind="git-tree", value=candidate),
-        source_selection=source_selection_fixture(
-            candidate, base_commit=diff_base, changed_paths=changed_paths
-        ),
     )
     profile = admitted.canonical.profile
     return FakeFile(
@@ -154,7 +134,6 @@ def test_gate_four_not_applicable_result_does_not_claim_real_codex_execution() -
 
     assert "codexMode" not in payload
     assert payload["codexProtocol"] is None
-    assert payload["promptSubmitted"] is False
 
 
 def test_python_suite_refuses_missing_or_mismatched_dagger_attestation(tmp_path: Path) -> None:

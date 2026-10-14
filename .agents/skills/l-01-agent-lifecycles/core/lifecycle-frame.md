@@ -1,46 +1,34 @@
 # Core — The Minimal Lifecycle Frame
 
-The only machinery every session shares. Six signals record where a seat is and what it waits on, so
+The only machinery every session shares. The worktree tools record where a task is, so
 work is observable and resumable across chat deaths. Lifecycle correlation is server-side and
-anchored in the worktree contract; it is not model state.
+anchored in the worktree contract; it is not model state. Nothing else begins, blocks or hands
+over a lifecycle.
 
 | When | Effect |
 | --- | --- |
-| Trust checkpoint passes (managed repo) | begin a **fleeting** lifecycle (guarded: one per session; no id) |
-| Entering a phase | move the phase axis (`request` / `trust-checkpoint` / `reframe-research` / `decide` / `build` / `close`) |
-| A developer hand-off | set `awaiting-developer`, surface the attention item; the next turn resumes — never resume by hand |
-| `worktree_start` | *(automatic promotion)* the fleeting lifecycle becomes **persistent**, anchored in the contract |
+| `worktree_start` | adopts the lifecycle of the new contract, anchored in the contract |
 | Resuming an existing task | `worktree_attach` re-adopts the contract's lifecycle (contract-resolved) |
-| Leaving unsaved fleeting work | the save gate (`on_unsaved=save`\|`discard`) — never dropped silently |
 | Close | the terminal record (`completed`\|`abandoned`) |
 
 Rules:
 
 - A tool call outside any lifecycle is **dropped, never misattributed**. `paused` is system-owned.
-- A spawned role that never touches mutating AR tools simply never instantiates a lifecycle — that
-  is correct, not a violation. A spawned role runs its **own** lifecycle when it runs one; it never
-  adopts its spawner's.
-- The seat binding is the catalog binding made at dispatch (canonical task document plus role), not
-  lifecycle adoption. Sprint roles bind to the sprint document, managers to master documents,
-  workers/curators to leaf documents, and reviewers bind to the exact leaf, master, or sprint
-  document whose review seam they adjudicate.
+- A role that never calls `worktree_start` or `worktree_attach` has no lifecycle — that
+  is correct, not a violation. A started role never adopts its starter's.
+- The seat binding is made when `role_start` starts the agent (canonical task document plus role), not
+  by lifecycle adoption. The architect is started without a document; the other sprint roles bind
+  to the sprint document, managers to master documents, workers/curators to leaf documents, and
+  reviewers bind to the exact leaf, master, or sprint document whose review seam they adjudicate.
 - A holder of one lifecycle never advances another seat's. Owning seats own the machinery their own
-  role file names, and no other agent calls `task_doc`, gates, `dispatch_agent`, or closeout on
+  role file names, and no other agent calls `task_doc`, `role_start`, or closeout on
   their behalf.
-
-## Which signals a seat runs
-
-| Seat | Lifecycle use |
-| --- | --- |
-| Developer-facing seats (architect) and portfolio/coordination seats (orchestrator, manager) | run their own lifecycle; the manager's is promoted to persistent by `worktree_start` on a leaf |
-| Build/report seats (worker, curator, reviewer, strategist, designer, investigator) | a short-lived seat that never touches a mutating AR tool never instantiates one; where it does mutate, it runs its own |
-| Ambient launcher | a launcher, not a seat: condition 3 of `../SKILL.md` routes it, and `core/launcher.md` owns its obligations |
 
 ## The trust checkpoint
 
 The opening detail the **architect and orchestrator** run before relying on memory or providers
-(each role file binds whether its seat runs it; a spawned role never repeats it, because its
-spawner compiles the facts into the brief):
+(each role file binds whether its seat runs it; a started role never repeats it, because the AR
+handover carries its task facts and workspace bindings):
 
 1. `context_packet(repo_id="<repo-id>", include_drift=true,
    include_freshness=true)`.
@@ -49,8 +37,8 @@ spawner compiles the facts into the brief):
    (`behind`/`diverged` → fast-forward the local official line first). Reconcile actual memory
    content or ancestry conflicts; missing cache rows or attribution for unchanged memory do not
    block an otherwise valid code/memory pair.
-3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **emit a decision item to the
-   architect** before refreshing via `c-05-create-or-update-onboarding-files` — drift handling is
+3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **send the question up the
+   chain with `role_message`** before refreshing via `c-05-create-or-update-onboarding-files` — drift handling is
    approval-gated. Drift tied to dirty source is active work-in-progress, not maintenance.
 4. Providers stopped/degraded: run the matching provider/runtime operations, re-check, report;
    `indexing` means healthy-but-busy (partial results).

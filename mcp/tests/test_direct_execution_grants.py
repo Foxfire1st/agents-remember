@@ -48,17 +48,13 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.direct_execution_grants import grants_for_task, write_grant_file
-from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.task_document import DocStatus
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving import direct_execution_grants as developer_module
 from agents_remember.serving.direct_execution_grants import (
     DeveloperGrantChange,
@@ -69,7 +65,6 @@ from agents_remember.serving.projections.snapshots_impl._task_documents import (
     read_series_documents,
     read_task_documents,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.tasks import (
     SubTaskRef,
     TaskDocument,
@@ -917,68 +912,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         }
         self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
 
-    def test_reclaim_preserves_abandoned_leaf_with_seat_evidence(self) -> None:
-        # Sealed F09 (R4 Reviewer repro, seat cell): a seat-started leaf that
-        # is abandoned keeps its grant — the ordinary revoke sees seat:
-        # present, so reclaim must see it too, not just document fields.
-        self._reclaim_fixture()
-        catalog = TerminalCatalog(terminal_catalog_path(self.coord))
-        catalog.upsert(
-            TerminalCatalogEntry(
-                id="r6-seat",
-                label="r6-seat",
-                kind="harness",
-                harness="codex",
-                lifecycle_id=None,
-                cwd=Path("/workspace"),
-                tmux_name="ar-r6-seat",
-                command=("codex",),
-                created_at="2026-10-06T00:00:00+00:00",
-                last_attached_at="2026-10-06T00:00:00+00:00",
-                status="running",
-                task_document_ref=self.leaf_ref,
-                seat_role="worker",
-                spawned_by_kind="ambient",
-            )
-        )
-        self._mark_abandoned(self.leaf_ref)
-        result = reclaim_direct_execution_grants(self.config, self.leaf_ref)
-        self.assertEqual(result.reclaimed, ())
-        self.assertIsNotNone(read_grant(self.coord, self.leaf_ref))
-        reasons = {
-            entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved
-        }
-        self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
-
-    def test_reclaim_preserves_abandoned_leaf_with_turn_report(self) -> None:
-        # Sealed F09 (R4 Reviewer repro, turn-report cell): a report-started
-        # leaf that is abandoned keeps its grant.
-        self._reclaim_fixture()
-        inbox = OperatorInboxStore(observer_root(self.config))
-        inbox.append(
-            OperatorInboxEntry(
-                id="r6-report",
-                ts="2026-10-06T00:00:00+00:00",
-                state="pending",
-                senderRole="worker",
-                messageKind="turn-report",
-                subjectTaskDocumentRef=self.leaf_ref,
-                ask="r6",
-                response="r6",
-                createdAt="2026-10-06T00:00:00+00:00",
-                createdBy="r6",
-                createdVia="cli",
-            )
-        )
-        self._mark_abandoned(self.leaf_ref)
-        result = reclaim_direct_execution_grants(self.config, self.leaf_ref)
-        self.assertEqual(result.reclaimed, ())
-        self.assertIsNotNone(read_grant(self.coord, self.leaf_ref))
-        reasons = {
-            entry.get("ref", entry.get("file")): entry["reason"] for entry in result.preserved
-        }
-        self.assertIn("rule 5", reasons[f"repo-a:{MASTER_NAME}/{LEAF_SLUG}.json"])
-
     def test_reclaim_preserves_abandoned_leaf_with_unreadable_locator(self) -> None:
         # Sealed F09 (R4 Reviewer repro, ambiguous-locator cell): an
         # unreadable locator is not proof of no work — the abandoned grant
@@ -1367,27 +1300,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
                     revoke_grant(self.config, self.leaf_ref)
                 self.assertEqual(taken.exception.status, "direct-grant-leaf-started")
                 grant_path_for(self.coord, self.leaf_ref).unlink(missing_ok=True)
-        # An ambiguous census (an unreadable seat catalog) refuses both too.
-        rewrite()
-        catalog = terminal_catalog_path(self.coord)
-        catalog.parent.mkdir(parents=True, exist_ok=True)
-        catalog.write_text("{not json", encoding="utf-8")
-        with self.subTest(evidence_class="ambiguous-seat"):
-            with self.assertRaises(DirectGrantError) as given:
-                give_grant(self.config, self.leaf_ref, granted_by=ARCHITECT_GRANTER)
-            self.assertEqual(given.exception.status, "direct-grant-leaf-started")
-            write_grant_file(
-                grant_path_for(self.coord, self.leaf_ref),
-                DirectExecutionGrant(
-                    leaf=self.leaf_ref,
-                    granted_by=ARCHITECT_GRANTER,
-                    granted_at="2026-10-06T00:00:00+00:00",
-                    granter_agent_id="matrix",
-                ),
-            )
-            with self.assertRaises(DirectGrantError) as taken:
-                revoke_grant(self.config, self.leaf_ref)
-            self.assertEqual(taken.exception.status, "direct-grant-leaf-started")
 
     def _assert_grant_pair_refused(self) -> None:
         """Give and revoke must both refuse with the started-leaf words."""
@@ -1553,51 +1465,6 @@ class DirectExecutionGrantTest(unittest.TestCase):
         # published lifecycle journals refuses both mutations.
         contract, location, enclosure_path, memory_repo = self._publish_enclosure_chain()
         self._write_running_direct_journal(contract, location, enclosure_path, memory_repo)
-        self._assert_grant_pair_refused()
-
-    def test_give_and_revoke_refuse_actual_seat(self) -> None:
-        # Sealed F14 E2, seat class: a worker row bound to this leaf in the
-        # terminal catalog refuses both mutations.
-        catalog = TerminalCatalog(terminal_catalog_path(self.coord))
-        catalog.upsert(
-            TerminalCatalogEntry(
-                id="e2-seat",
-                label="e2-seat",
-                kind="harness",
-                harness="codex",
-                lifecycle_id=None,
-                cwd=Path("/workspace"),
-                tmux_name="ar-e2-seat",
-                command=("codex",),
-                created_at="2026-10-06T00:00:00+00:00",
-                last_attached_at="2026-10-06T00:00:00+00:00",
-                status="running",
-                task_document_ref=self.leaf_ref,
-                seat_role="worker",
-                spawned_by_kind="ambient",
-            )
-        )
-        self._assert_grant_pair_refused()
-
-    def test_give_and_revoke_refuse_turn_report(self) -> None:
-        # Sealed F14 E2, report class: a worker turn-report for this leaf in
-        # the observer inbox refuses both mutations.
-        inbox = OperatorInboxStore(observer_root(self.config))
-        inbox.append(
-            OperatorInboxEntry(
-                id="e2-report",
-                ts="2026-10-06T00:00:00+00:00",
-                state="pending",
-                senderRole="worker",
-                messageKind="turn-report",
-                subjectTaskDocumentRef=self.leaf_ref,
-                ask="e2",
-                response="e2",
-                createdAt="2026-10-06T00:00:00+00:00",
-                createdBy="e2",
-                createdVia="cli",
-            )
-        )
         self._assert_grant_pair_refused()
 
     def test_task_doc_cannot_self_grant(self) -> None:

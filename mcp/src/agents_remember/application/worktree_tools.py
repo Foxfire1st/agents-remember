@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agents_remember.application.completion_cleanup import auto_complete_seats
 from agents_remember.application.review_external_git_movement import (
     external_git_movement_result_block,
 )
@@ -42,7 +41,6 @@ from agents_remember.models.lifecycles.responses import TerminalState
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionInput
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
-from agents_remember.observer.save_gate import coerce_save_decision
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 from agents_remember.providers.settings import write_lifecycle_settings
@@ -91,7 +89,6 @@ from .lifecycle.lifecycle_control_authority import (
     LifecycleCallerError,
     completed_disposition_authorized,
     require_completed_disposition_authority,
-    resolve_lifecycle_caller,
 )
 from .lifecycle.lifecycle_operation_location import (
     LifecycleOperationPublicAddress,
@@ -211,13 +208,13 @@ def worktree_start_tool(
     if direct_refusal is not None:
         return direct_refusal
     amb = ambient()
-    if amb is not None and amb.current is not None and not amb.current.fleeting:
+    if amb is not None and amb.current is not None:
         return {
             "ok": False,
             "state": "lifecycle-switch-required",
-            # The condition this actually tests, measured at D-17: a *real* start binds the
-            # session's current fleeting lifecycle to the new enclosure and leaves it non-fleeting,
-            # so the next start refuses. It has no knowledge of other leaves, enclosures or
+            # The condition this actually tests, measured at D-17: a *real* start or attach
+            # binds this process's lifecycle to an enclosure, so the next start refuses. It has
+            # no knowledge of other leaves, enclosures or
             # sessions -- the old sentence ("refuses to repoint the active persistent lifecycle")
             # read as if one enclosure could block another, which is not the case and cost this
             # master five extra calls plus a misleading line in its own record.
@@ -237,9 +234,9 @@ def worktree_start_tool(
                 ),
             },
         }
-    # worktree_start promotes the active lifecycle to persistent (design §1.3); with
-    # no active lifecycle, mint a fresh anchor so the contract always carries one.
-    lifecycle_id = amb.current.id if amb is not None and amb.current is not None else new_ulid()
+    # Mint the anchor so the contract always carries one; a clean start adopts it
+    # as this process's lifecycle (design §1.3).
+    lifecycle_id = new_ulid()
     # Containment R1 (260707-HFX-L1): the on-disk authority file — not the boot
     # snapshot — decides whether provider setup may launch. An empty (or
     # unreadable: fail-closed) live providers map skips setup outright; the
@@ -333,35 +330,27 @@ def summarized_worktree_start_tool(
 
 
 def _attribute_start(amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str) -> None:
-    """Promote the active lifecycle into the freshly started worktree (design §1.3).
+    """Adopt the freshly started worktree's lifecycle (design §1.3).
 
     Only a clean ``started`` result attributes: the contract now anchors the
-    lifecycle. An active lifecycle is promoted in place; with none active the
-    minted contract id is adopted as a fresh persistent lifecycle. Re-attaching to
-    an existing contract is ``worktree_attach``'s job, not start's.
+    lifecycle, and the minted contract id is adopted as this process's lifecycle.
+    Re-attaching to an existing contract is ``worktree_attach``'s job, not start's.
     """
     if amb is None or result.get("state") != "started":
         return
     enclosure = result.get("enclosure_path") or result.get("contract_path")
     if not isinstance(enclosure, str):
         return
-    if amb.current is not None:
-        amb.promote(enclosure=enclosure, repo_id=repo_id, scope=repo_id)
-        return
     lifecycle_id = result.get("lifecycle_id")
     if isinstance(lifecycle_id, str) and lifecycle_id:
         amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id)
 
 
-def _attribute_attach(
-    amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str, on_unsaved: str | None
-) -> None:
+def _attribute_attach(amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str) -> None:
     """Resume the contract's lifecycle on ``worktree_attach`` (design §1.3 table).
 
-    ``attach`` adopts when none is active, no-ops on the same id, auto-pauses a
-    persistent current, and routes an unsaved fleeting through the save gate --
-    raising ``SaveGateRequired`` when ``on_unsaved`` was not supplied, so unsaved
-    work is never dropped silently (the read-only attach already returned).
+    ``attach`` adopts when none is active, no-ops on the same id and pauses another
+    current lifecycle (the read-only attach already returned).
     """
     if amb is None or result.get("state") != "attached":
         return
@@ -369,19 +358,13 @@ def _attribute_attach(
     enclosure = result.get("enclosure_path") or result.get("contract_path")
     if not isinstance(lifecycle_id, str) or not lifecycle_id or not isinstance(enclosure, str):
         return
-    decision = coerce_save_decision(on_unsaved) if on_unsaved else None
-    amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id, on_unsaved=decision)
+    amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id)
 
 
-def worktree_attach_tool(
-    config: McpRuntimeConfig,
-    task: TaskRef,
-    *,
-    on_unsaved: str | None = None,
-) -> dict[str, Any]:
+def worktree_attach_tool(config: McpRuntimeConfig, task: TaskRef) -> dict[str, Any]:
     args = _task_ref_namespace(config, task)
     result = _worktree_result("worktree_attach", git_worktree_manager.attach_result(args))
-    _attribute_attach(ambient(), result, task.repo_id, on_unsaved)
+    _attribute_attach(ambient(), result, task.repo_id)
     return result
 
 
@@ -532,15 +515,6 @@ def worktree_integrate_tool(
         # preview as well as the landing: an attached measurement, never a gate -- it refuses nothing
         # and the integration's own admission has already run by here.
         result = external_git_movement_result_block(configured.contract, result)
-    if result["ok"] and not dry_run and config.retirement.auto_land_on_integration:
-        result.update(
-            auto_complete_seats(
-                config,
-                confined_contract,
-                reason="auto-close: leaf integrated into master",
-                edge="leaf-integration",
-            )
-        )
     return result
 
 
@@ -668,8 +642,8 @@ def worktree_operation_control_tool(
         config, request.contract_path, operation="worktree_operation_control"
     )
     if isinstance(configured, ConfiguredContractRefused):
-        return _configured_control_refusal(config, request, configured)
-    caller_result = _resolve_control_caller(config, configured.contract, request)
+        return _configured_control_refusal(request, configured)
+    caller_result = _resolve_control_caller(configured.contract, request)
     if isinstance(caller_result, dict):
         return caller_result
     caller, disposition_authorized = caller_result
@@ -714,21 +688,9 @@ def _operation_control_request_refusal(
 
 
 def _configured_control_refusal(
-    config: McpRuntimeConfig,
     request: OperationControlRequest,
     configured: ConfiguredContractRefused,
 ) -> dict[str, Any]:
-    if configured.reason in {"authority-invalid", "contract-unreadable"}:
-        try:
-            resolve_lifecycle_caller(config, request.caller)
-        except LifecycleCallerError as exc:
-            return {
-                "ok": False,
-                "operation": "worktree_operation_control",
-                "state": "refused",
-                "status": exc.status,
-                "detail": exc.detail,
-            }
     return project_configured_contract_refusal(
         configured,
         operation="worktree_operation_control",
@@ -741,12 +703,11 @@ def _configured_control_refusal(
 
 
 def _resolve_control_caller(
-    config: McpRuntimeConfig,
     contract: WorktreeContract,
     request: OperationControlRequest,
 ) -> tuple[DeclaredCaller | None, bool] | dict[str, Any]:
     try:
-        caller = resolve_lifecycle_caller(config, request.caller)
+        caller = request.caller
         if request.action in {"retire", "supersede"}:
             require_completed_disposition_authority(contract, caller)
         return caller, completed_disposition_authorized(contract, caller)
@@ -975,15 +936,6 @@ def lifecycle_finalize_task_tool(
         teardown_providers=teardown_providers,
     )
     result = _worktree_result("lifecycle_finalize_task", git_worktree_manager.finalize_result(args))
-    if result["ok"] and not dry_run and config.retirement.auto_land_on_finalize:
-        result.update(
-            auto_complete_seats(
-                config,
-                confined_contract,
-                reason="auto-close: master finalized into super",
-                edge="master-finalization",
-            )
-        )
     return result
 
 

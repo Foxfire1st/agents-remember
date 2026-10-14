@@ -18,10 +18,16 @@ from unittest.mock import patch
 from agents_remember.application.agent_binding import (
     AGENT_ID_VARIABLE,
     SPRINT_REF_VARIABLE,
-    TOOL_SERVER_NAME,
     AgentBinding,
+    read_agent_binding,
 )
-from agents_remember.application.role_launch_context import selection_binding
+from agents_remember.application.role_launch_context import (
+    PARENTLESS_START_SELECTIONS,
+    RoleLaunchContext,
+    parentless_selection_violation,
+    resolve_role_launch_context,
+    selection_binding,
+)
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.cli import (
     paseo_catalog,
@@ -35,7 +41,7 @@ from agents_remember.cli import (
     role_message_delivery,
     role_retire,
 )
-from agents_remember.cli.paseo_launch import StartingAgent, exclusion_applied_agent
+from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_tools import (
     MAY_START,
     send_role_message,
@@ -43,7 +49,11 @@ from agents_remember.cli.paseo_role_tools import (
     start_rule_violation,
 )
 from agents_remember.cli.paseo_status import AgentReading
-from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
+from agents_remember.cli.role_launch_preparation import (
+    RoleHandoverRequest,
+    _entry_mode,
+    _owner_relation,
+)
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference
 from agents_remember.mcp.registration.role_agents import register_role_agent_tools
 from agents_remember.mcp.tools import role_agents as role_agent_payloads
@@ -294,6 +304,142 @@ class MayStartRuleTests(unittest.TestCase):
                 )
 
 
+class ParentlessChatStartTests(RoleToolsTestCase):
+    """MIK-R113 rule 6: a chat without a role starts through the dashboard's table."""
+
+    def test_the_table_names_every_launchable_role(self) -> None:
+        self.assertEqual(
+            set(PARENTLESS_START_SELECTIONS),
+            {
+                "architect",
+                "investigator",
+                "orchestrator",
+                "manager",
+                "worker",
+                "reviewer",
+                "curator",
+            },
+        )
+
+    def test_canonical_selections_pass_and_anything_else_is_named(self) -> None:
+        full = {"sprint": SPRINT_REF, "master": MASTER_REF, "task": LEAF_REF}
+        cases = [
+            ("architect", {}, None),
+            ("investigator", {"sprint": SPRINT_REF}, None),
+            (
+                "investigator",
+                {"sprint": SPRINT_REF, "master": MASTER_REF},
+                None,
+            ),
+            ("orchestrator", {"sprint": SPRINT_REF}, None),
+            ("manager", {"sprint": SPRINT_REF, "master": MASTER_REF}, None),
+            ("worker", full, None),
+            ("reviewer", full, None),
+            ("curator", full, None),
+            (
+                "architect",
+                {"sprint": SPRINT_REF},
+                "architect does not accept a sprint selection.",
+            ),
+            ("investigator", full, "does not accept a leaf selection"),
+            (
+                "investigator",
+                {"master": MASTER_REF},
+                "investigator requires a canonical sprint selection.",
+            ),
+            (
+                "manager",
+                full,
+                "manager does not accept a task selection.",
+            ),
+            (
+                "worker",
+                {"sprint": SPRINT_REF, "master": MASTER_REF},
+                "worker requires a canonical task selection.",
+            ),
+            (
+                "curator",
+                {},
+                "curator requires a canonical sprint selection.",
+            ),
+        ]
+        for role, refs, said in cases:
+            with self.subTest(role=role, refs=sorted(refs)):
+                violated = parentless_selection_violation(
+                    role, refs.get("sprint"), refs.get("master"), refs.get("task")
+                )
+                if said is None:
+                    self.assertIsNone(violated)
+                else:
+                    assert violated is not None
+                    self.assertIn(said, violated)
+
+    def test_a_chat_starts_an_architect_with_no_parent(self) -> None:
+        request_id = uuid.uuid4()
+        result = self.start(None, "architect", request_id=request_id)
+        self.assertEqual((result["ok"], result["status"]), (True, "running"))
+        self.assertIsNone(result["parentAgentId"])
+        request = RoleDispatchRequest.model_validate({"role": "architect", "requestId": request_id})
+        self.assertNotIn("parentAgentId", self.receipt(request))
+        created = next(p for command, p in self.runtime.calls if command == "agent-create")
+        self.assertNotIn("parentAgentId", created)
+
+    def test_a_chat_starts_a_worker_with_no_parent(self) -> None:
+        result = self.start(None, "worker")
+        self.assertEqual((result["ok"], result["status"]), (True, "running"))
+        self.assertIsNone(result["parentAgentId"])
+        created = next(p for command, p in self.runtime.calls if command == "agent-create")
+        self.assertNotIn("parentAgentId", created)
+
+    def test_a_refused_selection_matches_the_dashboard_refusal(self) -> None:
+        # The resolver runs before any document is read, so the real one answers
+        # here even though this case stubs it for the launch below.
+        selection = RoleSelection.model_validate(
+            {
+                "role": "manager",
+                "sprintDocumentRef": SPRINT_REF.model_dump(mode="json"),
+                "masterDocumentRef": MASTER_REF.model_dump(mode="json"),
+                "taskDocumentRef": LEAF_REF.model_dump(mode="json"),
+            }
+        )
+        with self.assertRaises(ValueError) as resolver:
+            resolve_role_launch_context(self.config, selection)
+        result = self.refusal(
+            self.start(
+                None,
+                "manager",
+                sprint_document_ref=SPRINT_REF,
+                master_document_ref=MASTER_REF,
+                task_document_ref=LEAF_REF,
+            ),
+            "launch-refused",
+        )
+        self.assertEqual(result["detail"], str(resolver.exception))
+        self.assertEqual(self.receipt_files(), [])
+        self.assertEqual(self.runtime.launch_calls(), [])
+
+    def test_a_chat_may_not_replace_a_holder(self) -> None:
+        result = self.refusal(
+            self.start(None, "worker", replaces_agent_id=str(uuid.uuid4())),
+            "role-may-not-start-role",
+        )
+        self.assertIn("may not replace the holder", result["detail"])
+
+    def test_the_launch_record_names_the_chat_without_a_role(self) -> None:
+        self.assertEqual(_entry_mode(None, True), "chat-role-start")
+        self.assertEqual(_entry_mode(None, False), "dashboard-role-start")
+        self.assertEqual(
+            _entry_mode(StartingAgent("agent-1", "manager", "MASTER"), False),
+            "agent-role-start",
+        )
+        context = RoleLaunchContext("architect", None, None, None, None)
+        chat = _owner_relation(None, role="architect", context=context, chat_started=True)
+        self.assertIn("started by a chat without a role", chat)
+        self.assertIn("no parent agent", chat)
+        plain = _owner_relation(None, role="architect", context=context)
+        self.assertIn("dashboard launcher", plain)
+
+
 class RoleStartTests(RoleToolsTestCase):
     def test_r71_worker_instruction_text_is_not_an_input_to_start_permission(self) -> None:
         caller = binding("worker")
@@ -448,18 +594,14 @@ class RoleStartTests(RoleToolsTestCase):
         self.assertEqual(create["parentAgentId"], self.architect.agent_id)
         self.assertEqual(receipt["parentAgentId"], self.architect.agent_id)
         self.assertEqual(create["agentId"], receipt["agentId"])
-        # MIK-R112 F07: codex is task-server-only, so the native agent-create input
-        # retains our task-server entry and carries the exclusion record (the other
-        # copy is suppressed, user entries preserved). The receipt derives from the
-        # applied input: applied, copy sent; the host also lists it, so a second
-        # copy is loaded.
-        self.assertEqual(
-            create["serverExclusion"],
-            {"harness": "codex", "mode": "task-server-only", "servers": [TOOL_SERVER_NAME]},
-        )
+        # MIK-R132: the host has no setting for one Codex launch, so nothing is handed over
+        # and no record is kept. The agent carries the task server, and the answer above says
+        # that a second copy is loaded.
+        self.assertNotIn("serverExclusion", create)
+        self.assertNotIn("providerOptions", create)
         self.assertIn("agents-remember-task", create["mcpServers"])
         self.assertTrue(receipt["toolServer"]["applied"])
-        self.assertEqual(receipt["serverExclusion"], create["serverExclusion"])
+        self.assertNotIn("serverExclusion", receipt)
         self.assertEqual(len(self.enclosures.start_calls), 1)
         self.assertEqual(
             [command for command, _payload in self.runtime.calls],
@@ -495,10 +637,19 @@ class RoleStartTests(RoleToolsTestCase):
                 )
 
         cases: dict[str, tuple[Any, str, str]] = {
-            "a caller without a binding": (
-                lambda: self.start(None, "worker"),
-                "caller-has-no-binding",
-                "was not started by an AR role launch",
+            "a caller without a binding starts nothing without its canonical selection": (
+                lambda: start_role(
+                    self.config,
+                    RoleStartCall(
+                        role="worker",
+                        request_id=uuid.uuid4(),
+                        sprint_document_ref=SPRINT_REF,
+                        master_document_ref=MASTER_REF,
+                    ),
+                    environment={},
+                ),
+                "launch-refused",
+                "worker requires a canonical task selection",
             ),
             "a binding without its role": (
                 lambda: start_role(
@@ -668,13 +819,9 @@ class RoleStartTests(RoleToolsTestCase):
             created = [
                 payload for command, payload in self.runtime.calls if command == "agent-create"
             ]
-            # MIK-R112 F07: the replay sends the exclusion-applied input -- the stored
-            # agent minus only the other product copy, everything else byte-identical.
-            applied = exclusion_applied_agent(replay_request)
-            self.assertEqual([{key: call[key] for key in applied} for call in created], [applied])
-            if "serverExclusion" in replay_request:
-                for call in created:
-                    self.assertEqual(call["serverExclusion"], replay_request["serverExclusion"])
+            # The replay sends the stored agent definition, key for key.
+            stored = replay_request["agent"]
+            self.assertEqual([{key: call[key] for key in stored} for call in created], [stored])
             self.assertEqual(self.receipt(request)["parentAgentId"], self.architect.agent_id)
             self.assertEqual(list(self.runtime.agents), [unknown["agentId"]])
             # The launcher's bar offers this Retry: the result route says so with the same payload.
@@ -1073,16 +1220,20 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
         self.assertEqual(asyncio.run(names()), ["role_start", "role_start_set", "role_message"])
         leaf = {key: ref.model_dump(mode="json") for key, ref in selection_of("worker").items()}
         start = {"role": "worker", "request_id": str(uuid.uuid4()), **leaf}
-        # This process was not started by a launch: no binding, whatever the settings hold.
-        # MIK-R108: the answer carries no envelope field; the operation repeats the tool.
-        _loop, refused = self.call("role_start", start)
+        # This process was not started by a launch: a canonical selection starts with
+        # no parent (MIK-R113 rule 6), whatever the settings hold.
+        _loop, started = self.call("role_start", start)
+        whole = json.loads(Path(started["log"]).read_text(encoding="utf-8"))
         self.assertEqual(
-            (refused["ok"], refused["refusal"]),
-            (False, "caller-has-no-binding"),
+            (started["ok"], whole["status"]),
+            (True, "running"),
         )
+        created = next(p for command, p in self.runtime.calls if command == "agent-create")
+        self.assertNotIn("parentAgentId", created)
         message = {"text": "hello", "agent_id": str(uuid.uuid4())}
+        # MIK-R108: the answer carries no envelope field; the operation repeats the tool.
         _loop, refused = self.call("role_message", message)
-        self.assertEqual(refused["refusal"], "caller-has-no-binding")
+        self.assertEqual((refused["ok"], refused["refusal"]), (False, "caller-has-no-binding"))
         _loop, refused = self.call("role_start_set", {"request_id": str(uuid.uuid4()), **leaf})
         self.assertEqual(
             (refused["ok"], refused["refusal"]),
@@ -1112,12 +1263,21 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
                 "send_role_message",
                 recorded(paseo_role_tools.send_role_message),
             )
-            loop_thread, started = self.call("role_start", start)
+            loop_thread, started = self.call(
+                "role_start", {"role": "investigator", "request_id": str(uuid.uuid4())}
+            )
             whole = json.loads(Path(started["log"]).read_text(encoding="utf-8"))
             self.assertEqual(whole["agentId"], started["agentId"])
             self.assertEqual(
-                (whole["status"], whole["parentAgentId"]),
-                ("running", self.architect.agent_id),
+                (started["ok"], whole["status"], whole["parentAgentId"]),
+                (True, "running", self.architect.agent_id),
+            )
+            investigator_request = RoleDispatchRequest.model_validate(
+                {"role": "investigator", "requestId": whole["requestId"]}
+            )
+            self.assertEqual(
+                self.receipt(investigator_request).get("parentAgentId"),
+                self.architect.agent_id,
             )
             _loop, sent = self.call(
                 "role_message", {"text": "hello", "agent_id": started["agentId"]}
@@ -1125,6 +1285,117 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
             self.assertEqual(sent["status"], "accepted")
             self.assertEqual(len(threads), 2)
             self.assertNotIn(loop_thread, threads)
+
+    def unbound(self) -> None:
+        """This process as a chat without a role has it: its tool server names no agent."""
+
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop(AGENT_ID_VARIABLE, None)
+        self.assertIsNone(read_agent_binding())
+
+    def test_a_chat_without_a_role_starts_an_architect_through_the_registered_tool(self) -> None:
+        """MIK-R113 rule 6: no binding and no document reference start a parentless Architect."""
+
+        self.unbound()
+        handovers: list[RoleHandoverRequest] = []
+
+        def compiled(request: RoleHandoverRequest) -> dict[str, Any]:
+            handovers.append(request)
+            return self.compile_handover(request)
+
+        self.replace(role_launch_preparation, "_compile_handover", compiled)
+        request_id = uuid.uuid4()
+        _loop, started = self.call(
+            "role_start", {"role": "architect", "request_id": str(request_id)}
+        )
+        whole = json.loads(Path(started["log"]).read_text(encoding="utf-8"))
+        self.assertEqual(whole["agentId"], started["agentId"])
+        self.assertEqual(
+            (started["ok"], whole["status"], whole["role"]), (True, "running", "architect")
+        )
+        self.assertIsNone(whole.get("parentAgentId"))
+        # The launch record is compiled from this: a chat without a role started the agent.
+        self.assertEqual(
+            [(handover.chat_started, handover.started_by) for handover in handovers],
+            [(True, None)],
+        )
+        request = RoleDispatchRequest.model_validate({"role": "architect", "requestId": request_id})
+        receipt = self.receipt(request)
+        self.assertEqual(receipt["agentId"], started["agentId"])
+        self.assertEqual(
+            receipt["selection"],
+            {
+                "role": "architect",
+                "sprintDocumentRef": None,
+                "masterDocumentRef": None,
+                "taskDocumentRef": None,
+            },
+        )
+        self.assertNotIn("parentAgentId", receipt)
+        created = [p for command, p in self.runtime.calls if command == "agent-create"]
+        self.assertEqual([payload["agentId"] for payload in created], [started["agentId"]])
+        self.assertNotIn("parentAgentId", created[0])
+        # The same chat may not message the agent it started; the developer speaks with it
+        # in the dashboard.
+        _loop, refused = self.call(
+            "role_message", {"text": "hello", "agent_id": started["agentId"]}
+        )
+        self.assertEqual(
+            (refused["ok"], refused["status"], refused["refusal"]),
+            (False, "refused", "caller-has-no-binding"),
+        )
+        self.assertIn("the developer speaks with the agent in the dashboard", refused["nextAction"])
+        self.assertEqual(self.received(started["agentId"]), [])
+
+    def test_the_registered_tool_refuses_what_the_dashboard_refuses_in_the_same_words(self) -> None:
+        """MIK-R113 rule 6: a selection the launcher's routes refuse, the tool refuses alike."""
+
+        self.unbound()
+        # The table is read before any document is, so the real resolver answers the
+        # launcher's routes here in place of the fixture's stand-in.
+        self.replace(role_launch_routes, "resolve_role_launch_context", resolve_role_launch_context)
+        app = FastAPI()
+        role_launch_routes.register_role_launch_routes(app, self.config)
+        sprint = {"sprintDocumentRef": SPRINT_REF}
+        master = {**sprint, "masterDocumentRef": MASTER_REF}
+        leaf = {**master, "taskDocumentRef": LEAF_REF}
+        cases: dict[str, tuple[str, dict[str, TaskDocumentRef]]] = {
+            "architect does not accept a sprint selection.": ("architect", sprint),
+            "manager does not accept a task selection.": ("manager", leaf),
+            "worker requires a canonical task selection.": ("worker", master),
+        }
+        with TestClient(app) as client:
+            for reason, (role, refs) in cases.items():
+                with self.subTest(role=role, refs=sorted(refs)):
+                    selection = {key: ref.model_dump(mode="json") for key, ref in refs.items()}
+                    options = client.post(
+                        "/api/role-launch/options", json={"role": role, **selection}
+                    )
+                    dispatch = client.post(
+                        "/api/role-launch/dispatch",
+                        json={"role": role, "requestId": str(uuid.uuid4()), **selection},
+                    )
+                    for answer in (options, dispatch):
+                        self.assertEqual(
+                            (answer.status_code, answer.json()), (409, {"detail": reason})
+                        )
+                    _loop, refused = self.call(
+                        "role_start",
+                        {
+                            "role": role,
+                            "request_id": str(uuid.uuid4()),
+                            **{CALL_REFS[key]: ref for key, ref in selection.items()},
+                        },
+                    )
+                    self.assertEqual(
+                        (refused["ok"], refused["status"], refused["refusal"]),
+                        (False, "refused", "launch-refused"),
+                    )
+                    self.assertEqual(refused["detail"], dispatch.json()["detail"])
+        self.assertEqual(self.receipt_files(), [])
+        self.assertEqual(self.runtime.launch_calls(), [])
 
 
 if __name__ == "__main__":

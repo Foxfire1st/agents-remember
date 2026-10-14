@@ -2,7 +2,6 @@ import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 
 import { dashboardStore } from '../../data/store';
-import { GALLERY } from '../../dev/fixtures';
 import { metricsFor } from '../../types/projection';
 import type {
   EnclosureNode,
@@ -11,12 +10,6 @@ import type {
   TaskDocNode,
   WorkspaceProjection,
 } from '../../types/projection';
-export function seed(name: string) {
-  const projection = GALLERY.find((entry) => entry.name === name)?.projection;
-  if (!projection) throw new Error(`fixture not found: ${name}`);
-  dashboardStore.getState().applySnapshot(projection);
-}
-
 export function taskDoc(
   over: Partial<TaskDocNode> & Pick<TaskDocNode, 'kind' | 'docPath'>,
 ): TaskDocNode {
@@ -105,9 +98,7 @@ const SERIES_LIFECYCLE: LifecycleProjection = {
   fleeting: false,
   startedAt: '2026-06-20T09:00:00+00:00',
   lastEventTs: '2026-06-20T09:00:30+00:00',
-  stateEnteredAt: '2026-06-20T09:00:00+00:00',
   inferred: false,
-  actions: [],
 };
 
 const SERIES_MASTER = seriesNode({
@@ -202,8 +193,6 @@ export function seedSeries(
       series: [master],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -267,8 +256,6 @@ export function seedSeriesOrdering() {
       series: [master],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -294,8 +281,6 @@ export function seedTaskDocuments(
       series: [],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   });
 }
@@ -322,8 +307,6 @@ export function seedProjection(over: Partial<WorkspaceProjection>) {
       series: [],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
     ...over,
   };
@@ -339,9 +322,7 @@ const PROMOTED_LIFECYCLE: LifecycleProjection = {
   repoId: 'agents-remember',
   startedAt: '2026-06-24T06:00:00+00:00',
   lastEventTs: '2026-06-24T06:00:30+00:00',
-  stateEnteredAt: '2026-06-24T06:00:00+00:00',
   inferred: false,
-  actions: [],
 };
 
 const PROMOTED_DOC = taskDoc({
@@ -437,8 +418,6 @@ export function seedPromotedLeaf() {
       series: [PROMOTED_SERIES],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);

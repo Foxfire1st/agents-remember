@@ -1,5 +1,10 @@
 # Session cockpit closeout evidence
 
+**Status:** History as of MIK-R113 (2026-10-12), which removed the session
+cockpit and composer panels (`dashboard/src/panels/session-cockpit/`,
+`SessionComposer.*`). This index describes the removed parts; it is kept as
+the record of what was built and where, not as a live design.
+
 This is the durable code-repository evidence index for master `260715-FEUI`. It keeps the design
 route readable without expanding `scenario-catalog.md` into a second cockpit specification. The
 binding product authorities remain the master task, the v3 cockpit design, and the developer-ruled

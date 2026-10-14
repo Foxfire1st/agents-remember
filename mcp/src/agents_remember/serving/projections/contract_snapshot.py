@@ -14,8 +14,8 @@ cache is mutated only inside ``build``, which runs on the projection worker
 thread -- the projector serializes ticks by awaiting each ``asyncio.to_thread``
 call, so builds never overlap. The published :class:`ContractSnapshot` is an
 immutable value (read-only mapping of frozen contracts) that may be handed to any
-consumer without locks. The landing refresher and agent-notifier sweep keep their own
-independent passes; they never touch this cache.
+consumer without locks. The landing refresher keeps its own independent pass; it never
+touches this cache.
 """
 
 from __future__ import annotations

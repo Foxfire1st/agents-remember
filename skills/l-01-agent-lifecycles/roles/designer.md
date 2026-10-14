@@ -84,13 +84,13 @@ the architect rules it and the orchestrator adopts the ruled plan into durable e
 
 ## What you must not do
 
-- **Design work never touches git.** No `git` mutation, no `worktree_*`, no `lifecycle_*`, no `gate_*`,
-  no `memory_*`, no closeout — those are the owning seat's machinery. A seat that never mutates lifecycle
-  machinery never instantiates a lifecycle, and that is the designed shape, not a gap.
+- **Design work never touches git.** No `git` mutation, no `worktree_*`, no `lifecycle_finalize_task`,
+  no `memory_*`, no closeout — those are the owning seat's machinery. A seat that never calls
+  `worktree_start` or `worktree_attach` has no lifecycle, and that is the designed shape, not a gap.
 - **Never invent execution authority:** not an approved plan, not an adopted topology, not a dispatch.
 - Do not hand a question straight to the developer: a truth gap goes into `openQuestions` for the architect.
 - Do not absorb another seat's work — a pasted brief for a different seat is refused and reported.
-- Operator knobs (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, `promptKeywords`) are
+- Operator knobs (`harness`, `model`, `effort`) are
   settings, not yours to set: role-file defaults resolve at role-file defaults < global settings < repo-local
   settings, and the resolved `system/tools.md` owns the concrete environment you run in.
 

@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
 from agents_remember.application.agent_binding import (
@@ -39,7 +38,6 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 
 from .compact_content import install_compact_content
-from .public_surface import DISPATCH_AGENT_INPUT_FIELDS
 from .read_only import apply_read_only_marks
 from .registration import TOOL_REGISTRARS
 
@@ -59,11 +57,7 @@ class AgentsRememberMCP(FastMCP):
     _agents_remember_config: Any | None = None
 
     async def list_tools(self) -> list[Any]:
-        tools = await super().list_tools()
-        for tool in tools:
-            if tool.name == "dispatch_agent":
-                tool.inputSchema = {**tool.inputSchema, "additionalProperties": False}
-        return tools
+        return await super().list_tools()
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         # MIK-R108 rule 3: every call is written to the daily log with its
@@ -76,12 +70,6 @@ class AgentsRememberMCP(FastMCP):
         config = getattr(self, "_agents_remember_config", None)
         with tool_call_context(name, arguments, config=config):
             try:
-                if name == "dispatch_agent":
-                    extras = sorted(set(arguments) - DISPATCH_AGENT_INPUT_FIELDS)
-                    if extras:
-                        raise ToolError(
-                            "dispatch_agent rejects undeclared inputs: " + ", ".join(extras)
-                        )
                 return await super().call_tool(name, arguments)
             except Exception as error:
                 _log_raised_tool_call(name, arguments, config, error)

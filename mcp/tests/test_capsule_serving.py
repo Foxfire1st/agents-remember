@@ -48,7 +48,7 @@ from agents_remember.models.role_capsules.types import (
 )
 from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
-from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 
 REPOSITORY = "agents-remember"
 MASTER_DIR = "SPRINT/MASTER"
@@ -861,12 +861,12 @@ def test_a_resource_read_leaves_the_tool_surface_and_response_registry_unchanged
     """Reading server-supplied content cannot widen what the server advertises."""
 
     roster_before = tuple(PUBLIC_TOOLS)
-    models_before = tuple(sorted(PUBLIC_TOOL_RESPONSE_MODELS))
+    models_before = tuple(sorted(TOOL_RESPONSE_MODELS))
     catalog = world.catalog
     read_served_file(catalog, catalog.entries[0].uri)
     world.read_response(catalog.entries[0].uri, world.catalog_request(corpus=world.corpus))
     assert tuple(PUBLIC_TOOLS) == roster_before
-    assert tuple(sorted(PUBLIC_TOOL_RESPONSE_MODELS)) == models_before
+    assert tuple(sorted(TOOL_RESPONSE_MODELS)) == models_before
 
 
 def test_same_named_skills_from_two_servers_remain_distinct(world: World) -> None:

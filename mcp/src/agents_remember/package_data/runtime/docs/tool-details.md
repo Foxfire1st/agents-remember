@@ -20,12 +20,17 @@ Answer fields: `ok`, `server` (this package's own name), `version`,
 `transcriptRoot`, `harnessSkillRoot` (absent when unconfigured),
 `allowedRepoIds` (the configured repositories), `unusedProviderKeys` (old
 provider keys, reported once as unused — MIK-R112 removed the provider
-tools, so enabled keys drive nothing), `servingBuild` (the serving build
-record), and, on a role-launched server only, `toolServer` and
-`agentBinding`.
+tools, so enabled keys drive nothing), `unusedSettingsKeys` (settings keys
+the files hold that only removed parts read, named once as no longer used),
+`openUserSettings` (only while the user's settings file or its folder is
+open to writing: `userPath`, `fileExists`, `fileOpen`, `folderOpen`, and the
+user's two commands for that exact path, `closeCommand` and `editCommand`),
+`servingBuild` (the serving build record), and, on a role-launched server
+only, `toolServer` and `agentBinding`.
 
 Operations: one (report). The call is read-only; it reflects the settings
-and runtime loaded at startup.
+and runtime loaded at startup, and the modes of the user's settings file and
+folder as they are at the call. It changes no mode and no byte of them.
 
 Refusals: none in the ordinary path — the call cannot fail on arguments
 (it takes none). A server that cannot read its own configuration refuses at
@@ -51,14 +56,14 @@ record).
 `experiment=role-capsules` is the one supported experiment. `capsule` mode
 withholds the legacy AR startup chain in the installation (the coordinator
 `AGENTS.md` targets) while still installing the `skills/` authored copy — read
-by humans, the dashboard and curators, never compiled — and the pinned eve
-application; a per-run record carries experiment, source, selection source and
-mode. Selection precedence: the request field, then the `AR_EXPERIMENT`
-environment fallback; empty at both means unselected (the legacy default). An
-unknown id is refused by name before anything is written, never silently run
-as legacy. Omission after a capsule run undoes it: re-running the installer
-with no experiment selected copies the withheld `AGENTS.md` targets back (the
-rollback plan also removes the installed application dir and runtime state).
+by humans, the dashboard and curators, never compiled; a per-run record
+carries experiment, source, selection source and mode. Selection precedence:
+the request field, then the `AR_EXPERIMENT` environment fallback; empty at
+both means unselected (the legacy default). An unknown id is refused by name
+before anything is written, never silently run as legacy. Omission after a
+capsule run undoes it: re-running the installer with no experiment selected
+copies the withheld `AGENTS.md` targets back (the `rollback` plan in the
+run's `experiment` part names this step).
 
 Operations: one install run. It stops leftover provider watcher processes as its
 only watcher action; a failed stop is recorded in the install result and the
@@ -84,7 +89,11 @@ report), `reportPath`, `summary` (`createdDirs`, `copiedFiles`,
 `unchangedFiles`, `replacedLinks`, `removedPaths`, `dependencyRuns`,
 `unusedProviderKeys`), `providerWatcherRebind` (attempted, ok, `phases[]`
 with phase/action/ok per run — the single stop phase; the untruncated runs
-live in the report file), `recoveryActions` (when the run lists any).
+live in the report file), `recoveryActions` (when the run lists any),
+`removedPartStores` (when stores of removed parts remain: `count`, `bytes`,
+`notice` naming `agents-remember removed-stores`, and `storedGates` when a
+gate log is among them; the report file adds `stores`, each with its path,
+size and files. The install deletes none of them).
 
 Refusals: an experimental cutover refused before anything is written (nothing
 under the coordination root is created, replaced or removed, and the selected

@@ -67,8 +67,8 @@ The highest-value owned detector. No installed skill does this.
 Grade the dashboard as a *monitoring surface*:
 
 1. **Golden signals per entity** — RED (Rate/Errors/Duration) for request/command-shaped entities
-   (lifecycle, worktree ops, TUI commands); USE (Utilization/Saturation/Errors) for resources
-   (providers, PTY, queues). Flag any entity missing its signals.
+   (lifecycle, worktree ops); USE (Utilization/Saturation/Errors) for resources
+   (providers, queues). Flag any entity missing its signals.
 2. **At-a-glance health** — can the operator answer "is everything okay?" from the first viewport
    without drilling? Flag if the top-level view buries faults.
 3. **Symptoms over causes** salience; **inverted-pyramid drill-down** — every red/fault state must
@@ -95,19 +95,8 @@ Judge motion as *information*, not decoration. Sample only at settled beats; con
 
 ## Method 5 — Task-6 TUI control-plane review (Stage 3e)
 
-Review the embedded interactive terminal as a first-class control surface:
-
-1. **Focus contention** — when the terminal has focus, do dashboard keyboard shortcuts steal keys (or
-   vice-versa)? Is the focused/unfocused state legible?
-2. **Liveness legibility** — can the user tell busy vs idle vs awaiting-input vs disconnected?
-3. **Escapability** — can the user detach / Ctrl-C / switch sessions without killing the dashboard or
-   the session? Does a session survive view-switch and tab-switch?
-4. **Round-trip** — a command's effect must trace back visibly: command → in-flight → success or
-   failure-with-recovery → reflected on the engine-room canvas. Confirm delivery is honestly reported
-   (Sending… → delivered / Retry), and that context injection (selection/composer) is "no silent
-   action" (nothing reaches the agent until Send).
-5. **Safety** — destructive actions (abandon / cleanup / integrate / kill-PTY) must be guarded
-   (confirm/undo) and visually distinct.
+The dashboard embeds no interactive terminal any more (removed by MIK-R113, 2026-10-12): this
+method has no subject and is not run.
 
 ## Method 6 — Information-scent / 5-second / progressive-disclosure foraging
 

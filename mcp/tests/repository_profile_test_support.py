@@ -44,7 +44,6 @@ from agents_remember.certification.repository_profiles.models import (
     RepositoryCertificationProfile,
     RepositoryGateId,
     RepositoryGateSelection,
-    RepositoryProfilePlan,
     RepositoryProfileSelection,
     RepositoryRailDefinition,
     RepositoryRailExecution,
@@ -53,11 +52,7 @@ from agents_remember.certification.repository_profiles.models import (
 from agents_remember.certification.repository_profiles.planning import (
     compile_repository_profile_plan,
 )
-from agents_remember.certification.repository_profiles.source_selection.models import (
-    RailSourceSelection,
-)
 from agents_remember.models.certification.base import RailIdentity
-from source_selection_test_support import source_selection_fixture
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_REMEMBER_PROFILE_REFERENCE = Path("mcp/certification-profile-v1.json")
@@ -124,36 +119,7 @@ def agents_remember_profile_execution(
         purpose=purpose,
         mode=mode,
         candidate_identity=CandidateIdentity(kind="git-tree", value=candidate_tree),
-        source_selection=source_selection_fixture(candidate_tree)
-        if purpose != "local-precommit"
-        else None,
     )
-
-
-def write_source_selection_artifacts(
-    root: Path, plan: RepositoryProfilePlan
-) -> tuple[RailSourceSelection, ...]:
-    """Publish the exact plan's decisions in an isolated executor/export fixture."""
-    decisions = tuple(
-        RailSourceSelection.model_validate_json(node.canonicalJson)
-        for gate in plan.gates
-        for node in gate.semanticInputs
-        if node.inputKind == "source-applicability"
-    )
-    for decision in decisions:
-        path = root / decision.declaration.evidencePath
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                decision.model_dump(mode="json"),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-    return decisions
 
 
 def _file_digest(path: Path) -> str:
@@ -746,12 +712,6 @@ class FakeContainer:
                     "/reports/dashboard-suite-result.json",
                 )
             )
-        if "scripts/e2e_harness/run.py" in command:
-            paths.append(
-                command[command.index("--reports") + 1] + "/ambient-role-chat-e2e/summary.json"
-            )
-        if "--proof" in command:
-            paths.append(command[command.index("--proof") + 1])
         if "agents_remember_test_support.code_quality.causal_preflight" in command:
             paths.append(command[command.index("--report") + 1])
         for token in command:

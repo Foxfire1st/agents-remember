@@ -107,8 +107,8 @@ LIVE_STATES: tuple[LiveState, ...] = cast(
 )
 TERMINAL_STATES: frozenset[str] = frozenset(vocabulary_names(TerminalState, label="TerminalState"))
 
-# Not a classification: a policy. ``lifecycle_end`` takes a free-form outcome string from the
-# tool boundary, and anything that is not the affirmative completion is an abandonment.
+# Not a classification: a policy. A ``lifecycle.ended`` event carries a free-form outcome
+# string, and anything that is not the affirmative completion is an abandonment.
 DEFAULT_END_OUTCOME: TerminalState = "abandoned"
 
 INITIAL_PHASE: Phase = "request"
@@ -129,21 +129,6 @@ def coerce_end_outcome(value: object) -> TerminalState:
 
 class LifecycleError(AgentsRememberError):
     """A lifecycle signal was issued against an incompatible state."""
-
-
-class GuardedStartError(LifecycleError):
-    """``lifecycle_start`` was issued while a lifecycle is already active.
-
-    Guarded start is how the model is kept from ever holding two lifecycles or
-    handling an id: the reminder names the active lifecycle so the model ends or
-    switches it rather than stacking a new one.
-    """
-
-    def __init__(self, active_id: str) -> None:
-        super().__init__(
-            f"a lifecycle is already active ({active_id}); end or switch it before starting another"
-        )
-        self.active_id = active_id
 
 
 def coerce_phase(value: str) -> Phase:
@@ -167,12 +152,11 @@ class LifecycleState:
     phase: Phase
     fleeting: bool
     started_at: str
-    # Set when the lifecycle is promoted to persistent (design §1.1, §1.5): the
-    # enclosure (contract path) is the durable resume anchor; repo_id/scope record
-    # where saved work belongs ("<repo_id>" | "0_unscoped" | "1_cross-repo").
+    # Set when a worktree contract's lifecycle is adopted (design §1.1, §1.5): the
+    # enclosure (contract path) is the durable resume anchor; repo_id records the
+    # repository the lifecycle belongs to.
     enclosure: str | None = None
     repo_id: str | None = None
-    scope: str | None = None
 
     @property
     def is_terminal(self) -> bool:

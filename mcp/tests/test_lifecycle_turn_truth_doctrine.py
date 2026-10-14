@@ -469,7 +469,7 @@ OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
         "means only that the provider turn ended normally",
         "does not attest that the required artifact exists, is current, or satisfies its requirement",
         "derives that mechanical seat-state fact, and delivers it to the structurally current owner",
-        "never opens, parses, or evaluates a report, verdict, coherence record, expectation row, "
+        "never opens, parses, or evaluates a report, verdict, coherence record, "
         "or acceptance envelope",
         "before advancing lifecycle state",
         "nudges, rejects, replaces, or escalates",

@@ -1,12 +1,12 @@
 """Observer substrate: the append-only event log, the ambient lifecycle, and the
 projection read side.
 
-Slice 2a is the write side -- the ``ar-observer-event/v1`` envelope, local id
-minting, and the append-only store. Slice 2b adds the ambient lifecycle: the
-process-singleton state machine, the six ``lifecycle_*`` signals, the heartbeat
-ticker, and the TTL project-and-prune sweep. Slice 2c adds resume + the save
-gate. Slice 3a adds the projection read side -- the reducer that folds events
-(plus structural file snapshots) into the resolved state tree.
+The write side is the ``ar-observer-event/v1`` envelope, local id minting, and the
+append-only store. The ambient lifecycle is the process-singleton state of the
+lifecycle a tool server works in: it adopts a worktree lifecycle, writes the event
+of a tool call, runs the heartbeat ticker and ends the lifecycle. The projection
+read side is the reducer that folds events (plus structural file snapshots) into
+the resolved state tree.
 
 This package exports the dependency-light core (the write side plus the *pure*
 projection schema and reducer). The I/O readers that reuse other subsystems'
@@ -23,7 +23,6 @@ from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.observer.ambient import (
     AmbientLifecycle,
     install_ambient,
-    require_ambient,
     reset_ambient,
 )
 from agents_remember.observer.events import (
@@ -34,7 +33,6 @@ from agents_remember.observer.events import (
     now_iso,
 )
 from agents_remember.observer.lifecycle_state import (
-    GuardedStartError,
     LifecycleError,
     LifecycleState,
     Phase,
@@ -42,11 +40,9 @@ from agents_remember.observer.lifecycle_state import (
 )
 from agents_remember.observer.projection import (
     ActionAvailability,
-    AgentPickupNode,
     Analytics,
     DriftSnapshotNode,
     EnclosureNode,
-    ExpectationRowNode,
     LedgerNode,
     LifecycleProjection,
     Metrics,
@@ -91,7 +87,6 @@ __all__ = [
     "TTL_SECONDS",
     "ActionAvailability",
     "Actor",
-    "AgentPickupNode",
     "AmbientLifecycle",
     "Analytics",
     "Clock",
@@ -99,8 +94,6 @@ __all__ = [
     "EnclosureNode",
     "Event",
     "EventStore",
-    "ExpectationRowNode",
-    "GuardedStartError",
     "LedgerNode",
     "LifecycleError",
     "LifecycleProjection",
@@ -129,7 +122,6 @@ __all__ = [
     "observer_root",
     "project_lifecycle",
     "project_workspace",
-    "require_ambient",
     "reset_ambient",
     "served_key",
     "staleness_histogram",

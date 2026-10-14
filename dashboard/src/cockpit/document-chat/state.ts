@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { SeriesNode, TaskDocNode } from "../../types/projection";
-import type { TaskDocumentRef } from "../../types/terminalCatalog";
+import type { SeriesNode, TaskDocNode, TaskDocumentRef } from "../../types/projection";
 import { canonicalLauncherRole, type RoleDocumentScope, type RoleExecutionReceipt } from "../roleLaunchModel";
 import { useKnownChats, useSelectionAgents } from "./knownChats";
 import { bindingInTree, documentBindings, documentChatAgent, type DocumentAgent } from "./model";

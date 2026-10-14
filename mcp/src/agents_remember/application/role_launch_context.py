@@ -24,6 +24,58 @@ ROLE_LEVELS = {
 TASKLESS_ROLES = frozenset({"architect", "investigator"})
 LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
 
+# What may be started without a parent (MIK-R113 rule 6): the selections the
+# dashboard's start accepts, per role as (sprint, master, task) with True =
+# required and False = forbidden. The investigator takes no leaf and at least
+# one of sprint/master; that row reads (True, None, False) with None = accepted
+# but not required. The dashboard's start and a chat without a role use this
+# one table: the dispatch endpoint checks it for a start with no starter, and
+# ``resolve_role_launch_context`` below reads it too, so the two cannot drift
+# apart and a refused selection is refused with the same reason either way.
+PARENTLESS_START_SELECTIONS: dict[str, tuple[bool | None, bool | None, bool | None]] = {
+    "architect": (False, False, False),
+    "investigator": (True, None, False),
+    "orchestrator": (True, False, False),
+    "manager": (True, True, False),
+    "worker": (True, True, True),
+    "reviewer": (True, True, True),
+    "curator": (True, True, True),
+}
+
+
+def parentless_selection_violation(
+    role: str,
+    sprint_ref: Any,
+    master_ref: Any,
+    task_ref: Any,
+) -> str | None:
+    """Why a parentless start of ``role`` on these references is refused, else None."""
+
+    if role == "investigator" and task_ref is not None:
+        return (
+            "An investigator does not accept a leaf selection; start it on the master and "
+            "name the leaf in the first message."
+        )
+    if role == "investigator":
+        required: tuple[bool | None, bool | None, bool | None] = (
+            bool(sprint_ref or master_ref),
+            bool(master_ref),
+            False,
+        )
+    else:
+        required = PARENTLESS_START_SELECTIONS[role]
+    for label, ref, needed in zip(
+        ("sprint", "master", "task"),
+        (sprint_ref, master_ref, task_ref),
+        required,
+        strict=True,
+    ):
+        if needed and ref is None:
+            return f"{role} requires a canonical {label} selection."
+        if not needed and ref is not None:
+            return f"{role} does not accept a {label} selection."
+    return None
+
 
 @dataclass(frozen=True)
 class RoleLaunchContext:
@@ -39,32 +91,14 @@ def resolve_role_launch_context(
 ) -> RoleLaunchContext:
     """Resolve the selected sprint/master/leaf chain from canonical task documents."""
 
-    if selection.role == "investigator" and selection.task_document_ref is not None:
-        raise ValueError(
-            "An investigator does not accept a leaf selection; start it on the master and name the leaf in the first message."
-        )
-    needs_sprint = selection.role not in TASKLESS_ROLES
-    needs_master = selection.role in {"manager", *LEAF_ROLES}
-    needs_task = selection.role in LEAF_ROLES
-    refs = (
+    violated = parentless_selection_violation(
+        selection.role,
         selection.sprint_document_ref,
         selection.master_document_ref,
         selection.task_document_ref,
     )
-    required = (
-        (
-            bool(selection.sprint_document_ref or selection.master_document_ref),
-            bool(selection.master_document_ref),
-            False,
-        )
-        if selection.role == "investigator"
-        else (needs_sprint, needs_master, needs_task)
-    )
-    for label, ref, needed in zip(("sprint", "master", "task"), refs, required, strict=True):
-        if needed and ref is None:
-            raise ValueError(f"{selection.role} requires a canonical {label} selection.")
-        if not needed and ref is not None:
-            raise ValueError(f"{selection.role} does not accept a {label} selection.")
+    if violated is not None:
+        raise ValueError(violated)
 
     topology = TaskDocumentTopology(config.coordination_root)
     sprint = (

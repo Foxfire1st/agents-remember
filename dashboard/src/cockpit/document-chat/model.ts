@@ -1,5 +1,4 @@
-import type { SeriesNode, TaskDocNode } from "../../types/projection";
-import type { TaskDocumentRef } from "../../types/terminalCatalog";
+import type { SeriesNode, TaskDocNode, TaskDocumentRef } from "../../types/projection";
 import { isOrchestrationDoc, masterCommandNames, orchestratorParentKey, taskDocParentKey } from "../../data/taskHierarchy";
 import { sameTaskDocumentRef, taskDocSelectionKey } from "../../data/taskIdentity";
 import { taskOptionsForDocs, type LauncherRole, type RoleLaunchSelection, type RoleTaskOption } from "../roleLaunchModel";

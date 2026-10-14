@@ -10,11 +10,10 @@ route-index coverage (10), the tool-report feed (12), and memory-ledger currency
 re-parsing.
 
 The provider readers and their container-inspection helpers live in this module;
-the runtime process readers (enclosures, gates, inbox, expectations, engine
-facts), the analytical readers, and the task-document readers live in
-responsibility-split sibling modules and are re-exported here so the projection's
-public import surface is unchanged. These functions do the file I/O at the
-projection's call edge; the fold itself
+the runtime process readers (enclosures, engine facts), the analytical readers,
+and the task-document readers live in responsibility-split sibling modules and
+are re-exported here so the projection's public import surface is unchanged.
+These functions do the file I/O at the projection's call edge; the fold itself
 (:mod:`agents_remember.observer.reducer`) stays pure.
 """
 
@@ -75,11 +74,8 @@ from agents_remember.serving.projections.snapshots_impl._runtime import (
     _enclosure_from_contract,
     _safe_status_payload,
     logger,
-    read_agent_pickups,
     read_enclosures,
     read_engine_process_facts,
-    read_expectation_rows,
-    read_gates,
     refresh_engine_process_landing,
 )
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
@@ -133,12 +129,9 @@ __all__ = [
     "_task_document_lifecycle_maps",
     "_task_step_nodes",
     "logger",
-    "read_agent_pickups",
     "read_drift_snapshots",
     "read_enclosures",
     "read_engine_process_facts",
-    "read_expectation_rows",
-    "read_gates",
     "read_ledger",
     "read_providers",
     "read_route_coverage",

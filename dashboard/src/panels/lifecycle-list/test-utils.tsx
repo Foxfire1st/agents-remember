@@ -2,7 +2,6 @@ import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 
 import { dashboardStore } from '../../data/store';
-import { sessionStore } from '../../data/sessions';
 import { metricsFor } from '../../types/projection';
 import type {
   Analytics,
@@ -20,8 +19,6 @@ export const EMPTY_ANALYTICS: Analytics = {
   setupProgress: [],
   routeCoverage: [],
   toolReports: [],
-  agentPickups: [],
-  expectationRows: [],
   ledgers: [],
   taskDocuments: [],
   series: [],
@@ -36,9 +33,7 @@ export function lifecycle(over: Partial<LifecycleProjection> & Pick<LifecyclePro
     fleeting: false,
     startedAt: '2026-06-24T06:00:00+00:00',
     lastEventTs: '2026-06-24T06:00:30+00:00',
-    stateEnteredAt: '2026-06-24T06:00:00+00:00',
     inferred: false,
-    actions: [],
     ...over,
   } satisfies LifecycleProjection;
 }
@@ -265,7 +260,6 @@ export function installLifecycleListCleanup() {
     cleanup();
     vi.unstubAllGlobals();
     dashboardStore.getState().reset();
-    sessionStore.getState().hydrate([]);
     window.localStorage.clear();
   });
 }

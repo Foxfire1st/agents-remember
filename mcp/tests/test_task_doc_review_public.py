@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.task_docs import task_doc_tools as tools
 from agents_remember.application.task_docs.task_doc_response import review_state_payload
 from agents_remember.application.task_docs.task_doc_route_review import (
@@ -284,7 +284,7 @@ def test_public_review_api_enforces_cap_and_carries_explicit_extra_rounds(
 
 
 def _write_user_settings(data: dict[str, object]) -> Path:
-    path = Path(os.environ["XDG_CONFIG_HOME"]) / "agents-remember" / "settings.json"
+    path = user_settings_path_for_write()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
     return path

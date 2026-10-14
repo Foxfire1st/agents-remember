@@ -9,7 +9,7 @@ returned an **error** instead of ``ok=false``::
     citation source-index input exceeds the 4194304-byte per-file cap:
     ['eve_runtime/.eve/dev-hosts/…/nitro/dev/index.mjs', …]
 
-``eve_runtime/.eve/`` is gitignored and absent from Git membership; the explicit candidate route
+``eve_runtime/.eve/`` was gitignored and absent from Git membership; the explicit candidate route
 read membership correctly all along. Only the default acquisition walk ingested it, because
 ``_tree_state`` walked the code root with ``os.walk`` and filtered by ``SKIPPED_DIRECTORIES`` and
 ``SKIPPED_SUFFIXES`` alone -- neither of which names ``.eve`` or ``.mjs``. Two independent refusals

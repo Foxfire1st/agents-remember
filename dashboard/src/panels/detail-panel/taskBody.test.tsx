@@ -35,9 +35,7 @@ describe('DetailPanel on-demand task body (task 11)', () => {
           repoId: 'agents-remember',
           startedAt: '2026-07-12T08:00:00+00:00',
           lastEventTs: '2026-07-12T08:00:01+00:00',
-          stateEnteredAt: '2026-07-12T08:00:00+00:00',
           inferred: false,
-          actions: [],
         },
       ],
       enclosures: [

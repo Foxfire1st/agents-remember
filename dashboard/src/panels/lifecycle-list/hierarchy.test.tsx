@@ -708,15 +708,6 @@ describe("LifecycleList task labels — hierarchy and phase grouping", () => {
             state: "blocked",
             phase: "reframe-research",
             repoId: "agents-remember",
-            gate: {
-              id: "gate-1",
-              kind: "plan-approval",
-              state: "open",
-              decisions: ["approve", "revise"],
-              packet: {},
-              evidenceRefs: [],
-              ts: "2026-06-24T06:00:40+00:00",
-            },
           }),
         ],
         enclosures: [
@@ -752,13 +743,13 @@ describe("LifecycleList task labels — hierarchy and phase grouping", () => {
     expect(title.className).toContain("flex_1_1_0");
     expect(title.className).toContain("tov_ellipsis");
     const word = row?.querySelector("[data-testid='task-word']");
-    expect(word?.textContent).toBe("plan-approval");
+    expect(word?.textContent).toBe("blocked");
     expect(word?.className).toContain("tov_ellipsis");
     expect(word?.className).toContain("max-w_15ch");
     // The hover of the whole row says everything the line has no room for.
     const hover = rowHover(row).split("\n");
     expect(hover[0]).toBe(`doc. ${longTitle}`);
-    expect(hover).toContain("State: plan-approval");
+    expect(hover).toContain("State: blocked");
     expect(hover).toContain("Kind: task");
     expect(hover).toContain("Document status: inProgress");
     expect(hover).toContain("Steps done: 1 of 4");
@@ -766,7 +757,6 @@ describe("LifecycleList task labels — hierarchy and phase grouping", () => {
     expect(hover.some((line) => line.startsWith(
       "Lifecycle: 01KVWK7Z8PQZ7BV9T6QPXFHM3B · blocked · phase reframe-research",
     ))).toBe(true);
-    expect(hover).toContain("Gate: plan-approval");
     expect(hover).toContain("Worktree: on disk");
     expect(hover).toContain("Repo: agents-remember");
   });

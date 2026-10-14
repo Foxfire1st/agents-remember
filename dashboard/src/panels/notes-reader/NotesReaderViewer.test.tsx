@@ -577,7 +577,6 @@ function seedMaster() {
     analytics: {
       driftSnapshots: [], stalestSidecars: [], setupSummaries: [], setupProgress: [], routeCoverage: [],
       toolReports: [], ledgers: [], taskDocuments: [masterDoc()], series: [], attentionQueue: [], engineProcesses: [],
-      agentPickups: [], expectationRows: [],
     },
   } satisfies WorkspaceProjection;
   dashboardStore.getState().applySnapshot(projection);

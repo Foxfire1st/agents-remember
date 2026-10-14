@@ -15,7 +15,7 @@ export default defineConfig({
       // Under vitest, the package's `node` export condition resolves to an "edge-light" build
       // that skips layout effects — panels then never receive their initial layout and the
       // imperative collapse/expand API asserts. Alias to the browser development build: the
-      // code path the real app runs (FEUI-L1: the sessions view drives collapse via commands).
+      // code path the real app runs.
       "react-resizable-panels": fileURLToPath(
         new URL(
           "./node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.js",

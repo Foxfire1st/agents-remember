@@ -94,6 +94,22 @@ FORBIDDEN = (
     "dispatch_agent",
     "message_parent",
     "message_child",
+    # MIK-R113 rule 10: the other removed tools, the seat variables of the earlier way and the
+    # removed argument of worktree_attach. No role text tells an agent to use a removed part.
+    "rename_child",
+    "rename_self",
+    "lifecycle_start",
+    "lifecycle_resume",
+    "lifecycle_turn_end_notification",
+    "lifecycle_end",
+    "switch_lifecycle",
+    "lifecycle_phase",
+    "lifecycle_gate",
+    "gate_decide",
+    "gate_list",
+    "AR_SPAWN_ROLE",
+    "AR_HOSTED_SESSION_ID",
+    "on_unsaved",
 )
 # The report directory of a role, as a segment of the report and artifact paths in a handover. It
 # carried the previous host's name until the rename leaf (PNT-R08); the search below now reads

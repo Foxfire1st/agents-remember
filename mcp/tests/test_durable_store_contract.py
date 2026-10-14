@@ -52,11 +52,6 @@ from agents_remember.controlplane.durable_store import (
     require_lock_held,
     rewrite_lines,
 )
-from agents_remember.controlplane.orchestration_nudges import (
-    OrchestrationNudgeRecord,
-    OrchestrationNudgeStore,
-    replace_records,
-)
 from agents_remember.controlplane.records import GateAnchor, GateRecord, create_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel import atomic_write, file_lock
@@ -448,54 +443,6 @@ class SchemaVersionMajorTests(_TempRoot):
             store.read("L1")
 
         self.assertEqual(log.read_bytes(), on_disk)
-
-
-@pytest.mark.fitness
-class OrchestrationNudgeRewriteTests(_TempRoot):
-    """The nudge log's two rewrite entry points: the safe one and the primitive it wraps."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.store = OrchestrationNudgeStore(self.root)
-
-    def _nudge(self, nudge_id: str, *, reason: str = "inactive") -> OrchestrationNudgeRecord:
-        return OrchestrationNudgeRecord(
-            id=nudge_id,
-            ts=NOW.isoformat(),
-            state="sent",
-            reason=reason,  # type: ignore[arg-type]
-            targetAgentId="agent-1",
-            message=f"nudge {nudge_id}",
-        )
-
-    def test_compact_drops_what_keep_rejects_and_reports_the_count(self) -> None:
-        for nudge_id in ("N1", "N2", "N3"):
-            self.store.append(self._nudge(nudge_id))
-
-        dropped = self.store.compact(keep=lambda record: record.id == "N2")
-
-        self.assertEqual(dropped, 2)
-        self.assertEqual([record.id for record in self.store.read()], ["N2"])
-        # The survivor is a whole record, not a truncated line: the rewrite re-serialises it.
-        self.assertEqual(self.store.read()[0].message, "nudge N2")
-
-    def test_replace_records_refuses_an_unlocked_caller_and_changes_nothing(self) -> None:
-        """The refusal IS the durability property, not a tidiness check.
-
-        ``records`` was chosen by a read this call did not make. Unlocked, everything appended
-        since that read is about to be discarded -- so the refusal has to leave the log exactly as
-        it found it, which is the second assertion here.
-        """
-        path = self.store.log_path()
-        self.store.append(self._nudge("N1"))
-        before = path.read_bytes()
-
-        with self.assertRaises(DurableStoreError) as raised:
-            replace_records(path, [])
-
-        self.assertIn("without holding", str(raised.exception))
-        self.assertEqual(path.read_bytes(), before)
-        self.assertEqual([record.id for record in self.store.read()], ["N1"])
 
 
 @pytest.mark.fitness

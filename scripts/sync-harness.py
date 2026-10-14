@@ -105,6 +105,10 @@ HOOK_FRAGMENT_ORDER = (
     "hook_specific_output",
     "additional_context",
     "started_inside_workspace",
+    "HOST_RECORD_FOLDER",
+    "ROLE_LABEL",
+    "host_agent_id",
+    "has_binding",
     "emit",
 )
 
@@ -215,9 +219,13 @@ SHARED_STARTER_FRAGMENTS = (
     "Renderer",
 )
 
+# What tells a hook that its session is a role agent: the reader of the host's record of the
+# agent, with the two names of the host's layout it needs.
+BINDING_FRAGMENTS = ("HOST_RECORD_FOLDER", "ROLE_LABEL", "host_agent_id", "has_binding")
+
 HOOK_SPECIFIC_OUTPUT_HOOK = HookSpec(
     subject="SessionStart",
-    fragments=("Payload", "hook_specific_output", "emit"),
+    fragments=("Payload", "hook_specific_output", *BINDING_FRAGMENTS, "emit"),
     trailer=("    emit(hook_specific_output)",),
 )
 
@@ -253,7 +261,13 @@ HARNESSES = (
         ),
         hook=HookSpec(
             subject="SessionStart",
-            fragments=("Payload", "hook_specific_output", "started_inside_workspace", "emit"),
+            fragments=(
+                "Payload",
+                "hook_specific_output",
+                "started_inside_workspace",
+                *BINDING_FRAGMENTS,
+                "emit",
+            ),
             trailer=(
                 "    if started_inside_workspace():",
                 "        emit(hook_specific_output)",
@@ -279,7 +293,7 @@ HARNESSES = (
         ),
         hook=HookSpec(
             subject="sessionStart",
-            fragments=("Payload", "additional_context", "emit"),
+            fragments=("Payload", "additional_context", *BINDING_FRAGMENTS, "emit"),
             trailer=("    emit(additional_context)",),
         ),
         shared=(*STARTER_SHARED, MCP_SETTINGS_SHARED),

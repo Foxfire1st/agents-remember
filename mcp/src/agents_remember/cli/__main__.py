@@ -34,6 +34,7 @@ from agents_remember.cli import (
     memory_citations,
     paseo_runtime,
     providers_remove,
+    removed_stores,
     tool_log_stats,
     upgrade_user_settings,
 )
@@ -180,6 +181,12 @@ def _register_runtime_commands(sub: argparse._SubParsersAction) -> None:
     )
     providers_remove.add_arguments(removal)
     removal.set_defaults(func=providers_remove.run)
+    stores = sub.add_parser(
+        "removed-stores",
+        help="Remove the stores of removed parts (MIK-R113 rule 5).",
+    )
+    removed_stores.add_arguments(stores)
+    stores.set_defaults(func=removed_stores.run)
 
 
 def main(argv: list[str] | None = None) -> int:

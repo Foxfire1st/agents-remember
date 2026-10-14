@@ -21,9 +21,8 @@ const STATE_EVENTS = [
 // through the identity-preserving merge), so this is deliberately generous — it exists only to
 // catch the pathological socket that fires NEITHER `open` NOR `error` (a half-open corpse or a
 // hung connect). Without it the watchdog's QUIET cycle (which writes no phase) would strand a
-// never-opening resubscribe at a fabricated "live" forever — the same silent-dead-channel class
-// the conversation stream's open-deadline (conversation/stream.ts) fixes, mirrored here so the
-// cockpit LIVE badge cannot stay lit with nothing connected.
+// never-opening resubscribe at a fabricated "live" forever, so the cockpit LIVE badge could stay
+// lit with nothing connected.
 export const STATE_STREAM_OPEN_DEADLINE_MS = 20_000;
 
 /** Subscribe to `GET /api/stream` (the folded-projection channel). Returns a disposer. */
@@ -91,7 +90,7 @@ export function connectState(base = ""): () => void {
     }, STATE_STREAM_OPEN_DEADLINE_MS) as unknown as number;
   };
 
-  // The same sleep/wake + half-open-wedge class as the conversation stream (streamLiveness.ts):
+  // The sleep/wake + half-open-wedge class (streamLiveness.ts):
   // deltas are content-only, so an idle channel is legitimately silent, and after an OS sleep
   // the open socket is a corpse that never fires `error` — the native auto-reconnect never
   // engages and the cockpit would show a live-LOOKING but frozen projection forever. The cycle
@@ -117,9 +116,6 @@ export function connectState(base = ""): () => void {
  * Subscribe to `GET /api/events` (the raw `ar-observer-event/v1` channel). Verbatim JSONL
  * lines for the Event River; the browser carries the opaque byte-offset `Last-Event-ID`
  * cursor across reconnects. A separate connection from the state channel by design.
- * `onInterrupt` fires on a connection error/reconnect: the NEXT connection replays a backlog
- * before its own `ready` marker, so a consumer gating on ready must re-close its gate here
- * (an undecodable cursor makes the server fall back to the full initial window).
  *
  * Deliberately NOT under the liveness watchdog: the resume cursor lives only in the instance's
  * own `Last-Event-ID`, which a FRESH EventSource cannot be told to send — a quiet cycle would
@@ -130,12 +126,10 @@ export function connectEvents(
   onLine: (line: string) => void,
   base = "",
   onReady?: (ready?: { lastEventTs?: string }) => void,
-  onInterrupt?: () => void,
 ): () => void {
   const source = new EventSource(`${base}/api/events`);
   source.addEventListener("event", (event) => onLine((event as MessageEvent).data));
   source.addEventListener("ready", (event) => onReady?.(parseReady((event as MessageEvent).data)));
-  source.addEventListener("error", () => onInterrupt?.());
   return () => source.close();
 }
 

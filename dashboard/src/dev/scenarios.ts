@@ -7,13 +7,7 @@
 import { ENGINE_ROOM_SCENARIOS } from "../panels/engine-room/fixtures";
 import type { ObserverEvent } from "../types/event";
 import type { WorkspaceProjection } from "../types/projection";
-import { FLEET_TASK_DOCUMENTS } from "../test/fixtures/catalogRows";
 import { engineRoomProjection, GALLERY } from "./fixtures";
-import {
-  COCKPIT_SCENARIOS,
-  INTERACTION_SCENARIO_GATE,
-  type CockpitScenarioDefinition,
-} from "./cockpitScenarios";
 
 export interface ScenarioFrame {
   caption: string;
@@ -26,7 +20,6 @@ export interface Scenario {
   name: string;
   label: string;
   frames: ScenarioFrame[];
-  cockpit?: CockpitScenarioDefinition;
 }
 
 // A frame built from a named engine-room scenario (wrapped into a full projection). Throws on a bad name
@@ -211,60 +204,6 @@ const restingScenarios: Scenario[] = GALLERY.map((entry) => ({
   frames: [{ caption: entry.name, projection: entry.projection, events: entry.events }],
 }));
 
-const calmProjection = GALLERY.find((entry) => entry.name === "calm")!.projection;
-const cockpitScenarios: Scenario[] = COCKPIT_SCENARIOS.map((cockpit) => {
-  const cockpitProjection =
-    cockpit.kind === "fleet-12"
-      ? {
-          ...calmProjection,
-          analytics: {
-            ...calmProjection.analytics,
-            taskDocuments: FLEET_TASK_DOCUMENTS,
-          },
-        }
-      : calmProjection;
-  const projection =
-    cockpit.kind === "interaction-answer"
-      ? {
-          ...cockpitProjection,
-          lifecycles: [
-            ...cockpitProjection.lifecycles,
-            {
-              id: INTERACTION_SCENARIO_GATE.lifecycleId,
-              state: "blocked" as const,
-              phase: "build" as const,
-              fleeting: false,
-              startedAt: "2026-07-18T00:00:00Z",
-              lastEventTs: "2026-07-18T00:00:00Z",
-              stateEnteredAt: "2026-07-18T00:00:00Z",
-              inferred: false,
-              actions: [],
-              gate: {
-                id: INTERACTION_SCENARIO_GATE.gateId,
-                kind: "agent-question",
-                state: "open",
-                evidenceRefs: [],
-                decisions: [],
-                packet: {
-                  adapterInteraction: {
-                    sessionId: INTERACTION_SCENARIO_GATE.sessionId,
-                    interactionId: INTERACTION_SCENARIO_GATE.interactionId,
-                  },
-                },
-                ts: "2026-07-18T00:00:00Z",
-              },
-            },
-          ],
-        }
-      : cockpitProjection;
-  return {
-    name: cockpit.name,
-    label: cockpit.label,
-    cockpit,
-    frames: [{ caption: cockpit.caption, projection }],
-  };
-});
-
 // Timelines first (build-up · tear-down · the 8 failure modes), then the folded-in resting frames.
 export const SCENARIOS: Scenario[] = [
   buildUp,
@@ -277,6 +216,5 @@ export const SCENARIOS: Scenario[] = [
   liveSync,
   integrationConflict,
   abandon,
-  ...cockpitScenarios,
   ...restingScenarios,
 ];

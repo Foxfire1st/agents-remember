@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.cli import paseo_frame, role_launch_routes
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_frame import (
@@ -17,7 +18,6 @@ from agents_remember.cli.paseo_frame import (
     host_frame_facts,
     normalise_origin,
 )
-from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoEmbedEntry,
@@ -187,7 +187,7 @@ class PaseoFrameTests(unittest.TestCase):
             {
                 "available": False,
                 "reason": "not-configured",
-                "detail": f"{user_agentic_settings_path()} has no paseoRuntime block",
+                "detail": f"{user_settings_path_for_write()} has no paseoRuntime block",
             },
         )
 

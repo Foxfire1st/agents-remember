@@ -54,13 +54,11 @@ leaf's delta — a new project entering ordinary setup, an existing project with
 knowledge records, or an explicitly requested bootstrap of an existing project — the inputs are the
 repository id the MCP authority settings declare, the resolved coordination context, the requested
 scope, the available sources and the current knowledge state. There is no brief, no change set and no
-enclosure contract to intake. **This seat is admitted for it either way:** opened on a leaf's task
-document it takes the leaf pass, and opened with **no** task document it is the taskless carrier of
-this entry — `curator` joined the taskless seat roles by the developer's **2026-09-24 ruling**, taken
-when the missing route was put to them. On a repository with no task at all the step can also be
-carried by the taskless **bootstrap** seat (it reads the state and hands it on) and by the taskless
-writer an instructed session holds. The procedure is the `c-14-knowledge-bootstrap` skill. Onboarding
-is optional input there and is never required to start.
+enclosure contract to intake. **This seat is started only on a leaf's task document**, where it takes
+the leaf pass; it does not open with **no** task document. On a repository with no task at all the
+step is carried by the taskless **bootstrap** seat (it reads the state and hands it on) and by the
+taskless writer an instructed session holds under this role's rules. The procedure is the
+`c-14-knowledge-bootstrap` skill. Onboarding is optional input there and is never required to start.
 
 **On the leaf pass**, every MCP call you make carries that contract path. Without it the tools resolve
 the *official* memory repo: your diagnostics would describe the wrong tree, and `route_index_refresh` on `agents-remember-task`
@@ -123,10 +121,10 @@ The result is review evidence, never a new closeout gate or an intent verdict.
 
 **The repository-foundation entry — the same reconciliation, without this leaf's delta.** Run the
 `c-14-knowledge-bootstrap` skill: read the state at the declared knowledge location, and author
-through the curator's own writer in the shape `../templates/curator-handoff-list.md` owns. **Which entry depends on the scope this seat runs in**: on a leaf's task document it is the leaf
+through the curator's own writer in the shape `../templates/curator-handoff-list.md` owns. **Which entry depends on the task document**: on a leaf's task document, where this seat runs, it is the leaf
 entry, `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --commit`,
 which writes into this leaf's memory worktree; with **no** task document —
-the taskless seat the developer's 2026-09-24 ruling admits — there is no enclosure to name, so it is
+an instructed session, never this seat — there is no enclosure to name, so it is
 the taskless `agents-remember knowledge-bootstrap` entry, which belongs to a session with **no
 enclosure in scope** and refuses one (`enclosure_in_scope`) because a bootstrap must not write onto a
 task's line. Neither route is fabricated: no leaf, worktree or enclosure is ever created to give either
@@ -224,7 +222,7 @@ Repository-foundation and other admissions retain their brief's transport withou
   silence a finding.** The closeout records the real commits after your handoff; the ledger is a derived cache.
 - Never accept a subset result in place of the full operation, and never pass incomplete onboarding.
 - Do not absorb another seat's work — a pasted brief for a different seat is refused and reported to the owning seat.
-- Operator knobs (`harness`, `model`, `effort`, `serviceTier`, `launchArgs`, `sessionCommands`, `promptKeywords`) are settings, not
+- Operator knobs (`harness`, `model`, `effort`, `serviceTier`) are settings, not
   yours to set.
 
 ## Where your stage ends

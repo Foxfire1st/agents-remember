@@ -15,13 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.kernel.harnesses import HARNESSES, Harness
+from agents_remember.kernel.harnesses import HARNESS_IDS
 from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
-)
-from agents_remember.kernel.primitives.inbox_backoff import (
-    DEFAULT_RATE_LIMIT_SECONDS,
 )
 from agents_remember.kernel.primitives.user_settings_location import (
     UserSettingsLocationError,
@@ -48,19 +45,15 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "concurrency",
         "spawn",
         "harnesses",
-        "expectations",
-        # Compatibility window (260713-TES-L1): the legacy key is accepted as an explicit
-        # alias for ``agentNotifier`` with a loud deprecation, then removed with the window.
-        "supervisor",
-        "agentNotifier",
         "qualityGate",
         # MIK-R117: the bound on the characters of one role_message text.
         "roleMessageLimit",
     }
 )
-# One ``orchestration.harnesses.<id>`` entry (260703-L16): define a NEW harness or override a
-# builtin's defaults. Schema + worked example: ``docs/reference/harnesses.md`` (THE manual).
-KNOWN_HARNESS_ENTRY_FIELDS = frozenset(
+# MIK-R113 rule 4: keys an earlier build read and this one does not. A file that holds one
+# loads; none is read or checked, and :func:`unused_orchestration_keys` names the ones it holds.
+UNUSED_ORCHESTRATION_FIELDS = frozenset({"expectations", "supervisor", "agentNotifier"})
+UNUSED_HARNESS_ENTRY_FIELDS = frozenset(
     {
         "name",
         "command",
@@ -72,6 +65,7 @@ KNOWN_HARNESS_ENTRY_FIELDS = frozenset(
         "effortSessionCommand",
     }
 )
+UNUSED_ROLE_KNOB_FIELDS = frozenset({"launchArgs", "promptKeywords", "sessionCommands"})
 KNOWN_GATE_DELEGATION_FIELDS = frozenset({"policy", "kinds", "requireReviewerVerdictAtSeams"})
 KNOWN_GATE_POLICY_KIND_FIELDS = frozenset({"role", "requireReviewerVerdict"})
 # Optional hard cap for the full Dagger quality gate. When absent, the container runtime's
@@ -112,9 +106,6 @@ KNOWN_ROLE_KNOB_FIELDS = frozenset(
         "mode",
         "featureValues",
         "notes",
-        "launchArgs",
-        "promptKeywords",
-        "sessionCommands",
     }
 )
 # R71 rule 20: unknown features carry permission authority until explicitly classified.
@@ -139,52 +130,9 @@ def role_feature_values(knobs: RoleKnobs, source: str) -> dict[str, str | bool]:
 
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
-# R1/R5 (260707-HFX2-L2): the deterministic agent-notifier sweep's own knobs -- interval, enable
-# flag, self-liveness staleness cutoff, inbox redelivery rate limit, owner-signal cooldown, and
-# the per-sweep load-shed budgets.
-KNOWN_AGENT_NOTIFIER_FIELDS = frozenset(
-    {
-        "enabled",
-        "intervalSeconds",
-        "staleCutoffSeconds",
-        "redeliverRateLimitSeconds",
-        "signalCooldownSeconds",
-        "redeliverBudget",
-        "escalationBudget",
-    }
-)
-DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS = 10.0
-DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS = 60.0
-DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET = 1
-# CS-6 D1 (260707-HFX2-L12): per-sweep cap on owner-signal emission (seat-liveness +
-# dead-upstream), the twin of the redeliver budget. Bounds the synchronous hosted pastes one
-# sweep can do; deferred findings re-fire next sweep (level-triggered) so nothing is lost.
-DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET = 250
-# R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
-# what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
-# Orchestration Expectations). Kept as a plain string set here (not imported from
-# controlplane.expectation_rows) to avoid a kernel<->controlplane import cycle. Together with
-# ``ExpectationKind`` in expectation_rows.py it forms the kind vocabulary, and the two are
-# deliberately NOT equal: the active members stay aligned, while the record Literal additionally
-# keeps the retired ``turn-report-by``/``ack-by`` values for legacy-row parse compatibility only.
-# Those two have no membership in this set and no entry in DEFAULT_EXPECTATION_SLA_SECONDS, so a
-# settings write or an SLA lookup for them fails loud instead of resurrecting a retired deadline.
-KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by"})
-KNOWN_EXPECTATIONS_FIELDS = frozenset({"defaults"})
-DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
-    "briefed-by": 120.0,
-    "verdict-by": 1800.0,
-}
-
 # MIK-R117: where the settings name no role-message limit, one text holds this
 # many characters. The message file itself has no limit.
 DEFAULT_ROLE_MESSAGE_LIMIT = 1000
-
-# The ids of the builtin harness registry. Harness references (roles.<role>.harness,
-# spawn.harness) are validated against the EFFECTIVE id set -- these plus any
-# orchestration.harnesses-defined ids -- so a settings value can never inject argv through a
-# reference; argv is definable only through the explicit harnesses family (260703-L16).
-HARNESS_IDS = tuple(harness.id for harness in HARNESSES)
 
 # The review budget is a tunable orchestration preference (MIK-R116): a review
 # takes as many rounds without an approval as ``orchestration.loops.defaults.maxRounds``
@@ -246,13 +194,8 @@ class RoleChoiceOrigin:
 class RoleKnobs:
     """One role's knob overrides (``orchestration.roles.<role>``); ``None`` = role-file default.
 
-    ``harness``/``model``/``effort`` are free strings HERE. A Paseo launch validates provider and model choices against its host catalog; terminal dispatch still requires its existing registry adapter. Native adapters
-    validate them against their token-free dynamic catalog at launch; settings-defined non-native
-    harnesses use their explicit registry mappings at dispatch. The
-    free-form escape hatch (``launch_args``/``prompt_keywords``/``session_commands``, JSON keys
-    ``launchArgs``/``promptKeywords``/``sessionCommands``) is shape-checked only (a list of
-    non-empty strings) and NEVER content-validated; the spawn path records it in spawn provenance.
-    Empty tuple = not configured.
+    ``harness``/``model``/``effort`` are free strings HERE. A launch validates provider and model
+    choices against the host's catalog.
     """
 
     harness: str | None = None
@@ -263,9 +206,6 @@ class RoleKnobs:
     feature_values: dict[str, str | bool] = field(default_factory=dict)
     notes: str | None = None
     origins: dict[str, RoleChoiceOrigin] = field(default_factory=dict, compare=False, repr=False)
-    launch_args: tuple[str, ...] = ()
-    prompt_keywords: tuple[str, ...] = ()
-    session_commands: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -275,43 +215,6 @@ class ConcurrencySettings:
     max_parallel_masters: int | None = None
     max_parallel_leaves: int | None = None
     max_sub_agents: int | None = None
-
-
-@dataclass(frozen=True)
-class ExpectationSettings:
-    """``orchestration.expectations`` -- owner-visible deadline SLAs (R2, 260707-HFX2-L1).
-
-    The relay never evaluates these rows; they are an owner-visible deadline surface written at
-    dispatch-brief (``briefed-by``) and gate open (``verdict-by``), configurable per kind here and
-    defaulting to :data:`DEFAULT_EXPECTATION_SLA_SECONDS`.
-    """
-
-    sla_seconds: dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_EXPECTATION_SLA_SECONDS)
-    )
-
-    def sla_for(self, kind: str) -> float:
-        return self.sla_seconds.get(kind, DEFAULT_EXPECTATION_SLA_SECONDS[kind])
-
-
-@dataclass(frozen=True)
-class AgentNotifierSettings:
-    """``orchestration.agentNotifier`` -- the deterministic sweep's knobs (R1/R5, 260707-HFX2-L2).
-
-    ``redeliver_rate_limit_seconds`` of ``None`` inherits ``OperatorInboxStore.list_redeliverable``'s
-    own default. ``signal_cooldown_seconds`` controls agent-notifier pane/seat-liveness signal
-    posts. ``redeliver_budget``/``escalation_budget`` are per-sweep load-shed caps: they bound how
-    many redeliveries and owner-signal emissions one sweep performs; shed findings re-fire next
-    sweep (level-triggered), so nothing is lost.
-    """
-
-    enabled: bool = True
-    interval_seconds: float = DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS
-    stale_cutoff_seconds: float = DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS
-    redeliver_rate_limit_seconds: float | None = None
-    signal_cooldown_seconds: float = DEFAULT_RATE_LIMIT_SECONDS
-    redeliver_budget: int = DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET
-    escalation_budget: int = DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET
 
 
 @dataclass(frozen=True)
@@ -343,17 +246,15 @@ class AgenticSettings:
     # (see :meth:`resolved_role_knobs`). Level vocabulary matches ``loops.perLevel``.
     roles_per_level: dict[str, dict[str, RoleKnobs]] = field(default_factory=dict)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
-    expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
-    agent_notifier: AgentNotifierSettings = field(default_factory=AgentNotifierSettings)
     quality_gate: QualityGateSettings = field(default_factory=QualityGateSettings)
     # MIK-R117: the bound on the characters of one role_message text, read per
     # call so a changed number holds for the next call without a restart.
     role_message_limit: int = DEFAULT_ROLE_MESSAGE_LIMIT
     spawn_harness: str | None = None
-    # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the
-    # ``orchestration.harnesses`` family -- new ids added, builtin ids possibly pre-customized.
-    # The spawn path resolves harness ids against THIS set, never the builtin table directly.
-    harnesses: tuple[Harness, ...] = HARNESSES
+    # The EFFECTIVE harness ids: the builtin ones, then each id ``orchestration.harnesses`` adds.
+    harness_ids: tuple[str, ...] = HARNESS_IDS
+    # MIK-R113 rule 4: the keys the merged files hold that are no longer read, as dotted names.
+    unused_keys: tuple[str, ...] = ()
     # The settings files that existed and were merged, global first.
     sources: tuple[Path, ...] = ()
 
@@ -365,7 +266,7 @@ class AgenticSettings:
 
         The per-level override deep-merges over the flat role default at leaf-key granularity: an
         unset override field inherits the default (harness inherited unless overridden), a set one
-        replaces it (the free-form lists REPLACE, never concatenate -- the array rule). Because
+        replaces it. Because
         both families were already merged local-over-global per file layer, this realizes the full
         dispatch chain: repo-local level override > global level override > repo-local role
         default > global role default.
@@ -384,14 +285,7 @@ class AgenticSettings:
             feature_values={**base.feature_values, **override.feature_values},
             notes=override.notes or base.notes,
             origins={**base.origins, **override.origins},
-            launch_args=override.launch_args or base.launch_args,
-            prompt_keywords=override.prompt_keywords or base.prompt_keywords,
-            session_commands=override.session_commands or base.session_commands,
         )
-
-    def find_harness(self, harness_id: str) -> Harness | None:
-        """The effective :class:`Harness` for ``harness_id`` (builtin merged with settings)."""
-        return next((harness for harness in self.harnesses if harness.id == harness_id), None)
 
 
 def agentic_settings_path(root: Path) -> Path:
@@ -466,6 +360,25 @@ def merge_settings(base: dict[str, Any], override: dict[str, Any]) -> dict[str, 
     return merged
 
 
+def unused_orchestration_keys(raw: dict[str, Any]) -> tuple[str, ...]:
+    """The keys of one validated ``orchestration`` block that are no longer read, dotted."""
+    names = [f"orchestration.{key}" for key in sorted(UNUSED_ORCHESTRATION_FIELDS & raw.keys())]
+    for harness_id, entry in raw.get("harnesses", {}).items():
+        owner = f"orchestration.harnesses.{harness_id}"
+        names.extend(f"{owner}.{key}" for key in sorted(UNUSED_HARNESS_ENTRY_FIELDS & entry.keys()))
+    role_tables = [("orchestration.roles", raw.get("roles", {}))]
+    role_tables.extend(
+        (f"orchestration.rolesPerLevel.{level}", roles)
+        for level, roles in raw.get("rolesPerLevel", {}).items()
+    )
+    for owner, roles in role_tables:
+        for role, knobs in roles.items():
+            names.extend(
+                f"{owner}.{role}.{key}" for key in sorted(UNUSED_ROLE_KNOB_FIELDS & knobs.keys())
+            )
+    return tuple(names)
+
+
 def _refuse_unknown(raw: dict[str, Any], known: frozenset[str], owner: str, source: str) -> None:
     unknown = sorted(set(raw) - known)
     if unknown:
@@ -497,48 +410,12 @@ def _require_positive_int(raw: object, owner: str, source: str) -> int:
     return raw
 
 
-def _require_positive_number(raw: object, owner: str, source: str) -> float:
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw <= 0:
-        raise AgenticSettingsError(f"{owner} must be a positive number: {source}")
-    return float(raw)
-
-
-def _require_bool(raw: object, owner: str, source: str) -> bool:
-    if not isinstance(raw, bool):
-        raise AgenticSettingsError(f"{owner} must be a boolean: {source}")
-    return raw
-
-
-def _require_string_list(raw: object, owner: str, source: str) -> tuple[str, ...]:
-    """A free-form list of non-empty strings (shape-checked only; content never validated).
-
-    An EMPTY list is refused (PR #100 review follow-up): ``RoleKnobs`` cannot distinguish
-    "absent" from "explicitly cleared" (empty tuple = not configured), so a per-level ``[]``
-    meant to clear a flat default would silently INHERIT it instead — the same silent-degrade
-    shape as a ``null`` family key (260703-L18 finding 6). Omit the key to inherit; list
-    values to override.
-    """
-    if not isinstance(raw, list):
-        raise AgenticSettingsError(f"{owner} must be a list of non-empty strings: {source}")
-    if not raw:
-        raise AgenticSettingsError(
-            f"{owner} must not be an empty list (omit the key to inherit, or list the values "
-            f"to override): {source}"
-        )
-    values: list[str] = []
-    for item in raw:
-        if not isinstance(item, str) or not item:
-            raise AgenticSettingsError(f"{owner} must be a list of non-empty strings: {source}")
-        values.append(item)
-    return tuple(values)
-
-
 def _require_harness_id(
     raw: object, owner: str, source: str, harness_ids: tuple[str, ...] | None
 ) -> str:
     """A harness reference: shape-checked always, membership-checked against the EFFECTIVE id set.
 
-    ``harness_ids`` is the effective registry (builtin merged with ``orchestration.harnesses``);
+    ``harness_ids`` is the effective id set (builtin, then ``orchestration.harnesses``);
     ``None`` skips membership -- the per-file (non-strict) pass, where the other layer may declare
     the id.
     """
@@ -546,7 +423,7 @@ def _require_harness_id(
     if harness_ids is not None and value not in harness_ids:
         allowed = ", ".join(harness_ids)
         raise AgenticSettingsError(
-            f"{owner} must be a harness registry id or an orchestration.harnesses-defined id "
-            f"({allowed}), got {value!r}: {source} (see docs/reference/harnesses.md)"
+            f"{owner} must be a builtin harness id or an orchestration.harnesses-defined id "
+            f"({allowed}), got {value!r}: {source}"
         )
     return value

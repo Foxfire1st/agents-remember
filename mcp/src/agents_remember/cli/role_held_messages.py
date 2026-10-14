@@ -21,9 +21,7 @@ Delivery: one process delivers (``drain_held`` under the store file's lock, so n
 deliveries to one recipient run at once). Everything held for a recipient goes in one
 delivery, in the order taken, each under the line naming its sender; a further message
 is held behind what waits even when the host could take it at that moment. The store
-calls nothing of the product's own hosted-seat messaging (``message_child``,
-``message_parent``, the stores under ``controlplane/``); it shares only the generic
-file lock. How the product learns a prompt was answered, a turn ended, or a start
+shares only the generic file lock with the rest of the product. How the product learns a prompt was answered, a turn ended, or a start
 finished is one read of the agent before each drain; the dashboard sweep runs that
 read every ``HELD_DELIVERY_SWEEP_SECONDS``.
 """

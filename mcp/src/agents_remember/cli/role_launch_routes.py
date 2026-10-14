@@ -22,6 +22,7 @@ from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
     TASKLESS_ROLES,
     RoleLaunchContext,
+    parentless_selection_violation,
     resolve_role_launch_context,
     selection_binding,
 )
@@ -96,6 +97,7 @@ from agents_remember.models.role_launcher import (
     RoleLauncherOptionsRequest,
     RoleResultRequest,
 )
+from agents_remember.serving.paseo.paseo_daemon_config import provider_denied_tools
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 _DISPATCH_LOCK = threading.Lock()
@@ -234,6 +236,18 @@ def _role_launch_dispatch_endpoint(
     """
 
     _require_paseo_runtime(config)
+    if request.action == "start" and request.chat_started:
+        # MIK-R113 rule 6: a chat without a role starts through the same table as
+        # the dashboard's start. The resolver below would refuse the same selection
+        # with the same reason; this names it before the lock is taken.
+        violated = parentless_selection_violation(
+            request.role,
+            request.sprint_document_ref,
+            request.master_document_ref,
+            request.task_document_ref,
+        )
+        if violated is not None:
+            raise HTTPException(status_code=409, detail=violated)
     _acquire_dispatch_lock(lock_wait_seconds)
     role_launch_progress.begin(request.request_id)
     try:
@@ -507,6 +521,7 @@ def _start_execution(
         agent_override=request.agent_override,
         request_id=request.request_id,
         started_by=started_by,
+        chat_started=request.chat_started,
     )
     prepared = role_handover.handover
     prompt = prepared["prompt"]
@@ -583,6 +598,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             handover_artifact=artifact,
             settings_file=start.config.config_path,
             accepts_tool_servers=provider_accepts_tool_servers(start.config, provider),
+            host_denied_tools=_host_denied_tools(start.config, provider),
             replaces_agent_id=start.replaces_agent_id,
             parent_agent_id=start.started_by.agent_id if start.started_by else None,
             held=start.held,
@@ -712,6 +728,13 @@ def _require_paseo_runtime(config: McpRuntimeConfig) -> None:
         require_bridge_runtime(config)
     except PaseoBridgeFailure as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+def _host_denied_tools(config: McpRuntimeConfig, provider: str) -> tuple[str, ...]:
+    """The tool rules the host's own configuration denies in the options of this provider."""
+
+    runtime = config.paseo_runtime
+    return provider_denied_tools(runtime.home, provider) if runtime is not None else ()
 
 
 def _bridge_http_error(error: PaseoBridgeFailure) -> HTTPException:

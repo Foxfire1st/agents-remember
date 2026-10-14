@@ -11,6 +11,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application import review_leaf_view_memo, review_tree_knowledge
 from agents_remember.application.knowledge_gate import evaluate_leaf_gate
 from agents_remember.application.knowledge_gate import memo as gate_memo
@@ -19,7 +20,6 @@ from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import reviewer_worklist_process as process_owner
-from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.coordination_context.paths import settings_path_for_roots
 from agents_remember.kernel.coordination_context.resolver import detect_coordination_selection
 from agents_remember.kernel.coordination_context.settings import parse_coordination_settings
@@ -284,7 +284,7 @@ def _settings_selection(root: Path) -> None:
         (directory / "system").mkdir(parents=True)
     higher = memory / "system/settings.md"
     markdown = coordination / "system/settings.md"
-    machine = user_agentic_settings_path()
+    machine = user_settings_path_for_write()
     machine.parent.mkdir(parents=True, exist_ok=True)
     raw = b"```yaml\ronboarding:\r  storage:\r    mode: memory-repo\r```\r"
     markdown.write_bytes(raw)
@@ -315,7 +315,7 @@ def _fallback_reads(fixture: World) -> None:
 
     external = fixture.config.coordination_root / "memory-repos" / f"ar-{REPO}"
     external.mkdir(parents=True)
-    user = user_agentic_settings_path()
+    user = user_settings_path_for_write()
     user.parent.mkdir(parents=True, exist_ok=True)
     user.write_text(json.dumps({"storage": {"mode": "memory-repo"}}))
     contract, _trees = _live(fixture)
@@ -771,8 +771,8 @@ def _external_ledger(fixture: World) -> None:
     commit(memory, {"memory.md": raw.decode()})
     ledger = memory / "memory.md"
     _settings(fixture.config.coordination_root, "memory-repo")
-    user_agentic_settings_path().parent.mkdir(parents=True, exist_ok=True)
-    user_agentic_settings_path().write_text(
+    user_settings_path_for_write().parent.mkdir(parents=True, exist_ok=True)
+    user_settings_path_for_write().write_text(
         json.dumps(
             {
                 "storage": {"mode": "memory-repo"},

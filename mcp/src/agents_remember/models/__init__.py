@@ -1,9 +1,6 @@
 """Pydantic response contracts for Agents Remember MCP tools."""
 
 from agents_remember.kernel.memory_mode import MemoryMode
-from agents_remember.models import (
-    conversations as conversations,  # curated package surface
-)
 from agents_remember.models.base import (
     FlexibleResponseModel,
     FlexibleToolResponse,
@@ -65,7 +62,7 @@ from agents_remember.models.tokens import (
     finalize_payload_tokens,
     response_payload,
 )
-from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.worktree import (
     CleanupStatus,
     HumanReviewStatus,
@@ -90,7 +87,7 @@ from agents_remember.models.worktree import (
 
 __all__ = [
     "DEFAULT_TOKEN_COUNTER",
-    "PUBLIC_TOOL_RESPONSE_MODELS",
+    "TOOL_RESPONSE_MODELS",
     "ApproximateTokenCounter",
     "CGCCalleesResponse",
     "CGCCallersResponse",

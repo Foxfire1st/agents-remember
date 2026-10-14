@@ -23,12 +23,6 @@ from __future__ import annotations
 TOOL_DESCRIPTION_MAX_CHARS = 600
 TOOL_ARGUMENT_DESCRIPTION_MAX_CHARS = 120
 
-# `dispatch_agent` stays registered until L113 removes it (D128); it keeps its
-# description, held to the length it has when this leaf lands.
-RETAINED_DESCRIPTION_LENGTHS: dict[str, int] = {
-    "dispatch_agent": 1114,
-}
-
 INTERIM_DESCRIPTION_OWNERS: dict[str, str] = {
     "memory_quality_check": "L110",
     "citation_fix": "L110",

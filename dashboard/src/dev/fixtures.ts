@@ -39,7 +39,6 @@ function lifecycle(
     startedAt: "2026-06-14T09:00:00+00:00",
     lastEventTs: "2026-06-14T09:00:30+00:00",
     inferred: false,
-    actions: [],
     ...over,
   });
 }
@@ -170,28 +169,9 @@ export const GALLERY: GalleryEntry[] = [
           repoId: "agents-remember",
           enclosure: "wt-a",
           staleSeconds: 95,
-          ask: { question: "Approve the plan?" },
-          actions: [{ action: "resume", enabled: true }],
         }),
       ],
       providers: [ok("codegraphcontext-code"), ok("grepai-memory")],
-      analytics: {
-        ...EMPTY_ANALYTICS,
-        attentionQueue: [
-          {
-            id: "blocked-gate:plan-002",
-            kind: "blocked-gate",
-            severity: "warn",
-            lane: "lifecycle",
-            title: "Gate — input needed",
-            detail: "Approve the plan?",
-            waitSeconds: 95,
-            lifecycleId: "plan-002",
-            enclosure: "wt-a",
-            repoId: "agents-remember",
-          },
-        ],
-      },
     }),
   },
   {
@@ -283,8 +263,6 @@ export const GALLERY: GalleryEntry[] = [
           repoId: "agents-remember",
           enclosure: "wt-a2",
           staleSeconds: 140,
-          ask: { question: "Approve the plan?" },
-          actions: [{ action: "resume", enabled: true }],
         }),
         lifecycle({
           id: "old-003",
@@ -387,18 +365,6 @@ export const GALLERY: GalleryEntry[] = [
         ],
         attentionQueue: [
           {
-            id: "blocked-gate:plan-002",
-            kind: "blocked-gate",
-            severity: "warn",
-            lane: "lifecycle",
-            title: "Gate — input needed",
-            detail: "Approve the plan?",
-            waitSeconds: 140,
-            lifecycleId: "plan-002",
-            enclosure: "wt-a2",
-            repoId: "agents-remember",
-          },
-          {
             id: "actionable-drift:agents-remember",
             kind: "actionable-drift",
             severity: "warn",
@@ -416,45 +382,6 @@ export const GALLERY: GalleryEntry[] = [
             waitSeconds: 6200,
             lifecycleId: "old-003",
             repoId: "repo-b",
-          },
-        ],
-      },
-    }),
-  },
-  {
-    name: "gate-review",
-    projection: project({
-      lifecycles: [
-        lifecycle({
-          id: "closeout-005",
-          state: "blocked",
-          phase: "close",
-          repoId: "agents-remember",
-          enclosure: "wt-a",
-          staleSeconds: 30,
-          gate: {
-            id: "01HGATE",
-            kind: "closeout-approval",
-            state: "open",
-            evidenceRefs: [],
-            decisions: ["approve", "cancel", "reject", "request-revision"],
-            packet: { changedPaths: 6 },
-            ts: "2026-06-14T09:00:30+00:00",
-          },
-        }),
-      ],
-      providers: [ok("codegraphcontext-code"), ok("grepai-memory")],
-      analytics: {
-        ...EMPTY_ANALYTICS,
-        attentionQueue: [
-          {
-            id: "gate:01HGATE",
-            kind: "gate-open",
-            severity: "warn",
-            lane: "lifecycle",
-            title: "Gate — closeout-approval",
-            detail: "awaiting your decision",
-            lifecycleId: "closeout-005",
           },
         ],
       },

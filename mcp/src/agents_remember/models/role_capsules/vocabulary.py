@@ -19,10 +19,8 @@ earlier role therefore cannot shift because this one was added.
 **``bootstrap`` is a FREE agent, not a structural seat** (developer ruling 2026-09-16:
 *"It is not a task related agent. Can't be. It needs to be free agent. All what it needs
 is that can 'call'."*). It has no task altitude and is deliberately absent from
-``SPRINT_ROLES``/``MASTER_ROLES``/``LEAF_ROLES`` and from
-``serving/structural_seats.py``: a session opens with ``AR_SPAWN_ROLE=bootstrap`` and no
-task document, and its instructions are its compiled capsule rather than a dispatch
-brief. Do **not** "fix" the absent altitude by adding one — a task altitude is the wrong
+``SPRINT_ROLES``/``MASTER_ROLES``/``LEAF_ROLES``: its session has no
+task document, and its instructions are its compiled capsule. Do **not** "fix" the absent altitude by adding one — a task altitude is the wrong
 shape for this seat.
 """
 

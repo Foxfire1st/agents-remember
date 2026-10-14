@@ -77,8 +77,6 @@ describe('head identity and title chrome (L127-C-F02)', () => {
         series: [series],
         attentionQueue: [],
         engineProcesses: [],
-        agentPickups: [],
-        expectationRows: [],
       },
     });
     const { container } = render(<DetailPanel selectedId="series:s1" />);
@@ -118,8 +116,6 @@ describe('head identity and title chrome (L127-C-F02)', () => {
         series: [],
         attentionQueue: [],
         engineProcesses: [],
-        agentPickups: [],
-        expectationRows: [],
       },
     });
     const { container, getByTestId } = render(<DetailPanel selectedId="LC-H2" />);

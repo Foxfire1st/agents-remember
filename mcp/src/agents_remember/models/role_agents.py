@@ -239,7 +239,9 @@ class RoleStartSetResponse(ToolResponse):
 
     ``seats`` carries worker, reviewer and curator in that order: each names its agent,
     its seat request id, whether the seat is held (no turn yet) or opened at once, and
-    whether the host records a turn for it. ``ok`` is true only when all three seats
+    whether the host records a turn for it. A seat that has an agent also says whether the
+    agent carries the product's other server (``secondCopyLoaded``, as ``RoleStartResponse``
+    says it of a single start). ``ok`` is true only when all three seats
     have an agent; a partial set names the failed seat, leaves the others as they are,
     and a repeat with the same set request id completes it.
     """

@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from agents_remember.controlplane.durable_store import (
-    OPERATOR_INBOX_OWNERSHIP,
+    GATE_OWNERSHIP,
     append_line,
     declared_process_role,
     exclusive_access,
@@ -103,25 +103,24 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         self.assertEqual(config.providers, {})
         self.assertFalse(config.dashboard.auto_start)
         self.assertFalse(config.benchmarks_enabled)
-        self.assertFalse(config.retirement.auto_close_completed_seats)
         self.assertFalse(live_settings.parent.joinpath("live-ar-coordination").exists())
 
     @pytest.mark.integration
     @pytest.mark.usefixtures("worktree_services")
-    def test_incident_shaped_inbox_write_lands_only_in_leaf_dummy_root(self) -> None:
+    def test_incident_shaped_store_write_lands_only_in_leaf_dummy_root(self) -> None:
         _checkout, source = self._checkout()
         self._undeclared_checkout(source)
         settings = self.root / "live-settings.json"
         self._settings(settings)
         config = load_config(settings)
-        inbox = config.coordination_root / "observer" / "workspace" / "operator-inbox.jsonl"
+        gates = config.coordination_root / "observer" / "workspace" / "gates.jsonl"
 
-        with exclusive_access(inbox, OPERATOR_INBOX_OWNERSHIP):
-            append_line(inbox, '{"candidateField":"unpublished"}')
+        with exclusive_access(gates, GATE_OWNERSHIP):
+            append_line(gates, '{"candidateField":"unpublished"}')
 
-        self.assertTrue(inbox.is_file())
+        self.assertTrue(gates.is_file())
         self.assertEqual(
-            inbox.read_text(encoding="utf-8"),
+            gates.read_text(encoding="utf-8"),
             '{"candidateField":"unpublished"}\n',
         )
         self.assertFalse((self.root / "live-ar-coordination").exists())
@@ -131,9 +130,9 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
     def test_store_guard_refuses_escape_before_creating_lock_or_parent(self) -> None:
         _checkout, source = self._checkout()
         self._undeclared_checkout(source)
-        escaped = self.root / "live-ar-coordination" / "operator-inbox.jsonl"
+        escaped = self.root / "live-ar-coordination" / "gates.jsonl"
 
-        guard = exclusive_access(escaped, OPERATOR_INBOX_OWNERSHIP)
+        guard = exclusive_access(escaped, GATE_OWNERSHIP)
         with self.assertRaisesRegex(CheckoutCoordinationError, "leaf-local"):
             guard.__enter__()
 
@@ -145,19 +144,19 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         self._undeclared_checkout(source)
         report = checkout.parent / "reports" / "closeout-operation.json"
 
-        with exclusive_access(report, OPERATOR_INBOX_OWNERSHIP):
-            rewrite_lines(report, ['{"status":"running"}'], OPERATOR_INBOX_OWNERSHIP)
+        with exclusive_access(report, GATE_OWNERSHIP):
+            rewrite_lines(report, ['{"status":"running"}'], GATE_OWNERSHIP)
 
         self.assertEqual(report.read_text(encoding="utf-8"), '{"status":"running"}\n')
-        self.assertFalse((checkout.parent / "operator-inbox.jsonl").exists())
+        self.assertFalse((checkout.parent / "gates.jsonl").exists())
 
     def test_rewrite_guard_refuses_a_manually_constructed_live_target(self) -> None:
         _checkout, source = self._checkout()
         self._undeclared_checkout(source)
-        escaped = self.root / "live-ar-coordination" / "operator-inbox.jsonl"
+        escaped = self.root / "live-ar-coordination" / "gates.jsonl"
 
         with self.assertRaisesRegex(CheckoutCoordinationError, "refused target"):
-            rewrite_lines(escaped, ["unsafe"], OPERATOR_INBOX_OWNERSHIP)
+            rewrite_lines(escaped, ["unsafe"], GATE_OWNERSHIP)
 
         self.assertFalse(escaped.parent.exists())
 

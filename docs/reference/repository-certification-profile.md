@@ -190,9 +190,9 @@ repository, not a generic default.
 That reference instance records the complete approved Agents Remember inventory: runtime,
 dependency, configuration/scope, generated projections/skills/runtime/harness, Python and
 dashboard Gate-1 checks including exact selection ownership; both ordinary suites in Gate 2;
-suite-artifact consumers in Gate 3; and the current clean-room, real-client, provider, browser,
-and teardown/process-cleanliness work in Gate 4. The inventory remains repository data. Generic
-profile code neither imports nor recognizes those rail names.
+suite-artifact consumers in Gate 3; and the current clean-room real-client, provider and browser
+work in Gate 4. The inventory remains repository data. Generic profile code neither imports nor
+recognizes those rail names.
 
 ## Execution and evidence
 

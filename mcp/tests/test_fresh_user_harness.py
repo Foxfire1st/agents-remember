@@ -87,6 +87,7 @@ run_fresh_user = _load("run_fresh_user")
 GOVERNED_HARNESS_MODULES = (
     "scripts/e2e_harness/fresh_user_fixture.py",
     "scripts/e2e_harness/fresh_user_scenario.py",
+    "scripts/e2e_harness/reporting.py",
     "scripts/e2e_harness/run_fresh_user.py",
 )
 """The governed artifacts this module consumes, as exact paths.

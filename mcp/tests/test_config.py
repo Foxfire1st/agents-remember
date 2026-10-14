@@ -9,7 +9,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.kernel.agentic_settings import user_agentic_settings_path
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeNotConfigured,
@@ -80,7 +80,7 @@ class McpConfigTests(unittest.TestCase):
                     },
                 ],
             }
-            shared = user_agentic_settings_path()
+            shared = user_settings_path_for_write()
             write_json(shared, {"paseoRuntime": block})
             configured = load_config(path).paseo_runtime
             assert configured is not None
@@ -332,7 +332,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
             if authority is not None:
                 payload["orchestration"] = authority
             if global_orchestration is not None:
-                global_path = user_agentic_settings_path()
+                global_path = user_settings_path_for_write()
                 write_json(global_path, {"orchestration": global_orchestration})
             path = root / "mcp-settings.json"
             write_json(path, payload)

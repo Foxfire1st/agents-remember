@@ -1,60 +1,7 @@
 {
   "activeWorktreeGroups": ["sim-group"],
   "analytics": {
-    "agentPickups": [
-      {
-        "ageSeconds": 50.0,
-        "agentId": "agent-worker-1",
-        "artifactPath": "/tmp/brief.md",
-        "attemptCount": 1,
-        "deliveredToSession": "session-7",
-        "deliveryState": "delivered",
-        "entryId": "entry-1",
-        "escalatedAt": "2026-06-14T09:04:00+00:00",
-        "gateId": "GATE-1",
-        "id": "pickup-1",
-        "lastAttemptAt": "2026-06-14T09:00:10+00:00",
-        "lifecycleId": "sim-replay-lifecycle",
-        "messageKind": "message",
-        "nextAttemptAt": "2026-06-14T09:05:10+00:00",
-        "ownerAgentId": "agent-worker-1",
-        "ownerLifecycleId": "sim-replay-lifecycle",
-        "ownerRole": "worker",
-        "ownerTaskDocumentRef": {
-          "path": "sim-master/SIM-1.json",
-          "repository": "sim-repo"
-        },
-        "recipientRole": "worker",
-        "senderAgentId": "agent-manager-1",
-        "senderRole": "manager",
-        "state": "check-chat",
-        "subjectTaskDocumentRef": {
-          "path": "sim-master/SIM-1.json",
-          "repository": "sim-repo"
-        },
-        "taskDocumentRef": {
-          "path": "sim-master/SIM-1.json",
-          "repository": "sim-repo"
-        },
-        "ttlSeconds": 900.0
-      }
-    ],
     "attentionQueue": [
-      {
-        "detail": "approve the gate?",
-        "enclosure": "sim-enclosure",
-        "gateId": "GATE-1",
-        "id": "blocked-gate:sim-replay-lifecycle",
-        "kind": "blocked-gate",
-        "lane": "lifecycle",
-        "lifecycleId": "sim-replay-lifecycle",
-        "providerId": "grepai-memory",
-        "repoId": "agents-remember",
-        "severity": "warn",
-        "signalTs": "2026-06-14T09:00:35+00:00",
-        "title": "Gate \u2014 input needed",
-        "waitSeconds": 20
-      },
       {
         "id": "provider-down:codegraphcontext-code",
         "kind": "provider-down",
@@ -75,6 +22,16 @@
         "severity": "info",
         "title": "Worktree awaiting cleanup",
         "waitSeconds": 900
+      },
+      {
+        "id": "stale-session:paused-002",
+        "kind": "stale-session",
+        "lane": "lifecycle",
+        "lifecycleId": "paused-002",
+        "severity": "info",
+        "signalTs": "2026-06-14T08:52:00+00:00",
+        "title": "Session gone quiet",
+        "waitSeconds": 540
       }
     ],
     "driftSnapshots": [
@@ -570,23 +527,6 @@
         "taskId": "SIM-8",
         "taskName": "landed",
         "worktreeGroup": "complete-group"
-      }
-    ],
-    "expectationRows": [
-      {
-        "dueAt": "2026-06-14T09:30:00+00:00",
-        "id": "expect-1",
-        "kind": "review",
-        "note": "worker report on the contract guard",
-        "overdue": false,
-        "sourceId": "agent-manager-1",
-        "state": "pending",
-        "subjectAgentId": "agent-worker-1",
-        "subjectLifecycleId": "sim-replay-lifecycle",
-        "taskDocumentRef": {
-          "path": "sim-master/SIM-1.json",
-          "repository": "sim-repo"
-        }
       }
     ],
     "ledgers": [
@@ -1866,39 +1806,8 @@
   "generatedAt": "2026-06-14T09:01:00+00:00",
   "lifecycles": [
     {
-      "actions": [
-        {
-          "action": "resume",
-          "enabled": true
-        },
-        {
-          "action": "end",
-          "disabledReason": "a gate is open",
-          "enabled": false,
-          "nextSafeAction": "gate_decide"
-        }
-      ],
-      "ask": {
-        "question": "approve the gate?"
-      },
       "enclosure": "sim-enclosure",
       "fleeting": false,
-      "gate": {
-        "decisions": ["approve", "revise"],
-        "evidenceRefs": [
-          {
-            "kind": "task-doc",
-            "path": "/tasks/sim/01.md"
-          }
-        ],
-        "id": "GATE-1",
-        "kind": "plan-approval",
-        "packet": {
-          "summary": "approve the gate?"
-        },
-        "state": "open",
-        "ts": "2026-06-14T09:00:35+00:00"
-      },
       "id": "sim-replay-lifecycle",
       "inferred": false,
       "lastEventTs": "2026-06-14T09:00:40+00:00",
@@ -1907,22 +1816,18 @@
       "scope": "agents-remember",
       "staleSeconds": 20.0,
       "startedAt": "2026-06-14T09:00:00+00:00",
-      "state": "blocked",
-      "stateEnteredAt": "2026-06-14T09:00:35+00:00"
+      "state": "blocked"
     },
     {
-      "actions": [],
       "fleeting": true,
       "id": "fleeting-001",
       "inferred": false,
       "lastEventTs": "2026-06-14T09:00:55+00:00",
       "phase": "reframe-research",
       "startedAt": "2026-06-14T09:00:50+00:00",
-      "state": "running",
-      "stateEnteredAt": "2026-06-14T09:00:50+00:00"
+      "state": "running"
     },
     {
-      "actions": [],
       "fleeting": false,
       "id": "paused-002",
       "inferred": true,
@@ -1930,59 +1835,34 @@
       "phase": "request",
       "staleSeconds": 540.0,
       "startedAt": "2026-06-14T08:40:00+00:00",
-      "state": "paused",
-      "stateEnteredAt": "2026-06-14T08:52:00+00:00"
+      "state": "paused"
     },
     {
-      "actions": [],
       "fleeting": false,
       "id": "awaiting-003",
       "inferred": false,
       "lastEventTs": "2026-06-14T08:58:00+00:00",
       "phase": "trust-checkpoint",
       "startedAt": "2026-06-14T08:30:00+00:00",
-      "state": "awaiting-developer",
-      "stateEnteredAt": "2026-06-14T08:58:00+00:00"
+      "state": "awaiting-developer"
     },
     {
-      "actions": [],
       "fleeting": false,
-      "gate": {
-        "decidedBy": "developer",
-        "decidedVia": "dashboard",
-        "decisions": ["approve"],
-        "evidenceRefs": [
-          {
-            "kind": "task-doc",
-            "path": "/tasks/sim/00.md"
-          }
-        ],
-        "id": "GATE-0",
-        "kind": "design-approval",
-        "packet": {
-          "summary": "approve the design?"
-        },
-        "state": "decided",
-        "ts": "2026-06-14T08:09:00+00:00"
-      },
       "id": "completed-004",
       "inferred": false,
       "lastEventTs": "2026-06-14T08:10:00+00:00",
       "phase": "decide",
       "startedAt": "2026-06-14T07:00:00+00:00",
-      "state": "completed",
-      "stateEnteredAt": "2026-06-14T08:10:00+00:00"
+      "state": "completed"
     },
     {
-      "actions": [],
       "fleeting": true,
       "id": "abandoned-005",
       "inferred": true,
       "lastEventTs": "2026-06-14T06:04:00+00:00",
       "phase": "close",
       "startedAt": "2026-06-14T06:00:00+00:00",
-      "state": "abandoned",
-      "stateEnteredAt": "2026-06-14T06:04:00+00:00"
+      "state": "abandoned"
     }
   ],
   "metrics": {
@@ -2019,22 +1899,5 @@
       "worktreeGroup": "sim-group"
     }
   ],
-  "terminalObserverHealth": {
-    "activeFailureCategory": "steady-state-refresh-failed",
-    "activeFailureSummary": "steady-state terminal observation failed",
-    "activeFailureType": "TimeoutError",
-    "ageSeconds": 3.0,
-    "attemptCount": 128,
-    "consecutiveFailureCount": 2,
-    "initialObservationSucceeded": true,
-    "lastAttemptAt": "2026-06-14T09:00:57+00:00",
-    "lastDurationSeconds": 12.5,
-    "lastSuccessAgeSeconds": 43.0,
-    "lastSuccessAt": "2026-06-14T09:00:17+00:00",
-    "schemaVersion": "ar-terminal-observer-health/v1",
-    "servingStartedAt": "2026-06-14T08:00:00+00:00",
-    "staleCutoffSeconds": 60.0,
-    "status": "degraded"
-  },
   "version": 1
 }

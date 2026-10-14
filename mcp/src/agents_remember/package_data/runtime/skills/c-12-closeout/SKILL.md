@@ -151,13 +151,11 @@ requires it is validated at admission, so a missing or stale record refuses ther
 its remedy — and nothing here runs the operation. Older tasks without code changes remain valid and
 do not need a profile merely to be read or resumed.
 
-For a developer-gated closeout, the relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
-preview/dry-run first, then deliver
-the preview facts and proposed messages as plain chat output ending with the commit ask, and
-**STOP / end your turn**. The handoff sets the `awaiting-developer` lifecycle state and surfaces a
-dashboard attention item. The developer approves on the dashboard or in the leaf's
-attached chat; your next turn resumes the lifecycle (`running`),
-clears the attention item, and runs `worktree_closeout_apply` — no explicit resume step is needed.
+For a developer-gated closeout, run the
+preview/dry-run first, then send
+the preview facts and proposed messages to your parent with `role_message`, ending with the commit
+ask; without a parent, deliver them as plain chat output ending with the commit ask, and
+**STOP / end your turn**. Run `worktree_closeout_apply` when the approval has arrived.
 Never invoke `worktree_closeout_apply` in the same turn as the relay; the preview report is what the
 developer sees.
 
@@ -178,6 +176,9 @@ explicitly raised. It gates only admission of the addressed closeout generation;
 the task document, another sprint, or an already accepted operation. Apply accepts only a current
 developer-attributed approval and consumes it once. Open, rejected, revision-requested, applied,
 or model-approved gates refuse closeout admission. A model never self-approves a human-pinned gate.
+No part of the product raises or decides a gate any more: a gate that an earlier build stored
+still refuses, and `agents-remember removed-stores` names the gate logs and removes them on the
+developer's word.
 
 Do not create a durable gate as an incident workaround or compatibility route. Ordinary
 subordinate closeouts use recorded accepted-series authority; standalone/final work uses the

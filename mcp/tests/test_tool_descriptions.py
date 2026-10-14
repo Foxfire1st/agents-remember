@@ -32,7 +32,6 @@ from agents_remember.mcp.registration import TOOL_REGISTRARS
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_descriptions import (
     INTERIM_DESCRIPTION_OWNERS,
-    RETAINED_DESCRIPTION_LENGTHS,
     TOOL_ARGUMENT_DESCRIPTION_MAX_CHARS,
     TOOL_DESCRIPTION_MAX_CHARS,
 )
@@ -197,14 +196,6 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
                         f"{INTERIM_DESCRIPTION_OWNERS[name]} may rewrite it",
                     )
                     continue
-                if name in RETAINED_DESCRIPTION_LENGTHS:
-                    self.assertLessEqual(
-                        len(text),
-                        RETAINED_DESCRIPTION_LENGTHS[name],
-                        f"{name} grew past its retained length "
-                        f"({RETAINED_DESCRIPTION_LENGTHS[name]})",
-                    )
-                    continue
                 self.assertLessEqual(
                     len(text),
                     TOOL_DESCRIPTION_MAX_CHARS,
@@ -261,7 +252,7 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
         # MIK-R112 F08 moved-material inventory: every argument, operation and
         # refusal the two owned short descriptions omit lives in the shipped
         # longer explanation. The keyed phrases below are the omitted details.
-        details = TOOL_DETAILS_CHECKOUT.read_text(encoding="utf-8")
+        details = " ".join(TOOL_DETAILS_CHECKOUT.read_text(encoding="utf-8").split())
         required = (
             "unusedProviderKeys",
             "install_provider_deps=true",
@@ -282,6 +273,12 @@ class ToolDescriptionBoundsTests(unittest.TestCase):
             "providerless",
             "cache-reuse flag",
             "changes nothing observable",
+            # role_start_set and retire_child (MIK-R113): what their short descriptions omit.
+            "featureValues",
+            "replaces_interrupt_turn",
+            "leaves the others as they are",
+            "nothing is archived",
+            "already retired agent changes nothing",
         )
         for phrase in required:
             self.assertIn(

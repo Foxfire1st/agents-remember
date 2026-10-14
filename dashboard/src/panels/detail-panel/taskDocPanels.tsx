@@ -141,7 +141,7 @@ export function EmptyDetailPanel() {
   return (
     <Panel testid="detail-panel" title="Detail" className={sizing} fill>
       <EmptyStateBackdrop src="/assets/sc2-battlecruiser-boomerang.mp4" opacity={0.18}>
-        Select a task to inspect its phase and gate.
+        Select a task to inspect its steps, review, requirements and reports.
       </EmptyStateBackdrop>
     </Panel>
   );

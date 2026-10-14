@@ -108,21 +108,19 @@ describe("AttentionQueue blocked-start alarm parity (5f S3)", () => {
     seed(
       [
         {
-          id: "blocked-gate:LC19",
-          kind: "blocked-gate",
-          severity: "warn",
+          id: "stale-session:LC19",
+          kind: "stale-session",
+          severity: "info",
           lane: "lifecycle",
-          title: "Gate - closeout-approval",
-          detail: "awaiting your decision",
+          title: "Session gone quiet",
           lifecycleId: "LC19",
-          gateId: "G19",
         },
       ],
       [taskDoc],
     );
     const onSelect = vi.fn();
     const { getByText, getByTestId, queryByTestId } = renderOpen(onSelect);
-    expect(getByText("Gate - closeout-approval · awaiting your decision")).toBeTruthy();
+    expect(getByText("Session gone quiet")).toBeTruthy();
     // The task is the entry's second line and its link: it opens the entry's lifecycle, as
     // "Open" did, and closes the layer.
     const link = getByText("19 Gate interaction polish");
@@ -139,11 +137,11 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
     vi.mocked(postAttentionDismiss).mockResolvedValue("dismissed");
     seed([
       {
-        id: "awaiting-developer:LC19",
-        kind: "awaiting-developer",
+        id: "stale-session:LC19",
+        kind: "stale-session",
         severity: "info",
         lane: "lifecycle",
-        title: "Turn complete — your move",
+        title: "Session gone quiet",
         lifecycleId: "LC19",
       },
     ]);
@@ -153,10 +151,9 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
 
     await waitFor(() =>
       expect(postAttentionDismiss).toHaveBeenCalledWith({
-        itemId: "awaiting-developer:LC19",
-        kind: "awaiting-developer",
+        itemId: "stale-session:LC19",
+        kind: "stale-session",
         lifecycleId: "LC19",
-        gateId: undefined,
       }),
     );
   });
@@ -180,7 +177,6 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
         itemId: "actionable-drift:agents-remember:ar/260610-browser-dashboard",
         kind: "actionable-drift",
         lifecycleId: null,
-        gateId: undefined,
       }),
     );
   });
@@ -188,15 +184,6 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
   it("Clear all dismisses dismissible listed items, not worktree alarms", async () => {
     vi.mocked(postAttentionDismiss).mockResolvedValue("dismissed");
     seed([
-      {
-        id: "gate:G19",
-        kind: "gate-open",
-        severity: "warn",
-        lane: "lifecycle",
-        title: "Gate - closeout-approval",
-        lifecycleId: "LC19",
-        gateId: "G19",
-      },
       {
         id: "stale-session:LC7",
         kind: "stale-session",
@@ -215,24 +202,16 @@ describe("AttentionQueue lifecycle-scoped dismiss (leaf-28 S5.2)", () => {
     // What cannot be dismissed stays listed in the open layer.
     expect(getAllByTestId("attn-item")).toHaveLength(1);
     expect(getAllByTestId("attn-item")[0].textContent).toContain("Worktree start blocked");
-    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(3));
-    expect(postAttentionDismiss).toHaveBeenCalledWith({
-      itemId: "gate:G19",
-      kind: "gate-open",
-      lifecycleId: "LC19",
-      gateId: "G19",
-    });
+    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(2));
     expect(postAttentionDismiss).toHaveBeenCalledWith({
       itemId: "stale-session:LC7",
       kind: "stale-session",
       lifecycleId: "LC7",
-      gateId: undefined,
     });
     expect(postAttentionDismiss).toHaveBeenCalledWith({
       itemId: "actionable-drift:agents-remember:ar/260610-browser-dashboard",
       kind: "actionable-drift",
       lifecycleId: null,
-      gateId: undefined,
     });
   });
 

@@ -5,8 +5,7 @@ import {
   taskDocParentKey,
 } from "../data/taskHierarchy";
 import { sameTaskDocumentRef, taskDocSelectionKey, taskDocumentRefForDoc } from "../data/taskIdentity";
-import type { SeriesNode, TaskDocNode } from "../types/projection";
-import type { TaskDocumentRef } from "../types/terminalCatalog";
+import type { SeriesNode, TaskDocNode, TaskDocumentRef } from "../types/projection";
 
 export type LauncherRole = "architect" | "investigator" | "system-specialist" | "orchestrator" | "manager" | "worker" | "reviewer" | "curator";
 export type RoleAction = "start" | "revive";

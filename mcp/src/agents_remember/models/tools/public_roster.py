@@ -1,9 +1,9 @@
 """The advertised public MCP tool roster, as one cycle-free literal.
 
 This tuple is the single definition; :data:`agents_remember.mcp.tools.base.PUBLIC_TOOLS`
-re-exports it unchanged, so every existing consumer and the ``public_surface`` pin against
-:data:`~agents_remember.models.tools.tool_registry.PUBLIC_TOOL_RESPONSE_MODELS` still name
-the same object.
+re-exports it unchanged, so every consumer and the pin against
+:data:`~agents_remember.models.tools.tool_registry.TOOL_RESPONSE_MODELS` name the same
+object.
 
 It lives here, in the ``models`` package, because ``models`` needs to read the roster and
 may not import ``mcp`` (``layers.toml`` ranks ``models`` 2 and ``mcp`` 22, and the ``mcp``
@@ -24,7 +24,6 @@ PUBLIC_TOOLS = (
     "context_packet",
     "read_ar_files",
     "runtime_install",
-    "dispatch_agent",
     # MIK-R100 rule 8 restores only retire_child; the L112 removals otherwise stand.
     "retire_child",
     "memory_quality_check",

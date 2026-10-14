@@ -72,77 +72,9 @@ const SANCTIONED_WIRE_SITES: Record<string, SanctionedSite> = {
     count: 1,
     reason: "raw `/api/events` line decode",
   },
-  "src/data/seatEvents.ts :: as ObserverEvent": {
-    count: 1,
-    reason: "raw seat-event line decode before the applier inspects it",
-  },
   "src/data/taskDocuments.ts :: as TaskDocNode": {
     count: 1,
     reason: "`GET /api/tasks/{id}` body decode",
-  },
-  "src/data/terminal.ts :: as { sessions?: TerminalCatalogRow[] }": {
-    count: 1,
-    reason: "`GET /api/terminal/sessions` envelope decode",
-  },
-  "src/data/terminalOpen.ts :: as HarnessControlState": {
-    count: 1,
-    reason: "open-response `controlState` narrowed from the wire's bare string",
-  },
-  "src/data/launchFlow.ts :: as TerminalOpenKind | null": {
-    count: 1,
-    reason: "launch-evidence kind narrowed from a persisted bare string",
-  },
-  "src/data/launchFlow.ts :: as HarnessControlState | null": {
-    count: 2,
-    reason: "launch-evidence controlState narrowed from a persisted bare string",
-  },
-  "src/data/submitClient.ts :: as SubmissionReceiptWire[\"acceptance\"]": {
-    count: 1,
-    reason: "submit receipt acceptance narrowed from the wire's bare string",
-  },
-  "src/data/submitClient.ts :: as ReconciliationResultWire[\"state\"]": {
-    count: 1,
-    reason: "reconciliation state narrowed from the wire's bare string",
-  },
-  "src/data/submitClient.ts :: as ReconciliationResultWire[\"submissionState\"]": {
-    count: 1,
-    reason: "reconciliation submissionState narrowed from the wire's bare string",
-  },
-  "src/data/sessionCapabilities.ts :: as Partial<CapabilitySnapshotWire>": {
-    count: 1,
-    reason: "capability snapshot decode, tolerant of a server that predates a field",
-  },
-  "src/data/capabilityCatalog.ts :: as Partial<CapabilityEnvelope>": {
-    count: 1,
-    reason: "capability envelope decode, tolerant of a server that predates a field",
-  },
-  "src/data/conversation/client.ts :: as ConversationPage": {
-    count: 1,
-    reason: "conversation page body decode",
-  },
-  "src/data/conversation/client.ts :: as ConversationTelemetry": {
-    count: 1,
-    reason: "conversation telemetry body decode",
-  },
-  "src/data/conversation/client.ts :: as InterruptOperation": {
-    count: 1,
-    reason: "interrupt operation body decode",
-  },
-  "src/data/conversation/stream.ts :: as ConversationEventEnvelope": {
-    count: 1,
-    reason: "conversation SSE frame decode",
-  },
-  "src/data/conversation-library/client.ts :: as ConversationLibraryPage": {
-    count: 1,
-    reason: "library list body decode",
-  },
-  "src/data/conversation-library/client.ts :: as HistoricalConversationPage": {
-    count: 1,
-    reason: "library read body decode",
-  },
-  "src/data/conversation-library/client.ts :: as OpenConversationOperation": {
-    count: 1,
-    reason: "library open body decode",
   },
 
   // ── the mirror's own derivations ───────────────────────────────────────────
@@ -160,18 +92,6 @@ const SANCTIONED_WIRE_SITES: Record<string, SanctionedSite> = {
     count: 1,
     reason:
       "the sanctioned narrowing: the PARAMETER type did the structural check, and this only puts back the literal types `resolveJsonModule` erased",
-  },
-  "src/test/fixtures/conversationWire.ts :: as ActivePageCursor": {
-    count: 1,
-    reason: "brand mint: an opaque server-issued token with no structure to get wrong",
-  },
-  "src/test/fixtures/conversationWire.ts :: as ActiveEventCursor": {
-    count: 1,
-    reason: "brand mint: an opaque server-issued token with no structure to get wrong",
-  },
-  "src/test/fixtures/conversationWire.ts :: as LibraryConversationKey": {
-    count: 1,
-    reason: "brand mint: an opaque server-issued token with no structure to get wrong",
   },
   "src/topology/model.test.ts :: as State": {
     count: 1,
@@ -202,7 +122,7 @@ describe("the guard has something to police", () => {
   it("discovers a wire vocabulary rather than an empty one", () => {
     // Every rule is conditioned on "is this a wire type?". An empty vocabulary is not a clean
     // tree, it is a guard that has stopped running.
-    expect(vocabulary.length).toBeGreaterThan(100);
+    expect(vocabulary.length).toBeGreaterThan(50);
   });
 
   it("knows the types the two proven defects lived on", () => {
@@ -210,7 +130,6 @@ describe("the guard has something to police", () => {
     expect(vocabulary).toContain("src/types/projection.ts:EngineProcessEdge");
     expect(vocabulary).toContain("src/types/projection.ts:TaskSubTaskRefNode");
     expect(vocabulary).toContain("src/types/event.ts:ObserverEvent");
-    expect(vocabulary).toContain("src/data/conversation/types.ts:ConversationCapabilities");
   });
 
   it("watches exactly the modules that declare themselves mirrors", () => {
@@ -220,24 +139,15 @@ describe("the guard has something to police", () => {
     // fails here too, which is the moment to decide what its fixtures are allowed to do.
     //
     // KNOWN GAP, stated rather than papered over: a handful of API clients — `data/changeset.ts`,
-    // `data/files.ts`, `data/notes.ts`, `data/harnessCatalog.ts`, `data/submissionLifecycleClient.ts`
-    // — declare wire-shaped response types INLINE, next to client-side option and handler types
-    // (`MasterChangesetOptions`, `FetchLike`, `ListQuery`). They carry no marker and are not
+    // `data/files.ts`, `data/notes.ts` — declare wire-shaped response types INLINE, next to
+    // client-side option types (`MasterChangesetOptions`, `LeafMode`). They carry no marker and are not
     // vocabulary here, so a fixture for those routes is unguarded. Treating "the header cites a
     // .py file" as the rule was measured and rejected: it sweeps up the option types too, which
     // are not wire shapes and would make the guard wrong rather than wider. The real fix is to
     // move those response types into a marker-carrying module; that is a refactor of app code,
     // not of fixtures, and it is left for whoever needs those routes guarded.
     const modules = [...new Set(vocabulary.map((entry) => entry.split(":")[0]))].sort();
-    expect(modules).toEqual([
-      "src/data/conversation-library/types.ts",
-      "src/data/conversation/types.ts",
-      "src/types/event.ts",
-      "src/types/harnessCapabilities.ts",
-      "src/types/projection.ts",
-      "src/types/terminalCatalog.ts",
-      "src/types/terminalOpen.ts",
-    ]);
+    expect(modules).toEqual(["src/types/event.ts", "src/types/projection.ts"]);
   });
 
   it("keeps the marker convention it discovers wire modules by", () => {
@@ -252,14 +162,13 @@ describe("the guard has something to police", () => {
   });
 
   it("classifies the fixture surface the rules are strict on", () => {
-    expect(isFixtureSurface("src/panels/SessionComposer.test.tsx")).toBe(true);
+    expect(isFixtureSurface("src/cockpit/Cockpit.test.tsx")).toBe(true);
     expect(isFixtureSurface("src/test/fixtures/wire.ts")).toBe(true);
     expect(isFixtureSurface("src/dev/fixtures.ts")).toBe(true);
     expect(isFixtureSurface("src/panels/engine-room/fixtures.ts")).toBe(true);
-    expect(isFixtureSurface("e2e-production/cockpit.production.spec.ts")).toBe(true);
-    expect(isFixtureSurface("perf/cockpit.perf.spec.ts")).toBe(true);
+    expect(isFixtureSurface("e2e/cockpit.spec.ts")).toBe(true);
     expect(isFixtureSurface("src/data/store.ts")).toBe(false);
-    expect(isFixtureSurface("src/panels/SessionComposer.tsx")).toBe(false);
+    expect(isFixtureSurface("src/cockpit/Cockpit.tsx")).toBe(false);
   });
 });
 
@@ -269,8 +178,8 @@ describe("no dashboard test asserts against a payload the server cannot produce"
   it("has no wire fixture that is not type-checked against the mirror", () => {
     expect(
       verdict.unregistered,
-      `A fixture opted out of the wire mirror. Build it with src/test/fixtures/wire.ts (or\n` +
-        `conversationWire.ts), annotate it, or \`satisfies\` it — do not cast it.${render(verdict.unregistered)}\n`,
+      `A fixture opted out of the wire mirror. Build it with src/test/fixtures/wire.ts,\n` +
+        `annotate it, or \`satisfies\` it — do not cast it.${render(verdict.unregistered)}\n`,
     ).toEqual([]);
   });
 

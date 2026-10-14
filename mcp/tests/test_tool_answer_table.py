@@ -96,11 +96,12 @@ from agents_remember.models.tools.tool_answer import (
     strip_envelope,
     truncate_lists,
 )
-from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
     install_ambient,
+    new_ulid,
     observer_root,
 )
 from agents_remember.observer.ambient import reset_ambient
@@ -110,7 +111,6 @@ from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.worktree_contract import load_contract
 from tool_answer_l110_rows import L110_ROW_DATA
 from tool_answer_l111_test_support import ToolAnswerRow, _apply_l111_shaped_rows
-from tool_entry_point_world import REPO as ENTRY_POINT_WORLD_REPO
 from tool_entry_point_world import EntryPointWorld
 
 # Answer keys the row framework itself adds around row fields: a row case
@@ -256,8 +256,11 @@ _INSTALL_ORDINARY_CASE = {
 
 # The largest case the operation produces: the same dry run with a failed
 # watcher stop, which records the stop, the failure message and the recovery
-# action. Post-retirement the rebind holds the single stop phase only.
-# Measured 357 tokens; the row bound 600 sits between it and twice it.
+# action. Post-retirement the rebind holds the single stop phase only. Its
+# root holds a store of a removed part and a gate log (MIK-R113 rule 5), so
+# the answer counts them and names the command and the way out of a stored
+# gate; their `logs/` folder is there before the run, so one folder fewer is
+# created. Measured 453 tokens; the row bound 600 sits between it and twice it.
 _INSTALL_LARGEST_CASE = {
     "coordinationRoot": f"{_CASE_ROOT}",
     "dryRun": True,
@@ -304,10 +307,16 @@ _INSTALL_LARGEST_CASE = {
             "recoveryAction": "Stop the named leftover process and rerun the install; no product path restarts provider watchers. Only the providers-remove command deletes leftover provider runtime folders, and server_info reports enabled provider keys once as unused.",
         }
     ],
+    "removedPartStores": {
+        "bytes": 6,
+        "count": 2,
+        "notice": "The install deleted none of them: `agents-remember removed-stores --dry-run` lists them, and without `--dry-run` the command removes them on your word",
+        "storedGates": "No part of the product decides a stored gate any more: `agents-remember removed-stores` names the gate logs and removes them on your word",
+    },
     "reportPath": f"{_CASE_ROOT}/report.json",
     "summary": {
         "copiedFiles": 107,
-        "createdDirs": 158,
+        "createdDirs": 157,
         "dependencyRuns": 0,
         "removedPaths": 0,
         "replacedLinks": 0,
@@ -329,47 +338,14 @@ _INSTALL_FIELDS = {
     "reportPath": "open the full install report",
     "providerWatcherRebind": "see whether watcher recovery was attempted and which phases ran",
     "recoveryActions": "perform the recovery actions the run lists",
+    "removedPartStores": "tell the user that stores of removed parts remain and which command lists or removes them",
     "log": "open the detail file holding the whole install result",
-}
-
-_DISPATCH_ORDINARY_CASE = {
-    "ok": False,
-    "status": "task-document-not-found",
-    "role": "worker",
-    "taskDocumentRef": {"repository": "agents-remember", "path": "m.json"},
-    "detail": f"task document does not exist: {_CASE_ROOT}/tasks/agents-remember/m.json",
-    "log": f"{_CASE_ROOT}/logs/mcp/ar-tools-2026-10-10/042700000000-dispatch_agent-00000000.json",
-}
-
-# The largest case the tool's own limits allow: the refusal detail carries
-# the longest task-document path the model accepts (4,096 canonical
-# characters). Measured 1,114 tokens; the row bound is the 1,500 default
-# ceiling, between it and twice it.
-_DISPATCH_LONG_PATH = "t/" + "a" * 4080 + ".json"
-_DISPATCH_LARGEST_CASE = {
-    "ok": False,
-    "status": "task-document-not-found",
-    "role": "worker",
-    "taskDocumentRef": {"repository": "agents-remember", "path": _DISPATCH_LONG_PATH},
-    "detail": f"task document does not exist: {_CASE_ROOT}/tasks/agents-remember/{_DISPATCH_LONG_PATH}",
-    "log": f"{_CASE_ROOT}/logs/mcp/ar-tools-2026-10-10/042700000000-dispatch_agent-00000000.json",
-}
-
-_DISPATCH_FIELDS = {
-    "ok": "branch on whether a child was briefed or the dispatch was refused",
-    "status": "name the refusal when the dispatch did not succeed",
-    "role": "confirm the child runs the requested role",
-    "taskDocumentRef": "address the child's document in follow-up role_message calls",
-    "detail": "report why the dispatch was refused",
-    "deliveryState": "tell whether the brief reached the child",
-    "adapterDeliveryState": "tell whether the host harness accepted the child session",
-    "log": "open the detail file holding the whole dispatch result",
 }
 
 # MIK-R112 rule 9 final rows: every tool rule 7 gives L112 that is not
 # removed. server_info is an exception passthrough (the rule-4 table bounds
-# it at 4,000 with its reason); runtime_install and dispatch_agent hold
-# shaped rows with fields, caller-step uses, and measured cases.
+# it at 4,000 with its reason); runtime_install holds a shaped row with
+# fields, caller-step uses, and measured cases.
 L112_FINAL_ROWS: dict[str, ToolAnswerRow] = {
     "server_info": ToolAnswerRow(
         tool="server_info",
@@ -387,13 +363,6 @@ L112_FINAL_ROWS: dict[str, ToolAnswerRow] = {
         bound_for("runtime_install"),
         _INSTALL_ORDINARY_CASE,
         _INSTALL_LARGEST_CASE,
-    ),
-    "dispatch_agent": _l112_shaped_row(
-        "dispatch_agent",
-        _DISPATCH_FIELDS,
-        bound_for("dispatch_agent"),
-        _DISPATCH_ORDINARY_CASE,
-        _DISPATCH_LARGEST_CASE,
     ),
 }
 
@@ -729,7 +698,7 @@ def _produce_l109_read_ar_files_largest() -> tuple[str, dict[str, bool]]:
     )
 
     world = EntryPointWorld()
-    world.build()
+    world.build(keep_lifecycle=True)
     try:
         # The packet's canonical journey: a leaf Worker names twenty files
         # in its own worktrees through task scope, so cards and overviews
@@ -830,7 +799,7 @@ def _produce_l109_knowledge_read_largest() -> str:
     paging.write_family_tree(mem, paging._statements(18, words=20), directory=paging._DEEP)
     _l109_commit_all(mem, "deep family")
     world = EntryPointWorld()
-    world.build()
+    world.build(keep_lifecycle=True)
     try:
         outcome, first = world.call(
             "knowledge_read",
@@ -944,7 +913,7 @@ def _produce_l109_knowledge_diff_largest() -> str:
         (mem / record_path("invariant", inv, f"rec-{index}")).unlink()
     _l109_commit_all(mem, "change one hundred")
     world = EntryPointWorld()
-    world.build()
+    world.build(keep_lifecycle=True)
     try:
         outcome, out = world.call(
             "knowledge_diff",
@@ -1195,16 +1164,16 @@ def _stub_config(
 
 class ToolAnswerTableTests(unittest.TestCase):
     def test_every_registered_tool_has_an_authored_row_and_no_extras(self) -> None:
-        check_tool_answer_roster(set(PUBLIC_TOOL_RESPONSE_MODELS), authored_row_owners())
+        check_tool_answer_roster(set(TOOL_RESPONSE_MODELS), authored_row_owners())
         rowed = {tool for tool, _operation in TOOL_ANSWER_TABLE}
-        self.assertEqual(rowed, set(PUBLIC_TOOL_RESPONSE_MODELS))
+        self.assertEqual(rowed, set(TOOL_RESPONSE_MODELS))
 
     def test_missing_authored_row_fails(self) -> None:
         reduced = {
             tool: leaf for tool, leaf in authored_row_owners().items() if tool != "server_info"
         }
         with self.assertRaises(AssertionError):
-            check_tool_answer_roster(set(PUBLIC_TOOL_RESPONSE_MODELS), reduced)
+            check_tool_answer_roster(set(TOOL_RESPONSE_MODELS), reduced)
 
     def test_task_doc_row_covers_every_operation(self) -> None:
         rowed = {operation for tool, operation in TOOL_ANSWER_TABLE if tool == "task_doc"}
@@ -1361,9 +1330,9 @@ class ToolAnswerRowGateTests(unittest.TestCase):
         return ToolAnswerRow(**params)
 
     def test_missing_row_fails(self) -> None:
-        reduced = {t: leaf for t, leaf in AUTHORED_INTERIM_OWNERS.items() if t != "dispatch_agent"}
+        reduced = {t: leaf for t, leaf in AUTHORED_INTERIM_OWNERS.items() if t != "task_doc"}
         with self.assertRaises(AssertionError):
-            check_tool_answer_roster(set(PUBLIC_TOOL_RESPONSE_MODELS), reduced)
+            check_tool_answer_roster(set(TOOL_RESPONSE_MODELS), reduced)
 
     def test_valid_shaped_row_passes(self) -> None:
         # The probe's legitimate shaped row: no interim owner, a nonempty
@@ -1496,9 +1465,7 @@ class ToolAnswerOwnershipTests(unittest.TestCase):
     def test_implementation_matches_the_authored_roster(self) -> None:
         owners = authored_row_owners()
         mismatches = [
-            tool
-            for tool in PUBLIC_TOOL_RESPONSE_MODELS
-            if interim_leaf_for(tool) != owners.get(tool)
+            tool for tool in TOOL_RESPONSE_MODELS if interim_leaf_for(tool) != owners.get(tool)
         ]
         self.assertEqual(mismatches, [])
         for tool in L110_ROW_DATA:
@@ -2372,10 +2339,10 @@ class ToolAnswerLogTests(unittest.TestCase):
 
 
 def _install_ambient(coord: Path) -> Any:
-    """Install a fresh fleeting ambient lifecycle for one test (rule 3)."""
+    """Install an ambient that adopted a lifecycle for one test (rule 3)."""
     reset_ambient()
     amb = AmbientLifecycle(EventStore(observer_root(_stub_config(coord))))
-    amb.start(fleeting=True)
+    amb.attach(new_ulid(), enclosure=str(coord / "contract.json"))
     install_ambient(amb)
     return amb
 
@@ -2907,20 +2874,6 @@ class ToolRaisedCallLoggingTests(unittest.TestCase):
             world.close()
             reset_ambient()
 
-    def test_dispatch_extras_refusal_is_logged(self) -> None:
-        world = EntryPointWorld()
-        try:
-            status, _detail = world.call("dispatch_agent", {"unknown_input": 1})
-            self.assertTrue(status.startswith("RAISED"), status)
-            (line,) = self._today_lines(world)
-            self.assertEqual(line["tool"], "dispatch_agent")
-            self.assertFalse(line["ok"])
-            self.assertEqual(line["code"], "raised")
-            self.assertIn("unknown_input", json.dumps(line["arguments"]))
-        finally:
-            world.close()
-            reset_ambient()
-
 
 class ToolTerminatingRouteTests(unittest.TestCase):
     """Cleanup, abandon and finalize never log into an enclosure (rule 3)."""
@@ -3215,12 +3168,19 @@ def _produced_install_compact(*, stop_ok: bool) -> tuple[dict[str, Any], str]:
 
     A disposable dry run from the packaged tree with the watcher stop mocked
     at the lifecycle boundary (ok or failed with a fixed process); returns
-    the projected compact and the coordination root for normalization.
+    the projected compact and the coordination root for normalization. The
+    run with the failed stop finds a store of a removed part and a gate log
+    in its root, so that it is the largest answer the operation gives.
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
         root = Path(tmp_dir)
         coord = (root / "coord").resolve()
         coord.mkdir(parents=True, exist_ok=True)
+        if not stop_ok:
+            workspace = coord / "logs" / "observer" / "workspace"
+            workspace.mkdir(parents=True)
+            (workspace / "operator-inbox.jsonl").write_text("{}\n", encoding="utf-8")
+            (workspace / "gates.jsonl").write_text("{}\n", encoding="utf-8")
         config = McpRuntimeConfig(
             config_path=coord / "mcp.settings.json",
             coordination_root=coord,
@@ -3327,7 +3287,7 @@ class L112FinalRowProductionTests(unittest.TestCase):
     """
 
     def test_final_bounds_live_in_the_production_lookup(self) -> None:
-        self.assertEqual(L112_FINAL_BOUNDS, {"runtime_install": 600, "dispatch_agent": 1500})
+        self.assertEqual(L112_FINAL_BOUNDS, {"runtime_install": 600})
         for tool, row in L112_FINAL_ROWS.items():
             if tool in L112_FINAL_BOUNDS:
                 self.assertEqual(row.bound, bound_for(tool))
@@ -3338,7 +3298,6 @@ class L112FinalRowProductionTests(unittest.TestCase):
     def test_l109_l111_ownership_is_unchanged(self) -> None:
         self.assertNotIn("L112", set(INTERIM_TOOL_LEAF.values()))
         self.assertNotIn("runtime_install", INTERIM_TOOL_LEAF)
-        self.assertNotIn("dispatch_agent", INTERIM_TOOL_LEAF)
 
     def test_ordinary_install_case_is_operation_produced(self) -> None:
         produced, _ = _produced_install_compact(stop_ok=True)
@@ -3363,53 +3322,6 @@ class L112FinalRowProductionTests(unittest.TestCase):
             self.assertEqual(set(produced) - set(RUNTIME_INSTALL_ANSWER_FIELDS), set())
             for message in produced.get("messages", []):
                 self.assertLessEqual(len(message), 201)
-
-    def test_dispatch_cases_are_operation_produced(self) -> None:
-        world = EntryPointWorld()
-        try:
-            status, ordinary = world.call(
-                "dispatch_agent",
-                {
-                    "role": "worker",
-                    "task_document_ref": {
-                        "repository": ENTRY_POINT_WORLD_REPO,
-                        "path": "m.json",
-                    },
-                    "brief": "do the thing",
-                },
-            )
-            self.assertEqual(status, "RETURNED")
-            assert ordinary is not None
-            status, largest = world.call(
-                "dispatch_agent",
-                {
-                    "role": "worker",
-                    "task_document_ref": {
-                        "repository": ENTRY_POINT_WORLD_REPO,
-                        "path": _DISPATCH_LONG_PATH,
-                    },
-                    "brief": "do the thing",
-                },
-            )
-            self.assertEqual(status, "RETURNED")
-            assert largest is not None
-
-            def normalize(answer: dict[str, Any]) -> dict[str, Any]:
-                raw = json.dumps(answer)
-                raw = raw.replace(world.coord.as_posix(), _CASE_ROOT)
-                raw = raw.replace(ENTRY_POINT_WORLD_REPO, "agents-remember")
-                data = json.loads(raw)
-                if isinstance(data.get("log"), str):
-                    data["log"] = _DISPATCH_ORDINARY_CASE["log"]
-                return data
-
-            self.assertEqual(normalize(ordinary), _DISPATCH_ORDINARY_CASE)
-            normalized_largest = normalize(largest)
-            normalized_largest["log"] = _DISPATCH_LARGEST_CASE["log"]
-            self.assertEqual(normalized_largest, _DISPATCH_LARGEST_CASE)
-        finally:
-            world.close()
-            reset_ambient()
 
     def test_row_bound_governs_install_overflow(self) -> None:
         # Over the 600 row bound but under the 4,000 net: only the row bound
@@ -3436,22 +3348,6 @@ class L112FinalRowProductionTests(unittest.TestCase):
             ]
             self.assertEqual(len(lines), 1)
             self.assertTrue(lines[0]["guardCut"])
-
-    def test_row_bound_governs_dispatch_overflow(self) -> None:
-        whole = dict(_DISPATCH_LARGEST_CASE)
-        # Varied text: long runs of one character compress under the product
-        # counter, so the overflow detail uses varied text.
-        whole["detail"] = "".join(f"{index:08d}-abcdefgh;" for index in range(300))
-        measured = count_response_tokens(whole)
-        self.assertGreater(measured, bound_for("dispatch_agent"))
-        self.assertLess(measured, TOOL_ANSWER_EXCEPTION_MAX_TOKENS)
-        with tempfile.TemporaryDirectory() as tmp:
-            coord = Path(tmp)
-            config = _stub_config(coord)
-            with tool_call_context("dispatch_agent", {"role": "worker"}, config=config):
-                answer = complete_tool_response("dispatch_agent", whole)
-            self.assertTrue(answer.get("overflow"))
-            self.assertLessEqual(count_response_tokens(answer), TOOL_ANSWER_OVERFLOW_MAX_TOKENS)
 
 
 if __name__ == "__main__":

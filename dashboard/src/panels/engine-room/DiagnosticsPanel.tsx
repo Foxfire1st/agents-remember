@@ -1,8 +1,7 @@
 import { css } from "../../../styled-system/css";
 import { fmtWait } from "../../data/selectors";
 import { Affordance } from "../../grammar/Affordance";
-import type { CommitRefNode, EngineProcessNode, GateNode } from "../../types/projection";
-import { GateResponder, isWorktreeGateKind } from "../GateResponder";
+import type { CommitRefNode, EngineProcessNode } from "../../types/projection";
 import {
   actionRow,
   diagKey,
@@ -37,15 +36,7 @@ function CommitRow({ label, refNode }: { label: string; refNode: CommitRefNode }
   );
 }
 
-export function DiagnosticsPanel({
-  node,
-  lifecycleId,
-  gateNode,
-}: {
-  node: EngineProcessNode;
-  lifecycleId?: string;
-  gateNode?: GateNode;
-}) {
+export function DiagnosticsPanel({ node }: { node: EngineProcessNode }) {
   // 5k F3 — during the power-down (cleanup-pending / abandon) the runtimes are being torn down, so the
   // diagnostics must not keep reading "ok": show "powering down" and de-emphasize the (now-stale)
   // lines. Derived from `phase` on the frontend (the live runtime is pre-05m, so it sends no power-down signal).
@@ -80,7 +71,7 @@ export function DiagnosticsPanel({
       {node.completedPhases.length > 0 || node.failedPhases.length > 0 ? (
         <PhaseLineList node={node} poweringDown={poweringDown} />
       ) : null}
-      <DiagnosticActionRow node={node} lifecycleId={lifecycleId} gateNode={gateNode} />
+      <DiagnosticActionRow node={node} />
       {node.missingFacts.length > 0 ? <MissingFacts facts={node.missingFacts} /> : null}
       {node.sourceFiles.length > 0 ? (
         <div className={diagRow}>
@@ -160,27 +151,7 @@ function OptionalDiagRows({ node }: { node: EngineProcessNode }) {
   );
 }
 
-function DiagnosticActionRow({
-  node,
-  lifecycleId,
-  gateNode,
-}: {
-  node: EngineProcessNode;
-  lifecycleId?: string;
-  gateNode?: GateNode;
-}) {
-  if (lifecycleId && gateNode && isWorktreeGateKind(gateNode.kind)) {
-    return (
-      <div className={actionRow}>
-        <GateResponder
-          lifecycleId={lifecycleId}
-          gateNode={gateNode}
-          compact
-          testId="engine-gate-responder"
-        />
-      </div>
-    );
-  }
+function DiagnosticActionRow({ node }: { node: EngineProcessNode }) {
   if (node.actions.length > 0) {
     return (
       <div className={actionRow}>

@@ -25,19 +25,11 @@ IGNORED_NAMES = frozenset(
 
 @dataclass(frozen=True)
 class RuntimeTarget:
-    """One canonical tree and where its generated copy belongs.
-
-    ``ignored_names`` is per target because the machine-local trees differ per
-    canonical folder: the eve application carries ``node_modules`` and eve's own
-    ``.eve``/``.output``/``.vercel`` state, and none of them is authored source.
-    A global ignore would silently drop a same-named directory from any other
-    target, so the rule travels with the tree it applies to.
-    """
+    """One canonical tree and where its generated copy belongs."""
 
     label: str
     source: Path
     path: Path
-    ignored_names: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -50,7 +42,7 @@ class RuntimeDiff:
 
     Without this flag a target whose source and generated copy are *both* missing compared equal
     and reported ``ok``: an empty comparison is not evidence of a synced tree, and a caller who
-    pointed the generator at the wrong root would read five green rows for nothing.
+    pointed the generator at the wrong root would read a green row per target for nothing.
     """
 
     @property
@@ -67,12 +59,6 @@ TARGETS = (
     RuntimeTarget("benchmarks", REPO_ROOT / "benchmarks", PACKAGE_DATA / "benchmarks"),
     RuntimeTarget("providers", REPO_ROOT / "providers", PACKAGE_DATA / "runtime/providers"),
     RuntimeTarget("system", REPO_ROOT / "system", PACKAGE_DATA / "runtime/system"),
-    RuntimeTarget(
-        "eve-runtime",
-        REPO_ROOT / "eve_runtime",
-        PACKAGE_DATA / "runtime/eve-runtime",
-        ignored_names=frozenset({"node_modules", ".eve", ".output", ".vercel"}),
-    ),
 )
 
 
@@ -97,11 +83,8 @@ def repo_relative(path: Path) -> str:
     return str(path.relative_to(REPO_ROOT))
 
 
-def ignored(rel_path: Path, target_ignored: frozenset[str] = frozenset()) -> bool:
-    return any(
-        part in IGNORED_NAMES or part in target_ignored or part.endswith(".pyc")
-        for part in rel_path.parts
-    )
+def ignored(rel_path: Path) -> bool:
+    return any(part in IGNORED_NAMES or part.endswith(".pyc") for part in rel_path.parts)
 
 
 def digest(path: Path) -> str:
@@ -120,7 +103,7 @@ def extended_length(path: Path) -> Path:
     return path
 
 
-def file_digests(root: Path, target_ignored: frozenset[str] = frozenset()) -> dict[Path, str]:
+def file_digests(root: Path) -> dict[Path, str]:
     walk_root = extended_length(root)
     if not walk_root.exists():
         return {}
@@ -128,7 +111,7 @@ def file_digests(root: Path, target_ignored: frozenset[str] = frozenset()) -> di
     files: dict[Path, str] = {}
     for path in walk_root.rglob("*"):
         rel_path = path.relative_to(walk_root)
-        if ignored(rel_path, target_ignored) or not path.is_file():
+        if ignored(rel_path) or not path.is_file():
             continue
         files[rel_path] = digest(path)
     return files
@@ -137,8 +120,8 @@ def file_digests(root: Path, target_ignored: frozenset[str] = frozenset()) -> di
 def diff_target(target: RuntimeTarget) -> RuntimeDiff:
     if not target.source.is_dir():
         return RuntimeDiff(missing=(), extra=(), changed=(), source_missing=True)
-    source = file_digests(target.source, target.ignored_names)
-    current = file_digests(target.path, target.ignored_names)
+    source = file_digests(target.source)
+    current = file_digests(target.path)
 
     source_paths = set(source)
     current_paths = set(current)
@@ -151,21 +134,17 @@ def diff_target(target: RuntimeTarget) -> RuntimeDiff:
     )
 
 
-def copy_ignore(names: list[str], target_ignored: frozenset[str]) -> list[str]:
-    return [
-        name
-        for name in names
-        if name in IGNORED_NAMES or name in target_ignored or name.endswith(".pyc")
-    ]
+def copy_ignore(_directory: str, names: list[str]) -> list[str]:
+    return [name for name in names if name in IGNORED_NAMES or name.endswith(".pyc")]
 
 
 def sync_target(target: RuntimeTarget) -> None:
     if target.path.resolve() == target.source.resolve():
         raise RuntimeError(f"refusing to sync {repo_relative(target.source)} onto itself")
-    replace_tree(target.source, target.path, target.ignored_names)
+    replace_tree(target.source, target.path)
 
 
-def replace_tree(source: Path, target: Path, target_ignored: frozenset[str] = frozenset()) -> None:
+def replace_tree(source: Path, target: Path) -> None:
     """Build a complete staged copy, then swap it in with two separate renames.
 
     The previous delete-then-copy left the target gutted when the copy (or the
@@ -189,11 +168,7 @@ def replace_tree(source: Path, target: Path, target_ignored: frozenset[str] = fr
         if leftover.exists():
             shutil.rmtree(leftover)
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        extended_length(source),
-        staging,
-        ignore=lambda _directory, names: copy_ignore(names, target_ignored),
-    )
+    shutil.copytree(extended_length(source), staging, ignore=copy_ignore)
     if target_ext.exists():
         os.rename(target_ext, retired)
     os.rename(staging, target_ext)

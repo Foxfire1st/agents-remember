@@ -10,26 +10,27 @@ skill is the single roof over all of them. No role is defined by reference to an
 lifecycle, and no role reads another role's file to learn its own obligations.
 
 Authority in this system is **structural, never textual**: a seat's task document plus its role
-name is its address, and the control plane — not a prompt, a chat claim, or a runtime occupant id —
-owns occupant identity, readiness, and the pinned initial brief.
+name is its address, and AR — not a prompt or a chat claim — records which agent holds it when
+`role_start` starts it.
 
 ## Seat binding
 
 | Altitude | Canonical document | Ordinary occupants |
 | --- | --- | --- |
-| Sprint | the sprint (`kind:"master"`) document | architect · orchestrator · strategist · designer · plan reviewer · super-exit reviewer |
+| Projects | none — the start names no document; the sprint document holds the developer's request, and the developer names it to the architect in the dashboard | architect |
+| Sprint | the sprint (`kind:"master"`) document | orchestrator · strategist · designer · plan reviewer · super-exit reviewer |
 | Master | the master document | manager · master-exit reviewer |
 | Leaf | the leaf document | worker · curator · leaf route reviewer |
 | Portfolio artifact | none — a notes draft only | strategist's draft before adoption |
 
-- The session↔seat association is the catalog binding made at dispatch: **canonical task document
-  plus role**. It is not lifecycle adoption. Different roles may coexist on one document; only a
-  second live occupant of the same `(task document, role)` seat collides.
-- A spawned role runs its **own** lifecycle when it runs one; it never adopts its spawner's. A
-  spawned role that never touches a mutating AR tool simply never instantiates a lifecycle — that
-  is the designed shape, not a gap.
-- The plane stamps a reviewer's canonical parent document + role at dispatch; it never derives the
-  parent from an occupant id.
+- A seat is bound when `role_start` starts its agent: **canonical task document
+  plus role**. It is not lifecycle adoption. The architect is the exception of the first row: its
+  start names no document, and a start that names one is refused. Different roles may coexist on
+  one document; only a second live occupant of the same `(task document, role)` seat collides.
+- A started role never adopts its starter's lifecycle. A role that never calls `worktree_start` or
+  `worktree_attach` has no lifecycle — that is the designed shape, not a gap.
+- A started agent's parent is the agent that called `role_start` for it; a role started from the
+  dashboard or by a chat without a role has none.
 - **A seat that WEARS a hat runs that hat's file as its own.** Hat-collapse is sanctioned only for
   the owner/developer-facing architect seat in solo or flat runs (see `roles/architect.md`). A
   spawned role seat never wears another role's hat and never becomes a different role in place.
@@ -38,82 +39,42 @@ owns occupant identity, readiness, and the pinned initial brief.
 
 When the dashboard owns a session, its role is fixed for the session lifetime.
 
-- A pasted brief for another role is **refused**, not absorbed: the seat escalates the mismatch to
-  its owner through the inbox instead of silently rerouting itself.
-- Roles expand **horizontally** by dispatching new, individually addressable role seats
-  (`dispatch_agent` with the target's canonical document and role). A role seat is never a
+- A pasted brief for another role is **refused**, not absorbed: the seat sends the mismatch to
+  its parent with `role_message` instead of silently rerouting itself.
+- Roles expand **horizontally** by starting new, individually addressable role agents
+  (`role_start` with the role and its canonical task references). A role seat is never a
   harness-native sub-agent of another role seat.
 - Harness sub-agents work inside the seat's assignment with its permissions and working folder.
   The seat organises their work, verifies and credits it, and performs all boundary acts itself.
   Helpers hold no AR seat, start no role and cannot supply independent review of their author.
 - Sessions not owned by the dashboard follow their host harness's ordinary rules.
 
-## Dispatch is one structural transaction
+## Starting a role agent
 
-Every launcher or role that dispatches a hosted role calls `dispatch_agent` **once** with the
-target's real task document, role, and one complete brief. The control plane then:
-
-1. selects caller kind from process identity, and either authorizes the plane seat's direct-child
-   relationship or validates the ambient launcher's target document and role altitude;
-2. resolves source lineage from that canonical task document **before** process creation — an
-   organizational leaf requires super → leaf, while an atomic path requires super → master → leaf,
-   for code and external memory when enabled; a manager's admission proves its nature-appropriate
-   source edge before it can read or dispatch;
-3. creates and binds the child using settings-owned launch knobs only when every applicable edge is
-   current;
-4. proves readiness privately;
-5. persists exactly one internally exact-pinned initial dispatch brief before delivery;
-6. returns only structural status (`dispatched` or `dispatch-queued`) and delivery state.
-
-`dispatch_agent` has **two disjoint caller kinds**; the public request is identical and caller kind
-comes only from process context:
-
-| Caller kind | Recognition | Authority | Forbidden shortcut |
-| --- | --- | --- | --- |
-| Plane-hosted seat | Plane-injected hosted identity is present | Current seat plus direct-child scope policy | Treating a plane authorization failure as ambient |
-| Ambient launcher | Plane-injected hosted identity is absent | Canonical target-document resolution plus target role-altitude validation; there is no parent seat | Fabricating caller identity or using ambient mode as an in-hierarchy escape |
-
-A stale, invalid, mismatched, unbound, or unauthorized plane identity remains a plane refusal and
-never falls back to ambient.
-
-Consuming a dispatch result:
-
-- `dispatched` and `dispatch-queued` both mean **the brief is durable**. Never send a second brief,
-  duplicate it, or respawn merely because delivery is pending; a queued brief follows the ordinary
-  notifier retry path.
-- Never request, retain, paste, or reconcile a runtime occupant id, session id, lifecycle id, branch
-  name, or commit id. The model never receives the spawned occupant's runtime id and never calls
-  readiness, exact inbox, attach, or raw retire operations.
-- `source-lineage-stale` / `source-lineage-unavailable` means **no child process was created**. Use
-  the refusal's ordered, contract-addressed `worktree_sync` recovery, resolve any retained
-  mechanically derivable merge conflict through the advertised continuation, then dispatch the same
-  document + role again. Escalate only when the conflicting changes encode a semantic truth that
-  current requirements and evidence cannot resolve.
-- Repetition after an advertised recovery is idempotent: it reconciles the canonical seat and
-  pinned brief instead of creating a duplicate. Never clear a viable existing occupant or its
-  durable queued brief merely to make a retry look fresh.
-- Settings are the sole developer-controlled spend surface: callers declare document, role, brief,
-  and an optional label — never harness/model/effort or direct launch controls.
+A role that starts another calls `role_start` **once**, with the role, a request id it chooses and
+the task references the role requires. The same request id with the same selection reconciles the
+same agent and never creates a second. Agent kind, model and effort come from the role settings
+unless the call overrides them; a call cannot state a mode. A call that is not carried out answers
+`refused` with its reason, and a refusal never falls back to another tool. A leaf's Worker,
+Reviewer and Curator are started as a set with `role_start_set`.
 
 ## Developer-declared task-seat takeover
 
 When the developer says *"you are the orchestrator/manager/worker for task X"* (or equivalent),
-that is a **task-seat takeover**, not a loose role hint. Before analysis, profile checks, dispatch,
+that is a **task-seat takeover**, not a loose role hint. Before analysis, profile checks, a start,
 or implementation, resolve the named task document and converge on that role's canonical seat at
 its canonical altitude (table above; a reviewer binds the leaf, master, or sprint document its
 exact review seam adjudicates).
 
 1. Resolve the canonical JSON-primary task document and the role being claimed.
-2. Compile the role's complete canonical brief and call `dispatch_agent` once with that document,
-   role, and brief.
-3. Verify Operations and Chats show the expected `(taskDocumentRef, role)` row before continuing.
+2. Start the named role on that document with `role_start` once. An architect is started without
+   a document reference: the sprint document holds the request, and the developer names it in the
+   dashboard.
+3. Tell the developer that the agent is in the dashboard.
 
-An identity-free developer chat uses ambient-launcher mode: it does not submit caller identity,
-call a terminal attach/session primitive, or read, request, paste, or retain a
-session/lifecycle/agent id. Takeover never means manually replacing a live incumbent; only the
-lifecycle-owned transaction may retire one generation that it has positively proved failed. If
-`dispatch_agent` cannot establish the document+role binding, record the structural blocker and ask
-for the missing document or role authority — never improvise an exact-id attachment.
+A chat without a role makes the same `role_start` call. Takeover never means replacing a live
+incumbent: a start without a binding takes no replacement. If `role_start` refuses the selection,
+say which document or role is missing — never improvise another way to attach.
 
 ## Escalation ladder
 
@@ -165,35 +126,32 @@ it does not force a developer hand-off for mechanical closeout of in-scope work.
 
 ## Minimal decision-item relay
 
-The ARCHITECT/ORCHESTRATOR split rides the existing operator inbox. No queue schema or dashboard
-reform is part of it.
+A question for the developer goes up the chain with `role_message`; `operations/orientation.md`
+states how.
 
-- A backend seat posts **one** `messageKind: decision-item` row at a time to the architect, stating
-  what is being decided, the options, the consequences, and the durable evidence refs.
+- A seat sends the question to its parent, stating what is being decided, the options, the
+  consequences, and the durable evidence refs.
 - The architect presents one item at the developer's pace, records the ruling in the durable task
-  surface (`openQuestions` / decision logs, with notes for analysis), and returns one
-  `messageKind: decision-ruling` row to the backend seat.
-- If the item is underspecified, the architect sends a single clarification row back instead of
-  guessing. The backend does not open a second item until the active item has a durable ruling or
-  clarification state.
+  surface (`openQuestions` / decision logs, with notes for analysis), and returns the answer with
+  `role_message`.
+- If the item is underspecified, the architect sends a single clarification back instead of
+  guessing.
 
 ## Notify-and-stop is safe by design
 
 Ending a turn — simply stopping once your artifact is
-written and nothing is pending — is **never a liveness gap**. Silence is supervised: the HFX2-L2
-agent-notifier sweep evaluates seat-state facts on its own mechanical tick and relays them to owners
-(turn-ended/completed state-signals, compound-idle, non-reaction residue); owners interpret and act.
-The timed escalation ladder is retired — there is no renudge, skip-level, or respawn machinery in
-the relay.
+written and nothing is pending — is **never a liveness gap**. A turn that ends without a message
+to its parent wakes that parent with one line from the host, which names where the newest report
+lies; the parent reads the report and acts.
 
 **Watcher ban (uniform-mechanism ruling 2026-07-07):** no role watches, polls, nudges, or
 timer-loops on its own initiative — that is a banned seat-local watcher, and there is no per-seat
-variance. Every role's own liveness duty inverts to *passive*: you will be woken with your pending
-signals; process and ack every item before ending your turn again.
+variance. Every role's own liveness duty inverts to *passive*: you are woken by a message; answer
+it before ending your turn again.
 
 ## Change authority
 
-- **Doctrine and instruction text** is owned by the seats the terminal host's routing gives it to;
+- **Doctrine and instruction text** is changed only through a task;
   a seat never rewrites its own role file or another role's file to resolve a disagreement.
 - **Requirements** are owned by the architecture seat that compiled them; a claimed contradiction
   or overconstraint is diagnosed and proposed, never self-approved, and never silently rewritten.

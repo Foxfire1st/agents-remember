@@ -10,7 +10,7 @@ import uuid
 from dataclasses import replace
 from functools import partial
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -387,7 +387,10 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
             "gone",
         )
 
-    def test_existing_observer_archives_terminal_debt_without_a_person_calling_recovery(self):
+    def test_the_dashboard_s_own_loop_archives_terminal_debt_without_a_person_calling_recovery(
+        self,
+    ):
+        """The recovery ticks in a loop of its own: nothing else of the serving app is started."""
         path, body = self.receipt()
 
         async def scenario():
@@ -399,11 +402,8 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
                 return {"found": True, "archived": True}
 
             runtime = cast(_ServingRuntime, SimpleNamespace(config=self.config))
-            with (
-                patch.object(lifespan, "_observe_terminal_catalog", return_value=None),
-                patch.object(archive, "bridge_call", side_effect=host) as call,
-            ):
-                owner = asyncio.create_task(lifespan._terminal_observation_loop(runtime))
+            with patch.object(archive, "bridge_call", side_effect=host) as call:
+                owner = asyncio.create_task(lifespan._leaf_archive_recovery_loop(runtime))
                 try:
                     await asyncio.wait_for(observed.wait(), timeout=HANG_GUARD_SECONDS)
                 finally:
@@ -575,3 +575,54 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
         self.assertEqual(result.returncode, 2)
         remove.assert_not_called()
         port.archive.assert_not_called()
+
+
+def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keeps_its_interval():
+    """The loop is started by the lifespan itself and asks once a second, as it did before."""
+
+    assert recovery.RECOVERY_TICK_SECONDS == 1.0
+    started: list[str] = []
+
+    async def record(name: str, *_arguments: object) -> None:
+        started.append(name)
+        await asyncio.Event().wait()
+
+    async def scenario() -> None:
+        runtime = cast(
+            _ServingRuntime,
+            SimpleNamespace(
+                config=SimpleNamespace(),
+                observer_root=None,
+                clock=lambda: None,
+                review_trees_shutdown=None,
+                projector=SimpleNamespace(prime=_settled, run=partial(record, "projection")),
+            ),
+        )
+        with (
+            patch.object(lifespan, "compact_workspace_river"),
+            patch.object(lifespan, "start_heap_tracing", return_value=False),
+            patch.object(lifespan, "malloc_trim_enabled", return_value=False),
+            patch.object(lifespan, "_metrics_loop", partial(record, "metrics")),
+            patch.object(lifespan, "_held_delivery_loop", partial(record, "held-delivery")),
+            patch.object(
+                lifespan, "_workspace_river_compaction_loop", partial(record, "river-compaction")
+            ),
+            patch.object(
+                lifespan, "_leaf_archive_recovery_loop", partial(record, "archive-recovery")
+            ),
+        ):
+            async with lifespan._serving_lifespan(runtime, cast(Any, None))(cast(Any, None)):
+                await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+    assert sorted(started) == [
+        "archive-recovery",
+        "held-delivery",
+        "metrics",
+        "projection",
+        "river-compaction",
+    ]
+
+
+async def _settled() -> None:
+    return None

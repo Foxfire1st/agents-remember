@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -184,7 +183,6 @@ def test_a_member_that_is_missing_still_refuses_while_another_cannot_be_read(wor
 
 @pytest.mark.parametrize("alias", ["id", "title"])
 def test_public_finalize_requires_canonical_identity_for_an_unreadable_member(world, alias):
-    world.cfg.retirement = SimpleNamespace(auto_land_on_finalize=False)
     contract = world.series()
     other = world.tasks / "master-b" / "task.json"
     sibling = read_task_doc(other)
@@ -229,7 +227,6 @@ def test_public_finalize_requires_canonical_identity_for_an_unreadable_member(wo
 
 
 def test_public_finalize_keeps_a_readable_admitted_title_member(world):
-    world.cfg.retirement = SimpleNamespace(auto_land_on_finalize=False)
     contract = world.series()
     other = world.tasks / "master-b" / "task.json"
     data = world.sprint().model_dump(mode="json")
@@ -307,7 +304,6 @@ def test_a_task_whose_own_document_cannot_be_read_is_not_finalized_and_the_file_
 
 @pytest.mark.parametrize("shape", ["directory", "dangling-symlink"])
 def test_public_finalize_refuses_existing_unreadable_own_document_objects(world, shape):
-    world.cfg.retirement = SimpleNamespace(auto_land_on_finalize=False)
     contract = world.series("outside")
     write_task_doc(contract.task_root, _master(identity="outside", execution_nature="atomic"))
     document = contract.task_root / "task.json"
@@ -337,7 +333,6 @@ def test_public_finalize_refuses_existing_unreadable_own_document_objects(world,
 
 
 def test_public_finalize_preserves_a_genuinely_absent_ordinary_document(world):
-    world.cfg.retirement = SimpleNamespace(auto_land_on_finalize=False)
     contract = world.series("plain")
     document = contract.task_root / "task.json"
     assert not document.exists() and not document.is_symlink()

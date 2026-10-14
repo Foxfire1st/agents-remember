@@ -1,4 +1,4 @@
-"""Bounded receipt reconciliation driven by the existing terminal observer.
+"""Bounded receipt reconciliation driven by the dashboard's own loop.
 
 The cursor is disposable and holds only directory iterators. After restart, exact terminal
 contract truth recovers obligations even when the closing call could not persist its debt.
@@ -25,6 +25,8 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract, load_c
 SCAN_ENTRIES_PER_PASS = 128
 RECOVERY_BUDGET_SECONDS = 2.0
 RECOVERY_INTERVAL_SECONDS = 5.0
+# How often the dashboard's loop asks; the pass itself runs once per interval above.
+RECOVERY_TICK_SECONDS = 1.0
 
 
 def _scan(root: Path, depth: int = 0) -> Generator[Path | None]:

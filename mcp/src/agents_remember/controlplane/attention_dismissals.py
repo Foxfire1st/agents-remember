@@ -28,8 +28,8 @@ class AttentionDismissalRecord(DurableRecord):
     """One ``ar-attention-dismissal/v1`` snapshot: the operator dismissed an item.
 
     ``itemId`` is the stable :class:`AttentionItem` id (the fold key); ``kind`` /
-    ``lifecycleId`` / ``gateId`` are recorded for provenance and so the serving
-    layer can pair a ``gate-open`` dismissal with the gate cancel it also performs.
+    ``lifecycleId`` are recorded for provenance. ``gateId`` is held by rows an earlier
+    build wrote for a gate item; nothing writes it now.
     ``dismissedAt`` is the server wall-clock the reducer compares against the item's
     triggering-signal timestamp.
     """

@@ -51,50 +51,10 @@ export interface ActionAvailability {
   nextSafeAction?: string;
 }
 
-export interface AgentNotifierHeartbeat {
-  ageSeconds: number | null;
-  lastSweepDurationSeconds: number | null;
-  lastTickAt: string | null;
-  pendingInboxCount: number;
-  redeliverableInboxCount: number;
-  stale: boolean;
-  staleCutoffSeconds: number;
-}
-
-export interface AgentPickupNode {
-  ageSeconds?: number;
-  agentId?: string;
-  artifactPath?: string;
-  attemptCount: number;
-  deliveredToSession?: string;
-  deliveryState: string;
-  entryId: string;
-  escalatedAt?: string;
-  gateId?: string;
-  id: string;
-  lastAttemptAt?: string;
-  lifecycleId?: string;
-  messageKind: string;
-  nextAttemptAt?: string;
-  ownerAgentId?: string;
-  ownerLifecycleId?: string;
-  ownerRole?: string;
-  ownerTaskDocumentRef?: TaskDocumentRef;
-  recipientRole?: string;
-  senderAgentId?: string;
-  senderRole?: string;
-  state: string;
-  subjectTaskDocumentRef?: TaskDocumentRef;
-  taskDocumentRef?: TaskDocumentRef;
-  ttlSeconds: number;
-}
-
 export interface Analytics {
-  agentPickups: AgentPickupNode[];
   attentionQueue: AttentionItem[];
   driftSnapshots: DriftSnapshotNode[];
   engineProcesses: EngineProcessNode[];
-  expectationRows: ExpectationRowNode[];
   ledgers: LedgerNode[];
   routeCoverage: RouteCoverageNode[];
   series: SeriesNode[];
@@ -108,7 +68,6 @@ export interface Analytics {
 export interface AttentionItem {
   detail?: string;
   enclosure?: string;
-  gateId?: string;
   id: string;
   kind: string;
   lane: AttentionLane;
@@ -278,31 +237,6 @@ export interface EngineProcessNode {
   worktreeGroup: string;
 }
 
-export interface ExpectationRowNode {
-  dueAt: string;
-  id: string;
-  kind: string;
-  note?: string;
-  overdue: boolean;
-  sourceId: string;
-  state: string;
-  subjectAgentId?: string;
-  subjectLifecycleId?: string;
-  taskDocumentRef?: TaskDocumentRef;
-}
-
-export interface GateNode {
-  decidedBy?: string;
-  decidedVia?: string;
-  decisions: string[];
-  evidenceRefs: Record<string, unknown>[];
-  id: string;
-  kind: string;
-  packet: Record<string, unknown>;
-  state: string;
-  ts: string;
-}
-
 export interface LandingRefNode {
   at?: string;
   detail?: string;
@@ -368,11 +302,8 @@ export interface LifecycleOperationProjection {
 }
 
 export interface LifecycleProjection {
-  actions: ActionAvailability[];
-  ask?: Record<string, unknown>;
   enclosure?: string;
   fleeting: boolean;
-  gate?: GateNode;
   id: string;
   inferred: boolean;
   lastEventTs: string;
@@ -382,7 +313,6 @@ export interface LifecycleProjection {
   staleSeconds?: number;
   startedAt: string;
   state: State;
-  stateEnteredAt: string;
 }
 
 export interface LifecycleProjectionComponentBindings {
@@ -838,30 +768,6 @@ export interface TaskSubTaskRefNode {
   status: string;
 }
 
-export interface TerminalObserverHealth {
-  activeFailureCategory: "startup-refresh-failed" | "steady-state-refresh-failed" | null;
-  activeFailureSummary: "startup terminal observation failed" | "steady-state terminal observation failed" | null;
-  activeFailureType: "HarnessControlError" | "TimeoutError" | "ConnectionError" | "OSError" | "RuntimeError" | "ValueError" | "Exception" | null;
-  /** JSON Schema refinements: {"minimum":0} */
-  ageSeconds: number;
-  /** JSON Schema refinements: {"maximum":4294967295,"minimum":0} */
-  attemptCount: number;
-  /** JSON Schema refinements: {"maximum":4294967295,"minimum":0} */
-  consecutiveFailureCount: number;
-  initialObservationSucceeded: boolean;
-  lastAttemptAt: string | null;
-  /** JSON Schema refinements: {"anyOf":[{"minimum":0},{}]} */
-  lastDurationSeconds: number | null;
-  /** JSON Schema refinements: {"anyOf":[{"minimum":0},{}]} */
-  lastSuccessAgeSeconds: number | null;
-  lastSuccessAt: string | null;
-  schemaVersion: "ar-terminal-observer-health/v1";
-  servingStartedAt: string;
-  /** JSON Schema refinements: {"minimum":0} */
-  staleCutoffSeconds: number;
-  status: "initializing" | "degraded" | "healthy" | "stale";
-}
-
 export interface ToolReportNode {
   ageSeconds?: number;
   label: string;
@@ -881,8 +787,5 @@ export interface WorkspaceProjection {
   metrics: Metrics;
   providers: ProviderNode[];
   version: number;
-  agentNotifierHeartbeat?: AgentNotifierHeartbeat;
   servingBuild?: ServingBuild;
-  supervisorHeartbeat?: AgentNotifierHeartbeat;
-  terminalObserverHealth?: TerminalObserverHealth;
 }

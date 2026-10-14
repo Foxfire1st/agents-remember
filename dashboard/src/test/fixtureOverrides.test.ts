@@ -9,12 +9,11 @@ import { buildProgramWithVirtualFiles, dashboardRoot } from "./wireFixtureGuard"
 // `wireFixtureGuard.ts` measures property NAMES: it catches a field the mirror never declared, an
 // `any` with no shape at all, and every syntactic way of opting out. It cannot catch a fixture
 // whose names are all correct and whose VALUE is `undefined` on a field the server always sends —
-// `conversationPage({ capabilities: undefined })` names nothing wrong, asserts nothing, and
-// suppresses nothing. Yet it produces the exact page `conversationWire.ts`'s header says it fixed:
-// one whose REQUIRED `capabilities` is absent.
+// `lifecycle({ state: undefined })` names nothing wrong, asserts nothing, and
+// suppresses nothing. Yet it produces a lifecycle whose REQUIRED `state` is absent.
 //
 // `exactOptionalPropertyTypes` is what makes that a compile error project-wide. It is not on here —
-// measured at 222 errors across 71 files, most of them in app code this leaf does not own — so the
+// measured at 381 errors across 107 files, most of them in app code this leaf does not own — so the
 // builders carry the constraint themselves (`fixtures/overrides.ts`). This file is the proof that
 // they do, and it runs over the guard's in-memory program precisely BECAUSE that program does not
 // set the flag: whatever these assertions catch, they catch without it.
@@ -27,10 +26,9 @@ const PROBE_FILES: Record<string, string> = {
   // move — an explicit `undefined` written into a slot the wire type declares REQUIRED — and all
   // four compiled before `Overrides` replaced the builders' bare `Partial<Node>`.
   [`${PROBE_DIR}/impossible.test.ts`]: [
-    `import { lifecycle, projection, taskDoc } from "../test/fixtures/wire";`,
-    `import { conversationPage } from "../test/fixtures/conversationWire";`,
+    `import { lifecycle, projection, provider, taskDoc } from "../test/fixtures/wire";`,
     ``,
-    `export const a = conversationPage({ capabilities: undefined });`,
+    `export const a = provider({ state: undefined });`,
     `export const b = lifecycle({ state: undefined });`,
     `export const c = taskDoc({ steps: undefined });`,
     `export const d = projection({ enclosures: undefined });`,
@@ -51,7 +49,6 @@ const PROBE_FILES: Record<string, string> = {
   // shape the server does send, and none of it may cost a diagnostic.
   [`${PROBE_DIR}/honest.test.ts`]: [
     `import { action, lifecycle, observerEvent, projection, taskDoc } from "../test/fixtures/wire";`,
-    `import { conversationItem, conversationPage } from "../test/fixtures/conversationWire";`,
     `import type { LifecycleProjection } from "../types/projection";`,
     ``,
     `// no argument at all`,
@@ -66,9 +63,7 @@ const PROBE_FILES: Record<string, string> = {
     `export const f = taskDoc({ lifecycleId: undefined });`,
     `// a builder whose override is REQUIRED rather than defaulted`,
     `export const g = action({ action: "approve" });`,
-    `export const h = observerEvent({ kind: "gate.opened" });`,
-    `export const i = conversationItem({ itemId: "it-1", globalOrdinal: 1 });`,
-    `export const j = conversationPage({ items: [] });`,
+    `export const h = observerEvent({ kind: "lifecycle.paused" });`,
     `// a pre-widened override: \`O\` infers \`Partial<…>\` and every slot admits undefined again.`,
     `// This is the documented residue, asserted here so it is a KNOWN pass rather than a surprise.`,
     `const widened: Partial<LifecycleProjection> = { id: "LC-2" };`,

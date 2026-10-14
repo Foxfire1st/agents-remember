@@ -14,15 +14,12 @@ separately failable readings, and they are deliberately kept apart:
 * the **commands the procedure prints** exist on the shipped command line, and every option it prints
   belongs to the subcommand it prints it with. A document that describes commands which do not exist is
   the failure the requirement names, and it is mechanical to catch;
-* the **seats** the procedure names are admitted by the shipped opener — measured at the route, because
-  the launch *compiler* accepts any declared role while the *opener* admits a session with no task
-  document only for the taskless seat roles. Those are ``chat``, ``terminal`` and ``bootstrap``, and —
-  by the developer's 2026-09-24 ruling, taken when the missing route was put to them — ``curator``.
-  The procedure's own text states the gate, and this module pins it by observation rather than by
-  reading the policy constant;
-* the instructions that **are** delivered name the procedure: to the seats the opener admits taskless,
-  to the curator shape the compiler produces, and through the two served skills an ordinary setup
-  follows.
+* the **capsules** the launch compiler produces for the seats the procedure names carry it: the
+  ``bootstrap`` free agent's, and the ``curator``'s both with no task document and on one. A capsule
+  compiled with no task document is bound to the named absence ``free-agent:<role>``, never to a
+  document;
+* the instructions that **are** delivered name the procedure: to the bootstrap free agent, to the
+  curator shape the compiler produces, and through the two served skills an ordinary setup follows.
 
 WHAT DEFENDS WHAT
 -----------------
@@ -36,16 +33,12 @@ WHAT DEFENDS WHAT
       through the shipped command line                     which fills each printed placeholder and
                                                            runs the real parser over the exact
                                                            subcommand and options
-    a seat-less session is admitted for the four          ``test_the_opener_admits_exactly...``,
-      taskless roles and refused for the rest, by          which drives the dashboard's own open route
-      status, and a taskless curator is INSTRUCTED         over the shipped real coordination world and
-                                                           reads each arm's delivery mode
-    the bootstrap seat's own instructions reach the       ``test_the_admitted_taskless_seat...``,
-      procedure and the state vocabulary                   which opens that seat and reads its
-                                                           compiled instructions
-    the curator SEAT opens on a task document AND         ``test_the_curator_seat_opens...``,
-      opens taskless with the free-agent reference         which opens ``role=curator`` both ways and
-                                                           reads the delivered mode
+    the bootstrap free agent's own instructions reach     ``test_the_bootstrap_free_agent...``,
+      the procedure and the state vocabulary, bound to     which compiles that seat with no task
+      the named absence of a task document                 document and reads its capsule
+    the curator's capsule compiles on a task document     ``test_the_curator_capsule_compiles...``,
+      AND with none, under different task references       which compiles ``role=curator`` both ways
+                                                           and reads each capsule's binding
     the curator SHAPE's compiled instructions name it     ``test_the_compiled_curator_shape...``,
                                                            which compiles that shape through the launch
                                                            compiler and names only what it measured
@@ -62,13 +55,11 @@ WHAT THIS DOES NOT COVER (stated, not implied)
   host, not a property of this checkout: ``scripts/sync-skills.py --check`` owns the nine packaged
   copies (byte for byte, in ``mcp/tests/test_sync_scripts.py``), and an installed harness root is owned
   by whoever runs the install.
-- **Whether the seat policy itself is right.** A taskless CURATOR seat **is** admitted — ``curator``
-  joined the taskless seat roles by the developer's **2026-09-24 ruling**, recorded in
-  ``serving/task_binding.py``'s ``TASKLESS_SEAT_ROLES`` — and the seat case above asserts that
-  admission and the ``free-agent:curator`` capsule it receives, not a refusal. This module measures the
-  shipped opener; it does not decide that policy.
+- **Which role a launch admits without a task document.** The launch compiler produces a capsule for
+  any declared role; whether a launch of that role may start at all is the role launch's decision and
+  its own tests' subject. This module measures the compiler's answer and does not decide that policy.
 - **The wording of the procedure.** These cases assert that the named surfaces are published, reached,
-  admitted and parseable. They do not read the prose for meaning, and a wrong sentence in a live
+  compiled and parseable. They do not read the prose for meaning, and a wrong sentence in a live
   document is the curator's and the verifier's subject rather than this module's.
 """
 
@@ -76,13 +67,9 @@ from __future__ import annotations
 
 import hashlib
 import re
-import shutil
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
-from typing import cast
 
 import pytest
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
@@ -98,16 +85,10 @@ from agents_remember.application.skill_resources.responses import (
     skill_catalog_read_response,
 )
 from agents_remember.cli.__main__ import build_parser
-from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.observer import reset_ambient
-from agents_remember.serving.app import create_app
+from agents_remember.serving.capsule_delivery import CapsuleDelivery
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
-from agents_remember.serving.projector import ProjectionCadence
-from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import TerminalCatalog
-from fastapi.testclient import TestClient
-from test_capsule_launch_wiring import LEAF_REF, _scratch_world, _write_codex_settings
+from test_capsule_launch_wiring import LEAF_REF, _scratch_world
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -214,13 +195,11 @@ def _read_shipped_skill(uri: str):
     return skill_catalog_read_response(served, skill_revision="" if root is None else root.revision)
 
 
-def free_agent_instructions(role: str) -> tuple[str, str]:
-    """The instructions the launch COMPILER produces for a seat shape, and its own summary.
+def free_agent_capsule(role: str) -> CapsuleDelivery:
+    """The capsule the launch COMPILER produces for one role with no task document.
 
-    This is the compiler's answer, not an admission. Whether a session of that shape may be opened at
-    all is the opener's decision, and
-    `test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each` measures that
-    separately — the two are different surfaces and this module keeps them apart on purpose.
+    This is the compiler's answer, not an admission: it takes any declared role, and whether a launch
+    of that role may start is decided elsewhere.
 
     The world holds no task artifact of any kind: no settings beyond the two roots, no task document,
     no enclosure, no worktree, no memory repository. That absence is the point — the compiler's
@@ -237,199 +216,62 @@ def free_agent_instructions(role: str) -> tuple[str, str]:
             repositories={},
         )
         launched = compile_launch_capsule(
-            config,
-            LaunchCapsuleRequest(role=role, workspace_root=workspace, harness="codex"),
+            config, LaunchCapsuleRequest(role=role, workspace_root=workspace)
         )
         assert not launched.is_refusal, launched.explain()
-        delivery = launched.codex_delivery
+        delivery = launched.delivery
         assert delivery is not None, launched.explain()
-        return delivery.trusted_instructions, launched.explain()
+        return delivery
 
 
-@contextmanager
-def launch_world() -> Iterator[tuple[Path, McpRuntimeConfig, object]]:
-    """The shipped real coordination world, with the dashboard's own open route over it.
+def test_the_bootstrap_free_agent_receives_the_foundation_step() -> None:
+    """The bootstrap seat compiles with no document, and its own instructions reach the foundation.
 
-    The world is the one ``mcp/tests/test_capsule_launch_wiring.py`` owns and keeps real — a
-    coordination root, a task document, its enclosure contract, the code worktree and the external
-    memory root — built here through that module's own builder rather than reimplemented, so this case
-    drives the same production route that module already exercises. The root is short because the
-    opener mints a Unix-domain socket under it.
+    The bootstrap seat is the read-and-report carrier for a repository whose foundation is absent: its
+    capsule is bound to the named absence of a task document, and its own compiled instructions name
+    the procedure and the knowledge states, so a greenfield repository reaches the step at all. It is
+    not the only capsule compiled without a task document — an instructed session that authors the
+    foundation holds the curator's — which is why the curator case below owns that shape.
     """
 
-    root = Path(tempfile.mkdtemp(prefix="l27-"))
-    try:
-        config, host, _repo = _scratch_world(root)
-        _write_codex_settings(root)
-        yield root, config, host
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
-def open_seat(
-    root: Path, config: McpRuntimeConfig, host: object, session: str, body: dict[str, object]
-) -> tuple[int, dict[str, object]]:
-    """Open one seat through ``POST /api/terminal/{session}`` and return its status and body."""
-
-    reset_ambient()
-    collaborators = replace(
-        serving_collaborators(config),
-        terminal_host=cast(TerminalHost, host),
-        terminal_catalog=TerminalCatalog(root / "logs" / "dashboard" / "terminal-sessions.json"),
-    )
-    app = create_app(config, cadence=ProjectionCadence(interval=100), collaborators=collaborators)
-    with TestClient(app) as client:
-        response = client.post(f"/api/terminal/{session}", json=body)
-    return response.status_code, response.json()
-
-
-def test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each() -> None:
-    """The seat gate by its observed status over the five arms the policy decides, plus the boundary.
-
-    The requirement's whole new-project entry depends on which seat may be opened before a task
-    exists, so this is measured at the real opener rather than inferred from what the launch compiler
-    accepts — the compiler takes any declared role, and the opener is the surface that admits a
-    session. **The arms ARE the status table**: a policy change the constant's own pin cannot see (an
-    admission that opens the wrong seat, or opens one that is never instructed) fails here by name.
-    ``curator`` is taskless by the developer's 2026-09-24 ruling, taken when the missing route was put
-    to them; the fourth arm asserts the *delivery*, because a 200 without a capsule would satisfy the
-    constant and still leave a fresh curator with nothing to follow. The last arm is the boundary the
-    gate does not cover: a terminal-kind open is a plain pane whatever role it was asked for.
-    """
-
-    arms: tuple[tuple[str, dict[str, object]], ...] = (
-        (
-            "bootstrap-no-document",
-            {"kind": "harness", "harness": "codex", "role": "bootstrap"},
-        ),
-        ("chat-no-document", {"kind": "harness", "harness": "codex", "role": "chat"}),
-        ("worker-no-document", {"kind": "harness", "harness": "codex", "role": "worker"}),
-        ("curator-no-document", {"kind": "harness", "harness": "codex", "role": "curator"}),
-        (
-            "curator-on-a-task-document",
-            {
-                "kind": "harness",
-                "harness": "codex",
-                "role": "curator",
-                "taskDocumentRef": LEAF_REF.model_dump(),
-            },
-        ),
-        ("curator-as-a-terminal", {"kind": "terminal", "role": "curator"}),
-    )
-    with launch_world() as (root, config, host):
-        observed = {arm: open_seat(root, config, host, f"l32-{arm}", body) for arm, body in arms}
-
-    def mode(arm: str) -> dict[str, object]:
-        return cast("dict[str, object]", observed[arm][1]["instructionMode"])
-
-    # Arm 1 — the first-hour free agent: admitted taskless, instructed by its own capsule.
-    status, body = observed["bootstrap-no-document"]
-    assert status == 200, (status, body)
-    assert mode("bootstrap-no-document")["mode"] == "capsule", mode("bootstrap-no-document")
-    assert mode("bootstrap-no-document")["taskReference"] == "free-agent:bootstrap", mode(
-        "bootstrap-no-document"
-    )
-
-    # Arm 2 — a session that declared no role: admitted, and with no instructions to receive.
-    status, body = observed["chat-no-document"]
-    assert status == 200, (status, body)
-    assert mode("chat-no-document")["mode"] == "legacy", mode("chat-no-document")
-
-    # Arm 3 — a task-bound role with no document is still refused, by name.
-    status, body = observed["worker-no-document"]
-    assert status == 400, (status, body)
-    assert body["status"] == "task-binding-required", body
-
-    # Arm 4 — THE ADMISSION THE RULING MADE: taskless AND instructed.
-    status, body = observed["curator-no-document"]
-    assert status == 200, (status, body)
-    assert mode("curator-no-document")["mode"] == "capsule", mode("curator-no-document")
-    assert mode("curator-no-document")["role"] == "curator", mode("curator-no-document")
-    assert mode("curator-no-document")["taskReference"] == "free-agent:curator", mode(
-        "curator-no-document"
-    )
-
-    # Arm 5 — the same role ON a document still takes the dispatched route, so the ruling widened
-    # the seat rather than replacing it.
-    status, body = observed["curator-on-a-task-document"]
-    assert status == 200, (status, body)
-    assert mode("curator-on-a-task-document")["role"] == "curator", mode(
-        "curator-on-a-task-document"
-    )
-    assert (
-        mode("curator-on-a-task-document")["taskReference"]
-        != mode("curator-no-document")["taskReference"]
-    ), "a document-bound curator and a taskless one must not report the same task reference"
-
-    # Arm 6, the boundary: a terminal-kind open is a plain pane for every role, so the taskless
-    # curator seat is a HARNESS seat and this arm is not a second route to its instructions.
-    status, body = observed["curator-as-a-terminal"]
-    assert status == 200, (status, body)
-    assert mode("curator-as-a-terminal")["mode"] == "legacy", mode("curator-as-a-terminal")
-
-
-def test_the_admitted_taskless_seat_receives_the_foundation_step() -> None:
-    """The bootstrap seat opens with no document, and its own instructions reach the foundation.
-
-    The bootstrap seat is the read-and-report carrier for a repository whose foundation is absent: it
-    is admitted with no task document, and its own compiled instructions name the procedure and the
-    knowledge states, so a greenfield repository reaches the step at all. It is not the only seat the
-    opener admits taskless and instructs — a **taskless curator** seat is admitted by the developer's
-    2026-09-24 ruling and receives the curator's capsule — which is why the six-arm case above, not
-    this one, owns the seat table. The instructions below are this seat's own compiled capsule.
-    """
-
-    instructions, summary = free_agent_instructions("bootstrap")
+    capsule = free_agent_capsule("bootstrap")
+    instructions = capsule.trusted_instructions
     assert PROCEDURE_SKILL in instructions, (
-        "the taskless seat the opener admits is not instructed about the knowledge-foundation "
-        f"procedure, so ordinary setup cannot reach it ({summary})"
+        "the bootstrap free agent is not instructed about the knowledge-foundation procedure, so "
+        f"ordinary setup cannot reach it ({capsule.binding.as_report()})"
     )
     assert "not-recorded" in instructions, (
         "the bootstrap seat's instructions name no knowledge state, so a repository whose foundation "
         "is absent cannot be reported as anything but a ready setup"
     )
-
-    with launch_world() as (root, config, host):
-        status, body = open_seat(
-            root,
-            config,
-            host,
-            "l27-bootstrap-instructed",
-            {"kind": "harness", "harness": "codex", "role": "bootstrap"},
-        )
-    assert status == 200, body
-    mode = cast("dict[str, object]", body["instructionMode"])
-    assert mode["taskReference"] == "free-agent:bootstrap", mode
+    assert capsule.binding.task_path == "free-agent:bootstrap", capsule.binding.as_report()
 
 
-def test_the_curator_seat_opens_on_a_task_document_and_taskless() -> None:
-    """The curator's own seat opens WITH a named role scope, and it also opens with no document.
+def test_the_curator_capsule_compiles_on_a_task_document_and_taskless(tmp_path: Path) -> None:
+    """The curator's capsule compiles WITH a task document, and it also compiles with none.
 
-    With the task document it is admitted on the dispatched-brief route the procedure's leaf entry
-    states. Without one it is admitted too — **the developer's 2026-09-24 ruling**, which is the arm
-    this case exists to keep honest: before it, this docstring read "a session for the curator without
-    a document is refused (``task-binding-required``)", which was true then and is false now. The five
-    arms and their delivery modes are asserted together in
-    ``test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each``; what this case adds
-    is the document-bound arm at its own surface, so the two routes are separately attributable.
+    On the task document the capsule is bound to that document, the dispatched route the procedure's
+    leaf entry states. Without one it is bound to the named absence ``free-agent:curator``: the
+    capsule of an instructed session that authors a first knowledge foundation before any task
+    exists (no curator seat is started without a task document). Both carry the curator role, and
+    the two are separately attributable: they must not report the same task reference.
     """
 
-    with launch_world() as (root, config, host):
-        status, body = open_seat(
-            root,
-            config,
-            host,
-            "l27-curator-bound",
-            {
-                "kind": "harness",
-                "harness": "codex",
-                "role": "curator",
-                "taskDocumentRef": LEAF_REF.model_dump(),
-            },
-        )
-        assert status == 200, body
-    mode = cast("dict[str, object]", body["instructionMode"])
-    assert mode["role"] == "curator", mode
+    config, _repo = _scratch_world(tmp_path)
+    launched = compile_launch_capsule(
+        config,
+        LaunchCapsuleRequest(role="curator", workspace_root=tmp_path, task_document_ref=LEAF_REF),
+    )
+    assert launched.delivery is not None, launched.explain()
+    bound = launched.delivery.binding
+    assert bound.role == "curator", bound.as_report()
+
+    taskless = free_agent_capsule("curator").binding
+    assert taskless.role == "curator", taskless.as_report()
+    assert taskless.task_path == "free-agent:curator", taskless.as_report()
+    assert bound.task_path != taskless.task_path, (
+        "a document-bound curator and a taskless one must not report the same task reference"
+    )
 
 
 def test_the_served_catalog_publishes_the_bootstrap_procedure() -> None:
@@ -490,17 +332,17 @@ def test_the_compiled_curator_shape_names_the_procedure_it_would_receive() -> No
     """The curator SHAPE's compiled instructions name the procedure — the compiler, not an admission.
 
     This case is deliberately named for the compiler, because that is all it measures: the launch
-    compiler builds a free-agent capsule for any declared role, whether or not the opener admits that
-    role without a task document. Which roles the opener *does* admit is
-    ``test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each``'s subject, and since
-    the developer's 2026-09-24 ruling ``curator`` is one of them — so this shape's instructions are
-    delivered to a taskless session as well as to a curator opened on a task document.
+    compiler builds a free-agent capsule for any declared role. An instructed session that authors
+    the foundation without a task document holds this capsule too — so this shape's instructions are
+    the ones it follows as well as a curator launched on a task document.
     """
 
-    instructions, summary = free_agent_instructions("curator")
+    capsule = free_agent_capsule("curator")
+    instructions = capsule.trusted_instructions
     assert PROCEDURE_SKILL in instructions, (
         "the curator shape's compiled instructions never name the knowledge-bootstrap procedure, so "
-        f"a curator seat opened on a task document would not be told about it ({summary})"
+        "a curator seat opened on a task document would not be told about it "
+        f"({capsule.binding.as_report()})"
     )
     assert "knowledge-bootstrap" in instructions, (
         "the curator shape's instructions name no taskless bootstrap entry, leaving the only printed "

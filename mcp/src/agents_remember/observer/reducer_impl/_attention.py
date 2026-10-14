@@ -11,11 +11,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalRecord
-from agents_remember.controlplane.records import DECISION_STATES, GateRecord
 from agents_remember.observer.projection import (
     AttentionItem,
     DriftSnapshotNode,
-    GateNode,
     LifecycleProjection,
     ProviderNode,
     SetupProgressNode,
@@ -28,14 +26,6 @@ from agents_remember.observer.reducer_impl._types import AnalyticalInputs
 _SEVERITY_RANK: dict[str, int] = {"alarm": 0, "warn": 1, "info": 2}
 _PROVIDER_DOWN: frozenset[str] = frozenset({"stopped", "failed", "error"})
 _DISMISSABLE_REPO_KINDS: frozenset[str] = frozenset({"actionable-drift"})
-
-
-def _ask_text(ask: dict[str, Any] | None) -> str | None:
-    """The human-facing question from an open block ask, when present."""
-    if not ask:
-        return None
-    question = ask.get("question")
-    return str(question) if question is not None else None
 
 
 def build_attention_queue(
@@ -61,7 +51,6 @@ def build_attention_queue(
     """
     items = [
         *_lifecycle_attention(lifecycles),
-        *_gate_attention(given.gates),
         *_provider_attention(providers),
         *_drift_attention(given.drift_snapshots),
         *_setup_attention(given.setup_progress),
@@ -118,148 +107,28 @@ def _signal_after(signal_ts: str | None, dismissed_at: str) -> bool:  # pragma: 
     return signal > dismissed
 
 
-def _await_summary(ask: dict[str, Any] | None) -> str | None:
-    """The developer-facing summary an awaiting-developer turn-end carried."""
-    if not ask:
-        return None
-    summary = ask.get("summary")
-    return str(summary) if summary is not None else None
-
-
 def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[AttentionItem]:
-    """Awaiting-developer turn ends and bare blocks, then inferred stale/dormant
-    sessions (one item per lifecycle).
+    """An event-backed session that went quiet (one item per lifecycle).
 
-    A durable open gate is emitted by ``_gate_attention`` and already materialized
-    onto ``lifecycle.gate`` by ``_attach_gates``, so the ``blocked-gate`` item fires
-    only for a *bare* ``block()`` with no GateRecord (``lifecycle.gate is None``) --
-    that ``and lifecycle.gate is None`` is the gate-open/blocked-gate dedup.
+    A synthesized dormant persistent worktree (``lastEventTs == ""``) is the hangar's job
+    (note 06), not the queue.
     """
-    items: list[AttentionItem] = []
-    for lifecycle in lifecycles:
-        if lifecycle.state == "awaiting-developer":
-            # NOTIFY-AND-CONTINUE turn end (leaf-28): one info item, the developer's
-            # cue that the turn is theirs. enclosure is the deep-link anchor when set.
-            items.append(
-                AttentionItem(
-                    id=f"awaiting-developer:{lifecycle.id}",
-                    kind="awaiting-developer",
-                    severity="info",
-                    lane="lifecycle",
-                    title="Turn complete — your move",
-                    detail=_await_summary(lifecycle.ask),
-                    waitSeconds=lifecycle.staleSeconds,
-                    lifecycleId=lifecycle.id,
-                    enclosure=lifecycle.enclosure,
-                    repoId=lifecycle.repoId,
-                    # The turn-end transition time -- a fresh turn-end re-enters the
-                    # state and re-surfaces a dismissed item; a heartbeat does not.
-                    signalTs=lifecycle.stateEnteredAt or None,
-                )
-            )
-        elif lifecycle.state == "blocked" and lifecycle.gate is None:
-            items.append(
-                AttentionItem(
-                    id=f"blocked-gate:{lifecycle.id}",
-                    kind="blocked-gate",
-                    severity="warn",
-                    lane="lifecycle",
-                    title="Gate — input needed",
-                    detail=_ask_text(lifecycle.ask),
-                    waitSeconds=lifecycle.staleSeconds,
-                    lifecycleId=lifecycle.id,
-                    enclosure=lifecycle.enclosure,
-                    repoId=lifecycle.repoId,
-                    signalTs=lifecycle.stateEnteredAt or None,
-                )
-            )
-        elif lifecycle.inferred and lifecycle.state == "paused" and lifecycle.lastEventTs:
-            # Only an event-backed session that went quiet is queue-worthy; a synthesized dormant
-            # persistent worktree (lastEventTs == "") is the hangar's job (note 06), not the queue.
-            items.append(
-                AttentionItem(
-                    id=f"stale-session:{lifecycle.id}",
-                    kind="stale-session",
-                    severity="info",
-                    lane="lifecycle",
-                    title="Session gone quiet",
-                    waitSeconds=lifecycle.staleSeconds,
-                    lifecycleId=lifecycle.id,
-                    repoId=lifecycle.repoId,
-                    # The moment it last had activity (the quiet point): a revived
-                    # session advances this past a dismissal and re-surfaces if it
-                    # later goes quiet again.
-                    signalTs=lifecycle.lastEventTs or None,
-                )
-            )
-        elif lifecycle.inferred and lifecycle.state == "abandoned" and lifecycle.lastEventTs:
-            items.append(
-                AttentionItem(
-                    id=f"dormant-fleeting:{lifecycle.id}",
-                    kind="dormant-fleeting",
-                    severity="info",
-                    lane="lifecycle",
-                    title="Fleeting session dormant",
-                    waitSeconds=lifecycle.staleSeconds,
-                    lifecycleId=lifecycle.id,
-                    repoId=lifecycle.repoId,
-                    signalTs=lifecycle.lastEventTs or None,
-                )
-            )
-    return items
-
-
-def _gate_node(gate: GateRecord) -> GateNode:
-    """Project one durable gate; an open gate exposes the decision verbs the cockpit can POST."""
-    return GateNode(
-        id=gate.id,
-        kind=gate.kind,
-        state=gate.state,
-        decidedBy=gate.decidedBy,
-        decidedVia=gate.decidedVia,
-        evidenceRefs=[ref.model_dump(mode="json", exclude_none=True) for ref in gate.evidenceRefs],
-        decisions=sorted(DECISION_STATES) if gate.state == "open" else [],
-        packet=gate.packet,
-        ts=gate.ts,
-    )
-
-
-def _attach_gates(
-    lifecycles: list[LifecycleProjection], gates: list[GateRecord]
-) -> list[LifecycleProjection]:
-    """Materialize each lifecycle's latest open gate onto its projection (slice 6c)."""
-    by_lifecycle: dict[str, list[GateRecord]] = {}
-    for gate in gates:
-        by_lifecycle.setdefault(gate.lifecycleId or "", []).append(gate)
-    attached: list[LifecycleProjection] = []
-    for lifecycle in lifecycles:
-        open_gates = [g for g in by_lifecycle.get(lifecycle.id, []) if g.state == "open"]
-        if open_gates:
-            latest = max(open_gates, key=lambda gate: gate.ts)
-            attached.append(lifecycle.model_copy(update={"gate": _gate_node(latest)}))
-        else:
-            attached.append(lifecycle)
-    return attached
-
-
-def _gate_attention(gates: list[GateRecord]) -> list[AttentionItem]:
-    """An open gate -- the operator must decide it (slice 6c)."""
     return [
         AttentionItem(
-            id=f"gate:{gate.id}",
-            kind="gate-open",
-            severity="warn",
+            id=f"stale-session:{lifecycle.id}",
+            kind="stale-session",
+            severity="info",
             lane="lifecycle",
-            title=f"Gate — {gate.kind}",
-            detail="awaiting your decision",
-            lifecycleId=gate.lifecycleId,
-            gateId=gate.id,
-            # The gate's open-snapshot time; a re-gate is a new id, so a dismissal
-            # never bleeds onto a freshly opened gate.
-            signalTs=gate.ts or None,
+            title="Session gone quiet",
+            waitSeconds=lifecycle.staleSeconds,
+            lifecycleId=lifecycle.id,
+            repoId=lifecycle.repoId,
+            # The moment it last had activity (the quiet point): a revived session
+            # advances this past a dismissal and re-surfaces if it later goes quiet again.
+            signalTs=lifecycle.lastEventTs or None,
         )
-        for gate in gates
-        if gate.state == "open"
+        for lifecycle in lifecycles
+        if lifecycle.inferred and lifecycle.state == "paused" and lifecycle.lastEventTs
     ]
 
 

@@ -123,8 +123,6 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         contract_path: str | None = None,
         leaf_id: str | None = None,
         parent_task: str | None = None,
-        *,
-        on_unsaved: str | None = None,
     ) -> dict[str, Any]:
         """Re-attach to an existing task contract without mutating Git. Answers the state reached
         (attached, attached-existing-contract, blocked) and the next call; the whole result is
@@ -138,7 +136,6 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
                 leaf_id=leaf_id,
                 parent_task=parent_task,
             ),
-            on_unsaved=on_unsaved,
         )
 
 

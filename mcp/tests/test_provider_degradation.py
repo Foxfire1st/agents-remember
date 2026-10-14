@@ -6,12 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.primitives.provider_degradation_settings import (
     ProviderDegradationSettings,
 )
@@ -19,10 +17,6 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     load_config,
 )
-from agents_remember.models.terminal_catalog import (
-    TerminalCatalogEntry,
-)
-from agents_remember.observer import observer_root
 from agents_remember.providers.degradation import (
     ProviderDegradationStore,
     classify_degradation,
@@ -33,11 +27,6 @@ from agents_remember.providers.metrics import (
     ContainerSample,
     MetricsSnapshot,
     ProviderMetricsStore,
-)
-from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
-    terminal_catalog_path,
 )
 
 T1 = "2026-07-07T12:00:00+00:00"
@@ -244,40 +233,7 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
             },
         )
 
-    def test_critical_transition_records_event_inbox_and_failsafe_once(self) -> None:
-        catalog = TerminalCatalog(terminal_catalog_path(self.config.coordination_root))
-        catalog.upsert(
-            TerminalCatalogEntry(
-                id="orchestrator-1",
-                label="Orchestrator",
-                kind="harness",
-                harness="claude",
-                lifecycle_id="L1",
-                cwd=self.root,
-                tmux_name="ar-orchestrator-1",
-                command=("claude",),
-                created_at=T1,
-                last_attached_at=T1,
-                status="running",
-                spawn_role="orchestrator",
-            )
-        )
-        catalog.upsert(
-            TerminalCatalogEntry(
-                id="manager-1",
-                label="Manager",
-                kind="harness",
-                harness="codex",
-                lifecycle_id="L2",
-                cwd=self.root,
-                tmux_name="ar-manager-1",
-                command=("codex",),
-                created_at=T1,
-                last_attached_at=T1,
-                status="running",
-                spawn_role="manager",
-            )
-        )
+    def test_critical_transition_records_event_and_failsafe_once(self) -> None:
         record_memory_sample(self.config, name="grepai-1", ratio=0.95)
         record_memory_sample(self.config, name="grepai-2", ratio=0.96)
         stop_calls: list[Path] = []
@@ -286,26 +242,14 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
             stop_calls.append(config.config_path)
             return {"ok": True, "stopped": ["grepai-memory"]}
 
-        delivery_attempts: list[dict[str, Any]] = []
-
-        def deliver_entry(log: Any, **kwargs: Any) -> Any:
-            delivery_attempts.append({"log": log, **kwargs})
-            return log.entry
-
-        with patch(
-            "agents_remember.serving.degradation_delivery.deliver_inbox_entry",
-            side_effect=deliver_entry,
-        ):
-            result = evaluate_provider_degradation(
-                self.config,
-                degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
-                stop_provider_stacks=stop_provider_stacks,
-            )
-            second = evaluate_provider_degradation(
-                self.config,
-                degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
-                stop_provider_stacks=stop_provider_stacks,
-            )
+        result = evaluate_provider_degradation(
+            self.config,
+            stop_provider_stacks=stop_provider_stacks,
+        )
+        second = evaluate_provider_degradation(
+            self.config,
+            stop_provider_stacks=stop_provider_stacks,
+        )
 
         self.assertEqual(result["state"], "critical")
         self.assertEqual(second["event"], None)
@@ -326,21 +270,7 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         self.assertEqual(state_payload["state"], "critical")
         self.assertEqual(state_payload["lastEventId"], event["id"])
 
-        inbox_entries = OperatorInboxStore(observer_root(self.config)).current().values()
-        self.assertEqual({entry.messageKind for entry in inbox_entries}, {"degradation-alert"})
-        self.assertEqual(
-            {entry.agentId for entry in inbox_entries}, {"orchestrator-1", "manager-1"}
-        )
-        self.assertEqual(len(delivery_attempts), 2)
-        self.assertEqual(
-            {attempt["log"].entry.agentId for attempt in delivery_attempts},
-            {"orchestrator-1", "manager-1"},
-        )
-        responses = {entry.recipientRole: entry.response for entry in inbox_entries}
-        self.assertIn("investigator", responses["orchestrator"])
-        self.assertIn("no provider kill authority", responses["manager"])
-
-    def test_critical_stop_failure_still_records_event_inbox_and_state(self) -> None:
+    def test_critical_stop_failure_still_records_event_and_state(self) -> None:
         record_memory_sample(self.config, name="grepai-1", ratio=0.95)
         record_memory_sample(self.config, name="grepai-2", ratio=0.96)
 
@@ -349,7 +279,6 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
 
         result = evaluate_provider_degradation(
             self.config,
-            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
             stop_provider_stacks=stop_provider_stacks,
         )
 
@@ -369,17 +298,12 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
             )
         )
         self.assertEqual(state_payload["state"], "critical")
-        inbox_entries = OperatorInboxStore(observer_root(self.config)).current().values()
-        self.assertEqual(
-            {entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"}
-        )
 
-    def test_recovery_transition_survives_restart_and_posts_role_addressed_all_clear(self) -> None:
+    def test_recovery_transition_survives_restart(self) -> None:
         record_memory_sample(self.config, name="grepai-1", ratio=0.80)
         record_memory_sample(self.config, name="grepai-2", ratio=0.82)
         degraded = evaluate_provider_degradation(
             self.config,
-            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
             stop_provider_stacks=unreachable_stopper,
         )
         self.assertEqual(degraded["state"], "degraded")
@@ -389,7 +313,6 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
 
         recovered = evaluate_provider_degradation(
             self.config,
-            degradation_alerts=DegradationAlertDelivery(self.config.coordination_root),
             stop_provider_stacks=unreachable_stopper,
         )
 
@@ -400,11 +323,6 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         self.assertEqual(event["to"], "healthy")
         event_rows = read_event_rows(self.config)
         self.assertEqual([row["to"] for row in event_rows], ["degraded", "healthy"])
-        inbox_entries = list(OperatorInboxStore(observer_root(self.config)).current().values())
-        self.assertEqual(
-            {entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"}
-        )
-        self.assertEqual({entry.agentId for entry in inbox_entries}, {None})
 
 
 if __name__ == "__main__":

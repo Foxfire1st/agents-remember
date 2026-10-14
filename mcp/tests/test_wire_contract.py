@@ -67,12 +67,11 @@ class WireSweepFalsePositiveTests(unittest.TestCase):
     """Known-good constructs the package really contains. None of these may be reported."""
 
     def test_setting_fields_on_the_model_before_the_dump_is_the_sanctioned_pattern(self) -> None:
-        # mcp/tools/base.py: the choke point writes nextStep/agentNotifierBanner onto the
-        # MODEL, then dumps once. This is what the remediation asks for.
+        # mcp/tools/base.py: the choke point writes nextStep onto the MODEL, then dumps
+        # once. This is what the remediation asks for.
         source = (
             "def f(model):\n"
             "    model.nextStep = step\n"
-            "    model.agentNotifierBanner = banner\n"
             "    return model.model_dump(mode='json', exclude_none=True)\n"
         )
         self.assertEqual(_wire(source), [])

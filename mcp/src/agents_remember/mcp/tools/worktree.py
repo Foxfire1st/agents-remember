@@ -76,16 +76,8 @@ def worktree_sync_payload(
     )
 
 
-def worktree_attach_payload(
-    config: McpRuntimeConfig,
-    task: TaskRef,
-    *,
-    on_unsaved: str | None = None,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "worktree_attach",
-        worktree_attach_tool(config, task, on_unsaved=on_unsaved),
-    )
+def worktree_attach_payload(config: McpRuntimeConfig, task: TaskRef) -> dict[str, Any]:
+    return _tool_payload("worktree_attach", worktree_attach_tool(config, task))
 
 
 def worktree_pause_payload(

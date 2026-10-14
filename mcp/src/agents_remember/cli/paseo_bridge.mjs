@@ -43,6 +43,7 @@
 //
 //   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
 //                  title, labels, prompt?, systemPrompt?, parentAgentId?, modeId?, featureValues?, toolPolicy?,
+//                  providerOptions?: {disallowedTools: [<rule>]},
 //                  mcpServers?: {<name>: {type: 'stdio', command, args, env}}}
 //            -> {serverId, existing: boolean, agent: AGENT, creationError?}
 //            One agent under the caller's agent id (a UUID) in that workspace's directory, with
@@ -57,7 +58,8 @@
 //            the runtime with the agent and applied again whenever it resumes the agent's
 //            session: the text is added to the provider's system-level instructions where the
 //            provider has such, and each tool server is started for the agent with exactly the
-//            given command and environment. `parentAgentId` names the agent that starts this one:
+//            given command and environment. A map that names `agents-remember-task` is handed
+//            on without an entry `agents-remember`. `parentAgentId` names the agent that starts this one:
 //            the runtime records it as the new agent's parent (the label `paseo.parent-agent-id`,
 //            which AGENT's `labels` shows) and refuses the creation when it has no such agent
 //            loaded. The agent still runs in `workspaceId`, not in the parent's workspace.
@@ -626,28 +628,27 @@ function agentCreation(input, agentId) {
       'The Paseo bridge payload needs mcpServers as stdio definitions with command, args and env.'
     )
   }
-  const serverExclusion = input.serverExclusion ?? null
-  if (serverExclusion !== null && !isRecord(serverExclusion)) {
-    throw failure('invalid_bridge_payload', 'The Paseo bridge payload needs serverExclusion as a record when present.')
-  }
-  // MIK-R112 rule 6: the launch record travels with the call. A task-server-only
-  // exclusion retains the task server and suppresses only the other product
-  // copy (agents-remember, cf. OTHER_PRODUCT_TOOL_SERVER in
-  // application/agent_binding.py): that key goes, every other entry (task
-  // entry, user servers) is preserved byte-identical. Same filter as the
-  // Python shaper: applied here, idempotent with it. An emptied map is
-  // dropped as meaningless; the exclusion record still travels.
-  let appliedServers = mcpServers
-  if (isRecord(serverExclusion) && serverExclusion.mode === 'task-server-only' && isRecord(mcpServers)) {
-    const pared = Object.fromEntries(
-      Object.entries(mcpServers).filter(([name]) => name !== 'agents-remember')
-    )
-    appliedServers = Object.keys(pared).length > 0 ? pared : null
+  // MIK-R132: beside the task server, an entry for the product's other tool server is a second
+  // copy of the product's tools. A supplied map loses that one entry (agents-remember, cf.
+  // OTHER_PRODUCT_TOOL_SERVER in application/agent_binding.py); the task server's entry and the
+  // user's servers stay as they are. The same filter as exclusion_applied_agent in
+  // cli/paseo_launch.py, applied here again.
+  const appliedServers =
+    isRecord(mcpServers) && Object.hasOwn(mcpServers, 'agents-remember-task')
+      ? Object.fromEntries(Object.entries(mcpServers).filter(([name]) => name !== 'agents-remember'))
+      : mcpServers
+  // MIK-R132: what keeps the product's other tool server out of this one agent. The one key
+  // the pinned host reads for it is disallowedTools of a provider's options; which provider,
+  // and where the host reads it, stands in application/agent_binding.py. Nothing else is
+  // handed over under this name.
+  const providerOptions = input.providerOptions
+  if (providerOptions !== undefined && (!isRecord(providerOptions) ||
+      Object.keys(providerOptions).some((key) => key !== 'disallowedTools') ||
+      !Array.isArray(providerOptions.disallowedTools) || providerOptions.disallowedTools.length === 0 ||
+      providerOptions.disallowedTools.some((rule) => !nonEmpty(rule)))) {
+    throw failure('invalid_bridge_payload', 'providerOptions must hold disallowedTools as a list of rules and nothing else.')
   }
   // What the runtime keeps with the agent and applies again on every resume of its session.
-  // (d): nothing crosses to the host that the host does not read -- the
-  // serverExclusion record leaves what is handed to the host. It stays in the
-  // product's own receipt (applied_to_agent). The map carries what is retained.
   const kept = {
     ...(modeId ? { modeId } : {}),
     ...(toolPolicy ? { toolPolicy } : {}),
@@ -681,7 +682,7 @@ function agentCreation(input, agentId) {
       if (model) {
         const handle = await workspace.agents.create({
           ...shared,
-          config: { provider: `${provider}/${model}`, ...kept },
+          config: { provider: `${provider}/${model}`, ...kept, ...(providerOptions ? { options: providerOptions } : {}) },
           title,
           ...(parentAgentId ? { parent: parentAgentId } : {})
         })
@@ -691,7 +692,7 @@ function agentCreation(input, agentId) {
       if (!nonEmpty(cwd)) throw new Error(`Workspace ${workspaceId} has no available directory`)
       return await daemon.createAgent({
         ...shared,
-        config: { provider, cwd, title, ...kept },
+        config: { provider, cwd, title, ...kept, ...(providerOptions ? { providerOptions } : {}) },
         workspaceId,
         ...(parentAgentId ? { callerAgentId: parentAgentId } : {})
       })

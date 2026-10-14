@@ -31,11 +31,10 @@ REMOVED_PREFIXES: dict[str, str] = {
     ),
     "AR_": (
         "belong to another AR runtime or launch: the seat identity its control plane injects "
-        "(AR_SPAWN_*, AR_HOSTED_SESSION_ID), a launch's workspace and capsule (AR_WORKSPACE_ROOT, "
-        "AR_BINDING_REF, AR_CAPSULE_*), the Orca runtime the ONT line selects (AR_ORCA_*), the Eve "
-        "runtime and state roots (AR_EVE_*), the experiment switch (AR_EXPERIMENT), the settings "
-        "file of a reloading dashboard (AR_DASHBOARD_DEV_*) and the Dagger authority root "
-        "(AR_DAGGER_*)"
+        "(AR_SPAWN_*, AR_HOSTED_SESSION_ID), the Orca runtime the ONT line selects (AR_ORCA_*), "
+        "the experiment switch (AR_EXPERIMENT), the settings file of a reloading dashboard "
+        "(AR_DASHBOARD_DEV_*), the Dagger authority root (AR_DAGGER_*) and whatever an earlier "
+        "AR build on the machine still exports under the prefix"
     ),
     "AGENTS_REMEMBER_": "select another AR source tree or settings file",
     "ORCA_": (
@@ -75,8 +74,9 @@ def sandbox_variables(layout: SandboxLayout) -> dict[str, str]:
     """What the sandbox sets in every process it starts.
 
     ``XDG_CONFIG_HOME`` isolates the single user settings file without redirecting HOME or
-    harness login directories. ``TMUX_TMPDIR`` gives the dashboard's terminal sessions a multiplexer server of the sandbox's
-    own instead of the developer's. ``PYTHONPYCACHEPREFIX`` and ``GIT_OPTIONAL_LOCKS=0`` keep the
+    harness login directories. ``TMUX_TMPDIR`` gives every tmux a sandbox process starts (an
+    agent's shell, or an earlier build run through this tooling) a multiplexer server of the
+    sandbox's own instead of the developer's. ``PYTHONPYCACHEPREFIX`` and ``GIT_OPTIONAL_LOCKS=0`` keep the
     checkout unwritten: no bytecode beside its sources, and no index lock when the dashboard asks
     Git whether the build it serves is modified. ``AR_DAGGER_AUTHORITY_ROOT`` puts the registry of
     the build's quality tools inside the sandbox; unset, the build keeps it in the user's home,

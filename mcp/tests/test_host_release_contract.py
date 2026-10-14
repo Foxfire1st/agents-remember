@@ -12,9 +12,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.cli import paseo_runtime
 from agents_remember.install.runtime import upgrade_user_settings
-from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.paseo_authority import load_shared_paseo_runtime
 from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettingsError
 from agents_remember.kernel.primitives.runtime_config import load_config
@@ -60,7 +60,7 @@ def test_starter_renders_one_shared_block_and_preserves_existing_settings(tmp_pa
     settings.write_text((root / "scripts/harness/shared/agents-remember-settings.json").read_text())
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     module.render_settings(settings, tmp_path, ["repo"])
-    shared = user_agentic_settings_path()
+    shared = user_settings_path_for_write()
     host = json.loads(shared.read_text())["paseoRuntime"]
     assert "paseoRuntime" not in json.loads(settings.read_text())
     assert "version" not in host
@@ -161,7 +161,7 @@ def test_native_public_renderer_consumes_shared_setup_without_output_edits(tmp_p
     adapter = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(adapter)
     coordination = tmp_path / "coordination"
-    shared = user_agentic_settings_path()
+    shared = user_settings_path_for_write()
     shared.parent.mkdir(parents=True)
     block = {
         "installPrefix": str(tmp_path / "paseo/prefix"),
@@ -257,7 +257,7 @@ def test_retired_selector_notice_once_on_each_public_command_and_dashboard_line(
 
     settings = runtime_settings(tmp_path)
     write_shared_runtime(tmp_path, settings)
-    shared = user_agentic_settings_path()
+    shared = user_settings_path_for_write()
     document = json.loads(shared.read_text())
     document["paseoRuntime"]["version"] = "*"
     shared.write_text(json.dumps(document))
@@ -310,7 +310,7 @@ def test_host_and_all_standalone_starters_refuse_old_location_before_any_write(
     # A location refusal must precede even parsing the removed file.
     old.write_bytes(b"\xff old settings must not be read")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "user-config"))
-    new = user_agentic_settings_path()
+    new = user_settings_path_for_write()
     if both:
         new.parent.mkdir(parents=True)
         new.write_bytes(b"\xff existing user settings must not be read")
@@ -365,7 +365,7 @@ def test_whole_file_upgrade_retains_configured_host_and_all_other_families(tmp_p
     coordination = tmp_path / "sandbox/coordination"
     settings = runtime_settings(tmp_path / "sandbox")
     write_shared_runtime(tmp_path, settings)
-    new = user_agentic_settings_path()
+    new = user_settings_path_for_write()
     document = json.loads(new.read_text())
     document["futureFamily"] = {"unknownKey": ["keep", 42]}
     document["orchestration"] = {"roles": {"worker": {"harness": "codex", "mode": "auto"}}}
@@ -378,7 +378,11 @@ def test_whole_file_upgrade_retains_configured_host_and_all_other_families(tmp_p
     preview = upgrade_user_settings(coordination, dry_run=True)
     assert preview["state"] == "would-move" and old.exists() and not new.exists()
     assert upgrade_user_settings(coordination, dry_run=False)["state"] == "moved"
-    assert not old.exists() and (new.read_bytes(), stat.S_IMODE(new.stat().st_mode)) == before
+    # MIK-R137 rule 4: the moved file keeps its bytes but not its open mode.
+    assert not old.exists() and new.read_bytes() == before[0]
+    assert stat.S_IMODE(new.stat().st_mode) == 0o444
+    assert stat.S_IMODE(new.parent.stat().st_mode) == 0o555
+    new.parent.chmod(0o755)
     actual = load_shared_paseo_runtime(coordination)
     assert actual is not None and actual.source_path == new
     assert (actual.home, actual.install_prefix, actual.listen, actual.providers, actual.embed) == (
@@ -399,7 +403,7 @@ def test_sandbox_environment_reads_only_its_own_user_settings(tmp_path, monkeypa
     real_home = tmp_path / "simulated-user"
     monkeypatch.setenv("HOME", str(real_home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(real_home / "config"))
-    outside = user_agentic_settings_path()
+    outside = user_settings_path_for_write()
     outside.parent.mkdir(parents=True)
     outside.write_bytes(b"\xff must not be read by the sandbox")
     layout = SandboxLayout(tmp_path / "sandbox")
@@ -408,6 +412,6 @@ def test_sandbox_environment_reads_only_its_own_user_settings(tmp_path, monkeypa
     environment = sandbox_environment(os.environ, layout)
     assert environment["HOME"] == str(real_home)
     with patch.dict(os.environ, environment, clear=True):
-        assert user_agentic_settings_path() == layout.user_settings_file
+        assert user_settings_path_for_write() == layout.user_settings_file
         assert load_shared_paseo_runtime(layout.coordination) is None
     assert outside.read_bytes() == b"\xff must not be read by the sandbox"

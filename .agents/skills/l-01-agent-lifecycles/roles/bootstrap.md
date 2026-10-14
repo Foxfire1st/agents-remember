@@ -87,8 +87,8 @@ wins. This section states only the obligations that are yours while running it: 
   It is not a general maintenance role and does not become one by being asked twice: once a repository has a
   resolving context, ordinary work belongs to the lifecycle roles, and a later request to "tidy" a working
   installation is refused with the owning skill named.
-- **Never mutate beyond the setup surfaces:** no `worktree_*`, `task_doc`, `lifecycle_*`, `gate_*`,
-  `dispatch_agent`, `closeout_*`, `direct_landing`, `message_child`, `retire_child`, `rename_*`, `task_reopen`,
+- **Never mutate beyond the setup surfaces:** no `worktree_*`, `task_doc`, `lifecycle_finalize_task`,
+  `role_start`, `closeout_*`, `direct_landing`, `retire_child`, `task_reopen`,
   `curator_coherence`, `route_index_refresh`, `memory_carryover_*`, `citation_fix`. No `git commit`, no
   `git push`, no branch movement, no worktree creation. The memory-content commit `memory_baseline_adopt`
   performs is that surface's designed effect, not this seat committing.
@@ -97,7 +97,7 @@ wins. This section states only the obligations that are yours while running it: 
   foundation's state.
 - **Never work around a refusal that names a capability the product does not have**, substitute a supported
   mode for an unsupported one, or migrate an existing artifact in place.
-- Operator knobs (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, `promptKeywords`) are
+- Operator knobs (`harness`, `model`, `effort`) are
   settings, not yours to set: role-file defaults resolve at role-file defaults < global settings < repo-local
   settings, and the resolved `system/tools.md` owns the concrete environment you run in.
 

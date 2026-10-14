@@ -1,30 +1,23 @@
-"""Teardown proof for the serving lifespan's terminal-observation owner (``LOCR-R19@v1``).
+"""Teardown proof for the serving lifespan's leaf-archive recovery owner.
 
-Serving shutdown must cancel the recurring observer *and* wait for the off-loop
-``TerminalCatalogLivenessSweeper.refresh`` worker it is running. Cancelling an ``asyncio.to_thread``
-call does not stop the underlying thread, so a teardown that only cancelled the observer task could
-return -- and close the terminal host -- while the sweeper was still reading panes or writing the
-catalog. The drain boundary is the existing ``_to_thread_drained_on_cancel`` helper, applied at
-every observer call site including the startup prime; the teardown that consumes it is the
-lifespan's own ``background`` collection, cancelled as a group and then awaited one task at a time.
+Serving shutdown must cancel the recurring owner *and* wait for the off-loop
+``LeafArchiveRecovery.tick`` worker it is running. Cancelling an ``asyncio.to_thread`` call does not
+stop the underlying thread, so a teardown that only cancelled the owner task could return while the
+recovery was still reading receipts or writing an archive outcome. The drain boundary is the
+``_to_thread_drained_on_cancel`` helper the owner calls its worker through; the teardown that
+consumes it is the lifespan's own ``background`` collection, cancelled as a group and then awaited
+one task at a time.
 
-These cases drive the real ``_serving_lifespan`` under the shared serving fixture from
-``test_serving_observation_loop`` (its virtual clock, recorders, and probe -- no HTTP request, no
-browser, no real second) and park a real ``refresh`` worker in its thread, so "did shutdown wait?"
-is answered by an ordered witness instead of by timing luck: cancellation is requested while the
-worker is provably in flight, the worker is released after its cancellation drain is observed, and the host's own
-shutdown callback reports the state it found.
-
-The three cases are the packet's two required classes plus the startup-prime edge it was revised to
-cover: a controlled blocking-refresh teardown (ordering, drain, and no post-shutdown write),
-cancellation during the startup prime, and the final-commit restart proof (the last pass's
-committed catalog truth stays durable and is evaluated by the next serving startup rather than
-delivered by a teardown-time callback).
+The case drives the real ``_serving_lifespan`` and the real ``_leaf_archive_recovery_loop`` under a
+virtual clock (no HTTP request, no browser, no real second) and parks a real ``tick`` worker in its
+thread, so "did shutdown wait?" is answered by an ordered witness instead of by timing luck:
+cancellation is requested while the worker is provably in flight, the worker is released after its
+cancellation drain is observed, and the lifespan's own return reports the state it found.
 
 THE FINALIZER IS BOUNDED HERE, NOT IN PRODUCTION
 ------------------------------------------------
 The lifespan's teardown awaits each background task with no deadline of its own, and that is
-correct: a worker that has not drained must keep the terminal host open. It also means a task that
+correct: a worker that has not drained must keep the lifespan open. It also means a task that
 SWALLOWS its cancellation parks the case inside that ``await`` forever, so the run dies on the lane's
 timeout with no assertion ever printed and the clause the case exists for is never reached. The
 bound below is on the test's own await and on nothing else: same fixture, same real lifespan, same
@@ -52,13 +45,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import sys
 import tempfile
 import threading
+import time
 import unittest
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import AbstractAsyncContextManager
+from contextvars import Context
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest import mock
 
@@ -68,21 +66,16 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember.serving._app_lifespan as lifespan_module
-from agents_remember.kernel.agentic_settings import AgenticSettings, AgentNotifierSettings
 from agents_remember.providers.metrics import ProviderMetricsStore
+from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving._app_lifespan import _serving_lifespan
-from agents_remember.serving.terminal_catalog import TerminalCatalog
-from test_serving_observation_loop import (
-    _durable_tree,
-    _entry,
-    _observer_tasks,
-    _RefreshProbe,
-    _ServingFixture,
-    _VirtualClock,
-    _wait_until,
-)
+from fastapi import FastAPI
 
-_CATALOG_FILE = "terminal-sessions.json"
+_REAL_SLEEP = asyncio.sleep
+"""The real sleep, captured before the fixture swaps ``asyncio.sleep`` for its virtual clock."""
+
+_STARTED_AT = datetime(2026, 8, 31, 12, 0, 0, tzinfo=UTC)
+_COMMITTED_DIRECTORY = "archive-outcomes"
 _FINALIZER_BOUND_SECONDS = HANG_GUARD_SECONDS
 """The lifespan exit only has a test hang guard; production still owns an unbounded drain."""
 
@@ -97,6 +90,182 @@ swallows only the first repeat. They are best-effort and claim nothing more: a l
 rounds ends it -- that residue is reported by name and then deliberately never awaited again (see
 ``_finalize_bounded`` and ``_tearDownAsyncioRunner``).
 """
+
+
+async def _parked_forever(*_args: object, **_kwargs: object) -> None:
+    """A sibling background loop that touches nothing until lifespan teardown cancels it."""
+
+    await asyncio.Event().wait()
+
+
+async def _wait_until(
+    predicate: Callable[[], bool], *, timeout: float = HANG_GUARD_SECONDS
+) -> None:
+    """Yield until ``predicate`` holds. The deadline bounds a hung test, never a cadence."""
+
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition was not reached before the test deadline")
+        await _REAL_SLEEP(0.001)
+
+
+class _VirtualClock:
+    """``asyncio.sleep`` as a parked request, plus the serving clock the runtime reads.
+
+    A sleep parks its caller until teardown cancels it, so ``pending`` counts the passes a loop
+    has scheduled and not yet started: zero after teardown means no owner is waiting to run again.
+    """
+
+    def __init__(self) -> None:
+        self._parked: list[asyncio.Future[None]] = []
+
+    @property
+    def pending(self) -> int:
+        return len(self._parked)
+
+    def now(self) -> datetime:
+        return _STARTED_AT
+
+    async def sleep(self, _delay: float) -> None:
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._parked.append(future)
+        try:
+            await future
+        except asyncio.CancelledError:
+            self._parked = [item for item in self._parked if item is not future]
+            raise
+
+
+class _TickProbe:
+    """The archive recovery the owner constructs: counts ``tick`` attempts and records ``close``.
+
+    ``inner`` runs inside the attempt, so a gate there parks exactly the invocation the case
+    names. ``active`` is the number of attempts currently inside their worker thread.
+    """
+
+    def __init__(self, *, inner: Callable[[], object]) -> None:
+        self.inner = inner
+        self.calls = 0
+        self.active = 0
+        self.close = mock.Mock()
+
+    def tick(self) -> None:
+        self.calls += 1
+        self.active += 1
+        try:
+            self.inner()
+        finally:
+            self.active -= 1
+
+
+class _ServingFixture:
+    """One disposable serving runtime whose background loops run under a virtual clock.
+
+    Only the archive recovery owner is real: the projector, metrics, held-delivery and compaction
+    loops are replaced by parked coroutines, and the blocking startup compaction is inert, so a
+    case cannot start containers, read live settings, or write stores. The owner builds its
+    recovery from the lifespan module's own name, which resolves to ``recovery`` here.
+
+    ``returned`` is called with no suspension after the lifespan's own exit returns, so its side
+    effect reads the state the lifespan returned over.
+    """
+
+    def __init__(self, root: Path, recovery: _TickProbe) -> None:
+        self.recovery = recovery
+        self.clock = _VirtualClock()
+        self.created: list[asyncio.Task[object]] = []
+        self.returned = mock.Mock()
+        self.review_trees_shutdown_threads: list[threading.Thread] = []
+        self.review_trees_shutdown = mock.Mock(
+            side_effect=lambda: self.review_trees_shutdown_threads.append(
+                threading.current_thread()
+            )
+        )
+        self.app = FastAPI()
+        self.runtime = cast(
+            _ServingRuntime,
+            SimpleNamespace(
+                config=SimpleNamespace(coordination_root=root),
+                observer_root=root,
+                projector=SimpleNamespace(prime=mock.AsyncMock(), run=_parked_forever),
+                review_trees_shutdown=self.review_trees_shutdown,
+                clock=self.clock.now,
+            ),
+        )
+
+    def _record_task(
+        self,
+        coro: Coroutine[Any, Any, object],
+        *,
+        name: str | None = None,
+        context: Context | None = None,
+    ) -> asyncio.Task[object]:
+        task = asyncio.get_running_loop().create_task(coro, name=name, context=context)
+        self.created.append(task)
+        return task
+
+    @contextlib.asynccontextmanager
+    async def running(self) -> AsyncIterator[None]:
+        with contextlib.ExitStack() as stack:
+            for name, replacement in (
+                ("compact_workspace_river", mock.Mock()),
+                ("_metrics_loop", _parked_forever),
+                ("_held_delivery_loop", _parked_forever),
+                ("_workspace_river_compaction_loop", _parked_forever),
+                ("start_heap_tracing", lambda: False),
+                ("malloc_trim_enabled", lambda: False),
+                ("LeafArchiveRecovery", lambda _config: self.recovery),
+            ):
+                stack.enter_context(mock.patch.object(lifespan_module, name, replacement))
+            stack.enter_context(mock.patch.object(asyncio, "sleep", self.clock.sleep))
+            stack.enter_context(mock.patch.object(asyncio, "create_task", self._record_task))
+            lifespan = _serving_lifespan(self.runtime, cast(ProviderMetricsStore, mock.Mock()))
+            shutdowns = self.review_trees_shutdown.call_count
+            async with lifespan(self.app):
+                yield
+            self.returned()
+            assert self.review_trees_shutdown.call_count == shutdowns + 1
+            assert all(
+                thread is not threading.main_thread()
+                for thread in self.review_trees_shutdown_threads
+            )
+
+
+def _recovery_tasks(tasks: list[asyncio.Task[object]]) -> list[asyncio.Task[object]]:
+    def is_recovery_owner(task: asyncio.Task[object]) -> bool:
+        coro = task.get_coro()
+        return getattr(coro, "__qualname__", "") == "_leaf_archive_recovery_loop"
+
+    return [task for task in tasks if is_recovery_owner(task)]
+
+
+def _durable_tree(root: Path) -> dict[str, str]:
+    """Every durable artifact under ``root`` as relative path -> sha256 of its bytes.
+
+    A pass that writes anything changes this map, so byte-identity across teardown is the
+    "nothing was written after the lifespan returned" assertion.
+    """
+
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _commit_outcome(root: Path, outcome_id: str) -> None:
+    """One durable write of the kind a recovery pass ends with."""
+
+    directory = root / _COMMITTED_DIRECTORY
+    directory.mkdir(exist_ok=True)
+    (directory / f"{outcome_id}.json").write_text(f'{{"id":"{outcome_id}"}}\n', encoding="utf-8")
+
+
+def _committed_ids(root: Path) -> list[str]:
+    """The outcome ids a reader would find committed under ``root``."""
+
+    return sorted(path.stem for path in (root / _COMMITTED_DIRECTORY).glob("*.json"))
 
 
 def _pending_names(background: list[asyncio.Task[object]]) -> list[str]:
@@ -177,7 +346,7 @@ async def _finalize_bounded(
     """Await the lifespan's finalizer, and refuse to await it forever.
 
     ``asyncio.wait`` on the exit rather than a bare ``await`` on it: the production finalizer has no
-    deadline (a task that has not drained must keep the host open), so a task that swallows
+    deadline (a task that has not drained must keep the lifespan open), so a task that swallows
     cancellation would otherwise park this case in an ``await`` that no assertion can interrupt --
     the run times out with nothing printed. Everything else about the exit is unchanged; the bound
     is on this test's wait alone.
@@ -209,7 +378,7 @@ async def _finalize_bounded(
     if not finalizer.done():
         # One more attempt, because it is what an unwind by cancellation would look like: the
         # lifespan's own teardown suppresses cancellation per task, so a cancel that REACHES the
-        # finalizer lets it walk the rest of its loop and close the host. It does not reach it when
+        # finalizer lets it walk the rest of its loop and return. It does not reach it when
         # the thing being awaited is the task that swallows cancellation -- ``Task.cancel`` forwards
         # to the awaited future -- so this is an attempt, and what follows reports which one happened.
         finalizer.cancel()
@@ -224,10 +393,10 @@ async def _finalize_bounded(
         _ABANDONED.extend(task for task in (finalizer, *background) if not task.done())
     return unfinished, (
         "the serving lifespan's finalizer did not return within "
-        f"{_FINALIZER_BOUND_SECONDS:.1f}s of the host closing: "
-        f"{stuck or ['an unnamed task']} never finished draining. Teardown cancels the observation "
-        "owner and then awaits it, so a task that swallows its own cancellation keeps the terminal "
-        "host open and the case never reaches its witness assertions. This bound is the test's, not "
+        f"{_FINALIZER_BOUND_SECONDS:.1f}s of teardown starting: "
+        f"{stuck or ['an unnamed task']} never finished draining. Teardown cancels the recovery "
+        "owner and then awaits it, so a task that swallows its own cancellation keeps the lifespan "
+        "open and the case never reaches its witness assertions. This bound is the test's, not "
         "production's: the production finalizer has no deadline of its own, and the forced drain "
         "attempted before this report is test-only cleanup. "
         + (
@@ -251,7 +420,6 @@ async def _bounded_running(
     fixture: _ServingFixture,
     *,
     on_unfinished: Callable[[bool], None] | None = None,
-    **kwargs: Any,
 ) -> AsyncIterator[None]:
     """``fixture.running()``, with the lifespan's own finalizer under a test-only bound.
 
@@ -262,7 +430,7 @@ async def _bounded_running(
     BEFORE that happens whether its loop is still holding a task.
     """
 
-    lifespan_cm = fixture.running(**kwargs)
+    lifespan_cm = fixture.running()
     surfaces = _snapshot_patch_surfaces()
     await lifespan_cm.__aenter__()
     body_failed = False
@@ -285,44 +453,16 @@ async def _bounded_running(
             raise AssertionError(report)
 
 
-async def _parked_forever(*_args: object, **_kwargs: object) -> None:
-    """A sibling serving loop that touches nothing: only the startup prime is under test here."""
-
-    await asyncio.Event().wait()
-
-
-def _observation_failure_lines(log_spy: mock.Mock) -> list[object]:
-    """Every observation-failure line the lifespan logged, judged by the module's own message.
-
-    Cancellation must not be recorded as a failed observation, and the only recording the lifespan
-    has is this log call -- so the assertion is about the observer's own message rather than about
-    "nothing was logged at all", which would also forbid unrelated sibling logging.
-    """
-
-    lines = []
-    for call in log_spy.exception.call_args_list:
-        message = call.args[0] if call.args else ""
-        if isinstance(message, str) and "terminal catalog observation" in message:
-            lines.append(message)
-    return lines
-
-
-def _committed_ids(path: Path) -> list[str]:
-    """The row ids a reader would find in the catalog's last committed atomic snapshot."""
-
-    return sorted(entry.id for entry in TerminalCatalog(path).list_committed())
-
-
 class _DrainGate:
     """The steady pass teardown has to drain: parked in its worker thread, then committed.
 
-    ``probe.inner`` runs inside the attempt, so parking here parks exactly the ``refresh``
-    invocation the case names without teaching the probe a second blocking mode. Invocation 1 is
-    always the pre-serve startup prime, so ``block_at=2`` parks the recurring owner's own first
-    pass -- the in-flight worker shutdown must wait for.
+    ``probe.inner`` runs inside the attempt, so parking here parks exactly the ``tick``
+    invocation the case names without teaching the probe a second blocking mode. Nothing ticks
+    before the owner exists, so ``block_at=1`` parks the recurring owner's own first pass -- the
+    in-flight worker shutdown must wait for.
 
     The monitor releases the worker only after its cancelled owner directly awaits that worker.
-    ``on_release`` is the pass's own last durable act: the catalog commit that must survive
+    ``on_release`` is the pass's own last durable act: the outcome commit that must survive
     cancellation. No scheduler interval supplies the ordering witness.
     """
 
@@ -348,7 +488,7 @@ class _DrainGate:
         self._events.append("worker-entered")
         self.entered.set()
         if not self.release.wait(timeout=HANG_GUARD_SECONDS):
-            raise AssertionError("the parked observation worker was not released")
+            raise AssertionError("the parked recovery worker was not released")
         if self._on_release is not None:
             self._on_release()
         self._events.append("worker-released")
@@ -357,7 +497,7 @@ class _DrainGate:
 
 
 @contextlib.contextmanager
-def _observe_worker_drain(probe: _RefreshProbe, draining: asyncio.Event) -> Any:
+def _observe_worker_drain(probe: _TickProbe, draining: asyncio.Event) -> Any:
     """Witness the cancelled product coroutine's direct await of its exact thread task."""
     loop = asyncio.get_running_loop()
     previous_factory = loop.get_task_factory()
@@ -371,7 +511,7 @@ def _observe_worker_drain(probe: _RefreshProbe, draining: asyncio.Event) -> Any:
 
     def task_factory(owner_loop: asyncio.AbstractEventLoop, coroutine: Any, **kwargs: Any) -> Any:
         frame = getattr(coroutine, "cr_frame", None)
-        if frame is not None and frame.f_locals.get("func") == probe.refresh:
+        if frame is not None and frame.f_locals.get("func") == probe.tick:
             return ObservedWorker(coroutine, loop=owner_loop, **kwargs)
         return asyncio.Task(coroutine, loop=owner_loop, **kwargs)
 
@@ -383,27 +523,37 @@ def _observe_worker_drain(probe: _RefreshProbe, draining: asyncio.Event) -> Any:
 
 
 async def _release_after_cancellation(
-    observer: asyncio.Task[object],
+    owner: asyncio.Task[object],
     gate: _DrainGate,
     events: list[str],
     draining: asyncio.Event,
 ) -> None:
     """Release after the cancelled owner reaches the real worker-drain await."""
     await _wait_until(draining.is_set)
-    assert observer.cancelling() >= 1, "the worker await did not follow cancellation"
+    assert owner.cancelling() >= 1, "the worker await did not follow cancellation"
     assert not gate.released.is_set(), "the worker escaped before its drain was observed"
     events.append("cancellation-requested")
     gate.release.set()
 
 
-def _two_row_settings(*, enabled: bool, interval_seconds: float) -> AgenticSettings:
-    return AgenticSettings(
-        agent_notifier=AgentNotifierSettings(enabled=enabled, interval_seconds=interval_seconds)
-    )
+def _recovery_failure_lines(log_spy: mock.Mock) -> list[object]:
+    """Every recovery-failure line the lifespan logged, judged by the module's own message.
+
+    Cancellation must not be recorded as a failed pass, and the only recording the owner has is
+    this log call -- so the assertion is about the owner's own message rather than about
+    "nothing was logged at all", which would also forbid unrelated sibling logging.
+    """
+
+    lines = []
+    for call in log_spy.exception.call_args_list:
+        message = call.args[0] if call.args else ""
+        if isinstance(message, str) and "leaf agent archive observation" in message:
+            lines.append(message)
+    return lines
 
 
 class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
-    """``LOCR-R19@v1``: teardown cancels the observer, drains its worker, then closes the host."""
+    """Teardown cancels the recovery owner, drains its worker, then returns."""
 
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -437,28 +587,28 @@ class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
     def _note_unfinished(self, unfinished: bool) -> None:
         self._loop_holds_a_task_that_will_not_end = unfinished
 
-    async def test_teardown_drains_an_in_flight_refresh_before_the_host_closes(self) -> None:
+    async def test_teardown_drains_an_in_flight_tick_before_the_lifespan_returns(self) -> None:
         events: list[str] = []
-        catalog = TerminalCatalog(self.tmp / _CATALOG_FILE)
-        catalog.upsert(_entry("seat-1"))
+        _commit_outcome(self.tmp, "outcome-1")
         gate = _DrainGate(
-            block_at=2,
-            on_release=lambda: catalog.upsert(_entry("seat-late")),
+            block_at=1,
+            on_release=lambda: _commit_outcome(self.tmp, "outcome-late"),
             events=events,
         )
-        probe = _RefreshProbe(inner=gate)
+        probe = _TickProbe(inner=gate)
         fixture = _ServingFixture(self.tmp, probe)
-        at_shutdown: list[tuple[int, bool, list[str]]] = []
-        closed_state: list[tuple[int, Any]] = []
+        at_return: list[tuple[int, bool, list[str]]] = []
+        returned_state: list[tuple[int, Any]] = []
         draining = asyncio.Event()
 
-        def _host_shutdown() -> None:
-            events.append("host-shutdown")
-            closed_state.append((probe.calls, _durable_tree(self.tmp)))
-            # Read inside the callback: this is the state the terminal host is closed over.
-            at_shutdown.append((probe.active, gate.released.is_set(), _committed_ids(catalog.path)))
+        def _lifespan_returned() -> None:
+            events.append("lifespan-returned")
+            returned_state.append((probe.calls, _durable_tree(self.tmp)))
+            # Read inside the callback: this is the state the lifespan returned over.
+            at_return.append((probe.active, gate.released.is_set(), _committed_ids(self.tmp)))
 
-        fixture.shutdown.side_effect = _host_shutdown
+        fixture.returned.side_effect = _lifespan_returned
+        probe.close.side_effect = lambda: events.append("recovery-closed")
 
         with (
             mock.patch.object(lifespan_module, "logger") as log_spy,
@@ -466,130 +616,44 @@ class ServingShutdownDrainTests(unittest.IsolatedAsyncioTestCase):
         ):
             async with _bounded_running(fixture, on_unfinished=self._note_unfinished):
                 await _wait_until(gate.entered.is_set)
-                observer = _observer_tasks(fixture.created)[0]
+                owner = _recovery_tasks(fixture.created)[0]
                 monitor = asyncio.get_running_loop().create_task(
-                    _release_after_cancellation(observer, gate, events, draining)
+                    _release_after_cancellation(owner, gate, events, draining)
                 )
             await monitor
 
         # The ordering witness: cancellation arrived while the worker was parked, the worker was
-        # released strictly after it, and the host closed strictly after the drain.
+        # released strictly after it, the owner closed its recovery strictly after the drain, and
+        # the lifespan returned strictly after the owner ended.
         self.assertEqual(
             events,
-            ["worker-entered", "cancellation-requested", "worker-released", "host-shutdown"],
+            [
+                "worker-entered",
+                "cancellation-requested",
+                "worker-released",
+                "recovery-closed",
+                "lifespan-returned",
+            ],
         )
-        # The host closed with no worker running, its own pass's commit already durable, and the
-        # observer task drained.
-        self.assertEqual(at_shutdown, [(0, True, ["seat-1", "seat-late"])])
-        self.assertTrue(observer.cancelled())
-        # Cancellation is not recorded as an observation failure: the boundary is ``except
+        # The lifespan returned with no worker running, its own pass's commit already durable, and
+        # the owner task drained.
+        self.assertEqual(at_return, [(0, True, ["outcome-1", "outcome-late"])])
+        self.assertTrue(owner.cancelled())
+        # Cancellation is not recorded as a recovery failure: the boundary is ``except
         # Exception``, and ``CancelledError`` is a ``BaseException``.
-        self.assertEqual(_observation_failure_lines(log_spy), [])
-        # No future pass starts, and nothing is written after the host closed.
+        self.assertEqual(_recovery_failure_lines(log_spy), [])
+        # No future pass starts, and nothing is written after the lifespan returned.
         self.assertTrue(all(task.done() for task in fixture.created))
         self.assertEqual(fixture.clock.pending, 0)
-        calls_at_teardown, after_shutdown = closed_state[0]
+        calls_at_teardown, after_return = returned_state[0]
         self.assertEqual(probe.calls, calls_at_teardown)
-        self.assertEqual(_durable_tree(self.tmp), after_shutdown)
-        # Control for the identity above: this run really did commit durable catalog truth, so the
+        self.assertEqual(_durable_tree(self.tmp), after_return)
+        # Control for the identity above: this run really did commit a durable outcome, so the
         # tree is a live surface rather than one nothing ever writes.
-        self.assertEqual(_committed_ids(catalog.path), ["seat-1", "seat-late"])
-
-    async def test_cancellation_during_the_startup_prime_waits_for_its_worker(self) -> None:
-        probe = _RefreshProbe(block_first=True)
-        fixture = _ServingFixture(self.tmp, probe)
-        lifespan = _serving_lifespan(fixture.runtime, cast(ProviderMetricsStore, mock.Mock()))
-        draining = asyncio.Event()
-
-        with (
-            _observe_worker_drain(probe, draining),
-            mock.patch.object(lifespan_module, "migrate_control_plane_identity_logs"),
-            mock.patch.object(lifespan_module, "compact_workspace_river"),
-            mock.patch.object(lifespan_module, "_metrics_loop", _parked_forever),
-            mock.patch.object(lifespan_module, "relay_death_watch_loop", _parked_forever),
-            mock.patch.object(lifespan_module, "_workspace_river_compaction_loop", _parked_forever),
-            mock.patch.object(lifespan_module, "_agent_notifier_loop", _parked_forever),
-            mock.patch.object(lifespan_module, "start_heap_tracing", lambda: False),
-            mock.patch.object(lifespan_module, "malloc_trim_enabled", lambda: False),
-            mock.patch.object(lifespan_module, "logger") as log_spy,
-        ):
-            # Entered by hand: the prime runs before the lifespan yields, so a case that cancels
-            # *during* the prime cannot reach it from inside the ``async with`` body.
-            startup = asyncio.get_running_loop().create_task(lifespan(fixture.app).__aenter__())
-            await _wait_until(probe.first_call_entered.is_set)
-            startup.cancel()
-            # The drain is what holds this task open. A prime that merely cancelled its
-            # ``to_thread`` call would already have returned here, with the worker still running.
-            await _wait_until(draining.is_set)
-            self.assertFalse(startup.done())
-            self.assertEqual(probe.active, 1)
-
-            probe.release_first_call.set()
-            with self.assertRaises(asyncio.CancelledError):
-                await startup
-
-        # The worker drained and the cancellation was re-raised only after it did.
-        self.assertEqual(probe.active, 0)
-        self.assertEqual(probe.outcomes, ["ok"])
-        self.assertEqual(probe.calls, 1)
-        self.assertEqual(_observation_failure_lines(log_spy), [])
+        self.assertEqual(_committed_ids(self.tmp), ["outcome-1", "outcome-late"])
         for guard in (_FINALIZER_BOUND_SECONDS, _DRAIN_RETRY_SECONDS):
             with self.subTest(finalizer_guard=guard):
-                result = mock.AsyncMock(return_value=({startup}, set()))
+                result = mock.AsyncMock(return_value=({monitor}, set()))
                 with mock.patch.object(asyncio, "wait", result):
-                    self.assertTrue(await _finalizer_returned(startup, guard))
-                result.assert_awaited_once_with({startup}, timeout=HANG_GUARD_SECONDS)
-
-    async def test_the_final_in_flight_commit_stays_relayable_after_the_next_startup(self) -> None:
-        clock = _VirtualClock([])
-        catalog = TerminalCatalog(self.tmp / _CATALOG_FILE)
-        catalog.upsert(_entry("seat-1"))
-        gate = _DrainGate(block_at=2, on_release=lambda: catalog.upsert(_entry("seat-late")))
-        probe = _RefreshProbe(clock.timeline, inner=gate)
-        fixture = _ServingFixture(self.tmp, probe, clock=clock)
-        stopped_sweep = mock.Mock()
-        at_shutdown: list[list[str]] = []
-        draining = asyncio.Event()
-        fixture.shutdown.side_effect = lambda: at_shutdown.append(_committed_ids(catalog.path))
-
-        with _observe_worker_drain(probe, draining):
-            async with _bounded_running(
-                fixture,
-                on_unfinished=self._note_unfinished,
-                notifier=True,
-                settings=_two_row_settings(enabled=False, interval_seconds=4.0),
-                notifier_sweep=stopped_sweep,
-            ):
-                await _wait_until(gate.entered.is_set)
-                observer = _observer_tasks(fixture.created)[0]
-                monitor = asyncio.get_running_loop().create_task(
-                    _release_after_cancellation(observer, gate, [], draining)
-                )
-        await monitor
-
-        # The notifier had already stopped: its sweep is never synthesized as a teardown fallback.
-        stopped_sweep.assert_not_called()
-        # The last in-flight pass's commit was already durable when the host closed.
-        self.assertEqual(at_shutdown, [["seat-1", "seat-late"]])
-
-        # Restart: a fresh reader of the same durable catalog, then a second serving startup whose
-        # notifier evaluates exactly that committed truth.
-        resumed = _ServingFixture(self.tmp, _RefreshProbe(), clock=_VirtualClock([]))
-        resumed_ns = cast(Any, resumed.runtime)
-        resumed_ns.catalog = TerminalCatalog(catalog.path)
-        resumed_ns.paster = mock.Mock()
-        resumed_ns.heartbeat_store = mock.Mock()
-        resumed_ns.register_inbox_execution_evidence = None
-        sweep = mock.Mock()
-
-        async with resumed.running(
-            notifier=True,
-            settings=_two_row_settings(enabled=True, interval_seconds=1.0),
-            notifier_sweep=sweep,
-        ):
-            await _wait_until(lambda: sweep.call_count >= 1)
-
-        delivered = cast(Any, sweep.call_args.args[0])
-        self.assertEqual(
-            sorted(row.id for row in delivered.catalog.list()), ["seat-1", "seat-late"]
-        )
+                    self.assertTrue(await _finalizer_returned(monitor, guard))
+                result.assert_awaited_once_with({monitor}, timeout=HANG_GUARD_SECONDS)

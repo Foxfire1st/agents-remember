@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type MouseEvent,
   type RefObject,
 } from "react";
 
@@ -19,10 +18,8 @@ import {
 } from "react-aria-components";
 
 import { css, cva, cx } from "../../../styled-system/css";
-import { dismissOperatorInboxEntry } from "../../data/operatorInbox";
 import { hasLiveWorktree, type Pivot } from "../../data/selectors";
 import { servedAgeSeconds, useNowMs } from "../../data/servedAges";
-import { type OpenSession, useSessions } from "../../data/sessions";
 import { useDashboard } from "../../data/store";
 import {
   isOrchestrationDoc,
@@ -39,7 +36,6 @@ import {
   lifecycleSelectionKey,
   parseTaskSelection,
   seriesSelectionKey,
-  taskDocumentRefForDoc,
   taskDocSelectionKey,
   taskLabel,
 } from "../../data/taskIdentity";
@@ -48,7 +44,6 @@ import { Panel } from "../../grammar/Panel";
 import { columnTabButton } from "../../grammar/viewTabLook";
 import {
   PHASES,
-  type AgentPickupNode,
   type Analytics,
   type EnclosureNode,
   type LifecycleProjection,
@@ -56,7 +51,6 @@ import {
   type TaskDocNode,
 } from "../../types/projection";
 import { AttentionQueue } from "../AttentionQueue";
-import { summarizeChatActivity, type ChatActivityIdentity } from "../ChatActivityIndicator";
 import { statusLabel } from "../detail-panel/pageParts";
 import { dim } from "../detail-panel/pageStyles";
 import { TaskGroupDisclosure } from "../TaskGroupDisclosure";
@@ -233,7 +227,6 @@ const rowWordCell = cva({
       ask: { color: "amber" },
       fault: { color: "alarm" },
       run: { color: "cyan" },
-      live: { color: "mint" },
       rest: { color: "muted" },
     },
   },
@@ -243,18 +236,6 @@ const rowFigure = css({
   minWidth: "3ch",
   textAlign: "right",
   fontSize: "0.72rem",
-});
-const pickupDismiss = css({
-  flex: "none",
-  font: "inherit",
-  fontSize: "0.72rem",
-  color: "muted",
-  background: "transparent",
-  borderStyle: "none",
-  paddingBlock: "0",
-  paddingInline: "0.0875rem",
-  cursor: "pointer",
-  _hover: { color: "ink" },
 });
 // The indent of the tree: 0.7438rem a level, by padding inside the row.
 function indent(depth: number): { paddingLeft: string } {
@@ -285,7 +266,6 @@ function LifecycleListImpl({
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
-  const sessions = useSessions((state) => state.sessions);
   // Row staleness advances locally between emissions — the change gate no longer
   // re-serves a lifecycle every tick just because its age moved. A hidden kept-alive rail freezes
   // this clock so its React Aria list does no background reconstruction.
@@ -306,7 +286,6 @@ function LifecycleListImpl({
       lifecycles={lifecycles}
       enclosures={enclosures}
       analytics={analytics}
-      sessions={sessions}
       nowMs={nowMs}
     />
   );
@@ -412,7 +391,6 @@ interface LifecycleListRenderProps {
   lifecycles: Record<string, LifecycleProjection>;
   enclosures: Record<string, EnclosureNode>;
   analytics: Analytics | null;
-  sessions: OpenSession[];
   nowMs: number;
 }
 
@@ -426,8 +404,6 @@ const LifecycleListRender = memo(
       enclosuresByLifecycle: groupEnclosuresByLifecycle(Object.values(enclosures)),
       docs: analytics ? analytics.taskDocuments : [],
       series: analytics ? analytics.series : [],
-      agentPickups: analytics ? analytics.agentPickups : [],
-      sessions: props.sessions,
       nowMs: props.nowMs,
     });
     const choice = readChoice(
@@ -514,8 +490,6 @@ interface OperationRowsInput {
   enclosuresByLifecycle: Map<string, EnclosureNode>;
   docs: TaskDocNode[];
   series: SeriesNode[];
-  agentPickups: AgentPickupNode[];
-  sessions: OpenSession[];
   nowMs: number; // the age-display clock — served staleness advances locally
 }
 
@@ -534,7 +508,6 @@ interface OperationRow extends TreeRow, RowHoverFacts {
   docId: string;
   shortId: string;
   phase: string;
-  chatIdentity: ChatActivityIdentity;
   tier?: CommandTier;
 }
 
@@ -554,7 +527,6 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
   const representedEnclosureIds = new Set<string>();
   const docPaths = new Set(input.docs.map((doc) => doc.docPath));
   const docsByLifecycle = groupDocs(input.docs);
-  const pickupsByLifecycle = groupPickups(input.agentPickups);
   const enclosureList = Object.values(input.enclosures);
   // The visibility rule: a leaf is active while its worktree physically exists — the
   // projection's stat'ed truth, never a cleanup-state proxy. Completed/abandoned worktrees are
@@ -574,7 +546,6 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     representedEnclosureIds,
     activeEnclosureList,
     enclosureList,
-    pickupsByLifecycle,
   );
   appendSeriesRows(
     input,
@@ -582,7 +553,6 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     representedLifecycleIds,
     docPaths,
     enclosureList,
-    pickupsByLifecycle,
   );
   appendLifecycleRows(
     input,
@@ -590,18 +560,12 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     representedLifecycleIds,
     representedEnclosureIds,
     docsByLifecycle,
-    pickupsByLifecycle,
     activeEnclosures,
     activeEnclosuresByLifecycle,
     docPaths,
   );
 
-  return rows
-    .map((item) => ({
-      ...item,
-      chatActivity: summarizeChatActivity(input.sessions, item.chatIdentity),
-    }))
-    .sort(compareRows);
+  return rows.sort(compareRows);
 }
 
 // What every document row is built from.
@@ -618,7 +582,6 @@ function appendDocRows(
   representedEnclosureIds: Set<string>,
   activeEnclosureList: EnclosureNode[],
   enclosureList: EnclosureNode[],
-  pickupsByLifecycle: ReturnType<typeof groupPickups>,
 ): void {
   const { input } = context;
   for (const doc of input.docs) {
@@ -631,15 +594,7 @@ function appendDocRows(
         : undefined);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
     if (enclosure) representedEnclosureIds.add(enclosure.enclosureId);
-    rows.push(
-      docRow(
-        doc,
-        lifecycle,
-        pickupForLifecycle(lifecycle, pickupsByLifecycle),
-        Boolean(enclosure),
-        context,
-      ),
-    );
+    rows.push(docRow(doc, lifecycle, Boolean(enclosure), context));
   }
 }
 
@@ -649,21 +604,12 @@ function appendSeriesRows(
   representedLifecycleIds: Set<string>,
   docPaths: Set<string>,
   enclosureList: EnclosureNode[],
-  pickupsByLifecycle: ReturnType<typeof groupPickups>,
 ): void {
   for (const series of input.series) {
     if (docPaths.has(series.docPath)) continue;
     const lifecycle = runtimeForDoc(series, input.lifecycleById, enclosureList);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
-    rows.push(
-      seriesRow(
-        series,
-        lifecycle,
-        pickupForLifecycle(lifecycle, pickupsByLifecycle),
-        input.docs,
-        input.nowMs,
-      ),
-    );
+    rows.push(seriesRow(series, lifecycle, input.docs, input.nowMs));
   }
 }
 
@@ -673,7 +619,6 @@ function appendLifecycleRows(
   representedLifecycleIds: Set<string>,
   representedEnclosureIds: Set<string>,
   docsByLifecycle: ReturnType<typeof groupDocs>,
-  pickupsByLifecycle: ReturnType<typeof groupPickups>,
   activeEnclosures: Record<string, EnclosureNode>,
   activeEnclosuresByLifecycle: Map<string, EnclosureNode>,
   docPaths: Set<string>,
@@ -690,17 +635,7 @@ function appendLifecycleRows(
     // above IS this leaf's single entry (the lifecycle already annotates it).
     if (!enclosure || representedEnclosureIds.has(enclosure.enclosureId)) continue;
     representedEnclosureIds.add(enclosure.enclosureId);
-    rows.push(
-      lifecycleRow(
-        lifecycle,
-        docs,
-        enclosure,
-        pickupForLifecycle(lifecycle, pickupsByLifecycle),
-        input.series,
-        docPaths,
-        input.nowMs,
-      ),
-    );
+    rows.push(lifecycleRow(lifecycle, docs, enclosure, input.series, docPaths, input.nowMs));
   }
 }
 
@@ -880,53 +815,13 @@ function typedText(row: OperationRow, id: string): string {
   return id && row.label !== row.name ? `${id} ${row.name}` : row.name;
 }
 
-// The one word of the row (rowState.ts). A chat's word keeps the mark the chat tests look for.
+// The one word of the row (rowState.ts).
 function RowWord({ row }: { row: OperationRow }) {
   const word = rowWord(row);
   return (
-    <>
-      <span
-        className={rowWordCell({ tone: word.tone })}
-        data-testid={word.source === "chat" ? "chat-activity" : "task-word"}
-      >
-        {word.text}
-      </span>
-      {word.dismissPickup && row.pickup ? (
-        <PickupDismiss entryId={row.pickup.entryId} named={word.source !== "pickup"} />
-      ) : null}
-    </>
-  );
-}
-
-// "check chat": the acknowledgment of a hand-over is overdue. × dismisses the warning. Beside
-// another word (an open gate comes first and stays the word) the control is `named`: it says
-// "chat", so that it cannot be read as a dismissal of that word.
-function PickupDismiss({ entryId, named }: { entryId: string; named: boolean }) {
-  const [dismissing, setDismissing] = useState(false);
-  const dismiss = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (dismissing) return;
-    setDismissing(true);
-    void dismissOperatorInboxEntry(entryId).finally(() => setDismissing(false));
-  };
-  return (
-    <button
-      type="button"
-      className={pickupDismiss}
-      // A press that reached the row would choose it: the list chooses on the press, not the click.
-      onPointerDown={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
-      onClick={dismiss}
-      disabled={dismissing}
-      aria-label={named ? "Dismiss pickup warning (check chat)" : "Dismiss pickup warning"}
-      title={
-        named ? "Dismiss pickup warning (check chat). The gate stays open." : "Dismiss pickup warning"
-      }
-      data-testid="agent-pickup-dismiss"
-    >
-      {named ? "chat ×" : "×"}
-    </button>
+    <span className={rowWordCell({ tone: word.tone })} data-testid="task-word">
+      {word.text}
+    </span>
   );
 }
 
@@ -1000,20 +895,6 @@ function taskPhase(
   return lifecycle?.phase ?? doc.status;
 }
 
-function taskGate(lifecycle: LifecycleProjection | undefined): string {
-  return gateHint(lifecycle?.gate?.kind);
-}
-
-function taskChatIdentity(
-  doc: TaskDocNode,
-  lifecycle: LifecycleProjection | undefined,
-): ChatActivityIdentity {
-  return {
-    ...(taskDocumentRefForDoc(doc) ? { taskDocumentRef: taskDocumentRefForDoc(doc) } : {}),
-    ...(lifecycle ? { lifecycleId: lifecycle.id } : {}),
-  };
-}
-
 // What a document row is called: a task carries its id, a sprint and a master their title alone.
 function docNames(
   doc: TaskDocNode,
@@ -1047,7 +928,6 @@ function docProgress(doc: TaskDocNode): Pick<OperationRow, "progress" | "progres
 function docRow(
   doc: TaskDocNode,
   lifecycle: LifecycleProjection | undefined,
-  pickup: AgentPickupNode | undefined,
   worktree: boolean,
   context: DocRowContext,
 ): OperationRow {
@@ -1061,9 +941,6 @@ function docRow(
     phase: taskPhase(doc, lifecycle),
     status: doc.status,
     lifecycle,
-    gate: taskGate(lifecycle),
-    pickup,
-    chatIdentity: taskChatIdentity(doc, lifecycle),
     ...docProgress(doc),
     currentStep: doc.currentStep,
     worktree,
@@ -1079,7 +956,6 @@ function docRow(
 function seriesRow(
   series: SeriesNode,
   lifecycle: LifecycleProjection | undefined,
-  pickup: AgentPickupNode | undefined,
   allDocs: TaskDocNode[],
   nowMs: number,
 ): OperationRow {
@@ -1098,9 +974,6 @@ function seriesRow(
     phase: lifecycle?.phase ?? series.status,
     status: series.status,
     lifecycle,
-    gate: taskGate(lifecycle),
-    pickup,
-    chatIdentity: lifecycle ? { lifecycleId: lifecycle.id } : {},
     progress: { ...seriesProgress(series), discarded: series.discardedCount },
     progressNoun: "Tasks completed",
     worktree: false,
@@ -1131,7 +1004,6 @@ function lifecycleRow(
   lifecycle: LifecycleProjection,
   docs: TaskDocNode[],
   enclosure: EnclosureNode | undefined,
-  pickup: AgentPickupNode | undefined,
   seriesList: SeriesNode[],
   masterDocPaths: Set<string>,
   nowMs: number,
@@ -1154,14 +1026,6 @@ function lifecycleRow(
     // and until then the row says "waiting" (rowState.ts).
     status: "",
     lifecycle,
-    gate: gateHint(lifecycle.gate?.kind),
-    pickup,
-    chatIdentity: {
-      ...(only && taskDocumentRefForDoc(only)
-        ? { taskDocumentRef: taskDocumentRefForDoc(only) }
-        : {}),
-      lifecycleId: lifecycle.id,
-    },
     progress: only ? taskStepProgress(only) : undefined,
     progressNoun: "Steps done",
     documents: docs.length > 1 ? docs.length : undefined,
@@ -1302,14 +1166,6 @@ function selectionKey(selection: ReturnType<typeof parseTaskSelection>): string 
   return lifecycleSelectionKey(selection.lifecycleId);
 }
 
-// The gate a row says is the DURABLE gate kind only. The wait-loop-era fallback to the lifecycle's bare
-// `ask` payload (the question string, else the literal "ask") was retired with notify-and-continue: the
-// attention queue carries the notification and GateResponder owns durable gates, so a bare `ask` no
-// longer renders a gate in the tasks row.
-function gateHint(kind: string | undefined): string {
-  return kind ?? "";
-}
-
 function groupDocs(docs: TaskDocNode[]): Map<string, TaskDocNode[]> {
   const byLifecycle = new Map<string, TaskDocNode[]>();
   for (const doc of docs) {
@@ -1319,25 +1175,6 @@ function groupDocs(docs: TaskDocNode[]): Map<string, TaskDocNode[]> {
     else byLifecycle.set(doc.lifecycleId, [doc]);
   }
   return byLifecycle;
-}
-
-function groupPickups(pickups: AgentPickupNode[]): Map<string, AgentPickupNode[]> {
-  const byLifecycle = new Map<string, AgentPickupNode[]>();
-  for (const pickup of pickups) {
-    if (!pickup.lifecycleId) continue;
-    const list = byLifecycle.get(pickup.lifecycleId);
-    if (list) list.push(pickup);
-    else byLifecycle.set(pickup.lifecycleId, [pickup]);
-  }
-  return byLifecycle;
-}
-
-function pickupForLifecycle(
-  lifecycle: LifecycleProjection | undefined,
-  byLifecycle: Map<string, AgentPickupNode[]>,
-): AgentPickupNode | undefined {
-  if (!lifecycle) return undefined;
-  return byLifecycle.get(lifecycle.id)?.[0];
 }
 
 function runtimeForDoc(
@@ -1380,7 +1217,7 @@ function enclosureForDoc(
 // The lifecycle bound to an enclosure, following the cross-ref in either direction: the
 // contract's recorded lifecycleId, or a live lifecycle still anchored to the enclosure
 // (lifecycle.enclosure). This is the annotation source for a doc row whose own lifecycleId is
-// unset or stale: the bound lifecycle's gate/staleness enrich the leaf's single row instead
+// unset or stale: the bound lifecycle's state/staleness enrich the leaf's single row instead
 // of rendering a duplicate lifecycle card for the same enclosureId.
 function lifecycleForEnclosure(
   enclosure: EnclosureNode,

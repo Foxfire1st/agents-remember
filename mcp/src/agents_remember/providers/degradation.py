@@ -2,7 +2,7 @@
 
 The detector consumes the central provider metrics log produced by
 ``providers.metrics`` and owns the provider-only response protocol:
-healthy/degraded/critical state transitions, durable events, inbox alerts, and
+healthy/degraded/critical state transitions, durable events, and
 the critical provider-stop failsafe. It deliberately stays outside the serving
 app so the dashboard loop only has to call one focused service after sampling.
 
@@ -34,7 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agents_remember.controlplane.durable_store import (
     SCHEMA_VERSION,
@@ -44,19 +44,9 @@ from agents_remember.controlplane.durable_store import (
     read_log_text,
     rewrite_lines,
 )
-from agents_remember.controlplane.operator_inbox_records import (
-    AgentRole,
-    InboxAddress,
-    InboxMessage,
-    InboxPoster,
-    InboxRouting,
-    create_operator_inbox_entry,
-)
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.kernel.primitives.provider_degradation_settings import (
     ProviderDegradationSettings,
 )
-from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.metrics import (
@@ -69,18 +59,6 @@ if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
         McpRuntimeConfig,
     )
-
-
-class DegradationAlertPort(Protocol):
-    """The served alert surface the degradation detector may reach.
-
-    Implemented by the serving layer (dashboard loop); providers declares the
-    port and never imports the implementation.
-    """
-
-    def role_recipients(self, coordination_root: Path, role: AgentRole) -> list[str | None]: ...
-
-    def deliver(self, *, store: OperatorInboxStore, entry: Any) -> None: ...
 
 
 DegradationState = Literal["healthy", "degraded", "critical"]
@@ -102,15 +80,15 @@ PROVIDER_DEGRADATION_OWNERSHIP = StoreOwnership(
         "the dashboard's _metrics_loop (serving/app.py), and it is the only thing that appends "
         "an event, compacts the log or writes the state document. Compaction therefore belongs "
         "to the dashboard, and it is enforced structurally -- compact_events is called from one "
-        "place, immediately after the append it bounds. NOT the operator-inbox exception: that "
-        "store earned compaction_owner=None because both processes must physically remove rows; "
+        "place, immediately after the append it bounds. compaction_owner=None is for a store "
+        "whose rows both processes must physically remove, and that is not this one: "
         "nothing in the MCP process removes a degradation event, or writes one. The single "
         "writer is why check_declared_writer earns its place here rather than being a formality "
         "-- with writers=('dashboard',) it is the one store in this pair where the check can "
         "actually fire, and it fires the moment the MCP process starts evaluating degradation. "
         "It is NOT why the log is safe: the lock is unconditional for the same reason it is on "
-        "attention-dismissals and agent-notifier-signals, which are also single-writer and whose "
-        "unlocked draft measured 31.45% loss."
+        "attention-dismissals, which is also single-writer: the unlocked draft of single-writer "
+        "stores measured 31.45% loss."
     ),
 )
 """Who writes and who compacts ``degradation-events.jsonl``.
@@ -120,21 +98,6 @@ reason given on ``providers/metrics.PROVIDER_METRICS_OWNERSHIP``: that register 
 for the six control-plane logs, and this leaf had a second worker inside that folder. The
 contract is imported, never re-implemented.
 """
-
-ORCHESTRATOR_DEGRADATION_INSTRUCTION = (
-    "Dispatch AR_SPAWN_ROLE=investigator to investigate this provider degradation "
-    "event and write a report. Read that report before ordering a fix. If the report says "
-    "the issue is not fixable in-session, stop providers through provider_watchers stop."
-)
-MANAGER_DEGRADATION_INSTRUCTION = (
-    "Do not start provider setup, provider watchers, watcher restart, or retry_provider_setup "
-    "until an all-clear degradation event arrives. Managers have no provider kill authority; "
-    "escalate provider action to the orchestrator."
-)
-_ALERT_TARGETS: tuple[tuple[AgentRole, str], ...] = (
-    ("orchestrator", ORCHESTRATOR_DEGRADATION_INSTRUCTION),
-    ("manager", MANAGER_DEGRADATION_INSTRUCTION),
-)
 
 
 @dataclass(frozen=True)
@@ -282,7 +245,6 @@ def evaluate_provider_degradation(
     config: McpRuntimeConfig,
     *,
     stop_provider_stacks: ProviderStopper,
-    degradation_alerts: DegradationAlertPort,
 ) -> dict[str, Any]:
     """Evaluate metrics, emit one event per state change, and run the critical failsafe.
 
@@ -325,7 +287,6 @@ def evaluate_provider_degradation(
             event["criticalFailsafe"] = {"enabled": False}
         store.append_event(event)
         store.compact_events()  # F5: bound the append-only degradation audit log
-        _post_degradation_alerts(config, event, degradation_alerts)
 
     updated = ProviderDegradationState(
         state=state,
@@ -632,65 +593,6 @@ def _build_event(
             "tail": rows[-5:],
         },
     }
-
-
-def _post_degradation_alerts(
-    config: McpRuntimeConfig,
-    event: dict[str, Any],
-    alerts: DegradationAlertPort,
-) -> None:
-    store = OperatorInboxStore(observer_root(config))
-    now = str(event["at"])
-    for role, instruction in _ALERT_TARGETS:
-        recipients = alerts.role_recipients(config.coordination_root, role)
-        for agent_id in recipients:
-            entry = create_operator_inbox_entry(
-                InboxMessage(
-                    ask=f"Provider degradation state changed to {event['to']}",
-                    response=_alert_response(event, instruction),
-                    message_kind="degradation-alert",
-                ),
-                entry_id=new_ulid(),
-                now=now,
-                routing=InboxRouting(
-                    address=InboxAddress(lifecycle_id=None, agent_id=agent_id, recipient_role=role)
-                ),
-                poster=InboxPoster(
-                    created_by="provider-degradation-detector",
-                    created_via="cli",
-                    sender_role="system",
-                ),
-            )
-            store.append(entry)
-            store.compact(now=datetime.now(UTC))
-            alerts.deliver(store=store, entry=entry)
-
-
-def _role_recipients(
-    coordination_root: Path, role: AgentRole, alerts: DegradationAlertPort
-) -> list[str | None]:
-    return alerts.role_recipients(coordination_root, role)
-
-
-def _alert_response(event: dict[str, Any], instruction: str) -> str:
-    affected = ", ".join(event.get("affectedStacks") or ["unknown"])
-    reasons = "; ".join(
-        str(item.get("reason"))
-        for item in event.get("evidence", [])
-        if isinstance(item, dict) and item.get("reason")
-    )
-    failsafe = event.get("criticalFailsafe")
-    parts = [
-        f"event: {event['id']}",
-        f"transition: {event['from']} -> {event['to']}",
-        f"affected: {affected}",
-        f"reasons: {reasons or 'none recorded'}",
-        "",
-        instruction,
-    ]
-    if isinstance(failsafe, dict):
-        parts.extend(["", f"critical failsafe: {json.dumps(failsafe, sort_keys=True)}"])
-    return "\n".join(parts)
 
 
 def _run_critical_failsafe(stopper: ProviderStopper, config: McpRuntimeConfig) -> dict[str, Any]:

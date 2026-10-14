@@ -12,9 +12,7 @@ const lifecycle = (id: string, repoId?: string, phase: Phase = "build"): Lifecyc
     fleeting: false,
     startedAt: "t",
     lastEventTs: "t",
-    stateEnteredAt: "t",
     inferred: false,
-    actions: [],
   };
   return repoId === undefined ? base : { ...base, repoId };
 };
@@ -71,11 +69,11 @@ describe("fmtWait", () => {
 describe("selectQueue", () => {
   it("reads the server-computed queue, empty when analytics is absent", () => {
     const item: AttentionItem = {
-      id: "blocked-gate:LC1",
-      kind: "blocked-gate",
-      severity: "warn",
+      id: "stale-session:LC1",
+      kind: "stale-session",
+      severity: "info",
       lane: "lifecycle",
-      title: "Gate — input needed",
+      title: "Session gone quiet",
     };
     expect(
       selectQueue({

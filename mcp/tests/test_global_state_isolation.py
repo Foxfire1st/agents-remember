@@ -20,6 +20,7 @@ from agents_remember.controlplane.durable_store import (
 )
 from agents_remember.observer.ambient import AmbientLifecycle, ambient, install_ambient
 from agents_remember.observer.store import EventStore
+from agents_remember.observer.ulid import new_ulid
 from agents_remember_test_support.testing.global_state import (
     OWNED_MUTABLE_STATES,
     PROCESS_MUTABLE_STATES,
@@ -157,7 +158,7 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             lifecycle = AmbientLifecycle(EventStore(Path(temporary)))
             install_ambient(lifecycle)
-            lifecycle.start(ticker_wait=lambda stop, interval: stop.wait(interval))
+            lifecycle.attach(new_ulid(), enclosure=str(Path(temporary) / "contract.json"))
             ticker = lifecycle._ticker
             assert ticker is not None
             self.assertTrue(ticker.is_alive())

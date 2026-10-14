@@ -9,8 +9,7 @@ run root is read or written.
 This entry point deliberately runs on the host rather than inside the Dagger graph. The packet
 carries a **clean environment** requirement, not a Dagger-graph requirement: the fixtures are
 created from nothing under the run root and no machine-local state is consulted, which is what
-the certification would have bought here. The existing ``run.py`` entry point keeps its own
-Dagger admission for the ambient role-chat scenario and is not modified by this module.
+the certification would have bought here.
 """
 
 from __future__ import annotations

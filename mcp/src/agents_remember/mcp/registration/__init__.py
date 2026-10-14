@@ -24,7 +24,7 @@ from .core import register_core_tools
 from .knowledge import register_knowledge_tools
 from .memory import register_memory_tools
 from .role_agents import register_role_agent_tools
-from .sessions import register_session_tools
+from .seat_retirement import register_seat_retirement_tools
 from .tasks import register_task_tools
 from .worktrees import register_worktree_tools
 
@@ -32,7 +32,7 @@ ToolRegistrar = Callable[[FastMCP, McpRuntimeConfig], None]
 
 TOOL_REGISTRARS: tuple[ToolRegistrar, ...] = (
     register_core_tools,
-    register_session_tools,
+    register_seat_retirement_tools,
     register_memory_tools,
     register_worktree_tools,
     register_closeout_tools,

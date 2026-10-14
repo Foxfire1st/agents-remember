@@ -35,7 +35,6 @@ import os
 import subprocess
 import sys
 import uuid
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -45,6 +44,7 @@ from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
     install_ambient,
+    new_ulid,
     observer_root,
 )
 from agents_remember.observer.ambient import ambient, reset_ambient
@@ -144,7 +144,7 @@ def _bridge_derived_layout(world: EntryPointWorld) -> None:
 
 
 def _promote_ambient(world: EntryPointWorld) -> None:
-    """Promote the ambient lifecycle onto one enclosure contract (worker)."""
+    """Adopt one enclosure contract's lifecycle as the ambient (worker)."""
     reset_ambient()
     amb = ambient()
     if amb is None:
@@ -153,8 +153,7 @@ def _promote_ambient(world: EntryPointWorld) -> None:
         )
         install_ambient(installed)
         amb = installed
-    state = amb.start(fleeting=True)
-    amb.current = replace(state, enclosure=str(world.contract))
+    amb.attach(new_ulid(), enclosure=str(world.contract))
 
 
 def _checks_destinations(

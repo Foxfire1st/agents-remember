@@ -333,8 +333,6 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
         series: [],
         attentionQueue: [],
         engineProcesses: [],
-        agentPickups: [],
-        expectationRows: [],
       },
     });
     const onOpenChangeSet = vi.fn();
@@ -383,8 +381,6 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
         series: [],
         attentionQueue: [],
         engineProcesses: [],
-        agentPickups: [],
-        expectationRows: [],
       },
     });
   };

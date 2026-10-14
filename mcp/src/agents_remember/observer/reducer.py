@@ -11,10 +11,9 @@ snapshots), keeping all file I/O at the call edge
 The inferred layer reuses the write-side thresholds rather than re-deriving them:
 a ``running`` lifecycle whose last event is older than ``STALE_AFTER_SECONDS``
 projects ``paused`` (mirrors ``providers.setup_progress``'s ``_project_running``),
-and a dormant never-promoted fleeting lifecycle projects ``abandoned`` (mirrors
-``ambient._is_dormant_fleeting`` -- the reducer *projects* the state, the sweep
-*prunes* the log). Both are marked ``inferred`` so a renderer never shows a
-derived state as a written fact.
+and a never-promoted fleeting lifecycle silent past ``TTL_SECONDS`` projects
+``abandoned``. Both are marked ``inferred`` so a renderer never shows a derived
+state as a written fact.
 """
 
 from __future__ import annotations
@@ -42,13 +41,8 @@ from agents_remember.observer.reducer_impl._attention import (
     _DISMISSABLE_REPO_KINDS,
     _PROVIDER_DOWN,
     _SEVERITY_RANK,
-    _ask_text,
-    _attach_gates,
-    _await_summary,
     _drift_attention,
     _drift_attention_detail,
-    _gate_attention,
-    _gate_node,
     _is_dismissed,
     _lifecycle_attention,
     _provider_attention,
@@ -126,18 +120,12 @@ def project_lifecycle(events: list[Event], *, now: datetime) -> LifecycleProject
     for event in events[1:]:
         if event.kind == "correction.recorded":
             continue  # its effect is applied at the corrected event's position
-        before_state = proj.state
         proj = _apply_kind(proj, event)
         corrected = corrections.get(event.id)
         if corrected is not None:
             proj = proj.model_copy(update={"state": corrected})
-        if proj.state != before_state:
-            # Stamp when the lifecycle entered its new written state (the attention
-            # queue's stable, heartbeat-immune dismissal anchor).
-            proj = proj.model_copy(update={"stateEnteredAt": event.ts})
     proj = proj.model_copy(update={"lastEventTs": events[-1].ts})
-    proj = _project_inferred(proj, events, now)
-    return proj.model_copy(update={"actions": _lifecycle_actions(proj)})
+    return _project_inferred(proj, events, now)
 
 
 def project_workspace(
@@ -170,7 +158,6 @@ def project_workspace(
     # worktrees appear as the lifecycles they are -- not as nothing. Fleeting + active promotion
     # lifecycles still come from the logs above.
     lifecycles = lifecycles + _persistent_lifecycles(enriched, lifecycles)
-    lifecycles = _attach_gates(lifecycles, given.gates)
     engine_processes = build_engine_processes(
         given.engine_process_facts,
         enriched,
@@ -299,7 +286,7 @@ def _persistent_from_enclosure(enclosure: EnclosureNode) -> LifecycleProjection:
     a completed closeout/integration reads ``close``, otherwise ``build`` (worktrees live in build).
     """
     closed = "completed" in {enclosure.closeoutStatus, enclosure.integrationStatus}
-    proj = LifecycleProjection(
+    return LifecycleProjection(
         id=enclosure.lifecycleId or f"{enclosure.repoName}/{enclosure.taskName}",
         state="paused",
         phase="close" if closed else "build",
@@ -310,7 +297,6 @@ def _persistent_from_enclosure(enclosure: EnclosureNode) -> LifecycleProjection:
         lastEventTs="",
         inferred=True,
     )
-    return proj.model_copy(update={"actions": _lifecycle_actions(proj)})
 
 
 # --- the fold ----------------------------------------------------------------
@@ -327,7 +313,6 @@ def _seed_from_started(event: Event) -> LifecycleProjection:
         repoId=event.repoId,
         startedAt=event.ts,
         lastEventTs=event.ts,
-        stateEnteredAt=event.ts,
     )
 
 
@@ -335,28 +320,22 @@ def _phase_changed_updates(proj: LifecycleProjection, event: Event) -> dict[str,
     return {"phase": coerce_phase(str(event.data.get("phase", proj.phase)))}
 
 
-def _blocked_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any]:
-    return {"state": "blocked", "ask": event.data.get("ask")}
+def _blocked_updates(_proj: LifecycleProjection, _event: Event) -> dict[str, Any]:
+    """Nothing writes this kind any more; a log that holds one still reads ``blocked``."""
+    return {"state": "blocked"}
 
 
-def _awaiting_developer_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any]:
-    """NOTIFY-AND-CONTINUE turn end (leaf-28): non-terminal.
+def _awaiting_developer_updates(_proj: LifecycleProjection, _event: Event) -> dict[str, Any]:
+    """A turn end that handed the turn back: non-terminal.
 
-    The summary rides on the projection's ``ask`` carrier (mirroring how the block ask rides
-    on ``lifecycle.blocked``) so the awaiting-developer attention item can surface it;
-    ``lifecycle.resumed`` clears it back to None on auto-resume.
+    Nothing writes this kind any more; a log that holds one still reads ``awaiting-developer``.
     """
-    summary = event.data.get("summary")
-    return {
-        "state": "awaiting-developer",
-        "ask": {"summary": summary} if summary is not None else None,
-    }
+    return {"state": "awaiting-developer"}
 
 
 def _resumed_updates(_proj: LifecycleProjection, _event: Event) -> dict[str, Any]:
-    """Carries both the parked blocked path and the awaiting-developer turn-end path back to
-    running (resume() / resume_from_await() both emit this)."""
-    return {"state": "running", "ask": None}
+    """Back to running, from a pause as from a ``blocked`` or ``awaiting-developer`` state."""
+    return {"state": "running"}
 
 
 def _paused_updates(_proj: LifecycleProjection, _event: Event) -> dict[str, Any]:
@@ -423,8 +402,9 @@ def _project_inferred(
     proj = proj.model_copy(update={"staleSeconds": age})
     if proj.state in TERMINAL_STATES or age is None:
         return proj
-    # Mirrors ambient._is_dormant_fleeting: the reducer projects abandoned where
-    # the opportunistic sweep would prune. Persistent lifecycles are never reaped.
+    # A fleeting lifecycle silent past its TTL has no live owner to write a terminal
+    # event, so the reducer projects abandoned. Only logs written before the session
+    # lifecycle was removed hold one; a persistent lifecycle never reads abandoned here.
     if proj.fleeting and age > TTL_SECONDS:
         return proj.model_copy(update={"state": "abandoned", "inferred": True})
     # Mirrors setup_progress._project_running: a live state gone quiet reads paused.
@@ -434,18 +414,6 @@ def _project_inferred(
 
 
 # --- action availability (the reducer decides, never the UI) ------------------
-
-
-def _lifecycle_actions(proj: LifecycleProjection) -> list[ActionAvailability]:
-    blocked = proj.state == "blocked"
-    return [
-        ActionAvailability(
-            action="resume",
-            enabled=blocked,
-            disabledReason=None if blocked else "lifecycle is not blocked",
-            nextSafeAction=None if blocked else "resume becomes safe once the gate is resolved",
-        )
-    ]
 
 
 def enclosure_actions(enclosure: EnclosureNode) -> list[ActionAvailability]:
@@ -507,8 +475,6 @@ __all__ = [
     "_ProcessLanes",
     "_SetupFacts",
     "_as_dict",
-    "_ask_text",
-    "_await_summary",
     "_bool_or_none",
     "_code_refs",
     "_drift_attention",
@@ -516,8 +482,6 @@ __all__ = [
     "_engine_process",
     "_engine_runtime_state",
     "_expected_provider_roles",
-    "_gate_attention",
-    "_gate_node",
     "_int_or_none",
     "_is_dismissed",
     "_is_disposed",

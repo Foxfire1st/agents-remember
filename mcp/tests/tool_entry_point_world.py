@@ -49,29 +49,6 @@ class _ToolCallTimeout(AssertionError):
     """A sweep deadline failed; it is not a product exception to classify as a raiser."""
 
 
-AMBIENT_STATES = ("none", "running", "blocked", "awaiting-developer")
-
-# The population the matrix is measured over, derived by RULE from the roster rather than from
-# the pin: every lifecycle-state tool. Measuring the matrix over the pin itself would make the
-# pin self-confirming — deleting a tool from it would delete the measurement that would have
-# failed. The member of this population answers in an envelope in all four states
-# (`lifecycle_finalize_task`) and is therefore not an entry; only the raising subset is pinned.
-LIFECYCLE_STATE_POPULATION = tuple(
-    tool for tool in PUBLIC_TOOLS if tool.startswith("lifecycle_") or tool == "switch_lifecycle"
-)
-
-# ...and the population the rule above must produce, written out. The rule alone cannot be
-# checked by a subset assertion: `population == pin` satisfies "the pin is inside the
-# population", so a weakened predicate would silently stop measuring the member that does
-# not raise. This constant is the second, visible edit a weakening requires, and the case
-# asserts the derived population EQUALS it and that the population is STRICTLY larger than the
-# pin.
-EXPECTED_LIFECYCLE_STATE_POPULATION = frozenset(
-    {
-        "lifecycle_finalize_task",
-    }
-)
-
 # What the sweep is allowed to add inside its own world's official memory repository. The
 # product's own `memory_init` repair writes these two scaffold files; everything else about
 # that repository — and everything about the code repository — must be byte-identical after
@@ -613,8 +590,13 @@ class EntryPointWorld:
             "census": self.census(repo),
         }
 
-    def build(self) -> None:
-        """Author the master + leaf and open one real leaf enclosure, through the tools."""
+    def build(self, *, keep_lifecycle: bool = False) -> None:
+        """Author the master + leaf and open one real leaf enclosure, through the tools.
+
+        ``keep_lifecycle`` leaves the lifecycle that ``worktree_start`` adopted open: the
+        state of a call made inside the leaf's lifecycle, where the answer's log and report
+        land under the enclosure (the cases MIK-R109 pins are measured there).
+        """
 
         self.created = self.call(
             "task_doc",
@@ -679,11 +661,10 @@ class EntryPointWorld:
             },
         )
         assert self.contract.exists(), f"the fixture enclosure is missing: {self.contract}"
-        # `worktree_start` starts the ambient lifecycle; the sweep's own `lifecycle_start`
-        # case needs no active one, and its `lifecycle_resume` case prepares its own state.
+        # `worktree_start` adopts the enclosure's lifecycle; the sweep starts without one.
         running = ambient()
-        if running is not None and running.current is not None:
-            self.call("lifecycle_end", {"outcome": "completed"})
+        if not keep_lifecycle and running is not None and running.current is not None:
+            running.end("completed")
         self.code_base = _git(self.code, "rev-parse", "HEAD")
 
     # -- benign arguments, and the states two tools need prepared ------------------------
@@ -711,11 +692,6 @@ class EntryPointWorld:
             "context_packet": {"repo_id": REPO},
             "read_ar_files": {"repo_id": REPO, "files": [{"path": "not-covered.md"}]},
             "runtime_install": {"dry_run": True, "install_provider_deps": False},
-            "dispatch_agent": {
-                "task_document_ref": self.task_ref,
-                "role": "worker",
-                "brief": "entry-point sweep",
-            },
             "retire_child": {"task_document_ref": self.task_ref, "role": "worker"},
             "memory_quality_check": {
                 "request": {"mode": "sync", "repo_id": REPO, "contract_path": contract}
@@ -868,34 +844,10 @@ class EntryPointWorld:
         return str(current.current.state)
 
     def prepare(self, tool: str) -> None:
-        """Place the ambient lifecycle in the state the tool under test documents.
+        """No per-tool ambient arrangement: no tool is a function of the ambient state alone.
 
-        Two tools are pure functions of lifecycle state and have no arguments to vary:
-        ``lifecycle_start`` documents "no active lifecycle", and ``lifecycle_resume``
-        documents ``blocked``. The blocked state cannot be reached through a second seat in
-        one process — a real gate raise blocks the raiser, and ``gate_decide`` refuses a gate
-        "that cannot be decided by its owning lifecycle" — so the state is arranged here with
-        the same product method the gate path uses. ``sweep`` records the state this arranged
-        and the state the call left behind, and ``test_the_resume_case_asserts_the_transition_
-        it_arranged`` asserts both for ``lifecycle_resume``. See the round-2 addendum for the
-        measurement behind it, and the round-3 addendum for what the arrangement does NOT buy:
-        the unprepared states still lose the envelope, which is ``STATE_DEPENDENT_RAISERS``.
+        The sweep records the ambient state around each call regardless.
         """
-
-        current = ambient()
-        if tool == "lifecycle_start":
-            if current is not None and current.current is not None:
-                self.call("lifecycle_end", {"outcome": "completed"})
-            return
-        if tool == "lifecycle_resume":
-            if current is None or current.current is None:
-                self.call("lifecycle_start", {})
-                current = ambient()
-            if current is None or current.current is None:
-                raise AssertionError("the sweep could not place a lifecycle to resume")
-            if current.current.state != "blocked":
-                current.block(kind="plan-approval", prompt="entry-point sweep")
-            return
 
     def sweep(self) -> dict[str, dict[str, Any]]:
         """Invoke every public tool once, in registration order, and classify each outcome.
@@ -946,43 +898,3 @@ class EntryPointWorld:
                 "state_after": self.ambient_state(),
             }
         return results
-
-    def matrix(self) -> dict[str, list[str]]:
-        """Every tool that is a pure function of ambient state, in every ambient state.
-
-        The measurement behind ``STATE_DEPENDENT_RAISERS``: for each state, the ambient is
-        arranged and the tool is called with the same arguments the sweep uses.
-        """
-
-        arguments = self.benign()
-        observed: dict[str, list[str]] = {}
-        for state in AMBIENT_STATES:
-            for tool in LIFECYCLE_STATE_POPULATION:
-                self.arrange(state)
-                arm, _ = classify(tool, self.call(tool, arguments[tool]))
-                if arm == "error":
-                    observed.setdefault(tool, []).append(state)
-        self.arrange("none")
-        return observed
-
-    def arrange(self, state: str) -> None:
-        """Put the ambient lifecycle into one of ``AMBIENT_STATES`` through the product's API."""
-
-        current = ambient()
-        if state == "none":
-            if current is not None and current.current is not None:
-                self.call("lifecycle_end", {"outcome": "completed"})
-            return
-        if current is None or current.current is None:
-            self.call("lifecycle_start", {})
-            current = ambient()
-        if current is None or current.current is None:
-            raise AssertionError(f"could not place an ambient lifecycle for state {state!r}")
-        if current.current.state == "blocked" and state != "blocked":
-            current.resume()
-        elif current.current.state == "awaiting-developer" and state != "awaiting-developer":
-            current.resume_from_await()
-        if state == "blocked" and current.current.state != "blocked":
-            current.block(kind="plan-approval", prompt="entry-point matrix")
-        if state == "awaiting-developer" and current.current.state != "awaiting-developer":
-            current.await_developer(summary="entry-point matrix")

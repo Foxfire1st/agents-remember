@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
 
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     resolve_role_launch_context,
@@ -42,7 +43,6 @@ from agents_remember.cli.role_launch_receipts import (
     digest,
 )
 from agents_remember.cli.role_launch_workspace import _ensure_leaf_enclosure, workspace_folder
-from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives import checkout_coordination
@@ -680,7 +680,7 @@ class RepeatAfterDocumentEditTests(unittest.TestCase):
                 },
             }
             atomic_write_text(
-                user_agentic_settings_path(),
+                user_settings_path_for_write(),
                 json.dumps({"paseoRuntime": settings.pop("paseoRuntime")}),
             )
             atomic_write_text(settings_path, json.dumps(settings))

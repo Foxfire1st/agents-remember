@@ -59,14 +59,12 @@ function ev(partial: Partial<ObserverEvent> & Pick<ObserverEvent, "kind">): Obse
 function lifecycle(partial: Partial<LifecycleProjection> & { id: string }): LifecycleProjection {
   const { id, ...rest } = partial;
   return {
-    actions: [],
     fleeting: false,
     id,
     inferred: false,
     lastEventTs: "2026-06-23T10:11:12+00:00",
     phase: "build",
     startedAt: "2026-06-23T10:00:00+00:00",
-    stateEnteredAt: "2026-06-23T10:00:00+00:00",
     state: "running",
     ...rest,
   };
@@ -130,11 +128,9 @@ function taskDoc(partial: Partial<TaskDocNode> & { docPath: string }): TaskDocNo
 
 function analyticsWithTaskDocuments(taskDocuments: TaskDocNode[]): Analytics {
   return {
-    agentPickups: [],
     attentionQueue: [],
     driftSnapshots: [],
     engineProcesses: [],
-    expectationRows: [],
     ledgers: [],
     routeCoverage: [],
     series: [],

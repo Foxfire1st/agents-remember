@@ -17,10 +17,6 @@ import { metricsFor } from "../types/projection";
 import type { EnclosureNode, LifecycleProjection, TaskDocNode, WorkspaceProjection } from "../types/projection";
 import { CockpitShell } from "./Cockpit";
 
-vi.mock("../panels/Terminal", () => ({
-  Terminal: ({ sessionId }: { sessionId: string }) => <div data-testid={`term-${sessionId}`} />,
-}));
-
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -65,9 +61,7 @@ function lifecycle(id: string, enclosure: string): LifecycleProjection {
     enclosure: `/contracts/${enclosure}`,
     startedAt: "2026-07-12T10:00:00+00:00",
     lastEventTs: "2026-07-12T10:00:30+00:00",
-    stateEnteredAt: "2026-07-12T10:00:00+00:00",
     inferred: false,
-    actions: [],
   };
 }
 
@@ -115,8 +109,6 @@ function seedTwoLiveLeaves(): TaskDocNode[] {
       series: [],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -177,8 +169,6 @@ function serve(docs: TaskDocNode[]) {
           memory: { files: 0, insertions: 0, deletions: 0 },
         },
       });
-    if (url.pathname === "/api/terminal/sessions") return json({ sessions: [] });
-    if (url.pathname === "/api/harnesses") return json({ harnesses: [] });
     if (url.pathname === "/api/files/repos") return json({ repos: [] });
     return json({});
   });

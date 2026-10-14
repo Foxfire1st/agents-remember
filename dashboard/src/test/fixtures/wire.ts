@@ -15,9 +15,9 @@
 // HOW THE DEFAULTS STAY HONEST — and exactly how far that goes. Each base below is assembled from
 // `fixtures/snapshot.json` and annotated with the mirror type, so it is pinned from both sides at
 // once: a required field the server adds fails to compile until it is filled, and it can only be
-// filled from a served row. Only the REQUIRED fields are carried. Optionals (`gate`, `ask`,
-// `staleSeconds`, `seedFallback`, …) are left off on purpose: a default gate nobody asked for would
-// silently change what an attention-queue test is measuring.
+// filled from a served row. Only the REQUIRED fields are carried. Optionals (`staleSeconds`,
+// `seedFallback`, …) are left off on purpose: a default nobody asked for would silently change
+// what a test is measuring.
 //
 // BE PRECISE ABOUT WHAT PINS WHAT. `snapshot.json` is NOT generated; it remains a hand-maintained
 // sampled payload. The producer-to-TypeScript link is generated and checked, while this file and
@@ -45,15 +45,12 @@
 import { metricsFor } from '../../types/projection';
 import type {
   ActionAvailability,
-  AgentPickupNode,
   Analytics,
   AttentionItem,
   EnclosureNode,
   EngineProcessNode,
-  GateNode,
   LifecycleProjection,
   ProviderNode,
-  AgentNotifierHeartbeat,
   TaskDocNode,
   WorkspaceProjection,
 } from '../../types/projection';
@@ -86,14 +83,9 @@ const SERVED_ENGINE_PROCESS = demandServed(
   SERVED.analytics.engineProcesses[0],
   'analytics.engineProcesses[0]',
 );
-const SERVED_PICKUP = demandServed(SERVED.analytics.agentPickups[0], 'analytics.agentPickups[0]');
 const SERVED_ATTENTION = demandServed(
   SERVED.analytics.attentionQueue[0],
   'analytics.attentionQueue[0]',
-);
-const SERVED_GATE = demandServed(
-  SERVED.lifecycles.find((entry) => entry.gate !== undefined)?.gate,
-  'a lifecycle carrying a gate',
 );
 
 // ── the bases: required fields only, every value taken from the served payload ──
@@ -105,19 +97,7 @@ const BASE_LIFECYCLE: LifecycleProjection = {
   fleeting: SERVED_LIFECYCLE.fleeting,
   startedAt: SERVED_LIFECYCLE.startedAt,
   lastEventTs: SERVED_LIFECYCLE.lastEventTs,
-  stateEnteredAt: SERVED_LIFECYCLE.stateEnteredAt,
   inferred: SERVED_LIFECYCLE.inferred,
-  actions: [],
-};
-
-const BASE_GATE: GateNode = {
-  id: SERVED_GATE.id,
-  kind: SERVED_GATE.kind,
-  state: SERVED_GATE.state,
-  evidenceRefs: [],
-  decisions: SERVED_GATE.decisions,
-  packet: {},
-  ts: SERVED_GATE.ts,
 };
 
 const BASE_ENCLOSURE: EnclosureNode = {
@@ -212,16 +192,6 @@ const BASE_ENGINE_PROCESS: EngineProcessNode = {
   sourceFiles: [],
 };
 
-const BASE_PICKUP: AgentPickupNode = {
-  id: SERVED_PICKUP.id,
-  entryId: SERVED_PICKUP.entryId,
-  messageKind: SERVED_PICKUP.messageKind,
-  deliveryState: SERVED_PICKUP.deliveryState,
-  state: SERVED_PICKUP.state,
-  attemptCount: SERVED_PICKUP.attemptCount,
-  ttlSeconds: SERVED_PICKUP.ttlSeconds,
-};
-
 const BASE_ATTENTION: AttentionItem = {
   id: SERVED_ATTENTION.id,
   kind: SERVED_ATTENTION.kind,
@@ -242,8 +212,6 @@ export const EMPTY_ANALYTICS: Analytics = {
   setupProgress: [],
   routeCoverage: [],
   toolReports: [],
-  agentPickups: [],
-  expectationRows: [],
   ledgers: [],
   taskDocuments: [],
   series: [],
@@ -258,26 +226,6 @@ export function lifecycle<O extends Partial<LifecycleProjection> = NoOverrides>(
 ): LifecycleProjection {
   const over: Partial<LifecycleProjection> = overrides ?? {};
   return { ...BASE_LIFECYCLE, ...over };
-}
-
-export function gate<O extends Partial<GateNode> = NoOverrides>(
-  overrides?: Overrides<O, GateNode>,
-): GateNode {
-  const over: Partial<GateNode> = overrides ?? {};
-  return { ...BASE_GATE, ...over };
-}
-
-/** A lifecycle holding an open gate — the shape every gate/interaction test needs. */
-export function lifecycleWithGate<
-  O extends Partial<LifecycleProjection> = NoOverrides,
-  G extends Partial<GateNode> = NoOverrides,
->(
-  overrides?: Overrides<O, LifecycleProjection>,
-  gateOverrides?: Overrides<G, GateNode>,
-): LifecycleProjection {
-  const over: Partial<LifecycleProjection> = overrides ?? {};
-  const gateOver: Partial<GateNode> = gateOverrides ?? {};
-  return { ...BASE_LIFECYCLE, gate: gate(gateOver), ...over };
 }
 
 export function enclosure<O extends Partial<EnclosureNode> = NoOverrides>(
@@ -306,13 +254,6 @@ export function engineProcess<O extends Partial<EngineProcessNode> = NoOverrides
 ): EngineProcessNode {
   const over: Partial<EngineProcessNode> = overrides ?? {};
   return { ...BASE_ENGINE_PROCESS, ...over };
-}
-
-export function agentPickup<O extends Partial<AgentPickupNode> = NoOverrides>(
-  overrides?: Overrides<O, AgentPickupNode>,
-): AgentPickupNode {
-  const over: Partial<AgentPickupNode> = overrides ?? {};
-  return { ...BASE_PICKUP, ...over };
 }
 
 export function attentionItem<O extends Partial<AttentionItem> = NoOverrides>(
@@ -356,27 +297,6 @@ export function projection<O extends Partial<WorkspaceProjection> = NoOverrides>
     lifecycles,
     metrics: metrics ?? metricsFor(lifecycles),
     analytics: analytics(analyticsOver),
-  };
-}
-
-/**
- * The app-injected agent-notifier tick. It is NOT reducer truth and so is absent from the snapshot
- * (`contract.test.ts::KnownUnsampled` names it); the base is a typed literal, which is still
- * checked against the mirror in both directions.
- */
-export function agentNotifierHeartbeat<O extends Partial<AgentNotifierHeartbeat> = NoOverrides>(
-  overrides?: Overrides<O, AgentNotifierHeartbeat>,
-): AgentNotifierHeartbeat {
-  const over: Partial<AgentNotifierHeartbeat> = overrides ?? {};
-  return {
-    lastTickAt: '2026-07-08T00:00:00+00:00',
-    ageSeconds: 1,
-    staleCutoffSeconds: 30,
-    stale: false,
-    pendingInboxCount: 0,
-    redeliverableInboxCount: 0,
-    lastSweepDurationSeconds: 0.2,
-    ...over,
   };
 }
 

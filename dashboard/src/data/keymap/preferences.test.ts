@@ -4,125 +4,145 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   KEYMAP_STORAGE_KEY,
   bindingFor,
-  codeMirrorBinding,
   normalizeBinding,
   resolveKeymap,
   useEffectiveKeymap,
-  writeKeymapPreferences,
 } from "./preferences";
 
 describe("effective keymap preferences", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    writeKeymapPreferences({});
   });
 
   it("applies a valid user override to the one effective catalog", () => {
     const keymap = resolveKeymap(
       JSON.stringify({
         version: 1,
-        bindings: { "palette.open": "ctrl+p" },
-        composerProfile: "vim",
+        bindings: { "review.nextChange": "alt+n" },
       }),
     );
-    expect(bindingFor(keymap, "palette.open")).toMatchObject({
-      chord: "Control+P",
-      label: "ctrl+P",
+    expect(bindingFor(keymap, "review.nextChange")).toMatchObject({
+      chord: "Alt+N",
+      label: "alt+N",
+      zones: ["review"],
     });
-    expect(keymap.composerProfile).toBe("vim");
-    expect(keymap.issues).toEqual([]);
+    expect(bindingFor(keymap, "review.previousChange")).toMatchObject({ chord: "K", label: "k" });
   });
 
   it("rejects corrupt, unknown, browser-owned, and colliding entries independently", () => {
     const corrupt = resolveKeymap("{");
-    expect(corrupt.issues[0]).toContain("not valid JSON");
-    expect(bindingFor(corrupt, "palette.open")?.chord).toBe("Control+K");
+    expect(bindingFor(corrupt, "review.nextChange")?.chord).toBe("J");
+    expect(bindingFor(corrupt, "review.previousChange")?.chord).toBe("K");
 
     const keymap = resolveKeymap(
       JSON.stringify({
         version: 1,
         bindings: {
-          "palette.open": "Control+W",
-          "composer.submit": "Escape",
+          "review.nextChange": "Control+W",
+          // The default of the other command: a duplicate in the same zone.
+          "review.previousChange": "J",
           bogus: "Control+P",
         },
-        composerProfile: "nano",
       }),
     );
-    expect(bindingFor(keymap, "palette.open")?.chord).toBe("Control+K");
-    // Plain Enter is the default send chord in harness chats.
-    expect(bindingFor(keymap, "composer.submit")?.chord).toBe("Enter");
-    expect(keymap.composerProfile).toBe("emacs");
-    expect(keymap.issues.join(" ")).toMatch(/browser-reserved|duplicate/);
-    expect(keymap.issues.join(" ")).toContain("unknown command");
-    expect(keymap.issues.join(" ")).toContain("unknown composer profile");
+    expect(bindingFor(keymap, "review.nextChange")).toMatchObject({ chord: "J", label: "j" });
+    expect(bindingFor(keymap, "review.previousChange")).toMatchObject({ chord: "K", label: "k" });
+    expect(bindingFor(keymap, "bogus")).toBeUndefined();
+    expect(keymap.bindings.map((entry) => entry.commandId)).toEqual([
+      "review.nextChange",
+      "review.previousChange",
+    ]);
   });
 
-  it("accepts only the supported tinykeys subset and translates it for CodeMirror", () => {
+  it("restores the defaults for a stored object of another version or shape", () => {
+    for (const stored of [
+      { version: 2, bindings: { "review.nextChange": "N" } },
+      { bindings: { "review.nextChange": "N" } },
+      [{ version: 1 }],
+      { version: 1, bindings: ["N"] },
+      { version: 1, bindings: { "review.nextChange": 7 } },
+    ]) {
+      const keymap = resolveKeymap(JSON.stringify(stored));
+      expect(bindingFor(keymap, "review.nextChange")?.chord).toBe("J");
+      expect(bindingFor(keymap, "review.previousChange")?.chord).toBe("K");
+    }
+  });
+
+  // An object stored by an earlier build can still bind commands that no longer exist and name a
+  // composer profile. It loads, those entries have no effect, and its reviewer override applies.
+  it("ignores bindings of commands it does not know and fields it does not read", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      bindings: {
+        "palette.open": "Control+P",
+        "session.next": "J",
+        "composer.submit": "Escape",
+        "focus.nextRegion": "K",
+        "conversation.stop": "Control+W",
+        "review.nextChange": "N",
+      },
+      composerProfile: "vim",
+    });
+    const keymap = resolveKeymap(raw);
+    expect(keymap.bindings).toEqual([
+      { chord: "N", label: "N", commandId: "review.nextChange", zones: ["review"] },
+      { chord: "K", label: "k", commandId: "review.previousChange", zones: ["review"] },
+    ]);
+    expect(bindingFor(keymap, "palette.open")).toBeUndefined();
+  });
+
+  it("accepts a swap of the two reviewer bindings and rejects the same chord for both", () => {
+    const swapped = resolveKeymap(
+      JSON.stringify({
+        version: 1,
+        bindings: { "review.nextChange": "K", "review.previousChange": "J" },
+      }),
+    );
+    expect(bindingFor(swapped, "review.nextChange")?.chord).toBe("K");
+    expect(bindingFor(swapped, "review.previousChange")?.chord).toBe("J");
+
+    const same = resolveKeymap(
+      JSON.stringify({
+        version: 1,
+        bindings: { "review.nextChange": "N", "review.previousChange": "n" },
+      }),
+    );
+    expect(bindingFor(same, "review.nextChange")?.chord).toBe("J");
+    expect(bindingFor(same, "review.previousChange")?.chord).toBe("K");
+  });
+
+  it("accepts only the supported tinykeys subset", () => {
     expect(normalizeBinding("alt+arrowup")).toBe("Alt+ArrowUp");
     expect(normalizeBinding("Control++P")).toBeNull();
     expect(normalizeBinding("Control+ImaginaryKey")).toBeNull();
-    expect(codeMirrorBinding("Control+Enter")).toBe("Ctrl-Enter");
-    expect(codeMirrorBinding("Alt+ArrowUp")).toBe("Alt-ArrowUp");
-  });
-
-  it("keeps F6 as the truthful Vim escape when both region commands attempt printable overrides", () => {
-    const keymap = resolveKeymap(
-      JSON.stringify({
-        version: 1,
-        bindings: {
-          "focus.nextRegion": "K",
-          "focus.prevRegion": "L",
-        },
-        composerProfile: "vim",
-      }),
-    );
-
-    expect(keymap.composerProfile).toBe("vim");
-    expect(bindingFor(keymap, "focus.nextRegion")?.chord).toBe("F6");
-    expect(bindingFor(keymap, "focus.prevRegion")?.chord).toBe("Shift+F6");
-    expect(keymap.issues).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("F6 is the fixed browser-safe composer escape"),
-        expect.stringContaining("printable composer binding rejected"),
-      ]),
-    );
   });
 
   it.each(["Meta+W", "Meta+T", "Meta+N", "Meta+Q", "Meta+Shift+W"])(
     "rejects browser-owned Command chord %s",
     (chord) => {
       const keymap = resolveKeymap(
-        JSON.stringify({ version: 1, bindings: { "palette.open": chord } }),
+        JSON.stringify({ version: 1, bindings: { "review.nextChange": chord } }),
       );
-      expect(bindingFor(keymap, "palette.open")?.chord).toBe("Control+K");
-      expect(keymap.issues.join(" ")).toContain("browser-reserved");
+      expect(bindingFor(keymap, "review.nextChange")?.chord).toBe("J");
     },
   );
 
-  it("publishes same-tab writes through the public preference seam", async () => {
+  it("reads the stored overrides when the hook mounts", () => {
+    window.localStorage.setItem(
+      KEYMAP_STORAGE_KEY,
+      JSON.stringify({ version: 1, bindings: { "review.previousChange": "P" } }),
+    );
     const { result } = renderHook(() => useEffectiveKeymap());
-    expect(bindingFor(result.current, "palette.open")?.chord).toBe("Control+K");
-
-    act(() => {
-      writeKeymapPreferences({
-        bindings: { "palette.open": "Control+P" },
-        composerProfile: "vim",
-      });
-    });
-
-    await waitFor(() => {
-      expect(bindingFor(result.current, "palette.open")?.chord).toBe("Control+P");
-      expect(result.current.composerProfile).toBe("vim");
-    });
+    expect(bindingFor(result.current, "review.nextChange")?.chord).toBe("J");
+    expect(bindingFor(result.current, "review.previousChange")?.chord).toBe("P");
   });
 
   it("reacts to native cross-tab storage notifications", async () => {
     const { result } = renderHook(() => useEffectiveKeymap());
+    expect(bindingFor(result.current, "review.nextChange")?.chord).toBe("J");
     const raw = JSON.stringify({
       version: 1,
-      bindings: { "palette.open": "Control+P" },
-      composerProfile: "vim",
+      bindings: { "review.nextChange": "N" },
     });
 
     act(() => {
@@ -133,8 +153,7 @@ describe("effective keymap preferences", () => {
     });
 
     await waitFor(() => {
-      expect(bindingFor(result.current, "palette.open")?.chord).toBe("Control+P");
-      expect(result.current.composerProfile).toBe("vim");
+      expect(bindingFor(result.current, "review.nextChange")?.chord).toBe("N");
     });
   });
 });

@@ -64,9 +64,6 @@ const PHASE_LABELS: Record<Phase, string> = {
 
 const TOOL_LABELS: Record<string, string> = {
   context_packet: "Checked workspace context",
-  gate_create: "Opened approval request",
-  gate_response_wait: "Waited for approval",
-  gate_wait: "Waited for approval",
   memory_quality_check: "Checked memory quality",
   read_ar_files: "Read source with onboarding",
   role_message: "Sent message",
@@ -117,17 +114,11 @@ const SUMMARIZERS: Record<
   "lifecycle.heartbeat": summarizeHeartbeat,
 };
 
-function summarizeDefault(event: ObserverEvent, context: EventSummaryContext): EventSummary {
-  return event.kind.startsWith("gate.")
-    ? summarizeGateEvent(event, context)
-    : summarizeUnknown(event, context);
-}
-
 export function summarizeEvent(
   event: ObserverEvent,
   context: EventSummaryContext,
 ): EventSummary {
-  const summarizer = SUMMARIZERS[event.kind] ?? summarizeDefault;
+  const summarizer = SUMMARIZERS[event.kind] ?? summarizeUnknown;
   return summarizer(event, context);
 }
 
@@ -332,18 +323,6 @@ function summarizeBlocked(event: ObserverEvent, context: EventSummaryContext): E
     diagnosticKind: event.kind,
     label: prompt ? `Waiting: ${prompt}` : "Waiting for developer input",
     meta: compact([askKind]),
-    title: rawDiagnosticTitle(event),
-    visibility: "normal",
-  };
-}
-
-function summarizeGateEvent(event: ObserverEvent, context: EventSummaryContext): EventSummary {
-  const prompt = askPrompt(event.data?.ask);
-  return {
-    context: lifecycleContext(event, context).label,
-    diagnosticKind: event.kind,
-    label: prompt ? `Gate: ${prompt}` : humanizeIdentifier(event.kind),
-    meta: compact([stringField(event.data ?? {}, "state"), askKindLabel(event.data?.ask)]),
     title: rawDiagnosticTitle(event),
     visibility: "normal",
   };

@@ -1,5 +1,10 @@
 # Harness Capability Matrix — Observable Lifecycle
 
+**Status:** History as of MIK-R113 (2026-10-12), which removed the session lifecycle and the
+product's own hosting of agent sessions that this matrix served. Kept as the record of what was
+verified per harness, not as a live matrix. The present harness reference stands in
+`docs/reference/harnesses.md`.
+
 The observable lifecycle (design `observable-lifecycle.md`) relies on three
 harness capabilities. This matrix records what is **verified** per harness so the
 ambient-attribution and return-channel mechanics degrade knowingly, not silently.

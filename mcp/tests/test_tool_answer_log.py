@@ -547,20 +547,6 @@ class ToolRaisedCallLoggingTests(unittest.TestCase):
             world.close()
             reset_ambient()
 
-    def test_dispatch_extras_refusal_is_logged(self) -> None:
-        world = EntryPointWorld()
-        try:
-            status, _detail = world.call("dispatch_agent", {"unknown_input": 1})
-            self.assertTrue(status.startswith("RAISED"), status)
-            (line,) = self._today_lines(world)
-            self.assertEqual(line["tool"], "dispatch_agent")
-            self.assertFalse(line["ok"])
-            self.assertEqual(line["code"], "raised")
-            self.assertIn("unknown_input", json.dumps(line["arguments"]))
-        finally:
-            world.close()
-            reset_ambient()
-
 
 class ToolTerminatingRouteTests(unittest.TestCase):
     """Cleanup, abandon and finalize never log into an enclosure (rule 3)."""

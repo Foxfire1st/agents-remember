@@ -7,17 +7,17 @@ artifact obligation and still produce mechanical `completed` truth. A terminal `
 remains an interruption, not a completed handoff. Role files state their own seat's side of this
 boundary; they do not restate the whole of it.
 
-- **The relay derives and delivers the state signal.** The lifecycle-owned relay reads turn truth,
-  derives that mechanical seat-state fact, and delivers it to the structurally current owner. It
-  never opens, parses, or evaluates a report, verdict, coherence record, expectation row, or
+- **The relay derives and delivers the state signal.** The host reads that a turn ended,
+  derives that mechanical seat-state fact, and delivers it to the structurally current owner: one
+  line to the parent of an agent whose turn ended without a message to that parent. It
+  never opens, parses, or evaluates a report, verdict, coherence record, or
   acceptance envelope, and it never nudges a seat on its own judgment about an artifact.
 - **The gate owner validates before advancing state.** On wake, the current owner opens the required artifact, candidate
   identity, evidence, and acceptance envelope and validates them **before advancing lifecycle
   state**. For a leaf gate that owner is the Manager. Peer hand-overs go directly between Worker, Reviewer and Curator; a recipient checks the exact object and requested stretch, while the Manager retains gate acceptance.
 - **An artifact defect is owner-detected.** A missing, malformed, or stale artifact is a handoff
   defect the owner finds after wake; it nudges, rejects, replaces, or escalates under existing
-  doctrine instead of waiting for an imaginary notifier artifact check. If terminal truth is
-  unavailable, observer health identifies that runtime failure.
+  doctrine instead of waiting for an imaginary artifact check by the relay.
 - **The artifact obligation is unchanged.** Worker, reviewer, and curator still write their durable
   handoff artifact before intentionally ending a successful handoff turn. Once that artifact exists
   and the turn ends, the subordinate needs no second model-authored completion post.

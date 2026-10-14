@@ -217,7 +217,6 @@ INTERIM_LEAVES = ("L100", "L110", "L111", "L112")
 # through this lookup, and the overflow short form is unchanged.
 L112_FINAL_BOUNDS = {
     "runtime_install": 600,
-    "dispatch_agent": TOOL_ANSWER_MAX_TOKENS,
 }
 
 
@@ -239,6 +238,7 @@ RUNTIME_INSTALL_ANSWER_FIELDS = frozenset(
         "reportPath",
         "providerWatcherRebind",
         "recoveryActions",
+        "removedPartStores",
         "log",
     }
 )
@@ -616,10 +616,6 @@ FRAMEWORK_ANSWER_KEYS = frozenset(
         "answerTokens",
         "droppedFields",
         "errorCut",
-        # Conditional lifecycle banners, kept by preservation (what a tool
-        # does is unchanged; the stale-agent banner is per-call state).
-        "agentNotifierBanner",
-        "supervisorBanner",
     }
 )
 
@@ -631,7 +627,7 @@ def fields_outside_row(
 
     ``allowed_fields=None`` is an interim row (rule 7): no list of fields,
     so nothing is outside it. Framework keys (``ok``, ``next``, ``log``,
-    the overflow short-form keys, the preserved banners) are never outside.
+    the overflow short-form keys) are never outside.
     The table test fails for a missing row, for a field outside its row,
     and for a case over the bound.
     """

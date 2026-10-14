@@ -50,10 +50,7 @@ class SyncRuntimeTests(unittest.TestCase):
         sync_runtime = load_sync_runtime()
 
         labels = {target.label for target in sync_runtime.TARGETS}
-        self.assertEqual(
-            labels,
-            {"agents-md-files", "benchmarks", "providers", "system", "eve-runtime"},
-        )
+        self.assertEqual(labels, {"agents-md-files", "benchmarks", "providers", "system"})
 
         for target in sync_runtime.TARGETS:
             target_path = target.path.as_posix()
@@ -96,27 +93,6 @@ class SyncRuntimeTests(unittest.TestCase):
                     sync_runtime.RuntimeTarget("fixture", source, target)
                 ).in_sync
             )
-
-    def test_only_the_eve_application_target_ignores_machine_local_trees(self) -> None:
-        """The per-target ignore rule stays scoped to the tree that needs it.
-
-        ``node_modules`` and eve's generated ``.eve``/``.output``/``.vercel`` are
-        machine-local, so the eve application target must skip them while every other
-        canonical tree keeps syncing a same-named directory if it ever grows one.
-        """
-
-        sync_runtime = load_sync_runtime()
-
-        ignoring = {target.label for target in sync_runtime.TARGETS if target.ignored_names}
-        self.assertEqual(ignoring, {"eve-runtime"})
-        eve = next(target for target in sync_runtime.TARGETS if target.label == "eve-runtime")
-        self.assertEqual(
-            eve.ignored_names,
-            frozenset({"node_modules", ".eve", ".output", ".vercel"}),
-        )
-        self.assertTrue(sync_runtime.ignored(Path("node_modules/eve/index.js"), eve.ignored_names))
-        self.assertFalse(sync_runtime.ignored(Path("node_modules/eve/index.js")))
-        self.assertFalse(sync_runtime.ignored(Path("agent/agent.ts"), eve.ignored_names))
 
 
 if __name__ == "__main__":

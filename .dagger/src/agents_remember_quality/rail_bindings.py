@@ -63,8 +63,6 @@ def bounded_capture_bytes(output: str | bytes, *, max_bytes: int = MAX_CAPTURE_B
 #   python-suite:      profile_rails passes --coverage-data/--coverage-json/
 #                      --pytest-phase-report into {reports} (argv builder in
 #                      test_support/.../code_quality/profile_rails.py).
-#   ambient e2e rail:  writes {reports}/ambient-role-chat-e2e/summary.json
-#                      (published artifact; scripts/e2e_harness run).
 #   codex probe rail:  env AR_CODEX_PROBE_REPORT={reports}/codex-probe.json
 #                      (profile rail command).
 #   dashboard suite:   vitest --coverage json reporter writes
@@ -75,13 +73,11 @@ ARTIFACT_FILE_PATHS: dict[str, str] = {
     "python-coverage-data": "coverage.data",
     "python-coverage-json": "coverage.json",
     "python-suite-result": "pytest-phases.json",
-    "ambient-role-summary": "ambient-role-chat-e2e/summary.json",
     "codex-probe-result": "codex-probe.json",
     "dashboard-coverage-data": "dashboard-coverage.json",
     "dashboard-suite-result": "dashboard-suite-result.json",
     "dashboard-e2e-result": "dashboard-e2e-result.json",
     "provider-integration-result": "provider-integration-result.json",
-    "teardown-proof": "teardown-proof.json",
 }
 
 

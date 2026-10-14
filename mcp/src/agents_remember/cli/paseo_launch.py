@@ -32,9 +32,11 @@ from typing import Any, Literal
 
 import agents_remember
 from agents_remember.application.agent_binding import (
+    EXCLUSION_MODE_SUPPLIED_MAP,
     OTHER_PRODUCT_TOOL_SERVER,
     TOOL_SERVER_NAME,
     AgentBinding,
+    exclusion_agent_options,
     launch_server_exclusion,
 )
 from agents_remember.application.role_launch_context import RoleLaunchContext
@@ -66,7 +68,10 @@ RECOVERY_NOTE_LIMIT = 600
 # A shortened part of a task reference keeps its leading id, at most this many characters of it.
 _LONGEST_LEADING_ID = 12
 # Variables that say where a process of this build may write: no index lock and no bytecode in
-# the checkout it runs from, its own terminal multiplexer, its own registry of quality tools. A
+# the checkout it runs from, its own terminal multiplexer, its own registry of quality tools.
+# ``XDG_CONFIG_HOME`` says where the build reads the user's settings, the roles and the host
+# block among them (``kernel/primitives/user_settings_location.py``): an agent's tool server
+# must read the file the launching process read, or its role tools address another host. A
 # harness need not pass its environment on, so the definition carries each of them when the
 # launching process has it, and never a value of its own.
 _CARRIED_VARIABLES = (
@@ -74,6 +79,7 @@ _CARRIED_VARIABLES = (
     "PYTHONPYCACHEPREFIX",
     "TMUX_TMPDIR",
     HOST_REGISTRY_ROOT_ENV,
+    "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_STATE_HOME",
     "XDG_CACHE_HOME",
@@ -173,6 +179,9 @@ class RoleLaunch:
     settings_file: Path
     # What the runtime reports about the provider.
     accepts_tool_servers: bool = True
+    # The tool rules the host's configuration denies in this provider's options. A launch that
+    # hands the host rules of its own repeats them (MIK-R132).
+    host_denied_tools: tuple[str, ...] = ()
     # The agent of the closed execution this launch replaces on its selection.
     replaces_agent_id: str | None = None
     # The agent that started this role, which the runtime records as the new agent's parent.
@@ -429,12 +438,12 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
             **(agent.get("featureValues") or {}),
             "service_tier": launch.session_options["serviceTier"],
         }
-    # The applied one-launch server exclusion, recorded beside the host payload (MIK-R112
-    # rule 6): what this launch carries, not the harness name. run_launch_call forwards
-    # only workspace/agent, so host configuration bytes are unchanged; the receipt keeps
-    # this record (replayRequest) and the role-start answer derives from it.
+    # What keeps the product's other server out of this one agent (MIK-R132). The host reads
+    # the provider options of the create request; the record beside the agent definition
+    # stays with the product: the receipt keeps it and the role-start answer derives from it.
     servers = [TOOL_SERVER_NAME] if launch.accepts_tool_servers else []
     server_exclusion = launch_server_exclusion(launch.provider, servers=tuple(servers))
+    agent.update(exclusion_agent_options(server_exclusion, host_denied=launch.host_denied_tools))
     return {
         **({"archiveAgentId": launch.replaces_agent_id} if launch.replaces_agent_id else {}),
         "workspace": workspace_call(launch.context, launch.folder),
@@ -462,38 +471,39 @@ def workspace_call(context: RoleLaunchContext, folder: str) -> dict[str, Any]:
 
 
 def exclusion_applied_agent(call: dict[str, Any]) -> dict[str, Any]:
-    """The agent definition as the native bridge input carries it.
+    """The agent definition of a launch call as the host is handed it.
 
-    MIK-R112 rule 6: a task-server-only exclusion retains the task server and
-    suppresses only the other product copy. The map our launch builds holds
-    only our copy, but a caller-supplied map may also hold user servers or a
-    stale other-server entry: the other key goes, everything else (task entry,
-    user servers, identity, configuration) is preserved byte-identical. An
-    emptied map is dropped as meaningless; the exclusion record still travels.
+    The map of servers this build puts into a call holds the task server alone. A call that
+    was saved by an earlier build, or supplied from elsewhere, may also hold servers of the
+    user and an entry for the product's other server. Beside the task server that entry is a
+    second copy of the product's tools, so it goes; a call recorded under the earlier build's
+    mode loses it as it did then. Every other entry and every other key stays as it is, and a
+    map that is empty afterwards is left out.
     """
 
-    agent = dict(call.get("agent") or {})
+    agent = dict(call["agent"])
+    servers = agent.get("mcpServers")
+    if not isinstance(servers, dict) or OTHER_PRODUCT_TOOL_SERVER not in servers:
+        return agent
     exclusion = call.get("serverExclusion")
-    if isinstance(exclusion, dict) and exclusion.get("mode") == "task-server-only":
-        servers = agent.get("mcpServers")
-        if isinstance(servers, dict):
-            pared = {k: v for k, v in servers.items() if k != OTHER_PRODUCT_TOOL_SERVER}
-            if pared:
-                agent["mcpServers"] = pared
-            else:
-                agent.pop("mcpServers", None)
+    recorded = isinstance(exclusion, dict) and exclusion.get("mode") == EXCLUSION_MODE_SUPPLIED_MAP
+    if not recorded and TOOL_SERVER_NAME not in servers:
+        return agent
+    kept = {name: entry for name, entry in servers.items() if name != OTHER_PRODUCT_TOOL_SERVER}
+    if kept:
+        agent["mcpServers"] = kept
+    else:
+        del agent["mcpServers"]
     return agent
 
 
 def agent_create_input(call: dict[str, Any], workspace_id: str) -> dict[str, Any]:
-    """The exact native agent-create input: applied agent, workspace, record."""
+    """The exact native agent-create input: the agent definition and its workspace.
 
-    exclusion = call.get("serverExclusion")
-    return {
-        **exclusion_applied_agent(call),
-        "workspaceId": workspace_id,
-        **({"serverExclusion": exclusion} if isinstance(exclusion, dict) else {}),
-    }
+    The record of what the launch applied stays with the product; the host reads none of it.
+    """
+
+    return {**exclusion_applied_agent(call), "workspaceId": workspace_id}
 
 
 def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:

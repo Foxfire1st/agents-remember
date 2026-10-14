@@ -102,6 +102,30 @@ def test_role_tool_definition_carries_product_xdg_homes_without_starting(tmp_pat
         run.assert_not_called()
 
 
+def test_role_tool_definition_carries_the_place_of_the_user_settings(tmp_path, monkeypatch):
+    """An agent's tool server reads the settings file its launching process read.
+
+    A harness need not pass its environment on (Codex gives a tool server six names, an ACP
+    harness what the request holds). Without the name in the definition the tool server falls
+    back to the home directory's file: other roles and another host block than the dashboard's.
+    """
+
+    binding = AgentBinding("agent", "worker", "request", str(tmp_path / "report.md"))
+    config_home = tmp_path / "config"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    before = dict(os.environ)
+    definition = paseo_launch.tool_server_definition(tmp_path / "settings.json", binding)
+    assert definition["env"]["XDG_CONFIG_HOME"] == str(config_home)
+    assert dict(os.environ) == before
+
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    definition = paseo_launch.tool_server_definition(tmp_path / "settings.json", binding)
+    assert "XDG_CONFIG_HOME" not in definition["env"]
+    monkeypatch.setenv("XDG_CONFIG_HOME", "")
+    definition = paseo_launch.tool_server_definition(tmp_path / "settings.json", binding)
+    assert "XDG_CONFIG_HOME" not in definition["env"]
+
+
 # What an agent reports when a refresh closes its execution with the given status (PNT-R07).
 CLOSING_STATES: dict[str, dict[str, Any]] = {
     "completed": {"status": "idle", "lastTurn": {"state": "replied", "text": "Done."}},
@@ -491,11 +515,6 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                             "prompt": self.first_message(request),
                             "systemPrompt": note,
                             "mcpServers": {"agents-remember-task": definition},
-                            "serverExclusion": {
-                                "harness": "codex",
-                                "mode": "task-server-only",
-                                "servers": ["agents-remember-task"],
-                            },
                         },
                     ),
                 )

@@ -375,7 +375,7 @@ describe("LifecycleList task labels — row admission", () => {
     // The reopen defect's second half: the doc row and the live lifecycle's card both
     // rendered for the same leaf. The identity rule is one row per enclosureId — the lifecycle
     // bound to the enclosure (by the contract's lifecycleId, or by its own enclosure anchor)
-    // annotates the doc row with its state/gate/staleness instead of adding a card.
+    // annotates the doc row with its state/staleness instead of adding a card.
     const onSelect = vi.fn();
     seed(
       projection({
@@ -386,15 +386,6 @@ describe("LifecycleList task labels — row admission", () => {
             repoId: "agents-remember",
             state: "blocked",
             staleSeconds: 120,
-            gate: {
-              id: "gate-11",
-              kind: "closeout-approval",
-              state: "open",
-              decisions: ["approve", "revise"],
-              packet: {},
-              evidenceRefs: [],
-              ts: "2026-06-24T06:00:40+00:00",
-            },
           }),
           // Bound only by its own anchor (lifecycle.enclosure); the contract binding is unset.
           lifecycle({
@@ -446,14 +437,13 @@ describe("LifecycleList task labels — row admission", () => {
     expect(queryByText("11_hangar-worktree-truth")).toBeNull(); // the would-be duplicate's label
     expect(queryByText("12_three-party-loops")).toBeNull();
 
-    // The bound lifecycle ANNOTATES the single row: state, gate, and staleness flow through it.
-    // The open gate is the row's word; the lifecycle's own state and its age are in the hover.
+    // The bound lifecycle ANNOTATES the single row: state and staleness flow through it.
+    // A blocked lifecycle is the row's word; the lifecycle's own facts and its age are in the hover.
     const contractRow = getByText("Hangar Worktree Truth");
     const contractHover = rowHover(rowOf(contractRow));
+    expect(contractHover).toContain("State: blocked");
     expect(contractHover).toContain("Lifecycle: LC-CONTRACT · blocked");
     expect(contractHover).toContain("last event 2m ago"); // staleSeconds: 120
-    expect(contractHover).toContain("Gate: closeout-approval");
-    expect(getByText("closeout-approval")).toBeTruthy();
 
     const anchorRow = getByText("Three Party Loops");
     expect(rowHover(rowOf(anchorRow))).toContain("Lifecycle: LC-ANCHOR · running");

@@ -7,7 +7,7 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { taskDocumentRefForDoc } from "../../data/taskIdentity";
-import type { TaskDocumentRef } from "../../types/terminalCatalog";
+import type { TaskDocumentRef } from "../../types/projection";
 import { chatLeaf, chatMaster, chatSeries, chatSprint } from "../../test/fixtures/documentChat";
 import type { RoleAgentChoice, RoleLaunchSelection } from "../roleLaunchModel";
 import {

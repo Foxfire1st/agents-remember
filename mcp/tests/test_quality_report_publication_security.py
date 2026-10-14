@@ -8,10 +8,7 @@ from pathlib import Path
 from agents_remember.worktrees.modules.quality import (
     clean_executor,
 )
-from repository_profile_test_support import (
-    agents_remember_profile_execution,
-    write_source_selection_artifacts,
-)
+from repository_profile_test_support import agents_remember_profile_execution
 
 CANDIDATE_TREE = "c" * 40
 
@@ -36,7 +33,6 @@ def _source(root: Path, name: str, *, attempt: str) -> Path:
         json.dumps({"status": "passed", "exitCode": 0, "attempt": attempt}) + "\n",
         encoding="utf-8",
     )
-    write_source_selection_artifacts(source, _profile_execution().plan)
     return source
 
 
@@ -71,14 +67,14 @@ class QualityReportPublicationSecurityTests(unittest.TestCase):
             pointer_before = (reports / clean_executor.REPORT_SET_MANIFEST).read_bytes()
             external = root / "external"
             external.mkdir()
-            external_run = external / "run-1.json"
+            external_run = external / "python-suite@1.0.0.log"
             external_run.write_text("must survive\n", encoding="utf-8")
-            (reports / "ambient-role-chat-e2e").symlink_to(external, target_is_directory=True)
+            (reports / "rail-evidence").symlink_to(external, target_is_directory=True)
 
             candidate = _source(root, "candidate", attempt="candidate")
-            nested = candidate / "ambient-role-chat-e2e"
+            nested = candidate / "rail-evidence"
             nested.mkdir()
-            (nested / "run-1.json").write_text("candidate\n", encoding="utf-8")
+            (nested / "python-suite@1.0.0.log").write_text("candidate\n", encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "unsafe legacy report directory"):
                 _publish_reports(candidate, reports)
 

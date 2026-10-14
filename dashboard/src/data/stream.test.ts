@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dashboardStore } from "./store";
 import { STATE_STREAM_OPEN_DEADLINE_MS, connectEvents, connectState } from "./stream";
 
-// connectState shares the sleep/wake half-open-corpse class with the conversation stream
+// connectState and the sleep/wake half-open-corpse class
 // (data/streamLiveness.ts): after an OS sleep the open EventSource never fires `error`, so the
 // native auto-reconnect never engages and the cockpit would render a live-LOOKING but frozen
 // projection forever. The watchdog cycles a judged corpse to a fresh subscribe — quietly: the
@@ -88,8 +88,8 @@ describe("connectState liveness (260723 sleep/wake)", () => {
   // conn at "live". If that fresh subscribe is itself a half-open corpse it fires NEITHER `open`
   // NOR `error` (a CONNECTING EventSource cannot surface the failure) and the watchdog no-ops on a
   // non-open channel — so before the open-deadline conn sat at a fabricated "live" forever: a lit
-  // cockpit LIVE badge with nothing connected, the sibling of the conversation stream's silent dead
-  // chat. The deadline drops conn to the honest "signal-lost" and re-enters the open cycle.
+  // cockpit LIVE badge with nothing connected. The deadline drops conn to the honest "signal-lost"
+  // and re-enters the open cycle.
   it("drops a never-opening cycled subscribe off 'live' — no fabricated LIVE badge (M4)", () => {
     vi.useFakeTimers();
     vi.stubGlobal("EventSource", ControlledSource);

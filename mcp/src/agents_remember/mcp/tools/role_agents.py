@@ -1,4 +1,4 @@
-"""Payload builders for the tools through which role agents start and message role agents."""
+"""Payload builders for the tools through which role agents start, message and retire role agents."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from agents_remember.models.role_agents import (
     RoleStartCall,
     RoleStartSetCall,
 )
+from agents_remember.models.structural.agent import RetireChildRequest
 from agents_remember.observer.tool_events import call_target_role
 
 from .base import _tool_payload
@@ -54,4 +55,22 @@ def role_message_payload(config: McpRuntimeConfig, call: RoleMessageCall) -> dic
         call_target_role.reset(token)
 
 
-__all__ = ["role_message_payload", "role_start_payload", "role_start_set_payload"]
+def retire_child_payload(
+    config: McpRuntimeConfig,
+    request: RetireChildRequest,
+    **overrides: Any,
+) -> dict[str, Any]:
+    # MIK-R100 rule 8: the starter retires the receipt-tracked agent in its seat. An
+    # empty id is refused by name inside the retirement.
+    from agents_remember.cli.role_retire import retire_native_seat  # noqa: PLC0415
+
+    payload = retire_native_seat(config, request, environment=overrides.get("environ"))
+    return _tool_payload("retire_child", payload)
+
+
+__all__ = [
+    "retire_child_payload",
+    "role_message_payload",
+    "role_start_payload",
+    "role_start_set_payload",
+]

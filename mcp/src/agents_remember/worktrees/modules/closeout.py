@@ -10,6 +10,7 @@ from agents_remember.controlplane.enforcement import (
     evaluate_closeout_gate,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.observer.events import now_iso
@@ -428,9 +429,7 @@ def _closeout_gate_blocked_preview(contract, guard: CloseoutGuard) -> dict[str, 
     """
 
     summary = f"The closeout would be refused, and nothing would be committed: {guard.reason}"
-    step = (
-        f"{summary}. Decide the addressed closeout-approval gate, then preview the closeout again."
-    )
+    step = f"{summary}. {STORED_GATE_WAY_OUT}."
     status = {
         key: value
         for key, value in status_payload(contract).items()
@@ -438,7 +437,7 @@ def _closeout_gate_blocked_preview(contract, guard: CloseoutGuard) -> dict[str, 
     }
     sentence = (
         f"Closeout-approval gate {guard.gate_id or 'unaddressed'} is undecided "
-        f"({guard.reason}); decide it, then preview again."
+        f"({guard.reason}). {STORED_GATE_WAY_OUT}."
     )
     return {
         "state": "closeout-gate-blocked",
@@ -450,7 +449,7 @@ def _closeout_gate_blocked_preview(contract, guard: CloseoutGuard) -> dict[str, 
         "commit_approval_required": False,
         "closeout_gate": _closeout_gate_payload(guard),
         "blockers": [{"code": "closeout-gate-blocked", "sentence": sentence}],
-        "nextStep": {"summary": step, "nextTool": "gate_list", "nextArgs": {}},
+        "nextStep": {"summary": step},
     }
 
 
@@ -607,8 +606,8 @@ def _refuse_unsatisfied_closeout_gate(contract, args: WorktreeArgs) -> None:
 
     Server-side gate enforcement (slice 6b): a dashboard-opened ``closeout-approval`` gate is
     binding; a gateless lifecycle uses the approval and note persisted by the canonical
-    journaled closeout operation. The agent cannot satisfy the gate itself: its own
-    ``gate_decide`` is
+    journaled closeout operation. The agent cannot satisfy the gate itself: a decision
+    it recorded is
     ``decidedBy="model"``, which :func:`evaluate_closeout_gate` rejects.
 
     THIS IS NOT THE ENFORCEMENT ANY MORE, and reading it as such is the check-then-act mistake
@@ -625,7 +624,9 @@ def _refuse_unsatisfied_closeout_gate(contract, args: WorktreeArgs) -> None:
     """
     guard = _closeout_gate_guard(contract, args)
     if guard is not None and not guard.permitted:
-        raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
+        raise RuntimeError(
+            f"closeout blocked by gate enforcement: {guard.reason}. {STORED_GATE_WAY_OUT}"
+        )
 
 
 def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
@@ -664,7 +665,7 @@ def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
     source-head validation, the onboarding/route plans, and candidate staging -- either only reads
     or only touches the index of the task's own disposable worktree, so a refusal there changes
     nothing and must not cost the developer their approval.
-    ``mcp/tests/test_gate_replay_window.py`` pins both halves: the gate is already ``applied`` by
+    Both halves hold: the gate is already ``applied`` by
     the time the transaction commit runs, and a gate failure leaves it ``approved``.
     """
     if not contract.lifecycle_id:
@@ -678,7 +679,9 @@ def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
         operation_key=args.operation_key or None,
     )
     if not guard.permitted:
-        raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
+        raise RuntimeError(
+            f"closeout blocked by gate enforcement: {guard.reason}. {STORED_GATE_WAY_OUT}"
+        )
     return guard
 
 

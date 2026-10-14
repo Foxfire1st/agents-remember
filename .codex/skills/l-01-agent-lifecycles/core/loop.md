@@ -69,7 +69,7 @@ precise statements, evidence, and fix-acceptance criteria.
 A changed candidate, source, requirement version, model, seat, route, or report label does **not**
 reset the list. Unknown, duplicate, rewritten, reintroduced, newly discovered, or outside-list
 issues, new criteria, new routes/lenses, whole-review requests, and passing with unresolved items
-are refused. This rule applies equally to native, hosted, plan, integration, route, lens,
+are refused. This rule applies equally to native, plan, integration, route, lens,
 replacement, resumed, bootstrap, diagnostic, delta, and final review labels.
 
 Mechanical tests and worker diagnosis are evidence and may not publish reviewer findings or reset

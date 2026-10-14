@@ -3,8 +3,8 @@ import type {
   EnclosureNode,
   LifecycleProjection,
   TaskDocNode,
+  TaskDocumentRef,
 } from "../types/projection";
-import type { TaskDocumentRef } from "../types/terminalCatalog";
 
 export type TaskSelection =
   | { kind: "taskdoc"; docPath: string }
@@ -45,19 +45,6 @@ export function parseTaskSelection(
   return null;
 }
 
-export function lifecycleIdForSelection(
-  selectedId: string | null,
-  lifecycles: Record<string, LifecycleProjection>,
-  analytics: Analytics | null | undefined,
-): string | undefined {
-  const selection = parseTaskSelection(selectedId, lifecycles, analytics);
-  if (selection?.kind === "lifecycle") return selection.lifecycleId;
-  if (selection?.kind === "taskdoc") {
-    return analytics?.taskDocuments.find((doc) => doc.docPath === selection.docPath)?.lifecycleId;
-  }
-  return undefined;
-}
-
 // The durable QUALIFIED LEAF ID for a task doc: `repo/master/leaf-id`, where master is the basename
 // of the doc's directory (the series/contract folder) and leaf-id is the doc id. This is the chat<->leaf
 // registry key (L5). Derived from the doc, NOT the enclosure, so it resolves with no live worktree and
@@ -93,7 +80,7 @@ export function sameTaskDocumentRef(
 }
 
 // The selected leaf's qualified key, from the OPEN TASK DOC (taskdoc or lifecycle selection). A series
-// selection has no single leaf, so it resolves to undefined. Mirrors lifecycleIdForSelection.
+// selection has no single leaf, so it resolves to undefined.
 export function leafKeyForSelection(
   selectedId: string | null,
   lifecycles: Record<string, LifecycleProjection>,
@@ -122,110 +109,11 @@ export function leafTitleForKey(
   return taskDocuments.find((doc) => qualifiedLeafKey(doc) === leafKey)?.title;
 }
 
-// The leaf id (last segment) of a qualified leaf key — the name-label fallback when no doc title resolves.
-export function leafIdFromKey(leafKey: string): string {
-  return leafKey.split("/").filter(Boolean).pop() ?? leafKey;
-}
-
-// One node of the task hierarchy the leaf-attach picker drills: either a MASTER (has `master`, drillable,
-// `children` are its sub-tasks) or an attachable LEAF (has `leafKey`, no children). Nesting is real — a
-// master can itself be a sub-task of another master — so this is a recursive tree, not a flat group.
-export interface TaskTreeNode {
-  key: string; // unique among siblings: master folder for a master, leaf key for a leaf
-  title: string;
-  master?: string; // the master folder, set iff this is a master node (drill-in + contextMaster match)
-  leafKey?: string; // the qualified leaf id, set iff this is an attachable leaf
-  children: TaskTreeNode[];
-}
-
 const masterFolderOf = (doc: Pick<TaskDocNode, "docPath">): string =>
   doc.docPath.split("/").slice(0, -1).filter(Boolean).pop() ?? "";
 
-function indexMasters(
-  taskDocuments: TaskDocNode[],
-): {
-  masterByFolder: Map<string, TaskTreeNode>;
-  masterByLifecycle: Map<string, TaskTreeNode>;
-  masterDocByFolder: Map<string, TaskDocNode>;
-} {
-  const masterByFolder = new Map<string, TaskTreeNode>();
-  const masterByLifecycle = new Map<string, TaskTreeNode>();
-  const masterDocByFolder = new Map<string, TaskDocNode>();
-  for (const doc of taskDocuments) {
-    if (doc.kind !== "master") continue;
-    const folder = masterFolderOf(doc);
-    if (!folder || masterByFolder.has(folder)) continue;
-    const node: TaskTreeNode = { key: folder, title: doc.title || folder, master: folder, children: [] };
-    masterByFolder.set(folder, node);
-    masterDocByFolder.set(folder, doc);
-    if (doc.lifecycleId) masterByLifecycle.set(doc.lifecycleId, node);
-  }
-  return { masterByFolder, masterByLifecycle, masterDocByFolder };
-}
-
-function nestMasters(
-  masterByFolder: Map<string, TaskTreeNode>,
-  masterByLifecycle: Map<string, TaskTreeNode>,
-  masterDocByFolder: Map<string, TaskDocNode>,
-): Set<TaskTreeNode> {
-  const nestedMasters = new Set<TaskTreeNode>();
-  for (const [folder, node] of masterByFolder) {
-    const parentLifecycle = masterDocByFolder.get(folder)?.masterLifecycleId;
-    const parent = parentLifecycle ? masterByLifecycle.get(parentLifecycle) : undefined;
-    if (parent && parent !== node) {
-      parent.children.push(node);
-      nestedMasters.add(node);
-    }
-  }
-  return nestedMasters;
-}
-
-function attachLeaves(
-  taskDocuments: TaskDocNode[],
-  masterByFolder: Map<string, TaskTreeNode>,
-  masterByLifecycle: Map<string, TaskTreeNode>,
-): TaskTreeNode[] {
-  const orphanLeaves: TaskTreeNode[] = [];
-  for (const doc of taskDocuments) {
-    if (doc.kind !== "subTask") continue;
-    const leafKey = qualifiedLeafKey(doc);
-    if (!leafKey) continue;
-    const leaf: TaskTreeNode = { key: leafKey, title: doc.title || leafIdFromKey(leafKey), leafKey, children: [] };
-    const parent =
-      masterByFolder.get(masterFolderOf(doc)) ??
-      (doc.masterLifecycleId ? masterByLifecycle.get(doc.masterLifecycleId) : undefined);
-    if (parent) parent.children.push(leaf);
-    else orphanLeaves.push(leaf);
-  }
-  return orphanLeaves;
-}
-
-// Build the recursive master→…→leaf tree the picker drills. Masters nest under their parent master via
-// `masterLifecycleId` (the cross-series parent link); leaves attach to the master in their own folder (or,
-// failing that, their `masterLifecycleId` parent). Top-level masters and any orphan leaves are the roots.
-// This scales to arbitrary nesting — "a master that is the leaf of another master" is just a master node
-// sitting inside another master node.
-export function buildTaskTree(taskDocuments: TaskDocNode[]): TaskTreeNode[] {
-  const { masterByFolder, masterByLifecycle, masterDocByFolder } = indexMasters(taskDocuments);
-  const nestedMasters = nestMasters(masterByFolder, masterByLifecycle, masterDocByFolder);
-  const orphanLeaves = attachLeaves(taskDocuments, masterByFolder, masterByLifecycle);
-  const rootMasters = [...masterByFolder.values()].filter((node) => !nestedMasters.has(node));
-  return [...rootMasters, ...orphanLeaves];
-}
-
-// The path of master nodes from a root down to the master whose folder is `master` (for pre-drilling the
-// picker to the in-context task). Empty when not found. Only master nodes are traversed (leaves are leaves).
-export function findMasterPath(nodes: TaskTreeNode[], master: string): TaskTreeNode[] {
-  for (const node of nodes) {
-    if (node.master === master) return [node];
-    const sub = findMasterPath(node.children, master);
-    if (sub.length) return [node, ...sub];
-  }
-  return [];
-}
-
 // The master folder of whatever task is currently selected (a master, one of its leaves, or a doc
-// resolved from a lifecycle) — drives the picker's in-context ordering so the relevant master comes first.
+// resolved from a lifecycle).
 export function masterFolderForSelection(
   selectedId: string | null,
   lifecycles: Record<string, LifecycleProjection>,

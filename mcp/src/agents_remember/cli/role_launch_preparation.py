@@ -113,9 +113,8 @@ _AR_TOOL_SERVER_USAGE_HEAD = (
     "or describe a tool by its name: what it answers then comes from another installation, and "
     'its answer "server not found" speaks only for that tool. '
 )
-# The server-choice sentence (MIK-R112 rule 6, last line). It stays only in a brief for a
-# harness that carries two servers: where the launch offers a one-launch exclusion the
-# agent sees one server and this goes away.
+# The server-choice sentence (MIK-R112 rule 6, last line; MIK-R132 rule 5). It stays in what
+# an agent reads unless its launch hands the host what keeps the other server out.
 _AR_OTHER_SERVER_CHOICE = (
     "Do not connect to, list, describe or call a tool server named "
     f"{OTHER_INSTALLATION_TOOL_SERVER} or any of its tools, nor an AR tool server under any "
@@ -137,26 +136,15 @@ _AR_TOOL_SERVER_USAGE = (
 )
 
 
-def _ar_tool_server_usage(
-    harness_id: str | None,
-    *,
-    servers: tuple[str, ...] | None = None,
-    exclusion_applied: bool = False,
-) -> str:
-    """The AR-tool guidance for one launch: choice sentence only with two servers.
+def _ar_tool_server_usage(harness_id: str | None, *, servers: tuple[str, ...] | None = None) -> str:
+    """The AR-tool guidance for one launch: the choice sentence unless the copy is kept out.
 
-    The wording derives from the launch capability predicate for (harness,
-    servers-listed) -- the same inputs the exclusion record carries -- plus
-    whether the exclusion was applied on the launch's route. servers=None
-    means the launch's tool-server acceptance is unknown: the sentence stays, so
-    the brief claims no exclusion it cannot know. The choice sentence leaves
-    only where the exclusion was actually applied (terminal route); on the host
-    route nothing is applied, so it stays. What the launch actually applies
-    as mechanism is the bridge input/terminal spawn argv, not this sentence.
+    The wording follows the same record the launch call carries (``launch_server_exclusion``
+    for this provider and these servers), so the first message and the role start's answer
+    cannot say different things. servers=None means the launch's tool-server acceptance is
+    unknown: the sentence stays, so the brief claims no exclusion it cannot know.
     """
-    if servers is None:
-        return _AR_TOOL_SERVER_USAGE
-    if exclusion_applied and launch_server_exclusion(harness_id, servers=servers) is not None:
+    if servers is not None and launch_server_exclusion(harness_id, servers=servers) is not None:
         return f"{_AR_TOOL_SERVER_USAGE_HEAD}{_AR_TOOL_SERVER_USAGE_TAIL}"
     return _AR_TOOL_SERVER_USAGE
 
@@ -184,10 +172,13 @@ class RoleHandoverRequest:
     request_id: uuid.UUID | None = None
     # The role agent that starts this role; none when the launcher starts it.
     started_by: StartingAgent | None = None
+    # A chat without a role started this through role_start (MIK-R113 rule 6);
+    # the launch record says so. False for every dashboard and role-agent start.
+    chat_started: bool = False
     session_options: dict[str, Any] = field(default_factory=dict)
-    # The resolved agent (harness id) this launch will run on; none when unresolved. The
-    # brief keeps the server-choice sentence unless the harness carries the product's
-    # tools once (MIK-R112 rule 6).
+    # The resolved agent (the host's provider id) this launch will run on; none when
+    # unresolved. The brief keeps the server-choice sentence unless this launch hands the
+    # host what keeps the other server out (MIK-R132 rule 5).
     harness_id: str | None = None
     # Whether the launch's provider accepts tool servers (None when the cached
     # catalog cannot say without a live call): the brief exclusion predicate reads
@@ -208,13 +199,14 @@ class PreparedRoleHandover:
     request_id: uuid.UUID
 
 
-def prepare_role_handover(
+def prepare_role_handover(  # noqa: PLR0913 -- chat_started rides the rule-6 launch record
     config: McpRuntimeConfig,
     context: RoleLaunchContext,
     *,
     agent_override: RoleAgentOverride | None,
     request_id: uuid.UUID,
     started_by: StartingAgent | None = None,
+    chat_started: bool = False,
 ) -> PreparedRoleHandover:
     """Prepare the canonical role handover and the exact launch inputs of one role."""
 
@@ -246,6 +238,7 @@ def prepare_role_handover(
             ar_mcp_context=ar_mcp_context,
             request_id=request_id,
             started_by=started_by,
+            chat_started=chat_started,
             session_options=session_options,
             harness_id=agent_id,
             accepts_tool_servers=handover_accepts,
@@ -411,7 +404,7 @@ def _role_defaults(
             "settingsSources": [path.as_posix() for path in settings.sources],
             "fieldOrigins": {key: asdict(origin) for key, origin in knobs.origins.items()},
         },
-        tuple(harness.id for harness in settings.harnesses),
+        settings.harness_ids,
     )
 
 
@@ -602,7 +595,7 @@ def _compile_handover(
     capsule = compile_launch_capsule(role_config, capsule_request, operation=operation)
     if capsule.is_refusal:
         raise ValueError(capsule.explain())
-    if capsule.codex_delivery is None:
+    if capsule.delivery is None:
         raise ValueError("The selected agent has no supported AR instruction carrier.")
     documents = [doc for doc in (context.sprint, context.master, context.task) if doc]
     task_reads = [_read_task_doc(config, document) for document in documents]
@@ -637,8 +630,8 @@ def _compile_handover(
         raise ValueError("A message binding requires its durable requestId.")
     task_document_digest = _digest(task_reads)
     instructions, instruction_record = compose_role_instructions(
-        capsule.codex_delivery.trusted_instructions,
-        capsule.codex_delivery.semantic_digest,
+        capsule.delivery.trusted_instructions,
+        capsule.delivery.semantic_digest,
         request.session_options.get("choices", {}).get("notes", {}),
     )
     effective_digest = instruction_record["semanticDigest"]
@@ -659,6 +652,8 @@ def _compile_handover(
         config, request_id, ar_binding
     )
     started_by = request.started_by
+    chat_started = request.chat_started
+    entry_mode = _entry_mode(started_by, chat_started)
     handover = {
         "schema": "ar-role-handover/v1",
         "requestId": str(request_id),
@@ -680,20 +675,20 @@ def _compile_handover(
         "arMcpContext": ar_mcp_context,
         "capsule": {
             "role": capsule.role,
-            "operation": capsule.codex_delivery.binding.operation,
+            "operation": capsule.delivery.binding.operation,
             "semanticDigest": effective_digest,
-            "baselineSemanticDigest": capsule.codex_delivery.semantic_digest,
+            "baselineSemanticDigest": capsule.delivery.semantic_digest,
             "blocks": instruction_metadata(instruction_record)["blocks"],
             "baselineReplaced": instruction_record["baselineReplaced"],
-            "binding": capsule.codex_delivery.binding.as_report(),
+            "binding": capsule.delivery.binding.as_report(),
         },
         "host": {
             "name": "Paseo",
-            "entryMode": "agent-role-start" if started_by else "dashboard-role-start",
+            "entryMode": entry_mode,
             "instructionSource": {
                 "kind": instruction_record["kind"],
-                "role": capsule.codex_delivery.binding.role,
-                "operation": capsule.codex_delivery.binding.operation,
+                "role": capsule.delivery.binding.role,
+                "operation": capsule.delivery.binding.operation,
                 "semanticDigest": effective_digest,
                 "ambientRoleFilesSelected": False,
             },
@@ -722,7 +717,9 @@ def _compile_handover(
                 if started_by
                 else None
             ),
-            "ownerRelation": _owner_relation(started_by, role=context.role, context=context),
+            "ownerRelation": _owner_relation(
+                started_by, role=context.role, context=context, chat_started=chat_started
+            ),
             "developerQuestions": (
                 "Because another agent started this role, send what needs the "
                 "developer's decision to that parent with role_message on "
@@ -744,9 +741,6 @@ def _compile_handover(
             "arMcpUsage": _ar_tool_server_usage(
                 request.harness_id,
                 servers=_brief_servers(request.accepts_tool_servers),
-                # Host route: the handover briefs a host-started agent, where no
-                # exclusion is applied, so the choice sentence stays.
-                exclusion_applied=False,
             ),
             "roleTools": {
                 "toolServer": TOOL_SERVER_NAME,
@@ -842,8 +836,7 @@ def _compile_handover(
         "Preserve system/developer instructions, approvals, sandbox policy, and "
         "repository-specific coding/tool rules.\n\n"
         # Before the capsule, which names AR tools: where this session holds them.
-        # Host route (exclusion_applied=False): the choice sentence stays.
-        f"AR tools, before your first tool call: {_ar_tool_server_usage(request.harness_id, servers=_brief_servers(request.accepts_tool_servers), exclusion_applied=False)}\n\n"
+        f"AR tools, before your first tool call: {_ar_tool_server_usage(request.harness_id, servers=_brief_servers(request.accepts_tool_servers))}\n\n"
         + instructions
         + "\n\nAR owner assignment and canonical task handover:\n"
         + json.dumps(handover, ensure_ascii=False, separators=(",", ":"))
@@ -933,8 +926,20 @@ def _address_words(address: dict[str, Any]) -> str:
     return ", ".join(words)
 
 
+def _entry_mode(started_by: StartingAgent | None, chat_started: bool) -> str:
+    """How the launch entered the host, as the launch record says it (MIK-R113 rule 6)."""
+
+    if started_by is not None:
+        return "agent-role-start"
+    return "chat-role-start" if chat_started else "dashboard-role-start"
+
+
 def _owner_relation(
-    started_by: StartingAgent | None, *, role: LauncherRole, context: RoleLaunchContext
+    started_by: StartingAgent | None,
+    *,
+    role: LauncherRole,
+    context: RoleLaunchContext,
+    chat_started: bool = False,
 ) -> str:
     """Whom this role answers to: the agent that started it, or nobody but the developer.
 
@@ -944,6 +949,14 @@ def _owner_relation(
     """
 
     if started_by is None:
+        if chat_started:
+            return (
+                "This role was started by a chat without a role through role_start "
+                "(MIK-R113 rule 6). It has no parent agent and needs none: the "
+                "developer who reads this chat owns its decisions. The developer "
+                "speaks with this agent in the dashboard. The selected AR "
+                "sprint/master/leaf is work scope, not a parent."
+            )
         return (
             "This role was started from the dashboard launcher. It has no parent agent and needs "
             "none: the developer who reads this chat owns its decisions. The selected AR "

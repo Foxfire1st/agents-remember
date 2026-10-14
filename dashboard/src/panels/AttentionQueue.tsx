@@ -27,9 +27,8 @@ import { masterIdsByFolder, shortTaskId } from "./lifecycle-list/rowState";
 // What one does with an entry is unchanged. Its task is a link that opens the entry's lifecycle
 // in the detail view and closes the layer: the deliberate queue↔detail coupling. Lifecycle-bound
 // entries are dismissable: × on an entry and "Clear all" both POST a current acknowledgement.
-// Lifecycle rows are scoped by lifecycle id, gate rows are consumed by cancelling/deleting the
-// gate, and actionable-drift rows are repo-level one-shot signals anchored by the drift snapshot
-// timestamp.
+// Lifecycle rows are scoped by lifecycle id, and actionable-drift rows are repo-level one-shot
+// signals anchored by the drift snapshot timestamp.
 //
 // The measures are the task page's text sizes (MIK-R163 rule 1); see
 // lifecycle-list/columnLook.ts.
@@ -241,16 +240,11 @@ function dismissPayload(item: AttentionItem) {
     itemId: item.id,
     kind: item.kind,
     lifecycleId: item.lifecycleId ?? null,
-    gateId: item.gateId,
   };
 }
 
 function canDismiss(item: AttentionItem): boolean {
-  return Boolean(
-    item.lifecycleId ||
-      (item.kind === "gate-open" && item.gateId) ||
-      item.kind === "actionable-drift",
-  );
+  return Boolean(item.lifecycleId || item.kind === "actionable-drift");
 }
 
 function dismissAttentionItem(

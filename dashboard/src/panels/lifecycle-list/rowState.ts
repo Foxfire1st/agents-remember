@@ -1,7 +1,6 @@
 import { fmtWait } from '../../data/selectors';
 import { pathDir, pathStem } from '../../data/taskHierarchy';
-import type { AgentPickupNode, LifecycleProjection, TaskDocNode } from '../../types/projection';
-import type { ChatActivitySummary } from '../ChatActivityIndicator';
+import type { LifecycleProjection, TaskDocNode } from '../../types/projection';
 import { statusLabel, statusTone, type StatusTone } from '../detail-panel/pageParts';
 import type { RowProgress } from './progress';
 
@@ -23,9 +22,9 @@ export type RowMark =
   | { kind: 'status'; tone: StatusTone }
   | { kind: 'state'; variant: string };
 
-// `ask` and `fault` call for the developer; `run` and `live` say that something moves; `rest`
-// is a state that asks for nothing.
-export type WordTone = 'ask' | 'fault' | 'run' | 'live' | 'rest';
+// `ask` and `fault` call for the developer; `run` says that something moves; `rest` is a state
+// that asks for nothing.
+export type WordTone = 'ask' | 'fault' | 'run' | 'rest';
 
 export interface RowState {
   mark: RowMark;
@@ -40,18 +39,11 @@ export interface RowWord {
   text: string;
   tone: WordTone;
   band: RowBand;
-  source: 'gate' | 'pickup' | 'chat' | 'state';
-  // An overdue hand-over offers its dismissal beside the word, also where an open gate is the
-  // word: a gate does not answer the hand-over.
-  dismissPickup: boolean;
 }
 
 export interface RowFacts {
   status: string;
   lifecycle?: LifecycleProjection;
-  gate: string;
-  pickup?: AgentPickupNode;
-  chatActivity?: ChatActivitySummary;
   ageSeconds?: number;
 }
 
@@ -102,21 +94,6 @@ export function rowState(facts: Pick<RowFacts, 'status' | 'lifecycle'>): RowStat
   return documentState(status || NOT_BEGUN);
 }
 
-// What asks for the developer from outside the task's own state: an open gate, a hand-over
-// that is overdue or not yet acknowledged, a chat that waits for an answer. The first that holds.
-function askingWord(facts: RowFacts): RowWord | undefined {
-  const asks = { tone: 'ask', band: 0, dismissPickup: false } as const;
-  const { pickup, chatActivity } = facts;
-  const overdue = pickup?.state === 'check-chat';
-  if (facts.gate) return { ...asks, text: facts.gate, source: 'gate', dismissPickup: overdue };
-  if (overdue) return { ...asks, text: 'check chat', source: 'pickup', dismissPickup: true };
-  if (pickup) return { ...asks, text: 'unacknowledged', source: 'pickup' };
-  if (chatActivity && chatActivity.state === 'needs-input') {
-    return { ...asks, text: 'needs input', source: 'chat' };
-  }
-  return undefined;
-}
-
 // The word of the task's own state, with its age where a reporting lifecycle is neither asking
 // nor over.
 function stateText(state: RowState, facts: RowFacts): string {
@@ -124,19 +101,10 @@ function stateText(state: RowState, facts: RowFacts): string {
   return aged ? `${state.word} ${fmtWait(facts.ageSeconds)}` : state.word;
 }
 
-// The one word of a row: the most pressing fact, in this order. Every other fact of the row is
-// in its hover text.
-//   what asks from outside > a state that asks or is stopped > a chat at work > the task's state
+// The one word of a row: the task's own state. Every other fact of the row is in its hover text.
 export function rowWord(facts: RowFacts): RowWord {
-  const asking = askingWord(facts);
-  if (asking) return asking;
   const state = rowState(facts);
-  const own = { tone: state.tone, band: state.band, dismissPickup: false, source: 'state' } as const;
-  if (state.band === 0) return { ...own, text: state.word };
-  if (facts.chatActivity && facts.chatActivity.state === 'working') {
-    return { text: 'working', tone: 'live', band: 1, source: 'chat', dismissPickup: false };
-  }
-  return { ...own, text: stateText(state, facts) };
+  return { text: stateText(state, facts), tone: state.tone, band: state.band };
 }
 
 export interface RowProgressFacts extends RowProgress {
@@ -177,12 +145,6 @@ function lifecycleLine(lifecycle: LifecycleProjection, ageSeconds: number | unde
     .join(' · ')}`;
 }
 
-function pickupLine(pickup: AgentPickupNode): string {
-  if (pickup.state === 'check-chat') return 'Inbox: acknowledgment overdue; check chat';
-  const subject = pickup.messageKind === 'dispatch-brief' ? 'brief' : 'message';
-  return `Inbox: ${subject} ${pickup.deliveryState}, awaiting acknowledgment`;
-}
-
 export interface RowHoverFacts extends RowFacts {
   heading: string;
   kind: string;
@@ -206,21 +168,18 @@ function documentLines(facts: RowHoverFacts): string[] {
   ].filter((line): line is string => Boolean(line));
 }
 
-// What runs around the task: its lifecycle, an open gate, its worktree, its chat, its inbox.
+// What runs around the task: its lifecycle and its worktree.
 function signalLines(facts: RowHoverFacts): string[] {
-  const { lifecycle, chatActivity, pickup } = facts;
+  const { lifecycle } = facts;
   return [
     lifecycle ? lifecycleLine(lifecycle, facts.ageSeconds) : '',
-    facts.gate ? `Gate: ${facts.gate}` : '',
     facts.worktree ? 'Worktree: on disk' : '',
-    chatActivity ? `Chat: ${chatActivity.label}. ${chatActivity.detail}` : '',
-    pickup ? pickupLine(pickup) : '',
     facts.repo && facts.repo !== '—' ? `Repo: ${facts.repo}` : '',
   ].filter(Boolean);
 }
 
 // Everything a row knows, one fact a line: the whole title and every signal the line itself has
-// no room for (kind, document status, the long progress, the lifecycle's facts, chat, inbox).
+// no room for (kind, document status, the long progress, the lifecycle's facts).
 export function rowHover(facts: RowHoverFacts): string {
   return [
     facts.heading,

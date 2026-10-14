@@ -32,7 +32,7 @@ from agents_remember.mcp.tools import (
     server_info_payload,
 )
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
-from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.serving.build_info import ServingBuild
 from test_config import settings_payload
@@ -177,7 +177,7 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         self.assertEqual(live, PUBLIC_TOOLS)
 
     def test_worktree_record_landing_has_a_response_model_that_validates(self) -> None:
-        self.assertEqual(set(PUBLIC_TOOL_RESPONSE_MODELS), set(PUBLIC_TOOLS))
+        self.assertEqual(set(TOOL_RESPONSE_MODELS), set(PUBLIC_TOOLS))
         # A name in the inventory but missing from the registry raises KeyError here, which the
         # surface comparison above cannot see on its own.
         envelope = finalize_tool_response(

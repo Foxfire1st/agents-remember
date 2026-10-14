@@ -129,6 +129,11 @@ the planned Onboarding Inspector (task 260621).
 
 ## W6 — Operate an agent session via the control plane
 
+**Status:** History as of MIK-R113 (2026-10-12), which removed the Chats cockpit, the product's
+own terminals and the session composer this scenario drives. Kept as the record of the scenario,
+not as a live scenario; the row **Chats** of the view inventory and the composers named under it
+describe the same removed parts.
+
 **Persona:** operator
 **Job story:** "When I want to steer an agent, I want to drive it from inside the cockpit, so I don't
 have to leave for the harness."

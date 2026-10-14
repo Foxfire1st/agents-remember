@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { sameTaskDocumentRef } from "../../data/taskIdentity";
-import type { TaskDocumentRef } from "../../types/terminalCatalog";
+import type { TaskDocumentRef } from "../../types/projection";
 import type { RoleLaunchSelection } from "../roleLaunchModel";
 import { documentAgents, type DocumentAgent, type DocumentBinding } from "./model";
 

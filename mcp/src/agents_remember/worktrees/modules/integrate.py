@@ -9,6 +9,7 @@ from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.primitives.gate_policy import (
     GatePolicy,
 )
+from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
@@ -381,8 +382,8 @@ def _dry_run_result(
         return handover_gate_blocked(
             contract,
             summary=(
-                "Dry run completed; the real run would refuse with handover-gate-blocked — "
-                "decide the addressed master-handover-approval gate first."
+                "Dry run completed; the real run would refuse with handover-gate-blocked. "
+                f"{STORED_GATE_WAY_OUT}."
             ),
             gate_id=preview.guard.gate_id or "unaddressed",
             reason=preview.guard.reason,
@@ -560,8 +561,8 @@ def _checkpoint_dry_run_result(
         return handover_gate_blocked(
             contract,
             summary=(
-                "Dry run completed; the real run would refuse with handover-gate-blocked — "
-                "decide the addressed master-handover-approval gate first."
+                "Dry run completed; the real run would refuse with handover-gate-blocked. "
+                f"{STORED_GATE_WAY_OUT}."
             ),
             gate_id=preview.guard.gate_id or "unaddressed",
             reason=preview.guard.reason,
@@ -827,8 +828,8 @@ def _handover_or_apply_integration(
         return handover_gate_blocked(
             contract,
             summary=(
-                "Integration is blocked by the addressed master-handover-approval gate; "
-                "inspect the structural gate and decide it before rerunning integration."
+                "Integration is blocked by the addressed master-handover-approval gate. "
+                f"{STORED_GATE_WAY_OUT}."
             ),
             gate_id=guard.gate_id or "unaddressed",
             reason=guard.reason,

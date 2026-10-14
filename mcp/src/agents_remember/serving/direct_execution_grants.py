@@ -3,8 +3,7 @@
 Serving rank: this module never imports ``application`` or MCP surfaces (the
 layering test forbids it). It reuses the same substrate readers the
 ``prove_task_unstarted`` census reads -- task documents, the enclosure
-contract, lifecycle operation locations and journals, the terminal seat
-catalog, and the operator-inbox turn reports -- and folds them the same way:
+contract, and lifecycle operation locations and journals -- and folds them the same way:
 any start evidence, or any doubt about a source, refuses the change. Both
 routes write the same record through the kernel store.
 """
@@ -19,7 +18,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.direct_execution_grants import (
     ARCHITECT_GRANTER,
@@ -34,10 +32,8 @@ from agents_remember.kernel.direct_execution_grants import (
     remove_matching_grant,
     utc_now_iso,
 )
-from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.task_paths import leaf_enclosure_path
@@ -213,55 +209,14 @@ def _operation_labels(
     return [f"lifecycle operations present ({kinds})"]
 
 
-def _seat_labels(coordination_root: Path, ref: TaskDocumentRef) -> list[str]:
-    """Start evidence from the terminal seat catalog."""
-    path = terminal_catalog_path(coordination_root)
-    if not path.is_file():
-        return []
-    try:
-        rows = TerminalCatalog(path).list(include_terminated=True)
-    except (OSError, ValueError, TypeError) as error:
-        return [f"seat catalog unreadable ({type(error).__name__})"]
-    wanted = (ref.repository, ref.path)
-    matched = [
-        f"{row.id}:{row.status}"
-        for row in rows
-        if row.binding_role in _LEAF_SEAT_ROLES
-        and wanted
-        in {_ref_key(row.task_document_ref), _ref_key(row.replacement_for_task_document_ref)}
-    ]
-    if not matched:
-        return []
-    return [f"leaf seats present ({','.join(sorted(matched))})"]
-
-
-def _report_labels(config: McpRuntimeConfig, ref: TaskDocumentRef) -> list[str]:
-    """Start evidence from the operator-inbox turn reports."""
-    store = OperatorInboxStore(observer_root(config))
-    path = store.log_path()
-    if not path.is_file():
-        return []
-    try:
-        entries = store.current().values()
-    except (OSError, ValueError, TypeError) as error:
-        return [f"turn reports unreadable ({type(error).__name__})"]
-    wanted = (ref.repository, ref.path)
-    matched = [
-        entry.id
-        for entry in entries
-        if entry.messageKind == "turn-report"
-        and entry.senderRole in _LEAF_SEAT_ROLES
-        and wanted in {_ref_key(entry.subjectTaskDocumentRef), _ref_key(entry.taskDocumentRef)}
-    ]
-    if not matched:
-        return []
-    return [f"leaf turn reports present ({','.join(sorted(matched))})"]
-
-
 def refuse_started_leaf(
-    config: McpRuntimeConfig, coordination_root: Path, ref: TaskDocumentRef
+    _config: McpRuntimeConfig, coordination_root: Path, ref: TaskDocumentRef
 ) -> None:
-    """Refuse a grant change for a started leaf, naming the evidence of the start."""
+    """Refuse a grant change for a started leaf, naming the evidence of the start.
+
+    The evidence is the leaf's document, its enclosure and its lifecycle operations. The
+    configuration that the grant control passes is not read.
+    """
     task_root, leaf_id, leaf = _resolve_leaf(coordination_root, ref)
     labels = _task_labels(task_root, leaf_id, leaf)
     enclosure_labels, contract = _enclosure_labels(task_root, leaf_id)
@@ -275,8 +230,6 @@ def refuse_started_leaf(
         leaf_enclosure_path(task_root, leaf_id),
         contract_failure,
     )
-    labels += _seat_labels(coordination_root, ref)
-    labels += _report_labels(config, ref)
     if contract is not None:
         labels.append("leaf enclosure present")
     if not labels:

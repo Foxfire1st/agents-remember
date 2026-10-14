@@ -149,6 +149,23 @@ PHASES = (
 )
 
 
+# The baseline tree answers an integration with the seat fields of the product's own hosting of
+# agents. MIK-R113 removed that hosting and the fields with it, so they are taken out of the
+# baseline's side alone; the current answers are pinned to hold none of them.
+SEAT_FIELDS_OF_THE_BASELINE = (
+    "autoClosedSeats",
+    "autoCloseDeferredSeats",
+    "autoCloseFailedSeats",
+    "autoLandedSeats",
+)
+
+
+def _without_seat_fields(response: Any) -> Any:
+    if not isinstance(response, dict):
+        return response
+    return {key: item for key, item in response.items() if key not in SEAT_FIELDS_OF_THE_BASELINE}
+
+
 def _scrub(value: Any, roots: list[str]) -> Any:
     if isinstance(value, str):
         redacted = _SHA.sub("<sha>", value)
@@ -430,6 +447,8 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
         )
         for phase in PHASES:
             with self.subTest(phase=phase):
+                for current in (pristine, noisy):
+                    self.assertFalse(set(SEAT_FIELDS_OF_THE_BASELINE) & set(current[phase]))
                 # Raw grant/current equality first (volatile scrub only, no take-out):
                 # the take-out below must never be what makes the grant world exact.
                 raw = [_scrub(world[phase], roots) for world, _ in worlds]
@@ -438,6 +457,7 @@ class NoGrantCloseoutParityTest(unittest.TestCase):
                     _without_conversion_row(world[phase], marker_commits)
                     for world, marker_commits in worlds
                 ]
+                taken[0] = _without_seat_fields(taken[0])
                 scrubbed = [_scrub(taken_world, roots) for taken_world in taken]
                 # The grant world stays exact against the current world on every phase,
                 # taken out or not; the world of before is compared after the take-out.

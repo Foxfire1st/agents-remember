@@ -100,6 +100,10 @@ a high-severity violation.
 
 ## Carried known defects (verify, then re-confirm or retire)
 
+**Status:** The bullet **Display-only affordances** is history as of MIK-R113 (2026-10-12), which
+removed the commit gate's decision in the dashboard and the terminal WebSocket it names. Kept as
+the record of that review.
+
 - **D5 landing-tier retract bug** — at `cleanup-pending` the engine-room landing tier stays lit at rest.
 - **Display-only affordances** — most attention-item actions (answer/decide/ack/retry/restart) and the
   engine-room recovery chips have no write path yet (only the commit gate + the terminal WebSocket are

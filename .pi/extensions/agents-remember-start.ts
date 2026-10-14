@@ -48,17 +48,17 @@ export default function (pi: Pi): void {
     const directive = [
       "**Agents Remember — session start.**",
       "",
-      "If `AR_SPAWN_ROLE` is set, or your first user message is a role brief from an",
-      "orchestrating agent: **ignore this notice entirely — your brief is your session",
-      "start.**",
+      "You are the developer-facing **free chat**: read",
+      `\`${WORKSPACE_ROOT}/ar-coordination/AGENTS.md\` as workspace`,
+      "instructions. Answer a question inline; for work on a managed repository,",
+      "create or resolve the sprint document, write the request of the developer into",
+      "it, start an Architect with `role_start` (the call for an Architect names no",
+      "document), and tell the developer that the agent is in the dashboard and which",
+      "sprint document holds the request. Another role is started this way only when",
+      "the developer names the role and the task.",
       "",
-      "Otherwise you are the developer-facing **free chat** session: read",
-      `\`${WORKSPACE_ROOT}/ar-coordination/AGENTS.md\` and treat those rules as workspace`,
-      "instructions. Answer research inline; for role-shaped work, create or resolve the",
-      "durable sprint and first leaf, compile the canonical architect brief, then call",
-      "`dispatch_agent` once on the sprint document with role `architect`. Hand over after",
-      "that exact brief is durable. Free chat never becomes a global architect identity",
-      "and never calls a session primitive."
+      "An agent whose first message is the hand-over of a role is not meant by this",
+      "notice."
     ].join("\n");
 
     return {

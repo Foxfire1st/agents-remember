@@ -16,31 +16,16 @@ WHAT THIS SCENARIO CERTIFIES
 It certifies the *chain* over disposable fixtures created by the harness: two repositories from
 nothing, the register persisted, the baseline adopted, the first worktree task started by the
 product's own activation, and the four chain invariants asserted on both fixtures.
-
-It also runs the **free agent**, the seat the developer ruled has no task document at all.
-``free_agent_acceptance`` opens it through the product's live route -- ``POST /api/terminal/{session}``
-with ``role='bootstrap'`` and no ``taskDocumentRef`` -- and reads the capsule back **out of the
-launch token the session was actually started with**, parsed by the product's own
-``parse_runner_config``. The capsule it receives is the ``(bootstrap, orientation)`` compilation:
-the route publishes its semantic digest, and the run asserts that the digest the route published is
-the digest on the token, and that the instruction text equals the compiler's own result for the same
-admitted seat through the same application entry point. The step reports ``completed`` or ``failed``,
-never ``blocked``: a free agent that opens without its instructions is a failure, not a deferral.
-
-The standing rule this shape exists to satisfy: a delivery claim is closed by a production path from
-producer to consumer, with the artifact read from the consumer's side -- never a seam plus a
-caller-supplied value.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -58,22 +43,16 @@ from agents_remember.application.memory_tools import (  # noqa: E402
     _baseline_request,
     citation_fix_tool,
 )
-from agents_remember.application.role_capsules.launch import (  # noqa: E402
-    LaunchCapsuleRequest,
-    compile_launch_capsule,
-)
 from agents_remember.application.worktree_tool_requests import (  # noqa: E402
     StartExecution,
     TaskBases,
     TaskIdentity,
 )
 from agents_remember.application.worktree_tools import worktree_start_tool  # noqa: E402
-from agents_remember.cli.dashboard import serving_collaborators  # noqa: E402
 from agents_remember.install.runtime import (  # noqa: E402
     RuntimeInstallRequest,
     install_runtime_from_config,
 )
-from agents_remember.kernel.agentic_settings import require_user_agentic_settings_path  # noqa: E402
 from agents_remember.kernel.authority import require_repo  # noqa: E402
 from agents_remember.kernel.memory_init import initialize_memory  # noqa: E402
 from agents_remember.kernel.primitives import checkout_coordination  # noqa: E402
@@ -85,14 +64,7 @@ from agents_remember.memory_quality.check import (  # noqa: E402
     run_memory_quality_check,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef  # noqa: E402
-from agents_remember.observer import reset_ambient  # noqa: E402
-from agents_remember.serving.app import create_app  # noqa: E402
-from agents_remember.serving.harness_control_runner import parse_runner_config  # noqa: E402
-from agents_remember.serving.projector import ProjectionCadence  # noqa: E402
-from agents_remember.serving.terminal import TerminalSessionBinding  # noqa: E402
-from agents_remember.serving.terminal_catalog import TerminalCatalog  # noqa: E402
 from agents_remember.tasks import TaskDocument, write_task_doc  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
 from fresh_user_fixture import (  # noqa: E402  (the harness's flat module convention)
     FreshUserFixture,
     create_fresh_user_fixture,
@@ -111,7 +83,6 @@ STEP_WORKTREE = "first-worktree-task"
 STEP_CITATION = "citation-fix"
 STEP_QUALITY = "memory-quality-check"
 STEP_CLOSEOUT = "closeout-validation"
-STEP_FREE_AGENT = "free-agent-bootstrap-seat"
 
 INVARIANTS = (
     CheckpointDefinition(
@@ -267,11 +238,10 @@ def _record_check(
 ) -> None:
     """Record one checkpoint without aborting the run.
 
-    ``CheckpointRecorder.check`` raises on the first failure, which would end the transcript
-    before the later steps ran. The packet is explicit that a failing scenario is a real result
-    to report with the failing step and its output, never a scenario removed to make the run
-    green -- so every step runs, every checkpoint is recorded, and the exit status carries the
-    verdict.
+    Raising on the first failure would end the transcript before the later steps ran. The
+    packet is explicit that a failing scenario is a real result to report with the failing
+    step and its output, never a scenario removed to make the run green -- so every step runs,
+    every checkpoint is recorded, and the exit status carries the verdict.
     """
     recorder.checkpoints.append(
         {
@@ -878,175 +848,6 @@ def citation_fix_blocked(fixture: FreshUserFixture, started: dict[str, Any]) -> 
     )
 
 
-class _RecordingTerminalHost:
-    """The tmux boundary, doubled for the OPEN path only.
-
-    Declared as a boundary double, not as a value: it records the session specification the product
-    produced (cwd, argv, env) and never supplies anything the capsule is compared against. The
-    capsule itself is compiled by the product and read back out of the launched token.
-    """
-
-    def __init__(self) -> None:
-        self.ensured: list[Any] = []
-        self.known: set[str] = set()
-
-    def has_session(self, tmux_name: str) -> bool:
-        return tmux_name in self.known
-
-    def shutdown(self) -> None:
-        return None
-
-    def ensure(self, sid: str, spec: Any) -> Any:
-        self.ensured.append(spec)
-        tmux_name = spec.tmux_name_for(sid)
-        self.known.add(tmux_name)
-        return TerminalSessionBinding(
-            sid=sid,
-            tmux_name=tmux_name,
-            cwd=spec.cwd,
-            command=spec.command,
-            lifecycle_id=spec.lifecycle_id,
-            suspend_unsafe=spec.suspend_unsafe,
-        )
-
-    def last_spec(self) -> Any:
-        if not self.ensured:
-            raise AssertionError("the launch route ensured no session")
-        return self.ensured[-1]
-
-
-def _write_role_settings(fixture: FreshUserFixture, harness: str) -> Path:
-    """Point the bootstrap role at one harness: the settings-owned launch selection."""
-    path = require_user_agentic_settings_path(fixture.coordination_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "orchestration": {
-                    "roles": {
-                        "bootstrap": {
-                            "harness": harness,
-                            "model": "gpt-5.6-sol",
-                            "effort": "medium",
-                        }
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    return path
-
-
-def free_agent_acceptance(fixture: FreshUserFixture) -> StepRecord:
-    """L14R-2: a FREE agent's compiled capsule, read back from its own first prompt.
-
-    The seat is opened the way a user opens it -- the product's registered route,
-    ``POST /api/terminal/{session}`` with ``role='bootstrap'`` and **no task document** -- and the
-    capsule is read back from the artifact that launch produced: the encoded launch token the child
-    process is started with, parsed by the product's own ``parse_runner_config``. The expected side
-    is the same application entry point the route itself calls, so neither side is hand-supplied.
-    """
-    with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(fixture.root / "config")}):
-        _write_role_settings(fixture, "codex")
-        reset_ambient()
-        config = _config(fixture)
-        host = _RecordingTerminalHost()
-        catalog_path = fixture.coordination_root / "logs" / "dashboard" / "terminal-sessions.json"
-        collaborators = replace(
-            serving_collaborators(config),
-            terminal_host=host,
-            terminal_catalog=TerminalCatalog(catalog_path),
-        )
-        app = create_app(
-            config, cadence=ProjectionCadence(interval=100), collaborators=collaborators
-        )
-        session = "l14-free-bootstrap"
-        with TestClient(app) as client:
-            response = client.post(
-                f"/api/terminal/{session}",
-                json={
-                    "kind": "harness",
-                    "harness": "codex",
-                    "role": "bootstrap",
-                    "label": "L14 free agent",
-                },
-            )
-        body = (
-            response.json()
-            if response.headers.get("content-type", "").startswith("application/json")
-            else {}
-        )
-        if response.status_code != 200:
-            return StepRecord(
-                step=STEP_FREE_AGENT,
-                fixture=fixture.name,
-                call=f"POST /api/terminal/{session} (role=bootstrap, no taskDocumentRef)",
-                status="failed",
-                result={"statusCode": response.status_code, "body": response.text[:600]},
-            )
-
-        spec = host.last_spec()
-        token = spec.command[-1]
-        parsed = parse_runner_config(token)
-        delivery = parsed.capsule_delivery
-        launched = compile_launch_capsule(
-            config,
-            LaunchCapsuleRequest(
-                role="bootstrap", workspace_root=config.workspace_root, harness="codex"
-            ),
-        )
-        received = "" if delivery is None else delivery.trusted_instructions
-        encoded = received.encode("utf-8")
-        expected = (
-            "" if launched.codex_delivery is None else launched.codex_delivery.trusted_instructions
-        )
-        instruction_mode = body.get("instructionMode") or {}
-        matches_expected = received == expected and bool(expected)
-        digest_matches = (
-            delivery is not None
-            and bool(instruction_mode)
-            and instruction_mode.get("semanticDigest") == delivery.semantic_digest
-        )
-        passed = (
-            instruction_mode.get("mode") == "capsule"
-            and body.get("taskDocumentRef") is None
-            and matches_expected
-            and digest_matches
-        )
-        return StepRecord(
-            step=STEP_FREE_AGENT,
-            fixture=fixture.name,
-            call=(
-                f"POST /api/terminal/{session} {{'kind':'harness','harness':'codex',"
-                "'role':'bootstrap','label':'L14 free agent'}}  # no taskDocumentRef"
-            ),
-            status="completed" if passed else "failed",
-            result={
-                "routeStatus": response.status_code,
-                "taskDocumentRef": body.get("taskDocumentRef"),
-                "instructionMode": instruction_mode,
-                "sessionReceived": {
-                    "characters": len(received),
-                    "bytes": len(encoded),
-                    "sha256": hashlib.sha256(encoded).hexdigest(),
-                    "semanticDigest": None if delivery is None else delivery.semantic_digest,
-                    "firstLine": received.splitlines()[0] if received else "",
-                },
-                "compiledByProduct": {
-                    "mode": launched.mode.value,
-                    "semanticDigest": None
-                    if launched.codex_delivery is None
-                    else launched.codex_delivery.semantic_digest,
-                    "instructionBytes": launched.report.get("instructionBytes"),
-                },
-                "tokenCharacters": len(token),
-                "equalsCompilerResult": matches_expected,
-                "routeDigestEqualsSessionDigest": digest_matches,
-            },
-        )
-
-
 def first_worktree_task_blocked(records: list[StepRecord], chains: dict[str, Any]) -> StepRecord:
     """The step this run could not complete, built FROM the run's own step records.
 
@@ -1172,8 +973,6 @@ def run_fresh_user_acceptance(run_root: Path) -> dict[str, Any]:
             )
         )
 
-    for fixture in fixtures.values():
-        records.append(free_agent_acceptance(fixture))
     if not all(chain.get("workBranchExists") for chain in chains.values()):
         records.append(first_worktree_task_blocked(records, chains))
     blocked = [

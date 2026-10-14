@@ -701,40 +701,55 @@ class BridgeScriptTests(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "the bridge script needs Node.js")
-class BridgeExclusionConsumerTests(unittest.TestCase):
-    """MIK-R112 F07: agentCreation applies the task-server-only record (model-free)."""
+class BridgeProviderOptionsTests(unittest.TestCase):
+    """MIK-R132: agentCreation hands the host the provider options, and only those it reads.
+
+    A supplied map of servers that names the task server crosses without the entry of the
+    product's other server; the task server's entry and the user's servers cross as they are.
+    """
 
     PROBE = (
         "import(process.env.BRIDGE_URL).then(async m => {"
         " const stdio = (command) => ({type:'stdio',command,args:[],env:{}});"
         " const base = {agentId:'a', idempotencyKey:'k', workspaceId:'w',"
-        " provider:'codex', title:'t', labels:{},"
-        " mcpServers:{'agents-remember-task':stdio('x'),"
-        " 'user-server':stdio('u'), 'agents-remember':stdio('o')}};"
-        " const tso = {...base, serverExclusion:{harness:'codex',"
-        " mode:'task-server-only', servers:['agents-remember-task']}};"
-        " const eve = {...base, serverExclusion:{harness:'eve',"
-        " mode:'host-owned', servers:['agents-remember-task']}};"
-        " let bad = null;"
-        " try { m.agentCreation({...base, serverExclusion:'nope'}, 'a'); }"
-        " catch (e) { bad = (e && e.code) || String(e); }"
-        " const keys = (r) => Object.keys(r.kept.mcpServers || {}).sort();"
-        " const stubApi = { workspaces: { ref: () => ({ refresh: async () => ({ workspaceDirectory: '/w' }) }) } };"
-        " const captured = [];"
-        " const stubDaemon = { createAgent: async (payload) => { captured.push(payload); return {}; } };"
-        " await m.agentCreation(tso, 'a').create(stubApi, stubDaemon);"
-        " const cfg = captured[0].config || {};"
+        " provider:'claude', title:'t', labels:{},"
+        " mcpServers:{'agents-remember-task':stdio('x'), 'user-server':stdio('u')}};"
+        " const options = {disallowedTools:['mcp__agents-remember']};"
+        " const viaDaemon = [];"
+        " const viaClient = [];"
+        " const workspace = { refresh: async () => ({ workspaceDirectory: '/w' }),"
+        " agents: { create: async (payload) => { viaClient.push(payload); return { current: () => ({}) }; } } };"
+        " const api = { workspaces: { ref: () => workspace } };"
+        " const daemon = { createAgent: async (payload) => { viaDaemon.push(payload); return {}; } };"
+        " await m.agentCreation({...base, providerOptions: options}, 'a').create(api, daemon);"
+        " await m.agentCreation({...base, model:'opus', providerOptions: options}, 'a').create(api, daemon);"
+        " await m.agentCreation(base, 'a').create(api, daemon);"
+        " const supplied = {...base.mcpServers, 'agents-remember':stdio('o'),"
+        " 'agents-remember-user':stdio('n')};"
+        " await m.agentCreation({...base, mcpServers: supplied}, 'a').create(api, daemon);"
+        " await m.agentCreation({...base, model:'opus', mcpServers: supplied}, 'a').create(api, daemon);"
+        " const { 'agents-remember-task': task, ...withoutTask } = supplied;"
+        " await m.agentCreation({...base, mcpServers: withoutTask}, 'a').create(api, daemon);"
+        " const refused = (value) => {"
+        " try { m.agentCreation({...base, providerOptions: value}, 'a'); return null; }"
+        " catch (e) { return (e && e.code) || String(e); } };"
         " process.stdout.write(JSON.stringify({"
-        " plain: m.agentCreation(base, 'a').hasToolServers,"
-        " kept: keys(m.agentCreation(tso, 'a')),"
-        " crossedServers: Object.keys(cfg.mcpServers || {}).sort(),"
-        " crossedRecord: (cfg.serverExclusion && cfg.serverExclusion.mode) || null,"
-        " eve: m.agentCreation(eve, 'a').hasToolServers,"
-        " bad}));"
+        " daemonOptions: viaDaemon[0].config.providerOptions,"
+        " daemonServers: Object.keys(viaDaemon[0].config.mcpServers).sort(),"
+        " clientProvider: viaClient[0].config.provider,"
+        " clientOptions: viaClient[0].config.options,"
+        " clientOtherKey: 'providerOptions' in viaClient[0].config,"
+        " plainKeys: Object.keys(viaDaemon[1].config).filter((key) => /ptions$/.test(key)),"
+        " suppliedViaDaemon: viaDaemon[2].config.mcpServers,"
+        " suppliedViaClient: Object.keys(viaClient[1].config.mcpServers).sort(),"
+        " suppliedInput: Object.keys(supplied).sort(),"
+        " withoutTask: Object.keys(viaDaemon[3].config.mcpServers).sort(),"
+        " refused: [refused('nope'), refused({}), refused({disallowedTools: []}),"
+        " refused({disallowedTools: ['']}), refused({disallowedTools: ['x'], extraArgs: {}})]}));"
         "}).catch(e => { process.stdout.write('IMPORT-FAIL ' + e.message); process.exit(1); });"
     )
 
-    def test_task_server_only_retains_task_and_user_suppresses_other(self) -> None:
+    def test_provider_options_reach_the_host_under_the_name_each_client_reads(self) -> None:
         node = shutil.which("node")
         assert node is not None
         env = {
@@ -750,15 +765,44 @@ class BridgeExclusionConsumerTests(unittest.TestCase):
             env=env,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        def stdio(command: str) -> dict[str, object]:
+            return {"type": "stdio", "command": command, "args": [], "env": {}}
+
         self.assertEqual(
             json.loads(completed.stdout),
             {
-                "plain": True,
-                "kept": ["agents-remember-task", "user-server"],
-                "crossedServers": ["agents-remember-task", "user-server"],
-                "crossedRecord": None,
-                "eve": True,
-                "bad": "invalid_bridge_payload",
+                # The daemon client takes the create request's own key.
+                "daemonOptions": {"disallowedTools": ["mcp__agents-remember"]},
+                # The servers this build's launch names cross as they are.
+                "daemonServers": ["agents-remember-task", "user-server"],
+                # The public client names them `options` and maps them to the same key.
+                "clientProvider": "claude/opus",
+                "clientOptions": {"disallowedTools": ["mcp__agents-remember"]},
+                "clientOtherKey": False,
+                # A launch without them hands the host neither key.
+                "plainKeys": [],
+                # A supplied map that names the task server loses the other product server's
+                # entry and nothing else, on both clients; the caller's map is not changed.
+                "suppliedViaDaemon": {
+                    "agents-remember-task": stdio("x"),
+                    "user-server": stdio("u"),
+                    "agents-remember-user": stdio("n"),
+                },
+                "suppliedViaClient": [
+                    "agents-remember-task",
+                    "agents-remember-user",
+                    "user-server",
+                ],
+                "suppliedInput": [
+                    "agents-remember",
+                    "agents-remember-task",
+                    "agents-remember-user",
+                    "user-server",
+                ],
+                # Without the task server the other one is the agent's only copy and stays.
+                "withoutTask": ["agents-remember", "agents-remember-user", "user-server"],
+                "refused": ["invalid_bridge_payload"] * 5,
             },
         )
 

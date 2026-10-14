@@ -1,13 +1,9 @@
-"""Retention policy for short-lived gate and operator-inbox interactions."""
+"""Retention policy for gate records."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from agents_remember.controlplane.operator_inbox_records import (
-    OperatorInboxEntry,
-    fold_operator_inbox_entries,
-)
 from agents_remember.controlplane.records import (
     GateRecord,
 )
@@ -16,23 +12,8 @@ from agents_remember.models.structural.gates import (
     GateKind,
 )
 
-GATE_RESPONSE_WAIT_TIMEOUT_SECONDS = 300.0
-GATE_RESPONSE_WAIT_POLL_SECONDS = 5.0
 INTERACTION_RECORD_TTL_SECONDS = 24 * 60 * 60.0
-AGENT_PICKUP_TTL_SECONDS = 300.0
 
-INBOX_PENDING_TTL_SECONDS = 48 * 60 * 60.0
-INBOX_TERMINAL_MARKER_RETENTION_SECONDS = INBOX_PENDING_TTL_SECONDS
-"""Terminal-marker retention (design §9/N13): terminal rows are inspectable for 48h, then
-physically evicted. In normal operation every resolution clock (attempt ceiling, rebind grace)
-is far shorter than 48h, so a pending row reaches a surfaced terminal state before retention
-can touch it; the old silent pending purge is replaced by the ``expired`` stamp + sweep event."""
-
-INBOX_MAX_CURRENT_ROWS = 500
-"""Hard health cap on folded inbox rows (D4): past this, compaction drops rows outright.
-Eviction prefers terminal markers oldest-first; only when the pending set itself exceeds the
-cap do pending rows drop (and that is accepted behavior, not data loss). Cap drops are
-counted/surfaced by the sweep's compaction event."""
 
 MUTATING_TOOL_GATE_KINDS: frozenset[GateKind] = frozenset(
     {
@@ -60,8 +41,8 @@ finds one in the fold. Delete it and the fold returns to *permitted-gateless* --
 approval channel governs" -- and the same approval buys a second mutation, with no error and no log
 line. That is this leaf's defect, and until 260731-EFA-L5 R1 the retention pass below was one of
 the things producing it: ``applied`` was pruned at ANY AGE, so any later decision on the lifecycle
-(``controlplane/gate_decisions.py::_reclaim_gate_log`` runs after every one, and an
-``agent-question`` being answered is enough) erased the marker within milliseconds. It was already
+(the gate log was reclaimed after every one, and an ``agent-question`` being answered was enough)
+erased the marker within milliseconds. It was already
 wrong before this leaf --
 the same states were pruned on the dashboard's 30s projection tick, so the marker survived at most
 half a minute -- and moving reclamation into the deciding process is what made it prompt and
@@ -75,10 +56,8 @@ rung for one of the other four cannot silently outrun its retention. Being a sup
 nothing: a kind nobody applies contributes no records.
 
 Every OTHER kind's ``applied`` snapshot stays immediately prunable and that is deliberate.
-``agent-question`` (applied by ``serving/hosted_interactions.py`` on every answered vendor
-interaction), ``alarm-ack``, ``provider-retry`` and ``plan-approval`` are never passed to
-``evaluate_gate``, so their ``applied`` record refuses nothing -- it is pure history, and
-``agent-question`` in particular is unbounded in a long adapter session. The retained set is
+``agent-question``, ``alarm-ack``, ``provider-retry`` and ``plan-approval`` are never passed to
+``evaluate_gate``, so their ``applied`` record refuses nothing -- it is pure history. The retained set is
 bounded by approvals a human actually granted and a mutating tool actually consumed: a handful per
 lifecycle, in a log that lives beside that lifecycle's events."""
 
@@ -90,9 +69,7 @@ these two that is exactly right, and for ``applied`` it is the replay:
 
 * ``cancelled`` -- the gate was WITHDRAWN. It never carried an approval, and cancelling it says
   precisely "this gate no longer governs", so falling back to the chat/commit approval channel is
-  the intended outcome. Retention is not even what removes it in production:
-  ``application/gate_tools.py::gate_decide_tool`` calls ``GateStore.delete`` on the record the moment
-  the cancel is recorded.
+  the intended outcome.
 * ``expired`` -- the gate was SUPERSEDED. ``expire_gate`` is written only when a newer gate opens
   on the same lifecycle, so the gate that replaced it is in the same log with a newer ``ts`` and
   governs the fold. Dropping the expired snapshot drops history, never authority.
@@ -142,60 +119,6 @@ def gate_keep_ids(
     }
 
 
-def inbox_keep_ids(
-    entries: list[OperatorInboxEntry],
-    *,
-    now: datetime,
-    max_rows: int = INBOX_MAX_CURRENT_ROWS,
-    current: dict[str, OperatorInboxEntry] | None = None,
-    protected_ids: frozenset[str] = frozenset(),
-) -> set[str]:
-    """Inbox ids whose current snapshot still belongs in the compacted log."""
-    latest = fold_operator_inbox_entries(entries) if current is None else current
-    kept = [
-        entry
-        for entry in latest.values()
-        if entry.id in protected_ids or _keep_inbox_entry(entry, now=now)
-    ]
-    if len(kept) > max_rows:
-        # Hard bounded-store cap (D4): pending rows survive before terminal markers, so the
-        # eviction class is terminal-oldest-first; only an overflowing pending set itself
-        # loses pending rows (oldest first). Dropping a pending row at the bound is accepted
-        # behavior, and the sweep counts/surfaces the drop.
-        protected = [entry for entry in kept if entry.id in protected_ids]
-        available = max(0, max_rows - len(protected))
-        pending = [
-            entry for entry in kept if entry.id not in protected_ids and entry.state == "pending"
-        ]
-        terminal = [
-            entry for entry in kept if entry.id not in protected_ids and entry.state != "pending"
-        ]
-        pending.sort(key=lambda entry: entry.createdAt, reverse=True)
-        terminal.sort(key=lambda entry: entry.createdAt, reverse=True)
-        selected = pending[:available]
-        if len(selected) < available:
-            selected = selected + terminal[: available - len(selected)]
-        kept = [*protected, *selected]
-    return {entry.id for entry in kept}
-
-
-def delete_after_wait(gate: GateRecord) -> bool:
-    """Whether a returned gate decision can be removed after the agent saw it."""
-    return gate.kind not in MUTATING_TOOL_GATE_KINDS
-
-
-def pickup_state(entry: OperatorInboxEntry, *, now: datetime) -> str:
-    """Dashboard state for a pending response waiting for agent pickup."""
-    age = age_seconds(entry.createdAt, now)
-    if age is not None and age > AGENT_PICKUP_TTL_SECONDS:
-        return "check-chat"
-    return "waiting-for-agent"
-
-
-def pickup_age_seconds(entry: OperatorInboxEntry, *, now: datetime) -> float | None:
-    return age_seconds(entry.createdAt, now)
-
-
 def _keep_gate(gate: GateRecord, *, now: datetime, ttl_seconds: float) -> bool:
     """Whether one folded gate snapshot survives reclamation.
 
@@ -210,28 +133,3 @@ def _keep_gate(gate: GateRecord, *, now: datetime, ttl_seconds: float) -> bool:
         return False
     age = age_seconds(gate.ts, now)
     return age is None or age <= ttl_seconds
-
-
-def _keep_inbox_entry(entry: OperatorInboxEntry, *, now: datetime) -> bool:
-    """D4 bounded-store retention: terminal markers keep their 48h visibility window, then drop.
-
-    A pending row is kept within :data:`INBOX_PENDING_TTL_SECONDS` -- the sweep stamps older
-    pending rows ``expired`` first, so the TTL is a resolution boundary, not a silent purge.
-    The post-N16 terminal states (landed/superseded/unresolved/expired) are retained for
-    :data:`INBOX_TERMINAL_MARKER_RETENTION_SECONDS` from their terminal stamp; legacy consumed
-    rows keep the same window from their consume stamp; legacy ladder-resolved rows drop
-    immediately (their immediate-drop behavior predates the marker window).
-    """
-    if entry.state == "ladder-resolved":
-        return False
-    if entry.state == "pending":
-        # The sweep owns the pending TTL as a RESOLUTION boundary: an older pending row is
-        # stamped ``expired`` (visible, counted) before retention can drop it. Compaction
-        # itself keeps pending rows so the expiry is always surfaced first; the hard cap
-        # remains the ultimate bound even when the sweep is down.
-        return True
-    if entry.state == "consumed":
-        marker_age = age_seconds(entry.consumedAt or entry.createdAt, now)
-        return marker_age is None or marker_age <= INBOX_TERMINAL_MARKER_RETENTION_SECONDS
-    marker_age = age_seconds(entry.terminalAt or entry.createdAt, now)
-    return marker_age is None or marker_age <= INBOX_TERMINAL_MARKER_RETENTION_SECONDS

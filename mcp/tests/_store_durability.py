@@ -1,4 +1,4 @@
-"""Force an append into the compaction window of eight real JSONL stores.
+"""Force an append into the compaction window of four real JSONL stores.
 
 Forked processes use disposable roots and independent receipt-versus-disk
 accounting. Bounded rendezvous and joins preserve termination when locking
@@ -13,28 +13,13 @@ import json
 import multiprocessing
 import os
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agents_remember.controlplane.agent_notifier_signals import (
-    AgentNotifierSignalCooldownStore,
-    AgentNotifierSignalRecord,
-)
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
-)
-from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
-from agents_remember.controlplane.operator_inbox_records import (
-    OperatorInboxEntry,
-    OperatorInboxState,
-)
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import (
-    OrchestrationNudgeRecord,
-    OrchestrationNudgeStore,
-    replace_records,
 )
 from agents_remember.controlplane.records import (
     GateRecord,
@@ -135,48 +120,6 @@ class GateAdapter(StoreAdapter):
         store.compact(None, now=_now())
 
 
-class ExpectationAdapter(StoreAdapter):
-    name = "expectation"
-    log_name = "expectation-rows.jsonl"
-    RETAIN_SECONDS = 60.0
-
-    def open(self, root: Path) -> Any:
-        return ExpectationRowStore(root)
-
-    def write(self, store: Any, record_id: str) -> None:
-        stamp = _iso(_now())
-        store.append(
-            ExpectationRow(
-                id=record_id,
-                ts=stamp,
-                kind="ack-by",
-                state="pending",
-                createdAt=stamp,
-                dueAt=stamp,
-                sourceId="durability-harness",
-            )
-        )
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        # A terminal row whose terminal stamp is older than the retention window: prunable.
-        stale = _iso(_now() - timedelta(seconds=self.RETAIN_SECONDS * 60))
-        store.append(
-            ExpectationRow(
-                id=f"{DECOY_PREFIX}{os.getpid()}-{tick}",
-                ts=stale,
-                kind="ack-by",
-                state="met",
-                createdAt=stale,
-                dueAt=stale,
-                sourceId="durability-harness",
-                metAt=stale,
-            )
-        )
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.compact(now=_now(), retain_seconds=self.RETAIN_SECONDS)
-
-
 class AttentionAdapter(StoreAdapter):
     name = "attention"
     log_name = "attention-dismissals.jsonl"
@@ -193,7 +136,7 @@ class AttentionAdapter(StoreAdapter):
             AttentionDismissalRecord(
                 itemId=record_id,
                 dismissedAt=_iso(_now()),
-                kind="gate-open",
+                kind="stale-session",
                 lifecycleId=self.LIVE_LIFECYCLE,
             )
         )
@@ -204,7 +147,7 @@ class AttentionAdapter(StoreAdapter):
             AttentionDismissalRecord(
                 itemId=f"{DECOY_PREFIX}{os.getpid()}-{tick}",
                 dismissedAt=_iso(_now()),
-                kind="gate-open",
+                kind="stale-session",
                 lifecycleId="retired-lifecycle",
             )
         )
@@ -213,125 +156,10 @@ class AttentionAdapter(StoreAdapter):
         store.prune_lifecycles({self.LIVE_LIFECYCLE})
 
 
-class OperatorInboxAdapter(StoreAdapter):
-    name = "operator_inbox"
-    log_name = "operator-inbox.jsonl"
-
-    def open(self, root: Path) -> Any:
-        return OperatorInboxStore(root)
-
-    def _entry(self, record_id: str, state: OperatorInboxState) -> OperatorInboxEntry:
-        stamp = _iso(_now())
-        return OperatorInboxEntry(
-            id=record_id,
-            ts=stamp,
-            state=state,
-            lifecycleId="live-lifecycle",
-            ask="durability harness",
-            response="durability harness",
-            createdAt=stamp,
-            createdBy="durability-harness",
-            createdVia="cli",
-        )
-
-    def write(self, store: Any, record_id: str) -> None:
-        store.append(self._entry(record_id, "pending"))
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        # ``ladder-resolved`` rows drop immediately in ``_keep_inbox_entry``.
-        store.append(self._entry(f"{DECOY_PREFIX}{os.getpid()}-{tick}", "ladder-resolved"))
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.compact(now=_now())
-
-
-class NudgeAdapter(StoreAdapter):
-    name = "nudge"
-    log_name = "orchestration-nudges.jsonl"
-
-    def open(self, root: Path) -> Any:
-        return OrchestrationNudgeStore(root)
-
-    def _record(self, record_id: str) -> OrchestrationNudgeRecord:
-        return OrchestrationNudgeRecord(
-            id=record_id,
-            ts=_iso(_now()),
-            state="sent",
-            reason="manual",
-            message="durability harness",
-        )
-
-    def write(self, store: Any, record_id: str) -> None:
-        store.append(self._record(record_id))
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        store.append(self._record(f"{DECOY_PREFIX}{os.getpid()}-{tick}"))
-
-    @staticmethod
-    @contextlib.contextmanager
-    def _reclaim_lock(path: Path) -> Any:  # pragma: no cover
-        """Hold the nudge log's lock across read + filter + rewrite, if the tree has one.
-
-        This store is the only one of the six with no ``compact`` method: ``replace_records`` is
-        its documented rewrite entry point, so the read-filter half of a reclaim belongs to the
-        caller -- and a caller that reads outside the lock reintroduces the exact lost update the
-        lock exists to prevent. The harness therefore reclaims the way a correct compaction owner
-        would, so a failure here is the store's and not the harness's.
-        """
-        try:
-            # Deliberately local: this module also runs against a `git archive` of the leaf's
-            # base commit, where `durable_store` does not exist yet. A top-level import would
-            # make the harness unable to measure the very tree it exists to measure.
-            from agents_remember.controlplane.durable_store import (  # noqa: PLC0415
-                ORCHESTRATION_NUDGE_OWNERSHIP,
-                exclusive_access,
-            )
-        except ImportError:
-            yield  # base commit: there is no lock to hold
-            return
-        with exclusive_access(path, ORCHESTRATION_NUDGE_OWNERSHIP):
-            yield
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        path = store.log_path()
-        with self._reclaim_lock(path):
-            kept = [record for record in store.read() if not record.id.startswith(DECOY_PREFIX)]
-            replace_records(path, kept)
-
-
-class AgentNotifierSignalAdapter(StoreAdapter):
-    name = "agent_notifier_signal"
-    log_name = "supervisor-signals.jsonl"
-    RETAIN_SECONDS = 300.0
-
-    def open(self, root: Path) -> Any:
-        return AgentNotifierSignalCooldownStore(root)
-
-    def _record(self, record_id: str, stamp: str) -> AgentNotifierSignalRecord:
-        return AgentNotifierSignalRecord(
-            id=record_id,
-            ts=stamp,
-            state="sent",
-            findingKind="durability-harness",
-            detail="durability harness",
-            deliveryState="queued",
-        )
-
-    def write(self, store: Any, record_id: str) -> None:
-        store.append(self._record(record_id, _iso(_now())))
-
-    def write_decoy(self, store: Any, tick: int) -> None:
-        stale = _iso(_now() - timedelta(seconds=self.RETAIN_SECONDS * 60))
-        store.append(self._record(f"{DECOY_PREFIX}{os.getpid()}-{tick}", stale))
-
-    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.compact(now=_now(), retain_seconds=self.RETAIN_SECONDS)
-
-
 class ProviderStoreAdapter(StoreAdapter):
     """The two ``providers/`` logs, which sit under a coordination root rather than an observer one.
 
-    ``StoreAdapter.log_path`` resolves ``<root>/workspace/<log>`` because that is where the six
+    ``StoreAdapter.log_path`` resolves ``<root>/workspace/<log>`` because that is where the two
     control-plane logs live. Both provider stores build their own directory from a COORDINATION
     root instead (``<root>/logs/observer/providers``), so the harness root means the same thing to
     them -- a throwaway tree -- and only the path under it differs.
@@ -436,11 +264,7 @@ class ProviderDegradationAdapter(ProviderStoreAdapter):
 
 CONTROLPLANE_ADAPTERS: tuple[type[StoreAdapter], ...] = (
     GateAdapter,
-    ExpectationAdapter,
     AttentionAdapter,
-    OperatorInboxAdapter,
-    NudgeAdapter,
-    AgentNotifierSignalAdapter,
 )
 PROVIDER_ADAPTERS: tuple[type[StoreAdapter], ...] = (
     ProviderMetricsAdapter,
@@ -449,7 +273,7 @@ PROVIDER_ADAPTERS: tuple[type[StoreAdapter], ...] = (
 ADAPTERS: dict[str, type[StoreAdapter]] = {
     adapter.name: adapter for adapter in (*CONTROLPLANE_ADAPTERS, *PROVIDER_ADAPTERS)
 }
-# ``CASES`` stays the six control-plane stores and ``PROVIDER_CASES`` is separate, so adding the
+# ``CASES`` stays the two control-plane stores and ``PROVIDER_CASES`` is separate, so adding the
 # provider stores to the shared instrument does not silently widen what the control-plane
 # contract test asserts -- each test file names the stores it speaks for.
 CASES: tuple[str, ...] = tuple(adapter.name for adapter in CONTROLPLANE_ADAPTERS)

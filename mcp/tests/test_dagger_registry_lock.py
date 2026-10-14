@@ -90,10 +90,10 @@ def _admit(
 def test_host_admission_keeps_undeclared_checkout_coordinator_writes_refused(
     registry: authority.AuthorityRegistry, tmp_path: Path
 ) -> None:
-    live_log = tmp_path / "live-coordinator" / "observer" / "operator-inbox.jsonl"
+    live_log = tmp_path / "live-coordinator" / "observer" / "gates.jsonl"
     with (
         pytest.raises(checkout_coordination.CheckoutCoordinationError),
-        durable_store.exclusive_access(live_log, durable_store.OPERATOR_INBOX_OWNERSHIP),
+        durable_store.exclusive_access(live_log, durable_store.GATE_OWNERSHIP),
     ):
         pytest.fail("live coordinator lock must refuse before entering")
     assert not live_log.parent.exists()

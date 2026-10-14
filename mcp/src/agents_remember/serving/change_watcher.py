@@ -18,10 +18,8 @@ watched root                              readers it feeds
                                           read_series_documents, read_engine_process_facts
                                           (leaf enclosure contracts)
 ``<obs>/lifecycles``                      read_lifecycle_logs (``events.jsonl`` +
-                                          ``heartbeat.json`` sidecars), per-lifecycle
-                                          ``gates.jsonl`` (read_gates)
-``<obs>/workspace``                       workspace ``gates.jsonl``, attention dismissals,
-                                          operator inbox (read_agent_pickups), expectation rows
+                                          ``heartbeat.json`` sidecars)
+``<obs>/workspace``                       attention dismissals
 ``<obs>/drift``                           read_drift_snapshots
 ``<coord>/logs/providers/status``         workspace provider ``current.json`` (read_providers)
 ``<coord>/logs/providers/setup``          read_setup_summaries
@@ -47,13 +45,11 @@ blind spots:
 Self-trigger safety: the projection's own per-tick outputs (``latest-state.json`` /
 ``latest-metrics.json`` and their ``*.tmp`` siblings) live at the observer root, *outside*
 every watched subdirectory, so a tick cannot re-wake itself. Inside ``<obs>/workspace``
-the non-input churn (the raw event river + cursor/lock, the agent-notifier heartbeat) is
-name-filtered, and the control-plane lockfiles are suffix-filtered in every watched
-directory (they are the busiest writes in the tree -- every durable-store append and every
-rewrite opens one ``a+b`` -- and none is an input). TTL-gated writers that run inside a tick
-(gate-log compaction, event
-retention, provider current-state refresh) cost at most one debounced echo tick per TTL
-window, whose diff emits nothing.
+the non-input churn (the raw event river + cursor/lock) is name-filtered, and the
+control-plane lockfiles are suffix-filtered in every watched directory (every durable-store
+append and every rewrite opens one ``a+b``, and none is an input). TTL-gated writers that
+run inside a tick (event retention, provider current-state refresh) cost at most one
+debounced echo tick per TTL window, whose diff emits nothing.
 
 Freshness bounds (unchanged SSE semantics): a write into a quiet world becomes an SSE
 delta within ``debounce + projection time``. Live ticks rest after completing for the greater
@@ -84,7 +80,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from agents_remember.kernel.file_lock import lock_path_for
 from agents_remember.observer.store import WORKSPACE_CURSOR_FILE, WORKSPACE_LOCK_FILE
-from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_heartbeat_path
 from agents_remember.serving.projections.paths import drift_snapshot_dir, observer_logs_root
 from agents_remember.serving.projections.projection_inputs import (
     ALL_PROJECTION_DOMAINS,
@@ -134,33 +129,28 @@ WATCH_REFRESH_SECONDS = 30.0
 _EXCLUDED_NAMES = frozenset({LATEST_STATE, LATEST_METRICS})
 
 #: ``<obs>/workspace`` files that are NOT projection inputs: the raw event river (served
-#: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock, and the
-#: agent-notifier's own heartbeat (written every sweep on its own cadence). The control-plane
-#: lockfiles used to be listed here by name; they are derived instead -- see
+#: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock. The
+#: control-plane lockfiles are filtered by suffix instead -- see
 #: :data:`_DURABLE_LOG_LOCK_SUFFIX`.
 _EXCLUDED_WORKSPACE_NAMES = frozenset(
     {
         "events.jsonl",
         WORKSPACE_CURSOR_FILE,
         WORKSPACE_LOCK_FILE,
-        agent_notifier_heartbeat_path(Path(".")).name,
     }
 )
 
 #: The suffix ``kernel.file_lock.lock_path_for`` gives a ``.jsonl`` control-plane log,
-#: DERIVED from that function rather than spelled out, because spelling it out is what broke:
-#: this filter carried the literal ``"operator-inbox.lock"`` while ``lock_path_for`` had moved to
-#: ``operator-inbox.jsonl.lock``, so the exclusion silently stopped matching anything.
+#: DERIVED from that function rather than spelled out, so the filter cannot fall out of step
+#: with the lock naming.
 #:
-#: Every append and every rewrite of the six durable logs opens its lockfile ``a+b`` (including
-#: each projection tick's own ``read_agent_pickups``), so these are the highest-frequency writes
-#: in the watched tree and none of them is a projection input. Matched by SUFFIX and in EVERY
-#: watched directory rather than by name under ``workspace/``, which is what the old list could
-#: not express: five of the six logs live only under ``workspace/``, but ``gates.jsonl`` lives
-#: there AND once per lifecycle under ``<obs>/lifecycles/<id>/``, so ``gates.jsonl.lock`` appears
-#: in every lifecycle directory too. A suffix rule needs no list to keep in step with the stores,
-#: and no projection input is named ``*.jsonl.lock``: the inputs are the ``.jsonl`` logs
-#: themselves and ``.json`` sidecars.
+#: Every append and every rewrite of a durable log opens its lockfile ``a+b`` (including each
+#: projection tick's own attention-dismissal prune), so these are high-frequency writes in the
+#: watched tree and none of them is a projection input. Matched by SUFFIX and in EVERY watched
+#: directory rather than by name under ``workspace/``: ``gates.jsonl`` lives there AND once per
+#: lifecycle under ``<obs>/lifecycles/<id>/``, so ``gates.jsonl.lock`` appears in every
+#: lifecycle directory too. A suffix rule needs no list to keep in step with the stores, and no
+#: projection input is named ``*.jsonl.lock``.
 _DURABLE_LOG_LOCK_SUFFIX = lock_path_for(Path("log.jsonl")).name.removeprefix("log")
 
 

@@ -1,22 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentPickupNode, LifecycleProjection } from '../../types/projection';
+import type { LifecycleProjection } from '../../types/projection';
 import { masterIdsByFolder, progressFigure, rowHover, rowState, rowWord, shortTaskId } from './rowState';
 import { lifecycle, taskDoc } from './test-utils';
 
 const reported = (over: Partial<LifecycleProjection> = {}) => lifecycle({ id: 'LC', ...over });
 // What the server assumes for every task with a worktree: a pause that no event ever reported.
 const assumed = () => lifecycle({ id: 'LC', inferred: true, lastEventTs: '' });
-const pickup = (state: string): AgentPickupNode => ({
-  id: 'pickup:1',
-  entryId: 'E1',
-  lifecycleId: 'LC',
-  messageKind: 'dispatch-brief',
-  deliveryState: 'delivered',
-  attemptCount: 0,
-  state,
-  ttlSeconds: 300,
-});
 
 describe('what a row of the tasks tree says', () => {
   it('lets the document speak where the lifecycle never reported', () => {
@@ -29,7 +19,7 @@ describe('what a row of the tasks tree says', () => {
   });
 
   it('lets a lifecycle that reported speak, with its own mark and its age', () => {
-    const facts = { status: 'planning', gate: '', ageSeconds: 1020 };
+    const facts = { status: 'planning', ageSeconds: 1020 };
     expect(rowWord({ ...facts, lifecycle: reported({ state: 'running' }) })).toMatchObject({
       text: 'running 17m',
       tone: 'run',
@@ -49,52 +39,21 @@ describe('what a row of the tasks tree says', () => {
       word: 'waiting',
       band: 2,
     });
-    expect(rowWord({ status: '', gate: '', ageSeconds: 60, lifecycle: reported({ inferred: true }) }).text).toBe(
-      'quiet 1m',
-    );
+    expect(rowWord({ status: '', ageSeconds: 60, lifecycle: reported({ inferred: true }) }).text).toBe('quiet 1m');
   });
 
-  it('says the most pressing fact as the one word', () => {
-    const running = reported({ state: 'running' });
-    const chat = (state: 'needs-input' | 'working') => ({ state, label: state, detail: '' });
-    const base = { status: 'inProgress', lifecycle: running, gate: '' };
+  it('says the task\'s own state as the one word, and what asks stands first', () => {
+    const base = { status: 'inProgress' };
     const words = [
-      rowWord({ ...base, gate: 'plan-approval', pickup: pickup('check-chat') }),
-      rowWord({ ...base, pickup: pickup('check-chat'), chatActivity: chat('needs-input') }),
-      rowWord({ ...base, pickup: pickup('waiting-for-agent'), chatActivity: chat('needs-input') }),
-      rowWord({ ...base, chatActivity: chat('needs-input') }),
-      rowWord({ ...base, lifecycle: reported({ state: 'blocked' }), chatActivity: chat('working') }),
+      rowWord({ ...base, lifecycle: reported({ state: 'blocked' }) }),
       rowWord({ ...base, lifecycle: reported({ state: 'awaiting-developer' }) }),
-      rowWord({ ...base, chatActivity: chat('working') }),
+      rowWord({ ...base, lifecycle: reported({ state: 'running' }) }),
       rowWord(base),
     ];
-    expect(words.map((word) => word.text)).toEqual([
-      'plan-approval',
-      'check chat',
-      'unacknowledged',
-      'needs input',
-      'blocked',
-      'your turn',
-      'working',
-      'running',
-    ]);
-    // Everything that asks for the developer stands first under its parent. Only an overdue
-    // hand-over offers its dismissal, and it does so also where an open gate is the word.
-    expect(words.map((word) => word.band)).toEqual([0, 0, 0, 0, 0, 0, 1, 1]);
-    expect(words.map((word) => word.dismissPickup)).toEqual([
-      true,
-      true,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-    ]);
-    // A gate alone, or with a hand-over that is not overdue yet, offers none.
-    const gated = { ...base, gate: 'plan-approval' };
-    expect(rowWord(gated).dismissPickup).toBe(false);
-    expect(rowWord({ ...gated, pickup: pickup('waiting-for-agent') }).dismissPickup).toBe(false);
+    expect(words.map((word) => word.text)).toEqual(['blocked', 'your turn', 'running', 'in work']);
+    expect(words.map((word) => word.tone)).toEqual(['fault', 'ask', 'run', 'rest']);
+    // Everything that asks for the developer stands first under its parent.
+    expect(words.map((word) => word.band)).toEqual([0, 0, 1, 1]);
   });
 
   it('keeps in the hover what the line has no room for', () => {
@@ -103,24 +62,19 @@ describe('what a row of the tasks tree says', () => {
       kind: 'master',
       repo: 'sandbox-app',
       status: 'inProgress',
-      gate: '',
       progress: { done: 79, total: 138, abandoned: 1, discarded: 5 },
       progressNoun: 'Tasks completed',
       worktree: false,
       lifecycle: assumed(),
-      chatActivity: { state: 'working', label: 'working', detail: 'curator: working; worker: idle' },
-      pickup: pickup('check-chat'),
     }).split('\n');
     expect(progressFigure({ done: 79, total: 138, abandoned: 1 })).toBe('79/138');
     expect(hover).toEqual([
       'Text helpers',
-      'State: check chat',
+      'State: in work',
       'Kind: master',
       'Document status: inProgress',
       'Tasks completed: 79 of 138, 1 abandoned, 5 discarded',
       'Lifecycle: LC · paused · phase build · inferred from the contract: no event was seen',
-      'Chat: working. curator: working; worker: idle',
-      'Inbox: acknowledgment overdue; check chat',
       'Repo: sandbox-app',
     ]);
   });

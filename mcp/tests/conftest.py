@@ -184,6 +184,41 @@ def _user_settings_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.fixture(autouse=True)
+def _user_settings_env_intact(tmp_path: Path) -> Iterator[None]:
+    """MIK-R137 rule 2: a test that ends outside the run's temporary root fails.
+
+    Compares the derived settings path at teardown, not the variable: fixture
+    teardown order cannot be relied on to still hold the per-test folder, so
+    the check allows the test's own root and the process-wide isolated root
+    and fails — naming the test — on anything else. A test that needs the
+    environment cleared for what it asserts clears it and restores it; the
+    guard, not the leftover environment, carries the protection while it is
+    cleared.
+    """
+    yield
+    from _user_settings_guard import (  # noqa: PLC0415
+        UserSettingsWriteRefused,
+        user_settings_path_for_write,
+    )
+
+    try:
+        candidate = user_settings_path_for_write()
+    except UserSettingsWriteRefused as error:
+        raise AssertionError(
+            "the test ended with the user's settings path at the account's "
+            f"real file: {error}; restore what the test clears so no later "
+            "write can reach the user's real settings file"
+        ) from error
+    allowed = (tmp_path, _ISOLATED_ROOT)
+    if not any(candidate == root or root in candidate.parents for root in allowed):
+        raise AssertionError(
+            "the test ended with the user's settings path outside the run's "
+            f"temporary roots: {candidate}; restore what the test clears so no "
+            "later write can reach the user's real settings file"
+        )
+
+
+@pytest.fixture(autouse=True)
 def _integration_composition(request: pytest.FixtureRequest) -> Iterator[None]:
     if request.node.get_closest_marker("integration") is not None and not request.config.getoption(
         "certify"

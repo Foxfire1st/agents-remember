@@ -11,25 +11,14 @@ import { motion } from "motion/react";
 
 import { css, cva, cx } from "../../styled-system/css";
 import { RoleChatsPane } from "./RoleChats";
-import {
-  preferLiveSession,
-  startCatalogPollDriver,
-  startCatalogReconciler,
-} from "../data/catalogPoll";
 import { clientMatchesServingBuild, servingCommitLabel } from "../data/buildIdentity";
 import { humanizeDuration } from "../data/conversation/format";
 import { startScreenWakeLock } from "../data/screenWakeLock";
-import { createGatedSeatEventApplier } from "../data/seatEvents";
-import { sessionCockpitStore } from "../data/sessionCockpitStore";
 import { selectQueue } from "../data/selectors";
 import type { ConnState } from "../data/store";
 import { dashboardStore, useDashboard } from "../data/store";
 import { connectEvents, connectState } from "../data/stream";
-import {
-  lifecycleIdForSelection,
-  lifecycleSelectionKey,
-  masterFolderForSelection,
-} from "../data/taskIdentity";
+import { lifecycleSelectionKey, masterFolderForSelection } from "../data/taskIdentity";
 import { ModeBar } from "../grammar/ModeBar";
 import { ChangeSetViewer, type ChangeSetTarget } from "../panels/changeset/ChangeSetViewer";
 import { ReviewSurface } from "../panels/review/ReviewSurface";
@@ -45,7 +34,6 @@ import { EventRiver } from "../panels/EventRiver";
 import { FileViewer } from "../panels/file-viewer/FileViewer";
 import { Hangar } from "../panels/Hangar";
 import { KnowledgeReader } from "../panels/knowledge-reader/KnowledgeReader";
-import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { MemoryMirror } from "../panels/MemoryMirror";
 import { DocumentChat } from "./document-chat/DocumentChat";
@@ -65,7 +53,7 @@ const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 // Knowledge / File Viewer),
 // and a persistent right rail (the event river ticker). The mode bar selects the viewport.
 // Selection is ephemeral UI state held here and shared across panels and views.
-// The "machine map" views (Engine Room / Topology) and the Chats terminal
+// The "machine map" views (Engine Room / Topology) and Chats
 // drop the rails and span the full body width; the top-bar caution stays visible so an
 // alarm is never hidden.
 export type CockpitView =
@@ -324,10 +312,8 @@ const viewport = css({
   minHeight: "0",
   overflow: "hidden", // the viewport does not scroll — its panel scrolls on its own
 });
-// Chats is kept mounted across every view (hidden via display, never unmounted) so the xterm
-// instance, its scrollback buffer, and the live WebSocket survive a view switch — the cure for
-// "switching away throws the terminal away." Cheap: the heavy xterm chunk is lazy and loads once a
-// session opens, and re-entry is instant (no remount / re-init).
+// Chats is kept mounted across every view (hidden via display, never unmounted) so the host's
+// chat frame is not loaded again on a view switch.
 const chatsLayer = css({
   display: "flex",
   flexDirection: "column",
@@ -364,27 +350,15 @@ const RAIL_TRANSITION = { duration: 0.18 };
 // out so the dev gallery (/dev/bench) renders the exact same surface against fixture state.
 export function Cockpit() {
   useEffect(() => connectState(), []);
-  useEffect(() => {
-    // The seat-event reconciler rides the SAME /api/events connection as the
-    // Event River — one EventSource, two consumers. The catalog poll stays the authoritative
-    // session-row source; push only pre-applies retire/land/rename. Every connection replays a
-    // backlog before its `ready` marker — incl. reconnects whose cursor the server cannot decode
-    // — and replayed history must never touch live rows (a stale rename would flicker until the
-    // next poll beat), so application runs through the per-connection backlog gate.
-    const gate = createGatedSeatEventApplier();
-    return connectEvents(
-      (line) => {
-        dashboardStore.getState().pushEvent(line);
-        gate.onLine(line);
-      },
-      "",
-      (ready) => {
-        gate.onReady();
-        dashboardStore.getState().markEventsHydrated(ready?.lastEventTs);
-      },
-      gate.onInterrupt,
-    );
-  }, []);
+  useEffect(
+    () =>
+      connectEvents(
+        (line) => dashboardStore.getState().pushEvent(line),
+        "",
+        (ready) => dashboardStore.getState().markEventsHydrated(ready?.lastEventTs),
+      ),
+    [],
+  );
   // A shared knowledge-reader URL (`#knowledge?…`, MIK-R29) opens on the Knowledge view.
   return <CockpitShell initialView={parseReaderHash(window.location.hash) ? "knowledge" : undefined} />;
 }
@@ -399,7 +373,6 @@ interface CockpitShellState {
   leftRailWidth: number;
   rightRailWidth: number;
   animate: boolean;
-  selectedLifecycleId: string | undefined;
   viewedLeafKey: string | undefined;
   viewedTask: ViewedTaskContext | undefined;
   taskDocuments: TaskDocNode[];
@@ -436,9 +409,6 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   const [leftRailWidth, setLeftRailWidth] = usePersistedNumber("cockpit.rail-left-w", 340);
   const [rightRailWidth, setRightRailWidth] = usePersistedNumber("cockpit.rail-right-w", 300);
   const animate = useShouldAnimate();
-  const selectedLifecycleId = useDashboard((s) =>
-    lifecycleIdForSelection(selectedId, s.lifecycles, s.analytics),
-  );
   const [viewedTask, setViewedTask] = useState<ViewedTaskContext | undefined>(undefined);
   const viewedLeafKey = viewedTask?.leafKey;
   const taskDocuments = useDashboard((s) => s.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
@@ -465,7 +435,6 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     leftRailWidth,
     rightRailWidth,
     animate,
-    selectedLifecycleId,
     viewedLeafKey,
     viewedTask,
     taskDocuments,
@@ -508,7 +477,6 @@ function useCockpitShellActions(
   closeChangeSet: () => void;
   closeNotes: () => void;
   selectNote: (path: string) => void;
-  showSentSession: (sessionId: string) => void;
 } {
   const setRailView = useCallback(
     (next: "river" | "chat") => setChatRail(next === "chat"),
@@ -550,11 +518,6 @@ function useCockpitShellActions(
       }),
     [setNotes],
   );
-  const showSentSession = useCallback((sessionId: string) => {
-    preferLiveSession(sessionId);
-    sessionCockpitStore.getState().setFocusedSession(sessionId);
-    setView("chats");
-  }, [setView]);
   return {
     setRailView,
     open,
@@ -564,7 +527,6 @@ function useCockpitShellActions(
     closeChangeSet,
     closeNotes,
     selectNote,
-    showSentSession,
   };
 }
 
@@ -880,10 +842,6 @@ function RailedBody({
 }
 
 export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitView } = {}) {
-  // Catalog ownership is shell-lifetime and view-independent. CockpitShell is also the exact dev
-  // scenario surface, so keeping both drivers here preserves deterministic poll transitions there.
-  useEffect(() => startCatalogPollDriver(), []);
-  useEffect(() => startCatalogReconciler(), []);
   // A visible cockpit means someone is MONITORING — hold the screen wake lock (the same
   // display-required request video playback uses) so watching agents work counts as activity
   // against OS idle/lock timers. Auto-releases while the tab is hidden.
@@ -922,13 +880,6 @@ export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitV
         ) : null}
         <RailedBody state={state} actions={actions} />
         <ModeBar items={VIEWS} value={state.view} onChange={actions.changeView} label="Views" />
-        {/* A cockpit-wide composer that a text selection raises — send the selection (+ a
-            message) to a chat session as a context package. Mounted once here so it works on every view;
-            renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
-        <HighlightComposer
-          selectedLifecycleId={state.selectedLifecycleId}
-          onSent={actions.showSentSession}
-        />
       </div>
     </IntentEntryRevalidation>
   );
@@ -987,39 +938,6 @@ function ServingBuildStamp() {
   );
 }
 
-// "The last turtle is the developer's glance" -- the agent-notifier sweep's own
-// heartbeat tick, red past its staleness cutoff. `lastTickAt: null` means the agent-notifier has
-// never ticked in this workspace (dashboard/agent-notifier autostart is opt-in), which is NOT the
-// same as stale -- the badge renders nothing for it rather than a false alarm.
-function AgentNotifierHeartbeatBadge() {
-  const heartbeat = useDashboard((s) => s.agentNotifierHeartbeat);
-  if (!heartbeat || heartbeat.lastTickAt === null) return null;
-  // Humanize the age (no raw `9512.1m`): the two most-significant units read as human time.
-  const age =
-    heartbeat.ageSeconds !== null ? humanizeDuration(heartbeat.ageSeconds * 1000) : null;
-  const label =
-    age !== null
-      ? `agent-notifier ${heartbeat.stale ? "stale" : "ok"} ${age}`
-      : "agent-notifier stale";
-  const duration =
-    heartbeat.lastSweepDurationSeconds !== null
-      ? `${heartbeat.lastSweepDurationSeconds.toFixed(2)}s`
-      : "n/a";
-  const backlog = `${heartbeat.redeliverableInboxCount}/${heartbeat.pendingInboxCount}`;
-  return (
-    <span
-      // A long-stale agent-notifier degrades to a QUIET-distinct amber (warn), never the pulsing
-      // cried-wolf red: six-day staleness is expected for an idle workspace, not a fault to alarm on.
-      className={heartbeat.stale ? caution({ sev: "warn" }) : dim}
-      data-testid="agent-notifier-heartbeat"
-      title={`Agent notifier last ticked ${heartbeat.lastTickAt}; staleness cutoff ${heartbeat.staleCutoffSeconds}s; redeliverable/pending inbox ${backlog}; last sweep ${duration}`}
-    >
-      {heartbeat.stale ? "⚠ " : ""}
-      {label} · inbox {backlog} · sweep {duration}
-    </span>
-  );
-}
-
 // Memoized (tab-switch CPU): the top bar takes no props — every update it shows arrives via
 // its own store subscriptions, so a shell re-render (view switch) never needs to reconcile it.
 const TopBar = memo(function TopBar() {
@@ -1041,12 +959,11 @@ const TopBar = memo(function TopBar() {
           </span>
         ) : null}
         {metrics ? (
-          // Explicit scope: these are LIFECYCLE/task counts, a different authority from the Chats
-          // rail's chat-seat states. Labeling the scope keeps one fact in one home (no backend change).
+          // Explicit scope: these are LIFECYCLE/task counts.
           <span
             className={dim}
             data-testid="task-metrics"
-            title="Lifecycle task counts (not Chats seats) — chat-seat working/waiting/failed states live in the Chats rail's attention strip."
+            title="Lifecycle task counts"
           >
             tasks {metrics.runningCount} running · {metrics.blockedCount} blocked
             {/* The NOTIFY-AND-CONTINUE handoff, appended only while something is actually handed
@@ -1062,7 +979,6 @@ const TopBar = memo(function TopBar() {
           </span>
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}
-        <AgentNotifierHeartbeatBadge />
         <ServingBuildStamp />
         <ConnBadge conn={conn} />
         <EffectsToggle />

@@ -149,17 +149,12 @@ function EngineRoomImpl() {
             <EnclosureProcessMap
               key={gen}
               node={selected.node}
-              gateNode={selected.gate}
               officialLedger={officialLedger}
             />
           </div>
           <div className={roomZone} data-testid="engine-room-diagnostics">
             <BootTimeline node={selected.node} />
-            <DiagnosticsPanel
-              node={selected.node}
-              lifecycleId={selected.lifecycle?.id}
-              gateNode={selected.gate}
-            />
+            <DiagnosticsPanel node={selected.node} />
           </div>
         </div>
       </div>

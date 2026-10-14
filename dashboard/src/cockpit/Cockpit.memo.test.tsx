@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sessionStore } from "../data/sessions";
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
 import { taskDoc as wireTaskDoc } from "../test/fixtures/wire";
@@ -90,11 +89,6 @@ vi.mock("../panels/EventRiver", async (importOriginal) => {
   return { ...mod, EventRiver: Counted };
 });
 
-// Mock the lazy Terminal so toggling the rail to chat never pulls xterm (a canvas probe) into jsdom.
-vi.mock("../panels/Terminal", () => ({
-  Terminal: ({ sessionId }: { sessionId: string }) => <div data-testid={`term-${sessionId}`} />,
-}));
-
 function seed(stateName: string) {
   const fixture = GALLERY.find((entry) => entry.name === stateName);
   if (!fixture) throw new Error(`fixture not found: ${stateName}`);
@@ -135,9 +129,7 @@ function seedDrillableMaster() {
     repoId: "repo-a",
     startedAt: "2026-06-20T09:00:00+00:00",
     lastEventTs: "2026-06-20T09:00:30+00:00",
-    stateEnteredAt: "2026-06-20T09:00:00+00:00",
     inferred: false,
-    actions: [],
   };
   const master = taskDoc({
     id: "master-x",
@@ -182,8 +174,6 @@ function seedDrillableMaster() {
       series: [],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -196,7 +186,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  sessionStore.setState({ sessions: [], activeId: null, count: 0 });
   dashboardStore.getState().reset();
   window.localStorage.clear(); // the rail toggle now persists its choice; isolate it between tests
 });

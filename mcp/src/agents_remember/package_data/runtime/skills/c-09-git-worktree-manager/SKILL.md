@@ -95,11 +95,9 @@ public retry `nextArgs`; execute those bytes rather than reconstructing a call. 
 different argument value refuses. Omission/default replay is not a recovery fallback. This terminal
 retry is not a `worktree_operation_control` action.
 
-`worktree_start` still promotes the session's fleeting lifecycle to persistent and records the
+`worktree_start` adopts the lifecycle of the new contract and records the
 binding in the configured contract. `worktree_attach` resumes that lifecycle through the proven
-address chain, so the model never passes a lifecycle or operation id. Attaching while holding an
-unsaved fleeting lifecycle still requires the explicit `on_unsaved="save"` or
-`on_unsaved="discard"` choice; unsaved work is never dropped silently.
+address chain, so the model never passes a lifecycle or operation id.
 
 ## Pre-Worktree Intake
 
@@ -143,12 +141,10 @@ visible: leaf work branches integrate into the pushable integration/source branc
 recorded by their enclosure; protected targets are reached later through the
 repo's PR flow.
 
-For developer-gated starts, run the applicable dry-run/preflight first, then **hand off**: deliver
-the intent packet as your final prose and **STOP / end your turn**. The handoff sets the
-`awaiting-developer` lifecycle state and surfaces a dashboard attention item. The developer
-approves from the dashboard or in the leaf's attached chat; your next turn resumes the
-lifecycle (`running`), clears the attention item, and proceeds to `worktree_start` — no explicit
-resume step is needed.
+For developer-gated starts, run the applicable dry-run/preflight first, then send the intent
+packet to your parent with `role_message`; without a parent, deliver
+the intent packet as your final prose and **STOP / end your turn**. Run `worktree_start` when
+the approval has arrived.
 
 For subordinate orchestrated-series starts, do the same dry-run/preflight, record the accepted
 planner/series authority in the task decision log or worktree intent note, and continue. Do not add
@@ -173,13 +169,13 @@ refuses to continue when source memory content has uncommitted changes; refreshe
 be committed first so the new worktree starts from an auditable memory baseline. The ignored
 `memory.md` cache is not part of that cleanliness or admission check.
 
-Before start, attach, reopen, task-bound terminal assignment, or hosted role spawn can expose a
+Before start, attach or reopen can expose a
 checkout to an agent, the control plane resolves **transitive source lineage from task identity**.
 A master must contain its super integration branch; a leaf must contain its master, whose branch
 must in turn contain super. The same edges are required for external memory. Missing contracts,
 missing/mismatched branches, and incomparable Git histories are `source-lineage-unavailable`;
-behind or diverged descendants are `source-lineage-stale`. Both fail closed before session/process
-creation or lifecycle mutation. The projection names relations, branches, ahead/behind counts, and
+behind or diverged descendants are `source-lineage-stale`. Both fail closed before the checkout
+is exposed or a lifecycle changes. The projection names relations, branches, ahead/behind counts, and
 ordered `worktree_sync` contract paths, but never asks an agent to retain a commit id.
 
 This is distinct from remote stale-base policy. `stale_base_choice="proceed-stale"` can override a
@@ -237,8 +233,8 @@ Queue presence is neither required nor consulted on either route.
 
 Atomic-series implementation admission is a separate, contract-scoped authority. Each canonical
 series contract owns its own activation record, so masters that share one exact code/memory source
-pair never share this state and one master's selection never pauses or excludes another. Manager
-dispatch, worker dispatch, atomic `worktree_start`, and `worktree_attach` are selecting operations;
+pair never share this state and one master's selection never pauses or excludes another.
+Atomic `worktree_start` and `worktree_attach` are selecting operations;
 reviewer and curator inspection is not. Once the requested canonical contract exists, selection
 first publishes `reconciling` for that contract, which suspends nothing — not its chat, process,
 worktree, contract, or already-claimed lifecycle journal. The selected contract is source-synced
@@ -430,10 +426,10 @@ warning.
 
 Run `worktree_integrate(..., dry_run=true)` first. For subordinate accepted-series integrations,
 record the standing series authority and then run the real integration without a developer stop.
-For developer-gated integrations, **hand off**: deliver
+For developer-gated integrations, send the integration preview to your parent with
+`role_message`; without a parent, deliver
 the integration preview as your final prose and **STOP**.
-The developer approves on the dashboard or in chat; the first AR tool call of your next turn auto-resumes
-and runs `worktree_integrate`; the agent never self-approves a human-pinned durable gate.
+Run `worktree_integrate` when the approval has arrived; the agent never self-approves a human-pinned durable gate.
 
 Before previewing integration, check out the recorded code and memory `source_branch` in their source repositories; `worktree_integrate` requires those active checkouts even for `dry_run=true`.
 
@@ -514,10 +510,10 @@ Task completion is not the evidence that authorizes enclosure deletion, and dele
 to erase the evidence that proves task completion.
 
 Run `lifecycle_finalize_task(..., dry_run=true)` first. For subordinate accepted-series cleanup,
-record the standing authority and run the real finalizer. For developer-gated cleanup, **hand off**:
-deliver the landed-commit proof, cleanup plan, and task-document updates as your final prose and **STOP**. The developer approves
-on the dashboard or in chat; the first AR tool call of your next turn auto-resumes and runs
-`lifecycle_finalize_task`; a model-attributed decision is never developer approval for a
+record the standing authority and run the real finalizer. For developer-gated cleanup, send the
+landed-commit proof, cleanup plan, and task-document updates to your parent with `role_message`;
+without a parent, deliver them as your final prose and **STOP**. Run
+`lifecycle_finalize_task` when the approval has arrived; a model-attributed decision is never developer approval for a
 human-pinned durable gate.
 
 `lifecycle_finalize_task` proves one immediate edge: the contract's landed code

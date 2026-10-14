@@ -43,8 +43,6 @@ SETTINGS_EXAMPLE_PATH = Path("examples") / "mcp" / "settings.example.json"
 CERTIFICATION_PROFILE_PATH = Path("mcp") / "certification-profile-v1.json"
 CODEX_CONFIG_PATH = Path(".codex") / "config.toml"
 LAYERS_CONTRACT_PATH = Path("layers").with_suffix(".toml")
-AMBIENT_ROLE_RUNNER_PATH = Path("scripts") / "e2e_harness" / "run.py"
-AMBIENT_ROLE_SELECTION_PATH = Path("scripts") / "e2e_harness" / "selection.py"
 # These repository-owned patterns are the exact ordinary dashboard-suite population in
 # dashboard/vitest.config.ts. Keeping them in the selector authority digest makes the population
 # contract explicit without teaching the repository-neutral profile framework about Vitest.
@@ -53,43 +51,6 @@ DASHBOARD_TEST_PATTERNS: tuple[tuple[Path, tuple[str, ...]], ...] = (
     (Path("dashboard/scripts"), (".test.mjs",)),
 )
 REPOSITORY_TEST_INPUT_CONSUMERS: dict[Path, frozenset[Path]] = {
-    AMBIENT_ROLE_SELECTION_PATH: frozenset(
-        {
-            Path("mcp/tests/test_agents_remember_quality.py"),
-        }
-    ),
-    AMBIENT_ROLE_RUNNER_PATH: frozenset(
-        {
-            Path("mcp/tests/test_agents_remember_quality.py"),
-            Path("mcp/tests/test_automatic_post_integration_cleanup.py"),
-            Path("mcp/tests/test_certification_lane_bridge.py"),
-            Path("mcp/tests/test_clean_quality_executor.py"),
-            Path("mcp/tests/test_cleanup_repeated_archive_ready.py"),
-            Path("mcp/tests/test_closeout_certification_entrypoint.py"),
-            Path("mcp/tests/test_closeout_certification_recovery.py"),
-            Path("mcp/tests/test_code_certification_execution.py"),
-            Path("mcp/tests/test_environment_reconstruction.py"),
-            Path("mcp/tests/test_gate_certificate_authority.py"),
-            Path("mcp/tests/test_gate_certification_evidence.py"),
-            Path("mcp/tests/test_integration_branch_authority.py"),
-            Path("mcp/tests/test_knowledge_read_boundary.py"),
-            Path("mcp/tests/test_knowledge_read_boundary_controls.py"),
-            Path("mcp/tests/test_lifecycle_operations.py"),
-            Path("mcp/tests/test_operation_certification_selection.py"),
-            Path("mcp/tests/test_quality_gate_public_contract.py"),
-            Path("mcp/tests/test_quality_report_publication_security.py"),
-            Path("mcp/tests/test_repository_certification_profiles.py"),
-            Path("mcp/tests/test_retired_door_publication_fields.py"),
-            Path("mcp/tests/test_review_block_state_values_through_real_tools.py"),
-            Path("mcp/tests/test_review_closeout_result_block_through_real_tool.py"),
-            Path("mcp/tests/test_source_lineage.py"),
-            Path("mcp/tests/test_terminal_blocker_reasons.py"),
-            Path("mcp/tests/test_terminal_enclosure_archive_sync_journal.py"),
-            Path("mcp/tests/test_transaction_only_worktree_delivery.py"),
-            Path("mcp/tests/test_worktree_closeout_quality_gate.py"),
-            Path("mcp/tests/test_worktree_quality_gate_runner.py"),
-        }
-    ),
     SETTINGS_EXAMPLE_PATH: frozenset(
         {
             Path("mcp/tests/test_catalog_selection.py"),
@@ -154,7 +115,6 @@ REPOSITORY_TEST_INPUT_CONSUMERS: dict[Path, frozenset[Path]] = {
             Path("mcp/tests/test_repository_certification_profiles.py"),
             Path("mcp/tests/test_retired_door_publication_fields.py"),
             Path("mcp/tests/test_source_lineage.py"),
-            Path("mcp/tests/test_spawn_agent_session.py"),
             Path("mcp/tests/test_task_doc_structural_publication_l2.py"),
             Path("mcp/tests/test_task_reopen.py"),
             Path("mcp/tests/test_task_sprint_linkage.py"),

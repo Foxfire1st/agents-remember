@@ -17,9 +17,9 @@
 | The reviewer is also every requested loop's reviewer seat | developer ruling 2026-07-06 (L12-Q2) | Reuse, not a separate loop-checker: same role file, same verdict template, catalog picked by review type | a distinct "loop checker" role |
 | Two adversarial seams | developer decision 2026-07-03 | Master-exit (manager → orchestrator) and super-exit (orchestrator → architect/developer) | ad-hoc review placement |
 | The strategist pass is proposed, never auto-run | ruled 2026-07-09 | The architect asks; a sanctioned skip makes the orchestrator author the same reasoned plan and explicit topology choice | the 2026-07-06 "mandatory strategist pre-run" rule |
-| Free chat is a launcher, not a role seat | ruled 2026-07-09 | Condition 3 of the router dispatches the architect once and hands over | assuming the architect role in the developer chat |
+| Free chat is a launcher, not a role seat | ruled 2026-07-09 | A chat without a role starts the architect once with `role_start` and hands over | assuming the architect role in the developer chat |
 | The spool-up chain is fixed and self-driving | ruled 2026-07-09 | Free chat → architect → orchestrator → managers → workers; no seat waits to be told what to spawn | per-request spawning |
-| No seat-local watchers | uniform-mechanism ruling 2026-07-07 | One mechanism (the agent-notifier sweep); every seat's liveness duty inverts to passive | the timed escalation ladder, renudge/skip-level/respawn machinery |
+| No seat-local watchers | uniform-mechanism ruling 2026-07-07 | One mechanism (the host's turn-end line to the parent); every seat's liveness duty inverts to passive | the timed escalation ladder, renudge/skip-level/respawn machinery |
 | Review independence and evidence-type matching | added 260815-DAG-L15 | The reviewer seat is never the author seat, and every requirement verdict must cite evidence of the requirement's class | passing a requirement on projection-only evidence |
 | Orchestration seats use no native sub-agents | doctrine ruled 2026-08-05, withdrawn as a current ban; freedom preserved in role `Organise your own work` paragraphs (R99 rule 14) | Harness helpers are permitted at any size with seat-owned boundary acts and independent code/memory review preserved; AR role seats stay distinct from helpers | native fan-out beside the orchestration machinery |
 | A candidate change cannot reopen acceptance | loop doctrine, `../core/loop.md` | A changed candidate, source, requirement version, model, seat, route, or report label does not reset the sealed review | implicit re-review on change |
@@ -28,6 +28,11 @@
 | The computed ledger cache is preserved | LCA (`260913_ledger-commit-attribution`), integrated in IAS | Computed, untracked ledger behaviour is baseline behaviour and must not regress | — |
 
 ## The LOCR rulings carried into this corpus
+
+**Status:** History as of MIK-R113 (2026-10-12), which removed the relay, the sweep and the terminal
+observer these rows name. Kept as the record of what was carried in and where it went, not as live
+doctrine; the present rule stands in `../core/acceptance.md`.
+
 The ambient checkout stood on `ar/260831_lifecycle-owned-completion-relay` (LOCR), ahead of IAS, and
 carried **accepted role-instruction doctrine that IAS lacked**. The instruction deltas below were
 carried in as applicable developer rulings. Their anchor is the LOCR diff

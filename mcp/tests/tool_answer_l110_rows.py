@@ -35,6 +35,7 @@ from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
     install_ambient,
+    new_ulid,
     observer_root,
 )
 from agents_remember.observer.ambient import reset_ambient
@@ -785,11 +786,11 @@ def _stub_config(
 
 
 def _install_ambient(coord: Path):
-    """Install a fresh fleeting ambient lifecycle for one test (rule 3)."""
+    """Install an ambient that adopted a lifecycle for one test (rule 3)."""
 
     reset_ambient()
     amb = AmbientLifecycle(EventStore(observer_root(_stub_config(coord))))
-    amb.start(fleeting=True)
+    amb.attach(new_ulid(), enclosure=str(coord / "contract.json"))
     install_ambient(amb)
     return amb
 

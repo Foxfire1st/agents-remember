@@ -32,6 +32,7 @@ from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.controlplane.enforcement import GateGuard
 from agents_remember.kernel.memory_attribution import render_memory_content_message
+from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tokens import count_response_tokens as _count
 from agents_remember.models.tools.tool_answer import FRAMEWORK_ANSWER_KEYS
@@ -843,7 +844,9 @@ class GateBlockedTests(unittest.TestCase):
         self.assertFalse(preview["commit_approval_required"])
         self.assertEqual(preview["closeout_gate"]["gateId"], "g2")
         self.assertEqual(preview["blockers"][0]["code"], "closeout-gate-blocked")
-        self.assertEqual(preview["nextStep"]["nextTool"], "gate_list")
+        # No tool decides a stored gate (MIK-R113): no next tool, and the way out.
+        self.assertNotIn("nextTool", preview["nextStep"])
+        self.assertIn(STORED_GATE_WAY_OUT, preview["nextStep"]["summary"])
 
     def test_blocked_preview_states_fail_closed(self) -> None:
 

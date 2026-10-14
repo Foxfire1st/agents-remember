@@ -11,7 +11,7 @@ it; a fix is a separate gated build job.
 ## What the conductor OWNS (no delegate exists)
 
 Scenario discovery · missing-view diff · observability-parity · motion-as-communication ·
-color-as-only-signal · Task-6 TUI UX · stale/freshness honesty · RED/USE altitude · cross-entity
+color-as-only-signal · stale/freshness honesty · RED/USE altitude · cross-entity
 continuity · control-plane safety. (See `owned-methods.md`.)
 
 ## Delegation table

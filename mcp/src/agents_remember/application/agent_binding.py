@@ -28,149 +28,73 @@ TOOL_SERVER_NAME = "agents-remember-task"
 # server of the user is kept out.
 OTHER_PRODUCT_TOOL_SERVER = "agents-remember"
 
-# Harness ids the registry knows (kernel/harnesses.py): "claude", "codex", "pi", "eve".
-# A settings file may name more; their launch surface is unknown. The known set is
-# spelled out in launch_server_exclusion (mode per harness), not here.
 
-# The decoy command for the codex override below: never spawned (the server is disabled in
-# the same override set), exits cleanly if it ever were, POSIX like the rest of this leaf.
-_CODEX_DISABLED_DECOY_COMMAND = "/bin/true"
-
-
-def harness_tool_exclusion_argv(harness_id: str | None) -> tuple[str, ...]:
-    """One-launch argv that keeps the product's other server out of a role agent.
-
-    ``pi`` filters tools (``--exclude-tools`` names both spellings of the other server's
-    tool prefix) and ``claude`` denies them (``--disallowedTools``, verified in
-    ``claude --help`` 2.1.294; both spellings). The task server's ``...-task__`` /
-    ``..._task__`` tools match neither pattern. ``codex`` disables the one server with
-    the unquoted dotted key (codex splits ``-c`` keys at the dots; a quoted segment
-    never merges). The second ``-c`` supplies a never-spawned command so the override
-    is a complete table: with the server configured it merges to disabled, without it
-    the decoy starts cleanly instead of failing bootstrap (both probed model-free).
-    ``eve`` is AR-owned: the host serves the task tools and no folder server loads, so
-    no argv is needed. Unknown harnesses offer nothing verified: empty, and the brief
-    keeps the server-choice sentence for them.
-    """
-    if harness_id == "pi":
-        return ("--exclude-tools", "mcp__agents-remember__*,mcp__agents_remember__*")
-    if harness_id == "claude":
-        return ("--disallowedTools", "mcp__agents-remember__*,mcp__agents_remember__*")
-    if harness_id == "codex":
-        return (
-            "-c",
-            "mcp_servers.agents-remember.enabled=false",
-            "-c",
-            f'mcp_servers.agents-remember.command="{_CODEX_DISABLED_DECOY_COMMAND}"',
-        )
-    return ()
-
-
-def harness_carries_one_server(harness_id: str | None) -> bool:
-    """Whether a role agent on this harness carries the product's tools once.
-
-    True for ``pi``, ``claude`` and ``codex`` (argv exclusion, merged with
-    caller filters) and ``eve`` (host-owned runtime). False for
-    settings-defined harnesses with an unknown surface and an unresolved id:
-    for those the brief keeps the server-choice sentence and the role-start
-    answer says a second copy is loaded.
-    """
-    return launch_server_exclusion(harness_id) is not None
+# What the role start hands the host for one launch so that the agent's harness does not load
+# the tools of the product's other server (MIK-R132). The pinned host (0.11.1) offers this for
+# Claude alone: it reads ``providerOptions.disallowedTools`` of the create request
+# (``providers/claude/options.js``, ``providers/claude/agent.js``) and hands it to the harness
+# as ``--disallowedTools``. The rule names the server and carries no star: the harness compares
+# the server name of a rule ``mcp__<server>`` for equality, while a rule with a star is matched
+# as a prefix of the whole tool name and would take the task server's tools with it.
+CLAUDE_OTHER_SERVER_RULE = f"mcp__{OTHER_PRODUCT_TOOL_SERVER}"
+EXCLUSION_MODE_CLAUDE = "claude-disallowed-tools"
+# The mode an earlier build recorded. The host was handed nothing under it; the launch call of
+# such a record had the other server's entry taken out of the map of servers it supplied, and
+# a repeat of a saved call of that build still has (``cli/paseo_launch.py``).
+EXCLUSION_MODE_SUPPLIED_MAP = "task-server-only"
 
 
 def launch_server_exclusion(
-    harness_id: str | None, *, servers: tuple[str, ...] = (TOOL_SERVER_NAME,)
+    provider: str | None, *, servers: tuple[str, ...] = (TOOL_SERVER_NAME,)
 ) -> dict[str, Any] | None:
-    """The applied one-launch server exclusion for a native role start, if any.
+    """What this launch hands the host to keep the other server's tools out, if anything.
 
-    The record is what the launch carries, not the harness name: ``mode`` is
-    ``host-owned`` for ``eve`` (no folder server loads in the host runtime),
-    ``task-server-only`` for ``pi``/``claude``/``codex`` (the host payload
-    lists only ``servers``), and there is no record for unknown harnesses or
-    launches that list no servers. Brief wording and the role-start answer
-    derive from this record; the harness name alone never decides.
-
-    Where the exclusion is actually applied as mechanism is the terminal
-    seat-spawn argv (application/terminal_tools.py merges the product patterns
-    into the native harness command per harness). The bridge agent-create call
-    forwards only workspace/agent and carries no exclusion consumer; whether a
-    bridge-launched agent sees a second copy is not measurable leaf-side. That
-    question is returned for owning authority disposition -- it is not answered
-    by this record (the exact host consumer is named in the L112-FX-F07
-    disposition, not here, so this prose stays out of the paseo single path).
+    The record is what the launch carries, and the role start's answer and the first message
+    derive from it; the provider's name alone never decides. None means that nothing is handed
+    over, so the agent's harness loads a second copy where its own configuration names the
+    server. That holds for Codex (the host narrows tools only for a server that the same
+    request names, and restating the user's entry would shadow it), for a provider that the
+    host runs over ACP such as Hermes (a session is given its folder and the request's servers
+    and nothing else), for Pi, and for every other provider the settings name. A launch that
+    carries no task server keeps the other one: without it the agent had none of the
+    product's tools.
     """
-    if harness_id == "eve":
-        return {"harness": harness_id, "mode": "host-owned", "servers": list(servers)}
-    if harness_id in ("pi", "claude", "codex") and servers:
-        return {"harness": harness_id, "mode": "task-server-only", "servers": list(servers)}
+    if provider == "claude" and servers:
+        return {
+            "harness": provider,
+            "mode": EXCLUSION_MODE_CLAUDE,
+            "disallowedTools": [CLAUDE_OTHER_SERVER_RULE],
+            "servers": list(servers),
+        }
     return None
 
 
-# The product-server tool patterns merged into caller tool filters: both
-# spellings of the other server's tool prefix. The task server's
-# ``...-task__`` / ``..._task__`` tools match neither pattern.
-_PRODUCT_TOOL_PATTERNS = ("mcp__agents-remember__*", "mcp__agents_remember__*")
+def exclusion_keeps_copy_out(record: object) -> bool:
+    """Whether a stored exclusion record is one that the host read and the harness obeyed.
 
-
-def _merge_tool_filter(
-    args: list[str], flags: tuple[str, ...], patterns: tuple[str, ...]
-) -> list[str] | None:
-    """Caller args with the patterns merged into its filter value, if it has one.
-
-    Finds the first known flag: an ``--flag=value`` form merges into the suffix,
-    a bare flag merges into the following argument unless that starts another
-    flag. Returns None when the caller passes no such flag (the caller adds a
-    fresh one) — never drops or reorders caller arguments.
+    A record of an earlier build named a mode under which the host was handed nothing; it
+    kept no copy out and does not count.
     """
-    merged = list(args)
-    for index, arg in enumerate(merged):
-        for flag in flags:
-            if arg == flag:
-                if index + 1 < len(merged) and not merged[index + 1].startswith("-"):
-                    merged[index + 1] = _merge_pattern_list(merged[index + 1], patterns)
-                    return merged
-                return None
-            if arg.startswith(flag + "="):
-                merged[index] = flag + "=" + _merge_pattern_list(arg[len(flag) + 1 :], patterns)
-                return merged
-    return None
+    return isinstance(record, dict) and record.get("mode") == EXCLUSION_MODE_CLAUDE
 
 
-def _merge_pattern_list(value: str, patterns: tuple[str, ...]) -> str:
-    present = value.split(",") if value else []
-    for pattern in patterns:
-        if pattern not in present:
-            present.append(pattern)
-    return ",".join(present)
+def exclusion_agent_options(
+    exclusion: dict[str, Any] | None, *, host_denied: tuple[str, ...] = ()
+) -> dict[str, Any]:
+    """The keys of the host's agent definition that carry an exclusion record to the host.
 
-
-def with_server_exclusion(
-    harness_id: str | None, launch_args: list[str] | None
-) -> list[str] | None:
-    """Append the one-launch exclusion argv for a role-agent spawn, if any.
-
-    Never drops caller-supplied arguments: when the caller already passes the same
-    tool filter (``--exclude-tools``/``-xt``, ``--disallowedTools``/``--disallowed-tools``),
-    the product patterns merge into its value instead of riding a second flag, so an
-    unrelated caller filter (``ask_question``, ``Bash``) cannot bypass the exclusion
-    while the launch still reports single-server. ``-c`` overrides merge by key, so
-    the codex pair always rides along.
+    The host lays the provider options of the request over the ones its own configuration
+    names for the provider, and a list of the request takes the place of the configured list
+    (``provider-registry.js``, ``provider-options.js``: ``mergeProviderOptions``). The list
+    handed over therefore repeats ``host_denied``, the rules the user's configuration of the
+    host denies in the provider's options, and adds the product's rule to them: what the user
+    denied stays denied for this agent. Nothing is handed over where there is no record, so
+    the configured list then applies as it is.
     """
-    extra = harness_tool_exclusion_argv(harness_id)
-    if not extra:
-        return launch_args
-    existing = list(launch_args) if launch_args else []
-    if harness_id == "pi":
-        merged = _merge_tool_filter(existing, ("--exclude-tools", "-xt"), _PRODUCT_TOOL_PATTERNS)
-        if merged is not None:
-            return merged
-    if harness_id == "claude":
-        merged = _merge_tool_filter(
-            existing, ("--disallowedTools", "--disallowed-tools"), _PRODUCT_TOOL_PATTERNS
-        )
-        if merged is not None:
-            return merged
-    return [*existing, *extra]
+    if exclusion is None:
+        return {}
+    rules = dict.fromkeys((*host_denied, *exclusion["disallowedTools"]))
+    return {"providerOptions": {"disallowedTools": list(rules)}}
 
 
 AGENT_ID_VARIABLE = "AR_PASEO_AGENT_ID"
@@ -183,8 +107,9 @@ REPORT_PATH_VARIABLE = "AR_REPORT_PATH"
 SPRINT_REF_VARIABLE = "AR_SPRINT_REF"
 MASTER_REF_VARIABLE = "AR_MASTER_REF"
 TASK_REF_VARIABLE = "AR_TASK_REF"
-# The seat identity other parts of the tool server read. A launched agent's tool server has none;
-# the variables are emptied for the same reason.
+# The seat identity of the earlier way of hosting. No part of this build reads it; an agent the
+# host starts gets both emptied, so that a value inherited from the starting harness never
+# reaches a reader of an earlier installation.
 CLEARED_SEAT_VARIABLES = ("AR_SPAWN_ROLE", "AR_HOSTED_SESSION_ID")
 
 

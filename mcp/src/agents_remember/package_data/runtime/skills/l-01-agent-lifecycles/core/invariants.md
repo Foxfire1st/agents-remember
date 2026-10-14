@@ -5,7 +5,7 @@ Authored once. A role file names the invariant it depends on; it never restates 
 ## Continuity lives in durable state, never in transcripts
 
 A seat's real state is the task tree — masters, leaves, statuses, decision logs, `openQuestions`,
-contracts, inbox rows, worktree contracts — plus its own written artifacts. This is why
+contracts, worktree contracts — plus its own written artifacts. This is why
 short-lived workers and reviewers are safe, why sessions can die, compact, and resume without
 losing the run, and why **every seat writes its artifact of record**. A finding held only in a chat
 is a bug.
@@ -65,20 +65,21 @@ keep the default behavior and escalate real deltas. The full spirit test lives i
 ## Knob resolution and capability doctrine
 
 Role files are **model-interpreted markdown, never an executor**. Each carries a portable **knob
-block** (harness / model / effort / tools) — the defaults the terminal host injects at spawn.
+block** (harness / model / effort / tools) — the defaults the role settings supply at the start.
 
 - Resolution: **role-file defaults < global settings < repo-local settings**, in the global agentic
   settings file with a repo-local override layer. Unknown `orchestration.*` keys fail loud.
-- Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`,
-  `promptKeywords`) participate in `orchestration.roles.<role>` and
-  `orchestration.rolesPerLevel.<level>.<role>`. `dispatch` and `tools` are structural
+- Only the launch-setting rows (`harness`, `model`, `effort`, `serviceTier`, `mode`,
+  `featureValues`) participate in `orchestration.roles.<role>` and
+  `orchestration.rolesPerLevel.<level>.<role>`; `launchArgs`, `sessionCommands` and
+  `promptKeywords` load and are no longer read. `dispatch` and `tools` are structural
   authority/capability descriptions, never settings keys.
 - There are deliberately **no per-harness role files** (developer decision 2026-07-05).
   Harness-specific *abilities* — sub-agent fan-out and the like — are covered inside the portable
   files as capability-conditional doctrine, and harness *preference* is deployment configuration,
   not doctrine. Hard-coding a vendor would fork the doctrine per harness.
-- `dispatch_agent` is itself the harness-independent fan-out: a harness with no sub-agent facility
-  still dispatches a canonical document+role seat through the framework — one behavior, any engine.
+- `role_start` is itself the harness-independent fan-out: a harness with no sub-agent facility
+  still starts a role agent on a canonical document+role seat through the framework — one behavior, any engine.
 
 ## Instruction-surface boundaries
 

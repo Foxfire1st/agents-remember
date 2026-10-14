@@ -7,16 +7,27 @@ opening, and set authority. The fake bridge stands in for the host.
 
 from __future__ import annotations
 
+import json
 import unittest
 import uuid
+from pathlib import Path
 
+from agents_remember.application.agent_binding import launch_server_exclusion
 from agents_remember.cli.paseo_role_tools import start_leaf_set
 from agents_remember.cli.role_launch_receipts import _read_receipt, _receipt_path
 from agents_remember.cli.role_launch_routes import seat_request_id
 from agents_remember.models.role_agents import RoleStartSetCall
 from agents_remember.models.role_launcher import RoleSelection
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from test_paseo_launch import LEAF_REF, MASTER_REF, SPRINT_REF
 from test_paseo_role_tools import OTHER_MASTER, RoleToolsTestCase, binding, selection_of
+
+
+def loaded(answer: dict) -> dict[str, bool]:
+    """What a set's answer says of each seat's second copy."""
+
+    return {role: seat["secondCopyLoaded"] for role, seat in answer["seats"].items()}
 
 
 def set_call(request_id: uuid.UUID, **fields) -> RoleStartSetCall:
@@ -159,6 +170,29 @@ class SetStartTests(RoleToolsTestCase):
         self.assertNotIn("agent-create", [command for command, _ in self.runtime.calls])
         self.assertEqual(self.received(reviewer_id), [])
 
+    def test_the_set_says_for_each_seat_whether_the_second_copy_is_loaded(self) -> None:
+        """MIK-R132 rule 5 for a set: read from each seat's receipt, as a single start reads it."""
+        manager, first = self.manager_set()
+
+        # The fixture's harness is handed no exclusion by the launch: every seat carries both.
+        self.assertEqual(loaded(first), {"worker": True, "reviewer": True, "curator": True})
+        # A seat whose receipt holds the record of the host's mode carries one copy. The repeat
+        # reads it there and starts nothing.
+        path = self.receipt_path_for("reviewer")
+        receipt = {
+            **self.receipt_for("reviewer"),
+            "serverExclusion": launch_server_exclusion("claude"),
+        }
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+
+        again = start_leaf_set(
+            self.config, set_call(uuid.UUID(first["requestId"])), environment=manager.environment()
+        )
+
+        self.assertEqual(loaded(again), {"worker": True, "reviewer": False, "curator": True})
+        self.assertEqual(len(self.runtime.agents), 3)
+        self.assertLessEqual(count_response_tokens(again), bound_for("role_start_set"))
+
     def test_an_architect_set_is_refused_with_no_effects(self) -> None:
         architect = binding("architect")
 
@@ -188,8 +222,8 @@ class SetStartTests(RoleToolsTestCase):
         self.assertEqual(self.runtime.launch_calls(), [])
         self.assertEqual(self.runtime.agents, {})
 
-    def receipt_for(self, role) -> dict:
-        """The current receipt of one seat of this line's leaf selection."""
+    def receipt_path_for(self, role) -> Path:
+        """Where the receipt of one seat of this line's leaf selection lies."""
 
         selection = RoleSelection(
             role=role,
@@ -197,7 +231,12 @@ class SetStartTests(RoleToolsTestCase):
             masterDocumentRef=MASTER_REF,
             taskDocumentRef=LEAF_REF,
         )
-        receipt = _read_receipt(_receipt_path(self.config, selection))
+        return _receipt_path(self.config, selection)
+
+    def receipt_for(self, role) -> dict:
+        """The current receipt of one seat of this line's leaf selection."""
+
+        receipt = _read_receipt(self.receipt_path_for(role))
         assert receipt is not None
         return receipt
 

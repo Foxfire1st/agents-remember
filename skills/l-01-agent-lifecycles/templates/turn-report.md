@@ -13,8 +13,7 @@ when reading the gate evidence.
 2. State facts, not a narrative: what changed, what broke, what is proven green, what remains.
 3. The **Respawn State** section must let a fresh successor continue **without reading any transcript**.
 4. Keep it durable and in the series notes; reference it from the leaf `task_doc`.
-5. Default path: `notes/reports/<leaf-id>-worker-report.md`. The control-plane helper exposes this
-   convention so manager nudges and respawn onboarding can point at the same artifact.
+5. Path: the report path your handover names.
 6. Include one complete **Requirement Acceptance Envelope** block for the leaf-owned primary stable
    requirement ID + version in the brief. List dependency/preservation checks separately; they are
    not closure claims. General prose or an aggregate completion statement is invalid.

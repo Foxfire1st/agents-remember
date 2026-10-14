@@ -650,7 +650,7 @@ class ReportResourceTests(unittest.TestCase):
 
         world = EntryPointWorld()
         try:
-            world.build()
+            world.build(keep_lifecycle=True)
             with tempfile.TemporaryDirectory() as tmp_dir:
                 repo = self._corpus(Path(tmp_dir), 3)
                 outcome, out = world.call(

@@ -1,18 +1,14 @@
 # Template — Curator Brief
 
-The dispatch packet the **manager** compiles for a leaf's **curator**, started when the Worker's
-first freeze exists. The Curator receives the passed freeze and hand-off list directly from the
-Reviewer and Worker before writing its curation. **The brief
-is the curator's entire session start** — it replaces the front half the spawner already ran. This
+What the **manager** makes sure the leaf's documents hold for a leaf's **curator**, which the
+leaf's `role_start_set` call starts held and its first message opens. The Curator receives the
+passed freeze and hand-off list directly from the
+Reviewer and Worker before writing its curation. This
 is the change-set and intent feeding contract: the curator never infers either from transcript
 memory. The Worker feeds the frozen change set and hand-off list, and the Reviewer feeds its code
 verdict. Existing intent anchors, the leaf task doc, approved
 developer/design rulings, the manager's immediately preceding current source-lineage projection,
-and notes/ complete the inputs. The control plane repeats that lineage proof before process creation.
-
-Dispatch with `dispatch_agent(task_document_ref=<canonical leaf document>, role="curator",
-brief=<this complete brief>)`. The control plane claims the `(leaf document, curator)` seat and
-privately binds its current occupant; the brief never carries a runtime address.
+and notes/ complete the inputs.
 
 **This template feeds inputs; it does not author rules.** The curator's duties live in
 `../roles/curator.md`, the coherence procedure in `../operations/curation.md`, and the truth
@@ -112,12 +108,11 @@ Messages wake; files carry. A message says what is asked or what is handed over,
 - Fill every `<placeholder>`; a brief with an unresolved placeholder is not dispatchable.
 - Immediately before compiling this brief, call `worktree_status` for the canonical leaf and require
   `sourceLineage.state=current`. If it is stale or unavailable, synchronize and reconcile before
-  curator dispatch. `dispatch_agent` repeats the proof and refuses before process creation if the
-  lineage moves between the manager's check and the dispatch transaction.
+  the Curator is opened.
 - `<enclosure-contract-path>` is the leaf's `series-contract.md` under the master's
   `enclosures/<leaf-id>/`. Use it to scope every memory-quality and coherence call; an unscoped
   `route_index_refresh` writes into the official memory repo.
-- Start the Curator when the Worker's first freeze exists. Supply task, intent and current-lineage
+- The Curator is started held with the set and opened by its first message. Supply task, intent and current-lineage
   anchors; the Worker sends its exact frozen change-set counters/paths and hand-off list directly,
   and the Reviewer sends the passed freeze and verdict directly. Relay neither handover.
 - Name the Worker report and candidate-bound Reviewer verdict paths as notes/ inputs supplied

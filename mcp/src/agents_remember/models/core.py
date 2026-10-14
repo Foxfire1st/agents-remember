@@ -42,6 +42,19 @@ class AgentBindingPayload(BaseModel):
     taskDocumentRef: TaskDocumentRef | None = None
 
 
+class OpenUserSettingsPayload(BaseModel):
+    """The user's settings file or its folder found open to writing, with the user's commands."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    userPath: str
+    fileExists: bool
+    fileOpen: bool
+    folderOpen: bool
+    closeCommand: str
+    editCommand: str
+
+
 class ServerInfoResponse(ResponseModel):
     server: str
     version: str
@@ -55,6 +68,12 @@ class ServerInfoResponse(ResponseModel):
     # Provider ids still present in settings, named once as no longer used: no tool
     # reports on the CGC or GrepAI providers anymore and nothing starts them.
     unusedProviderKeys: list[str] = Field(default_factory=list)
+    # Settings keys the files hold that only removed parts read, as dotted names: named
+    # here once as no longer used, and not read anywhere.
+    unusedSettingsKeys: list[str] = Field(default_factory=list)
+    # Present only while the user's settings file or its folder is open to writing: what is
+    # open, the command that closes it and the command the user runs before an edit.
+    openUserSettings: OpenUserSettingsPayload | None = None
     servingBuild: ServingBuildPayload
     # Both present only on a tool server that a role launch started for one agent: the name
     # under which the launch gave that agent this server, and the agent's binding.

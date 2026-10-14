@@ -155,7 +155,7 @@ export function useChangeTraversal(
         const target = event.target as Element | null;
         const owner = zoneForTarget(target);
         if (!binding.zones.includes(owner)) return;
-        if (routeKey(owner, event, target) !== 'handle') return;
+        if (routeKey(event, target) !== 'handle') return;
         event.preventDefault();
         move(direction);
       };

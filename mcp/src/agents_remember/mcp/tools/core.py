@@ -15,11 +15,13 @@ from agents_remember.application.context_packet import (
 )
 from agents_remember.application.runtime.install import (
     RuntimeInstallRequest,
+    open_user_settings_notice,
     run_runtime_install,
 )
 from agents_remember.application.task_scoped_mcp import (
     task_scoped_mcp_config_for_reader,
 )
+from agents_remember.kernel.agentic_settings import AgenticSettingsError, load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.core import ServingBuildPayload
@@ -33,6 +35,20 @@ from .. import SERVER_NAME, SERVER_VERSION
 from .base import TRANSPORT, _tool_payload
 
 
+def _unused_settings_keys(config: McpRuntimeConfig) -> list[str]:
+    """The settings keys the files hold that are no longer read (MIK-R113 rule 4).
+
+    The orchestration settings are read per use; when they cannot be read, the answer names
+    the keys of the configuration it was started with and the refusal stays with the tool
+    that needs those settings.
+    """
+    try:
+        orchestration = load_agentic_settings(config.coordination_root).unused_keys
+    except (AgenticSettingsError, OSError):
+        orchestration = ()
+    return [*config.unused_settings_keys, *orchestration]
+
+
 def server_info_payload(
     config: McpRuntimeConfig, serving_build: ServingBuildPayload
 ) -> dict[str, Any]:
@@ -40,6 +56,9 @@ def server_info_payload(
     # the name under which that agent was given it: ``server`` is the package's own name, which
     # the agent's instructions use for another installation's server.
     binding = read_agent_binding()
+    # The user's settings file or its folder, named only while it is open to writing, with
+    # the user's two commands (MIK-R137 rule 5). The answer changes no mode and no byte.
+    open_settings = open_user_settings_notice()
     return _tool_payload(
         "server_info",
         {
@@ -56,6 +75,8 @@ def server_info_payload(
             ),
             "allowedRepoIds": list(config.allowed_repo_ids),
             "unusedProviderKeys": list(config.allowed_provider_ids),
+            "unusedSettingsKeys": _unused_settings_keys(config),
+            **({"openUserSettings": open_settings} if open_settings is not None else {}),
             "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
             **(
                 {"toolServer": TOOL_SERVER_NAME, "agentBinding": binding.as_report()}
@@ -136,7 +157,9 @@ def compact_runtime_install_payload(
     in the whole result for the report and the log); messages keep the first
     five entries cut to the short-string bound each, with the rest counted
     into the report; the rebind digest keeps attempted/ok and
-    phase/action/ok per run. ``log`` is attached by the response boundary.
+    phase/action/ok per run; the stores of removed parts keep their count,
+    their size and the sentences that name the command, and the list of the
+    stores stays in the report. ``log`` is attached by the response boundary.
     """
     compact = {key: value for key, value in full.items() if key in RUNTIME_INSTALL_ANSWER_FIELDS}
     messages = full.get("messages")
@@ -165,6 +188,11 @@ def compact_runtime_install_payload(
                 for run in rebind.get("runs", [])
                 if isinstance(run, dict)
             ],
+        }
+    stores = full.get("removedPartStores")
+    if isinstance(stores, dict):
+        compact["removedPartStores"] = {
+            key: value for key, value in stores.items() if key != "stores"
         }
     if report_path is not None:
         compact["reportPath"] = report_path

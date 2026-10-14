@@ -1,9 +1,5 @@
 """Compile the capsule one launch must supply, through the compiler every seat already uses.
 
-This is the module the severed chain was missing. Until it existed, the compiler (L2), the admission
-and MCP surface (L4), the Codex carrier (L5) and the eve carrier (L7) were each individually proven
-and no production launch point supplied a capsule to anything.
-
 **One compiler, one routing rule.** Nothing here re-implements selection. A task-attached seat goes
 through :func:`~agents_remember.application.skill_resources.compile_task_capsule` — the same
 operation the registered MCP tool answers — and a seat with no task document goes through
@@ -20,7 +16,7 @@ proves that the document's repository is authorized, while its scoped worktree p
 code root for MCP tool access.
 
 **What a free agent's admission is, and the one convention this module had to define.** A free agent
-(a role, no task document — ``bootstrap`` is admitted to that class by ``TASKLESS_SEAT_ROLES``) has
+(a role, no task document — ``bootstrap`` is one) has
 no task plane at all: no document to digest, no revision to pin, no projection to carry. The frozen
 :class:`~agents_remember.models.role_capsules.types.CapsuleAdmittedFacts` has no typed absence for
 it (all four identity fields are non-blank strings), so the absence is minted **once, here**, by
@@ -28,10 +24,9 @@ it (all four identity fields are non-blank strings), so the absence is minted **
 deliberately does not parse as a task reference and whose digest covers the seat admission the
 launch actually performed. Nothing else in the tree can produce that value.
 
-**The carriers are the ones the master already built.** Codex's is
-:func:`~agents_remember.serving.capsule_delivery.capsule_delivery_from` over the compilation result;
-eve's is the carrier L7 materializes plus the two environment references its loader reads. A launch
-sets the carrier for the harness it is about to start; the other stays empty.
+**The value a launch carries.**
+:func:`~agents_remember.serving.capsule_delivery.capsule_delivery_from` copies the compilation
+result into the one value every launch reads, whatever agent the host starts.
 """
 
 from __future__ import annotations
@@ -40,10 +35,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.application.eve_capsule import (
-    EveBindingRequest,
-    materialize_eve_binding,
-)
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
 from agents_remember.application.skill_resources import (
     CapsuleCompileOutcome,
@@ -54,7 +45,7 @@ from agents_remember.application.skill_resources import (
     routed_admission_for,
     shipped_composition_corpus,
 )
-from agents_remember.errors import CapsuleCompilationError, HarnessControlError
+from agents_remember.errors import CapsuleCompilationError
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.git_facts import read_git_facts
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -101,14 +92,6 @@ UNVERSIONED_WORK_BRANCH = "<unversioned>"
 
 A free agent is not admitted onto a branch the way a worktree-bound seat is, and saying so is
 better than refusing to start the one seat whose job is to set a repository up.
-"""
-
-EVE_CARRIER_ROOT = ("runtime", "eve-carriers")
-"""Where a launch's eve carrier is written, under the coordination root.
-
-Outside every workspace by construction, which is what L7's carrier requires: the runtime's own
-file tools are confined to the workspace, so the instructions it applies are not a file the model
-can rewrite.
 """
 
 
@@ -315,8 +298,7 @@ def compile_launch_capsule(
 ) -> LaunchCapsule:
     """Compile the capsule one launch will supply, or refuse it by name.
 
-    Called by the launch points through the serving tier's :data:`LaunchCapsuleResolver` port, so a
-    serving-rank route can decide and record its instruction mode without importing this tier.
+    Called by the role launch before it builds its launch request.
     """
 
     role = canonical_role((request.role or "").strip())
@@ -356,8 +338,6 @@ def _compile_admitted_task(
     admission = _admit_task_document(config, request, role, operation, resolved)
     if isinstance(admission, LaunchCapsule):
         return admission
-    if (request.harness or "").strip() == "eve":
-        return _compile_eve_task(config, admission)
     outcome = compile_task_capsule(
         config,
         CapsuleCompileRequest(
@@ -523,51 +503,6 @@ def _compile_project_task(
     return _capsule_launch(role, outcome.result)
 
 
-def _compile_eve_task(config: McpRuntimeConfig, seat: AdmittedTaskSeat) -> LaunchCapsule:
-    """The eve carrier: the launch environment that names the compiled capsule.
-
-    The carrier is materialized by L7's produce side — the same materializer its runtime verifies —
-    so this path compiles nothing itself and adds no second carrier format.
-    """
-
-    report_root, memory_root = _admitted_surfaces(seat.contract_path)
-    try:
-        bound = materialize_eve_binding(
-            config,
-            EveBindingRequest(
-                enclosure=seat.selector,
-                task_path=seat.reference.path,
-                role=seat.role,
-                operation=seat.operation,
-                carrier_directory=_carrier_directory(config, seat.role, seat.reference.path),
-                code_repository_root=seat.repository_root,
-                report_root=report_root,
-                memory_root=memory_root,
-            ),
-        )
-    except HarnessControlError as error:
-        return refused_launch_capsule(seat.role, "eve-carrier-refused", str(error))
-    result = bound.compilation.result
-    if (
-        result is None
-    ):  # pragma: no cover - materialize_eve_binding refuses rather than returning this
-        return refused_launch_capsule(
-            seat.role,
-            "capsule-compilation-incomplete",
-            "the eve carrier was built from no capsule",
-        )
-    return _capsule_launch(
-        seat.role,
-        result,
-        eve_env=dict(bound.env),
-        carrier=bound.carrier_path,
-        # Read back out of the carrier the runtime will re-verify: the launch runs in the workspace
-        # the artifact itself admits, so the session's cwd and the carrier's AR_WORKSPACE_ROOT are
-        # one value rather than two that have to agree.
-        session_workspace=Path(bound.carrier.workspace.root),
-    )
-
-
 def _compile_free_agent(
     config: McpRuntimeConfig,
     request: LaunchCapsuleRequest,
@@ -576,17 +511,6 @@ def _compile_free_agent(
 ) -> LaunchCapsule:
     """The free-agent path: a seat with no task document still receives its compiled capsule."""
 
-    if (request.harness or "").strip() == "eve":
-        return refused_launch_capsule(
-            role,
-            "eve-carrier-requires-admitted-worktree",
-            (
-                "the eve carrier binds a runtime to the admitted git worktree of a task enclosure, "
-                "and a taskless seat has none; an eve free agent therefore has no verified "
-                "instruction channel. Owner: the final verification leaf, with the eve carrier "
-                "producer (L7)"
-            ),
-        )
     admission = free_agent_seat_admission(
         config,
         role=role,
@@ -619,44 +543,13 @@ def _compile_free_agent(
     return _capsule_launch(role, outcome.result)
 
 
-def _capsule_launch(
-    role: str,
-    result: CapsuleCompilationResult,
-    *,
-    eve_env: dict[str, str] | None = None,
-    carrier: Path | None = None,
-    session_workspace: Path | None = None,
-) -> LaunchCapsule:
-    """The delivered value: the carrier for this launch plus its per-run record."""
+def _capsule_launch(role: str, result: CapsuleCompilationResult) -> LaunchCapsule:
+    """The delivered value: the carrier for this launch."""
 
-    capsule = result.capsule
-    rendered = result.render_instructions()
-    report: dict[str, object] = {
-        "mode": LaunchCapsuleMode.CAPSULE.value,
-        "role": role,
-        "operation": capsule.binding.operation,
-        "semanticDigest": capsule.semantic_digest,
-        "taskReference": capsule.binding.admitted.task_reference,
-        "instructionCount": len(capsule.instruction_units),
-        "instructionBytes": len(rendered.encode("utf-8")),
-    }
-    if carrier is not None:
-        report["eveCarrier"] = str(carrier)
-    if session_workspace is not None:
-        report["sessionWorkspace"] = str(session_workspace)
-    if eve_env:
-        return LaunchCapsule(
-            mode=LaunchCapsuleMode.CAPSULE,
-            role=role,
-            eve_env=dict(eve_env),
-            session_workspace=session_workspace,
-            report=report,
-        )
     return LaunchCapsule(
         mode=LaunchCapsuleMode.CAPSULE,
         role=role,
-        codex_delivery=capsule_delivery_from(result),
-        report=report,
+        delivery=capsule_delivery_from(result),
     )
 
 
@@ -667,28 +560,6 @@ def _refusal(role: str, outcome: CapsuleCompileOutcome) -> LaunchCapsule:
         "capsule-not-compiled" if refusal is None else refusal.status,
         outcome.explanation(),
     )
-
-
-def _admitted_surfaces(contract_path: Path) -> tuple[Path | None, Path | None]:
-    """The enclosure's own report and memory surfaces, for the carrier's write scopes.
-
-    Read out of the contract the enclosure lookup already resolved — the worktree group's ``reports``
-    directory and the contract's memory worktree — so a carrier declares the surfaces that exist
-    rather than the surfaces this module would have liked. A surface that is absent stays ``None``,
-    and the carrier's own role authority table then decides whether that role needed it.
-    """
-
-    try:
-        contract = load_contract(contract_path)
-    except (ContractError, OSError):  # pragma: no cover - the compiler refuses this path already
-        return None, None
-    # The report surface is the enclosure's own artifact boundary, not a caller's directory: a leaf
-    # that has not produced a report yet does not have the directory, and a carrier for a role
-    # admitted to write there must still be buildable. Creating it is the launch claiming the
-    # surface the contract already declared for it.
-    report_root = contract.worktree_group / "reports"
-    report_root.mkdir(parents=True, exist_ok=True)
-    return report_root, contract.memory_worktree
 
 
 def _enclosure_contract(
@@ -728,16 +599,7 @@ def _task_root_of(task_path: str) -> str:
     return head
 
 
-def _carrier_directory(config: McpRuntimeConfig, role: str, task_path: str) -> Path:
-    """Where this seat's eve carrier is written: per seat, outside every workspace."""
-
-    slug = task_path.replace("/", "-").removesuffix(".json")
-    root = config.coordination_root.joinpath(*EVE_CARRIER_ROOT)
-    return root / f"{role}-{slug}"
-
-
 __all__ = [
-    "EVE_CARRIER_ROOT",
     "FREE_AGENT_TASK_REFERENCE_PREFIX",
     "UNVERSIONED_WORK_BRANCH",
     "AdmittedTaskSeat",

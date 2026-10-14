@@ -371,8 +371,8 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # The worktree surface's rule: a next move names a *registered public* tool, because
     # these values are advertised guidance an agent is meant to act on and the roster is
     # the already-enforced authority for what the agent can actually call. The rule is
-    # deliberately per surface, not global: the `task_doc` surface may name a non-public
-    # tool (see the boundary note below), so this is not an inconsistency to flatten.
+    # deliberately per surface, not global: the `task_doc` surface carries no such rule,
+    # so this is not an inconsistency to flatten.
     #
     # Complete producer survey behind the invariant (union of 20 values, each traced to
     # its producer): NextTool and RecoveryTool literals (models/worktree.py,
@@ -383,14 +383,7 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # the task_unstarted_evidence `RecoveryRoute` tools; and the remaining direct literals
     # in worktrees/modules/{integrate,start}.py, worktrees/task_leaf_binding.py,
     # application/worktree_tools.py, application/next_step.py and models/base.py.
-    # Every one is in PUBLIC_TOOLS except `session_retire`, which cannot reach this field.
-    #
-    # BOUNDARY -- `session_retire` is a registered but deliberately NON-PUBLIC tool
-    # (models/tools/tool_registry.py registers it with SessionRetireResponse; it is absent
-    # from mcp/tools/base.PUBLIC_TOOLS by design). It is reachable only as the `task_doc`
-    # payload's top-level `nextTool` and inside its nested `discardEvidence`, and
-    # `TaskDocResponse` is not a `WorktreeCommandResponse`, so this invariant does not
-    # apply to it. Do not "fix" that by widening PUBLIC_TOOLS to cover a non-public tool.
+    # Every one is in PUBLIC_TOOLS.
     @field_validator("nextTool")
     @classmethod
     def _require_registered_public_next_tool(cls, value: str | None) -> str | None:
@@ -469,12 +462,6 @@ class WorktreeCloseoutApplyResponse(_WorktreeCloseoutResponse):
 class WorktreeIntegrateResponse(WorktreeCommandResponse):
     operation: Literal["worktree_integrate"] = "worktree_integrate"
     lifecycleOperation: LifecycleOperationProjection | None = None
-    # Declared even though the worktree envelope is intentionally flexible: these are stable
-    # completion-cleanup products, not incidental worktree-module details.
-    autoClosedSeats: list[str] = Field(default_factory=list)
-    autoCloseDeferredSeats: list[str] = Field(default_factory=list)
-    autoCloseFailedSeats: list[str] = Field(default_factory=list)
-    autoLandedSeats: list[str] = Field(default_factory=list)
 
 
 class WorktreeCheckpointLandingResponse(WorktreeCommandResponse):

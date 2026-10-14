@@ -9,20 +9,14 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
-from agents_remember.cli.role_launch_archive_recovery import LeafArchiveRecovery
-from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
-from agents_remember.controlplane.expectation_rows import ExpectationRowStore
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.kernel.agentic_settings import (
-    DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
-    AgenticSettings,
-    load_agentic_settings,
+from agents_remember.cli.role_launch_archive_recovery import (
+    RECOVERY_TICK_SECONDS,
+    LeafArchiveRecovery,
 )
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS,
     compact_workspace_river,
 )
-from agents_remember.observer.store import EventStore
 from agents_remember.providers.degradation import evaluate_provider_degradation
 from agents_remember.providers.metrics import (
     DEFAULT_SAMPLE_INTERVAL_SECONDS,
@@ -31,29 +25,12 @@ from agents_remember.providers.metrics import (
 )
 from agents_remember.providers.watcher_service import run_configured_watchers
 from agents_remember.serving._app_common import _ServingRuntime, logger
-from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
-from agents_remember.serving.agent_notifier_heartbeat import (
-    AgentNotifierHeartbeatPayload,
-    heartbeat_age_seconds,
-)
-from agents_remember.serving.control_plane_identity_migration import (
-    migrate_control_plane_identity_logs,
-)
-from agents_remember.serving.degradation_delivery import DegradationAlertDelivery
 from agents_remember.serving.heap_diag import (
     heap_diag_loop,
     malloc_trim_enabled,
     malloc_trim_interval_seconds,
     start_heap_tracing,
     trim_malloc,
-)
-from agents_remember.serving.relay_death_watch import relay_death_watch_loop
-from agents_remember.serving.terminal_liveness import (
-    DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS,
-)
-from agents_remember.serving.terminal_observer_health import (
-    TerminalObserverHealthPayload,
-    TerminalObserverHealthPhase,
 )
 
 if TYPE_CHECKING:
@@ -78,88 +55,27 @@ async def _to_thread_drained_on_cancel[**Args, Result](
         raise
 
 
-async def _observe_terminal_catalog(
-    runtime: _ServingRuntime, phase: TerminalObserverHealthPhase
-) -> object:
-    """One completed observer call, published to this serving lifetime's health accumulator.
+async def _leaf_archive_recovery_loop(runtime: _ServingRuntime) -> None:
+    """The serving lifetime's owner of the leaf agents' archive recovery.
 
-    ``LOCR-R17@v1``: the producer stage's own outcome IS the durable diagnostic, so the transition
-    and its write sit on the observer call itself rather than on any failure boundary. A steady
-    pass that SUCCEEDS has to be as observable as one that fails -- that asymmetry is the whole
-    point of the record -- and R11's ``except Exception`` owns containment only, so it publishes
-    nothing of its own.
-
-    ``phase`` is what separates a startup-prime failure from a steady-pass one, and it is the only
-    input the failure summary is selected from. Cancellation is deliberately not recorded: it
-    leaves the call incomplete, and ``CancelledError`` is not an ``Exception``.
-
-    The completion instant and the duration come from the runtime's serving clock, so one clock
-    answers "when did this attempt finish" for the record and for every age computed from it.
-    """
-
-    started_at = runtime.liveness_clock()
-    try:
-        result = await _to_thread_drained_on_cancel(runtime.liveness_sweeper.refresh)
-    except Exception as error:
-        runtime.observer_health.record_failure(error, phase=phase, started_at=started_at)
-        raise
-    runtime.observer_health.record_success(started_at=started_at)
-    return result
-
-
-async def _terminal_observation_loop(runtime: _ServingRuntime) -> None:
-    """The serving lifetime's steady-state owner of terminal catalog observation.
-
-    Adapter terminal evidence is produced outside the dashboard, so the recurring refresh must
-    not depend on an HTTP request, an open dashboard, or the agent notifier being enabled: the
-    catalog is shared truth for both the routes and the notifier. The sleep is taken AFTER each
-    attempt returns, which is what makes the cadence completion-relative -- a slow sweep delays
-    the next attempt instead of queueing nominal ticks, and two attempts can never overlap. Both
-    the one-second starting-row and the full-sweep rate limits stay inside
-    ``TerminalCatalogLivenessSweeper.refresh``; this loop owns only the attempt cadence.
+    The pass limits itself (one bounded scan per ``RECOVERY_INTERVAL_SECONDS``); this loop owns
+    only the attempt cadence. The sleep is taken AFTER each attempt returns, so a slow pass
+    delays the next attempt instead of queueing ticks, and two attempts never overlap.
     """
 
     archives = LeafArchiveRecovery(runtime.config)
     try:
         while True:
             try:
-                await _observe_terminal_catalog(runtime, "steady-state")
-            except Exception:
-                logger.exception("terminal catalog observation failed; retrying next interval")
-            try:
                 await _to_thread_drained_on_cancel(archives.tick)
             except Exception:
                 logger.exception("leaf agent archive observation failed; retrying next interval")
-            await asyncio.sleep(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+            await asyncio.sleep(RECOVERY_TICK_SECONDS)
     finally:
         archives.close()
 
 
-async def _prime_terminal_observation(runtime: _ServingRuntime) -> None:
-    """Observe the terminal catalog once BEFORE the projection prime and the recurring loops.
-
-    The catalog is shared truth for the projection, the HTTP routes, and the agent notifier, and
-    the recurring owner is only created later in startup, so without this prime the initial
-    projection could be built from a catalog no sweep has refreshed yet and initial truth would
-    depend on the first scheduled tick. The prime is the same canonical pass that owner runs --
-    same evidence readers, cursor rules, full-sweep rate limit, batch, and lock order, and a fresh
-    sweeper's prime is a due full sweep -- so no startup-only reader or direct catalog mutation
-    exists.
-
-    A raise is contained here because observation degradation must not become a serving outage:
-    the projection prime and every recurring loop still start, and the level-triggered owner
-    retries from the unchanged durable evidence on its first cadence. Cancellation is not
-    contained, so the surrounding drain still owns thread teardown before lifespan exit.
-    """
-
-    try:
-        await _observe_terminal_catalog(runtime, "startup")
-    except Exception:
-        logger.exception("terminal catalog observation prime failed; serving startup continues")
-
-
 async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetricsStore) -> None:
-    degradation_alerts = DegradationAlertDelivery(config.coordination_root)
     while True:
         try:
             snapshot = await _to_thread_drained_on_cancel(
@@ -174,99 +90,12 @@ async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetrics
                     action="stop",
                     dry_run=False,
                 ),
-                degradation_alerts=degradation_alerts,
             )
             # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
             await _to_thread_drained_on_cancel(metrics_store.compact)
         except Exception:
             logger.exception("provider metrics sample failed; retrying next interval")
         await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
-
-
-def _agent_notifier_context(
-    runtime: _ServingRuntime,
-    settings: AgenticSettings | None = None,
-) -> AgentNotifierContext:
-    """One sweep's view of every store its predicates read directly.
-
-    The sweep loop passes its resolved (possibly last-good) settings so the context is built
-    from exactly the same snapshot the enabled-check and interval used.
-    """
-
-    settings = (
-        settings
-        if settings is not None
-        else load_agentic_settings(runtime.config.coordination_root)
-    )
-    root = runtime.observer_root
-    return AgentNotifierContext(
-        catalog=runtime.catalog,
-        host=runtime.host,
-        paster=runtime.paster,
-        inbox_store=OperatorInboxStore(root),
-        expectation_store=ExpectationRowStore(root),
-        signal_cooldown_store=AgentNotifierSignalCooldownStore(root),
-        event_store=EventStore(root),
-        heartbeat_store=runtime.heartbeat_store,
-        coordination_root=runtime.config.coordination_root,
-        register_execution_evidence=(
-            None
-            if runtime.register_inbox_execution_evidence is None
-            else partial(
-                runtime.register_inbox_execution_evidence,
-                runtime.config.coordination_root,
-            )
-        ),
-        stale_seat_seconds=max(settings.agent_notifier.interval_seconds * 4, 60.0),
-        redeliver_rate_limit_seconds=settings.agent_notifier.redeliver_rate_limit_seconds,
-        signal_cooldown_seconds=settings.agent_notifier.signal_cooldown_seconds,
-        redeliver_budget=settings.agent_notifier.redeliver_budget,
-        escalation_budget=settings.agent_notifier.escalation_budget,
-    )
-
-
-async def _agent_notifier_loop(runtime: _ServingRuntime) -> None:
-    """The notifier sweep loop, with last-good settings resilience (R7/N5).
-
-    ``load_agentic_settings`` runs INSIDE the loop's try: a failed read keeps the previous
-    good configuration for that sweep, fails loud per tick, and never kills the loop. Only
-    with no last-good snapshot at all does the loop skip the sweep and retry next interval.
-    """
-    last_good: AgenticSettings | None = None
-    while True:
-        try:
-            settings = load_agentic_settings(runtime.config.coordination_root)
-            last_good = settings
-        except Exception:
-            if last_good is None:
-                logger.exception(
-                    "agent-notifier settings load failed; no last-good settings yet; "
-                    "retrying next interval"
-                )
-                await asyncio.sleep(DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS)
-                continue
-            logger.exception(
-                "agent-notifier settings load failed; using last-good settings for this sweep"
-            )
-            settings = last_good
-        try:
-            if not settings.agent_notifier.enabled:
-                await asyncio.sleep(settings.agent_notifier.interval_seconds)
-                continue
-            # Notifier predicates depend on current control/turn boundaries. Dashboard HTTP
-            # clients also refresh this catalog, but delivery correctness must not depend on a
-            # browser polling ``/api/terminal/sessions``. Refresh through the one liveness owner
-            # immediately before each headless notifier sweep.
-            await _to_thread_drained_on_cancel(runtime.liveness_sweeper.refresh)
-            ctx = _agent_notifier_context(runtime, settings=settings)
-            await _to_thread_drained_on_cancel(
-                run_agent_notifier_sweep,
-                ctx,
-                now=runtime.liveness_clock(),
-            )
-        except Exception:
-            logger.exception("agent-notifier sweep failed; retrying next interval")
-        await asyncio.sleep(settings.agent_notifier.interval_seconds)
 
 
 async def _held_delivery_loop(runtime: _ServingRuntime) -> None:
@@ -309,7 +138,7 @@ async def _workspace_river_compaction_loop(runtime: _ServingRuntime) -> None:
         await asyncio.sleep(WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS)
         try:
             await asyncio.to_thread(
-                compact_workspace_river, runtime.observer_root, now=runtime.liveness_clock()
+                compact_workspace_river, runtime.observer_root, now=runtime.clock()
             )
         except Exception:
             logger.exception("workspace event-river compaction failed; retrying next interval")
@@ -322,32 +151,15 @@ def _serving_lifespan(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        await asyncio.to_thread(
-            migrate_control_plane_identity_logs,
-            runtime.config.coordination_root,
-            include_agent_notifier_signals=True,
-        )
         # Compact once before accepting clients, then keep compacting on a slow live
         # cadence. Workspace cursors are virtual (base offset + physical offset), and append/compact/read
         # share a cross-process lock, so this is cursor-safe while MCP and serving processes both write.
-        await asyncio.to_thread(
-            compact_workspace_river, runtime.observer_root, now=runtime.liveness_clock()
-        )
-        # One serving-lifetime health accumulator, and its initial record, BEFORE the prime: the
-        # first observation's own outcome is then the first transition published, and a failed
-        # initial write costs the counters nothing (the file simply stays absent, so the served
-        # key is omitted until a later legitimate observation write succeeds).
-        runtime.observer_health.start_lifetime()
-        # One pre-serve observation prime: it completes (or its recoverable failure is contained)
-        # before the projection is built and before any recurring loop exists.
-        await _prime_terminal_observation(runtime)
+        await asyncio.to_thread(compact_workspace_river, runtime.observer_root, now=runtime.clock())
         await runtime.projector.prime()
         projection_task = asyncio.create_task(runtime.projector.run())
         metrics_task = asyncio.create_task(_metrics_loop(runtime.config, metrics_store))
-        terminal_observation_task = asyncio.create_task(_terminal_observation_loop(runtime))
-        agent_notifier_task = asyncio.create_task(_agent_notifier_loop(runtime))
+        archive_recovery_task = asyncio.create_task(_leaf_archive_recovery_loop(runtime))
         held_delivery_task = asyncio.create_task(_held_delivery_loop(runtime))
-        relay_death_watch_task = asyncio.create_task(relay_death_watch_loop(runtime))
         river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
         optional: list[asyncio.Task[None]] = []
         # The heap-growth diagnostic only exists when AR_HEAP_DIAG is set (tracemalloc started here
@@ -358,11 +170,9 @@ def _serving_lifespan(
         if malloc_trim_enabled():
             optional.append(asyncio.create_task(_malloc_trim_loop()))
         background = [
-            terminal_observation_task,
+            archive_recovery_task,
             river_compaction_task,
-            agent_notifier_task,
             held_delivery_task,
-            relay_death_watch_task,
             metrics_task,
             projection_task,
             *optional,
@@ -377,52 +187,5 @@ def _serving_lifespan(
             for task in background:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            runtime.host.shutdown()
 
     return lifespan
-
-
-# --- projection routes --------------------------------------------------------------------------
-
-
-def _agent_notifier_heartbeat_payload(runtime: _ServingRuntime) -> AgentNotifierHeartbeatPayload:
-    # The tick age at RESPONSE time (not the ETag-gated content revision --
-    # a heartbeat is deliberately volatile, the same "ages excluded" posture delta.py already
-    # applies to other live ages, so it never busts the projection's change-gate revision).
-    settings = load_agentic_settings(runtime.config.coordination_root)
-    moment = runtime.liveness_clock()
-    heartbeat = runtime.heartbeat_store.read()
-    age = heartbeat_age_seconds(heartbeat, now=moment)
-    stale_cutoff = settings.agent_notifier.stale_cutoff_seconds
-    return AgentNotifierHeartbeatPayload(
-        lastTickAt=heartbeat.lastTickAt if heartbeat is not None else None,
-        ageSeconds=age,
-        staleCutoffSeconds=stale_cutoff,
-        stale=age is None or age >= stale_cutoff,
-        pendingInboxCount=heartbeat.pendingInboxCount if heartbeat is not None else 0,
-        redeliverableInboxCount=(heartbeat.redeliverableInboxCount if heartbeat is not None else 0),
-        lastSweepDurationSeconds=(
-            heartbeat.lastSweepDurationSeconds if heartbeat is not None else None
-        ),
-    )
-
-
-def _terminal_observer_health_payload(
-    runtime: _ServingRuntime,
-) -> TerminalObserverHealthPayload | None:
-    """The producer stage's freshness at RESPONSE time, or ``None`` to omit the tail key.
-
-    Separate from the notifier heartbeat above because it answers a different question about a
-    different stage: the heartbeat says how recently the consumer swept, this says how recently
-    the producer OBSERVED and what that observation concluded. One combined bit is exactly the
-    ambiguity ``LOCR-R17@v1`` exists to remove.
-
-    The cutoff comes from the configured full-observation cadence, so browser traffic can never
-    refresh health, and the source is the persisted record only -- the read route never rewrites,
-    repairs, or creates it.
-    """
-
-    return runtime.observer_health.served_payload(
-        now=runtime.liveness_clock(),
-        sweep_interval_seconds=runtime.liveness_config.sweep_interval_seconds,
-    )

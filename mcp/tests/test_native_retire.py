@@ -8,7 +8,7 @@ from unittest.mock import patch
 from agents_remember.cli import role_launch_receipts as receipts
 from agents_remember.cli.role_launch_receipts import _read_receipt, _receipt_path
 from agents_remember.cli.role_retire import retire_native_seat
-from agents_remember.mcp.tools.structural_agent import retire_child_payload
+from agents_remember.mcp.tools.role_agents import retire_child_payload
 from agents_remember.models.role_launcher import RoleSelection
 from agents_remember.models.structural.agent import RetireChildRequest
 from test_paseo_launch import LEAF_REF, MASTER_REF, SPRINT_REF

@@ -36,7 +36,6 @@ def _bound_lifecycle() -> LifecycleState:
         started_at="2026-09-18T00:00:00+00:00",
         enclosure="/tmp/coordination/enclosures/other/contract.md",
         repo_id="repo",
-        scope="repo",
     )
 
 

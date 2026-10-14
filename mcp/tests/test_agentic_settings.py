@@ -17,30 +17,27 @@ import tempfile
 import unittest
 import warnings
 from pathlib import Path
-from types import SimpleNamespace
-from typing import ClassVar, cast
+from typing import ClassVar
 from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.application import terminal_tools
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.kernel.agentic_settings import (
+    HARNESS_IDS,
     AgenticSettingsError,
     RoleKnobs,
     agentic_settings_path,
     load_agentic_settings,
     merge_settings,
-    user_agentic_settings_path,
 )
 from agents_remember.kernel.coordination_context.settings import parse_coordination_settings
-from agents_remember.kernel.harnesses import HARNESSES
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.recorded_reads import bytes_identity, recorded_reads
 
 
 def write_settings(root: Path, data: dict, *, user: bool = True) -> Path:
-    path = user_agentic_settings_path() if user else agentic_settings_path(root)
+    path = user_settings_path_for_write() if user else agentic_settings_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return path
@@ -91,7 +88,7 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertEqual(
             settings.sources,
             (
-                user_agentic_settings_path(),
+                user_settings_path_for_write(),
                 agentic_settings_path(self.repo_root),
             ),
         )
@@ -159,7 +156,7 @@ class FailLoudTests(unittest.TestCase):
         self.assertIn(str(local_path), str(caught.exception))
 
     def test_malformed_json_fails_loud_with_path(self) -> None:
-        path = user_agentic_settings_path()
+        path = user_settings_path_for_write()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{broken", encoding="utf-8")
 
@@ -352,9 +349,9 @@ class RolesPerLevelTests(unittest.TestCase):
 
 
 class HarnessesFamilyTests(unittest.TestCase):
-    """260703-L16 registry openness: orchestration.harnesses extends/overrides the builtin registry
-    (new ids add, builtin ids pre-customize), with fail-loud shapes, delivery-vehicle pair rules,
-    and harness references validated against the EFFECTIVE id set."""
+    """``orchestration.harnesses``: an entry under a new id adds that id to the effective id set,
+    an entry's keys load without being read and are named in ``unused_keys``, and a harness
+    reference is checked against the EFFECTIVE id set of the merged layers."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -375,37 +372,31 @@ class HarnessesFamilyTests(unittest.TestCase):
             self.coordination_root, self.repo_root if local is not None else None
         )
 
-    def test_new_id_adds_a_harness_with_defaults_derived(self) -> None:
+    def test_new_id_joins_the_id_set_and_its_entry_key_is_named_unused(self) -> None:
         settings = self._load({"harnesses": {"hermes": {"command": "hermes"}}})
-        hermes = settings.find_harness("hermes")
-        assert hermes is not None
-        self.assertEqual(hermes.argv, ("hermes",))
-        self.assertEqual(hermes.name, "hermes")
-        self.assertEqual(hermes.defined_in, "settings")
-        # Builtin order is preserved; new ids append. The builtin prefix is read from the curated
+        # Builtin order is preserved; new ids append. The builtin prefix is read from the id
         # table rather than transcribed, so the assertion cannot pass after a silent reorder.
-        expected = [harness.id for harness in HARNESSES] + ["hermes"]
-        self.assertEqual([h.id for h in settings.harnesses], expected)
+        self.assertEqual(settings.harness_ids, (*HARNESS_IDS, "hermes"))
+        self.assertEqual(settings.unused_keys, ("orchestration.harnesses.hermes.command",))
 
-    def test_a_builtin_override_keeps_its_runtime_readiness_probe(self) -> None:
-        # eve is detected through a runtime readiness probe, not a PATH lookup. A settings override
-        # customizes the launch mapping; it must not downgrade detection to ``which`` over a command
-        # that was never a PATH program.
-        settings = self._load({"harnesses": {"eve": {"argv": ["custom-eve", "--flag"]}}})
-        eve = settings.find_harness("eve")
-        assert eve is not None
-        builtin = next(harness for harness in HARNESSES if harness.id == "eve")
-        self.assertIsNotNone(builtin.runtime_probe)
-        self.assertEqual(eve.runtime_probe, builtin.runtime_probe)
-        self.assertEqual(eve.argv, ("custom-eve", "--flag"))
-        # A settings-defined id declares no runtime of its own, so it has no probe to inherit.
-        added = self._load({"harnesses": {"hermes": {"command": "hermes"}}}).find_harness("hermes")
-        assert added is not None
-        self.assertIsNone(added.runtime_probe)
+    def test_a_builtin_id_entry_adds_no_id_and_only_an_unknown_entry_key_is_refused(self) -> None:
+        # An empty ``argv`` is a shape no launch could use: an entry's keys are not read.
+        settings = self._load({"harnesses": {"eve": {"argv": [], "name": 7}}})
+        self.assertEqual(settings.harness_ids, HARNESS_IDS)
+        self.assertEqual(
+            settings.unused_keys,
+            ("orchestration.harnesses.eve.argv", "orchestration.harnesses.eve.name"),
+        )
+        for entry in ({"runtimeProbe": "eve"}, "custom-eve"):
+            with (
+                self.subTest(entry=entry),
+                self.assertRaisesRegex(AgenticSettingsError, r"orchestration\.harnesses\.eve"),
+            ):
+                self._load({"harnesses": {"eve": entry}})
 
-    def test_cross_layer_reference_and_partial_override_merge(self) -> None:
-        # The GLOBAL layer declares hermes; the LOCAL layer may reference it and override a single
-        # leaf (per-file validation is shape-only; cross-references bind on the MERGED block).
+    def test_cross_layer_reference_binds_on_the_merged_ids_and_names_each_key_once(self) -> None:
+        # The GLOBAL layer declares hermes; the LOCAL layer may reference it and hold the same
+        # entry key (per-file validation is shape-only; cross-references bind on the MERGED block).
         settings = self._load(
             {"harnesses": {"hermes": {"command": "hermes", "argv": ["hermes", "--global"]}}},
             local={
@@ -413,14 +404,64 @@ class HarnessesFamilyTests(unittest.TestCase):
                 "spawn": {"harness": "hermes"},
             },
         )
-        hermes = settings.find_harness("hermes")
-        assert hermes is not None
-        self.assertEqual(hermes.argv, ("hermes", "--local"))
         self.assertEqual(settings.spawn_harness, "hermes")
+        self.assertEqual(settings.harness_ids, (*HARNESS_IDS, "hermes"))
+        self.assertEqual(
+            settings.unused_keys,
+            ("orchestration.harnesses.hermes.argv", "orchestration.harnesses.hermes.command"),
+        )
 
-    def test_reference_to_an_id_known_nowhere_fails_naming_the_manual(self) -> None:
-        with self.assertRaisesRegex(AgenticSettingsError, "harnesses.md"):
+    def test_reference_to_an_id_known_nowhere_fails_naming_the_field_and_the_ids(self) -> None:
+        with self.assertRaises(AgenticSettingsError) as refused:
             self._load({"spawn": {"harness": "hermes"}})
+        for text in ("orchestration.spawn.harness", "'hermes'", ", ".join(HARNESS_IDS)):
+            self.assertIn(text, str(refused.exception))
+
+
+class UnusedKeysTests(unittest.TestCase):
+    """A key only an earlier build read loads, is not read, and is named in ``unused_keys``."""
+
+    def test_orchestration_and_role_keys_of_an_earlier_build_load_with_any_value_and_are_named(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            coordination = Path(folder) / "coord"
+            # No value has a shape a reader of its key could use, and ``supervisor`` stands beside
+            # ``agentNotifier``: none of these keys is read or checked, alone or together.
+            write_settings(
+                coordination,
+                {
+                    "orchestration": {
+                        "agentNotifier": {"enabled": "perhaps"},
+                        "supervisor": 7,
+                        "expectations": [],
+                        "roles": {"worker": {"harness": "codex", "launchArgs": "--fast"}},
+                        "rolesPerLevel": {
+                            "leaf": {
+                                "worker": {
+                                    "launchArgs": 3,
+                                    "promptKeywords": None,
+                                    "sessionCommands": {},
+                                }
+                            }
+                        },
+                    }
+                },
+            )
+            settings = load_agentic_settings(coordination)
+        self.assertEqual(
+            settings.unused_keys,
+            (
+                "orchestration.agentNotifier",
+                "orchestration.expectations",
+                "orchestration.supervisor",
+                "orchestration.roles.worker.launchArgs",
+                "orchestration.rolesPerLevel.leaf.worker.launchArgs",
+                "orchestration.rolesPerLevel.leaf.worker.promptKeywords",
+                "orchestration.rolesPerLevel.leaf.worker.sessionCommands",
+            ),
+        )
+        self.assertEqual(settings.resolved_role_knobs("worker", "leaf"), RoleKnobs(harness="codex"))
 
 
 class RoleMessageLimitSettingsTests(unittest.TestCase):
@@ -537,22 +578,6 @@ class ServiceTierSettingsTests(unittest.TestCase):
             with self.assertRaisesRegex(AgenticSettingsError, "fast"):
                 load_agentic_settings(root)
 
-    def test_legacy_terminal_route_refuses_configured_tier_instead_of_dropping_it(self) -> None:
-
-        settings = SimpleNamespace(
-            resolved_role_knobs=lambda *_args: RoleKnobs(service_tier="fast")
-        )
-        with patch.object(terminal_tools, "load_agentic_settings", return_value=settings):
-            dispatch, refusal = terminal_tools._resolve_harness_dispatch(
-                cast(McpRuntimeConfig, SimpleNamespace(coordination_root=Path("/unused"))),
-                task_document_ref=None,
-                level=None,
-                env={"AR_SPAWN_ROLE": "architect"},
-                which=None,
-            )
-        self.assertIsNone(dispatch)
-        self.assertIn("serviceTier", cast(dict[str, str], refusal)["detail"])
-
 
 class UserSettingsLocationTests(unittest.TestCase):
     def test_user_file_is_read_per_use_and_repository_file_keeps_its_location(self) -> None:
@@ -594,14 +619,14 @@ class UserSettingsLocationTests(unittest.TestCase):
     def test_default_home_and_explicit_xdg_select_only_their_own_file(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             home = Path(folder) / "sandbox-home"
-            inherited = user_agentic_settings_path()
+            inherited = user_settings_path_for_write()
             inherited.parent.mkdir(parents=True, exist_ok=True)
             inherited.write_text('{"orchestration":{"roles":{"worker":{"model":"outside"}}}}')
             with (
                 patch.dict(os.environ, {}, clear=True),
                 patch("pathlib.Path.home", return_value=home),
             ):
-                path = user_agentic_settings_path()
+                path = user_settings_path_for_write()
                 self.assertEqual(path, home / ".config/agents-remember/settings.json")
                 path.parent.mkdir(parents=True)
                 path.write_text('{"orchestration":{"roles":{"worker":{"model":"sandbox"}}}}')
@@ -611,7 +636,7 @@ class UserSettingsLocationTests(unittest.TestCase):
                 )
                 with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(Path(folder) / "xdg")}):
                     self.assertEqual(
-                        user_agentic_settings_path(),
+                        user_settings_path_for_write(),
                         Path(folder) / "xdg/agents-remember/settings.json",
                     )
                     self.assertIsNone(
@@ -622,7 +647,7 @@ class UserSettingsLocationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             coordination = Path(folder) / "coord"
             old = agentic_settings_path(coordination)
-            new = user_agentic_settings_path()
+            new = user_settings_path_for_write()
             old.parent.mkdir(parents=True)
             old.write_text("not JSON and never parsed")
             for both in (False, True):
@@ -652,7 +677,7 @@ class UserSettingsLocationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             coordination = Path(folder) / "coord"
             notes = coordination / "system/settings.md"
-            new = user_agentic_settings_path()
+            new = user_settings_path_for_write()
             new.parent.mkdir(parents=True, exist_ok=True)
             data = b'{"storage":{"mode":"memory-repo"},"crossRepo":{"allow":[]}}'
             new.write_bytes(data)

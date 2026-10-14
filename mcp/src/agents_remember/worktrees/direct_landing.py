@@ -70,7 +70,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     GatePolicyRule,
     make_gate_policy,
 )
-from agents_remember.kernel.primitives.gate_vocab import GateKind
+from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT, GateKind
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout.input import (
@@ -649,7 +649,7 @@ def _claim_direct_review_gate(
     if not guard.permitted:
         raise DirectLandingError(
             "direct-landing-review-refused",
-            f"direct landing review record refuses: {guard.reason}",
+            f"direct landing review record refuses: {guard.reason}. {STORED_GATE_WAY_OUT}",
         )
 
 

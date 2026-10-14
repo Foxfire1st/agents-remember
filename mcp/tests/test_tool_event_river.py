@@ -55,6 +55,7 @@ from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
     install_ambient,
+    new_ulid,
     reset_ambient,
 )
 from agents_remember.observer import event_retention as retention_module
@@ -324,7 +325,7 @@ class ToolEventRiverTests(unittest.TestCase):
         self._install(ToolCaller(role="worker", agent_id="agent-1"))
         ambient = AmbientLifecycle(self.store)
         install_ambient(ambient)
-        current = ambient.start()
+        current = ambient.attach(new_ulid(), enclosure=str(self.root / "contract.json"))
 
         complete_tool_response("server_info", _server_info_payload())
 

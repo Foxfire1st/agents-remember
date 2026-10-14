@@ -53,7 +53,7 @@ def test_standalone_manager_handoff_sentence_is_retired_without_preserved_contex
     preserved = (
         "An artifact defect is owner-detected. A missing, malformed, or stale artifact is a handoff "
         "defect the owner finds after wake; it nudges, rejects, replaces, or escalates under existing "
-        "doctrine instead of waiting for an imaginary notifier artifact check."
+        "doctrine instead of waiting for an imaginary artifact check by the relay."
     )
     assert retired_statement_findings(normalize_statement(preserved), relative) == []
 

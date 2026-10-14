@@ -39,7 +39,6 @@ export function buildEngineRoomModel(
         enclosureKey: node.worktreeGroup,
         node,
         lifecycle,
-        gate: lifecycle?.gate,
       };
     })
     .sort((a, b) => {

@@ -12,7 +12,6 @@ import type {
 } from '../../types/projection';
 import type { TaskDocumentBodyState } from '../../data/useTaskDocumentBody';
 import type { ChangeSetTarget } from '../changeset/ChangeSetViewer';
-import { GateResponder } from '../GateResponder';
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from '../../data/taskArtifacts';
 import { ChangeSetButton } from './changeSetBar';
 import { seriesAsMasterDoc, seriesSliceDocs, sliceForSlug, type MasterDocView } from './model';
@@ -220,17 +219,6 @@ function PhaseStepper({ currentIdx }: { currentIdx: number }) {
       ))}
     </ol>
   );
-}
-
-function GateSection({ lifecycle }: { lifecycle: LifecycleProjection }) {
-  return lifecycle.gate ? (
-    <GateResponder
-      lifecycleId={lifecycle.id}
-      gateNode={lifecycle.gate}
-      ask={lifecycle.ask}
-      testId="gate-review"
-    />
-  ) : null;
 }
 
 function SeriesBranch({
@@ -491,7 +479,6 @@ export function LifecycleDetailBody({
 
       <PhaseStepper currentIdx={derived.currentIdx} />
 
-      <GateSection lifecycle={lifecycle} />
 
       <DetailBody
         state={state}

@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
-from agents_remember.kernel.agentic_settings import user_agentic_settings_path
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.mcp.tools.core import runtime_install_payload
@@ -40,7 +40,7 @@ def write_host(root, version_marker):
     }
     if version_marker is not None:
         block["version"] = version_marker
-    path = user_agentic_settings_path()
+    path = user_settings_path_for_write()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"paseoRuntime": block}))
     return settings
@@ -74,7 +74,7 @@ def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
         second = run_runtime_install(config, RuntimeInstallRequest())
         second_mutations = fake.mutations(at)
         second_files = file_states(tmp_path)
-        shared = user_agentic_settings_path()
+        shared = user_settings_path_for_write()
         document = json.loads(shared.read_text())
         document["paseoRuntime"]["providers"]["new-provider"] = {"extends": "acp"}
         shared.write_text(json.dumps(document))
@@ -101,7 +101,7 @@ def test_install_reads_added_shared_block_at_call_and_provisions_once(tmp_path):
     assert whole["summary"] == previous["summary"]
     assert whole["host"]["version"] == PASEO_VERSION
     assert "latest" in whole["host"]["notice"]
-    assert str(user_agentic_settings_path()) in whole["host"]["notice"]
+    assert str(user_settings_path_for_write()) in whole["host"]["notice"]
     assert fake.mutations().count(("npm", "ci")) == 1
     assert {
         "ok",
@@ -144,7 +144,7 @@ def test_preview_and_absent_host_make_no_mutation_and_host_error_preserves_earli
     ):
         result = run_runtime_install(config, RuntimeInstallRequest(dry_run=True))
     assert not result["host"]["configured"]
-    assert not (user_agentic_settings_path()).exists()
+    assert not (user_settings_path_for_write()).exists()
     settings = write_host(tmp_path, None)
     fake = FakePaseo(settings)
     before = file_states(tmp_path)
@@ -218,7 +218,7 @@ def test_build_pin_wins_all_settings_selectors_and_legacy_harness_block_is_ignor
         assert fake.version_at(settings.install_prefix) == PASEO_VERSION
         if selector not in (None, PASEO_VERSION):
             assert actual.version_notice and str(selector) in actual.version_notice
-    shared = user_agentic_settings_path()
+    shared = user_settings_path_for_write()
     shared.unlink(missing_ok=True)
     document = json.loads(config.config_path.read_text())
     document["paseoRuntime"] = {"listen": "127.0.0.1:9786"}

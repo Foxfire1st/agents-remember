@@ -42,17 +42,14 @@ const dot = cva({
       running: { color: "cyan" },
       // Not `dormant`. `paused` and `abandoned` both rendered the dormant tone with no other
       // difference, so a live lifecycle a developer can resume looked exactly like a dead one in
-      // the same list. `dormant` is the terminal tone (the session grammar spends it on
-      // landed/retired/exited), so it stays with `abandoned`; `paused` takes the muted-amber the
-      // session grammar already rules for `waiting` — parked, not broken, not over.
+      // the same list. `dormant` is the terminal tone, so it stays with `abandoned`; `paused`
+      // takes a muted amber — parked, not broken, not over.
       //
       // Mixed in OKLAB, not OKLCH. `color-mix` interpolates polar hue along the SHORTER arc, and
       // amber (h 75) to muted (h 250) is 175° — just under the half turn — so the short way runs
       // through h 145 and an "in oklch" mix of amber and grey renders GREEN, a hand's breadth from
       // `mint`. Verified in Chromium against the built stylesheet, which is the only place that
       // shows: OKLCH computes oklch(0.772 0.104 145), OKLAB computes oklch(0.772 0.088 75).
-      // (`panels/session-cockpit/StateDot.tsx` mixes its own `mutedAmber` in oklch and so renders
-      // the same green — pre-existing, outside this leaf's files, reported rather than touched.)
       paused: { color: "color-mix(in oklab, token(colors.amber) 60%, token(colors.muted))" },
       // The app-wide alarm register (index.css `@keyframes pulse`, ≤3 flashes/s and so inside WCAG
       // 2.3.1) — shared with signal-lost, `caution--alarm` and the down-engine silhouette. Confined
@@ -65,7 +62,7 @@ const dot = cva({
         _motionReduce: { animation: "none" },
       },
       // The NOTIFY-AND-CONTINUE turn end — the developer holds the turn. Amber is the palette's one
-      // "wants you, is not broken" hue (the session grammar rules it for `awaiting-input`), and the
+      // "wants you, is not broken" hue, and the
       // diamond is the mark: a decision waiting on a person. The breathe is the slow ease-in-out of
       // the developer's 2026-07-16 ruling, never the fault strobe above, and it sits on top of the
       // colour rather than carrying the state.

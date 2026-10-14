@@ -100,7 +100,6 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
         # Roles and seats.
         "role_start",
         "role_message",
-        "dispatch_agent",
         # L100: starting and retiring agents changes seats.
         "role_start_set",
         "retire_child",

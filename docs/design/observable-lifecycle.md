@@ -1,8 +1,10 @@
 # Observable Lifecycle, Events, and Gates — the Agents Remember 3.0 Design
 
-**Status:** Design — approved, pre-implementation; amended by MIK-R112, which removed the
-model-facing signal tools (§1.3). States, events, gates, and the ambient correlation below
-stay as designed; the transitions that were model-invoked signals are now session-driven.
+**Status:** History as of MIK-R113 (2026-10-12), which removed the session lifecycle, its
+signal tools (taken from the tool list by MIK-R112), the gates raised to the developer and the
+product's own hosting of agent sessions. This document records the Agents Remember 3.0 design of
+those parts; it is kept as the record of what was designed, not as a live design. The present
+tool surface stands in `docs/reference/mcp-tools.md`.
 
 **Scope:** the architecture that makes the Agents Remember lifecycle *observable* and
 *controllable* — a first-class lifecycle entity, an append-only event substrate with

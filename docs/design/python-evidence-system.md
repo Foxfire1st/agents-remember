@@ -116,8 +116,8 @@ values; within those rules a change is data that a reviewer of a diff reads like
 
 This document states no size of the inventory and no split by kind or lifetime, because every
 change that adds or retires an artifact would change them; the validator prints the current number
-of governed artifacts. The permanent population includes the source-derived ambient role-chat E2E
-harness; there is no surviving task/date-shaped migration proof in the governed population.
+of governed artifacts. The permanent population includes the fresh-user acceptance harness; there
+is no surviving task/date-shaped migration proof in the governed population.
 
 ## Fixture authority
 

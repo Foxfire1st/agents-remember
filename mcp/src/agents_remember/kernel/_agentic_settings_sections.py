@@ -1,5 +1,5 @@
-"""``orchestration`` section parsers: loops, roles, concurrency, expectations,
-agent-notifier, spawn, and the quality gate."""
+"""``orchestration`` section parsers: loops, roles, concurrency, harness ids, spawn, and the
+quality gate."""
 
 from __future__ import annotations
 
@@ -7,19 +7,11 @@ from typing import Any
 
 from agents_remember.kernel._agentic_settings_core import (
     COMPLEXITY_SCALE,
-    DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET,
-    DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
-    DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET,
-    DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
-    DEFAULT_EXPECTATION_SLA_SECONDS,
     DEFAULT_LOOP_MAX_ROUNDS,
     DEFAULT_LOOP_PER_LEVEL,
-    DEFAULT_RATE_LIMIT_SECONDS,
     DEFAULT_REVIEWER_REUSE,
-    KNOWN_AGENT_NOTIFIER_FIELDS,
+    HARNESS_IDS,
     KNOWN_CONCURRENCY_FIELDS,
-    KNOWN_EXPECTATION_KINDS,
-    KNOWN_EXPECTATIONS_FIELDS,
     KNOWN_LOOP_COMPLEXITY_FIELDS,
     KNOWN_LOOP_DEFAULTS_FIELDS,
     KNOWN_LOOP_LEVEL_FIELDS,
@@ -29,26 +21,20 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_ROLE_KNOB_FIELDS,
     KNOWN_ROLES,
     KNOWN_SPAWN_FIELDS,
+    UNUSED_HARNESS_ENTRY_FIELDS,
+    UNUSED_ROLE_KNOB_FIELDS,
     AgenticSettingsError,
-    AgentNotifierSettings,
     ConcurrencySettings,
-    ExpectationSettings,
     LoopComplexity,
     LoopDefaults,
     LoopSettings,
     QualityGateSettings,
     RoleKnobs,
     _refuse_unknown,
-    _require_bool,
     _require_harness_id,
     _require_object,
     _require_positive_int,
-    _require_positive_number,
     _require_string,
-    _require_string_list,
-)
-from agents_remember.kernel.primitives.inbox_backoff import (
-    MIN_REDELIVERY_INTERVAL_SECONDS,
 )
 
 
@@ -163,7 +149,9 @@ def _parse_roles(
     parsed: dict[str, RoleKnobs] = {}
     for role, value in roles.items():
         knobs = _require_object(value, f"{owner}.{role}", source)
-        _refuse_unknown(knobs, KNOWN_ROLE_KNOB_FIELDS, f"{owner}.{role}", source)
+        _refuse_unknown(
+            knobs, KNOWN_ROLE_KNOB_FIELDS | UNUSED_ROLE_KNOB_FIELDS, f"{owner}.{role}", source
+        )
         harness = None
         if "harness" in knobs:
             harness = _require_string(
@@ -176,30 +164,9 @@ def _parse_roles(
             model = _require_string(knobs["model"], f"{owner}.{role}.model", source)
         effort = None
         if "effort" in knobs:
-            # Deliberately a free string here: the native adapter's dynamic catalog validates it at
-            # launch; an explicitly mapped non-native harness validates it at dispatch.
+            # Deliberately a free string here: the host's catalog validates it at launch.
             effort = _require_string(knobs["effort"], f"{owner}.{role}.effort", source)
         service_tier = _parse_service_tier(knobs, f"{owner}.{role}", source)
-        # The free-form escape hatch (260703-L16): shape-checked, never content-validated.
-        launch_args: tuple[str, ...] = ()
-        if "launchArgs" in knobs:
-            launch_args = _require_string_list(
-                knobs["launchArgs"], f"{owner}.{role}.launchArgs", source
-            )
-        prompt_keywords: tuple[str, ...] = ()
-        if "promptKeywords" in knobs:
-            prompt_keywords = _require_string_list(
-                knobs["promptKeywords"],
-                f"{owner}.{role}.promptKeywords",
-                source,
-            )
-        session_commands: tuple[str, ...] = ()
-        if "sessionCommands" in knobs:
-            session_commands = _require_string_list(
-                knobs["sessionCommands"],
-                f"{owner}.{role}.sessionCommands",
-                source,
-            )
         parsed[role] = RoleKnobs(
             harness=harness,
             model=model,
@@ -210,9 +177,6 @@ def _parse_roles(
             feature_values=_parse_feature_values(
                 knobs.get("featureValues", {}), f"{owner}.{role}.featureValues", source
             ),
-            launch_args=launch_args,
-            prompt_keywords=prompt_keywords,
-            session_commands=session_commands,
         )
     return parsed
 
@@ -309,114 +273,27 @@ def _parse_concurrency(raw: object, *, source: str) -> ConcurrencySettings:
     return ConcurrencySettings(**parsed)
 
 
-# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/_agentic_settings_sections.py:262).
-def _parse_expectations(raw: object, *, source: str) -> ExpectationSettings:  # pragma: no cover
-    """``orchestration.expectations.defaults``: per-kind SLA seconds, hyphenated kind keys
-    (matching the expectation-row kind vocabulary), overriding :data:`DEFAULT_EXPECTATION_SLA_SECONDS`
-    entry-by-entry -- an omitted kind keeps its documented default."""
-    if raw is None:
-        return ExpectationSettings()
-    block = _require_object(raw, "orchestration.expectations", source)
-    _refuse_unknown(block, KNOWN_EXPECTATIONS_FIELDS, "orchestration.expectations", source)
-    sla_seconds = dict(DEFAULT_EXPECTATION_SLA_SECONDS)
-    raw_defaults = block.get("defaults")
-    if raw_defaults is not None:
-        defaults = _require_object(raw_defaults, "orchestration.expectations.defaults", source)
-        for kind, value in defaults.items():
-            if kind not in KNOWN_EXPECTATION_KINDS:
-                allowed = ", ".join(sorted(KNOWN_EXPECTATION_KINDS))
-                raise AgenticSettingsError(
-                    f"orchestration.expectations.defaults key {kind!r} is not a known "
-                    f"expectation kind; allowed: {allowed}: {source}"
-                )
-            owner = f"orchestration.expectations.defaults.{kind}"
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-                raise AgenticSettingsError(
-                    f"{owner} must be a positive number of seconds: {source}"
-                )
-            sla_seconds[kind] = float(value)
-    return ExpectationSettings(sla_seconds=sla_seconds)
+def _parse_harnesses(raw: object, *, source: str) -> tuple[str, ...]:
+    """``orchestration.harnesses``: the effective harness ids.
 
-
-def _parse_agent_notifier(raw: object, *, source: str) -> AgentNotifierSettings:
-    """``orchestration.agentNotifier``: the deterministic sweep's own knobs (R1/R5).
-
-    Absent -> the documented defaults (enabled, 10s interval, 60s staleness cutoff, inbox-store
-    redelivery rate limit inherited).
+    The builtin ids come first; an entry under a new id ADDS that id. An entry is an object;
+    the keys an earlier build read from it are accepted and not read.
     """
     if raw is None:
-        return AgentNotifierSettings()
-    block = _require_object(raw, "orchestration.agentNotifier", source)
-    _refuse_unknown(block, KNOWN_AGENT_NOTIFIER_FIELDS, "orchestration.agentNotifier", source)
-    enabled = (
-        _require_bool(block["enabled"], "orchestration.agentNotifier.enabled", source)
-        if "enabled" in block
-        else True
-    )
-    interval_seconds = (
-        _require_positive_number(
-            block["intervalSeconds"], "orchestration.agentNotifier.intervalSeconds", source
-        )
-        if "intervalSeconds" in block
-        else DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS
-    )
-    stale_cutoff_seconds = (
-        _require_positive_number(
-            block["staleCutoffSeconds"], "orchestration.agentNotifier.staleCutoffSeconds", source
-        )
-        if "staleCutoffSeconds" in block
-        else DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS
-    )
-    redeliver_rate_limit_seconds = (
-        _require_agent_notifier_floor_seconds(
-            block["redeliverRateLimitSeconds"],
-            "orchestration.agentNotifier.redeliverRateLimitSeconds",
-            source,
-        )
-        if "redeliverRateLimitSeconds" in block
-        else None
-    )
-    signal_cooldown_seconds = (
-        _require_agent_notifier_floor_seconds(
-            block["signalCooldownSeconds"],
-            "orchestration.agentNotifier.signalCooldownSeconds",
-            source,
-        )
-        if "signalCooldownSeconds" in block
-        else DEFAULT_RATE_LIMIT_SECONDS
-    )
-    redeliver_budget = (
-        _require_positive_int(
-            block["redeliverBudget"], "orchestration.agentNotifier.redeliverBudget", source
-        )
-        if "redeliverBudget" in block
-        else DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET
-    )
-    escalation_budget = (
-        _require_positive_int(
-            block["escalationBudget"], "orchestration.agentNotifier.escalationBudget", source
-        )
-        if "escalationBudget" in block
-        else DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET
-    )
-    return AgentNotifierSettings(
-        enabled=enabled,
-        interval_seconds=interval_seconds,
-        stale_cutoff_seconds=stale_cutoff_seconds,
-        redeliver_rate_limit_seconds=redeliver_rate_limit_seconds,
-        signal_cooldown_seconds=signal_cooldown_seconds,
-        redeliver_budget=redeliver_budget,
-        escalation_budget=escalation_budget,
-    )
-
-
-def _require_agent_notifier_floor_seconds(raw: object, owner: str, source: str) -> float:
-    value = _require_positive_number(raw, owner, source)
-    if value < MIN_REDELIVERY_INTERVAL_SECONDS:
-        raise AgenticSettingsError(
-            f"{owner} must be at least {MIN_REDELIVERY_INTERVAL_SECONDS:g} seconds: {source}"
-        )
-    return value
+        return HARNESS_IDS
+    block = _require_object(raw, "orchestration.harnesses", source)
+    ids = list(HARNESS_IDS)
+    for harness_id, value in block.items():
+        if not isinstance(harness_id, str) or not harness_id:
+            raise AgenticSettingsError(
+                f"orchestration.harnesses keys must be non-empty harness ids: {source}"
+            )
+        owner = f"orchestration.harnesses.{harness_id}"
+        entry = _require_object(value, owner, source)
+        _refuse_unknown(entry, UNUSED_HARNESS_ENTRY_FIELDS, owner, source)
+        if harness_id not in ids:
+            ids.append(harness_id)
+    return tuple(ids)
 
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/_agentic_settings_sections.py:369).

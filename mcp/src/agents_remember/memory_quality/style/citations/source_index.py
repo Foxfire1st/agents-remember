@@ -797,7 +797,7 @@ def _git_candidate_paths(root: Path) -> frozenset[str] | None:
     """The paths Git reports as ``root``'s own, or ``None`` when ``root`` is not a work tree.
 
     D18: default acquisition used to index every file its skip lists did not name, so a
-    machine-local, gitignored scratch tree (this experiment's ``eve_runtime/.eve`` dev hosts) counted
+    machine-local, gitignored scratch tree counted
     against the index's per-file and aggregate caps and made the mandatory memory-quality checks
     *error* on a checkout whose tracked content is inside both. The population is therefore asked of
     Git -- ``ls-files --cached --others --exclude-standard``: everything Git reports as this work

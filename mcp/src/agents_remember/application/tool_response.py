@@ -13,7 +13,6 @@ import json
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -39,7 +38,6 @@ from agents_remember.application.tool_answer_log import (
     resolve_log_roots,
     write_diff_report,
 )
-from agents_remember.kernel.agentic_settings import DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS
 from agents_remember.models.base import NextStep, ResponseEnvelope
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import (
@@ -53,7 +51,6 @@ from agents_remember.models.tools.tool_answer import (
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.tool_events import record_tool_completed
-from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_staleness_banner
 
 _RESPONSE_PATH_FIELDS = ("contractPath", "enclosurePath")
 _ARGUMENT_PATH_FIELDS = (
@@ -133,35 +130,14 @@ def bound_next_step(response: ResponseEnvelope, step: NextStep | None) -> NextSt
     return step
 
 
-def _agent_notifier_banner(amb: AmbientLifecycle) -> str | None:
-    """Return the stale-agent-notifier banner without blocking a tool response."""
-    try:
-        return agent_notifier_staleness_banner(
-            amb.root,
-            now=datetime.now(UTC),
-            stale_cutoff_seconds=DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
-        )
-    except Exception:
-        return None
-
-
 def _attach_lifecycle_tail(
     response: ResponseEnvelope, amb: AmbientLifecycle, tool_name: str
 ) -> None:
-    if (
-        amb.current is not None
-        and amb.current.state == "awaiting-developer"
-        and tool_name != "lifecycle_turn_end_notification"
-    ):
-        amb.resume_from_await()
     # A refusal/recovery producer may supply an explicit nextStep alongside its top-level
     # recovery keys. Preserve that one authority instead of overwriting it with ambient phase
     # guidance derived from a contract the operation intentionally refused or just rewrote.
     step = response.nextStep or next_step_for(amb, tool_name)
     response.nextStep = bound_next_step(response, step)
-    banner = _agent_notifier_banner(amb)
-    response.agentNotifierBanner = banner
-    response.supervisorBanner = banner
 
 
 @dataclass(frozen=True)

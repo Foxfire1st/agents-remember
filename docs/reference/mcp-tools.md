@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-The Agents Remember MCP server exposes 38 public tools (`PUBLIC_TOOLS`). Tools **apply by default** — pass
+The Agents Remember MCP server exposes 40 public tools (`PUBLIC_TOOLS`). Tools **apply by default** — pass
 `dry_run=true` to preview first. Repository-scoped tools
 take a `repo_id` that must be an allowed repo in the MCP settings. Search the code with
 the harness's own tools: the former `cgc_*`, `grepai_*` and `provider_*` code-search tools
@@ -28,31 +28,23 @@ surrounding procedure. See the [Skills reference](skills.md).
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `dispatch_agent` | Create or replace one canonical role seat and durably pin its exact initial brief. Plane-hosted callers use injected seat identity plus direct-child scope; identity-free developer launchers use target-document resolution plus role-altitude validation. | `task_document_ref`, `role`, `brief`, optional `label` |
-Structural messaging, seat retirement/rename, lifecycle signals, and gates left the public
-surface (MIK-R112): `message_parent`, `message_child`, `retire_child`, `rename_child`,
+| `retire_child` | Retire the agent in one seat, by the agent that started it, without giving it a turn; the launch record names the caller and the reason. | `task_document_ref`, `role`, optional `reason`, `agent_id`, `interrupt_turn=false` |
+
+Structural messaging, seat rename, lifecycle signals, and gates left the public
+surface (MIK-R112), and the earlier start tool was removed with the product's own hosting of
+chats (MIK-R113): `dispatch_agent`, `message_parent`, `message_child`, `rename_child`,
 `rename_self`, `lifecycle_start`, `lifecycle_resume`, `lifecycle_turn_end_notification`,
 `lifecycle_end`, `switch_lifecycle`, `lifecycle_phase`, `lifecycle_gate`, `gate_decide`,
-`gate_list`. Messaging between seats goes through `role_message` (by agent id or by role
-plus task references); lifecycle moves are session-driven. `role_start` and `role_message`
+`gate_list`. Role agents are started with `role_start` / `role_start_set` and messaged with
+`role_message` (by agent id or by role plus task references). `role_start` and `role_message`
 stay public; see Role agents below for their rows.
-
-Runtime session, lifecycle, inbox-row, adapter, vendor, and gate identifiers are private
-control-plane correlations. The plane may use exact addressing internally for the initial brief,
-delivery, recovery, diagnostics, and trusted dashboard administration, but those operations are
-not registered as agent MCP tools and must not appear in role briefs or handoffs.
-
-`dispatch_agent` is the only public spawn verb and its two caller kinds are disjoint. Presence of
-plane-injected hosted identity selects structural child authorization; absence selects the ambient
-launcher, which has no parent seat and must address a canonical task document at the target role's
-altitude. The request never supplies caller identity or selects a mode. Both modes share settings,
-internal creation/readiness, exact brief pinning, rollback, and canonical seat publication. A
-plane authorization failure remains a refusal and never retries as ambient. `dispatched` and
-`dispatch-queued` both mean the brief is durable; callers do not poll readiness or send it again.
 
 `role_start` answers `ok`, the agent id, and the handover location; the rest rides in the
 detail file. Only a role agent that AR launched can call it, and only roles its rule allows
-under its own sprint or master. A `request_id` reconciles the same agent, never a second: only
+under its own sprint or master. A chat without a role (a tool server no role agent was
+started for) starts through the same table as the dashboard's start instead: every role with
+its canonical selection, no replacement, no parent; it cannot use `role_message`. A
+`request_id` reconciles the same agent, never a second: only
 the agent that started an execution repeats its `request_id`. Starts run one at a time; a call
 waits up to 60 seconds for another start to end, then is refused with a `nextAction` that says
 to call again with the same arguments. A finished, canceled, or rejected recipient is reconciled,
@@ -341,10 +333,9 @@ recipient's turn, never AR acceptance of a requirement. `role_start` calls run o
 
 ## Session lifecycle
 
-The lifecycle signal tools left the surface (MIK-R112): `lifecycle_start`,
-`lifecycle_resume`, `lifecycle_turn_end_notification`, `lifecycle_end`, `switch_lifecycle`,
-`lifecycle_phase`. Lifecycle moves are session-driven; states and the ambient correlation
-are described in the lifecycle frame.
+The lifecycle signal tools left the surface (MIK-R112), and the session lifecycle behind them
+was removed (MIK-R113); they are named under Structural role control above. `worktree_start` and
+`worktree_attach` adopt the lifecycle of a worktree contract; nothing else begins one.
 
 ## Providers
 
@@ -365,4 +356,4 @@ The benchmark tools left the surface (MIK-R112): `codex_benchmark_prepare`,
 The authoritative source for this surface is `mcp/src/agents_remember/mcp/registration/`
 (one module per tool family, each holding that family's `@server.tool()` registrations;
 `create_server` only walks `TOOL_REGISTRARS`); response shapes are enforced by the models in
-`mcp/src/agents_remember/models/` via `tool_registry.PUBLIC_TOOL_RESPONSE_MODELS`.
+`mcp/src/agents_remember/models/` via `tool_registry.TOOL_RESPONSE_MODELS`.

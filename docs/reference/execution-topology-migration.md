@@ -66,7 +66,7 @@ Classification rule (preserves current behavior):
   strict activation snapshot (`active`, `reconciling`, or vacant). Contract presence
   never elects a master, and the queue owns no activation transition or lifecycle
   operation.
-- Manager/worker dispatch and atomic `worktree_start`/`worktree_attach` are selecting
+- Atomic `worktree_start`/`worktree_attach` are selecting
   operations. They publish `reconciling` before source sync and `active` only after
   both exact recorded bases are current. Reviewer/curator inspection does not switch
   selection. Explicit sync cancellation publishes durable `vacant`.

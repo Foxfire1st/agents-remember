@@ -5,8 +5,8 @@ description: "Review the agents-remember cockpit dashboard like a user: discover
 
 # dashboard-experience-review Dashboard Experience Review
 
-Use this skill to review a **live** agents-remember cockpit dashboard (including the Task-6 control
-plane) against the user workflows it is supposed to support. It does not just grade rendered pixels —
+Use this skill to review a **live** agents-remember cockpit dashboard
+against the user workflows it is supposed to support. It does not just grade rendered pixels —
 it asks *"what would a user try to do here, and can they?"*: it discovers the intended workflow
 scenarios, detects **missing views** that break those workflows, finds where a user gets stuck, and
 judges glance-clarity, hierarchy, progressive disclosure, and observability quality.
@@ -14,7 +14,7 @@ judges glance-clarity, hierarchy, progressive disclosure, and observability qual
 It is a **conductor**. The craft dimensions (visual hierarchy, accessibility, data-viz honesty,
 motion feel) are already covered by installed skills — this skill **delegates** to them and owns only
 the layer none of them cover (scenario discovery, missing-view detection, observability-parity,
-motion-as-communication, the Task-6 terminal UX). See `delegation-map.md`.
+motion-as-communication). See `delegation-map.md`.
 
 **Findings only.** This skill never edits the dashboard. A fix is a separate, gated build job. Every
 output is a finding, routed in the design-review triage format so it can feed that pipeline.
@@ -66,8 +66,7 @@ in `owned-methods.md`; per-delegate constraints in `delegation-map.md`; output s
   extract computed fill/stroke/background hex for the color checks.
 - **Stage 3 — OWNED analyses** (one method-encoded pass each, from `owned-methods.md`):
   (a) scenario-driven cognitive walkthrough; (b) workflow × UI-state matrix → missing views;
-  (c) observability-parity diff + RED/USE altitude; (d) motion-as-communication; (e) Task-6 TUI
-  control-plane round-trip + safety + focus.
+  (c) observability-parity diff + RED/USE altitude; (d) motion-as-communication.
 - **Stage 4 — Delegate the bounded dimensions.** Hand each *resolved, settled* view to the installed
   craft skills and fold their findings **by reference** (do not re-derive): glance/hierarchy/friction,
   per-view robustness/console/a11y, code WCAG, chart honesty, color separation, motion feel/API. Ground
@@ -90,9 +89,6 @@ No installed or marketplace skill covers these, so the skill performs them itsel
 - **Motion-as-communication** — does a GSAP/Motion transition *encode* the state change (not just look
   nice), and does every transition land in a complete, readable resting view.
 - **Color-as-only-signal** — every state must be distinguished by more than hue (shape/icon/label/motion).
-- **Task-6 TUI control-plane UX** — terminal-vs-DOM focus contention, busy/idle/awaiting-input
-  legibility, escapability, and the command → in-flight → success/failure-with-recovery → effect-on-canvas
-  round-trip.
 - **Stale/freshness honesty** — a frozen real-time stream must not look identical to a healthy one.
 - **Cross-entity continuity & control-plane safety** — alert → worktree → lifecycle without losing
   context; destructive actions guarded.

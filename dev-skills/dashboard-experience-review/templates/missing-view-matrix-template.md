@@ -13,7 +13,7 @@ Build the row set from:
   `server_info` + observer/projection code):
   - lifecycle: phase × state (request → … → close)
   - worktree: active · closing · abandoned · blocked
-  - session/TUI: idle · busy · awaiting-input · disconnected
+  - session: idle · busy · awaiting-input · disconnected
 
 ## Columns — forced UI states
 

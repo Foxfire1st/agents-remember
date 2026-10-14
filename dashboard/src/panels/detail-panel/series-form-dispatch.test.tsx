@@ -56,8 +56,6 @@ function seedWithSeries(docs: ReturnType<typeof taskDoc>[], seriesId: string, do
       series: [seriesNode({ seriesId, title: `${seriesId} series`, docPath })],
       attentionQueue: [],
       engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
     },
   });
 }
@@ -113,8 +111,6 @@ describe('root-lifecycle selections dispatch on form (L127-C-F09)', () => {
         series: [],
         attentionQueue: [],
         engineProcesses: [],
-        agentPickups: [],
-        expectationRows: [],
       },
     });
   }
