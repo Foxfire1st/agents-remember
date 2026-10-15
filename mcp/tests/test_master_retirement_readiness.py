@@ -23,6 +23,8 @@ from unittest.mock import patch
 
 import anyio
 import pytest
+from agents_remember.application.task_docs.task_doc_publication import run_task_doc_call
+from agents_remember.kernel.file_lock import lock_path_for
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees import task_retirement as readiness
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
@@ -417,6 +419,11 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
         },
         "dry_run": True,
     }
+    # Repository lock creation is fixture setup; measure the retirement refusal itself.
+    run_task_doc_call(world.coord, REPO, lambda: {})
+    repository_lock = lock_path_for(world.coord / "tasks" / REPO)
+    assert repository_lock.is_file() and not repository_lock.is_symlink()
+    assert repository_lock.read_bytes() == b""
     before = world.snapshot()
     refused = anyio.run(world._call, "task_doc", arguments)
     world.record("retirement-refused", refused.model_dump(mode="json"))

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.application.knowledge_worklist.leaf import (
+    WORKLIST_FILE_NAME,
     paired_memory_commit,
     read_leaf_worklist,
 )
@@ -47,6 +48,7 @@ from agents_remember.application.knowledge_writer.open_questions import (
     UnavailableOpenQuestions,
 )
 from agents_remember.application.knowledge_writer.reconsideration import OpenQuestions
+from agents_remember.application.knowledge_writer.worklist_checks import worklist_shape_problem
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.primitives.runtime_config import load_config, require_config_path
@@ -178,6 +180,13 @@ class LeafQuestions:
     def append(self, key: str, question: str) -> str | None:
         return self._resolved().append(key, question)
 
+    def append_many(self, raised: list[tuple[str, str]]) -> str | None:
+        return self._resolved().append_many(raised)
+
+    @property
+    def destination(self) -> str:
+        return str(getattr(self._resolved(), "destination", self.contract.task_root))
+
     def _resolved(self) -> OpenQuestions:
         if self._port is None:
             self._port = self._open()
@@ -194,6 +203,11 @@ class LeafQuestions:
                 f"no MCP authority settings to reach task_doc ({error}); pass --config"
             )
         contract = self.contract
+        if config.coordination_root.resolve() != contract.coordination_root.resolve():
+            return UnavailableOpenQuestions(
+                f"settings {config.config_path} name coordination root {config.coordination_root}, "
+                f"but the contract names {contract.coordination_root}; load settings for the contract's root"
+            )
         return TaskDocOpenQuestions(
             config=config,
             repo_id=contract.repo_name,
@@ -232,6 +246,16 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
         print(document)
         return EXIT_REFUSED
     assert contract.memory_worktree is not None  # a converted contract has one
+    try:
+        worklist = read_leaf_worklist(contract.contract_path)
+    except (OSError, ValueError) as error:
+        print(
+            f"{contract.contract_path.parent / WORKLIST_FILE_NAME}: unreadable worklist: {error}; recompute with memory_quality_check"
+        )
+        return EXIT_REFUSED
+    if shape := worklist_shape_problem(worklist):
+        print(f"{contract.contract_path.parent / WORKLIST_FILE_NAME}: {shape.message}")
+        return EXIT_REFUSED
     report = write_knowledge(
         WriteRequest(
             memory_root=contract.memory_worktree,
@@ -244,7 +268,7 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
             decisions=leaf_decisions(contract),
             coordination_root=contract.coordination_root,
             questions=LeafQuestions(args, contract),
-            worklist=read_leaf_worklist(contract.contract_path),
+            worklist=worklist,
             code_base=contract.code_base_commit or None,
             memory_base=_leaf_memory_base(contract),
         )

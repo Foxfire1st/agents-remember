@@ -98,6 +98,8 @@ class OpenQuestions(Protocol):
 
     def append(self, key: str, question: str) -> str | None: ...
 
+    def append_many(self, raised: list[tuple[str, str]]) -> str | None: ...
+
 
 def reconsidered_alternative(
     subject: str, record: tuple[str, str, dict[str, Any]] | None
@@ -182,19 +184,15 @@ def append_questions(
     Called before any knowledge file is written; a refusal refuses the whole operation.
     """
 
-    appended: list[str] = []
-    refusals: list[str] = []
-    for key, question in raised:
-        refusal = (
-            "no task owner to append the question to"
-            if questions is None
-            else questions.append(key, question)
-        )
-        if refusal is None:
-            appended.append(key)
-        else:
-            refusals.append(f"{key}: {refusal}")
-    return appended, refusals
+    if not raised:
+        return [], []
+    refusal = (
+        "no task owner to append the question to"
+        if questions is None
+        else questions.append_many(raised)
+    )
+    keys = [key for key, _question in raised]
+    return (keys, []) if refusal is None else ([], [f"{', '.join(keys)}: {refusal}"])
 
 
 @dataclass(frozen=True)

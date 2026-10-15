@@ -76,7 +76,7 @@ __all__ = [
 EntryState = Literal["current", "stale", "unverifiable"]
 ObservationKey = tuple[str, str, str, str, str]
 
-_OBSERVATION_RULE: Final = "anchor-observation/v1"
+_OBSERVATION_RULE: Final = "anchor-observation/v2"
 EXTRACTOR_VERSION: Final = ";".join(
     (
         _OBSERVATION_RULE,
@@ -275,14 +275,24 @@ def _decided_without_resolving(
     """The packet table's checks that need no locator resolution, in its order (L03 ruling N1).
 
     No tree (or an unreadable one) observes nothing; then an absent path is ``stale`` and an
-    unchanged blob is ``current``, whatever the locator kind; only a changed blob whose locator
-    kind cannot be re-resolved is ``unverifiable``.
+    unchanged blob is ``current``, whatever the locator kind, except a symbol in a file that is not
+    valid UTF-8 (MIK-R54 rule 9). A changed blob whose locator kind cannot be re-resolved is
+    ``unverifiable``.
     """
 
     if code.problem is not None or code.trees is None:
         return ("unverifiable", code.problem or NO_TREE_REQUESTED, None)
     if observed_blob is None:
         return ("stale", f"the path {recorded.path!r} is absent at the code tree", None)
+    if recorded.locator.get("kind") == "symbol":
+        try:
+            code.trees._blob(observed_blob).decode("utf-8")
+        except UnicodeDecodeError:
+            return (
+                "unverifiable",
+                f"symbol anchor in {recorded.path!r} cannot be read: the file is not valid UTF-8",
+                None,
+            )
     if observed_blob == recorded.blob:
         return ("current", None, None)
     unsupported = _unsupported(recorded)

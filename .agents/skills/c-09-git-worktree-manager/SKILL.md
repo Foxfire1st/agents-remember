@@ -536,8 +536,8 @@ none and its folder's `task.json` master lists it, the finalizer always derives 
 parent and reconciles its exact row to `Completed`, even when both optional parent
 assertions are omitted. A sub-task naming none whose folder `task.json` is not a
 master is refused. `master_doc_path` and `subtask_number` are independent identity
-assertions; when supplied, each must match that derived edge. Standalone/no-parent
-leaves remain supported. The finalizer does not mark the parent task itself complete
+assertions; when supplied, each must match that derived edge.
+The finalizer does not mark the parent task itself complete
 or recursively complete ancestors; each parent-child edge is finalized separately.
 
 Standalone `worktree_cleanup` is deliberately non-terminal for task documents. If a

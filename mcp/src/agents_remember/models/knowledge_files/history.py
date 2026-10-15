@@ -26,9 +26,9 @@ only -- the gate finds a row by ``subject``, MIK-R09). A row's kind is decided b
   writing and publication. Other dispositions gain own revision through the writer. Historical
   omissions are never filled or rewritten.
 
-The other registered item kinds add their row kinds to :data:`HISTORY_ROW_KINDS` when they land
-(MIK-R30 ``onboarding:…``, MIK-R11 ``planned:…``, MIK-R10 ``hunk:…``/``file:…``, MIK-R14
-``reconsider:…``; MIK-R06 later); until then a row whose subject no kind claims is refused.
+The registered row kinds include MIK-R30 ``onboarding:…``, MIK-R11 ``planned:…``, MIK-R10
+``hunk:…``/``file:…``, MIK-R14 ``reconsider:…``, and MIK-R53 membership and record rows.
+A row whose subject no registered kind claims is refused.
 
 **Checks that need the trees.** The models check shape. The writer support below checks a row
 against K_B/K_C facts the caller reads: :func:`reanchor_mismatches` (rule 4: each ``after`` equals
@@ -134,6 +134,7 @@ class HistoryRow(FileModel):
     subject: Label
     disposition: Label
     reason: Text
+    # Stored labels stay readable; new tokens are checked at writing and publication.
     items: tuple[Label, ...]
 
     @model_validator(mode="after")

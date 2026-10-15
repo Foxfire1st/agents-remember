@@ -196,7 +196,7 @@ def _review_provenance(
     # The scope owner returns ``required=false`` for two different boundaries:
     # atomic child accumulation (where a leaf review is deliberately deferred)
     # and the old master-altitude exemption (where this candidate is still a
-    # standalone/organizational leaf).  Only the explicit atomic deferrals may
+    # organizational leaf).  Only the explicit atomic deferrals may
     # skip the candidate-aware checks below.
     if review_state.get("status") in {
         "deferred-atomic-child",

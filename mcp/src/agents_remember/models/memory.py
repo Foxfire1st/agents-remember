@@ -86,6 +86,8 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     memoryRepairCount: int | None = Field(default=None, ge=0)
     missingOnboardingCount: int | None = Field(default=None, ge=0)
     staleRouteIndexCount: int | None = Field(default=None, ge=0)
+    invariantsWithoutProofCount: int | None = Field(default=None, ge=0)
+    routeIndexCacheBuild: dict[str, Any] | None = None
     sourceChangeCandidateCount: int | None = Field(default=None, ge=0)
     closeoutOwnedFindingCount: int | None = Field(default=None, ge=0)
     noteworthyFindingCount: int | None = Field(default=None, ge=0)

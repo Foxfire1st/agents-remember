@@ -295,7 +295,8 @@ minversion = "9.0"
 #     unbounded, and `test_suite_budget.py` still proves both failure directions -- over-unit and
 #     over-integration -- at whatever pair is declared.  Only the number moved.
 #   * integration is NOT raised: measured 774 collected against 1000, unchanged by this leaf.
-unit_case_budget = 5000
+# 2026-10-14 -- unit ceiling raised, **5000 -> 6000**, by 260928-MIK-L54 under D299.
+unit_case_budget = 6000
 integration_case_budget = 1000
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this

@@ -95,7 +95,7 @@ master's leaf loop to the master-exit seam, then hand over.
   change affects a waiting generation's evidence, re-prove it through
   `closeout_door(request={action:"update-provenance", ...})` or change its door disposition before
   it is schedulable again.
-- Every requested `reviewMode=baseline` standalone or organizational code-change session receives
+- Every requested `reviewMode=baseline` organizational leaf code-change session receives
   an independent route review before curator handoff, with complete coverage of the agreed
   surface. The reviewer seat must be distinct from both the leaf's builder
   seat and the seat that authored the plan. Dispatch the exact same owned primary stable-ID + version

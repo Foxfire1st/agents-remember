@@ -373,6 +373,7 @@ def test_the_writer_carries_moved_blobs_and_the_rows_that_cover_them(leaf: Leaf)
             handoff_path="handoff.json",
             document=[],
             commit=True,
+            worklist=leaf_worklist(load_contract(leaf.contract())),
         )
     )
     assert report.state == "written", report.render()
@@ -479,6 +480,7 @@ def _carry(leaf: Leaf) -> Any:
             handoff_path="handoff.json",
             document=[],
             commit=True,
+            worklist=leaf_worklist(load_contract(leaf.contract())),
         )
     )
 
@@ -543,6 +545,7 @@ def test_a_proof_authored_through_the_writer_raises_its_invariant_when_its_test_
             handoff_path="handoff.json",
             document=[entry],
             commit=True,
+            worklist=leaf_worklist(load_contract(leaf.contract())),
         )
     )
     assert report.state == "written", report.render()
@@ -583,12 +586,23 @@ def test_a_completed_sync_recomputes_through_the_bound_port(leaf: Leaf) -> None:
 # --------------------------------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("publish_report", [True, False])
 def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_the_checklist(
     leaf: Leaf,
+    publish_report: bool,
 ) -> None:
     """F1: the controller path itself (``_execute_memory_quality``), not the helper."""
 
     (leaf.code / CODE_FILE).write_text(CODE_V1.replace("return value", "return -value"))
+    # Exercise the fresh shared-clone path: no route-index cache is copied or prebuilt.
+    source_memory = leaf.memory.with_name("memory-source")
+    leaf.memory.rename(source_memory)
+    git(leaf.root, "clone", "--shared", str(source_memory), str(leaf.memory))
+    assert (leaf.memory / ".git/objects/info/alternates").read_text().strip() == str(
+        source_memory / ".git/objects"
+    )
+    # Route indexes are ignored derived caches, as on a fresh production memory clone.
+    (leaf.memory / ".git/info/exclude").write_text("overview.index.json\n")
     contract = load_contract(leaf.contract())
     pair = MemoryCandidatePairIdentity(
         repoId="agents-remember",
@@ -628,11 +642,11 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
         pair_identity=pair,
     )
     execution = controller.MemoryQualityExecution(
-        config=mock.Mock(),
+        config=mock.Mock(coordination_root=leaf.root),
         scope=scope,
         checks=(),
         detail_limit=50,
-        publish_curator_report=True,
+        publish_curator_report=publish_report,
     )
     census = SimpleNamespace(
         scope=SimpleNamespace(pair_identity=pair, working_paths=(), committed_paths=()),
@@ -649,9 +663,6 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
         mock.patch.object(
             controller, "check_missing_onboarding", return_value={"missingCount": 0, "missing": []}
         ),
-        mock.patch.object(
-            controller, "build_route_indexes", return_value=mock.Mock(stale_indexes=[])
-        ),
         mock.patch.object(controller, "split_commit_owned_findings", return_value=([], [])),
         mock.patch.object(
             controller,
@@ -660,12 +671,15 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
         ),
         mock.patch.object(controller, "validate_memory_refresh_attestations"),
         mock.patch.object(controller, "contract_memory_verified_commit", return_value=""),
-        mock.patch.object(controller, "_without_proof", return_value=None),
         mock.patch.object(controller, "_attach_coherence_readiness"),
         mock.patch.object(controller, "_attach_final_full_catalog"),
     ):
         response = controller._execute_memory_quality(execution)
 
+    assert response["invariantsWithoutProofCount"] == 1
+    if not publish_report:
+        assert not report.exists()
+        return
     persisted = contract.contract_path.parent / WORKLIST_FILE_NAME
     document = json.loads(persisted.read_text(encoding="utf-8"))
     assert document["state"] == "complete"
@@ -676,7 +690,15 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
         "touched_invariant": 1,
         "onboarding_trace": 2,  # MIK-R30: the edited file's card and its root route (ruling Q2)
     }
+    assert response["invariantsWithoutProofCount"] == 1
+    assert response["staleRouteIndexCount"] == 0
+    assert cast(dict[str, Any], response["routeIndexCacheBuild"])["builtIndexes"] == [
+        "overview.index.json"
+    ]
+    assert (leaf.memory / "onboarding/overview.index.json").is_file()
     rendered = report.read_text(encoding="utf-8")
+    first_line = rendered.split("## knowledgeReview\n\n", 1)[1].splitlines()[0]
+    assert "gates nothing" in first_line and "worklist section" in first_line
     assert WORKLIST_SECTION_HEADING in rendered
     assert "| touched_invariant | INV-AAAAAA |" in rendered
     # MIK-R09: each open item is one repair finding, so the four open items now count.
@@ -776,6 +798,22 @@ def test_converted_bases_are_cached_by_commit_version_and_code_commit(tmp_path: 
         third = worklist_for_sides(inside)
     assert third == first and converting.called
     assert not (memory / ".cache").exists()
+
+
+def test_base_cache_store_survives_a_file_deleted_between_listing_and_stat(tmp_path: Path) -> None:
+    cache = worklist_base_cache.ConvertedBaseCache(tmp_path)
+    stale = tmp_path / "racing.json.gz"
+    stale.write_bytes(b"old")
+    stat = Path.stat
+
+    def vanished(path: Path, *args: Any, **kwargs: Any) -> Any:
+        if path == stale:
+            stale.unlink(missing_ok=True)
+        return stat(path, *args, **kwargs)
+
+    with mock.patch.object(Path, "stat", vanished):
+        cache.store(["memory", "version", "code"], {"onboarding/a.md": b"card"})
+    assert cache.load(["memory", "version", "code"]) == {"onboarding/a.md": b"card"}
 
 
 def test_warming_reads_the_changed_blobs_in_one_batch_and_never_fails_the_run(

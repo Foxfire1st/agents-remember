@@ -84,11 +84,7 @@ from typing import Any
 import apsw
 import knowledge_writer_test_support as fixture
 import pytest
-from agents_remember.application.knowledge_writer import (
-    Owner,
-    WriteRequest,
-    write_knowledge,
-)
+from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.application.published_intent import published_intent_block
 from agents_remember.mcp.tools import knowledge as tools
 from agents_remember.memory.knowledge.connection import open_read_only_database
@@ -99,6 +95,7 @@ from agents_remember.memory.knowledge_index import (
 )
 from agents_remember_test_support.testing import database_retirement_guard as guard
 from agents_remember_test_support.testing import database_source_reading as reader
+from writer_worklist_test_support import write_knowledge
 
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
 CONNECT, CONNECT_READ_ONLY, WRITE = guard.CONNECT, guard.CONNECT_READ_ONLY, guard.WRITE

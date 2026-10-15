@@ -16,11 +16,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from agents_remember.application.knowledge_writer import (
-    Owner,
-    WriteRequest,
-    write_knowledge,
-)
+from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.cli import knowledge_bootstrap, knowledge_write_route
 from agents_remember.cli.__main__ import main
 from agents_remember.cli.knowledge_write_route import run_wave_write
@@ -61,12 +57,13 @@ from knowledge_writer_test_support import (
     tree_bytes,
     write,
 )
+from writer_worklist_test_support import write_knowledge
 
 OWNER = Owner(task=TASK_ID, kind="leaf", id=LEAF_ID)
 TEST_ID = f"{TEST_FILE}::LandingTests::test_pair_lands_together"
 
 
-def _write(world: World, document: Any, *, commit: bool = True):
+def _write(world: World, document: Any, *, commit: bool = True, worklist: Any = None):
     return write_knowledge(
         WriteRequest(
             memory_root=world.memory,
@@ -75,6 +72,7 @@ def _write(world: World, document: Any, *, commit: bool = True):
             handoff_path="notes/handoff.json",
             document=document,
             commit=commit,
+            worklist=worklist,
         )
     )
 
@@ -247,6 +245,9 @@ def _every_kind(world: World) -> dict[str, Any]:
 
 
 def _ingest(world: World, listed: Path, *extra: str) -> int:
+    worklist = world.contract.parent / "knowledge-worklist.json"
+    if not worklist.exists():
+        worklist.write_text(json.dumps({"items": []}), encoding="utf-8")
     argv = ["knowledge-ingest", "--contract", str(world.contract), "--list", str(listed)]
     return main([*argv, "--authorization-ref", "curator", "--json", *extra])
 
@@ -355,6 +356,10 @@ def test_a_validator_refusal_writes_nothing_and_names_every_violation(tmp_path: 
     assert report.state == "refused"
     rules = {violation.rule for violation in report.violations if not violation.report_only}
     assert rules == {"R22.2-identity"}, report.render()
+    printed = report.to_document()
+    assert all(printed[key] == [] for key in ("records", "entries", "historyRows", "carried"))
+    assert "nothing was written" in report.render()
+    assert " created " not in report.render()
     assert tree_bytes(world.memory) == before
 
 
@@ -548,21 +553,39 @@ def test_a_row_the_candidate_contradicts_refuses_until_it_is_named_again(tmp_pat
         "reason": "The pair gained its function.",
         "covers": [{"handoff": "A-1"}],
     }
-    assert _write(world, {"entries": [authored], "history": [row]}).state == "written"
+    first = _write(world, [{**authored, "target": []}])
+    assert first.state == "written", first.render()
+    worklist = {
+        "items": [
+            {
+                "kind": "touched_invariant",
+                "subject": first.records[0].id,
+                "id": "sha256:" + "a" * 64,
+                "facts": {"record": {"baseRevision": 1}},
+            }
+        ]
+    }
+    assert (
+        _write(world, {"entries": [authored], "history": [row]}, worklist=worklist).state
+        == "written"
+    )
     write(world.code, {CODE_FILE: "# two lines\n\n" + CODE})
     before = tree_bytes(world.memory)
     stale = _write(world, {"entries": [authored]})
     assert stale.state == "refused"
     assert "no longer carry the row's 'after' anchor" in stale.render()
     assert tree_bytes(world.memory) == before
-    assert _write(world, {"entries": [authored], "history": [row]}).state == "written"
+    assert (
+        _write(world, {"entries": [authored], "history": [row]}, worklist=worklist).state
+        == "written"
+    )
     family = {
         "subject": BASE_FAMILY,
         "disposition": "no_impact",
         "reason": "Members examined.",
         "examined": [BASE_INVARIANT],
     }
-    assert _write(world, {"history": [row, family]}).state == "written"
+    assert _write(world, {"history": [row, family]}, worklist=worklist).state == "written"
     sharpened = entry("A-9", invariant_id=BASE_INVARIANT, statement="Pairs land together.")
     changed = {
         "subject": BASE_INVARIANT,
@@ -642,13 +665,18 @@ def test_the_bootstrap_command_dispatches_converted_memory_to_the_file_writer(
     admitted = SimpleNamespace(admission=admission, authority=authority)
     monkeypatch.setattr(knowledge_bootstrap, "_admitted", lambda _args: admitted)
     argv = ["knowledge-bootstrap", "--repo", "repo", "--list", str(listed), "--json"]
+    assert main([*argv, "--authorization-ref", "boot", "--wave", "wave-1", "--commit"]) == 1
+    refused = json.loads(capsys.readouterr().out)
+    assert refused["state"] == "refused" and not refused["records"]
+    assert [one["state"] for one in refused["requirementEndpoints"]] == ["resolved", "unresolved"]
+    _repair_lifted_endpoint(world, listed)
     assert main([*argv, "--authorization-ref", "boot", "--wave", "wave-1", "--commit"]) == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["state"] == "written" and printed["authorization"] == "boot"
     assert read_json(world.memory, _new_invariant_path(world))["origin"]["wave"] == "wave-1"
     # The wave resolves requirement endpoints through the admitted coordination root (review F4).
     endpoints = [(one["field"], one["state"]) for one in printed["requirementEndpoints"]]
-    assert endpoints == [("links.2", "resolved"), ("links.3", "unresolved")]
+    assert endpoints == [("links.2", "resolved"), ("links.3", "resolved")]
 
 
 def test_the_leaf_file_route_refuses_a_blank_authorization_and_reports_it(
@@ -657,6 +685,7 @@ def test_the_leaf_file_route_refuses_a_blank_authorization_and_reports_it(
     world = build_world(tmp_path)
     listed = world.task_root / "handoff.json"
     listed.write_text(json.dumps(_conforming()), encoding="utf-8")
+    write(world.contract.parent, {"knowledge-worklist.json": json.dumps({"items": []})})
     argv = ["knowledge-ingest", "--contract", str(world.contract), "--list", str(listed)]
     assert main([*argv, "--authorization-ref", "  "]) == 2
     assert "--authorization-ref must not be blank" in capsys.readouterr().out
@@ -733,7 +762,7 @@ def test_a_moved_row_whose_after_names_another_path_relocates_the_entry(tmp_path
 
     The file moves; the curator's ``moved`` row names the entry and its new ``path``. The writer
     moves the entry into that file's sidecar with its ID and authored fields, and fills ``blob``
-    and ``content`` at C. Any other disposition naming a path is refused.
+    and ``content`` at C. An extended row must still cover an added entry.
     """
 
     world = build_world(tmp_path)
@@ -759,7 +788,9 @@ def test_a_moved_row_whose_after_names_another_path_relocates_the_entry(tmp_path
         },
     )
     assert refused.state == "refused"
-    assert any("only on a moved row" in one.message for one in refused.problems)
+    assert any(
+        "an extended invariant row covers an added entry" in one.message for one in refused.problems
+    )
     # Review F1 and N7: a path that is empty, absolute or escapes the repository, or a path on a
     # cover that also removes its entry, is a named problem -- never an uncaught error.
     untouched = tree_bytes(world.memory)
@@ -873,6 +904,20 @@ def _requirement_packet(world: World) -> None:
     write(packet.parent, {packet.name: f"# R04\n\n{table}"})
 
 
+def _repair_lifted_endpoint(world: World, listed: Path) -> None:
+    document = json.loads(listed.read_text(encoding="utf-8"))
+    reference = document["records"][0]["fields"]["links"][3]["target"]
+    reference["packet"] = "requirements/MIK-R04-v9-family-routes.md"
+    packet = world.root / "tasks/agents-remember/260928_family" / reference["packet"]
+    write(
+        packet.parent,
+        {
+            packet.name: "# R04\n\n| Field | Value |\n| --- | --- |\n| Stable ID | MIK-R04 |\n| Version | v9 |\n"
+        },
+    )
+    listed.write_text(json.dumps(document), encoding="utf-8")
+
+
 def _lifted_d12(**fields: Any) -> dict[str, Any]:
     """D12 lifted from its ruling: governs the base invariant, reopens on it, motivated MIK-R04."""
 
@@ -897,12 +942,11 @@ def test_a_lifted_decision_round_trips_and_its_requirement_endpoints_are_reporte
     _requirement_packet(world)
     listed = world.task_root / "notes" / "decisions.json"
     write(listed.parent, {listed.name: json.dumps({"records": [_lifted_d12()]})})
-    assert _ingest(world, listed, "--commit") == 0
+    before = tree_bytes(world.memory)
+    assert _ingest(world, listed, "--commit") == 1
     printed = json.loads(capsys.readouterr().out)
-    assert printed["state"] == "written", printed
-    (record,) = printed["records"]
-    stored = parse_document_text((world.memory / record["path"]).read_text())
-    assert stored.to_document()["alternatives"][1]["reconsider_when"] == "Never."
+    assert printed["state"] == "refused" and not printed["records"], printed
+    assert tree_bytes(world.memory) == before
     endpoints = [
         (one["field"], one["state"], one["code"]) for one in printed["requirementEndpoints"]
     ]
@@ -911,6 +955,12 @@ def test_a_lifted_decision_round_trips_and_its_requirement_endpoints_are_reporte
         ("links.3", "unresolved", "task-intent-requirement-packet-version-mismatch"),
     ]
     assert not [one for one in printed["violations"] if one["rule"].startswith("R13")]
+    _repair_lifted_endpoint(world, listed)
+    assert _ingest(world, listed, "--commit") == 0
+    printed = json.loads(capsys.readouterr().out)
+    (record,) = printed["records"]
+    stored = parse_document_text((world.memory / record["path"]).read_text())
+    assert stored.to_document()["alternatives"][1]["reconsider_when"] == "Never."
     before = tree_bytes(world.memory)
     assert _ingest(world, listed, "--commit") == 0
     assert json.loads(capsys.readouterr().out)["records"][0]["action"] == "unchanged"

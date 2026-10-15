@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
+import json
 import os
 import shutil
 import sys
@@ -13,14 +15,25 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CANONICAL_SKILLS = REPO_ROOT / "skills"
-IGNORED_NAMES = frozenset(
-    {
-        ".DS_Store",
-        ".pytest_cache",
-        ".ruff_cache",
-        "__pycache__",
-    }
-)
+
+
+def _skill_projection(root: Path = REPO_ROOT):
+    """Read this checkout's declaration through the dependency-free parser owner."""
+    parser_path = REPO_ROOT / "mcp/src/agents_remember/kernel/generated_copies.py"
+    spec = importlib.util.spec_from_file_location("_ar_copy_declaration", parser_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load copy declaration parser: {parser_path}")
+    parser = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(parser)
+    projections = parser.parse_generated_copies((root / parser.DECLARATION_PATH).read_bytes())
+    matches = [one for one in projections if one.source == "skills"]
+    if len(matches) != 1:
+        raise ValueError("generated-copies.json must declare exactly one skills source")
+    return matches[0]
+
+
+IGNORED_NAMES = frozenset(_skill_projection().ignore_names)
+IGNORED_SUFFIXES = _skill_projection().ignore_suffixes
 
 
 @dataclass(frozen=True)
@@ -40,20 +53,10 @@ class SkillDiff:
         return not self.missing and not self.extra and not self.changed
 
 
-TARGETS = (
-    SkillTarget(
-        "mcp package data",
-        REPO_ROOT / "mcp/src/agents_remember/package_data/runtime/skills",
-    ),
-    SkillTarget("Claude Code package", REPO_ROOT / ".claude/skills"),
-    SkillTarget("Codex package", REPO_ROOT / ".codex/skills"),
-    SkillTarget("Cursor package", REPO_ROOT / ".cursor/skills"),
-    SkillTarget("VS Code/Copilot package", REPO_ROOT / ".github-vscode/skills"),
-    SkillTarget("Hermes package", REPO_ROOT / ".hermes/skills"),
-    SkillTarget("OpenClaw package", REPO_ROOT / ".openclaw/workspace/skills"),
-    SkillTarget("Pi package", REPO_ROOT / ".pi/skills"),
-    SkillTarget("Antigravity package", REPO_ROOT / ".agents/skills"),
-)
+def skill_targets(root: Path = REPO_ROOT) -> tuple[SkillTarget, ...]:
+    return tuple(
+        SkillTarget(target.label, root / target.path) for target in _skill_projection(root).targets
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,7 +84,7 @@ def repo_relative(path: Path) -> str:
 
 
 def ignored(rel_path: Path) -> bool:
-    return any(part in IGNORED_NAMES or part.endswith(".pyc") for part in rel_path.parts)
+    return any(part in IGNORED_NAMES or part.endswith(IGNORED_SUFFIXES) for part in rel_path.parts)
 
 
 def digest(path: Path) -> str:
@@ -130,7 +133,7 @@ def diff_target(target: SkillTarget) -> SkillDiff:
 
 
 def copy_ignore(_directory: str, names: list[str]) -> list[str]:
-    return [name for name in names if name in IGNORED_NAMES or name.endswith(".pyc")]
+    return [name for name in names if name in IGNORED_NAMES or name.endswith(IGNORED_SUFFIXES)]
 
 
 def sync_target(target: SkillTarget) -> None:
@@ -185,9 +188,31 @@ def print_diff(target: SkillTarget, diff: SkillDiff) -> None:
             print(f"    {path.as_posix()}")
 
 
+def projected_profile_bytes(root: Path = REPO_ROOT) -> bytes:
+    """Generate only the skill row through the certification profile's owner."""
+    sys.path.insert(0, str(REPO_ROOT / "mcp/src"))
+    try:
+        owner = importlib.import_module(
+            "agents_remember.certification.repository_profiles.canonical"
+        )
+    finally:
+        sys.path.pop(0)
+    path = root / "mcp/certification-profile-v1.json"
+    document = json.loads(path.read_bytes())
+    profile = owner.RepositoryCertificationProfile.model_validate(document)
+    projected = owner.project_generated_skills(
+        profile, (root / "generated-copies.json").read_bytes()
+    )
+    row = next(one for one in projected.generatedInputs if one.inputId == "generated-skills")
+    stored = next(one for one in document["generatedInputs"] if one["inputId"] == row.inputId)
+    stored.update(generatedScopes=list(row.generatedScopes), sourceScopes=list(row.sourceScopes))
+    document["profileDigest"] = projected.profileDigest
+    return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def check_targets() -> int:
     failed = False
-    for target in TARGETS:
+    for target in skill_targets():
         diff = diff_target(target)
         if diff.in_sync:
             print(f"[sync-skills] ok: {target.label} ({repo_relative(target.path)})")
@@ -195,6 +220,10 @@ def check_targets() -> int:
         print_diff(target, diff)
         failed = True
 
+    profile = REPO_ROOT / "mcp/certification-profile-v1.json"
+    if profile.read_bytes() != projected_profile_bytes():
+        print("[sync-skills] out of sync: generated-skills profile row", file=sys.stderr)
+        failed = True
     if failed:
         print("[sync-skills] run: python3 scripts/sync-skills.py", file=sys.stderr)
         return 1
@@ -206,15 +235,18 @@ def sync_targets() -> int:
         print("[sync-skills] missing canonical skills/ directory", file=sys.stderr)
         return 1
 
-    for target in TARGETS:
+    targets = skill_targets()
+    profile_bytes = projected_profile_bytes()
+    for target in targets:
         sync_target(target)
         print(f"[sync-skills] synced {repo_relative(target.path)}")
+    (REPO_ROOT / "mcp/certification-profile-v1.json").write_bytes(profile_bytes)
     return check_targets()
 
 
 def list_targets() -> int:
     print(f"canonical: {repo_relative(CANONICAL_SKILLS)}")
-    for target in TARGETS:
+    for target in skill_targets():
         print(f"{target.label}: {repo_relative(target.path)}")
     return 0
 

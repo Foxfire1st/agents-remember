@@ -796,7 +796,13 @@ def test_the_latest_row_about_a_subject_governs_across_attempts(
     relabelled = {**again, "disposition": "changed", "effect": "strengthen"}
     refused = write_knowledge(
         WriteRequest(
-            world.memory, world.code, OWNER, "notes/handoff.json", _handoff(relabelled), commit=True
+            world.memory,
+            world.code,
+            OWNER,
+            "notes/handoff.json",
+            _handoff(relabelled),
+            commit=True,
+            worklist=world.gate().worklist,
         )
     )
     assert refused.state == "refused", refused.render()

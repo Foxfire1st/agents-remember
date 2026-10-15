@@ -8,7 +8,6 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from agents_remember.application.knowledge_gate import GateResult, evaluate_leaf_gate
-from agents_remember.application.knowledge_proofs import invariants_without_proof
 from agents_remember.application.knowledge_worklist import (
     answering_trace_subjects,
     leaf_onboarding_trace_sides,
@@ -32,6 +31,15 @@ from agents_remember.application.memory_quality.converted_base import (
     leaf_base_port,
     leaf_base_request,
 )
+from agents_remember.application.memory_quality.knowledge_inputs import (
+    build_route_indexes,
+)
+from agents_remember.application.memory_quality.knowledge_inputs import (
+    knowledge_briefs as _knowledge_briefs,
+)
+from agents_remember.application.memory_quality.knowledge_inputs import (
+    without_proof as _without_proof,
+)
 from agents_remember.application.memory_quality.runs import (
     QualityRunIdentity,
     QualityRunSnapshot,
@@ -54,7 +62,7 @@ from agents_remember.errors import (
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.kernel.route_index import RouteIndexBuildResult
 from agents_remember.memory_quality.check import (
     DRIFT_CHECK_NAME,
     DriftCheckContext,
@@ -82,7 +90,6 @@ from agents_remember.memory_quality.knowledge_review import (
     AssessmentSummaryInput,
     summarise_assessment_state,
 )
-from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.models.lifecycles.review_assessment import assessment_subject_id
 from agents_remember.models.memory import (
@@ -129,13 +136,14 @@ class MemoryQualityExecution:
     checks: tuple[str, ...]
     detail_limit: int
     publish_curator_report: bool
+    full_run: bool = True
 
     @property
     def identity(self) -> QualityRunIdentity:
         return QualityRunIdentity(
             repo_id=self.scope.repo_id,
             scope=self.scope.identity,
-            checks=self.checks,
+            checks=() if self.full_run else self.checks,
             detail_limit=self.detail_limit,
             publish_curator_report=self.publish_curator_report,
         )
@@ -427,6 +435,7 @@ def _resolve_execution(
         checks=checks,
         detail_limit=request.detail_limit,
         publish_curator_report=scope.curator_report_path is not None and not request.checks,
+        full_run=not request.checks,
     )
 
 
@@ -487,6 +496,14 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
     census = prepare_memory_census(scope)
     gate, worklist = _knowledge_gate_and_worklist(scope, candidate_inputs)
     leaf_request = leaf_base_request(scope.contract, execution.config.coordination_root)
+    route_indexes = None
+    if execution.full_run:
+        route_indexes = build_route_indexes(
+            code_root=scope.quality_code_root,
+            onboarding_root=scope.onboarding_root,
+            repository=scope.quality_context.code_repository_name,
+            storage=scope.quality_context.storage,
+        )
     payload = run_memory_quality_check(
         scope.onboarding_root,
         checks=execution.checks,
@@ -525,6 +542,11 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
             census, detail_limit=execution.detail_limit
         )
     response.update(_knowledge_briefs(worklist, gate))
+    if route_indexes is not None:
+        response["routeIndexCacheBuild"] = route_indexes.cache_build_summary()
+    proof = _without_proof(scope.onboarding_root.parent, execution.config.coordination_root)
+    if proof is not None:
+        response["invariantsWithoutProofCount"] = len(proof.rows)
     if not execution.publish_curator_report:
         return _answered_quality_response(
             _bounded_quality_response(response, execution.detail_limit)
@@ -534,7 +556,13 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         payload,
         response,
         candidate_inputs=candidate_inputs,
-        prepared=_PreparedInputs(census=census, worklist=worklist, gate=gate),
+        prepared=_PreparedInputs(
+            census=census,
+            worklist=worklist,
+            gate=gate,
+            without_proof=proof,
+            route_indexes=route_indexes,
+        ),
     )
     return _answered_quality_response(_bounded_quality_response(response, execution.detail_limit))
 
@@ -550,7 +578,7 @@ def _answered_quality_response(response: dict[str, object]) -> dict[str, object]
 
     answer = quality_result_answer(dict(response))
     for key, value in answer.items():
-        if key not in ("ok", "repoId", "onboardingRoot"):
+        if key not in ("ok", "repoId", "onboardingRoot", "routeIndexCacheBuild"):
             response[key] = value
     return response
 
@@ -560,6 +588,8 @@ class _PreparedInputs:
     """What the run prepared before the checks: the census, and the leaf's worklist (MIK-R08)."""
 
     census: PreparedMemoryCensus | None
+    without_proof: WithoutProof | None = None
+    route_indexes: RouteIndexBuildResult | None = None
     worklist: tuple[dict[str, Any], str | None] | None = None
     gate: GateResult | None = None
     """MIK-R09's verdict over the exact curator candidate; ``None`` for an unconverted leaf."""
@@ -574,19 +604,6 @@ def _knowledge_gate_and_worklist(
     if gate is None:
         return None, _knowledge_worklist(scope)
     return gate, (dict(gate.worklist), gate.worklist_path)
-
-
-def _knowledge_briefs(
-    worklist: tuple[dict[str, Any], str | None] | None, gate: GateResult | None
-) -> dict[str, object]:
-    """The response's ``knowledgeWorklist`` and ``knowledgeGate`` summaries, where they exist."""
-
-    briefs: dict[str, object] = {}
-    if worklist is not None:
-        briefs["knowledgeWorklist"] = worklist_summary(*worklist)
-    if gate is not None:
-        briefs["knowledgeGate"] = gate.brief()
-    return briefs
 
 
 def _knowledge_gate(
@@ -616,9 +633,9 @@ def _knowledge_gate(
 def _knowledge_worklist(scope: MemoryScope) -> tuple[dict[str, Any], str | None] | None:
     """Recompute and persist the leaf's MIK-R08 worklist; ``None`` where none applies.
 
-    A leaf contract gets a worklist when K_B or K_C is converted; every other scope (and every
-    unconverted leaf, which is every production leaf before MIK-R37) gets none, so its run is
-    unchanged. :func:`recompute_leaf_worklist` is the one recompute entry point.
+    A leaf contract gets a worklist when K_B or K_C is converted; a non-leaf scope or a leaf
+    whose two memory sides are unconverted gets none. :func:`recompute_leaf_worklist` is the
+    one recompute entry point.
     """
 
     contract = scope.contract
@@ -704,13 +721,8 @@ def _attach_curator_checklist(
         settings=scope.quality_context.storage,
         code_repository_name=scope.quality_context.code_repository_name,
     )
-    route_indexes = build_route_indexes(
-        code_root=scope.quality_code_root,
-        onboarding_root=scope.onboarding_root,
-        repository=scope.quality_context.code_repository_name,
-        storage=scope.quality_context.storage,
-        dry_run=True,
-    )
+    route_indexes = prepared.route_indexes
+    assert route_indexes is not None
     scope = revalidate_memory_candidate_scope(config, scope)
     if scope.curator_report_path is None:
         raise RuntimeError("curator publication has no enclosure-local report path")
@@ -782,7 +794,7 @@ def _attach_curator_checklist(
             drift_rows=drift_rows,
             report_only_findings=report_only,
             knowledge_review=knowledge_review,
-            without_proof=_without_proof(scope.onboarding_root.parent, config.coordination_root),
+            without_proof=prepared.without_proof,
             knowledge_worklist=None if prepared.worklist is None else prepared.worklist[0],
             knowledge_worklist_path=None if prepared.worklist is None else prepared.worklist[1],
         )
@@ -978,20 +990,6 @@ def _onboarding_refresh_gate(
             }
         ], []
     return [], []
-
-
-def _without_proof(memory_root: Path, coordination_root: Path | None = None) -> WithoutProof | None:
-    """MIK-R28 rule 5's informational list for a converted memory tree; ``None`` otherwise.
-
-    The tree's index comes from the coordination index cache, keyed by the tree id.
-    """
-
-    coverage = invariants_without_proof(memory_root, coordination_root=coordination_root)
-    if coverage is None:
-        return None
-    return WithoutProof(
-        rows=tuple(row.as_row() for row in coverage.unproven), problem=coverage.problem
-    )
 
 
 def _checklist_finding_sets(

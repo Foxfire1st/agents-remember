@@ -74,7 +74,7 @@ class EvidenceOutcome:
 class EndpointOutcome:
     """A requirement endpoint one of this run's records links, and the owner's answer (MIK-R13).
 
-    ``state`` is ``resolved`` or ``unresolved``; an unresolved endpoint is reported, never refused.
+    ``state`` is ``resolved`` or ``unresolved``; changed unresolved links refuse with a root.
     """
 
     record: str
@@ -84,6 +84,8 @@ class EndpointOutcome:
     state: str
     code: str = ""
     detail: str = ""
+    changed: bool = False
+    archived: bool = False
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,18 @@ class WriteReport:
     authorization: str = ""
     carried: tuple[str, ...] = ()
     requirements: tuple[EndpointOutcome, ...] = ()
+
+    planned_count: int = 0
+    questions_published: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.state == "refused":
+            count = sum(
+                len(items) for items in (self.records, self.entries, self.rows, self.carried)
+            )
+            object.__setattr__(self, "planned_count", self.planned_count or count)
+            for name in ("records", "entries", "rows", "carried", "evidence", "rulings"):
+                object.__setattr__(self, name, ())
 
     @property
     def refused(self) -> bool:
@@ -144,10 +158,16 @@ class WriteReport:
             "carried": list(self.carried),
             "requirementEndpoints": [_endpoint(one) for one in self.requirements],
             "provisionalIds": self.provisional_ids,
+            "plannedBeforeRefusal": self.planned_count,
+            "questionsPublished": list(self.questions_published),
         }
 
     def render(self) -> str:
         lines = [f"knowledge-write {self.state}: {self.owner} into {self.memory_root}"]
+        if self.refused:
+            lines.append(
+                f"  {self.planned_count} outcomes planned before refusal; nothing was written"
+            )
         if self.authorization:
             lines.append(f"  authorization: {self.authorization}")
         lines += [f"  problem: {one.render()}" for one in self.problems]
@@ -235,6 +255,8 @@ def _endpoint(one: EndpointOutcome) -> dict[str, Any]:
         "state": one.state,
         "code": one.code,
         "detail": one.detail,
+        "changed": one.changed,
+        "archived": one.archived,
     }
 
 

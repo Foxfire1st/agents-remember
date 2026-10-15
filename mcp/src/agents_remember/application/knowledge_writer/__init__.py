@@ -11,7 +11,7 @@ the knowledge validator (MIK-R22) over the resulting tree before it writes anyth
 * :mod:`.memory_state` -- the memory tree, the operation's edits, and the base;
 * :mod:`.authoring` -- the edits, with the mechanical fields filled;
 * :mod:`.requirement_links` -- the requirement endpoints a run's records link, resolved by their
-  owner and reported, never refused (MIK-R13);
+  owner and reported; with a coordination root, new or changed unresolved links refuse (MIK-R54);
 * :mod:`.reconsideration` -- the reconsideration rows (MIK-R14): ``still_rejected``, and ``raise``,
   which sets the decision under reconsideration and appends a question for the developer;
 * :mod:`.open_questions` -- that question, appended to the leaf's task document through
@@ -20,8 +20,8 @@ the knowledge validator (MIK-R22) over the resulting tree before it writes anyth
 * :mod:`.report` -- what the operation reports.
 
 ``agents-remember knowledge-ingest`` and ``agents-remember knowledge-bootstrap`` reach it when the
-memory tree they write is converted (it holds ``knowledge/layout.json``). Unconverted memory keeps the
-installed database ingest until the cutover (MIK-R37).
+memory tree they write is converted (it holds ``knowledge/layout.json``). Unconverted memory converts
+before this writer is used; the database ingest is retired (MIK-R26, MIK-R46).
 """
 
 from __future__ import annotations

@@ -4,8 +4,7 @@
   comparison bases and its paired code tree. The writer (MIK-R12) calls it over the tree it produces,
   and the curator's command calls it over a working tree.
 * :func:`validation_applies` is rule 8's applicability: a commit route validates whenever K_B or K_C
-  -- every parent, at a merge -- has the layout marker. Before the cutover no production tree has
-  one, so no production route changes behaviour.
+  -- every parent, at a merge -- has the layout marker. Unconverted trees are out of scope.
 * :func:`require_valid_commit` is what a commit route calls before it commits memory: nothing when
   the commit is out of scope, the report when it passes, and :class:`KnowledgeValidationError` --
   listing every refusing violation -- when it does not. It has no parameter that skips a rule.
@@ -27,6 +26,9 @@ from agents_remember.memory_quality.knowledge_validator import (
 )
 from agents_remember.memory_quality.knowledge_validator import (
     rules_history as _rules_history,  # noqa: F401  # registers MIK-R09's open history row rule
+)
+from agents_remember.memory_quality.knowledge_validator import (
+    rules_link_targets as _rules_link_targets,  # noqa: F401  # registers MIK-R54's link path rule
 )
 from agents_remember.memory_quality.knowledge_validator import (
     rules_overviews as _rules_overviews,  # noqa: F401  # registers MIK-R80's overview order rules
@@ -81,7 +83,7 @@ def _reports_at_route(rule: ValidationRule, context: ValidationContext, finding:
     """
 
     if rule.merge_reports:
-        return merge_reports_at(context)
+        return merge_reports_at(context) and (not rule.merge_requires_carried or finding.carried)
     if rule.migration_debt:
         return debt_reports_at(context, carried=finding.carried)
     return False

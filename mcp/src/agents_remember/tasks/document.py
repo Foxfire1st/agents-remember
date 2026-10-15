@@ -6,7 +6,7 @@ This is the persisted source of truth for a task's plan and progress. ``task.md`
 peer of ``observer.projection`` -- a persisted/served Pydantic contract, **not**
 an MCP response model.
 
-Scope (slice 3c): ``light`` standalone tasks and ``subTask`` slices of a series
+Scope (slice 3c): legacy ``light`` documents and ``subTask`` slices of a series
 (the lifecycle-keyed work-content documents), plus the series ``master`` itself
 (commit 3). A master is the series-aggregation entity: a structured ``subTasks``
 index (each slice a checkable entry) + an ordered ``sections`` render plan that
@@ -647,7 +647,9 @@ class ExpectedKnowledgeEffect(_Doc):
 
 
 def _check_expected_knowledge_effects(
-    kind: DocKind, effects: list[ExpectedKnowledgeEffect] | None
+    kind: DocKind,
+    effects: list[ExpectedKnowledgeEffect] | None,
+    requirements: list[str | ApprovedRequirementPacketRef],
 ) -> None:
     if effects is None:
         return
@@ -656,6 +658,17 @@ def _check_expected_knowledge_effects(
     if not effects:
         raise ValueError(
             "expectedKnowledgeEffects declares at least one effect; clear it with null instead"
+        )
+    packets = {
+        f"{packet.stableId}@{packet.version}"
+        for packet in requirements
+        if isinstance(packet, ApprovedRequirementPacketRef)
+    }
+    unknown = sorted({effect.requirementRef for effect in effects} - packets)
+    if packets and unknown:
+        raise ValueError(
+            "expectedKnowledgeEffects requirementRef names no packet in requirements: "
+            + ", ".join(unknown)
         )
     counts = Counter(f"{effect.subject}#{effect.effect}" for effect in effects)
     repeated = sorted(key for key, count in counts.items() if count > 1)
@@ -749,7 +762,9 @@ class TaskDocument(_Doc):
         self._check_sprint_rows_and_seats()
         self._check_discarded_subtasks()
         self._normalize_integration_branch()
-        _check_expected_knowledge_effects(self.kind, self.expectedKnowledgeEffects)
+        _check_expected_knowledge_effects(
+            self.kind, self.expectedKnowledgeEffects, self.requirements
+        )
         return self
 
     def _check_master_fields(self) -> None:

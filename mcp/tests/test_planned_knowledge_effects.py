@@ -12,11 +12,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
+from agents_remember.application.knowledge_gate import evaluate_leaf_gate
 from agents_remember.application.knowledge_worklist import (
     ITEM_KINDS,
     leaf_worklist,
 )
+from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.application.knowledge_worklist.planned_effects import (
     Declaration,
     declarations_from,
@@ -25,6 +28,8 @@ from agents_remember.application.knowledge_worklist.surface import leaf_worklist
 from agents_remember.application.knowledge_writer.memory_state import Owner
 from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
 from agents_remember.application.task_docs.task_doc_tools import TaskDocEdit, _apply
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.mcp.registration.tasks import register_task_tools
 from agents_remember.memory_quality.knowledge_worklist_section import knowledge_worklist_lines
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.planned import planned_item_open
@@ -41,7 +46,11 @@ from agents_remember.tasks.leaf_decisions import leaf_decision_refusal
 from agents_remember.tasks.render import render_markdown
 from agents_remember.tasks.task_intent import task_intent_identity, task_intent_projection
 from agents_remember.worktrees.worktree_contract import load_contract
+from mcp.server.fastmcp import FastMCP
+from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import ValidationError
+from reconsideration_test_support import write_master
+from test_knowledge_requirement_reference_contract import _write_packet
 from test_knowledge_worklist import (
     DATA,
     DATA_V1,
@@ -56,6 +65,7 @@ from test_knowledge_worklist import (
     World,
     _init,
     base_memory,
+    git,
     invariant,
 )
 
@@ -184,6 +194,55 @@ def test_the_field_is_optional_normative_intent_settable_and_refuses_malformed_d
         )
 
 
+@pytest.mark.parametrize("reference", ["MIK-R55@v2", "MIK-R54@v1"])
+def test_effect_requirement_must_name_a_document_packet(reference: str) -> None:
+    packet = {"path": "requirements/MIK-R55-v1.md", "stableId": "MIK-R55", "version": "v1"}
+    with pytest.raises(ValidationError, match="requirementRef"):
+        leaf_document(
+            requirements=["Legacy prose", packet],
+            expectedKnowledgeEffects=[effect("family:FAM-F00001", "weaken", reference)],
+        )
+    assert leaf_document(
+        requirements=[packet],
+        expectedKnowledgeEffects=[effect("family:FAM-F00001", "weaken", "MIK-R55@v1")],
+    ).expectedKnowledgeEffects
+    assert leaf_document(
+        requirements=["Legacy prose"],
+        expectedKnowledgeEffects=[effect("family:FAM-F00001", "weaken", reference)],
+    ).expectedKnowledgeEffects
+
+
+def test_family_declared_effect_requires_the_same_recorded_effect(world: World) -> None:
+    code = world.code_commit({REVIEW: EDITED_REVIEW})
+    world.memory_commit(
+        {
+            f"knowledge/history/{LEAF}.json": history(
+                row(
+                    "FAM-F00001",
+                    "changed",
+                    "ROW-FFFFFF",
+                    revision=1,
+                    effect="clarify",
+                    examined=[{"id": "INV-AAAAAA", "revision": 1}],
+                )
+            )
+        },
+        code,
+    )
+    declared = (
+        Declaration("family:FAM-F00001", "weaken", "MIK-R55@v1"),
+        Declaration("family:FAM-F00001", "clarify", "MIK-R55@v1"),
+    )
+    result = _worklist(world, code, declared)
+    entries = {entry["effect"]: entry for entry in result["plannedEffects"]["entries"]}
+    assert entries["weaken"]["matched"] is False
+    assert entries["clarify"]["matchedBy"] == "ROW-FFFFFF"
+    item = next(item for item in result["items"] if item["kind"] == "planned_untouched")
+    assert item["facts"]["rows"] == [
+        {"id": "ROW-FFFFFF", "disposition": "changed", "effect": "clarify"}
+    ]
+
+
 # --------------------------------------------------------------------------------------------------
 # Matching and classification (rules 3, 4 and 6; the examples)
 # --------------------------------------------------------------------------------------------------
@@ -300,7 +359,14 @@ def test_declarations_match_only_the_rows_that_deliver_them_and_mark_every_item(
     _leaf_rows(
         world,
         code,
-        row("FAM-F00002", "changed", "ROW-FFFFF2", examined=[{"id": "INV-CCCCCC", "revision": 1}]),
+        row(
+            "FAM-F00002",
+            "changed",
+            "ROW-FFFFF2",
+            revision=1,
+            effect="split",
+            examined=[{"id": "INV-CCCCCC", "revision": 1}],
+        ),
         row(
             "INV-EEEEEE",
             "deleted",
@@ -404,6 +470,15 @@ def test_a_planned_row_answers_its_item_and_the_stored_predicate_agrees(world: W
 
 
 def _write(world: World, rows: list[dict[str, Any]], decisions: Any = None) -> Any:
+    _write_packet(
+        world.root / "tasks/agents-remember/260928_mik",
+        "requirements/MIK-R14-v2.md",
+        stable_id="MIK-R14",
+        version="v2",
+    )
+    declared = (*DECLARED, Declaration("family:FAM-F00001", "merge", "MIK-R11@v2"))
+    worklist = _worklist(world, world.code_base, declared)
+    (world.root / "knowledge-worklist.json").write_text(json.dumps(worklist), encoding="utf-8")
     return write_knowledge(
         WriteRequest(
             memory_root=world.memory,
@@ -412,6 +487,8 @@ def _write(world: World, rows: list[dict[str, Any]], decisions: Any = None) -> A
             handoff_path="handoff.json",
             document={"history": rows},
             decisions=decisions,
+            worklist=worklist,
+            coordination_root=world.root,
         )
     )
 
@@ -479,7 +556,8 @@ def test_the_writer_writes_planned_rows_and_refuses_what_they_cannot_name(
             }
         },
     }
-    assert _write(world, [deferred], owner).state == "planned"
+    deferred_report = _write(world, [deferred], owner)
+    assert deferred_report.state == "planned", deferred_report.render()
 
     refusals = {
         "does not resolve": [{**dropped, "ref": {"decision": "never"}}],
@@ -507,6 +585,7 @@ def test_the_writer_writes_planned_rows_and_refuses_what_they_cannot_name(
 
 
 def _contract(world: World, task_root: Path) -> Path:
+    write_master(task_root, leaf_document())
     enclosure = task_root / "enclosures" / LEAF.lower()
     enclosure.mkdir(parents=True, exist_ok=True)
     path = enclosure / "series-contract.md"
@@ -525,6 +604,83 @@ def _contract(world: World, task_root: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def test_mounted_task_doc_effect_is_reconciled_by_the_leaf_gate(world: World) -> None:
+    task_root = world.root / "tasks/agents-remember/planned_case"
+    task_root.mkdir(parents=True)
+    document_path = task_root / "99_leaf.json"
+    document_path.write_text(leaf_document().model_dump_json(by_alias=True, exclude_none=True))
+    requirements = task_root / "requirements"
+    requirements.mkdir()
+    (requirements / "MIK-R55-v1.md").write_text(
+        "# Packet\n\n| Stable ID | MIK-R55 |\n| Version | v1 |\n"
+    )
+    contract_path = _contract(world, task_root)
+    config = McpRuntimeConfig(
+        config_path=world.root / "settings.json",
+        coordination_root=world.root,
+        workspace_root=world.root,
+        transcript_root=world.root / "logs/mcp",
+        repositories={
+            "agents-remember": RepositoryScope(repo_id="agents-remember", path=world.code)
+        },
+    )
+    server = FastMCP("planned-effect-fixture")
+    register_task_tools(server, config)
+    declaration = effect("family:FAM-F00001", "weaken", "MIK-R55@v1")
+    arguments = dict(
+        repo_id="agents-remember",
+        task_name="planned_case",
+        slug="99_leaf",
+        operation="set_field",
+        fields={
+            "requirements": [
+                {"path": "requirements/MIK-R55-v1.md", "stableId": "MIK-R55", "version": "v1"}
+            ],
+            "expectedKnowledgeEffects": [declaration],
+        },
+    )
+
+    async def declare():
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
+            return await client.call_tool("task_doc", arguments)
+
+    answer = anyio.run(declare)
+    assert not answer.isError and answer.structuredContent is not None, answer
+    assert answer.structuredContent["ok"], answer
+    assert json.loads(document_path.read_text())["expectedKnowledgeEffects"] == [declaration]
+    contract = load_contract(contract_path)
+    # The declared family is planned; the undeclared touched invariant is unplanned.
+    # Then revert the probe so the gate has only the undelivered declaration to answer.
+    (world.code / REVIEW).write_text(EDITED_REVIEW)
+    marked = leaf_worklist(contract, persist=False)
+    assert marked is not None and marked["state"] == "complete", marked
+    marks = _by_subject(marked)
+    assert marks[("reached_family", "FAM-F00001")]["planning"] == "planned"
+    assert marks[("touched_invariant", "INV-AAAAAA")]["planning"] == "unplanned"
+    (world.code / REVIEW).write_text(REVIEW_V1)
+    code_tree = git(world.code, "rev-parse", "HEAD^{tree}")
+    candidate = CandidateTrees(code=code_tree, memory=git(world.memory, "rev-parse", "HEAD^{tree}"))
+    before = evaluate_leaf_gate(contract, candidate, persist_worklist=False)
+    assert before is not None and not before.ok
+    planned = next(item for item in before.worklist["items"] if item["kind"] == "planned_untouched")
+    assert any(finding.item == planned["id"] for finding in before.findings), before
+    world.memory_commit(
+        {
+            f"knowledge/history/{LEAF}.json": history(
+                row(planned["subject"], "deferred", "ROW-PPPPP1", ref={"leaf": "260928-MIK-L98"})
+            )
+        },
+        world.code_base,
+    )
+    after = evaluate_leaf_gate(
+        contract,
+        CandidateTrees(code=code_tree, memory=git(world.memory, "rev-parse", "HEAD^{tree}")),
+        persist_worklist=False,
+    )
+    assert after is not None and after.ok, after
+    assert not any(finding.item == planned["id"] for finding in after.findings), after
 
 
 def test_a_leaf_reads_its_declaration_and_the_checklist_and_tool_show_the_marks(

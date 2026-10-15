@@ -11,7 +11,7 @@ import pytest
 from agents_remember.application.knowledge_currentness.observe import open_code_tree
 from agents_remember.application.knowledge_gate.predicates import GateContext, family_row_open
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
-from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.cli.__main__ import main
 from agents_remember.memory.knowledge_index import KnowledgeIndexCache
 from agents_remember.memory_quality.knowledge_validator import (
@@ -48,6 +48,7 @@ from knowledge_writer_test_support import (
     tree_bytes,
     write,
 )
+from writer_worklist_test_support import prepare_worklist, write_knowledge
 
 FAMILY_PATH = f"knowledge/families/{BASE_FAMILY}-landing.json"
 HISTORY_PATH = f"knowledge/history/{LEAF_ID}.json"
@@ -60,6 +61,10 @@ def _world(tmp_path: Path) -> World:
     family["revision"] = 6  # deliberately different from its member's actual revision, 1
     write(world.memory, {FAMILY_PATH: canonical_text(family)})
     commit_all(world.memory, "family at own revision six")
+    prepare_worklist(
+        WriteRequest(world.memory, world.code, OWNER, "notes/handoff.json", {}),
+        contract=world.contract,
+    )
     return world
 
 

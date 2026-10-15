@@ -129,14 +129,11 @@ def test_finalizing_an_ordinary_standalone_task_keeps_todays_skip(world):
             createdAt="2026-10-02T00:00:00+00:00",
         ),
     )
+    before = world.snapshot()
     result = finalize_result(FinalizeArgs(contract_path=contract.contract_path))
-    assert result.returncode == 0 and result.payload["state"] == "finalized"
-    assert archive_state(result) == {
-        "state": "skipped",
-        "reason": "root-series-still-active",
-        "taskRoot": contract.task_root.as_posix(),
-    }
-    assert cast("dict[str, Any]", result.payload["taskUpdates"])["leaf"]["state"] == "skipped"
+    assert result.payload["state"] == "task-document-resolution-blocked"
+    assert "contract-bound task document and master row" in str(result.payload)
+    assert world.snapshot() == before
     assert contract.task_root.is_dir()
 
 
@@ -649,10 +646,11 @@ def test_every_successful_retire_answer_carries_the_restart_notice_and_refusals_
 
 def test_a_series_task_with_no_task_document_keeps_todays_skip(world):
     contract = world.series("nodoc")
+    before = world.snapshot()
     result = finalize_result(FinalizeArgs(contract_path=contract.contract_path))
-    assert result.returncode == 0
-    assert archive_state(result)["reason"] == "root-series-still-active"
-    assert "detail" not in archive_state(result)
+    assert result.payload["state"] == "task-document-resolution-blocked"
+    assert "contract-bound task document and master row" in str(result.payload)
+    assert world.snapshot() == before
 
 
 def test_a_refusal_before_anything_is_recorded_carries_no_restart_notice(world):

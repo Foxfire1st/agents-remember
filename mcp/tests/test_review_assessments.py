@@ -855,6 +855,12 @@ class TestKnowledgeReviewSection:
         assert review.limitations == (STALE_BINDING,)
         assert "not reused" in "\n".join(review.lines)
 
+    def test_first_section_line_names_the_actual_gate_section(self) -> None:
+        review = knowledge_review_section(())
+        first = review.lines[2]
+        assert "gates nothing" in first
+        assert "worklist section" in first
+
     def test_an_empty_collection_renders_no_rows_rather_than_a_default(self) -> None:
         review = knowledge_review_section(())
 

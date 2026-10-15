@@ -96,6 +96,7 @@ from agents_remember.models.knowledge_files.history import (
     sidecar_entry_anchors,
     unknown_subjects,
 )
+from agents_remember.models.knowledge_files.history_items import invalid_history_items
 from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.models.knowledge_files.sidecars import FileSidecar
 
@@ -262,6 +263,16 @@ def _hidden_change_message(row: Judgment, hidden: Judgment) -> str:
 
 def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
     for path, history in context.parsed.histories:  # every file: a subject never disappears
+        if not any(is_closed_history(base.get(path)) for base in context.bases):
+            for row in history.rows:
+                for item in invalid_history_items(row.items):
+                    yield Finding(
+                        path,
+                        f"rows.{row.id}.items",
+                        f"row {row.id} ({row.subject}) has invalid item {item!r}: new history "
+                        "items must be sha256:<64 hex>; name the row again through the writer "
+                        "with the worklist's item IDs",
+                    )
         for subject in unknown_subjects(history, context.record_ids):
             row = history.row_about(subject)
             yield Finding(

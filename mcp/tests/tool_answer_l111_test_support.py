@@ -579,6 +579,7 @@ _L111_TASK_DOC_UPDATED: dict[str, str] = {
     "remove_subtask": "removed sub-task 03c_x",
     "set_section": "section Objective set",
     "append_decision": "appended decision d3",
+    "put_open_question": "put_open_question applied",
     "begin_review": "began review",
     "record_review": "recorded review",
     "record_route_review": "recorded route review",

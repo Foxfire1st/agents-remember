@@ -8,7 +8,7 @@ working tree, so the same objects give the same answer on every machine and ever
 Symbols are bound by the shipped extractor (``memory_quality/style/citations``) through
 :func:`extents.qualified_spans`, the same rule the curator writer (MIK-R12) uses: a name resolves only
 when the file's language has a grammar and exactly one construct binds it. Parsing is cached per
-(blob, grammar), so a blob cited by many cards is parsed once.
+(blob, grammar, path), since test-case eligibility also depends on the exact filename.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ class CodeObjects:
     _modes: dict[str, dict[str, str]] = field(default_factory=dict)
     """Tree entry modes by path, for each tree :meth:`tree` read (MIK-R53 rule 3)."""
     _blobs: dict[str, bytes] = field(default_factory=dict)
-    _definitions: dict[tuple[str, str], dict[str, list[extents.Extent]]] = field(
+    _definitions: dict[tuple[str, str, str], dict[str, list[extents.Extent]]] = field(
         default_factory=dict
     )
 
@@ -125,9 +125,9 @@ class CodeObjects:
                     continue
                 metadata, path = row.split(b"\t", 1)
                 mode, kind, object_id = metadata.decode("ascii").split(" ")
+                modes[os.fsdecode(path)] = mode
                 if kind == "blob" and mode in _FILE_MODES:
                     blobs[os.fsdecode(path)] = object_id
-                    modes[os.fsdecode(path)] = mode
             self._trees[commit] = blobs
             self._modes[commit] = modes
         return self._trees[commit]
@@ -137,6 +137,17 @@ class CodeObjects:
 
         self.tree(commit)
         return self._modes[commit]
+
+    def tree_entry_mode(self, tree: str, path: str) -> str | None:
+        """Observe an exact entry, including trees with no recursive leaf rows."""
+        result = run_git(
+            self.repository,
+            ["ls-tree", "-z", tree, "--", path],
+            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+        )
+        if result.returncode:
+            raise CodeObjectError(f"{path}: tree entry cannot be read: {result.stderr.strip()}")
+        return result.stdout.split(" ", 1)[0] if result.stdout else None
 
     @staticmethod
     def link_paths(modes: Mapping[str, str]) -> frozenset[str]:
@@ -216,7 +227,7 @@ class CodeObjects:
         grammar = grammars.grammar_of(path)
         if grammar is None:
             return None
-        key = (blob_id, grammar)
+        key = (blob_id, grammar, path)
         if key not in self._definitions:
             lines = self.blob(blob_id).decode("utf-8", errors="surrogateescape").split("\n")
             try:

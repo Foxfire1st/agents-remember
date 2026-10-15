@@ -18,11 +18,7 @@ from typing import Any
 
 import pytest
 from agents_remember.application.knowledge_proofs import invariants_without_proof
-from agents_remember.application.knowledge_writer import (
-    Owner,
-    WriteRequest,
-    write_knowledge,
-)
+from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.application.knowledge_writer.handoff import (
     TestFileMention as FileMention,
 )
@@ -78,6 +74,7 @@ from knowledge_writer_test_support import (
     target,
     write,
 )
+from writer_worklist_test_support import write_knowledge
 
 OWNER = Owner(task=TASK_ID, kind="leaf", id=LEAF_ID)
 
@@ -412,7 +409,7 @@ def test_the_checklist_shows_the_list_as_information_that_moves_no_count(
         "evidenceTests": ["tests/test_landing.py::test_plain"],
     }
     second = write_curator_checklist(_checklist(converted, WithoutProof(rows=(row,))))
-    assert first == {
+    assert {**first, "invariantsWithoutProofCount": 1} == {
         **second,
         "reportPath": first["reportPath"],
         "attestationPath": first["attestationPath"],

@@ -21,6 +21,9 @@ document), which every keyed caller makes again before it uses anything it kept.
 could not be read cannot be ruled out, so its failed read stays recorded, and a lookup that cannot
 establish the document records everything it opened. With no claimant it also records the JSON
 listing it consumed, so a document missing during the lookup cannot reappear unnoticed.
+Ruled-out reads and their listing are observed as examined for the audit, outside the
+kept dependency set. As ruled, a sibling later claiming the leaf is not an input of a
+kept view until its age/capacity bound expires; request identity checks remain unchanged.
 
 * :func:`leaf_decision_refusal` -- a planned ``dropped`` history row cites one decision entry of
   the leaf's task document by its ``at``; the knowledge writer asks this at write time and refuses
@@ -39,6 +42,7 @@ from typing import Any
 from agents_remember.kernel.recorded_reads import (
     observed_json_files,
     observed_text,
+    record_read,
     recorded_reads,
     replay_reads,
 )
@@ -73,15 +77,12 @@ def strict_leaf_doc(task_root: Path, leaf_id: str) -> tuple[Path, TaskDocument] 
         replay_reads(opened)
         return None
     claimed = found[0].resolve(strict=False)
-    # A sibling read in full and ruled out is not an input. One that could not be read cannot be
-    # ruled out, so its failed read stays recorded for every caller that keeps a result.
-    replay_reads(
-        {
-            path: seen
-            for path, seen in opened.items()
-            if Path(path).resolve(strict=False) == claimed or not seen.startswith("sha256:")
-        }
-    )
+    for path, seen in opened.items():
+        if Path(path).resolve(strict=False) == claimed or not seen.startswith("sha256:"):
+            replay_reads({path: seen})
+        else:
+            # This sole ruled-out-sibling site is examined, never a kept dependency.
+            record_read(Path(path), seen, examined=True)
     return found
 
 

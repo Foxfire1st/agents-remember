@@ -24,7 +24,7 @@ WHAT DEFENDS WHAT
                                                            throwaway tree and requires all three
                                                            failure kinds to be reported
     the declared inventory is the certified one           the generated-scopes case: the script's
-                                                           ``TARGETS`` must equal the paths the
+                                                           ``skill_targets()`` must equal the paths the
                                                            certification profile declares as the
                                                            ``generated-skills`` generated input, so
                                                            a target silently dropped from the script
@@ -83,6 +83,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest import mock
+
+import pytest
+from agents_remember.certification.repository_profiles import canonical
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_SKILLS_PATH = REPOSITORY_ROOT / "skills"
@@ -179,7 +182,7 @@ def certified_generated_scopes() -> frozenset[str]:
 def declared_target_paths() -> frozenset[str]:
     """Repository-relative paths of every copy the projection script declares."""
 
-    return frozenset(repo_relative(target.path) for target in sync_skills_module().TARGETS)
+    return frozenset(repo_relative(target.path) for target in sync_skills_module().skill_targets())
 
 
 def boundary_locations() -> dict[str, Path]:
@@ -189,7 +192,7 @@ def boundary_locations() -> dict[str, Path]:
     """
 
     locations = {repo_relative(CANONICAL_SKILLS_PATH): CANONICAL_SKILLS_PATH / DOCTRINE_TREE}
-    for target in sync_skills_module().TARGETS:
+    for target in sync_skills_module().skill_targets():
         locations[repo_relative(target.path)] = target.path / DOCTRINE_TREE
     return locations
 
@@ -274,6 +277,41 @@ class RenameInterruption:
 class DeclaredProjectionInventoryTests(unittest.TestCase):
     """Which copies exist is a declaration, and a declaration can shrink by accident."""
 
+    def test_profile_projection_changes_only_the_declared_skill_input(self) -> None:
+        original = json.loads(CERTIFICATION_PROFILE_PATH.read_bytes())
+        profile = canonical.RepositoryCertificationProfile.model_validate(original)
+        declaration = json.loads((REPOSITORY_ROOT / "generated-copies.json").read_bytes())
+        declaration["copies"][0]["targets"] = [{"label": "fixture", "path": "pack/skills"}]
+        projected = canonical.project_generated_skills(profile, json.dumps(declaration).encode())
+        current = projected.model_dump(mode="json")
+        expected = profile.model_dump(mode="json")
+        row = next(
+            item for item in expected["generatedInputs"] if item["inputId"] == "generated-skills"
+        )
+        row["generatedScopes"] = ["pack/skills"]
+        row["sourceScopes"] = sorted({*row["sourceScopes"], "generated-copies.json"})
+        expected["profileDigest"] = canonical.repository_profile_digest(projected)
+        self.assertEqual(current, expected)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "mcp").mkdir()
+            (root / "mcp/certification-profile-v1.json").write_bytes(
+                CERTIFICATION_PROFILE_PATH.read_bytes()
+            )
+            (root / "generated-copies.json").write_text(json.dumps(declaration), encoding="utf-8")
+            before = (root / "mcp/certification-profile-v1.json").read_bytes()
+            generated = sync_skills_module().projected_profile_bytes(root)
+            self.assertNotEqual(generated, before)
+            raw_row = next(
+                item
+                for item in original["generatedInputs"]
+                if item["inputId"] == "generated-skills"
+            )
+            raw_row.update(generatedScopes=row["generatedScopes"], sourceScopes=row["sourceScopes"])
+            original["profileDigest"] = expected["profileDigest"]
+            self.assertEqual(json.loads(generated), original)
+            self.assertEqual((root / "mcp/certification-profile-v1.json").read_bytes(), before)
+
     def test_declared_targets_are_the_certified_generated_scopes(self) -> None:
         self.assertEqual(
             declared_target_paths(),
@@ -281,6 +319,32 @@ class DeclaredProjectionInventoryTests(unittest.TestCase):
             "the projection script and the certification profile disagree about which packaged "
             f"skill copies exist; reconcile them before running {REPAIR_COMMAND}",
         )
+
+    def test_generator_uses_the_repository_copy_declaration(self) -> None:
+        """Another repository can declare targets without editing the generator."""
+        module = sync_skills_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "generated-copies.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "copies": [
+                            {
+                                "source": "skills",
+                                "targets": [{"label": "fixture copy", "path": "pack/skills"}],
+                                "ignoreNames": [],
+                                "ignoreSuffixes": [".pyc"],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                [(target.label, target.path) for target in module.skill_targets(root)],
+                [("fixture copy", root / "pack/skills")],
+            )
 
     def test_the_canonical_tree_is_refused_as_its_own_target(self) -> None:
         self.assertTrue(CANONICAL_SKILLS_PATH.is_dir(), f"missing {CANONICAL_SKILLS_PATH}")
@@ -294,6 +358,69 @@ class DeclaredProjectionInventoryTests(unittest.TestCase):
             sync_skills_module().sync_target(
                 sync_skills_module().SkillTarget("canonical", CANONICAL_SKILLS_PATH)
             )
+
+
+@pytest.mark.parametrize("profile_shape", ["missing", "invalid-json", "digest-mismatch", "valid"])
+def test_normal_sync_prevalidates_profile_before_any_target_mutation(
+    tmp_path: Path, profile_shape: str
+) -> None:
+    root = tmp_path
+    script = root / "scripts/sync-skills.py"
+    parser = root / "mcp/src/agents_remember/kernel/generated_copies.py"
+    for destination, source in [
+        (script, SCRIPT_PATH),
+        (parser, REPOSITORY_ROOT / parser.relative_to(root)),
+    ]:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.read_bytes())
+    declaration = json.loads((REPOSITORY_ROOT / "generated-copies.json").read_bytes())
+    declaration["copies"][0]["targets"] = [
+        {"label": name, "path": name} for name in ["first/skills", "second/skills"]
+    ]
+    (root / "generated-copies.json").write_text(json.dumps(declaration), encoding="utf-8")
+    (root / "skills").mkdir()
+    (root / "skills/rule.md").write_bytes(b"canonical\n")
+    for name in ["first/skills", "second/skills"]:
+        (root / name).mkdir(parents=True)
+        (root / name / "rule.md").write_bytes(b"old copy\n")
+        (root / name / "extra.md").write_bytes(b"preserve on refusal\n")
+    profile = root / "mcp/certification-profile-v1.json"
+    if profile_shape != "missing":
+        document = json.loads(CERTIFICATION_PROFILE_PATH.read_bytes())
+        if profile_shape == "digest-mismatch":
+            document["profileDigest"] = "0" * 64
+        profile.write_bytes(
+            b"not JSON" if profile_shape == "invalid-json" else json.dumps(document).encode()
+        )
+    spec = importlib.util.spec_from_file_location("fixture_sync_skills", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    with mock.patch.dict(sys.modules, {spec.name: module}):
+        spec.loader.exec_module(module)
+
+        def snapshot() -> dict:
+            return {
+                path.relative_to(root).as_posix(): (
+                    path.stat().st_mode,
+                    path.read_bytes() if path.is_file() else None,
+                )
+                for path in root.rglob("*")
+            }
+
+        before = snapshot()
+        expected = module.projected_profile_bytes() if profile_shape == "valid" else None
+        with mock.patch.object(sys, "argv", [str(script)]):
+            if profile_shape == "valid":
+                assert module.main() == 0
+            else:
+                with pytest.raises((FileNotFoundError, ValueError)):
+                    module.main()
+                assert snapshot() == before
+        if expected is not None:
+            assert profile.read_bytes() == expected
+            assert module.check_targets() == 0
+            for target in module.skill_targets():
+                assert module.file_digests(target.path) == module.file_digests(root / "skills")
 
 
 class ReplaceTreeSequenceTests(unittest.TestCase):
@@ -407,10 +534,10 @@ class CanonicalProjectionConvergenceTests(unittest.TestCase):
     def test_every_declared_projection_matches_the_canonical_tree(self) -> None:
         module = sync_skills_module()
         self.assertTrue(CANONICAL_SKILLS_PATH.is_dir(), f"missing {CANONICAL_SKILLS_PATH}")
-        self.assertTrue(module.TARGETS, "the projection script declares no targets")
+        self.assertTrue(module.skill_targets(), "the projection script declares no targets")
 
         drifted: list[str] = []
-        for target in module.TARGETS:
+        for target in module.skill_targets():
             self.assertTrue(
                 target.path.is_dir(),
                 f"{module.repo_relative(target.path)} ({target.label}) is absent; "

@@ -119,25 +119,18 @@ def _resolve_parent_target(
     leaf_source: TaskDocSourceSnapshot | None = None,
 ) -> FinalizeTaskTargets:
     if leaf is None or leaf_path is None:
-        if args.master_doc_path is None and not args.subtask_number:
-            return FinalizeTaskTargets()
         raise FinalizeTaskDocumentError(
-            "cannot complete an immediate parent row without a contract-bound leaf document"
+            "cannot finalize a leaf without its contract-bound task document and master row; "
+            "author the leaf under its master through task_doc and retry finalization"
         )
     if leaf.master:
         target = _named_parent(contract.task_root, args, leaf.master, leaf.id)
     else:
         target = _folder_parent(contract.task_root, args, leaf)
     if target is None:
-        if _parent_asserted(args):
-            raise FinalizeTaskDocumentError(
-                "standalone leaf has no immediate parent reference to assert"
-            )
-        return FinalizeTaskTargets(
-            leaf_path=leaf_path,
-            leaf=leaf,
-            completed_leaf=_leaf_completion_candidate(leaf),
-            leaf_source=leaf_source,
+        raise FinalizeTaskDocumentError(
+            f"leaf {leaf.id!r} has no master row: no folder master task document; "
+            "create its master and add the leaf's row through task_doc before retrying finalization"
         )
     _check_parent_row_path(target.path, target.row, leaf_path)
     completed_parent = _parent_completion_candidate(target.document, target.row.number)
@@ -179,8 +172,8 @@ def _folder_parent(task_root: Path, args: FinalizeArgs, leaf: TaskDocument) -> _
     A leaf without a ``master`` reference belongs to its folder's ``task.json`` exactly as the
     task-document master sync decides it, so the row that sync keeps current is the row finalize
     completes. That master is held to every check a named master meets: it must be a readable
-    master with exactly one row for the leaf, pointing at this leaf's file. Only a missing folder
-    master, or one listing no row for the leaf, leaves the leaf standalone as before.
+    master with exactly one row for the leaf, pointing at this leaf's file. A missing folder
+    master or leaf row refuses finalization (MIK-R55 rule 9 supersedes MIK-R38's boundary).
     """
     folder_master = folder_master_json_path(task_root, leaf)
     if folder_master is None:
@@ -188,12 +181,10 @@ def _folder_parent(task_root: Path, args: FinalizeArgs, leaf: TaskDocument) -> _
     expected_parent = folder_master.resolve(strict=False)
     parent, parent_source = _read_parent(expected_parent)
     if not any(row.number == leaf.id for row in parent.subTasks):
-        if _parent_asserted(args):
-            raise FinalizeTaskDocumentError(
-                f"folder master {expected_parent} lists no row {leaf.id!r}; the leaf finalizes "
-                "standalone, so there is no immediate parent to assert"
-            )
-        return None
+        raise FinalizeTaskDocumentError(
+            f"folder master {expected_parent} lists no row {leaf.id!r}; "
+            "add the leaf's row to this master through task_doc and retry finalization"
+        )
     _assert_parent_arguments(args, expected_parent, leaf.id)
     return _ParentTarget(expected_parent, parent, parent_source, _exact_parent_row(parent, leaf.id))
 
@@ -407,8 +398,7 @@ def resolve_series_targets(contract: WorktreeContract, args: FinalizeArgs) -> Fi
 
     path = contract.task_root / "task.json"
     if not _holds_master_document(path):
-        # An ordinary standalone task (no task document, or one that is not a master) has no
-        # master or sprint row to complete: it finalizes as a task without a master document.
+        # Without a master document here, resolve the contract-bound leaf and its parent.
         return _resolve_parent_target(contract, args, None, None)
     master, source = _read_own_document(path)
     require_abandoned_rows_unlanded(
@@ -597,7 +587,7 @@ def _read_own_document(path: Path) -> tuple[TaskDocument, TaskDocSourceSnapshot]
     """The task's own document, which decides whether a master is being finalized.
 
     A deliberate difference from earlier builds, which finalized a task whose ``task.json``
-    could not be read as an ordinary standalone task: its kind cannot be known, and a master
+    could not be read: its kind cannot be known, and a master
     must not be finalized as if it were none. Such a task is refused and the file is named.
     """
 

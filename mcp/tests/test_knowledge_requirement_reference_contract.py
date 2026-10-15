@@ -21,11 +21,13 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from agents_remember.memory.knowledge.requirement_endpoint import resolve_requirement_endpoint
 from agents_remember.memory.knowledge.requirement_owner import consume_owner_resolution
 from agents_remember.models.knowledge.requirement import (
     REQUIREMENT_PACKET_VERSION_PATTERN,
     RequirementOwnerRef,
 )
+from agents_remember.models.knowledge_files.shapes import RequirementReference
 from agents_remember.models.task_intent import ApprovedRequirementPacketRef
 
 OWNER_PATH = "requirements/KS-R19-v1-requirement-revision-as-substrate-record.md"
@@ -179,3 +181,29 @@ def test_a_resolved_owner_is_reported_as_resolved(tmp_path: Path) -> None:
     resolution = consume_owner_resolution(task_root, _owner())
     assert resolution.state == "resolved"
     assert resolution.refusal_code is None and resolution.refusal_detail is None
+
+
+def test_archived_endpoint_resolves_only_when_active_task_directory_is_absent(
+    tmp_path: Path,
+) -> None:
+    reference = RequirementReference.model_validate(
+        {
+            "task": {"repository": "repo", "path": "wave/leaf"},
+            "packet": OWNER_PATH,
+            "id": "KS-R19",
+            "version": "v1",
+        }
+    )
+    archived = tmp_path / "tasks/repo/0_archive/wave/leaf"
+    _write_packet(archived, OWNER_PATH)
+    endpoint = resolve_requirement_endpoint(tmp_path, reference)
+    assert endpoint.state == "resolved"
+    assert endpoint.task_root == archived
+    assert endpoint.archived is True
+
+    active = tmp_path / "tasks/repo/wave/leaf"
+    active.mkdir(parents=True)
+    endpoint = resolve_requirement_endpoint(tmp_path, reference)
+    assert endpoint.state == "unresolved"
+    assert endpoint.task_root == active
+    assert endpoint.archived is False

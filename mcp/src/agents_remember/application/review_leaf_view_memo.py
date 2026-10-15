@@ -156,6 +156,7 @@ def leaf_view_key(contract: WorktreeContract, trees: ReviewTrees) -> LeafViewKey
             parent_tip,
             leaf_head,
         )
+    replay_reads(reads)
     if gate is None:
         return None
     return LeafViewKey(

@@ -627,17 +627,7 @@ def test_the_curator_hand_off_list_contract_has_one_home_its_consequences_declar
     # and narrows counted sidecar edits to references.
     copies = [contract] + [
         REPOSITORY_ROOT / root / "l-01-agent-lifecycles" / relative
-        for root in (
-            ".agents/skills",
-            ".claude/skills",
-            ".codex/skills",
-            ".cursor/skills",
-            ".github-vscode/skills",
-            ".hermes/skills",
-            ".openclaw/workspace/skills",
-            ".pi/skills",
-            "mcp/src/agents_remember/package_data/runtime/skills",
-        )
+        for root in GENERATED_SKILL_COPIES
     ]
     for copy_path in copies:
         copy_text = " ".join(copy_path.read_text(encoding="utf-8").split())
@@ -649,17 +639,7 @@ def test_the_curator_hand_off_list_contract_has_one_home_its_consequences_declar
     workflow = "workflows/converted-card-workflow.md"
     c05_copies = [SKILLS_ROOT / "c-05-create-or-update-onboarding-files" / workflow] + [
         REPOSITORY_ROOT / root / "c-05-create-or-update-onboarding-files" / workflow
-        for root in (
-            ".agents/skills",
-            ".claude/skills",
-            ".codex/skills",
-            ".cursor/skills",
-            ".github-vscode/skills",
-            ".hermes/skills",
-            ".openclaw/workspace/skills",
-            ".pi/skills",
-            "mcp/src/agents_remember/package_data/runtime/skills",
-        )
+        for root in GENERATED_SKILL_COPIES
     ]
     for c05_copy in c05_copies:
         c05_text = " ".join(c05_copy.read_text(encoding="utf-8").split())

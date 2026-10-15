@@ -486,7 +486,7 @@ class AnswerAndTextTests(unittest.TestCase):
 
         checkout = Path(__file__).resolve().parent.parent.parent
         result = subprocess.run(
-            ["python3", "scripts/sync-skills.py", "--check"],
+            [sys.executable, "scripts/sync-skills.py", "--check"],
             cwd=checkout,
             capture_output=True,
             text=True,

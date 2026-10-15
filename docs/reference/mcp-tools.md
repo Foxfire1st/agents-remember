@@ -187,7 +187,7 @@ application operation, not an agent-facing route around MCP.
 | `direct_execution_grant` | Give, take back, or reclaim direct-execution grants before work starts, as an architect. The developer gives the same record with the dashboard control; `task_doc` has no operation that gives, changes, or removes a grant. | `task_document_ref`, `action` (`give`, `revoke`, or `reclaim` — reclaim takes back only abandoned leaves' grants with clean checkouts and reports what was preserved and why; started leaves keep their grants under rule 5) |
 | `worktree_cleanup` | After integration, archive/read back canonical lifecycle evidence, publish an external terminal receipt, then remove worktrees, merged task branches, reports, and the enclosure root. Archive-ready is not cleanup-completed; retry this exact public call with its archived `teardown_providers` value until surviving contract truth records completion. Bounded pre-locator exception (MIK-R82 rule 5): with no locator, no worktree folder, and no work branches, the call finishes with nothing to archive/delete, records the why in the surviving contract, and reads it back. This is non-terminal for task documents. | `contract_path`, `dry_run=false`, `teardown_providers=true` |
 | `worktree_abandon` | Abandon an unintegrated generation through exact contract/journal/Git authority and preserve terminal archive proof before deletion. Archive-ready but incomplete abandon retries this exact public call with its archived `force` value until surviving contract truth records abandonment. Bounded pre-locator exception (MIK-R82 rule 5): with no locator, no worktree folder, and no work branches, the call finishes with nothing to archive/delete, records the why in the surviving contract, and reads it back. | `contract_path`, `dry_run=false`, `force=false` |
-| `lifecycle_finalize_task` | Prove the landed edge, resolve the exact contract-bound leaf, refuse before cleanup unless every parent/nested step is done, then complete that leaf and, when it declares an existing immediate parent (or names none and its folder's `task.json` master lists it), automatically derive and reconcile that exact row; a sub-task naming none whose folder `task.json` is not a master is refused. Standalone/no-parent tasks remain supported; the parent document's own task status and higher ancestors are not completed. | `contract_path`; optional `task_doc_path`, `master_doc_path`, and `subtask_number` are independent identity assertions; `dry_run=false` |
+| `lifecycle_finalize_task` | Prove the landed edge, resolve the exact contract-bound leaf, refuse before cleanup unless every parent/nested step is done, then complete that leaf and, when it declares an existing immediate parent (or names none and its folder's `task.json` master lists it), automatically derive and reconcile that exact row; a sub-task naming none whose folder `task.json` is not a master is refused. The parent document's own task status and higher ancestors are not completed. | `contract_path`; optional `task_doc_path`, `master_doc_path`, and `subtask_number` are independent identity assertions; `dry_run=false` |
 
 Closeout and landing record the actual code/memory Git pair. New memory-content commits carry
 `Code-Commit` attribution; `memory.md` remains an ignored computed cache, never an additional commit
@@ -245,7 +245,7 @@ strand accepted operation evidence.
 `read_steps` are removed operations (calling one is refused with the rendered `.md` and
 JSON file names to read instead). Locate the doc by `task_name` (also resolves the
 contract for the lifecycle key) or `contract_path`; pass `slug` for a series sub-task
-(`<slug>.json`), omit for a standalone task (`task.json`). `dry_run=true` builds,
+(`<slug>.json`), omit for a master (`task.json`). `dry_run=true` builds,
 validates and returns diff/wouldLose without writing. A write answers `ok` and
 the changed unit in a phrase (`renderedPath` rides `create`, `reviewState` rides reviews);
 the rendered Markdown and per-sprint `projectionEffects` ride the whole result in the log
@@ -262,6 +262,10 @@ sprint is scaffolded with empty canonical Judgment and Priority Register section
 - `get` and `read_steps` are removed: calling one is refused with the file names
 to read instead. `set_status`: set `fields.status`. `set_field`: scalar/list
 field updates. `append_decision`: append `decision={at, decision, rationale}`.
+- `put_open_question` takes `fields={key, text}`: append or replace the question starting
+with the nonempty key within the task owner's publication; `text` starts with that key.
+Alternatively, `fields={questions: [{key, text}, ...]}` validates every entry before one
+publication of the whole keyed list; the single-question form remains supported.
 - Step plane (one exact existing unit, addressed by `step={id, parent?}`; `parent` selects top
 level when absent or that parent's substeps): `set_step` updates exactly one unit
 (`{id, title?, status?, note?, parent?}`) and never creates — an explicit status clears an

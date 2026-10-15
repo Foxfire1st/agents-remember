@@ -20,6 +20,7 @@ from agents_remember.kernel.memory_attribution import render_memory_content_mess
 from agents_remember.memory_quality.knowledge_validator import (
     knowledge_tree_from_directory,
     knowledge_tree_from_git,
+    validate_tree,
 )
 from agents_remember.memory_quality.knowledge_validator.commit_route import (
     GitKnowledgeValidation,
@@ -39,13 +40,16 @@ from knowledge_validator_test_support import (
     INTEGRATE_SIDECAR,
     INVARIANT,
     LEGACY_COUNT,
+    code,
     edit_json,
     encode,
     fixture_tree_files,
     invariant_document,
     invariant_path,
+    tree,
     write_tree,
 )
+from test_knowledge_requirement_reference_contract import _write_packet
 from test_worktree_sync import SyncFixture
 
 LEFT_DUPLICATE = invariant_path("INV-D0P111", "left")
@@ -78,6 +82,109 @@ def _commit(path: Path, files: dict[str, bytes], message: str) -> str:
 def code_repository(tmp_path: Path) -> tuple[Path, str]:
     root = tmp_path / "code"
     return root, _repository(root, {path: b"# code\n" for path in CODE_PATHS})
+
+
+def test_marker_refusal_offers_fenced_code_block_and_code_span() -> None:
+    files = {**fixture_tree_files(), INTEGRATE_CARD: b"# integrate\n\nSlots[0]\n"}
+    report = validate_tree(tree(files), bases=[tree(files)], code=code())
+    message = next(one.message for one in report.refusals if one.rule == "R22.3-markers")
+    assert "fenced code block" in message
+    assert "code span" in message
+
+
+def test_validator_working_tree_ignores_ignored_paths_but_sees_untracked_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], code_repository: tuple[Path, str]
+) -> None:
+    code_root, _ = code_repository
+    (code_root / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+    write_tree(code_root, {"ignored/file.py": b"# ignored\n", "untracked/file.py": b"# visible\n"})
+    record = "knowledge/decisions/DEC-D12RTE-local-family-routes.json"
+    files = edit_json(
+        fixture_tree_files(),
+        record,
+        lambda doc: doc["links"].extend(
+            [
+                {"relation": "constrains", "target": "route:ignored"},
+                {"relation": "constrains", "target": "route:untracked"},
+            ]
+        ),
+    )
+    memory = tmp_path / "memory"
+    base = _repository(memory, files)
+    status, out = _cli(capsys, str(memory), "--code", str(code_root), "--base", base, "--json")
+    assert status == 1, out
+    links = [
+        one for one in json.loads(out)["violations"] if one["rule"] == "R22.6-link-target-path"
+    ]
+    assert len(links) == 1 and "ignored" in links[0]["message"], out
+
+
+def test_validator_without_base_explains_every_authored_record_is_new(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], code_repository: tuple[Path, str]
+) -> None:
+    code_root, _ = code_repository
+    memory = tmp_path / "memory"
+    _repository(memory, fixture_tree_files())
+    _, out = _cli(capsys, str(memory), "--code", str(code_root))
+    assert "every authored record is judged as new" in out
+    _, out = _cli(capsys, str(memory), "--code", str(code_root), "--json")
+    assert any(
+        "every authored record is judged as new" in note for note in json.loads(out)["notes"]
+    )
+
+
+def test_validator_lists_record_and_sidecar_requirement_endpoints_without_refusing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], code_repository: tuple[Path, str]
+) -> None:
+    record = "knowledge/decisions/DEC-D12RTE-local-family-routes.json"
+    files = fixture_tree_files()
+    reference = json.loads(files[record])["links"][3]["target"]
+    unresolved = {**reference, "version": "v99"}
+    files = edit_json(
+        files,
+        INTEGRATE_SIDECAR,
+        lambda doc: doc["references"].update(
+            {
+                "7": {"targets": [{"kind": "requirement", "requirement": unresolved}]},
+            }
+        ),
+    )
+    files[INTEGRATE_CARD] += b"\nPacket [7].\n"
+    memory = tmp_path / "memory"
+    base = _repository(memory, files)
+    coordination = tmp_path / "coordination"
+    archived = (
+        coordination
+        / "tasks"
+        / reference["task"]["repository"]
+        / "0_archive"
+        / reference["task"]["path"]
+    )
+    _write_packet(
+        archived, reference["packet"], stable_id=reference["id"], version=reference["version"]
+    )
+    args = (
+        str(memory),
+        "--code",
+        str(code_repository[0]),
+        "--base",
+        base,
+        "--coordination-root",
+        str(coordination),
+    )
+    status, out = _cli(capsys, *args, "--json")
+    assert status == 0, out
+    document = json.loads(out)
+    endpoints = document["requirementEndpoints"]
+    assert len(endpoints) == 2
+    assert {(one["path"], one["state"], one["archived"]) for one in endpoints} == {
+        (record, "resolved", True),
+        (INTEGRATE_SIDECAR, "unresolved", True),
+    }
+    assert document["refusalCount"] == 0
+    status, out = _cli(capsys, *args)
+    assert status == 0 and "requirement endpoints" in out
+    assert "resolved" in out and "unresolved" in out and "archived" in out
 
 
 def test_git_trees_are_read_exactly_and_the_route_index_cache_is_ignored(tmp_path: Path) -> None:

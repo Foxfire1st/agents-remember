@@ -196,7 +196,9 @@ def test_no_registered_rule_is_plainly_report_only() -> None:
 
 def test_each_of_the_ten_rules_carries_its_mik_r53_decision() -> None:
     registered = {rule.id: rule for rule in registered_rules()}
-    assert {rule_id for rule_id, rule in registered.items() if rule.merge_reports} == MERGE_RULES
+    assert {
+        rule_id for rule_id, rule in registered.items() if rule.merge_reports
+    } == MERGE_RULES | {"R22.6-link-target-path"}
     assert {rule_id for rule_id, rule in registered.items() if rule.migration_debt} == DEBT_RULES
     assert not registered["R13.3-governs"].merge_reports
     assert not registered["R13.3-governs"].migration_debt

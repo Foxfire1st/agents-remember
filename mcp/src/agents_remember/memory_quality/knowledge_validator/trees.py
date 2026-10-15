@@ -135,6 +135,19 @@ class CodeDirectory:
         return (self.root / path).is_dir()
 
 
+def code_tree_from_working_directory(root: Path) -> CodePathSet:
+    """Regular working-tree files Git tracks or would add, excluding ignored files and links."""
+    result = run_git(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+    if result.returncode != 0:
+        raise KnowledgeTreeReadError(f"cannot list the files of {root}: {result.stderr}")
+    paths = frozenset(
+        path
+        for path in result.stdout.split("\0")
+        if path and (root / path).is_file() and not (root / path).is_symlink()
+    )
+    return CodePathSet(label=root.as_posix(), paths=paths)
+
+
 def knowledge_tree_from_directory(root: Path, *, label: str | None = None) -> KnowledgeTree:
     """Read every knowledge and onboarding file under a memory working tree ``root``."""
 

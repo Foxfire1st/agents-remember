@@ -15,8 +15,11 @@ root, never the packet:
 * ``requirement-task-outside-tasks`` -- ``repository`` is not one plain directory name, so the
   task root would leave ``tasks/``.
 
-An endpoint that does not resolve is **reported as unresolved, never refused**: the record keeps
-it exactly as written. The resolved task root is returned so a later reader -- MIK-R14's lookup of a
+The resolver reports an unresolved endpoint exactly as written. The writer refuses a newly added
+or changed unresolved requirement link when a coordination root is given (MIK-R54 rule 10); commit
+routes never refuse an endpoint's task-plane state. When the active task directory is absent, the
+resolver looks under ``tasks/<repository>/0_archive/<path>`` and marks that answer ``archived``.
+The resolved task root is returned so a later reader -- MIK-R14's lookup of a
 newer approved version in that task's ``requirements/manifest.json`` -- starts from the same place.
 
 **Newer approved version (MIK-R14 rule 2).** :func:`latest_approved_requirement_version` reads the
@@ -73,6 +76,7 @@ class RequirementEndpoint:
     task_root: Path | None
     code: str = ""
     detail: str = ""
+    archived: bool = False
 
     @property
     def key(self) -> str:
@@ -88,7 +92,10 @@ def requirement_task_root(coordination_root: Path, reference: RequirementReferen
     repository = reference.task.repository
     if "/" in repository or "\\" in repository or repository in {".", ".."}:
         return None
-    return coordination_root / "tasks" / repository / reference.task.path
+    tasks = coordination_root / "tasks" / repository
+    active = tasks / reference.task.path
+    archived = tasks / "0_archive" / reference.task.path
+    return archived if not active.is_dir() and archived.is_dir() else active
 
 
 def resolve_requirement_endpoint(
@@ -119,14 +126,18 @@ def resolve_requirement_endpoint(
             path=reference.packet, stableId=reference.id, version=reference.version
         ),
     )
+    archived = task_root == (
+        coordination_root / "tasks" / reference.task.repository / "0_archive" / reference.task.path
+    )
     if resolution.state == "resolved":
-        return RequirementEndpoint(reference, "resolved", task_root)
+        return RequirementEndpoint(reference, "resolved", task_root, archived=archived)
     return RequirementEndpoint(
         reference,
         "unresolved",
         task_root,
         resolution.refusal_code or "",
         resolution.refusal_detail or "",
+        archived=archived,
     )
 
 

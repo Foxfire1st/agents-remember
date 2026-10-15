@@ -139,6 +139,11 @@ def write(world: World, document: dict[str, Any]) -> Any:
             handoff_path="handoff.json",
             document=document,
             commit=True,
+            worklist=world.worklist(
+                git(world.code, "rev-parse", "HEAD"), memory_candidate=world.memory
+            ),
+            code_base=world.code_base,
+            memory_base=world.memory_base,
         )
     )
 

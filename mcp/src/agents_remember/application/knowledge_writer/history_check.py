@@ -46,6 +46,7 @@ from agents_remember.models.knowledge_files.history import (
     stale_examined_members,
     unknown_subjects,
 )
+from agents_remember.models.knowledge_files.history_items import invalid_history_items
 from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.models.knowledge_files.sidecars import ProofEntry, RealizationEntry
 
@@ -83,6 +84,14 @@ def owner_history_problems(state: MemoryState, owner: Owner) -> list[Problem]:
     earlier = _earlier_attempts(state, owner, attempt)
     for row in history.rows:
         where = f"{path}: row {row.id} ({row.subject})"
+        if not frozen:
+            problems.extend(
+                Problem(
+                    where,
+                    f"invalid item {item!r}: new history items must be sha256:<64 hex>; {remedy}",
+                )
+                for item in invalid_history_items(row.items)
+            )
         problems.extend(
             Problem(where, message.replace(_REMEDY, remedy))
             for message in _row_messages(state, row, anchors, earlier)

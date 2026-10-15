@@ -16,8 +16,7 @@ content is identical at C while its file's blob moved (:mod:`.carry`): the mecha
 line-number update the worklist's ``carried`` class promises, so such an entry needs no disposition.
 
 **Converted trees only.** The writer writes a memory tree that holds the layout marker. An
-unconverted tree is refused by name: until the cutover (MIK-R37) the installed runtime's database
-ingest is the production path for unconverted memory, and nothing here changes it.
+unconverted tree is refused by name and must cross the converted boundary first (MIK-R46).
 """
 
 from __future__ import annotations
@@ -35,6 +34,7 @@ from agents_remember.application.knowledge_writer.authoring import Authoring, De
 from agents_remember.application.knowledge_writer.base_side import BaseCode
 from agents_remember.application.knowledge_writer.carry import carry_entries
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
+from agents_remember.application.knowledge_writer.file_publication import PublicationError
 from agents_remember.application.knowledge_writer.handoff import Problem, read_handoff
 from agents_remember.application.knowledge_writer.history_check import owner_history_problems
 from agents_remember.application.knowledge_writer.memory_state import MemoryState, Owner
@@ -43,7 +43,15 @@ from agents_remember.application.knowledge_writer.reconsideration import (
     append_questions,
 )
 from agents_remember.application.knowledge_writer.report import WriteReport
-from agents_remember.application.knowledge_writer.requirement_links import requirement_endpoints
+from agents_remember.application.knowledge_writer.requirement_links import (
+    requirement_endpoints,
+    requirement_link_problems,
+    stored_links,
+)
+from agents_remember.application.knowledge_writer.worklist_checks import (
+    worklist_problems,
+    worklist_shape_problem,
+)
 from agents_remember.memory_quality.knowledge_validator import (
     CodePathSet,
     KnowledgeTree,
@@ -53,6 +61,7 @@ from agents_remember.memory_quality.knowledge_validator import (
     writer_reported_rule_ids,
 )
 from agents_remember.models.knowledge_files.canonical import canonical_text
+from agents_remember.models.knowledge_files.decisions import stored_superseded_fields
 from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
     parse_document,
@@ -90,11 +99,11 @@ class WriteRequest:
     without a task owner (a wave) refuses such a row."""
     coordination_root: Path | None = None
     """Where requirement endpoints' owning tasks live (``tasks/<repository>/<path>``); without it
-    every endpoint is reported unresolved (MIK-R13 rule 4). Never a reason to refuse."""
+    every endpoint is reported unresolved; newly changed unresolved links refuse when it is given."""
     worklist: Mapping[str, Any] | None = None
     """The leaf's persisted worklist (MIK-R08): a ``still_rejected`` row refreshes the links whose
-    trigger fired on its item (MIK-R14), and a row whose hand-off names no item lists the items it
-    answers (MIK-R07 rule 1); without it no link is refreshed and no item is filled in."""
+    trigger fired on its item (MIK-R14), and a row names the items it answers (MIK-R07).
+    A leaf without a persisted worklist is refused and told to compute it (MIK-R54 rule 1)."""
     questions: OpenQuestions | None = None
     """The leaf task document's ``openQuestions``, where a ``raise`` row's question goes
     (MIK-R14); without it a ``raise`` is refused."""
@@ -125,7 +134,10 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     )
     if unwritable is not None:
         return replace(report, problems=(*problems, unwritable))
+    if request.owner.kind == "leaf" and (shape := worklist_shape_problem(request.worklist)):
+        return replace(report, problems=(*problems, shape))
     snapshot = code if code is not None else CodeSnapshot.capture(request.code_root)
+    previous_links = stored_links(state)
     authoring = Authoring(
         state,
         snapshot,
@@ -139,14 +151,22 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         onboarding_sources=_onboarding_sources(request.worklist),
         onboarding_counted=_onboarding_counted(request.worklist),
         memory_base=request.memory_base,
+        coordination_root=request.coordination_root,
     )
     authoring.run(document)
     carried = carry_entries(state, snapshot, request.owner)
     history_problems = owner_history_problems(state, request.owner)
     rendered, render_problems = _render(state.changed_documents())
-    problems = [*problems, *authoring.problems, *history_problems, *render_problems]
+    problems = [
+        *problems,
+        *authoring.problems,
+        *history_problems,
+        *render_problems,
+        *worklist_problems(authoring, document, request.worklist),
+    ]
     report = replace(
         report,
+        state="planned",
         code_tree=snapshot.tree,
         records=tuple(authoring.records),
         entries=tuple(authoring.entries),
@@ -155,10 +175,13 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         rulings=tuple(entry.entry_id for entry in document.rulings),
         notes=tuple(authoring.notes),
         carried=carried,
-        requirements=requirement_endpoints(state, authoring.records, request.coordination_root),
+        requirements=requirement_endpoints(
+            state, authoring.records, request.coordination_root, previous_links
+        ),
     )
+    problems.extend(requirement_link_problems(report.requirements, request.coordination_root))
     if problems:
-        return replace(report, problems=tuple(problems))
+        return replace(report, state="refused", problems=tuple(problems))
     files = state.candidate_files(rendered)
     bases = (state.base,) if state.base is not None and state.base.converted else ()
     validation = validate_tree(
@@ -168,11 +191,21 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     )
     refusals, reports = _writer_split(validation)
     if refusals:
-        return replace(report, violations=(*refusals, *reports))
+        return replace(report, state="refused", violations=(*refusals, *reports))
     report = replace(report, violations=reports)
-    refused = _append_raised(request, authoring.raised)
+    appended, refused = _append_raised(request, authoring.raised)
+    if appended:
+        destination = getattr(request.questions, "destination", "the leaf's task document")
+        report = replace(
+            report,
+            questions_published=appended,
+            notes=(
+                *report.notes,
+                f"raise questions published to {destination}: {', '.join(appended)}",
+            ),
+        )
     if refused:
-        return replace(report, problems=refused)
+        return replace(report, state="refused", problems=refused)
     return _finish(report, state, files, request.commit)
 
 
@@ -316,13 +349,17 @@ def _onboarding_counted(worklist: Mapping[str, Any] | None) -> dict[str, bool]:
     return found
 
 
-def _append_raised(request: WriteRequest, raised: list[tuple[str, str]]) -> tuple[Problem, ...]:
+def _append_raised(
+    request: WriteRequest, raised: list[tuple[str, str]]
+) -> tuple[tuple[str, ...], tuple[Problem, ...]]:
     """MIK-R14: a committing run's raise questions reach the task document before any file."""
 
     if not (request.commit and raised):
-        return ()
-    _appended, refused = append_questions(request.questions, raised)
-    return tuple(Problem("openQuestions", f"the raise is refused: {one}") for one in refused)
+        return (), ()
+    appended, refused = append_questions(request.questions, raised)
+    return tuple(appended), tuple(
+        Problem("openQuestions", f"the raise is refused: {one}") for one in refused
+    )
 
 
 def _writer_split(
@@ -366,7 +403,27 @@ def _finish(
             written=tuple(path for path, data in files.items() if state.files.get(path) != data),
             removed=tuple(path for path in state.files if path not in files),
         )
-    written, removed = state.write(files)
+    try:
+        written, removed = state.write(files)
+    except OSError as error:
+        recovery = (
+            (
+                "a question was appended before the failure; the same command, run again, completes the write and appends nothing twice",
+            )
+            if report.questions_published
+            else ()
+        )
+        restoration = (
+            "write failed and was undone"
+            if isinstance(error, PublicationError) and error.restored
+            else "write failed; rollback incomplete or unverifiable"
+        )
+        return replace(
+            report,
+            state="refused",
+            notes=(*report.notes, *recovery),
+            problems=(Problem(str(error.filename or state.root), f"{restoration}: {error}"),),
+        )
     return replace(report, state="written", written=tuple(written), removed=tuple(removed))
 
 
@@ -376,6 +433,18 @@ def _render(documents: Mapping[str, dict[str, Any]]) -> tuple[dict[str, bytes], 
     rendered: dict[str, bytes] = {}
     problems: list[Problem] = []
     for path, document in documents.items():
+        superseded = (
+            stored_superseded_fields(document) if document.get("schema") == "ar-decision/v1" else ()
+        )
+        if superseded:
+            problems.extend(
+                Problem(
+                    path,
+                    f"{field}: [R13.2-superseded-derived] 'superseded' is never stored: a decision is superseded when another decision's 'supersedes' names it. Keep this one 'active' and name it in the superseding decision's 'supersedes'",
+                )
+                for field in superseded
+            )
+            continue
         text = canonical_text(document)
         try:
             if document.get("schema") == HISTORY_SCHEMA:

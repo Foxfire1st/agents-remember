@@ -4,25 +4,30 @@ A decision (or any linked record) may name a requirement packet as a link target
 rule 6 shape ``{ task, packet, id, version }``. For every such link on a record this run created,
 updated or left unchanged, the writer asks the requirement owner through
 :func:`agents_remember.memory.knowledge.requirement_endpoint.resolve_requirement_endpoint` and
-reports the answer. An unresolved endpoint is **reported, never refused**: the link is written
-exactly as the curator authored it.
+reports the answer. With a coordination root, a new or changed unresolved link refuses;
+an unchanged unresolved link remains a report (MIK-R54 rule 10).
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 
-from agents_remember.application.knowledge_writer.memory_state import MemoryState
+from agents_remember.application.knowledge_writer.handoff import Problem
+from agents_remember.application.knowledge_writer.memory_state import MemoryState, deep_copy
 from agents_remember.application.knowledge_writer.report import EndpointOutcome, RecordOutcome
 from agents_remember.memory.knowledge.requirement_endpoint import resolve_requirement_endpoint
 from agents_remember.models.knowledge_files.shapes import RequirementReference
 
 
 def requirement_endpoints(
-    state: MemoryState, records: Sequence[RecordOutcome], coordination_root: Path | None
+    state: MemoryState,
+    records: Sequence[RecordOutcome],
+    coordination_root: Path | None,
+    previous: Mapping[str, Any] | None = None,
 ) -> tuple[EndpointOutcome, ...]:
     """Each requirement link target of ``records``, with the owner's resolution."""
 
@@ -48,6 +53,29 @@ def requirement_endpoints(
                     state=endpoint.state,
                     code=endpoint.code,
                     detail=endpoint.detail,
+                    changed=link not in ((previous or {}).get(record_id) or []),
+                    archived=endpoint.archived,
                 )
             )
     return tuple(outcomes)
+
+
+def stored_links(state: MemoryState) -> dict[str, Any]:
+    return {
+        record_id: deep_copy(found[2]).get("links", [])
+        for record_id in state.records
+        if (found := state.record(record_id)) is not None
+    }
+
+
+def requirement_link_problems(
+    outcomes: Sequence[EndpointOutcome], coordination_root: Path | None
+) -> list[Problem]:
+    return [
+        Problem(
+            f"{one.record}.{one.field}",
+            f"requirement {one.endpoint} does not resolve: [{one.code}] {one.detail}; correct or remove the link",
+        )
+        for one in outcomes
+        if coordination_root is not None and one.changed and one.state == "unresolved"
+    ]

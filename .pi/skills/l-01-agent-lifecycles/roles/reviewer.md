@@ -36,7 +36,7 @@ You must be given all of these; a brief missing one is refused and reported, nev
 
   | seam | binds | your verdict goes to |
   | --- | --- | --- |
-  | standalone / organizational leaf route review | the leaf | Worker; code PASS also to Curator; memory verdict to Curator |
+  | organizational leaf route review | the leaf | Worker; code PASS also to Curator; memory verdict to Curator |
   | atomic-master integration review | the canonical master | the integration owner |
   | master-exit | the master | that manager |
   | portfolio plan review | the sprint | the architect |

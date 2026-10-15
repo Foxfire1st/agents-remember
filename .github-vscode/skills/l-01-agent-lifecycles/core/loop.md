@@ -39,7 +39,7 @@ The strategist's blast-radius register is the scoring input when an orchestratio
 leaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS
 agent set) is recorded on the leaf doc with a decision-log entry. A master whose leaves all score
 `direct` avoids iterative full-loop machinery. Atomic leaves still defer a requested route review to
-the one master integration seam; standalone and organizational leaves retain their requested review
+the one master integration seam; organizational leaves retain their requested review
 scope. **The knobs tune review depth and round machinery; they do not create a review when none was
 requested.**
 

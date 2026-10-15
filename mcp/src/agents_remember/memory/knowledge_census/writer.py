@@ -14,9 +14,8 @@ assessments and a route's statuses: it has no operation that edits or removes on
 * :meth:`set_disposition` sets a claim's migration disposition and the records it links to.
 * :meth:`append_status` appends one entry to a route's status history.
 
-The writer refuses a memory tree without the layout marker: census files are part of the converted
-layout, and before the cutover (MIK-R37) no production memory tree is converted, so the writer never
-touches production memory.
+The writer refuses a memory tree without the layout marker: census files belong to the converted
+layout. Convert an unconverted tree before writing census files.
 """
 
 from __future__ import annotations

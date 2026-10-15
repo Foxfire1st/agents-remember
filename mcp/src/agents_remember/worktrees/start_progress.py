@@ -68,7 +68,9 @@ def write_start_progress(
     enclosure: StartingEnclosure,
     beat: StartBeat,
 ) -> None:
-    """Write the transient start-progress file. Never raises -- a start must not fail on this."""
+    """Write admitted progress, never a lineage-refused start; observability never raises."""
+    if beat.phase == "source-lineage-blocked":
+        return
     payload: dict[str, Any] = {
         "schema": START_PROGRESS_SCHEMA,
         "repoName": enclosure.repo_name,

@@ -793,7 +793,7 @@ Semantics, as the loop doctrine defines them
   route review; no iterative full-loop rounds);
   below both it is direct (ordinary build + the applicable independent route review;
   no iterative loop machinery). Atomic child leaves defer independent route review to the
-  accumulated canonical master at master-to-parent integration; standalone and organizational
+  accumulated canonical master at master-to-parent integration; organizational
   leaves retain independent leaf review.
 - `perLevel.leaf.loop: "scored"` — the owning seat scores each leaf at
   dispatch. `perLevel.master.loop: "seam-required"` names the default loop
@@ -801,7 +801,7 @@ Semantics, as the loop doctrine defines them
   leaves all score direct still runs the applicable candidate-bound route review at each
   owning altitude).
   **This knob governs the LOOP only (review rounds): it cannot disable an applicable
-  standalone/organizational leaf route review, curator/closeout admission, or the master-exit
+  organizational leaf route review, curator/closeout admission, or the master-exit
   SEAM gate.** Atomic-child review remains deferred to master integration by execution nature;
   the knob does not disable or move that gate. The master-exit seam
   is unconditional doctrine — no knob value touches it. Loop posture names

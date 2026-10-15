@@ -156,6 +156,7 @@ consumers = [
   "mcp/tests/test_bootstrap_converted_onboarding.py",
   "mcp/tests/test_bootstrap_uv_minimum_version.py",
   "mcp/tests/test_candidate_identity.py",
+  "mcp/tests/test_canonical_skill_worklist.py",
   "mcp/tests/test_capsule_delivery.py",
   "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",
@@ -252,6 +253,7 @@ consumers = [
   "mcp/tests/test_fresh_user_harness.py",
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
+  "mcp/tests/test_generated_copy_worklist.py",
   "mcp/tests/test_generated_master_selection_cost.py",
   "mcp/tests/test_git_command.py",
   "mcp/tests/test_git_object_memo.py",
@@ -278,6 +280,7 @@ consumers = [
   "mcp/tests/test_knowledge_copies_citation_cache.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
   "mcp/tests/test_knowledge_copy_cleanup.py",
+  "mcp/tests/test_knowledge_correction_guidance.py",
   "mcp/tests/test_knowledge_crossing.py",
   "mcp/tests/test_knowledge_currentness.py",
   "mcp/tests/test_knowledge_cutover.py",
@@ -464,6 +467,7 @@ consumers = [
   "mcp/tests/test_reconsideration_surfacing.py",
   "mcp/tests/test_record_integrity.py",
   "mcp/tests/test_record_landing.py",
+  "mcp/tests/test_recorded_read_audit.py",
   "mcp/tests/test_removed_stores.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_request_logical_digests.py",
@@ -596,6 +600,7 @@ consumers = [
   "mcp/tests/test_untyped_sprint_rows.py",
   "mcp/tests/test_unused_settings_keys.py",
   "mcp/tests/test_user_settings_guard.py",
+  "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_watched_writer_composition.py",
   "mcp/tests/test_watched_writer_transactions.py",
   "mcp/tests/test_watcher_health_body.py",
@@ -618,6 +623,13 @@ consumers = [
   "mcp/tests/test_worktree_support_tests_1.py",
   "mcp/tests/test_worktree_sync.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
+  "mcp/tests/test_writer_correction_history.py",
+  "mcp/tests/test_writer_correction_links.py",
+  "mcp/tests/test_writer_correction_publication.py",
+  "mcp/tests/test_writer_corrections.py",
+  "mcp/tests/test_writer_integrations.py",
+  "mcp/tests/test_writer_question_publication.py",
+  "mcp/tests/test_writer_refresh_restoration.py",
 ]
 
 [[artifact]]
@@ -941,6 +953,7 @@ consumers = [
   "mcp/tests/test_unused_settings_keys.py",
   "mcp/tests/test_workspace_wake_zero_census.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_own_environment.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_start_preview.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
@@ -1005,12 +1018,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1032,12 +1048,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1059,12 +1078,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1086,12 +1108,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1113,12 +1138,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1140,12 +1168,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1167,12 +1198,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1194,12 +1228,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1221,12 +1258,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
   "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -1509,6 +1549,7 @@ consumers = [
   "mcp/tests/test_bootstrap_converted_onboarding.py",
   "mcp/tests/test_bootstrap_uv_minimum_version.py",
   "mcp/tests/test_candidate_identity.py",
+  "mcp/tests/test_canonical_skill_worklist.py",
   "mcp/tests/test_capsule_delivery.py",
   "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",
@@ -1605,6 +1646,7 @@ consumers = [
   "mcp/tests/test_fresh_user_harness.py",
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
+  "mcp/tests/test_generated_copy_worklist.py",
   "mcp/tests/test_generated_master_selection_cost.py",
   "mcp/tests/test_git_command.py",
   "mcp/tests/test_git_object_memo.py",
@@ -1631,6 +1673,7 @@ consumers = [
   "mcp/tests/test_knowledge_copies_citation_cache.py",
   "mcp/tests/test_knowledge_copies_completed_tasks.py",
   "mcp/tests/test_knowledge_copy_cleanup.py",
+  "mcp/tests/test_knowledge_correction_guidance.py",
   "mcp/tests/test_knowledge_crossing.py",
   "mcp/tests/test_knowledge_currentness.py",
   "mcp/tests/test_knowledge_cutover.py",
@@ -1817,6 +1860,7 @@ consumers = [
   "mcp/tests/test_reconsideration_surfacing.py",
   "mcp/tests/test_record_integrity.py",
   "mcp/tests/test_record_landing.py",
+  "mcp/tests/test_recorded_read_audit.py",
   "mcp/tests/test_removed_stores.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_request_logical_digests.py",
@@ -1949,6 +1993,7 @@ consumers = [
   "mcp/tests/test_untyped_sprint_rows.py",
   "mcp/tests/test_unused_settings_keys.py",
   "mcp/tests/test_user_settings_guard.py",
+  "mcp/tests/test_validator_link_targets.py",
   "mcp/tests/test_watched_writer_composition.py",
   "mcp/tests/test_watched_writer_transactions.py",
   "mcp/tests/test_watcher_health_body.py",
@@ -1971,6 +2016,13 @@ consumers = [
   "mcp/tests/test_worktree_support_tests_1.py",
   "mcp/tests/test_worktree_sync.py",
   "mcp/tests/test_worktree_sync_knowledge_merge.py",
+  "mcp/tests/test_writer_correction_history.py",
+  "mcp/tests/test_writer_correction_links.py",
+  "mcp/tests/test_writer_correction_publication.py",
+  "mcp/tests/test_writer_corrections.py",
+  "mcp/tests/test_writer_integrations.py",
+  "mcp/tests/test_writer_question_publication.py",
+  "mcp/tests/test_writer_refresh_restoration.py",
 ]
 
 [[artifact]]
@@ -2370,12 +2422,15 @@ consumers = [
   "mcp/tests/test_knowledge_census_files.py",
   "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
+  "mcp/tests/test_validator_link_targets.py",
+  "mcp/tests/test_writer_correction_links.py",
 ]
 
 [[artifact]]
@@ -2394,8 +2449,10 @@ replacement_contract = "node:mcp/tests/test_knowledge_writer.py::test_a_decision
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_family_history_judgments.py",
+  "mcp/tests/test_generated_copy_worklist.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_database_retired.py",
+  "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_route_chain.py",
@@ -2410,6 +2467,13 @@ consumers = [
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
   "mcp/tests/test_tool_refusal_conformance.py",
+  "mcp/tests/test_writer_correction_history.py",
+  "mcp/tests/test_writer_correction_links.py",
+  "mcp/tests/test_writer_correction_publication.py",
+  "mcp/tests/test_writer_corrections.py",
+  "mcp/tests/test_writer_integrations.py",
+  "mcp/tests/test_writer_question_publication.py",
+  "mcp/tests/test_writer_refresh_restoration.py",
 ]
 
 [[artifact]]
@@ -2692,6 +2756,30 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/reconsideration_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-writer-and-task-publication"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "canonical task and writer models with real temporary Git fixtures"
+introduced_by = "260928-MIK-L54"
+lifetime = "permanent"
+permanence_rationale = "Shared native task configuration and a valid enclosing master preserve successful question publication under the no-orphan rule."
+replacement_contract = "node:mcp/tests/test_reconsideration_surfacing.py::test_the_task_document_append_preserves_questions_through_task_doc"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_canonical_skill_worklist.py",
+  "mcp/tests/test_planned_knowledge_effects.py",
+  "mcp/tests/test_reconsideration_route_trigger.py",
+  "mcp/tests/test_reconsideration_surfacing.py",
+  "mcp/tests/test_unexplained_change_disposition.py",
+  "mcp/tests/test_writer_question_publication.py",
+  "mcp/tests/test_writer_refresh_restoration.py",
+]
+
+[[artifact]]
 path = "mcp/tests/repository_profile_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -2833,6 +2921,7 @@ consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_tool_answer_guard.py",
   "mcp/tests/test_tool_answer_log.py",
   "mcp/tests/test_tool_answer_rows_citation.py",
@@ -2943,6 +3032,93 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/writer_corrections_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-writer-and-task-publication"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "canonical task and writer models with real temporary Git fixtures"
+introduced_by = "260928-MIK-L54"
+lifetime = "permanent"
+permanence_rationale = "The split writer correction tests share real paired Git repositories and the canonical writer entry rather than duplicate setup."
+replacement_contract = "node:mcp/tests/test_writer_correction_links.py::test_new_unresolved_requirement_link_refuses_with_coordination_root"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_writer_correction_history.py",
+  "mcp/tests/test_writer_correction_links.py",
+  "mcp/tests/test_writer_correction_publication.py",
+  "mcp/tests/test_writer_corrections.py",
+  "mcp/tests/test_writer_refresh_restoration.py",
+]
+
+[[artifact]]
+path = "mcp/tests/writer_worklist_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-writer-and-task-publication"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "native worklist_for_sides with real temporary Git operands"
+introduced_by = "260928-MIK-L54"
+lifetime = "permanent"
+permanence_rationale = "One native persisted-worklist prerequisite shared by positive Writer fixtures."
+replacement_contract = "node:mcp/tests/test_mik_r53_judgment_rows.py::test_writer_records_a_membership_row_for_an_unlisted_invariant"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_abandoned_series_closeout.py",
+  "mcp/tests/test_atomic_master_review_public.py",
+  "mcp/tests/test_atomic_master_review_scope.py",
+  "mcp/tests/test_atomic_series_landing_l3.py",
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_cleanup_repeated_archive_ready.py",
+  "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_live_gate.py",
+  "mcp/tests/test_closeout_projection_source_classification.py",
+  "mcp/tests/test_closeout_queue.py",
+  "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_family_history_judgments.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_crossing.py",
+  "mcp/tests/test_knowledge_database_retired.py",
+  "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_read_boundary.py",
+  "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_landing_state_refusals.py",
+  "mcp/tests/test_legacy_refusal_envelope.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
+  "mcp/tests/test_memory_attribution_producers.py",
+  "mcp/tests/test_mik_r53_judgment_rows.py",
+  "mcp/tests/test_mik_r53_onboarding_gate.py",
+  "mcp/tests/test_missing_master_tool_answers.py",
+  "mcp/tests/test_no_grant_closeout_parity.py",
+  "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_pause_stop_only_end_to_end.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_review_block_state_values_through_real_tools.py",
+  "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_result_blocks_through_real_tools.py",
+  "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_tool_answer_rows_packaging.py",
+  "mcp/tests/test_tool_entry_point_valid_progression.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_workspace_wake_zero_census.py",
+  "mcp/tests/test_worktree_sync_knowledge_merge.py",
+  "mcp/tests/test_writer_correction_history.py",
+  "mcp/tests/test_writer_correction_links.py",
+  "mcp/tests/test_writer_correction_publication.py",
+  "mcp/tests/test_writer_corrections.py",
+  "mcp/tests/test_writer_refresh_restoration.py",
 ]
 
 [[artifact]]

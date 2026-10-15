@@ -1,15 +1,9 @@
 """A ``raise`` row's question, appended to the leaf's task document through ``task_doc`` (MIK-R14).
 
 :class:`TaskDocOpenQuestions` is the writer's :class:`~.reconsideration.OpenQuestions` over the
-task owner. It is a read-modify-write that preserves every existing question:
-
-1. the leaf's one task document is found strictly (:func:`~agents_remember.tasks.leaf_decisions.
-   strict_leaf_doc`: two documents claiming the leaf, or the leaf's document in an unreadable state,
-   are named refusals);
-2. a question whose key is already present is not appended again (a rerun of the same ``raise``);
-3. otherwise ``task_doc`` ``set_field`` publishes ``openQuestions`` as the existing questions plus
-   the new one -- a ``NORMATIVE_INTENT`` field, so the change is the developer's to answer. ``check``
-   is the same edit as a dry run: the task owner validates the whole publication and writes nothing.
+task owner. The strict leaf lookup selects the document; ``put_open_question`` reads and
+publishes its keyed append/replacement inside the task owner's own publication. Intervening
+questions are preserved, reworded reasons replace the earlier text, and ``check`` is a dry run.
 
 Any refusal of the task owner is returned as the reason, never raised, so the writer refuses the
 ``raise`` and the item stays open. :class:`UnavailableOpenQuestions` is the port when no task owner
@@ -45,11 +39,21 @@ class TaskDocOpenQuestions:
     task_root: Path
     leaf: str
 
+    @property
+    def destination(self) -> str:
+        found = strict_leaf_doc(self.task_root, self.leaf)
+        return str(found[0]) if found is not None else str(self.task_root)
+
     def check(self, key: str, question: str) -> str | None:
-        return self._edit(key, question, dry_run=True)
+        return self._edit({"key": key, "text": question}, dry_run=True)
 
     def append(self, key: str, question: str) -> str | None:
-        return self._edit(key, question, dry_run=False)
+        return self._edit({"key": key, "text": question}, dry_run=False)
+
+    def append_many(self, raised: list[tuple[str, str]]) -> str | None:
+        return self._edit(
+            {"questions": [{"key": key, "text": text} for key, text in raised]}, dry_run=False
+        )
 
     def _current(self) -> tuple[str, list[Any]] | str:
         """The leaf document's slug and its questions as documents, or why it cannot be read."""
@@ -67,23 +71,23 @@ class TaskDocOpenQuestions:
         ]
         return path.stem, questions
 
-    def _edit(self, key: str, question: str, *, dry_run: bool) -> str | None:
+    def _edit(self, fields: dict[str, Any], *, dry_run: bool) -> str | None:
         current = self._current()
         if isinstance(current, str):
             return current
-        slug, questions = current
-        if any(isinstance(one, str) and one.startswith(key) for one in questions):
-            return None
+        slug, _questions = current
         try:
-            task_doc_tool(
+            result = task_doc_tool(
                 self.config,
                 TaskDocTarget(self.repo_id, contract_path=str(self.contract_path), slug=slug),
-                operation="set_field",
-                edit=TaskDocEdit(fields={"openQuestions": [*questions, question]}),
+                operation="put_open_question",
+                edit=TaskDocEdit(fields=fields),
                 call=TaskDocCall(dry_run=dry_run),
             )
         except (AgentsRememberError, ValueError, OSError) as error:
             return f"task_doc refused the openQuestions edit: {error}"
+        if result.get("ok") is not True:
+            return f"task_doc refused the openQuestions edit: {result.get('code', 'refused')}: {result.get('error') or result.get('detail')}"
         return None
 
 
@@ -99,4 +103,8 @@ class UnavailableOpenQuestions:
 
     def append(self, key: str, question: str) -> str | None:
         del key, question
+        return self.reason
+
+    def append_many(self, raised: list[tuple[str, str]]) -> str | None:
+        del raised
         return self.reason

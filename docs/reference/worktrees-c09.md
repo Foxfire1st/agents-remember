@@ -91,7 +91,7 @@ facts. The response's `projectionEffects` names each scope and carries an exact 
 rebuild did not finish.
 
 Execute that rebuild action. Do not reject or roll back the task write, retain a stale candidate,
-or invent queue replan/drain controls. Unrelated sprints, standalone tasks, and repositories keep
+or invent queue replan/drain controls. Unrelated sprints and repositories keep
 their own projection revisions.
 
 ## Closeout And Recovery

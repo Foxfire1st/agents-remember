@@ -542,6 +542,7 @@ def onboarding_trace_result(
     sides: OnboardingTraceSides,
     *,
     code_blobs: Mapping[str, str | None],
+    source_groups: Mapping[str, Sequence[str]] | None = None,
 ) -> OnboardingTraceResult:
     """Evaluate MIK-R30/MIK-R53 for the changed source files ``changed_paths`` over ``sides``.
 
@@ -566,13 +567,31 @@ def onboarding_trace_result(
     rows, problem = _history_rows(sides)
     base, candidate = sides.base, sides.candidate
     items: list[TraceItem] = []
-    for source in sorted(set(_card_sources(context, changed_paths))):
+    groups = source_groups or {}
+    aliases = {
+        path for representative, paths in groups.items() for path in paths if path != representative
+    }
+    for source in sorted(set(_card_sources(context, changed_paths)) - aliases):
         markdown = f"{ONBOARDING_ROOT}/{source}.md"
         sidecar = f"{ONBOARDING_ROOT}/{source}.json"
         if not any(path in tree for tree in (base, candidate) for path in (markdown, sidecar)):
             continue  # no card on either side: today's missing-onboarding check owns it
+        if source == "overview":
+            return OnboardingTraceResult(
+                owner=sides.owner,
+                items=(),
+                pairing=sides.pairing,
+                problems=(
+                    (
+                        INCOMPLETE_CODE,
+                        source,
+                        "the root-level code file 'overview' has a card whose subject equals the root route's; it cannot be traced",
+                    ),
+                ),
+            )
         subject = card_subject(source)
-        blobs = _item_blobs((source,), code_blobs)
+        sources = tuple(groups.get(source, (source,)))
+        blobs = _item_blobs(sources, code_blobs)
         found = rows.get(subject)
         counted = counted_change(base, candidate, markdown, sidecar)
         items.append(
@@ -580,7 +599,7 @@ def onboarding_trace_result(
                 subject=subject,
                 markdown=markdown,
                 sidecar=sidecar,
-                sources=(source,),
+                sources=sources,
                 counted=counted,
                 row=None if found is None else found[0].id,
                 blobs=blobs,

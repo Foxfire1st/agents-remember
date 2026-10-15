@@ -64,7 +64,7 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
     ) -> dict[str, Any]:
         """Prove the landed edge and complete one parent-child task lifecycle edge: refuses before
         cleanup unless every declared step is done, then reconciles the exact parent row.
-        Standalone leaves supported; ancestors are not completed. States: finalized,
+        Leaves require a master; ancestors are not completed. States: finalized,
         would-finalize, blocked. Answers the state, what blocks
         and the next call; preview with dry_run. Reference: docs/reference/mcp-tools.md."""
         return lifecycle_finalize_task_payload(
@@ -80,7 +80,7 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         )
 
 
-_TASK_DOC_TOOL_DESCRIPTION = """Write task documents: ar-task-document/v1 JSON plus rendered markdown (JSON rules; markdown is generated). Read the .md as a file. A write names its kind ['subTask'|'master']. Operations: create, replace, set_status, set_step, add_step, remove_step, skip_step, set_subtask, remove_subtask, set_section, append_decision, begin_review, record_review, record_route_review, author_execution_graph, attach_master, detach_master, retire_master, archive_sprint, linkage_report, set_field. Writes answer ok; dry runs answer wouldLose and the diff. Reference: docs/reference/mcp-tools.md."""
+_TASK_DOC_TOOL_DESCRIPTION = """Write task documents: ar-task-document/v1 JSON and generated markdown. Read the .md as a file. A write names its kind ['subTask'|'master']. Operations: create, replace, set_status, set_step, add_step, remove_step, skip_step, set_subtask, remove_subtask, set_section, append_decision, put_open_question, begin_review, record_review, record_route_review, author_execution_graph, attach_master, detach_master, retire_master, archive_sprint, linkage_report, set_field. Writes answer ok; dry runs answer wouldLose and the diff. Reference: docs/reference/mcp-tools.md."""
 
 
 def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> None:

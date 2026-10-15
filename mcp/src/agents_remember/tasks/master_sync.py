@@ -176,7 +176,7 @@ def folder_master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
     on every task-document write; the finalizer (``worktrees/modules/finalize.py``) completes it
     when the leaf lands; reopen (``worktrees/reopen.py``) resets it. The first two used to
     disagree about a leaf without a ``master`` reference -- the sync fell back to this file, the
-    finalizer called the leaf standalone -- so a master whose leaves name no master kept each
+    finalizer omitted its parent row -- so a master whose leaves name no master kept each
     finished leaf's row at ``inProgress`` (260928-MIK: 15 rows, repaired by resync writes). All
     three now resolve an unnamed leaf here, and a leaf that names its master through
     :func:`master_json_path_from_ref`.

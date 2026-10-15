@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -19,6 +21,7 @@ from agents_remember.tasks import (
     write_task_docs,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.tasks.master_sync import folder_master_json_path
 from agents_remember.tasks.store import restore_task_doc_sources
 from agents_remember.worktrees.queue.closeout_projection_publication import (
     preview_closeout_projection_effect,
@@ -31,6 +34,31 @@ from agents_remember.worktrees.task_fact_publication import (
 from .task_doc_graph_titles import require_single_graph_document
 from .task_doc_queue_scope import TaskDocScopeChange, resolve_projection_scope_union
 from .task_doc_route_review import TaskDocError
+
+_publication_active: ContextVar[bool] = ContextVar("task_doc_publication_active", default=False)
+
+
+def _task_repository_root(coordination_root: Path, repo_id: str) -> Path:
+    repository = TaskDocumentRef(repository=repo_id, path="task.json").repository
+    return coordination_root / "tasks" / repository
+
+
+def run_task_doc_call(
+    coordination_root: Path,
+    repo_id: str,
+    invoke: Callable[[], dict],
+) -> dict:
+    """Serialize source preparation with publication; nested writes cannot commit."""
+    if _publication_active.get():
+        return {
+            "ok": False,
+            "code": "task-document-publication-in-progress",
+            "error": "a publication of task documents is already in progress in this call",
+        }
+    with exclusive_file_lock(
+        _task_repository_root(coordination_root, repo_id), "task document publication"
+    ):
+        return invoke()
 
 
 class TaskDocPublicationConflict(TaskDocError):
@@ -132,6 +160,23 @@ def publish_prepared_task_documents(
 def publish_task_doc_transaction_and_refresh(
     transaction: TaskDocPublicationTransaction,
 ) -> TaskDocPublicationResult:
+    """Exclude other writers across validation, publication, copy refresh and rollback."""
+    if _publication_active.get():
+        raise TaskDocError("a publication of task documents is already in progress in this call")
+    with exclusive_file_lock(
+        _task_repository_root(transaction.coordination_root, transaction.target_repo_id),
+        "task document publication",
+    ):
+        token = _publication_active.set(True)
+        try:
+            return _publish_task_doc_transaction_and_refresh(transaction)
+        finally:
+            _publication_active.reset(token)
+
+
+def _publish_task_doc_transaction_and_refresh(
+    transaction: TaskDocPublicationTransaction,
+) -> TaskDocPublicationResult:
     """Commit task truth and invalidate every scope under CAS, then rebuild independently."""
 
     def publication() -> list[tuple[Path, Path]]:
@@ -152,7 +197,7 @@ def publish_task_doc_transaction_and_refresh(
 
     published = publish_task_fact_mutation(
         transaction.coordination_root,
-        validate=lambda: require_task_doc_sources_current(transaction.source_snapshots),
+        validate=lambda: validate_task_doc_transaction(transaction),
         projection_scopes=lambda: resolve_projection_scope_union(
             transaction.coordination_root,
             transaction.target_repo_id,
@@ -268,6 +313,23 @@ def validate_task_doc_transaction(transaction: TaskDocPublicationTransaction) ->
 
     def validate() -> None:
         require_task_doc_sources_current(transaction.source_snapshots)
+        topology = TaskDocumentTopology(transaction.coordination_root)
+        overrides = {change.ref: change.candidate for change in transaction.scope_changes}
+        for change in transaction.scope_changes:
+            if change.candidate.kind != "subTask" or change.candidate.master:
+                continue
+            parent = folder_master_json_path(
+                topology.path_for_ref(change.ref).parent, change.candidate
+            )
+            if parent is None:
+                raise TaskDocError("Sub-task publication requires a master.")
+            master = topology.resolve(
+                topology.canonical_ref(change.ref.repository, parent), overrides
+            ).document
+            if master.kind != "master" or not any(
+                row.number == change.candidate.id for row in master.subTasks
+            ):
+                raise TaskDocError("Sub-task publication requires a master.")
         resolve_projection_scope_union(
             transaction.coordination_root,
             transaction.target_repo_id,

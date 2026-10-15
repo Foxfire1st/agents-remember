@@ -1,17 +1,9 @@
-"""MIK-R14@v2: reconsideration surfacing over real Git code and converted memory repositories.
-
-The fixture is MIK-R08's (``test_knowledge_worklist.world``) plus two decisions in K_B: D18's
-(``DEC-D18TXT``: the rejected "Canonical SQLite" reconsidered on an assumption record, the deferred
-"Both" on a code anchor and a requirement endpoint) and a second decision (``DEC-D12RTE``) whose
-rejected alternative is reconsidered on a family and on D18 itself. A case commits a code candidate
-C and a memory candidate K_C and computes the leaf's worklist; the writer cases write the rows.
-"""
+"""MIK-R14@v2: real paired Git trees, D18/D12 reconsider links, worklists and writer rows."""
 
 from __future__ import annotations
 
 import copy
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +12,6 @@ from agents_remember.application.knowledge_worklist import ITEM_KINDS
 from agents_remember.application.knowledge_writer.memory_state import Owner
 from agents_remember.application.knowledge_writer.open_questions import TaskDocOpenQuestions
 from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory.knowledge.requirement_endpoint import (
     latest_approved_requirement_version,
     requirement_approval,
@@ -38,6 +29,7 @@ from agents_remember.models.knowledge_files.reconsideration import (
     reconsideration_item_open,
 )
 from agents_remember.tasks import TaskDocument
+from reconsideration_test_support import _config, write_master
 from test_knowledge_worklist import (
     DATA,
     DATA_V1,
@@ -204,9 +196,7 @@ def _links(document: dict[str, Any]) -> dict[tuple[str, int], dict[str, Any]]:
     return {(one["subject"], one["link"]): one for one in document["reconsideration"]["links"]}
 
 
-# --------------------------------------------------------------------------------------------------
 # Rule 2: the manifest lookup
-# --------------------------------------------------------------------------------------------------
 
 
 def test_the_manifest_lookup_returns_the_highest_approved_version(tmp_path: Path) -> None:
@@ -231,9 +221,7 @@ def test_the_manifest_lookup_returns_the_highest_approved_version(tmp_path: Path
     assert requirement_approval(task_root, "MIK-R21").state == "unknown"
 
 
-# --------------------------------------------------------------------------------------------------
 # Rule 1: the triggers (and the packet's conforming and non-conforming examples)
-# --------------------------------------------------------------------------------------------------
 
 
 def test_a_revised_assumption_surfaces_the_rejected_alternative(world: World) -> None:
@@ -358,9 +346,7 @@ def test_one_hop_a_decision_change_never_chains_on(world: World) -> None:
     assert _links(document)[(S12, 2)]["note"].startswith("one hop")
 
 
-# --------------------------------------------------------------------------------------------------
 # Rules 4 and 5: the rows, the satisfying rule, and the raise
-# --------------------------------------------------------------------------------------------------
 
 
 class FakeQuestions:
@@ -380,6 +366,11 @@ class FakeQuestions:
             self.appended.append(question)
         return self.refuse_append
 
+    def append_many(self, raised: list[tuple[str, str]]) -> str | None:
+        if self.refuse_append is None:
+            self.appended.extend(question for _key, question in raised)
+        return self.refuse_append
+
 
 def _write(
     world: World,
@@ -397,7 +388,9 @@ def _write(
             document={"history": rows},
             commit=commit,
             questions=questions,
-            worklist=worklist,
+            worklist=worklist
+            if worklist is not None
+            else world.worklist(git(world.code, "rev-parse", "HEAD")),
         )
     )
 
@@ -479,27 +472,6 @@ def test_raise_sets_the_status_and_appends_the_question_or_is_refused(world: Wor
     assert answered["satisfiedBy"] == written.rows[0].id
 
 
-def _config(coordination: Path) -> McpRuntimeConfig:
-    repo = coordination / "repo"
-    repo.mkdir(parents=True)
-    for args in (
-        ("init", "-q", "-b", "main"),
-        ("config", "user.email", "t@example.invalid"),
-        ("config", "user.name", "t"),
-        ("commit", "-q", "--allow-empty", "-m", "base"),
-        ("update-ref", "refs/remotes/origin/main", "HEAD"),
-        ("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"),
-    ):
-        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
-    return McpRuntimeConfig(
-        config_path=coordination / "settings.json",
-        coordination_root=coordination,
-        workspace_root=coordination,
-        transcript_root=coordination / "logs" / "mcp",
-        repositories={"agents-remember": RepositoryScope(repo_id="agents-remember", path=repo)},
-    )
-
-
 def test_the_task_document_append_preserves_questions_through_task_doc(tmp_path: Path) -> None:
     coordination = tmp_path / "coordination"
     task_root = coordination / "tasks" / "agents-remember" / "260928_case"
@@ -518,6 +490,7 @@ def test_the_task_document_append_preserves_questions_through_task_doc(tmp_path:
     )
     document_path = task_root / "99_leaf.json"
     document_path.write_text(leaf.model_dump_json(by_alias=True, exclude_none=True), "utf-8")
+    write_master(task_root, leaf)
     port = TaskDocOpenQuestions(
         config=_config(coordination),
         repo_id="agents-remember",
@@ -535,16 +508,17 @@ def test_the_task_document_append_preserves_questions_through_task_doc(tmp_path:
     assert stored == ["An earlier question?", question]
     assert "Reconsider 'Canonical SQLite'?" in (task_root / "99_leaf.md").read_text("utf-8")
     assert port.append(key, f"{key} reworded") is None  # one question per subject and leaf
-    assert json.loads(document_path.read_text(encoding="utf-8"))["openQuestions"] == stored
+    assert json.loads(document_path.read_text(encoding="utf-8"))["openQuestions"] == [
+        "An earlier question?",
+        f"{key} reworded",
+    ]
     other = TaskDocOpenQuestions(
         port.config, "agents-remember", port.contract_path, task_root, "260928-MIK-L98"
     )
     assert "has no task document" in str(other.append(key, question))
 
 
-# --------------------------------------------------------------------------------------------------
 # The L13 carried decision: a reorder never silently retargets a link; the row registry
-# --------------------------------------------------------------------------------------------------
 
 
 def _tree(label: str, document: str) -> KnowledgeTree:
@@ -611,10 +585,8 @@ def test_the_row_kind_and_the_item_kind_are_registered() -> None:
     assert "still_rejected" in kind.satisfying_row and "raise" in kind.satisfying_row
 
 
-# --------------------------------------------------------------------------------------------------
 # Rulings of 2026-09-30T04:37:56: route targets (Q1), the still_rejected refresh (Q2/Q3),
 # superseded decisions (Q5)
-# --------------------------------------------------------------------------------------------------
 
 ROUTED = "DEC-RT0PKG"
 
@@ -659,10 +631,11 @@ def test_a_route_target_fires_only_through_a_rerouting_or_retiring_row(world: Wo
         "FAM-F00002",
         "retired",
     )
-    # No directory-absence trigger: the route's code gone, no row, nothing raised.
+    # R55.3: directory absence fires without a history row.
     world.memory_commit({path: None}, world.code_base)
     gone = world.code_commit({REVIEW: None, OTHER: None, LINES: None, DATA: None})
-    assert subject not in _candidates(world.worklist(gone))
+    (fired,) = _candidates(world.worklist(gone))[subject]["facts"]["changed"]
+    assert (fired["trigger"], fired["route"]) == ("route_absent", "pkg")
 
 
 def test_a_superseded_decision_raises_nothing_and_its_links_are_listed_skipped(
@@ -765,10 +738,8 @@ def test_still_rejected_reanchors_a_linked_anchor_so_it_stays_live(world: World)
     assert second["facts"]["changed"][0]["entry"]["class"] == "touched"
 
 
-# --------------------------------------------------------------------------------------------------
 # Review R1 rulings of 2026-09-30T05:31:11: the refresh maps line ranges and touches only fired links
 # (F1), stale link anchors raise (F3), the re-point takes the item's facts (F4)
-# --------------------------------------------------------------------------------------------------
 
 SHIFTED = "# one\n# two\n# three\n" + REVIEW_V1
 
@@ -868,9 +839,7 @@ def test_the_repoint_takes_the_items_approved_version_not_a_fresh_read(
     assert (linked["version"], linked["packet"]) == ("v2", "requirements/MIK-R21-v2-formats.md")
 
 
-# --------------------------------------------------------------------------------------------------
 # Review R2 ruling of 2026-09-30T06:17:11: the refresh edits only the link that fired (N1, N2)
-# --------------------------------------------------------------------------------------------------
 
 
 def _reauthor_link(world: World, position: int, **changes: Any) -> bytes:
@@ -916,10 +885,8 @@ def test_a_refresh_refuses_a_fired_link_re_authored_or_moved_in_the_leaf(
     assert "no longer a reconsider_on link of alternative 2" in moved.render()
 
 
-# --------------------------------------------------------------------------------------------------
 # Review R3 ruling of 2026-09-30T07:13:57 (R3-1/N5; reconciled 09:18:48): a rerun after a written
 # refresh is accepted and changes nothing
-# --------------------------------------------------------------------------------------------------
 
 
 RERUN_ROW = {"subject": S18B, "disposition": "still_rejected", "reason": "Still no SQL."}
@@ -991,10 +958,8 @@ def test_a_rerun_after_an_anchor_refresh_is_written_and_bumps_nothing(world: Wor
     _assert_rerun_after_recompute(world, worklist, world.worklist(shifted))
 
 
-# --------------------------------------------------------------------------------------------------
 # Review R4 rulings of 2026-09-30T10:05:18: a rerun after more code changes (R4-1), committed
 # lookalikes and re-authors (R4-2), a version approved after the refresh (R4-3)
-# --------------------------------------------------------------------------------------------------
 
 
 def test_a_rerun_after_more_code_changes_carries_the_refreshed_anchor(world: World) -> None:
@@ -1093,10 +1058,8 @@ def test_a_version_approved_after_the_refresh_is_named_and_needs_the_new_item(
     assert _revision(world) == 2
 
 
-# --------------------------------------------------------------------------------------------------
 # Review R5 rulings of 2026-09-30T11:01:18: a second change inside the anchored range needs a new
 # answer (R5-1); a curator-set unapproved version is re-authored (R5-2)
-# --------------------------------------------------------------------------------------------------
 
 EDITED_AGAIN = EDITED_THIRD.replace("value * 5", "value * 7")
 
@@ -1172,9 +1135,7 @@ def test_an_anchor_link_re_authored_to_other_code_is_refused(world: World) -> No
     assert (world.memory / D18_PATH).read_bytes() == before
 
 
-# --------------------------------------------------------------------------------------------------
 # Architect ruling a3d79e94: succession from the candidate silences the base decision
-# --------------------------------------------------------------------------------------------------
 
 
 def _candidate_successor(world: World, decision_id: str, *supersedes: str) -> None:

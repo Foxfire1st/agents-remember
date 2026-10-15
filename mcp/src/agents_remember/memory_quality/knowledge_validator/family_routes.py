@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from posixpath import dirname
 from typing import Final, Literal
 
-from agents_remember.memory_quality.knowledge_validator.parsed import SidecarFile
+from agents_remember.memory_quality.knowledge_validator.parsed import ParsedTree, SidecarFile
 from agents_remember.models.knowledge_files.records import FamilyRecord
 from agents_remember.models.knowledge_files.shapes import LEGACY_UNASSESSED
 from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH, FileSidecar
@@ -62,6 +62,27 @@ def realization_locations(
                 RealizationLocation(entry.id, entry.invariant, sidecar.sidecar.path, sidecar.path)
             )
     return {invariant: tuple(locations) for invariant, locations in found.items()}
+
+
+@dataclass(frozen=True)
+class RoutedFamily:
+    """A family's record path and the route state shared by every validation rule."""
+
+    path: str
+    state: FamilyRouteState
+
+    @property
+    def id(self) -> str:
+        return self.state.family.id
+
+
+def family_route_states(parsed: ParsedTree) -> tuple[RoutedFamily, ...]:
+    locations = realization_locations(parsed.sidecars)
+    return tuple(
+        RoutedFamily(record.path, family_route_state(record.record, locations))
+        for record in parsed.records
+        if isinstance(record.record, FamilyRecord)
+    )
 
 
 def route_covers(route: str, path: str) -> bool:

@@ -51,6 +51,7 @@ __all__ = [
 ABSENT: Final = "absent"
 CONFLICTING: Final = "conflicting reads"
 _READS: ContextVar[dict[str, str] | None] = ContextVar("recorded_reads", default=None)
+_EXAMINED: ContextVar[dict[str, str] | None] = ContextVar("examined_reads", default=None)
 _FILE_IDENTITY = re.compile(r"sha256:[0-9a-f]{64}|absent")
 _FAILED_IDENTITY = re.compile(r"conflicting reads|unreadable \([A-Za-z0-9_]+\)")
 
@@ -71,29 +72,35 @@ def file_identity(path: Path) -> str:
 
 
 @contextmanager
-def recorded_reads() -> Iterator[dict[str, str]]:
-    """Record every read inside the block as ``{path: identity}``."""
+def recorded_reads(*, examined: dict[str, str] | None = None) -> Iterator[dict[str, str]]:
+    """Record dependencies; optionally collect examined, non-dependent lookup observations.
+
+    Only strict_leaf_doc may mark ruled-out siblings examined. That caller-owned audit
+    bucket is inherited by nested recorders and never exported as a kept read set.
+    """
 
     reads: dict[str, str] = {}
     token = _READS.set(reads)
+    examined_token = _EXAMINED.set(_EXAMINED.get() if examined is None else examined)
     try:
         yield reads
     finally:
         _READS.reset(token)
+        _EXAMINED.reset(examined_token)
 
 
-def record_read(path: Path, identity: str | None = None) -> None:
+def record_read(path: Path, identity: str | None = None, *, examined: bool = False) -> None:
     """Record one read of ``path`` (its identity now, unless the reader passes what it read)."""
 
-    if _READS.get() is None:
+    if (_EXAMINED.get() if examined else _READS.get()) is None:
         return
     key = path.as_posix()
     seen = file_identity(path) if identity is None else identity
-    _record(key, seen)
+    _record(key, seen, examined=examined)
 
 
-def _record(key: str, seen: str) -> None:
-    reads = _READS.get()
+def _record(key: str, seen: str, *, examined: bool = False) -> None:
+    reads = _EXAMINED.get() if examined else _READS.get()
     if reads is None:
         return
     previous = reads.get(key)

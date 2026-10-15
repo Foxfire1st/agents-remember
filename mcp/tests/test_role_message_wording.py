@@ -47,7 +47,7 @@ _SYNC = _sync_targets()
 def surfaces() -> list[Path]:
     """Every skill surface the product ships, canonical first."""
     roots = [Path(_SYNC.CANONICAL_SKILLS)]
-    roots.extend(Path(target.path) for target in _SYNC.TARGETS)
+    roots.extend(Path(target.path) for target in _SYNC.skill_targets())
     return [root / LIFECYCLE for root in roots]
 
 

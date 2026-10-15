@@ -1,9 +1,9 @@
 # Verdict Template (adversarial reviewer)
 
 The artifact an **adversarial reviewer** writes at a seam (`roles/reviewer.md`). It lands
-under the series `notes/reports/` directory. Standalone/organizational leaf route review and
+under the series `notes/reports/` directory. Organizational leaf route review and
 atomic-master integration review bind through the task document; other seam verdicts attach to
-handover gates as **judge evidence**. Variants are **standalone/organizational leaf route review**,
+handover gates as **judge evidence**. Variants are **organizational leaf route review**,
 **atomic-master integration review**, **master-exit** (before manager → orchestrator),
 **super-exit** (before orchestrator → developer), and the loop-review adaptation below. Atomic
 child leaves do not receive a separate route-review verdict.
@@ -98,7 +98,7 @@ contradiction/overconstraint`, `test/tool defect`, and `external blocker`. A req
 must point to a requested developer-approved revision; it cannot be rewritten in this record.
 ```
 
-## Standalone/Organizational Leaf Route-Review Variant
+## Organizational Leaf Route-Review Variant
 
 ```md
 # Independent Route-Review Verdict — <leaf id>

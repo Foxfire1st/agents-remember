@@ -12,12 +12,12 @@
       "budget_words": 2215
     },
     "architect/review": {
-      "size_words": 2410,
-      "budget_words": 2651
+      "size_words": 2694,
+      "budget_words": 2964
     },
     "architect/coordination": {
-      "size_words": 2980,
-      "budget_words": 3278
+      "size_words": 3498,
+      "budget_words": 3848
     },
     "architect/authorized-closeout": {
       "size_words": 1918,
@@ -36,12 +36,12 @@
       "budget_words": 1587
     },
     "orchestrator/review": {
-      "size_words": 1839,
-      "budget_words": 2023
+      "size_words": 2076,
+      "budget_words": 2284
     },
     "orchestrator/coordination": {
-      "size_words": 2409,
-      "budget_words": 2650
+      "size_words": 2880,
+      "budget_words": 3168
     },
     "orchestrator/authorized-closeout": {
       "size_words": 1347,
@@ -52,36 +52,36 @@
       "budget_words": 1584
     },
     "designer/orientation": {
-      "size_words": 1972,
-      "budget_words": 2170
+      "size_words": 2313,
+      "budget_words": 2545
     },
     "designer/planning": {
-      "size_words": 1319,
-      "budget_words": 1451
+      "size_words": 1673,
+      "budget_words": 1841
     },
     "strategist/orientation": {
-      "size_words": 2262,
-      "budget_words": 2489
+      "size_words": 2492,
+      "budget_words": 2742
     },
     "strategist/planning": {
-      "size_words": 1609,
-      "budget_words": 1770
+      "size_words": 1852,
+      "budget_words": 2038
     },
     "manager/orientation": {
       "size_words": 2625,
       "budget_words": 2888
     },
     "manager/review": {
-      "size_words": 2369,
-      "budget_words": 2606
+      "size_words": 2628,
+      "budget_words": 2891
     },
     "manager/curation": {
       "size_words": 5340,
       "budget_words": 5874
     },
     "manager/coordination": {
-      "size_words": 2939,
-      "budget_words": 3233
+      "size_words": 3432,
+      "budget_words": 3776
     },
     "manager/authorized-closeout": {
       "size_words": 1877,
@@ -96,44 +96,44 @@
       "budget_words": 2265
     },
     "worker/implementation": {
-      "size_words": 1654,
-      "budget_words": 1820
+      "size_words": 1949,
+      "budget_words": 2144
     },
     "worker/recovery": {
-      "size_words": 1404,
-      "budget_words": 1545
+      "size_words": 1561,
+      "budget_words": 1718
     },
     "curator/orientation": {
-      "size_words": 3884,
-      "budget_words": 4273
+      "size_words": 4567,
+      "budget_words": 5024
     },
     "curator/curation": {
-      "size_words": 6599,
-      "budget_words": 7259
+      "size_words": 7511,
+      "budget_words": 8263
     },
     "curator/recovery": {
-      "size_words": 3229,
-      "budget_words": 3552
+      "size_words": 3894,
+      "budget_words": 4284
     },
     "reviewer/orientation": {
-      "size_words": 3583,
-      "budget_words": 3942
+      "size_words": 4221,
+      "budget_words": 4644
     },
     "reviewer/review": {
-      "size_words": 3327,
-      "budget_words": 3660
+      "size_words": 4084,
+      "budget_words": 4493
     },
     "reviewer/recovery": {
-      "size_words": 2928,
-      "budget_words": 3221
+      "size_words": 3548,
+      "budget_words": 3903
     },
     "investigator/orientation": {
-      "size_words": 1603,
-      "budget_words": 1764
+      "size_words": 1778,
+      "budget_words": 1956
     },
     "investigator/recovery": {
-      "size_words": 948,
-      "budget_words": 1043
+      "size_words": 1105,
+      "budget_words": 1216
     },
     "bootstrap/orientation": {
       "size_words": 2211,
@@ -152,8 +152,8 @@
       "budget_words": 1658
     },
     "launcher/coordination": {
-      "size_words": 1821,
-      "budget_words": 2004
+      "size_words": 2192,
+      "budget_words": 2412
     }
   },
   "decisions_L101": {
@@ -2216,5 +2216,33 @@
   "decisions_L116": {
     "rule": "MIK-R116 rules 6 to 8: every one of the worker, reviewer, curator and manager role texts gains a 'Where your stage ends' section (end state, repair-own-slips, stops, plus the rule 5 and rule 9 sentences where the packet binds them); the settings-limit rewrite touches the loop doctrine, the review/coordination/curation operations, the reviewer/strategist/architect roles and three templates. Refreshed after the reviewer's tool-server naming line. L116-F03 repair: the reviewer role text and the review operation drop number-naming round phrases ('one seam or one loop round' -> 'a single seam or loop round'; 'the one that round' -> 'the candidate that round'); no capsule grew.",
     "grown_capsules": []
+  },
+  "decisions_L54": {
+    "leaf": "260928-MIK-L54",
+    "authority": "THE-FIVE-FAILING-TESTS-OF-THE-TIP-ARE-REPAIRED-IN-L54-AND-L56-TESTS-MADE-INDEPENDENT-OF-THE-MACHINE-BUDGETS-RE-RECORDED-RULING.json, item 2",
+    "method": "Native compiled_size on final L54 text; only exceeded entries renewed, ceil(size_words * 11 / 10) unchanged; twenty tip overages plus curator/curation newly over in L54; other text and prior decisions preserved.",
+    "changes": {
+      "architect/review": "Registry size/budget 2410/2651; tip 2663; final 2694/2964. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/architect.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2401\u21922657 (+256). L54: L54 roles/architect.md declares packet-named expectedKnowledgeEffects before implementation (+31 words per emitted role); planning adds the same rule via operations/planning.md.",
+      "architect/coordination": "Registry size/budget 2980/3278; tip 3467; final 3498/3848. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/architect.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3111\u21923461 (+350). L54: L54 roles/architect.md declares packet-named expectedKnowledgeEffects before implementation (+31 words per emitted role); planning adds the same rule via operations/planning.md.",
+      "orchestrator/review": "Registry size/budget 1839/2023; tip 2076; final 2076/2284. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/orchestrator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1818\u21922076 (+258). L54: None: final equals tip.",
+      "orchestrator/coordination": "Registry size/budget 2409/2650; tip 2880; final 2880/3168. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/orchestrator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2528\u21922880 (+352). L54: None: final equals tip.",
+      "designer/orientation": "Registry size/budget 1972/2170; tip 2313; final 2313/2545. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/designer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2177\u21922298 (+121). L54: None: final equals tip.",
+      "designer/planning": "Registry size/budget 1319/1451; tip 1642; final 1673/1841. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/designer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1506\u21921627 (+121). L54: L54 operations/planning.md declares packet-named expectedKnowledgeEffects before implementation (+31 words).",
+      "strategist/orientation": "Registry size/budget 2262/2489; tip 2492; final 2492/2742. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/strategist.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2356\u21922477 (+121). L54: None: final equals tip.",
+      "strategist/planning": "Registry size/budget 1609/1770; tip 1821; final 1852/2038. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/strategist.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1685\u21921806 (+121). L54: L54 operations/planning.md declares packet-named expectedKnowledgeEffects before implementation (+31 words).",
+      "manager/review": "Registry size/budget 2369/2606; tip 2628; final 2628/2891. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/manager.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 2364\u21922628 (+264). L54: None: final equals tip.",
+      "manager/coordination": "Registry size/budget 2939/3233; tip 3432; final 3432/3776. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/manager.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3074\u21923432 (+358). L54: None: final equals tip.",
+      "worker/implementation": "Registry size/budget 1654/1820; tip 1949; final 1949/2144. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/worker.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1696\u21921973 (+277). L54: None: final equals tip.",
+      "worker/recovery": "Registry size/budget 1404/1545; tip 1561; final 1561/1718. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/worker.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1446\u21921585 (+139). L54: None: final equals tip.",
+      "curator/orientation": "Registry size/budget 3884/4273; tip 4274; final 4567/5024. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3937\u21924058 (+121). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
+      "curator/curation": "Registry size/budget 6599/7259; tip 7218; final 7511/8263. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 6634\u21926876 (+242). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
+      "curator/recovery": "Registry size/budget 3229/3552; tip 3601; final 3894/4284. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/curator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3264\u21923385 (+121). L54: L54 roles/curator.md adds Writer and worklist corrections: persisted worklist, local handoff/evidence, grouped changes, reconsideration and generated-copy disposition (+293 words).",
+      "reviewer/orientation": "Registry size/budget 3583/3942; tip 4223; final 4221/4644. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 4046\u21924183 (+137). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
+      "reviewer/review": "Registry size/budget 3327/3660; tip 4086; final 4084/4493. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3772\u21924046 (+274). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
+      "reviewer/recovery": "Registry size/budget 2928/3221; tip 3550; final 3548/3903. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/reviewer.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 3373\u21923510 (+137). L54: This helper removes only the admitted nonexistent standalone-leaf review label in roles/reviewer.md (-2 words per capsule); no other-owner prose shortened.",
+      "investigator/orientation": "Registry size/budget 1603/1764; tip 1778; final 1778/1956. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/investigator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1656\u21921778 (+122). L54: None: final equals tip.",
+      "investigator/recovery": "Registry size/budget 948/1043; tip 1105; final 1105/1216. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/investigator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 983\u21921105 (+122). L54: None: final equals tip.",
+      "launcher/coordination": "Registry size/budget 1821/2004; tip 2192; final 2192/2412. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/operations/coordination.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1961\u21922192 (+231). L54: None: final equals tip."
+    }
   }
 }

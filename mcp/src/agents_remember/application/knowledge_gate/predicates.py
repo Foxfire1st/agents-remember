@@ -52,7 +52,12 @@ from agents_remember.application.knowledge_currentness.observe import (
     observe_entry,
 )
 from agents_remember.application.knowledge_worklist.classify import COVERING_CLASSES
+from agents_remember.application.knowledge_worklist.code import CodeReadError
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
+from agents_remember.application.knowledge_worklist.link_targets import holds_target
+from agents_remember.application.knowledge_worklist.reconsideration_gate import (
+    reconsideration_gate_reason,
+)
 from agents_remember.application.knowledge_worklist.registry import GUARANTEE_CHANGED, ITEM_KINDS
 from agents_remember.application.knowledge_worklist.route_conditions import (
     family_route_item_open,
@@ -71,7 +76,6 @@ from agents_remember.models.knowledge_files.history import (
     winning_row_closed,
 )
 from agents_remember.models.knowledge_files.planned import planned_item_open
-from agents_remember.models.knowledge_files.reconsideration import reconsideration_item_open
 from agents_remember.models.knowledge_files.sidecars import ProofEntry
 from agents_remember.models.knowledge_files.unexplained import (
     COVERED,
@@ -214,20 +218,23 @@ def invariant_row_open(item: Mapping[str, Any], context: GateContext) -> str | N
     if not isinstance(row, InvariantRow):
         return f"the leaf's history file holds no invariant row about {subject}"
     missing = sorted(required_covers(item) - {cover.id for cover in row.covers})
-    if missing:
-        return f"row {row.id} does not cover {', '.join(missing)}"
     revision = context.candidate.revision(subject)
-    if row.revision != revision:
-        return (
-            f"row {row.id} records revision {row.revision}, but {subject} is at revision "
-            f"{revision} in K_C"
-        )
     record = (item.get("facts") or {}).get("record") or {}
     hidden = changed_record_row_violation(
         row, base_revision=record.get("baseRevision"), candidate_revision=revision
     )
     if hidden is not None:
-        return f"row {row.id}: {hidden}; restate that changed row so that it governs again"
+        governing = f"row {row.id}: {hidden}; restate that changed row so that it governs again"
+        return governing + (
+            f"; row {row.id} does not cover {', '.join(missing)}" if missing else ""
+        )
+    if missing:
+        return f"row {row.id} does not cover {', '.join(missing)}"
+    if row.revision != revision:
+        return (
+            f"row {row.id} records revision {row.revision}, but {subject} is at revision "
+            f"{revision} in K_C"
+        )
     stale = _not_current(row, context)
     if stale:
         return f"row {row.id} covers entries not current at C: {'; '.join(stale)}"
@@ -523,6 +530,30 @@ register_gate_predicate("onboarding_trace", onboarding_row_open)
 register_gate_predicate("unexplained_hunk", unexplained_row_open)
 register_gate_predicate("unexplained_file", unexplained_row_open)
 register_gate_predicate("planned_untouched", _by_rows(planned_item_open))
-register_gate_predicate("reconsideration_candidate", _by_rows(reconsideration_item_open))
+
+
+def reconsideration_row_open(item: Mapping[str, Any], context: GateContext) -> str | None:
+    try:
+        return reconsideration_gate_reason(
+            item, context.candidate, context.code, context.rows_by_subject
+        )
+    except CodeReadError as error:
+        raise GitReadFailed(str(error)) from error
+
+
+register_gate_predicate("reconsideration_candidate", reconsideration_row_open)
+
+
+def link_target_open(item: Mapping[str, Any], context: GateContext) -> str | None:
+    facts = item.get("facts") or {}
+    return (
+        "K_C still holds the link whose target this leaf removed; remove or restate it "
+        "through the writer; no row answers it"
+        if holds_target(context.candidate, str(facts.get("record")), str(facts.get("targetKey")))
+        else None
+    )
+
+
+register_gate_predicate("link_target", link_target_open)
 register_gate_predicate("unassigned_invariant", membership_row_open)
 register_gate_predicate("touched_record", record_row_open)

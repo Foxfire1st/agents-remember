@@ -208,6 +208,11 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         "missingOnboardingCount": len(missing),
         "staleRouteIndexCount": len(stale),
         "sourceChangeCandidateCount": len(source_candidates),
+        **(
+            {"invariantsWithoutProofCount": len(checklist.without_proof.rows)}
+            if checklist.without_proof is not None
+            else {}
+        ),
         "closeoutOwnedFindingCount": len(commit_owned),
         "noteworthyFindingCount": len(report_only),
         # MIK-R110 rule 4: the complete blocking populations beside their

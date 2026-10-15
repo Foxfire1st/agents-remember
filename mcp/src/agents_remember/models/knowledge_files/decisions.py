@@ -21,7 +21,9 @@ applies the same reading:
   MIK-R14's worklist triggers take, one ``(DEC-ID, index)`` subject per link.
 
 Requirement endpoints are resolved by the requirement owner, not here
-(``memory/knowledge/requirement_endpoint.py``); an unresolved one is reported, never refused.
+(``memory/knowledge/requirement_endpoint.py``). Their owner states never refuse a commit route;
+the writer refuses a newly added or changed unresolved link when its coordination root is given
+(MIK-R54 rule 10).
 """
 
 from __future__ import annotations
@@ -135,16 +137,6 @@ def reconsider_link_problems(record: DecisionRecord) -> list[ContentProblem]:
                 )
             )
     return problems
-
-
-def content_problems(record: DecisionRecord) -> list[ContentProblem]:
-    """Every refusing content problem of one decision record."""
-
-    return [
-        *alternative_problems(record),
-        *reconsider_when_problems(record),
-        *reconsider_link_problems(record),
-    ]
 
 
 def governs_links(record: DecisionRecord) -> tuple[Link, ...]:

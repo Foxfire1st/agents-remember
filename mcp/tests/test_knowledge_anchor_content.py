@@ -8,8 +8,11 @@ keeping its own terminator, never decoded.
 from __future__ import annotations
 
 import hashlib
+import json
+from pathlib import Path
 
 import pytest
+from agents_remember.application.knowledge_worklist.code import CodeTrees
 from agents_remember.models.knowledge_files.anchor_content import (
     RangeOutsideBlobError,
     blob_lines,
@@ -17,6 +20,7 @@ from agents_remember.models.knowledge_files.anchor_content import (
     line_count,
     range_bytes,
 )
+from test_knowledge_currentness import REVIEW, World, git, observe_module
 
 
 @pytest.mark.parametrize(
@@ -49,3 +53,27 @@ def test_line_count_file_content_and_ranges_outside_the_blob() -> None:
         range_bytes(b"a\nb\n", 2, 3)
     with pytest.raises(RangeOutsideBlobError):
         range_bytes(b"a\n", 0, 1)
+
+
+@pytest.mark.parametrize("unchanged", [False, True])
+def test_symbol_observation_of_non_utf8_file_is_unverifiable(
+    tmp_path: Path, unchanged: bool
+) -> None:
+
+    world = World(tmp_path)
+    (world.code / REVIEW).write_bytes(b"def other():\n    return 1\n# \xff\n")
+    git(world.code, "add", "-A")
+    git(world.code, "commit", "-q", "-m", "non-UTF8")
+    code_tree = git(world.code, "rev-parse", "HEAD^{tree}")
+    assert REVIEW in CodeTrees.open(world.code, code_tree, code_tree).candidate()
+    if unchanged:
+        sidecar = world.memory / f"onboarding/{REVIEW}.json"
+        document = json.loads(sidecar.read_text("utf-8"))
+        for entry in document["realizes"]:
+            entry["anchor"]["blob"] = git(world.code, "rev-parse", f"HEAD:{REVIEW}")
+        sidecar.write_text(json.dumps(document), encoding="utf-8")
+    observed = world.states(world.tree(code_tree))["entries"]["RLZ-B00001"]
+    assert observed.state == "unverifiable"
+    assert "UTF-8" in observed.reason and REVIEW in observed.reason
+    assert observed.read_failed is False
+    assert "anchor-observation/v2" in observe_module.EXTRACTOR_VERSION

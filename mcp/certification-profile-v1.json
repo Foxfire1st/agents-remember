@@ -174,12 +174,13 @@
       "inputId": "generated-skills",
       "schemaVersion": "generated-candidate-input/v1",
       "sourceScopes": [
+        "generated-copies.json",
         "scripts/sync-skills.py",
         "skills"
       ]
     }
   ],
-  "profileDigest": "7f4efbba3575b1f70029f009b5b030bccfc2925aba423c56f4700e6ac9453207",
+  "profileDigest": "c314d420358949fef8078f10e217c968d2fd17267b5a544779707909ada718f7",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
     {

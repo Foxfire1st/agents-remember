@@ -410,6 +410,28 @@ marker, MIK-R21 rule 1): on a tree in the legacy format they refuse with `legacy
 the conversion command (`agents-remember knowledge-convert`). The producer's thirteen fields do not
 change: everything below is the **curator's**.
 
+Before a leaf run, compute and supply its persisted worklist. The writer refuses a row that
+cannot govern a changed invariant revision or family guarantee and says to name the `changed`
+row again. It refuses an itemless `still_rejected`, `planned:` or `hunk:` subject; a record
+first authored in this leaf needs no row unless an item names it. A `raise` needs no item;
+a wave or crossing owner has no leaf worklist. A refused run lists no records, entries, rows
+or carried work as done: its count is planned and nothing was written.
+
+For identical changes at uncovered paths, judge the representative once: the row names all
+of the grouped paths and their candidate blobs. Two card-bearing paths keep their own items,
+and covered paths are never grouped. Equal copies declared by the candidate repository's
+generated-copies.json need no unexplained row; a hand-edited copy retains its item, which names
+the canonical file. Ordinary non-generated files keep their obligations.
+
+A `link_target` item is open while the candidate still holds the broken target key: restate
+or remove that link through the writer. No history row answers it. A reconsideration
+`refresh_not_current` candidate likewise cannot be answered by a row; make the link current
+at C or restore its base value. A stale reconsideration refusal is cleared when you recompute
+the worklist and judge its current item.
+
+Record a rejected simplification or workaround as a decision whose chosen option is the
+current design, with the rejected alternative and its reason, not as a gap or later work.
+
 The writer reads the list you already have, or an object with three sections:
 
 ```json
@@ -428,14 +450,21 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   invariant.
 - `admission` is `{criteria, justification}` and is required for a new invariant.
 - `status` is optional. A new record starts `proposed`.
-- `invariant_id` names a stored invariant the entry updates. Without it, a new invariant is created,
-  or on a rerun the one this leaf already created from the same entry is reused.
+- `invariant_id` names a stored invariant, or `"handoff:<entry id>"` authored by this document.
+  The authoring entry runs first regardless of list order, and the attaching entry's statement
+  must equal it. Without the key, a new invariant is created, or the leaf's same entry is reused.
 - `supersedes` names the invariants the new one supersedes: an `INV-…` ID, or the `id` of an entry
   in this list.
 - Each `target` becomes a `realizes` entry in `onboarding/<path>.json`. The role `incidental` is
   written as `support`.
 - `proofs` is `[{ "test": "<path>::<name>", "facet": "<what this test demonstrates>" }]`, and each
   item becomes a `proves` entry in the test file's sidecar. `test` may also be `{path, symbol}`.
+  In JavaScript/TypeScript `.test.` or `.spec.` files, a plain-string `it` or `test` case
+  has the enclosing `describe` titles and its own joined by ` > `; a unique bare title also
+  resolves. Hand-off evidence names it as `<path>::"<title>"`. `.skip`, `.todo`, `.each` and
+  computed titles are not definitions: use the offered `line_range` instead.
+- `replace_evidence: true` replaces `origin.handoff.evidence` when this owner authored the record,
+  including an empty replacement; without it, new evidence is appended.
 - `evidence` is stored in the record's `origin.handoff.evidence` when this leaf authored the record.
   A record another leaf authored keeps its origin exactly: the run then needs a `history` row about
   that record, and the writer appends the evidence to that row's `reason`. Without the row the run is
@@ -596,11 +625,13 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
     through `task_doc`, keeping every existing question. When the question cannot be written, the
     `raise` is refused and the item stays open.
 
-  A `route:` target is raised by a row of the leaf that reroutes, retires or deletes it (a
-  family row about a family that has the route). A superseded decision is never raised; its
-  successor carries its own links. Never reverse a decision yourself: `raise` it. Keep a linked
-  alternative at its index; the validator refuses a reorder that would move a `reconsider_on` link
-  to another alternative, so append new alternatives after the linked ones.
+  A `route:` target fires when its directory had files at B and none at C (`route_absent`),
+  or a rerouting family row names that route or a route inside it. A decision superseded in
+  either memory side is never raised; its successor carries its own links. Never reverse a
+  decision yourself: `raise` it. When alternatives change without restating links, the writer
+  moves each stored reconsideration link by the exact unique old option text. If that text
+  is missing or ambiguous, restate `links`; never rely on an ordinal to retarget it.
+  A same-leaf `still_rejected` refresh with no fired item restores a current base link.
 
 **Handles.** `"handoff:<key>"` names the record this document authors under that entry `id` or record
 `key`. Use it wherever an ID goes: link targets, `members`, `subject`, `examined` or `supersedes`.

@@ -15,7 +15,7 @@ Light-task-workflow still follows the same shared discipline documented in `READ
 
 ## Phase 0 — Compile And Approve Requirements Before Task Topology
 
-After intent and scope are established, but before creating a sprint, master, standalone task, or
+After intent and scope are established, but before creating a sprint, master, or
 leaf document, the architect creates only the planning wrapper and its canonical requirement
 corpus:
 

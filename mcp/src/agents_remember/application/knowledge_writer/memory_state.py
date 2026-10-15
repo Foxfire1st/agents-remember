@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from agents_remember.application.knowledge_writer.base_side import BaseCode, writer_bases
+from agents_remember.application.knowledge_writer.file_publication import publish_files
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitPreparationError,
@@ -444,20 +445,7 @@ class MemoryState:
     def write(self, files: Mapping[str, bytes]) -> tuple[list[str], list[str]]:
         """Write ``files`` where they differ from disk and delete what the operation removed."""
 
-        written = []
-        for path, data in sorted(files.items()):
-            if self.files.get(path) == data:
-                continue
-            target = self.root / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_name(f".{target.name}.ar-writer")
-            temporary.write_bytes(data)
-            temporary.replace(target)
-            written.append(path)
-        removed = sorted(path for path in self.files if path not in files)
-        for path in removed:
-            (self.root / path).unlink(missing_ok=True)
-        return written, removed
+        return publish_files(self.root, self.files, files)
 
 
 def deep_copy(document: Mapping[str, Any]) -> dict[str, Any]:

@@ -25,12 +25,17 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Final
 
 from agents_remember.application.knowledge_writer.authoring_rows import HistoryRowAuthoring, meaning
 from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
+)
+from agents_remember.application.knowledge_writer.entry_handles import (
+    assign_entries,
+    ordered_entries,
 )
 from agents_remember.application.knowledge_writer.handoff import (
     HANDLE_PREFIX,
@@ -54,6 +59,8 @@ from agents_remember.application.knowledge_writer.memory_state import (
 from agents_remember.application.knowledge_writer.reconsideration import (
     OpenQuestions,
 )
+from agents_remember.application.knowledge_writer.record_updates import record_origin, remap_links
+from agents_remember.application.knowledge_writer.refresh_restoration import restore_refreshes
 from agents_remember.application.knowledge_writer.report import (
     Action,
     CitedTest,
@@ -126,14 +133,16 @@ class Authoring(HistoryRowAuthoring):
     # The leaf's paired memory base commit (the gate's K_B): the card comparison's base, which
     # a persisted worklist flag never overrides (MIK-R53 rule 2); ``None`` keeps own HEAD.
     memory_base: str | None = None
+    coordination_root: Path | None = None
 
     # -- the operation ------------------------------------------------------------------------
 
     def run(self, document: HandoffDocument) -> None:
         self._taken = self.state.known_ids()
         self._assign_ids(document)
+        restore_refreshes(self)
         tests: dict[str, tuple[CitedTest, ...]] = {}
-        for entry in document.entries:
+        for entry in ordered_entries(document):
             tests[entry.entry_id] = self._write_entry(entry)
         by_entry = {entry.entry_id: entry for entry in (*document.entries, *document.rulings)}
         for record in document.records:
@@ -173,14 +182,7 @@ class Authoring(HistoryRowAuthoring):
     # -- identities ---------------------------------------------------------------------------
 
     def _assign_ids(self, document: HandoffDocument) -> None:
-        for entry in document.entries:
-            if entry.invariant_id is not None:
-                self._require_kind(entry.invariant_id, "invariant", f"entry {entry.entry_id}")
-                self.handles[entry.entry_id] = entry.invariant_id
-                continue
-            self.handles[entry.entry_id] = self.state.record_by_origin(
-                "invariant", self.owner, entry.entry_id
-            ) or self.mint("invariant")
+        assign_entries(self, document)
         claimed = {("invariant", entry.entry_id) for entry in document.entries}
         for record in document.records:
             where = f"record {record.key}"
@@ -235,37 +237,9 @@ class Authoring(HistoryRowAuthoring):
         stored: Mapping[str, Any] | None,
         handoff_entry: str,
         evidence: Sequence[str],
+        replace_evidence: bool = False,
     ) -> tuple[dict[str, Any], bool]:
-        """The record's origin, and whether ``evidence`` is stored in it.
-
-        A record this owner authored keeps its origin and gains this run's evidence. A record another
-        leaf or wave authored keeps its origin exactly: its ``handoff`` is that owner's list, so an
-        updater's evidence is never written there; the report names it for the updater's history
-        row instead.
-        """
-
-        if stored is not None and isinstance(stored.get("origin"), Mapping):
-            origin = deep_copy(stored["origin"])
-            if not evidence:
-                return origin, False
-            if (
-                origin.get(self.owner.kind) != self.owner.id
-                or origin.get("task") != self.owner.task
-            ):
-                self._foreign_evidence.setdefault(str(stored.get("id")), []).append(
-                    (handoff_entry, tuple(evidence))
-                )
-                return origin, False
-            handoff = dict(origin.get("handoff") or {})
-            handoff.setdefault("path", self.handoff_path)
-            handoff["evidence"] = list(dict.fromkeys([*handoff.get("evidence", []), *evidence]))
-            origin["handoff"] = handoff
-            return origin, True
-        handoff: dict[str, Any] = {"path": self.handoff_path}
-        if evidence:
-            handoff["evidence"] = list(dict.fromkeys(evidence))
-        origin = {**self.owner.origin(), "handoff": handoff, "handoffEntry": handoff_entry}
-        return origin, bool(evidence)
+        return record_origin(self, stored, handoff_entry, evidence, replace_evidence)
 
     def _place_record(
         self,
@@ -389,7 +363,9 @@ class Authoring(HistoryRowAuthoring):
         if entry.supersedes:
             resolved = [self.resolve_id(one, f"entry {entry.entry_id}") for one in entry.supersedes]
             document["supersedes"] = list(dict.fromkeys(one for one in resolved if one))
-        document["origin"], stored = self._origin(before, entry.entry_id, entry.evidence)
+        document["origin"], stored = self._origin(
+            before, entry.entry_id, entry.evidence, entry.replace_evidence
+        )
         if stored:
             self._stored_in.setdefault(entry.entry_id, []).append(invariant_id)
         return document
@@ -402,6 +378,8 @@ class Authoring(HistoryRowAuthoring):
         found = self.state.record(record_id)
         before = deep_copy(found[2]) if found is not None else None
         fields = self.resolve(dict(request.fields), where)
+        if request.kind == "decision":
+            remap_links(self, before, fields, where)
         if isinstance(fields.get("links"), list):
             fields["links"] = [self._link(link, f"{where}.links") for link in fields["links"]]
         document: dict[str, Any] = (
@@ -413,7 +391,9 @@ class Authoring(HistoryRowAuthoring):
         if "status" not in document:
             document["status"] = "active" if request.kind == "decision" else "proposed"
         evidence = entry.evidence if entry is not None else ()
-        document["origin"], stored = self._origin(before, request.handoff_entry, evidence)
+        document["origin"], stored = self._origin(
+            before, request.handoff_entry, evidence, entry.replace_evidence if entry else False
+        )
         self._place_record(
             request.kind,
             document,

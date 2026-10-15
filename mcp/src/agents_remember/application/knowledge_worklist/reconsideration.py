@@ -22,12 +22,12 @@ reconsider_links`). A decision absent from K_B raises nothing: it was authored i
 
 A decision target never triggers: a change to a decision -- including the ``raise`` that sets its
 status -- never chains on to other decisions (rule 3, one hop). A ``route:<dir>`` target fires
-through the ``history_row`` trigger only (ruling Q1, 2026-09-30T04:37:56): a row of this leaf whose
-subject is the route, or a family row about a family whose routes (in K_B or K_C) include it, with
+when its directory held a file at B and none at C (``route_absent``), or through a family row
+about a family with a route equal to or inside that directory (in K_B or K_C), with
 the disposition ``rerouted``, ``retired`` or ``deleted``; or a ``changed`` row about such a family
 whose routes differ between K_B and K_C, because a family's one governing row is ``changed`` when
-the leaf changes its guarantee together with its routes (erratum to rule 1). No directory-absence
-trigger exists.
+the leaf changes its guarantee together with its routes (erratum to rule 1). No row kind names
+a route as its subject (MIK-R55 rule 3).
 A decision that is superseded (derived, MIK-R13 rule 2) raises nothing: its links are listed in the
 summary as ``skipped: superseded`` (ruling Q5), naming the successor decisions. Succession is
 derived from the decisions of K_B **and** K_C (architect ruling a3d79e94): a base decision that
@@ -40,7 +40,9 @@ evaluated (Exclusions).
 that fired. It is answered by this leaf's reconsideration row with the same subject
 (``still_rejected`` or ``raise``); ``satisfiedBy`` names it, and
 :func:`~agents_remember.models.knowledge_files.reconsideration.reconsideration_item_open` applies the
-same rule to a stored item. The run's ``reconsideration`` summary lists every link it evaluated, with
+same rule to a stored item. A changed K_C reconsider anchor that is not current at C fires
+``refresh_not_current`` and no row answers it: restore K_B's link or make it current (MIK-R55 rule 3).
+The run's ``reconsideration`` summary lists every link it evaluated, with
 each requirement endpoint's resolution and approval state.
 """
 
@@ -53,6 +55,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from agents_remember.application.knowledge_worklist.classify import RAISING_CLASSES, Classification
+from agents_remember.application.knowledge_worklist.code import CodeTrees
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
 from agents_remember.application.knowledge_worklist.registry import (
     ItemKind,
@@ -78,6 +81,7 @@ from agents_remember.models.knowledge_files.reconsideration import (
     HISTORY_ROW,
     RECONSIDERATION_ITEM_KIND,
     RECORD_FILE,
+    REFRESH_NOT_CURRENT,
     REQUIREMENT_VERSION,
     TRIGGERING_DISPOSITIONS,
     link_target_key,
@@ -138,6 +142,7 @@ class ReconsiderationInputs:
     owner: str | None
     coordination_root: Path | None
     """Where requirement endpoints' owning tasks live; without it no endpoint resolves."""
+    code: CodeTrees | None = None
 
 
 @dataclass(frozen=True)
@@ -286,21 +291,32 @@ class _Evaluation:
         ``changed`` row about a family whose routes are the same on both sides does not.
         """
 
+        route = target.removeprefix(ROUTE_PREFIX)
+        code = self.inputs.code
+        if code is not None:
+            prefix = "" if route == "." else f"{route}/"
+            before = sorted(path for path in code.base() if path.startswith(prefix))
+            after = sorted(path for path in code.candidate() if path.startswith(prefix))
+            if before and not after:
+                return {
+                    "trigger": "route_absent",
+                    "route": route,
+                    "paths": before,
+                    "identity": [[path, code.base()[path]] for path in before],
+                }
         history = self._history()
         if history is None:
             return None
-        route = target.removeprefix(ROUTE_PREFIX)
         governing = {
             family_id
             for side in (self.inputs.base, self.inputs.candidate)
             for family_id, record in side.families.items()
-            if route in record.routes
+            if any(route in (".", one) or one.startswith(f"{route}/") for one in record.routes)
         }
         for row in sorted(history.rows, key=lambda one: one.subject):
             rerouting = row.disposition in ROUTE_TRIGGERING_DISPOSITIONS
-            if (rerouting and row.subject == target) or (
-                row.subject in governing
-                and (rerouting or self._rerouted_by_a_changed_row(row.subject, row.disposition))
+            if row.subject in governing and (
+                rerouting or self._rerouted_by_a_changed_row(row.subject, row.disposition)
             ):
                 return {
                     "trigger": HISTORY_ROW,
@@ -326,6 +342,29 @@ class _Evaluation:
     def _anchor_trigger(
         self, link: ReconsiderLink, target: Anchor
     ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        indexed = self.inputs.candidate.parsed.records.get(link.decision)
+        links = () if indexed is None else getattr(indexed.record, "links", ())
+        if link.link_index < len(links):
+            refreshed = links[link.link_index]
+            anchor = refreshed.target
+            if (
+                refreshed.relation == "reconsider_on"
+                and isinstance(anchor, Anchor)
+                and anchor != target
+            ):
+                changed = self.inputs.classify_anchor(
+                    f"{link.subject}/links.{link.link_index}", anchor
+                )
+                current = changed.candidate_blob == anchor.blob or (
+                    changed.candidate is not None and changed.candidate.content == anchor.content
+                )
+                if not current:
+                    return {
+                        "trigger": REFRESH_NOT_CURRENT,
+                        "entry": changed.to_document(),
+                        "baseTarget": target.to_document(),
+                        "identity": [anchor.to_document(), *changed.contents()[1:]],
+                    }, {}
         classified = self.inputs.classify_anchor(f"{link.subject}/links.{link.link_index}", target)
         note = {"class": classified.entry_class}
         stale = classified.entry_class == "stale_at_base"

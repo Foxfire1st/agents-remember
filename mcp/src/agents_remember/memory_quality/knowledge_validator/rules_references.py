@@ -54,7 +54,9 @@ from agents_remember.models.knowledge_files.shapes import (
 )
 from agents_remember.models.knowledge_files.sidecars import FileSidecar, RealizationEntry
 
-_ESCAPE_HINT = "write it as \\[n] or put it in a code span if it is not a marker"
+_ESCAPE_HINT = (
+    "write it as \\[n] or put it in a fenced code block or a code span if it is not a marker"
+)
 
 
 def _unpaired_marker_message(marker: Marker, sidecar: SidecarFile | None) -> str | None:

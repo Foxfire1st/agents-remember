@@ -1,8 +1,8 @@
 """MIK-R07: per-leaf history files (``ar-history/v1``), their rows, revision binding and freezing.
 
-The writer's own tests belong to MIK-R12 and the validator's freeze test to MIK-R22; these cases pin
-the model-level contract both of them build on: each disposition and row shape, the revision
-binding, the freeze predicate, and that two leaves' history files merge without conflict.
+The cases pin row shape and revision binding, freezing, parallel history-file merges, and the
+writer/validator token boundary: stored labels remain readable while newly authored items must
+name full worklist hashes.
 """
 
 from __future__ import annotations
@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any, get_args
 
 import pytest
+from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
+from agents_remember.memory_quality.knowledge_validator import validate_tree
+from agents_remember.memory_quality.knowledge_validator.validator import LeafCommit
 from agents_remember.models.knowledge.effect import ADMITTED_EFFECT_LABELS, EffectLabel
 from agents_remember.models.knowledge_files import (
     HISTORY_ROW_KINDS,
@@ -44,6 +47,14 @@ from agents_remember.models.knowledge_files.history import (
 )
 from agents_remember.models.knowledge_files.ids import mint_id
 from agents_remember.models.knowledge_files.sidecars import FileSidecar
+from knowledge_validator_test_support import code, fixture_tree_files, tree
+from knowledge_writer_test_support import (
+    BASE_INVARIANT,
+    LEAF_ID,
+    TASK_ID,
+    build_world,
+    tree_bytes,
+)
 from pydantic import ValidationError
 
 LEAF = "260928-MIK-L07"
@@ -146,6 +157,95 @@ def test_conforming_example_parses_at_its_owner_path_and_formats_canonically() -
         parse_document(record)
 
 
+@pytest.mark.parametrize(
+    ("item", "accepted"),
+    [
+        ("token", False),
+        (" ", False),
+        ("sha256:" + "e" * 63, False),
+        ("sha256:" + "g" * 64, False),
+        ("sha256:" + "e" * 65, False),
+        ("sha256:" + "a" * 64, True),
+        ("sha256:" + "A" * 64, True),
+    ],
+)
+def test_writer_history_items_refuse_non_sha256_worklist_ids(
+    tmp_path: Path, item: str, accepted: bool
+) -> None:
+    world = build_world(tmp_path)
+    before = tree_bytes(world.memory)
+    row = _invariant_row(subject=BASE_INVARIANT, items=[item], covers=[])
+    for field in ("id", "revision"):
+        row.pop(field)
+    report = write_knowledge(
+        WriteRequest(
+            memory_root=world.memory,
+            code_root=world.code,
+            owner=Owner(task=TASK_ID, kind="leaf", id=LEAF_ID),
+            handoff_path="notes/handoff.json",
+            document={"history": [row]},
+            worklist={"items": []},
+            commit=False,
+        )
+    )
+    assert tree_bytes(world.memory) == before
+    if accepted:
+        assert report.state == "planned", report
+        valid = HistoryFile.model_validate(_history(_invariant_row(items=[item])))
+        assert valid.rows[0].items == (item,)
+        return
+    assert report.state == "refused", report
+    row_location = "row ROW-" if item.strip() else "history[1]"
+    assert any(
+        row_location in problem.where
+        and BASE_INVARIANT in problem.where
+        and repr(item) in problem.message
+        for problem in report.problems
+    ), report
+
+
+@pytest.mark.parametrize("digits", [63, 90, 62])
+def test_closed_in_comparison_base_legacy_items_parse_and_validate_unchanged(digits: int) -> None:
+    item = "sha256:" + "e" * digits
+    path = history_path(LEAF)
+    data = canonical_text(_history(_invariant_row(items=[item], covers=[]), closed=True)).encode()
+    files = fixture_tree_files() | {path: data}
+    candidate = tree(files)
+    parsed = parse_history_document(path, data.decode())
+    assert parsed.rows[0].items == (item,)
+    assert canonical_text(parsed.to_document()).encode() == data
+    report = validate_tree(candidate, bases=[tree(files, "base")], code=code())
+    assert report.ok, report
+    assert candidate.get(path) == data
+
+
+@pytest.mark.parametrize(
+    ("closed", "base_state"),
+    [(False, "absent"), (False, "open"), (True, "absent"), (True, "open"), (True, "frozen")],
+)
+def test_validator_refuses_short_items_without_closed_comparison_base(
+    closed: bool, base_state: str
+) -> None:
+    item = "sha256:" + "e" * 63
+    path = history_path(LEAF)
+    document = _history(_invariant_row(items=[item], covers=[]), closed=closed)
+    files = fixture_tree_files()
+    data = canonical_text(document).encode()
+    candidate = tree(files | {path: data})
+    bases = [tree(files, "base")]
+    publication: bool | LeafCommit = False
+    if base_state == "open":
+        bases = [tree(files | {path: canonical_text({**document, "closed": False}).encode()})]
+    elif base_state == "frozen":
+        publication = LeafCommit(frozen=(candidate,))
+    report = validate_tree(candidate, bases=bases, code=code(), leaf_publication=publication)
+    findings = [one for one in report.violations if one.field == "rows.ROW-3F9Q7K.items"]
+    assert not report.ok and len(findings) == 1, report
+    finding = findings[0]
+    assert finding.path == path and not finding.report_only
+    assert "ROW-3F9Q7K" in finding.message and item in finding.message
+
+
 def test_file_shape_owner_and_row_uniqueness_are_enforced() -> None:
     wave = HistoryFile.model_validate(_history(wave="260928-MIK-W01"))
     crossing = HistoryFile.model_validate(_history(crossing="260928-MIK-crossing-2"))
@@ -160,7 +260,7 @@ def test_file_shape_owner_and_row_uniqueness_are_enforced() -> None:
     _refused(_history(_invariant_row(), _family_row(id="ROW-3F9Q7K")), "row ids")
     _refused(_history(_invariant_row(id="RLZ-000000")), "pattern")
     _refused(_history(_invariant_row(reason=" ")), "blank")
-    _refused(_history(_invariant_row(items=["a", "a"])), "repeat")
+    _refused(_history(_invariant_row(items=["sha256:" + "a" * 64] * 2)), "repeat")
     # A subject no registered row kind claims is refused until its kind registers (MIK-R08 rule 1).
     _refused(_history({**_invariant_row(), "subject": "hunk:abc"}), "no registered")
     _refused(_history({**_invariant_row(), "subject": FAM}), "Extra inputs")

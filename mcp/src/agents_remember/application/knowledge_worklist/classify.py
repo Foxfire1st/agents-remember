@@ -90,6 +90,7 @@ class Classification:
     hunks: tuple[Hunk, ...] = ()
     renamed_to: str | None = None
     unique_match: str | None = None
+    reason: str | None = None
 
     def contents(self) -> list[str]:
         """The entry's range content identity at B and at C (``absent`` where it does not resolve)."""
@@ -111,6 +112,8 @@ class Classification:
             "candidate": _side(self.candidate_blob, self.candidate),
             "hunks": [hunk.to_document() for hunk in self.hunks],
         }
+        if self.reason is not None:
+            document["reason"] = self.reason
         if self.renamed_to is not None:
             document["renamedTo"] = self.renamed_to
         if self.unique_match is not None:
@@ -182,6 +185,15 @@ class Classifier:
             candidate_blob=candidate_blob,
             candidate=at_candidate,
             renamed_to=self.renames.get(path),
+            reason=(
+                f"the blob {anchor.blob} the line range was recorded against is unavailable"
+                if locator.get("kind") == "line_range"
+                and any(
+                    blob is not None and blob != anchor.blob for blob in (base_blob, candidate_blob)
+                )
+                and not self.code.has_blob(anchor.blob)
+                else None
+            ),
         )
         if anchor.blob != base_blob and (at_base is None or at_base.content != anchor.content):
             return _with(facts, "stale_at_base")

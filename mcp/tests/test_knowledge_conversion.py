@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
+from agents_remember.application.knowledge_currentness.observe import (
+    CodeTree,
+    ObservationKey,
+    observe_entry,
+    open_code_tree,
+)
 from agents_remember.cli.__main__ import main as cli_main
 from agents_remember.memory.conversion import convert as convert_module
 from agents_remember.memory.conversion.cards import EVIDENCE_HEADING
@@ -29,6 +35,8 @@ from agents_remember.memory.conversion.convert import (
     convert_memory,
 )
 from agents_remember.memory.conversion.inputs import memory_from_directory
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
+from agents_remember.memory.knowledge_index import Entry
 from agents_remember.memory_quality.knowledge_validator.report import (
     ValidationReport,
     Violation,
@@ -46,12 +54,68 @@ from knowledge_conversion_test_support import (
     STRAY_ROW,
     CodeFixture,
     code_repository,
+    commit_files,
     git,
     legacy_database,
     memory_repository,
 )
 
 APP_SIDECAR = f"onboarding/{APP}.json"
+
+
+@pytest.mark.parametrize("test_first", [False, True])
+def test_equal_blob_definition_cache_preserves_filename_eligibility(
+    tmp_path: Path, test_first: bool
+) -> None:
+    code = code_repository(tmp_path / "code")
+    paths = ("helper.ts", "helper.test.ts")
+    source = 'const helper = 1;\nit("case", () => {});\n'
+    head = commit_files(code.root, dict.fromkeys(paths, source), "equal blobs")
+    objects = CodeObjects(code.root)
+    blobs = objects.tree(head)
+    assert blobs[paths[0]] == blobs[paths[1]]
+    for path in reversed(paths) if test_first else paths:
+        assert objects.symbol_span(path, blobs[path], "helper") == (1, 1)
+        assert objects.symbol_span(path, blobs[path], "case") == (
+            (2, 2) if path == paths[1] else None
+        )
+
+
+@pytest.mark.parametrize("test_first", [False, True])
+def test_changed_blob_proof_observation_is_independent_of_filename_priming(
+    tmp_path: Path, test_first: bool
+) -> None:
+    code = code_repository(tmp_path / "code")
+    paths = ("helper.ts", "helper.test.ts")
+    case = 'it("case", () => {});\n'
+    base = commit_files(code.root, dict.fromkeys(paths, "const helper = 1;\n" + case), "recorded")
+    head = commit_files(code.root, dict.fromkeys(paths, "const helper = 2;\n" + case), "changed")
+    opened = open_code_tree(CodeTree(code.root, head))
+    assert opened.trees is not None
+    old = opened.trees.objects.tree(base)
+    assert old[paths[1]] != opened.files[paths[1]]
+    cache: BoundedMemo[ObservationKey, str | None] = BoundedMemo(8)
+    for path in reversed(paths) if test_first else paths:
+        assert opened.trees.objects.symbol_span(path, opened.files[path], "helper") == (1, 1)
+        proof = Entry(
+            "PRF-CACHE",
+            "proof",
+            "INV-CACHE",
+            path,
+            f"onboarding/{path}.json",
+            {
+                "anchor": {
+                    "blob": old[path],
+                    "content": content_identity(case.encode()),
+                    "locator": {"kind": "symbol", "name": "case"},
+                }
+            },
+        )
+        observation = observe_entry(proof, opened, cache=cache)
+        assert observation.state == ("current" if path == paths[1] else "stale")
+        assert not observation.read_failed
+        if path == paths[1]:
+            assert observation.observed_content == proof.document["anchor"]["content"]
 
 
 @pytest.fixture

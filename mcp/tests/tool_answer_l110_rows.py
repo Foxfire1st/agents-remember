@@ -187,6 +187,8 @@ QUALITY_ROW_FIELDS = frozenset(
         "addedFileCount",
         "cutCards",
         "addedFiles",
+        "invariantsWithoutProofCount",
+        "routeIndexCacheBuild",
     }
 )
 QUALITY_ROW_USES = {
@@ -219,6 +221,8 @@ QUALITY_ROW_USES = {
     "addedFileCount": "read how many files the landing added beside the knowledge",
     "cutCards": "name the cut behind each shortened card, first rows first",
     "addedFiles": "place each added file in the task's requirement, first rows first",
+    "invariantsWithoutProofCount": "read informational proof coverage, not a gate finding",
+    "routeIndexCacheBuild": "read actual absent-cache build, stale and error counters",
 }
 QUALITY_ROW_BOUND = 1500
 QUALITY_PRODUCTION_PATHS = ("sync", "start", "poll")

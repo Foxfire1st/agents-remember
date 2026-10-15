@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +89,8 @@ class RouteIndexBuildResult:
     unchanged: int
     indexes: list[str]
     stale_indexes: list[str]
+    built_indexes: list[str] = field(default_factory=list)
+    build_errors: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +104,16 @@ class RouteIndexBuildResult:
             "staleCount": len(self.stale_indexes),
             "indexes": self.indexes,
             "staleIndexes": self.stale_indexes,
+        }
+
+    def cache_build_summary(self) -> dict[str, Any]:
+        """Actual missing-cache builds, not the refresh preview's projected write count."""
+        return {
+            "builtCount": len(self.built_indexes),
+            "builtIndexes": self.built_indexes,
+            "staleCount": len(self.stale_indexes),
+            "staleIndexes": self.stale_indexes,
+            "buildErrors": self.build_errors,
         }
 
 
@@ -201,6 +213,21 @@ def build_route_indexes(
     repository root; the generator never falls back to a filesystem walk.
     """
 
+    survey = _checked_survey(code_root, onboarding_root, repository, storage)
+    return _build_indexes(survey, dry_run=dry_run, build_missing=False)
+
+
+def build_missing_route_indexes(
+    *, code_root: Path, onboarding_root: Path, repository: str, storage: StorageSettings
+) -> RouteIndexBuildResult:
+    """Build absent caches only; count existing stale caches without overwriting them."""
+    survey = _checked_survey(code_root, onboarding_root, repository, storage)
+    return _build_indexes(survey, dry_run=True, build_missing=True)
+
+
+def _checked_survey(
+    code_root: Path, onboarding_root: Path, repository: str, storage: StorageSettings
+) -> _RouteIndexSurvey:
     code_root = code_root.resolve()
     onboarding_root = onboarding_root.resolve()
     if not code_root.is_dir():
@@ -208,28 +235,31 @@ def build_route_indexes(
     if not onboarding_root.is_dir():
         raise FileNotFoundError(f"onboarding root does not exist: {onboarding_root}")
 
-    survey = _survey_routes(code_root, onboarding_root, repository, storage)
+    return _survey_routes(code_root, onboarding_root, repository, storage)
 
+
+def _build_indexes(
+    survey: _RouteIndexSurvey, *, dry_run: bool, build_missing: bool
+) -> RouteIndexBuildResult:
     written = 0
     unchanged = 0
     indexes: list[str] = []
     stale_indexes: list[str] = []
+    built_indexes: list[str] = []
+    build_errors: list[dict[str, str]] = []
 
     for route in sorted(survey.route_overviews.keys(), key=_route_sort_key):
         index_rel = _route_index_path(route)
-        rendered = (
-            json.dumps(_route_index_document(survey, route), indent=2, sort_keys=False) + "\n"
-        )
-        index_path = onboarding_root / index_rel
         indexes.append(index_rel)
-        if index_path.exists() and index_path.read_text(encoding="utf-8") == rendered:
-            unchanged += 1
-            continue
-        stale_indexes.append(index_rel)
-        if not dry_run:
-            index_path.parent.mkdir(parents=True, exist_ok=True)
-            index_path.write_text(rendered, encoding="utf-8")
-        written += 1
+        state, error = _build_one_index(survey, route, dry_run=dry_run, build_missing=build_missing)
+        unchanged += state == "unchanged"
+        written += state in ("built", "stale")
+        if state == "built":
+            built_indexes.append(index_rel)
+        elif state in ("stale", "failed"):
+            stale_indexes.append(index_rel)
+        if error is not None:
+            build_errors.append({"path": index_rel, "error": error})
 
     return RouteIndexBuildResult(
         routes=len(survey.route_overviews),
@@ -237,7 +267,32 @@ def build_route_indexes(
         unchanged=unchanged,
         indexes=indexes,
         stale_indexes=stale_indexes,
+        built_indexes=built_indexes,
+        build_errors=build_errors,
     )
+
+
+def _build_one_index(
+    survey: _RouteIndexSurvey, route: str, *, dry_run: bool, build_missing: bool
+) -> tuple[str, str | None]:
+    """Render one cache; quality reports failures without hiding their paths."""
+    path = survey.onboarding_root / _route_index_path(route)
+    try:
+        exists = path.exists()
+        rendered = (
+            json.dumps(_route_index_document(survey, route), indent=2, sort_keys=False) + "\n"
+        )
+        if exists and path.read_text(encoding="utf-8") == rendered:
+            return "unchanged", None
+        missing_build = build_missing and not exists
+        if missing_build or not dry_run:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(rendered, encoding="utf-8")
+        return ("built" if missing_build else "stale"), None
+    except (OSError, UnicodeError) as error:
+        if not build_missing:
+            raise
+        return "failed", str(error)
 
 
 def sidecar_status(source_path: str, route_index: dict[str, Any]) -> str:

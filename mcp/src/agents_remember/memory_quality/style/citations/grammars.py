@@ -24,6 +24,7 @@ False-positive boundaries:
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cache
 from pathlib import PurePosixPath
@@ -31,6 +32,7 @@ from pathlib import PurePosixPath
 from tree_sitter import Language, Node, Parser
 
 from agents_remember.errors import GrammarUnavailableError
+from agents_remember.memory_quality.style.citations import test_cases
 
 PYTHON = "python"
 TYPESCRIPT = "typescript"
@@ -134,6 +136,7 @@ class Binding:
 
     span: tuple[int, int]
     declaration: int
+    test_case: bool = False
 
 
 @dataclass(frozen=True)
@@ -260,7 +263,7 @@ def definitions(path: str, lines: list[str]) -> Spans:
     }
 
 
-def bindings(path: str, lines: list[str]) -> dict[str, list[Binding]]:
+def bindings(path: str, lines: Sequence[str]) -> dict[str, list[Binding]]:
     """Every name ``path`` binds, with both its widened extent and its declaration line.
 
     One walk answers both, so a caller needing the declaration line does not re-parse the file.
@@ -281,12 +284,29 @@ def bindings(path: str, lines: list[str]) -> dict[str, list[Binding]]:
     found: dict[str, list[Binding]] = {}
     for node in _walk(tree.root_node):
         names = [] if node.has_error else reader(node)
+        cases = (
+            test_cases.case_names(node)
+            if grammar != PYTHON and test_cases.is_test_file(path)
+            else ()
+        )
+        names.extend(cases)
         if not names:
             continue
-        binding = Binding(span=_span(_widened(node, wrappers)), declaration=_span(node)[0])
+        binding = Binding(
+            span=_span(_widened(node, wrappers)), declaration=_span(node)[0], test_case=bool(cases)
+        )
         for name in names:
             found.setdefault(name, []).append(binding)
     return found
+
+
+def test_case_refusal(path: str, lines: Sequence[str], name: str) -> str | None:
+    """Diagnostic for an unresolved test-case proof; other files keep symbol diagnostics."""
+    grammar = grammar_of(path)
+    if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
+        return None
+    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
+    return test_cases.refusal(_walk(tree.root_node), name)
 
 
 def _walk(root: Node) -> list[Node]:

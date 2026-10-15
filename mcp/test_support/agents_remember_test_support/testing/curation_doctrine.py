@@ -2,9 +2,8 @@
 
 This module guards exact retired wording and verifies the compact curation surfaces state their
 MIK normal-authoring contract: complete memory quality and required coherence. A report-only
-admission remains bounded and claims none of that normal authoring pass complete. It is deliberately free of
-pytest and repository constants so a case can point it at a staged or synthetic tree; the caller
-supplies the repository root.
+admission remains bounded and claims none of that normal authoring pass complete. It is free of pytest; its projection census derives from the canonical repository declaration,
+while callers supply the tree root to check, including staged or synthetic trees.
 
 Matching is on a normalized reading -- markdown emphasis stripped, line wrapping collapsed -- and
 against the whole retired sentence, so a statement re-inserted with different emphasis or at a
@@ -34,6 +33,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.kernel.generated_copies import DECLARATION_PATH, parse_generated_copies
+
 from .retired_leaf_handover_wording import RETIRED_LEAF_HANDOVER_WORDING
 
 #: The normal MIK curation pass remains complete on both canonical surfaces.
@@ -43,16 +44,13 @@ COMPLETE_CURATION_RULE = (
 
 #: The nine generated skill copies ``scripts/sync-skills.py`` owns, relative to the repository
 #: root. A stale copy is a real defect: a seat on that harness reads the old sentence.
-GENERATED_SKILL_COPIES = (
-    "mcp/src/agents_remember/package_data/runtime/skills",
-    ".claude/skills",
-    ".codex/skills",
-    ".cursor/skills",
-    ".github-vscode/skills",
-    ".hermes/skills",
-    ".openclaw/workspace/skills",
-    ".pi/skills",
-    ".agents/skills",
+GENERATED_SKILL_COPIES = tuple(
+    target.path
+    for projection in parse_generated_copies(
+        (Path(__file__).resolve().parents[4] / DECLARATION_PATH).read_bytes()
+    )
+    if projection.source == "skills"
+    for target in projection.targets
 )
 
 #: Every shipped instruction surface the census ranges over: the canonical tree, then the copies.

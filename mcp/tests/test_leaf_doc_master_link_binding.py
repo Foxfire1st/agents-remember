@@ -240,13 +240,13 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
         """
 
         with self.assertRaises(TaskDocError) as raised:
-            self._author_leaf()
+            self._author_leaf(master=None)
 
         message = str(raised.exception)
-        self.assertIn("would carry no master link", message)
-        self.assertIn("seriesContractPath", message)
-        self.assertIn(self.master_path.as_posix(), message)
-        self.assertIn("Author the master document first", message)
+        self.assertEqual(message, "Sub-task publication requires a master.")
+        self.assertFalse(self.master_path.exists())
+        self.assertEqual(list(self.task_root.glob("*.json")), [])
+        self.assertEqual(list(self.task_root.glob("*.md")), [])
         self.assertFalse(self.leaf_doc_path.exists())
 
     def test_authoring_a_master_and_its_leaves_before_any_start_still_succeeds(self) -> None:

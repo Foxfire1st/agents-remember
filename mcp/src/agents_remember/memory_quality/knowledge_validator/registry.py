@@ -21,8 +21,8 @@ and every reported finding names its reason and the route that will refuse it (M
 
 ``writer_reports`` marks a rule that **refuses at every commit route but is only reported inside the
 writer**: a leaf may break it mid-way and repair it before closeout. MIK-R04's family route rules
-(Coverage, Non-empty, an added route's directory) carry it (MIK-R04 rule 6), as do MIK-R53's five
-refusing rules. The validator's own
+(Coverage, Non-empty, an added route's directory, and non-nesting) carry it (MIK-R04 rule 6,
+MIK-R54 rule 11), as do MIK-R53's designated refusing rules. The validator's own
 report is unchanged -- :func:`validate_tree` and :func:`require_valid_commit` still refuse such a
 finding -- so a writer (MIK-R12) reads :func:`writer_reported_rule_ids` and treats those violations
 as reports; no commit route may.
@@ -43,6 +43,10 @@ from functools import cached_property
 from typing import Final
 
 from agents_remember.memory_quality.knowledge_census.files import onboarding_routes, read_censuses
+from agents_remember.memory_quality.knowledge_validator.family_routes import (
+    RoutedFamily,
+    family_route_states,
+)
 from agents_remember.memory_quality.knowledge_validator.parsed import (
     ParsedTree,
     SidecarFile,
@@ -89,6 +93,8 @@ class ValidationRule:
     """MIK-R53 rule 10: refuse at every commit and landing route, report only at a sync merge."""
     migration_debt: bool = False
     """MIK-R53 rule 10: report a base-carried finding until the migration is complete."""
+    merge_requires_carried: bool = False
+    """MIK-R54 rule 11: only an equal-base target gets the sync-merge reporting treatment."""
 
 
 _REGISTRY: dict[str, ValidationRule] = {}
@@ -330,6 +336,11 @@ class ValidationContext:
         """The candidate's migration state, read from its census files (MIK-R53 rule 10)."""
 
         return migration_state(self.candidate)
+
+    @cached_property
+    def route_families(self) -> tuple[RoutedFamily, ...]:
+        """Each family's route state, computed once for every route rule in this validation."""
+        return family_route_states(self.parsed)
 
     @cached_property
     def record_ids(self) -> frozenset[str]:

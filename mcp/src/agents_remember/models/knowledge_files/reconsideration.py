@@ -56,8 +56,18 @@ RECORD_FILE: Final = "record_file"
 HISTORY_ROW: Final = "history_row"
 ANCHOR: Final = "anchor"
 ANCHOR_STALE: Final = "anchor_stale"
+ROUTE_ABSENT: Final = "route_absent"
+REFRESH_NOT_CURRENT: Final = "refresh_not_current"
 REQUIREMENT_VERSION: Final = "requirement_version"
-TRIGGERS: Final = (RECORD_FILE, HISTORY_ROW, ANCHOR, ANCHOR_STALE, REQUIREMENT_VERSION)
+TRIGGERS: Final = (
+    RECORD_FILE,
+    HISTORY_ROW,
+    ANCHOR,
+    ANCHOR_STALE,
+    REQUIREMENT_VERSION,
+    ROUTE_ABSENT,
+    REFRESH_NOT_CURRENT,
+)
 # The triggers a ``still_rejected`` answer refreshes the link for (rulings Q2/Q3, F1, F3).
 REFRESHED_TRIGGERS: Final = frozenset({ANCHOR, ANCHOR_STALE, REQUIREMENT_VERSION})
 
@@ -91,7 +101,7 @@ def question_key(subject: str, leaf: str) -> str:
 
 
 def link_target_key(target: Any) -> str:
-    """The one spelling of a ``reconsider_on`` target in the worklist's facts (``changed[].target``).
+    """The shared target key of reconsideration facts and ``link_target`` subjects (MIK-R55).
 
     A record ID or ``route:`` string is itself; an anchor is ``<path>@<blob>#<content>``; a
     requirement is ``<repository>/<task path>#<id>@<version>``. The writer compares a K_C link with
@@ -125,10 +135,13 @@ def reconsideration_item_open(
     """
 
     subject = item.get("subject")
-    if isinstance(subject, str) and subject in rows_by_subject:
-        return False
     if isinstance(subject, str):
         parsed = parse_reconsider_subject(subject)
         if parsed is not None and parsed[0] in superseded:
             return False
-    return True
+    if any(
+        one.get("trigger") == REFRESH_NOT_CURRENT
+        for one in (item.get("facts") or {}).get("changed", ())
+    ):
+        return True
+    return not (isinstance(subject, str) and subject in rows_by_subject)

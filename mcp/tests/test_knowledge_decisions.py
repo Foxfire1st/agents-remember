@@ -169,6 +169,24 @@ def _variant(document: dict[str, Any], **changes: Any) -> dict[str, Any]:
     return changed
 
 
+def test_reordered_alternatives_pass_when_reconsider_links_follow_exact_option_text() -> None:
+    before = _d18()
+    after = copy.deepcopy(before)
+    after["alternatives"] = [
+        before["alternatives"][0],
+        before["alternatives"][2],
+        before["alternatives"][1],
+    ]
+    for link in after["links"]:
+        if link["relation"] == "reconsider_on":
+            link["alternative"] = 3 - link["alternative"]
+    report = validate_tree(_tree(after), bases=[_tree(before)], code=CODE)
+    assert not _found(report, "R14"), report.render()
+    after["links"][1]["alternative"] = 1
+    unsafe = validate_tree(_tree(after), bases=[_tree(before)], code=CODE)
+    assert _found(unsafe, "R14"), unsafe.render()
+
+
 def test_the_packets_d12_and_d18_decisions_pass_every_rule() -> None:
     """Conforming: D12 and D18 as records, with rejected and deferred alternatives and links."""
 

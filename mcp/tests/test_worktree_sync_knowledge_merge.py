@@ -32,7 +32,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.memory.conversion import crossing_port, inputs
 from agents_remember.memory.conversion.code_objects import CodeObjects
@@ -81,6 +81,7 @@ from knowledge_conversion_test_support import (
     memory_files,
 )
 from test_worktree_sync import SyncFixture
+from writer_worklist_test_support import write_knowledge
 
 RECORD = f"knowledge/invariants/{derived_record_id('invariant', 'inv-one')}-FIX-I-1.json"
 

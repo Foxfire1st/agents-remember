@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from agents_remember.application.knowledge_writer.memory_state import Owner
-from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer.writer import WriteRequest
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -49,6 +49,7 @@ from repository_profile_test_support import AGENTS_REMEMBER_PROFILE_REFERENCE
 from selected_lifecycle_test_support import selected_closeout_operation_input
 from test_closeout_queue import _ensure_fixture_services
 from test_source_lineage import _fixture, _git
+from writer_worklist_test_support import write_knowledge
 
 
 def _closed_external_leaf_worktrees(

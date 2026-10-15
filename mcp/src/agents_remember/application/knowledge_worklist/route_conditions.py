@@ -303,7 +303,9 @@ class _Evaluation:
         effective = self._effective(recorded)
         reached_set = set(reached)
         raised: list[RouteCondition] = []
-        for family_id in sorted(reached_set | self._with_killed_routes()):
+        for family_id in sorted(
+            (reached_set | self._with_killed_routes()) & set(self.base.families)
+        ):
             family = _Family(
                 family_id, self.base.families.get(family_id), self.candidate.families.get(family_id)
             )

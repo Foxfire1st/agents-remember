@@ -9,8 +9,9 @@ to another alternative. The canonical formatter keeps the authored order, so onl
   decision, an alternative that a ``reconsider_on`` link addresses on either side keeps its index.
   An alternative is followed by its ``option`` text: a linked alternative whose option appears at
   another index on the other side has moved, and so has an alternative that moved into a linked
-  index. An alternative edited in place (its option reworded) stays where it is, so its links still
-  mean it. New alternatives are appended after the linked ones.
+  index. MIK-R54 rule 7 admits that move when the complete links follow its uniquely matching
+  exact option text: their targets and other fields stay equal, only their index changes.
+  An alternative edited in place (its option reworded) stays where it is.
 
 The check reads the decision files as raw JSON on both sides, so a base the shape rule would not
 parse is compared as far as it can be read.
@@ -71,6 +72,20 @@ def _decisions(tree: KnowledgeTree) -> dict[str, dict[str, Any]]:
     return found
 
 
+def _links_at(document: Mapping[str, Any], index: int) -> list[str]:
+    """The complete reconsider links at an option's index, excluding only that index."""
+    links = document.get("links")
+    return sorted(
+        json.dumps(
+            {key: value for key, value in link.items() if key != "alternative"}, sort_keys=True
+        )
+        for link in (links if isinstance(links, list) else ())
+        if isinstance(link, Mapping)
+        and link.get("relation") == RECONSIDER_ON
+        and link.get("alternative") == index
+    )
+
+
 def moved_linked_alternatives(
     before: Mapping[str, Any], after: Mapping[str, Any]
 ) -> list[tuple[str, int, int]]:
@@ -101,7 +116,14 @@ def moved_linked_alternatives(
         source = follow(new, index, old)
         if source is not None:
             moved.add((str(new[index]), source, index))
-    return sorted(moved, key=lambda one: (one[1], one[2]))
+    return sorted(
+        (
+            one
+            for one in moved
+            if not (old_links := _links_at(before, one[1])) or old_links != _links_at(after, one[2])
+        ),
+        key=lambda one: (one[1], one[2]),
+    )
 
 
 def check_linked_alternative_order(context: ValidationContext) -> Iterator[Finding]:
@@ -125,7 +147,8 @@ def check_linked_alternative_order(context: ValidationContext) -> Iterator[Findi
                     f"alternative {option!r} moved from index {old} to {new}, and a "
                     "reconsider_on link addresses an alternative by its index "
                     f"(reconsider:{record.id}#<index>), so the move would silently retarget it; "
-                    "keep linked alternatives at their index and append new ones after them",
+                    "keep linked alternatives at their index, or move each stored link to the "
+                    "index of its uniquely matching exact option text (MIK-R54 rule 7)",
                 )
 
 
@@ -133,7 +156,7 @@ RECONSIDERATION_RULES = (
     ValidationRule(
         "R14.1-linked-alternative-order",
         "MIK-R14 rule 3 (L13 carried decision: link stability)",
-        "an alternative a reconsider_on link addresses keeps its index",
+        "a moved linked alternative keeps its complete links at its exact option text",
         check_linked_alternative_order,
     ),
 )

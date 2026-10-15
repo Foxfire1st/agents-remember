@@ -22,10 +22,40 @@ from agents_remember.tasks.document import step_done, step_total
 from agents_remember.tasks.leaf_doc import plan_leaf_doc_lifecycle_restamp
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from pydantic import ValidationError
+from test_review_git_trees import LEAF as REVIEW_LEAF
+from test_review_git_trees import build_world
 from test_task_document import ApplicationTests
 
 
 class ApplicationTests1(ApplicationTests):
+    def test_every_task_doc_publication_refuses_a_leaf_without_a_master(self) -> None:
+        world = build_world(self.coord / "orphan")
+        created = self._create()
+        self.assertFalse(read_task_doc(Path(str(created["docPath"]))).master)
+        fields = read_task_doc(Path(str(created["docPath"]))).model_dump(
+            by_alias=True, include={"title", "repo", "createdAt"}
+        )
+        fields.update(id=REVIEW_LEAF, slug="leaf", kind="subTask", status="planning")
+        (world.task_root / "task.json").rename(world.task_root / "task.json.old")
+        target = TaskDocTarget(
+            repo_id="agents-remember", contract_path=str(world.contract()), slug="leaf"
+        )
+        for operation in ("create", "replace", "set_field", "set_status"):
+            fields["status"] = "Completed" if operation == "create" else "planning"
+            if operation != "create":
+                write_task_doc(world.task_root, TaskDocument.model_validate(fields))
+            before = {p: p.read_bytes() for p in world.task_root.iterdir() if p.is_file()}
+            with self.assertRaisesRegex(
+                TaskDocError, r"^Sub-task publication requires a master\.$"
+            ):
+                task_doc_tool(
+                    world.config, target, operation=operation, edit=TaskDocEdit(fields=fields)
+                )
+            self.assertEqual(
+                {p: p.read_bytes() for p in world.task_root.iterdir() if p.is_file()}, before
+            )
+        self.assertEqual(read_task_doc(world.task_root / "leaf.json").kind, "subTask")
+
     def test_leaf_create_syncs_parent_master_row(self) -> None:
         self._create_parent_master()
         result = self._create(master="task.md")

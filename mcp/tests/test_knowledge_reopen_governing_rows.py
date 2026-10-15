@@ -15,6 +15,7 @@ import pytest
 from agents_remember.application.knowledge_gate import memo
 from agents_remember.application.knowledge_worklist.route_conditions import family_route_item_open
 from agents_remember.application.knowledge_writer import WriteRequest, write_knowledge
+from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.documents import (
     history_path,
 )
@@ -61,6 +62,39 @@ from test_knowledge_reopen import (
 )
 
 __all__ = ["ports", "world"]  # the fixtures these cases use, defined in test_knowledge_reopen
+
+
+def _refused_then_written_by_hand(world: Gated, document: dict[str, Any], attempt: int) -> Any:
+    """R54 refuses first; retain the independent by-hand landing counterexample."""
+    paths = tuple((world.memory / "knowledge").rglob("*.json"))
+    before = {path: path.read_bytes() for path in paths}
+    report = write_knowledge(
+        WriteRequest(
+            world.memory,
+            world.code,
+            OWNER,
+            "notes/handoff.json",
+            document,
+            commit=True,
+            worklist=world.gate().worklist,
+        )
+    )
+    assert report.refused and "name the `changed` row again" in report.render()
+    assert before == {
+        path: path.read_bytes() for path in (world.memory / "knowledge").rglob("*.json")
+    }
+    previous = SECOND if (world.memory / SECOND).exists() else FIRST
+    stored = json.loads((world.memory / previous).read_text())
+    stored.update(closed=False, attempt=attempt)
+    (judgment,) = document["history"]
+    row = next(row for row in stored["rows"] if row["subject"] == judgment["subject"])
+    row.update(disposition=judgment["disposition"], reason=judgment["reason"])
+    row.pop("effect", None)
+    path = world.memory / history_path(LEAF, attempt)
+    path.write_text(
+        canonical_text(HistoryFile.model_validate(stored).to_document()), encoding="utf-8"
+    )
+    return report
 
 
 def _restating(statement: str, guarantee: str) -> dict[str, Any]:
@@ -126,7 +160,7 @@ def test_a_changed_record_is_governed_by_its_changed_row_in_every_attempt(
     # to see it by, so the routes refuse it -- the gate by the record's revision on the parent
     # line, the validator by the changed row in the leaf's earlier attempt -- and name the remedy.
     hiding = _handoff({**unchanged, "reason": "Judged again; nothing changed since."})
-    _write(world, hiding)
+    _refused_then_written_by_hand(world, hiding, 2)
     hidden = _open(world.gate())["touched_invariant INV-AAAAAA"]
     assert "a no_impact row governs an invariant this leaf changed" in hidden
     assert "revision 1 on the parent line, 2 in K_C" in hidden and "restate that changed" in hidden
@@ -159,8 +193,8 @@ def test_a_changed_record_is_governed_by_its_changed_row_in_every_attempt(
     # Review R5-2, as reproduced: after the second closeout a no_impact row lands in attempt 3 and
     # would govern. The gate refuses it, and so does the validator on its own at a recorded
     # landing of a commit made by hand, a route the worklist does not reach.
-    report = _write(world, hiding)
-    assert [row.history for row in report.rows] == [history_path(LEAF, 3)]
+    report = _refused_then_written_by_hand(world, hiding, 3)
+    assert report.refused and (world.memory / history_path(LEAF, 3)).is_file()
     assert "a no_impact row governs" in _open(world.gate())["touched_invariant INV-AAAAAA"]
     close_owner_history(world.memory, LEAF)
     by_hand = commit(world.memory, {}, trailer=code)
@@ -211,7 +245,15 @@ def test_a_change_on_the_parent_line_may_be_answered_by_any_later_row(
     # though attempt 1 holds a changed row at this very revision.
     relabelled = _handoff({**unchanged, "disposition": "changed", "effect": "strengthen"})
     refused = write_knowledge(
-        WriteRequest(world.memory, world.code, OWNER, "notes/handoff.json", relabelled, commit=True)
+        WriteRequest(
+            world.memory,
+            world.code,
+            OWNER,
+            "notes/handoff.json",
+            relabelled,
+            commit=True,
+            worklist=world.gate().worklist,
+        )
     )
     assert refused.state == "refused", refused.render()
     assert "a changed row's revision is the K_B revision 2 plus one" in refused.render()
@@ -249,8 +291,10 @@ def test_a_family_whose_guarantee_the_leaf_changed_is_governed_by_its_changed_ro
     # After the closeout, a route row or a no_impact row would replace the changed row. The gate
     # refuses it by the guarantee on the parent line, the validator by the frozen changed row.
     for disposition in ("rerouted", "no_impact"):
-        report = _write(world, _handoff({**family, "disposition": disposition}))
-        assert [row.history for row in report.rows] == [SECOND]
+        report = _refused_then_written_by_hand(
+            world, _handoff({**family, "disposition": disposition}), 2
+        )
+        assert report.refused and (world.memory / SECOND).is_file()
         opened = _open(world.gate())["reached_family FAM-F00001"]
         assert f"a {disposition} row governs a family whose guarantee" in opened
         refusal = _refused(world, world.closed_out[0])
@@ -290,8 +334,8 @@ def test_a_route_condition_reads_the_one_governing_family_row_across_attempts() 
 
 def test_the_writer_fills_a_rows_items_from_the_leafs_worklist(world: Gated, ports: None) -> None:
     """L37 P1c, C4 (MIK-R07 rule 1): a row whose hand-off names no item lists the worklist items it
-    answers, by each kind's own satisfying-row rule. Named items are kept, and a missing or
-    malformed worklist fills nothing and refuses nothing."""
+    answers, by each kind's own satisfying-row rule. Named items are kept; R54 refuses a missing
+    or malformed worklist before writing anything."""
 
     _edit(world, CODE_A.replace("return value", "return -value"))
     worklist = world.gate().worklist
@@ -304,12 +348,16 @@ def test_the_writer_fills_a_rows_items_from_the_leafs_worklist(world: Gated, por
         return {row["subject"]: row["items"] for row in rows}
 
     invariant, family, *traces = _rows_for_the_edit()["history"]
-    _write(world, _handoff(invariant, family, traces[0]), {})  # no worklist: nothing filled in;
-    # an overview row binds its item's sources, so it is named with the worklist below
-    assert set(map(tuple, stored().values())) == {()}
+    with pytest.raises(AssertionError, match="persisted worklist is unreadable"):
+        _write(world, _handoff(invariant, family, traces[0]), {})
+    assert not (world.memory / FIRST).exists()  # R54 replaces the old empty-items success.
+    # An overview row binds its item's sources, so it is named with the valid worklist below.
     named = "sha256:" + "0" * 64
     odd = {"kind": "touched_invariant", "subject": "INV-AAAAAA", "id": "not an item id"}
-    worklist = {**worklist, "items": [*worklist["items"], odd, {**odd, "id": 7}, "not an item"]}
+    malformed = {**worklist, "items": [*worklist["items"], odd, {**odd, "id": 7}, "not an item"]}
+    with pytest.raises(AssertionError, match="persisted worklist is unreadable"):
+        _write(world, _handoff({**invariant, "items": [named]}, family, *traces), malformed)
+    assert not (world.memory / FIRST).exists()
     _write(world, _handoff({**invariant, "items": [named]}, family, *traces), worklist)
     items = stored()
     assert items["INV-AAAAAA"] == [named]  # what the hand-off names is kept

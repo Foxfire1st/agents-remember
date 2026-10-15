@@ -21,10 +21,9 @@ from the four sides and persists what it computed (carried from L11). A Git call
 out makes the run ``incomplete``, naming ``git``, never an unhandled error (carried from L03), and an
 unreadable leaf task document does the same (carried from L11).
 
-**Applicability.** A leaf whose K_B and K_C both lack the layout marker gets no gate at all
-(``None``): it closes out exactly as before this master (MIK-R09 rule 6, MIK-R37). The refusal of
-unconverted trees that names the crossing sync (MIK-R24 rule 9) is not wired here; it belongs to the
-cutover's installed build (see the L09 report).
+**Applicability.** ``leaf_gate_applies`` selects the gate from the contract and captured sides;
+a false probe returns ``None``. An unreadable layout probe is never treated as an exemption:
+evaluation continues so that its input failure can be reported.
 """
 
 from __future__ import annotations
@@ -69,7 +68,7 @@ from agents_remember.kernel.git_command import (
     GitRunnerOptions,
     run_git,
 )
-from agents_remember.kernel.recorded_reads import recorded_reads
+from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
 from agents_remember.memory.conversion.base import pinned_version
 from agents_remember.memory.knowledge_index import MemoryTreeError, git_tree_snapshot
 from agents_remember.memory_quality.knowledge_validator import (
@@ -295,6 +294,7 @@ def evaluate_leaf_gate(
         result = _evaluate(
             contract, candidate, lines, unreadable, persist_worklist=persist_worklist
         )
+    replay_reads(reads)
     if key is not None and result is not None:
         memo.remember(key, result, reads)
     return result

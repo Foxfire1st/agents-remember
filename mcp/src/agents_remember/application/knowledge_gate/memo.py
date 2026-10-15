@@ -42,11 +42,18 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.application.runtime.startup import measuring_build_stamp
-from agents_remember.kernel.recorded_reads import changed_observations, has_failed_observation
+from agents_remember.kernel.recorded_reads import (
+    ABSENT,
+    changed_observations,
+    has_failed_observation,
+    record_read,
+    replay_reads,
+)
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -93,6 +100,21 @@ def _digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def _read_bytes(path: Path) -> bytes:
+    try:
+        data = path.read_bytes()
+    except OSError as error:
+        record_read(
+            path,
+            ABSENT
+            if isinstance(error, FileNotFoundError)
+            else f"unreadable ({type(error).__name__})",
+        )
+        raise
+    record_read(path, _digest(data))
+    return data
+
+
 def memo_key(
     contract: WorktreeContract,
     candidate: CandidateTrees,
@@ -106,9 +128,9 @@ def memo_key(
     """
 
     try:
-        contract_bytes = contract.contract_path.read_bytes()
+        contract_bytes = _read_bytes(contract.contract_path)
         found = strict_leaf_doc(contract.task_root, contract.leaf_id or contract.task_name)
-        document = b"" if found is None else found[0].read_bytes()
+        document = b"" if found is None else _read_bytes(found[0])
         build = json.dumps(measuring_build_stamp(), sort_keys=True, separators=(",", ":"))
     except (OSError, LeafDocumentUnresolved, RuntimeError, ValueError):
         return None
@@ -134,6 +156,7 @@ def remembered(key: GateMemoKey, *, now: float | None = None) -> GateResult | No
         return None
     if not kept.still_read_the_same():
         return None  # an approval-state file changed since: recompute
+    replay_reads(dict(kept.reads))
     return kept.result
 
 

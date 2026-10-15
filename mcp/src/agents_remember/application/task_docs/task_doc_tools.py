@@ -67,7 +67,6 @@ from agents_remember.worktrees.worktree_contract import (
 
 from . import task_doc_steps, task_sprint_linkage
 from .task_doc_content_edits import (
-    _apply_append_decision,
     _apply_set_field,
     _apply_set_status,
     _upsert_section,
@@ -80,6 +79,7 @@ from .task_doc_publication import (
     TaskDocPublication,
     preview_task_doc_projection_effects,
     publish_task_doc_set,
+    run_task_doc_call,
     task_doc_publication_transaction,
     validate_task_doc_transaction,
 )
@@ -113,6 +113,8 @@ from .task_execution_topology import (
     author_execution_graph,
     enforce_execution_topology_edit,
 )
+from .task_flat_list_edits import TaskMutationEdit as _Edit
+from .task_flat_list_edits import append_decision, put_open_question
 from .task_master_completion import require_master_completion
 from .task_reopen import (
     task_reopen_tool,  # noqa: F401  # facade re-export (moved to task_reopen.py)
@@ -137,6 +139,7 @@ VALID_OPERATIONS = (
     "remove_subtask",
     "set_section",
     "append_decision",
+    "put_open_question",
     "begin_review",
     "record_review",
     "record_route_review",
@@ -360,6 +363,21 @@ def task_doc_tool(
     operation: str,
     edit: TaskDocEdit = NO_EDIT,
     call: TaskDocCall = DEFAULT_TASK_DOC_CALL,
+) -> dict[str, Any]:
+    return run_task_doc_call(
+        config.coordination_root,
+        target.repo_id,
+        lambda: _task_doc_tool_locked(config, target, operation=operation, edit=edit, call=call),
+    )
+
+
+def _task_doc_tool_locked(
+    config: McpRuntimeConfig,
+    target: TaskDocTarget,
+    *,
+    operation: str,
+    edit: TaskDocEdit,
+    call: TaskDocCall,
 ) -> dict[str, Any]:
     if operation in ("get", "read_steps"):  # removed reads refuse with the file names
         task_root, _contract = _resolve(
@@ -779,8 +797,8 @@ def _build_doc(
         )
     if "kind" not in data:
         # Master/leaf only — there is no "light" default. A create against a leaf
-        # contract is a subTask; anything else (no contract, or a standalone
-        # top-level task) is a master.
+        # contract is a subTask; anything else (no contract, or a master with no
+        # commanding sprint) is a master.
         data["kind"] = "subTask" if (contract is not None and contract.kind == "leaf") else "master"
     scaffold_register_sections(data)
     if contract is not None:
@@ -795,42 +813,7 @@ def _build_doc(
                     "enclosurePath": contract.contract_path.as_posix(),
                 }
             ]
-    elif data.get("kind") != "master":
-        _require_bindable_leaf_authoring(task_root)
     return _validate(data)
-
-
-def _require_bindable_leaf_authoring(task_root: Path) -> None:
-    """Refuse a leaf document whose derived master link nothing would ever bind.
-
-    With no contract resolved there is no ``seriesContractPath`` and no
-    ``enclosures[]`` to stamp, and this document is not the master that will own
-    the series. Two cases reach here and only one of them is repairable:
-
-    * The task root already holds a master document. Authoring a master and its
-      leaves before any start is the normal planning flow, and it is allowed
-      precisely because the leaf's first ``worktree_start``/``worktree_attach``
-      runs the start binding publisher
-      (``plan_leaf_doc_lifecycle_restamp`` / ``plan_leaf_doc_enclosure_registration``),
-      which writes both derived fields once the series contract exists. This
-      allowance is a guarantee, so it is asserted rather than implied.
-    * The task root holds no master document at all. Nothing owns the series, no
-      operation binds the fields, and the document would silently persist without
-      its master link — so it is refused here, with the remedy, instead.
-    """
-
-    master_path = task_root / "task.json"
-    if master_path.exists():
-        return
-    raise TaskDocError(
-        "refused: this leaf task document would carry no master link "
-        f"(seriesContractPath and enclosures) and nothing would ever bind it — task root "
-        f"{task_root} has no series contract and no master document ({master_path}). "
-        "Author the master document first (task_doc.create with kind 'master' in this same "
-        "task root, which owns the series), then author its leaf documents; each leaf's "
-        "first worktree_start then binds the link. Alternatively pass the leaf's "
-        "contract_path once its enclosure exists, or the master's series contract path."
-    )
 
 
 def _enforce_register_section_shapes(doc: TaskDocument) -> None:
@@ -839,19 +822,6 @@ def _enforce_register_section_shapes(doc: TaskDocument) -> None:
         require_register_sections_valid(doc)
     except CloseoutQueueError as exc:
         raise TaskDocError(str(exc)) from exc
-
-
-@dataclass(frozen=True)
-class _Edit:
-    """The one edit payload bundle an ``_apply`` operation may draw from."""
-
-    kind: str
-    fields: dict[str, Any]
-    step: dict[str, Any] | None
-    decision: dict[str, Any] | None
-    subtask: dict[str, Any] | None
-    section: dict[str, Any] | None
-    lifecycle_id: str | None
 
 
 def _apply_set_step(data: dict[str, Any], edit: _Edit) -> None:
@@ -908,7 +878,8 @@ _MUTATIONS: dict[str, Callable[[dict[str, Any], _Edit], None]] = {
     "skip_step": _apply_skip_step,
     "set_subtask": _apply_set_subtask,
     "set_section": _apply_set_section,
-    "append_decision": _apply_append_decision,
+    "append_decision": append_decision,
+    "put_open_question": put_open_question,
 }
 
 

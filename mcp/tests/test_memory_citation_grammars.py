@@ -15,8 +15,9 @@ PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.memory_quality.style.citations import grammars, model
+from agents_remember.memory_quality.style.citations import extents, grammars, model
 from test_memory_citation_fix import TreeCase
+from tree_sitter import Parser
 
 
 def spans(path: str, source: str) -> dict[str, list[tuple[int, int]]]:
@@ -87,6 +88,100 @@ class TypeScriptPureMoveTests(TreeCase):
 
         self.assertEqual(result["claimsRepaired"], 0)
         self.assertEqual(self.declined(result)["code"], "anchor_ambiguous")
+
+
+class TestCaseDefinitionTests(unittest.TestCase):
+    def test_nested_test_titles_bind_qualified_and_unique_bare_names(self) -> None:
+        source = """describe('review fixes', () => {
+  describe("loaded.cards", () => {
+    it("covers only members", () => {
+      expect(1).toBe(1);
+    });
+  });
+});"""
+        for suffix in ("ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"):
+            with self.subTest(suffix=suffix):
+                path = f"review.test.{suffix}"
+                bound = extents.definitions(path, source.splitlines())
+                self.assertEqual(
+                    extents.qualified_spans(
+                        "review fixes > loaded.cards > covers only members", bound
+                    ),
+                    ((3, 5),),
+                )
+                self.assertEqual(extents.qualified_spans("covers only members", bound), ((3, 5),))
+                self.assertNotIn("covers only members", spans(f"review.{suffix}", source))
+
+    def test_plain_string_titles_decode_javascript_escapes(self) -> None:
+        source = r"""describe('review\'s', () => { it("say \u{1F600} \u0061 \x62", () => {}); });"""
+        self.assertIn("review's > say 😀 a b", spans("review.test.ts", source))
+
+    def test_utf16_pairs_match_scalar_titles_and_preserve_lone_units(self) -> None:
+        for spelling in (r"\uD83D\uDE00", r"\u{1F600}", "😀"):
+            source = f'describe("suite {spelling}", () => {{ it("say {spelling}", () => {{}}); }});'
+            bound = extents.definitions("review.test.ts", source.splitlines())
+            for title in ("say 😀", "suite 😀 > say 😀"):
+                self.assertEqual(extents.qualified_spans(title, bound), ((1, 1),))
+        for unit in (r"\uD83D", r"\uDE00"):
+            self.assertIn(
+                chr(int(unit[2:], 16)), spans("review.test.ts", f'it("{unit}", () => {{}});')
+            )
+        source = r'it("say \uD83D\uDE00", () => {}); test("say \u{1F600}", () => {});'
+        self.assertEqual(
+            len(extents.qualified_spans("say 😀", extents.definitions("review.test.ts", [source]))),
+            2,
+        )
+
+    def test_duplicate_bare_titles_stay_ambiguous_even_on_one_line(self) -> None:
+        source: str = "describe('left', () => { it('same', () => {}); }); describe('right', () => { test('same', () => {}); });"
+        bound = extents.definitions("review.spec.ts", source.splitlines())
+        self.assertEqual(len(extents.qualified_spans("same", bound)), 2)
+        self.assertEqual(extents.qualified_spans("left > same", bound), ((1, 1),))
+        self.assertEqual(extents.qualified_spans("right > same", bound), ((1, 1),))
+
+    def test_leading_comment_extras_do_not_replace_semantic_first_arguments(self) -> None:
+        source = """describe(/* suite */ "suite", () => {
+  it(/* case */ "block", () => {});
+  test(// case
+    "line", () => {});
+  it(/* note */ value + "computed", "later", () => {});
+  test(/* note */ 123, "nonstring", () => {});
+});"""
+        for suffix in ("ts", "tsx", "js"):
+            path = f"comments.test.{suffix}"
+            grammar = grammars.grammar_of(path)
+            assert grammar is not None
+            tree = Parser(grammars.language(grammar)).parse(source.encode())
+            arguments = (
+                tree.root_node.named_children[0].named_children[0].child_by_field_name("arguments")
+            )
+            assert arguments is not None
+            self.assertFalse(tree.root_node.has_error)
+            self.assertEqual(arguments.named_children[0].type, "comment")
+            self.assertTrue(arguments.named_children[0].is_extra)
+            bound = extents.definitions(path, source.splitlines())
+            self.assertEqual(extents.qualified_spans("suite > block", bound), ((2, 2),))
+            self.assertEqual(extents.qualified_spans("suite > line", bound), ((3, 4),))
+            for title in ("computed", "later", "nonstring"):
+                self.assertNotIn(title, bound)
+
+    def test_unsupported_case_forms_explain_the_reason_and_offer_line_ranges(self) -> None:
+        source = """it.skip('skipped', () => {});
+test.todo('todo');
+test.each([1])('parameterized', () => {});
+it(`computed ${value}`, () => {});"""
+        bound = spans("review.spec.ts", source)
+        for title, reason in (
+            ("skipped", ".skip"),
+            ("todo", ".todo"),
+            ("parameterized", ".each"),
+            ("computed", "computed"),
+        ):
+            with self.subTest(title=title):
+                self.assertNotIn(title, bound)
+                message = grammars.test_case_refusal("review.spec.ts", source.splitlines(), title)
+                self.assertIn(reason, message or "")
+                self.assertIn("line_range", message or "")
 
 
 class PythonExtentTests(unittest.TestCase):

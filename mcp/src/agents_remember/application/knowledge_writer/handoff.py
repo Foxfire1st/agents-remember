@@ -34,6 +34,7 @@ the document's own shape and collects every problem, so one refusal names them a
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -44,6 +45,7 @@ from agents_remember.application.curator_realization_authoring import (
     realization_refusal,
 )
 from agents_remember.application.curator_scope import CuratorScope, read_curator_scope
+from agents_remember.application.knowledge_writer.row_items import read_row_items
 from agents_remember.models.knowledge.effect import EffectLabel
 from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, RecordKind
 from agents_remember.models.knowledge_files.shapes import require_repository_path
@@ -68,6 +70,9 @@ _ROW_KEYS: Final = frozenset(
 # The architect's ruling (L21 review, finding 6): the template's ``incidental`` has no spelling in the
 # file format and is written as ``support``.
 ROLE_SPELLINGS: Final = {"incidental": "support"}
+_CASE_PATH = r"[\w./@+-]+\.(?:test|spec)\.(?:[cm]?[jt]s|[jt]sx)"
+_CASE_PROOF = re.compile(rf"(?P<path>{_CASE_PATH})::(?P<name>[^\r\n]+)")
+_CASE_EVIDENCE = re.compile(rf'(?P<path>{_CASE_PATH})::(?P<title>"(?:\\.|[^"\\])*?")')
 _TEST_ID = re.compile(r"(?P<path>[\w./@+-]+\.py)::(?P<name>[A-Za-z_][\w]*(?:::[A-Za-z_][\w]*)*)")
 # MIK-R28 rule 2's "path plus symbol": the pytest selection ``<path> -k <name>`` where the ``-k``
 # expression is one bare identifier (optionally quoted). An expression (``a and not b``) names no one
@@ -135,7 +140,8 @@ class TestReference:
 
     @property
     def spelling(self) -> str:
-        return f"{self.path}::{self.name.replace('.', '::')}"
+        name = self.name.replace(".", "::") if self.path.endswith(".py") else self.name
+        return f"{self.path}::{name}"
 
 
 @dataclass(frozen=True)
@@ -160,6 +166,12 @@ def tests_named_in(evidence: Sequence[str]) -> tuple[TestReference | TestFileMen
 
     found: list[tuple[int, int, TestReference | TestFileMention]] = []
     for position, text in enumerate(evidence):
+        for match in _CASE_EVIDENCE.finditer(text):
+            try:
+                title = json.loads(match["title"])
+            except ValueError:
+                continue
+            found.append((position, match.start(), TestReference(match["path"], title)))
         for pattern in (_TEST_ID, _SELECTED_TEST):
             for match in pattern.finditer(text):
                 reference = TestReference(match["path"], match["name"].replace("::", "."))
@@ -198,6 +210,7 @@ class EntryRequest:
     status: str | None = None
     invariant_id: str | None = None
     supersedes: tuple[str, ...] = ()
+    replace_evidence: bool = False
     # An entry that authors no invariant (no target, no ``invariant_id``, no ``admission``) is a
     # ruling: nothing is written for it.
     ruling: bool = False
@@ -446,6 +459,9 @@ def read_test_reference(value: Any) -> TestReference | str:
             return TestReference(path, name)
         return "a test is '<path>::<name>' or {path, symbol}"
     if isinstance(value, str):
+        case = _CASE_PROOF.fullmatch(value.strip())
+        if case is not None:
+            return TestReference(case["path"], case["name"])
         match = _TEST_ID.fullmatch(value.strip())
         if match is not None:
             return TestReference(match["path"], match["name"].replace("::", "."))
@@ -501,6 +517,9 @@ def _entry(position: int, raw: Any, problems: list[Problem]) -> EntryRequest | N
     invariant_id = _text(raw.get("invariant_id"))
     admission = raw.get("admission")
     targets = _targets(entry_id, raw, where, problems)
+    replacement = raw.get("replace_evidence", False)
+    if not isinstance(replacement, bool):
+        problems.append(Problem(where, "replace_evidence is a boolean"))
     entry = EntryRequest(
         ruling=not raw.get("target") and invariant_id is None and admission is None,
         entry_id=entry_id,
@@ -513,6 +532,7 @@ def _entry(position: int, raw: Any, problems: list[Problem]) -> EntryRequest | N
         status=_text(raw.get("status")),
         invariant_id=invariant_id,
         supersedes=_identifiers(raw.get("supersedes")),
+        replace_evidence=replacement is True,
     )
     if entry.ruling:
         return entry
@@ -724,12 +744,14 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         if (cover := _cover(one, f"{where}.covers[{index}]", problems)) is not None
     ]
     because = raw.get("because") or []
+    items, refusals = read_row_items(raw.get("items"))
+    problems.extend(Problem(f"{where} ({subject})", refusal) for refusal in refusals)
     return RowRequest(
         position=position,
         subject=subject,
         disposition=disposition,
         reason=reason,
-        items=_identifiers(raw.get("items")),
+        items=items,
         covers=tuple(covers),
         effect=_text(raw.get("effect")),
         effect_supplied="effect" in raw,

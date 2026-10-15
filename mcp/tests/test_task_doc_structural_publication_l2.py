@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Event
+from threading import Barrier, Event, current_thread, main_thread
 from unittest import mock
 
 import agents_remember.application.task_docs.task_doc_publication as task_publication
@@ -126,6 +126,7 @@ class TaskDocDetachAbsencePublicationL2Tests(unittest.TestCase):
         reached_publication = Barrier(2)
         release = Event()
         real_publish = task_doc_tools_module.publish_task_doc_set
+        real_call = task_doc_tools_module.run_task_doc_call
         selected_json = self.owner.tasks / "master-c" / "task.json"
         sprint_json = self.owner.tasks / "sprint" / "task.json"
 
@@ -133,16 +134,26 @@ class TaskDocDetachAbsencePublicationL2Tests(unittest.TestCase):
             accepted_paths = {source.json_path for source in context.source_snapshots}
             self.assertIn(selected_json, accepted_paths)
             self.assertNotIn(sprint_json, accepted_paths)
+            return real_publish(context)
+
+        def delayed_call(*args, **kwargs):
+            if current_thread() is main_thread():
+                return real_call(*args, **kwargs)
             reached_publication.wait(timeout=HANG_GUARD_SECONDS)
             if not release.wait(timeout=HANG_GUARD_SECONDS):
                 raise AssertionError("create publication release was not signalled")
-            return real_publish(context)
+            return real_call(*args, **kwargs)
 
         with (
             mock.patch.object(
                 task_doc_tools_module,
                 "publish_task_doc_set",
                 side_effect=delayed_create,
+            ),
+            mock.patch.object(
+                task_doc_tools_module,
+                "run_task_doc_call",
+                side_effect=delayed_call,
             ),
             ThreadPoolExecutor(max_workers=1) as pool,
         ):

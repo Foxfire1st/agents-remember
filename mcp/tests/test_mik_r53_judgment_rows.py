@@ -32,7 +32,7 @@ from agents_remember.application.knowledge_worklist.touched_records import (
     TOUCHED_RECORD_KIND,
     touched_record_items,
 )
-from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.knowledge_writer.handoff import read_handoff
 from agents_remember.application.knowledge_writer.writer import _writer_split
@@ -75,6 +75,7 @@ from knowledge_writer_test_support import (
     commit_all,
     write,
 )
+from writer_worklist_test_support import write_knowledge
 
 OWNER = Owner(task=TASK_ID, kind="leaf", id=LEAF_ID)
 HISTORY_PATH = f"knowledge/history/{LEAF_ID}.json"
@@ -809,6 +810,7 @@ def _decision_world(tmp_path: Path) -> Any:
             f"knowledge/decisions/{DECISION}-rows.json": canonical_text(
                 _decision(
                     DECISION,
+                    origin={**ORIGIN, "task": "260101-OLD", "leaf": "260101-OLD-L1"},
                     admission={
                         "criteria": ["real_alternatives"],
                         "justification": "Two real designs were weighed.",

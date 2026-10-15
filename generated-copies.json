@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "copies": [
+    {
+      "source": "skills",
+      "targets": [
+        {"label": "mcp package data", "path": "mcp/src/agents_remember/package_data/runtime/skills"},
+        {"label": "Claude Code package", "path": ".claude/skills"},
+        {"label": "Codex package", "path": ".codex/skills"},
+        {"label": "Cursor package", "path": ".cursor/skills"},
+        {"label": "VS Code/Copilot package", "path": ".github-vscode/skills"},
+        {"label": "Hermes package", "path": ".hermes/skills"},
+        {"label": "OpenClaw package", "path": ".openclaw/workspace/skills"},
+        {"label": "Pi package", "path": ".pi/skills"},
+        {"label": "Antigravity package", "path": ".agents/skills"}
+      ],
+      "ignoreNames": [".DS_Store", ".pytest_cache", ".ruff_cache", "__pycache__"],
+      "ignoreSuffixes": [".pyc"]
+    }
+  ]
+}

@@ -205,7 +205,7 @@ def _match(
 
 def _delivers(row: HistoryRow, effect: str) -> bool:
     if isinstance(row, FamilyRow):
-        return row.disposition == "changed"
+        return row.disposition == "changed" and row.effect == effect
     if not isinstance(row, InvariantRow):
         return False
     if row.disposition == "changed":
@@ -232,7 +232,11 @@ def _untouched_item(
         {
             "id": row.id,
             "disposition": row.disposition,
-            **({"effect": row.effect} if isinstance(row, InvariantRow) and row.effect else {}),
+            **(
+                {"effect": row.effect}
+                if isinstance(row, (InvariantRow, FamilyRow)) and row.effect
+                else {}
+            ),
         }
         for row in (history.rows if history is not None else ())
         if record_id is not None and row.subject == record_id

@@ -27,7 +27,7 @@ import test_tool_answer_table as _rows_table
 import tool_answer_l111_test_support as _l111
 from agents_remember.application import worktree_tools as _worktree_tools
 from agents_remember.application.knowledge_writer.memory_state import Owner
-from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer.writer import WriteRequest
 from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.controlplane.enforcement import GateGuard
@@ -61,6 +61,7 @@ from agents_remember.worktrees.worktree_contract import load_contract, write_con
 from agents_remember_test_support.testing.waits import wait_until
 from test_closeout_queue import QueueFixture
 from tool_entry_point_world import REPO, EntryPointWorld, _git
+from writer_worklist_test_support import write_knowledge
 
 
 def _refusal(test: unittest.TestCase, kind: str, payload: dict[str, Any] | None) -> dict[str, Any]:

@@ -18,6 +18,7 @@ assignment, comment, and same-line strings remain separate.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from agents_remember.memory_quality.style.citations import grammars, model
@@ -48,6 +49,7 @@ class Extent:
     # anchor names the declaration, and a citation that starts at the declaration's own first
     # line is about that construct. ``None`` for every other kind, where the two coincide.
     declaration: int | None = None
+    test_case: bool = False
 
     def holds(self, start: int, end: int) -> bool:
         """Whether this extent overlaps the range ``start``-``end`` at all."""
@@ -104,7 +106,7 @@ def symbol_extents(name: str, path: str, lines: list[str]) -> tuple[Extent, ...]
     return occurrence_runs(model.whole_identifier(name), lines)
 
 
-def definitions(path: str, lines: list[str]) -> dict[str, list[Extent]]:
+def definitions(path: str, lines: Sequence[str]) -> dict[str, list[Extent]]:
     """Every name this file binds at any depth, and the extent of the construct binding it.
 
     Assignments and declarators count, not only ``def`` and ``class``: an earlier
@@ -122,6 +124,7 @@ def definitions(path: str, lines: list[str]) -> dict[str, list[Extent]]:
                 end=binding.span[1],
                 kind=DEFINITION,
                 declaration=binding.declaration,
+                test_case=binding.test_case,
             )
             for binding in items
         ]
@@ -137,6 +140,13 @@ def qualified_spans(name: str, bound: dict[str, list[Extent]]) -> tuple[tuple[in
     construct only when exactly one span comes back; the curator writer (MIK-R12) and the
     conversion (MIK-R24) both bind symbols through this one rule.
     """
+    if name in bound:
+        spans = tuple((extent.start, extent.end) for extent in bound[name])
+        return (
+            spans
+            if any(extent.test_case for extent in bound[name])
+            else tuple(dict.fromkeys(spans))
+        )
     parts = [part for part in name.split(".") if part]
     if not parts or any(part not in bound for part in parts):
         return ()

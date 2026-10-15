@@ -13,6 +13,7 @@ import re
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, get_args
 
 from pydantic import ValidationError
@@ -37,6 +38,7 @@ from agents_remember.application.knowledge_writer.memory_state import (
     canonical_equal,
     deep_copy,
 )
+from agents_remember.application.knowledge_writer.planned_references import unresolved_planned_ref
 from agents_remember.application.knowledge_writer.reconsideration import (
     UNDER_RECONSIDERATION,
     Answer,
@@ -149,6 +151,7 @@ class HistoryRowAuthoring:
         """The persisted worklist's onboarding items' covered sources by subject (MIK-R53)."""
         onboarding_counted: Mapping[str, bool]
         """The persisted worklist's onboarding items' counted change by subject (MIK-R53)."""
+        coordination_root: Path | None
         memory_base: str | None
         """The leaf's paired memory base commit: the gate's K_B for the card comparison."""
         handles: dict[str, str]
@@ -974,28 +977,10 @@ class HistoryRowAuthoring:
         if document.get("status") != UNDER_RECONSIDERATION:
             self.state.put(path, {**document, "status": UNDER_RECONSIDERATION})
         self.raised.append((key, question))
-        self.notes.append(f"raise {row['subject']}: the leaf's task document gets: {question}")
         return True
 
     def _unresolved_ref(self, row: PlannedEffectRow) -> str | None:
-        ref = row.ref
-        if ref.decision is not None:
-            if self.decisions is None:
-                return (
-                    "a dropped planned row cites a decision of the leaf's task document, and this "
-                    "write has no task owner to resolve it"
-                )
-            detail = self.decisions(ref.decision)
-            return (
-                None if detail is None else f"the dropped row's decision does not resolve: {detail}"
-            )
-        if ref.invariant is not None:
-            found = self.state.record(ref.invariant)
-            if found is None or found[1] != "invariant":
-                return f"ref.invariant {ref.invariant} names no stored invariant"
-        if ref.row is not None and ref.row not in self.state.known_ids():
-            return f"ref.row {ref.row} names no history row"
-        return None
+        return unresolved_planned_ref(self, row)
 
     def _foreign_carry(
         self, existing: Mapping[str, Any] | None, record: Mapping[str, Any]
@@ -1049,11 +1034,11 @@ class HistoryRowAuthoring:
         record: Mapping[str, Any],
         where: str,
     ) -> dict[str, Any] | None:
-        moving = request.disposition == "moved"
+        allow_path = request.disposition in {"moved", "extended", "changed", "deleted"}
         row["covers"] = [
             cover
             for one in request.covers
-            for cover in self._covers(one, row["subject"], f"{where}.covers", moving=moving)
+            for cover in self._covers(one, row["subject"], f"{where}.covers", allow_path=allow_path)
         ]
         row["revision"] = record.get("revision")
         if request.effect is not None:
@@ -1097,9 +1082,9 @@ class HistoryRowAuthoring:
         return row
 
     def _covers(
-        self, request: CoverRequest, subject: str, where: str, *, moving: bool = False
+        self, request: CoverRequest, subject: str, where: str, *, allow_path: bool = False
     ) -> list[dict[str, Any]]:
-        if request.path is not None and not moving:
+        if request.path is not None and not allow_path:
             self.problem(where, "a cover names another source path only on a moved row")
             return []
         if request.handoff is not None:
@@ -1188,7 +1173,7 @@ class HistoryRowAuthoring:
         return True
 
     def _relocate(self, located: EntryLocation, path: str) -> EntryLocation:
-        """Move the entry into ``path``'s file sidecar (a moved row's ``after``, MIK-R07 rule 4).
+        """Move the entry into ``path``'s file sidecar (the row's ``after``, MIK-R07 rule 4).
 
         The entry keeps its ID, invariant and authored fields; the caller re-anchors it at C, so
         its ``blob`` and ``content`` are C's.

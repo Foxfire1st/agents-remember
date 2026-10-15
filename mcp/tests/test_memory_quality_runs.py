@@ -427,7 +427,7 @@ class MemoryQualityControllerTests(unittest.TestCase):
                     controller,
                     "build_route_indexes",
                     return_value=mock.Mock(stale_indexes=[]),
-                ),
+                ) as route_indexes,
                 mock.patch.object(controller, "split_commit_owned_findings", return_value=([], [])),
                 mock.patch.object(controller, "write_curator_checklist") as publish,
                 mock.patch.object(controller, "_attach_coherence_readiness"),
@@ -438,7 +438,9 @@ class MemoryQualityControllerTests(unittest.TestCase):
                     {"checks": {}},
                     response,
                     candidate_inputs=candidate_inputs,
-                    prepared=controller._PreparedInputs(census=cast(Any, census)),
+                    prepared=controller._PreparedInputs(
+                        census=cast(Any, census), route_indexes=route_indexes.return_value
+                    ),
                 )
 
         published = publish.call_args.args[0]

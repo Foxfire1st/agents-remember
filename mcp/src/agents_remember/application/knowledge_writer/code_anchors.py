@@ -186,13 +186,17 @@ def _symbol_range(path: str, name: str, data: bytes) -> tuple[int, int]:
             f"{path!r} is in a language the shipped extractor has no grammar for, so a definition "
             f"of {name!r} cannot be told from a mention; cite a line_range or the file instead"
         )
-    lines = data.decode("utf-8", errors="surrogateescape").split("\n")
+    try:
+        lines = data.decode("utf-8").split("\n")
+    except UnicodeDecodeError as error:
+        raise AnchorResolutionError(f"{path!r} is not valid UTF-8: {error}") from error
     try:
         spans = _bound_spans(name, path, lines)
     except GrammarUnavailableError as error:
         raise AnchorResolutionError(f"the grammar for {path!r} is unavailable: {error}") from error
     if not spans:
-        raise AnchorResolutionError(f"{path!r} at C does not define {name!r}")
+        refusal = grammars.test_case_refusal(path, lines, name)
+        raise AnchorResolutionError(refusal or f"{path!r} at C does not define {name!r}")
     if len(spans) != 1:
         where = ", ".join(f"{start}-{end}" for start, end in spans)
         raise AnchorResolutionError(

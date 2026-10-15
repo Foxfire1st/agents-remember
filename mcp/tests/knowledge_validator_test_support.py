@@ -61,6 +61,7 @@ CODE_PATHS = frozenset(
         INTEGRATE,
         TEST_DIRECT_LANDING,
         LIFECYCLE_DIRECT_LANDING,
+        "mcp/src/agents_remember/memory/knowledge/requirement_endpoint.py",
         *(path for path, *_ in FAMILY_REALIZATIONS),
     }
 )

@@ -837,7 +837,7 @@ class BudgetAgreementTests(unittest.TestCase):
 
     def test_the_declaration_is_the_ceiling_this_module_screens(self) -> None:
         """The authority is one file, and the screen reads it rather than a copy."""
-        self.assertEqual(self.declared(), {"unit": 5000, "integration": 1000})
+        self.assertEqual(self.declared(), {"unit": 6000, "integration": 1000})
         budget_test = (MCP_TESTS / "test_suite_budget.py").read_text("utf-8")
         self.assertIn(f"STUB_UNIT = {self.declared()['unit']}", budget_test)
         self.assertIn(f"STUB_INTEGRATION = {self.declared()['integration']}", budget_test)

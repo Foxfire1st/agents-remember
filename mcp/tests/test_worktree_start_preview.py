@@ -302,6 +302,40 @@ def test_registered_first_leaf_preview_is_repeatable_without_publication(
         assert not world.parent_path.exists()
 
 
+def test_registered_leaf_without_a_master_refuses_preview_and_start(tmp_path: Path) -> None:
+    """R55 rule 9: the existing public refusal creates no branches, worktrees or documents."""
+    world = PreviewFixture(tmp_path)
+    world._document(world.task_root, id="UNOWNED", slug="task", kind="subTask")
+    leaf = read_task_doc(world.task_root / "leaf.json")
+    write_task_doc(world.task_root, leaf.model_copy(update={"master": None}))
+    mark = world.mark()
+    before = capture_preview_state(world)
+    world.record("no-master-before", before.snapshot)
+    for dry_run in (True, False):
+        refused = world.start(dry_run=dry_run)
+        assert not refused.isError, refused
+        assert refused.structuredContent is not None
+        payload = refused.structuredContent
+        assert payload["ok"] is False
+        assert payload["state"] == "blocked"
+        assert payload["summary"] == (
+            "Source lineage could not be proven; task-bound seats fail closed until contract "
+            "and branch evidence is restored."
+        )
+        assert _whole(payload)["source_lineage"]["edges"][0]["detail"] == (
+            "a leaf without a parent series must belong to an organizational master"
+        )
+        after = world.snapshot()
+        world.record(f"no-master-after-{dry_run}", after)
+        assert_preview_read_only(
+            before,
+            attach_record(world, after),
+            expected_tools=world.log_tools_since(mark),
+            expected_river_tools=world.river_tools_since(mark),
+        )
+        assert not world.parent_path.exists()
+
+
 def test_disabled_start_is_refused_before_any_publication(tmp_path: Path) -> None:
     """The removed opt-out mode never previews: the refusal names itself, twice identically.
 

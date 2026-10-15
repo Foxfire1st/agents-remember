@@ -90,11 +90,11 @@ MEMORY_MESSAGE = "260918-TSIP-L9: the extension leaf's memory"
 # below is a plain assertion that the declaration is at least the ruling. While the raise is
 # still in flight it reports that fact instead of failing on someone else's pending edit.
 # ---------------------------------------------------------------------------------------
-RULED_UNIT_BUDGET = 5000
+RULED_UNIT_BUDGET = 6000
 RULED_INTEGRATION_BUDGET = 1000
 BUDGET_RAIL_PENDING = (
     "260928-MIK-L146",
-    "the declared pair is below the developer's ruled 5000/1000; the ceiling raise has not landed "
+    "the declared pair is below the developer's ruled 6000/1000; the ceiling raise has not landed "
     "on this base and `mcp/tests/test_suite_budget.py` is red for it",
 )
 

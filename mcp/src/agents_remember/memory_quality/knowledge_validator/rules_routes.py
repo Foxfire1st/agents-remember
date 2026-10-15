@@ -23,9 +23,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 from agents_remember.memory_quality.knowledge_validator.family_routes import (
-    FamilyRouteState,
-    family_route_state,
-    realization_locations,
+    RoutedFamily as _Family,
 )
 from agents_remember.memory_quality.knowledge_validator.registry import (
     Finding,
@@ -46,21 +44,8 @@ from agents_remember.models.knowledge_files.shapes import LEGACY_UNASSESSED
 _FAMILY_DIRECTORY = f"{KNOWLEDGE_ROOT}/{RECORD_DIRECTORIES['family']}/"
 
 
-@dataclass(frozen=True)
-class _Family:
-    path: str
-    state: FamilyRouteState
-
-    @property
-    def id(self) -> str:
-        return self.state.family.id
-
-
 def _families(context: ValidationContext) -> Iterator[_Family]:
-    locations = realization_locations(context.parsed.sidecars)
-    for record in context.parsed.records:
-        if isinstance(record.record, FamilyRecord):
-            yield _Family(record.path, family_route_state(record.record, locations))
+    return iter(context.route_families)
 
 
 def _base_families(bases: Iterable[KnowledgeTree]) -> Iterator[FamilyRecord]:
@@ -121,6 +106,26 @@ def _absent_routes(context: ValidationContext) -> Iterator[_AbsentRoute]:
         for index, route in enumerate(family.state.family.routes):
             if not code.has_directory(route):
                 yield _AbsentRoute(family, index, route, (family.id, route) in carried, code.label)
+
+
+def check_nested_routes(context: ValidationContext) -> Iterator[Finding]:
+    for family in _families(context):
+        if family.state.retired:
+            continue
+        routes = family.state.family.routes
+        for index, route in enumerate(routes):
+            parents = [
+                parent
+                for parent in routes
+                if parent != route and (parent == "." or route.startswith(parent + "/"))
+            ]
+            if parents:
+                yield Finding(
+                    family.path,
+                    f"routes.{index}",
+                    f"family {family.id}: route {route} lies inside route {parents[0]}; "
+                    "keep non-nested routes",
+                )
 
 
 def check_route_directories(context: ValidationContext) -> Iterator[Finding]:
@@ -223,6 +228,13 @@ def check_route_unassigned(context: ValidationContext) -> Iterator[Finding]:
 
 
 ROUTE_RULES = (
+    ValidationRule(
+        "R04.1-nested-routes",
+        "MIK-R54 rule 11 (MIK-R04 rule 1)",
+        "a family lists no route inside another of its routes",
+        check_nested_routes,
+        writer_reports=True,
+    ),
     ValidationRule(
         "R04.1-route-directory",
         "MIK-R04 rule 1",

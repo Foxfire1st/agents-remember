@@ -21,25 +21,16 @@ operations over the same inventory.
 
 from __future__ import annotations
 
+import venv
 from pathlib import Path
 
 from agents_remember.worktrees.modules.git import changed_worktree_paths
+from agents_remember_test_support.testing.curation_doctrine import GENERATED_SKILL_COPIES
+from test_worktree_support import init_repo
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE = Path("l-01-agent-lifecycles")
 TEMPLATE = LIFECYCLE / "templates" / "worker-brief.md"
-
-GENERATED_SKILL_COPIES = (
-    "mcp/src/agents_remember/package_data/runtime/skills",
-    ".claude/skills",
-    ".codex/skills",
-    ".cursor/skills",
-    ".github-vscode/skills",
-    ".hermes/skills",
-    ".openclaw/workspace/skills",
-    ".pi/skills",
-    ".agents/skills",
-)
 
 #: Instruction surfaces: a sentence here tells a seat how to run its candidate.
 INSTRUCTION_DIRS = ("roles", "operations", "templates")
@@ -108,17 +99,22 @@ def test_the_guard_reports_the_retired_interpreter_line() -> None:
     assert not names_candidate_interpreter(shipped)
 
 
-def test_candidate_accounting_excludes_worktree_environments() -> None:
+def test_candidate_accounting_excludes_worktree_environments(tmp_path: Path) -> None:
     """The closeout working tier never carries either worktree environment directory.
 
-    The guard is meaningful only with a real environment present: this
-    repository root holds the built ``mcp/.venv``. (``dashboard/node_modules``
-    has no live instance in any checkout that never installed it; its half is
-    structural, backed by the ignore-rule proof.)
+    The temporary repository holds its own built ``mcp/.venv`` and populated
+    ``dashboard/node_modules``; both must be excluded by the product ignore rules.
     """
 
-    assert (REPOSITORY_ROOT / "mcp" / ".venv").is_dir(), "no built venv to exclude"
-    paths = changed_worktree_paths(REPOSITORY_ROOT)
+    root = tmp_path / "repository"
+    init_repo(root)
+    (root / ".gitignore").write_bytes((REPOSITORY_ROOT / ".gitignore").read_bytes())
+    venv.EnvBuilder(with_pip=False).create(root / "mcp" / ".venv")
+    modules = root / "dashboard" / "node_modules"
+    modules.mkdir(parents=True)
+    (modules / "fixture.js").write_text("// installed fixture\n", encoding="utf-8")
+    assert (root / "mcp" / ".venv").is_dir(), "no built venv to exclude"
+    paths = changed_worktree_paths(root)
     offenders = [
         path for path in paths if ".venv" in Path(path).parts or "node_modules" in Path(path).parts
     ]

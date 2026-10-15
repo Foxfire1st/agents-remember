@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.knowledge_writer.memory_state import Owner
-from agents_remember.application.knowledge_writer.writer import WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer.writer import WriteRequest
 from agents_remember.kernel.direct_execution_grants import (
     DirectExecutionGrant,
     grant_path_for,
@@ -58,6 +58,7 @@ from test_worktree_support import (
     init_repo,
     install_fixture_profile,
 )
+from writer_worklist_test_support import write_knowledge
 
 REPO = "repo-a"
 SPRINT = TaskDocumentRef(repository=REPO, path="sprint/task.json")

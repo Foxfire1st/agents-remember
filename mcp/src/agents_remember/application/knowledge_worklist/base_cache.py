@@ -121,8 +121,12 @@ class ConvertedBaseCache:
         self._evict()
 
     def _evict(self) -> None:
-        cached = sorted(self.directory.glob(f"*{_SUFFIX}"), key=lambda one: one.stat().st_mtime)
-        for stale in cached[:-MAX_FILES]:
+        times: list[tuple[float, Path]] = []
+        for path in self.directory.glob(f"*{_SUFFIX}"):
+            with contextlib.suppress(OSError):
+                times.append((path.stat().st_mtime, path))
+        cached = sorted(times)
+        for _, stale in cached[:-MAX_FILES]:
             with contextlib.suppress(OSError):
                 stale.unlink()
 

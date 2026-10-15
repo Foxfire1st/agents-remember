@@ -363,11 +363,13 @@ class FolderMasterFinalizeTests(_FinalizeFixtures):
         self.assertEqual(_sources(leaf_json, master_json), before)
 
     def test_without_a_listing_folder_master_the_leaf_finalizes_standalone(self) -> None:
-        """Behaviour 3 and the standalone preservation boundary: nothing else is written."""
-        for case in ("no-task-json", "no-row", "leaf-is-the-light-task-json"):
+        """R55 rule 9 supersedes R38's completion without a master row; nothing is written."""
+        for case in ("no-task-json", "no-row", "leaf-is-the-light-task-json", "no-leaf-document"):
             with self.subTest(case=case):
                 contract = self._contract(fixture_name=f"standalone-{case}")
-                if case == "no-task-json":
+                if case == "no-leaf-document":
+                    leaf_json, others = contract.task_root / "14_finalize.json", ()
+                elif case == "no-task-json":
                     leaf_json, others = self._leaf_doc(contract, None), ()
                 elif case == "no-row":
                     leaf_json, master_json = self._docs(
@@ -377,17 +379,26 @@ class FolderMasterFinalizeTests(_FinalizeFixtures):
                 else:
                     leaf_json = self._folder_doc(contract, kind="light", doc_id="14")
                     others = ()
-                before = _sources(*others)
+                before = _sources(leaf_json, *others, contract.task_root / "task.json")
 
                 result = finalize_result(FinalizeArgs(contract_path=contract.contract_path))
 
-                self.assertEqual(result.returncode, 0, result.payload)
+                self.assertEqual(result.returncode, 2, result.payload)
+                payload = _payload(result)
+                self.assertEqual(payload["state"], "task-document-resolution-blocked")
+                if case == "no-row":
+                    refusal = (
+                        f"folder master {master_json.resolve()} lists no row '14'; "
+                        "add the leaf's row to this master through task_doc and retry finalization"
+                    )
+                elif case == "no-leaf-document":
+                    refusal = "cannot finalize a leaf without its contract-bound task document and master row"
+                else:
+                    refusal = "leaf '14' has no master row: no folder master task document"
+                self.assertIn(refusal, payload["blockers"][0])
                 self.assertEqual(
-                    _payload(result)["taskUpdates"]["parent"],
-                    {"state": "skipped", "reason": "leaf has no immediate parent"},
+                    _sources(leaf_json, *others, contract.task_root / "task.json"), before
                 )
-                self.assertEqual(read_task_doc(leaf_json).status, "Completed")
-                self.assertEqual(_sources(*others), before)
 
     def test_a_folder_master_is_refused_exactly_as_a_named_master(self) -> None:
         """Behaviour 4: the named-master refusals, before any task document is written.
@@ -401,7 +412,7 @@ class FolderMasterFinalizeTests(_FinalizeFixtures):
             "listed-twice": "immediate parent must contain exactly one row '14'; found 2",
             "row-points-elsewhere": "parent row '14' points at ",
             "asserted-other-master": "is not the leaf's immediate parent",
-            "asserted-master-without-row": "lists no row '14'; the leaf finalizes standalone",
+            "asserted-master-without-row": "lists no row '14'; add the leaf's row to this master through task_doc",
         }
         rows = {
             "listed-twice": [_row(), _row()],

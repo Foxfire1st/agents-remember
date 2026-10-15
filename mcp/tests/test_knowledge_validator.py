@@ -37,7 +37,6 @@ from agents_remember.models.knowledge_files import history_path
 from agents_remember.models.knowledge_files.history import empty_history
 from agents_remember.models.knowledge_files.ids import derived_record_id
 from knowledge_validator_test_support import (
-    DIRECT_LANDING,
     DIRECT_LANDING_CARD,
     DIRECT_LANDING_SIDECAR,
     FAMILY,
@@ -358,101 +357,7 @@ def test_every_family_member_exists() -> None:
     assert line.startswith(f"{family}: members.1:") and "INV-R8M2TD" in line
 
 
-# --------------------------------------------------------------------------------------------------
-# Rule 6: anchors
-# --------------------------------------------------------------------------------------------------
-
-
-def test_an_added_anchor_must_name_an_existing_path() -> None:
-    target = {"kind": "code", "anchor": _code_anchor("mcp/src/gone.py")}
-    files = edit_json(fixture_tree_files(), DIRECT_LANDING_SIDECAR, _add_reference("8", target))
-    files[DIRECT_LANDING_CARD] += b"\nAlso [8].\n"
-
-    [line] = _only(_validate(files, bases=[tree(fixture_tree_files(), "K_B")]), "R22.6-anchor-path")
-
-    assert "references.8.targets.0.anchor.path" in line and "mcp/src/gone.py" in line
-
-
-def test_a_carried_anchor_at_a_deleted_path_refuses_off_merge() -> None:
-    files = fixture_tree_files()
-
-    report = _validate(files, bases=[tree(files, "K_B")], code=code(frozenset()))
-
-    assert not report.ok, report.render()
-    # The family's carried routes are gone with the code, too: refused the same way (MIK-R04).
-    assert _rules(report) == {
-        "R22.6-carried-stale",
-        "R04.1-carried-route-absent",
-    }
-    assert _rules(report, refusing=False) == {LEGACY_COUNT}
-
-
-def test_merge_where_one_parent_deleted_a_file_the_other_parents_card_cites() -> None:
-    """Packet boundary example: the anchors are equal in one parent, so they are carried."""
-
-    cites = fixture_tree_files()
-    for number in ("8", "9", "10"):
-        target = {"kind": "code", "anchor": _code_anchor("cli/knowledge_ingest.py", f"f{number}")}
-        cites = edit_json(cites, DIRECT_LANDING_SIDECAR, _add_reference(number, target))
-    cites[DIRECT_LANDING_CARD] += b"\nIngest [8], [9] and [10].\n"
-    deleted = fixture_tree_files()
-
-    report = _validate(
-        cites, bases=[tree(cites, "citing parent"), tree(deleted, "deleting parent")]
-    )
-
-    assert report.ok, report.render()
-    stale = [v for v in report.reports if v.rule == "R22.6-carried-stale"]
-    assert len(stale) == 3
-
-
-def test_a_re_anchored_entry_is_checked_and_a_moved_entry_carries_nothing() -> None:
-    def move(document: dict[str, Any]) -> None:
-        document["realizes"][0]["anchor"]["locator"]["name"] = "renamed"
-
-    files = edit_json(fixture_tree_files(), INTEGRATE_SIDECAR, move)
-    paths = frozenset({DIRECT_LANDING, "mcp/tests/test_direct_landing.py"})
-    paths |= {"mcp/src/agents_remember/application/lifecycle/direct_landing.py"}
-
-    report = _validate(files, bases=[tree(fixture_tree_files(), "K_B")], code=code(paths))
-
-    assert _rules(report) == {
-        "R22.6-anchor-path",
-        "R22.6-carried-stale",
-        "R04.1-carried-route-absent",
-    }, report.render()
-    [line] = [
-        violation.render() for violation in report.refusals if violation.rule == "R22.6-anchor-path"
-    ]
-    assert line.startswith(f"{INTEGRATE_SIDECAR}: realizes.RLZ-4E1C9A.anchor") and INTEGRATE in line
-
-
-def test_locator_kind_and_content_hash_are_anchor_rules() -> None:
-    def bad(document: dict[str, Any]) -> None:
-        document["realizes"][0]["anchor"]["locator"] = {"kind": "regex", "pattern": "x"}
-
-    files = edit_json(fixture_tree_files(), INTEGRATE_SIDECAR, bad)
-    assert _rules(_validate(files, bases=[tree(dict(files), "K_B")])) == {"R22.6-locator"}
-
-    files = edit_json(
-        fixture_tree_files(),
-        INTEGRATE_SIDECAR,
-        lambda doc: doc["realizes"][0]["anchor"].update(content="md5:abc"),
-    )
-    assert _rules(_validate(files, bases=[tree(dict(files), "K_B")])) == {"R22.6-content"}
-
-
-def test_an_unconverted_base_is_refused_and_a_standalone_conversion_checks_no_path() -> None:
-    files = fixture_tree_files()
-    unconverted = {"onboarding/x.md": b"# x\n"}
-
-    report = _validate(files, bases=[tree(unconverted, "K_B")])
-    assert _rules(report) == {"R22.6-base-converted", LEGACY_COUNT}
-
-    conversion = validate_tree(tree(files), code=None, conversion=True)
-    assert conversion.ok and _rules(conversion, refusing=False) == {LEGACY_COUNT}
-    with pytest.raises(ValueError, match="paired code tree"):
-        validate_tree(tree(files))
+# Rule 6's anchor-path cases live in test_validator_link_targets.py.
 
 
 # --------------------------------------------------------------------------------------------------

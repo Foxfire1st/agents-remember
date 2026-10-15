@@ -82,6 +82,8 @@ def _render(document: dict[str, Any]) -> str:
     lines.extend(f"  emptied route: {route}" for route in state["emptied"])
     suggestion = document["suggestion"]
     lines.append(f"  suggestion ({suggestion['label']}): {suggestion['routes']}")
+    if document["differs"]:
+        lines.append("  differs: authored routes differ from the mechanical suggestion")
     if suggestion["atRepositoryRoot"]:
         lines.append(
             f"  realizations at the repository root (route .): {suggestion['atRepositoryRoot']}"
@@ -99,6 +101,7 @@ def _family_documents(
         if not isinstance(family, FamilyRecord) or (wanted and family.id not in wanted):
             continue
         state = family_route_state(family, locations)
+        suggestion = suggest_family_routes(family, locations, code_files)
         documents.append(
             {
                 "family": family.id,
@@ -106,7 +109,8 @@ def _family_documents(
                 "status": family.status,
                 "routes": list(family.routes),
                 "state": _state_document(state),
-                "suggestion": suggest_family_routes(family, locations, code_files).to_document(),
+                "suggestion": suggestion.to_document(),
+                "differs": set(family.routes) != set(suggestion.routes),
             }
         )
     return documents

@@ -19,13 +19,7 @@ from unittest import mock
 import apsw
 import pytest
 from agents_remember.application.knowledge_worklist import base_cache
-from agents_remember.application.knowledge_writer import (
-    Owner,
-    WriteReport,
-    WriteRequest,
-    base_side,
-    write_knowledge,
-)
+from agents_remember.application.knowledge_writer import Owner, WriteReport, WriteRequest, base_side
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.memory.conversion import base as base_module
 from agents_remember.memory.conversion.base import GitBaseConverter
@@ -77,6 +71,7 @@ from knowledge_conversion_test_support import (
     other_card,
 )
 from test_worktree_sync import SyncFixture, commit_file
+from writer_worklist_test_support import write_knowledge
 
 
 def validate_plan(

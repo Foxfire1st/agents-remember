@@ -294,5 +294,11 @@ def worklist_onboarding(
     changed = sorted({change["path"] for change in document.get("changes", [])})
     return with_onboarding_items(
         document,
-        onboarding_trace_result(trace_context(contract), changed, sides, code_blobs=code_blobs),
+        onboarding_trace_result(
+            trace_context(contract),
+            changed,
+            sides,
+            code_blobs=code_blobs,
+            source_groups=document.get("identicalChanges"),
+        ),
     )

@@ -308,7 +308,9 @@ def test_a_task_whose_own_document_cannot_be_read_is_not_finalized_and_the_file_
         finally:
             document.chmod(mode)
             document.write_bytes(original)
-    assert _finalize(contract)["state"] == "finalized"
+    # R55.9: restoring readability does not authorize a no-master leaf's completion.
+    assert _finalize(contract)["state"] == "task-document-resolution-blocked"
+    assert document.read_bytes() == original
 
 
 @pytest.mark.parametrize("shape", ["directory", "dangling-symlink"])
@@ -349,9 +351,8 @@ def test_public_finalize_preserves_a_genuinely_absent_ordinary_document(world):
         payload = lifecycle_finalize_task_tool(
             world.cfg, str(contract.contract_path), dry_run=dry_run
         )
-        assert payload["ok"] and payload["state"] == (
-            "would-finalize" if dry_run else "finalized"
-        ), payload
+        assert not payload["ok"] and payload["state"] == "task-document-resolution-blocked", payload
+        assert "contract-bound task document and master row" in str(payload)
         assert not document.exists() and not document.is_symlink()
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -358,14 +359,20 @@ def test_sync_failure_names_both_uv_versions(tmp_path: Path, scratch_env: dict[s
     assert prefix is not None
     minimum = contract_uv_version()
     uv = write_fake_uv(tmp_path / "bin", "0.12.21")
-    venv = REPOSITORY_ROOT / "mcp" / ".venv"
+    root = tmp_path / "repository"
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (BOOTSTRAP.name, CONTRACT.name, CHECK_RUNTIME.name, "install-python-runtime.sh"):
+        shutil.copy2(REPOSITORY_ROOT / "scripts" / name, scripts / name)
+    venv = root / "mcp" / ".venv"
+    venv.mkdir(parents=True)
     assert venv.is_dir(), "this proof recreates an existing environment"
     marker = venv / ".l139-sync-failure-marker"
     marker.write_text("restore me", encoding="utf-8")
     backup_root = Path(scratch_env["XDG_CACHE_HOME"]) / "agents-remember" / "venv-backups"
     try:
         proc = subprocess.run(
-            ["bash", str(BOOTSTRAP), "--replace", "--prefix", str(prefix)],
+            ["bash", str(scripts / BOOTSTRAP.name), "--replace", "--prefix", str(prefix)],
             capture_output=True,
             check=False,
             text=True,

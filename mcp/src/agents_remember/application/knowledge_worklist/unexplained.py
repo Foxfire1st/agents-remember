@@ -41,7 +41,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from agents_remember.application.knowledge_worklist import generated_copies
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
+from agents_remember.application.knowledge_worklist.equal_changes import (
+    equal_change_groups,
+    group_representatives,
+)
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
 from agents_remember.application.knowledge_worklist.registry import (
     ItemKind,
@@ -228,6 +233,7 @@ class Unexplained:
     """The run's unexplained items and what the leaf's history says about them."""
 
     items: tuple[dict[str, Any], ...] = ()
+    groups: Mapping[str, list[str]] = field(default_factory=dict)
     unnecessary: tuple[tuple[str, str], ...] = field(default=())
     """``(subject, row id)`` of each ``no_invariant`` row that answers no raised item."""
 
@@ -268,7 +274,7 @@ def _admits(coverage: Mapping[str, Any], at_candidate: bool) -> list[str]:
     return ["attach", "author", NO_INVARIANT] if at_candidate else [NO_INVARIANT]
 
 
-def _trace(path: str, blob: str | None, counted: bool) -> dict[str, Any]:
+def _trace(path: str, blobs: Mapping[str, str], counted: bool) -> dict[str, Any]:
     """The onboarding-trace fact before the gate's own item is known: only a row can answer.
 
     ``counted`` is the card's counted change from K_B to K_C: the one value the item's own
@@ -280,12 +286,12 @@ def _trace(path: str, blob: str | None, counted: bool) -> dict[str, Any]:
         "subject": card_subject(path),
         "item": None,
         "countedChange": counted,
-        "sourceBlobs": {path: blob or ABSENT},
+        "sourceBlobs": dict(blobs),
     }
 
 
 def _current_onboarding_row(
-    path: str, blob: str | None, rows: Mapping[str, OnboardingTraceRow], counted: bool
+    path: str, blobs: Mapping[str, str], rows: Mapping[str, OnboardingTraceRow], counted: bool
 ) -> str | None:
     """The ID of the leaf's row that currently answers ``path``, or ``None`` (MIK-R53 rule 3).
 
@@ -300,7 +306,7 @@ def _current_onboarding_row(
         return None
     # Closed-file provenance is unavailable in this run, so sourceless rows answer
     # nothing here; the gate's own currency keeps frozen closed rows valid.
-    if onboarding_row_answers(row, False, {path: blob or ABSENT}, counted):
+    if onboarding_row_answers(row, False, blobs, counted):
         return row.id
     return None
 
@@ -358,7 +364,9 @@ class _Collector:
                         "admits": _admits(coverage, new_count > 0),
                     },
                 }
-            item["facts"]["hunks"].append({"base": hunk["base"], "candidate": hunk["candidate"]})
+            fact = {"base": hunk["base"], "candidate": hunk["candidate"]}
+            if fact not in item["facts"]["hunks"]:
+                item["facts"]["hunks"].append(fact)
 
     def _object(self, tree: str, path: str, blob: str | None) -> str | None:
         """The tree entry's object at ``path``: a regular file's blob, else a symlink's blob or a
@@ -420,16 +428,16 @@ def _finished(
     if facts["coverage"]["state"] == UNCOVERED:
         path = facts["path"]
         blob = facts.get("candidateBlob", facts.get("blob"))
-        candidate = blob if isinstance(blob, str) else None
+        blobs = facts.get("sourceBlobs") or {path: blob or ABSENT}
         counted = counted_change(
             base_files,
             candidate_files,
             f"onboarding/{path}.md",
             f"onboarding/{path}.json",
         )
-        trace = facts["onboardingTrace"] = _trace(path, candidate, counted)
+        trace = facts["onboardingTrace"] = _trace(path, blobs, counted)
         item["satisfiedBy"] = _current_onboarding_row(
-            path, candidate, onboarding, trace["countedChange"]
+            path, blobs, onboarding, trace["countedChange"]
         )
     else:
         item["satisfiedBy"] = unexplained_satisfied_by(item, rows)
@@ -450,9 +458,47 @@ class UnexplainedSides:
 def unexplained_items(changes: Sequence[Mapping[str, Any]], sides: UnexplainedSides) -> Unexplained:
     """Raise one item per unlinked change of ``changes`` (the run's ``changes[]`` linkage)."""
 
+    generated = generated_copies.generated_copy_facts(
+        sides.code, (str(change["path"]) for change in changes)
+    )
+    changes = [
+        change
+        for change in changes
+        if generated.get(str(change["path"]), {}).get("matches") is not True
+    ]
     collector = _Collector(code=sides.code, base=sides.base, coverage=sides.coverage)
+    uncovered = [
+        str(change["path"])
+        for change in changes
+        if _coverage(str(change["path"]), sides.base, sides.coverage)["state"] == UNCOVERED
+    ]
+    cards = [
+        path
+        for path in uncovered
+        if any(
+            f"onboarding/{path}.{suffix}" in files
+            for files in (sides.base.files, sides.candidate.files)
+            for suffix in ("md", "json")
+        )
+    ]
+    groups = equal_change_groups(sides.code, uncovered, cards)
+    representatives = group_representatives(groups)
     for change in changes:
-        collector.change(change)
+        path = str(change["path"])
+        collector.change({**change, "path": representatives.get(path, path)})
+    for raw in [*collector.hunks.values(), *collector.files.values()]:
+        facts = raw["facts"]
+        if facts["path"] in generated:
+            facts["generatedCopy"] = generated[facts["path"]]
+        members = groups.get(facts["path"])
+        if members is not None:
+            generated_members = {path: generated[path] for path in members if path in generated}
+            if generated_members:
+                facts["generatedCopies"] = generated_members
+            facts["sourceBlobs"] = {
+                path: sides.code.candidate().get(path) or ABSENT for path in members
+            }
+            facts["baseBlobs"] = {path: sides.code.base().get(path) or ABSENT for path in members}
     history = None if sides.owner is None else sides.candidate.history(sides.owner)
     rows = _rows_by_subject(history)
     onboarding = (
@@ -477,7 +523,7 @@ def unexplained_items(changes: Sequence[Mapping[str, Any]], sides: UnexplainedSi
         for row in (history.rows if history is not None else ())
         if row.disposition == NO_INVARIANT and row.subject not in answering
     )
-    return Unexplained(items=items, unnecessary=unnecessary)
+    return Unexplained(items=items, unnecessary=unnecessary, groups=groups)
 
 
 def settle_uncovered(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

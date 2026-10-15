@@ -11,6 +11,8 @@ checklist populations in repair order).
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 import unittest
 from pathlib import Path
@@ -37,18 +39,23 @@ from agents_remember.application.memory_quality.runs import (
     _registry,
     poll_quality_run,
 )
+from agents_remember.application.tool_answer_log import tool_call_context
 from agents_remember.errors import MemoryCandidatePairError, MemoryCandidatePairFailure
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.mcp.registration.memory import register_memory_tools
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
     MemoryQualitySyncRequest,
 )
+from agents_remember.models.tokens import count_response_tokens
+from agents_remember.models.tools.tool_answer import bound_for
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+from test_knowledge_worklist_leaf import invariant
 from test_worktree_support import git, open_external_contract_fixture
 from tool_answer_l110_rows import (
     assert_answer_survives_the_guard,
@@ -187,6 +194,59 @@ def _settle(repo_id: str, run_id: str) -> Any:
 class QualityProductionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.addCleanup(_registry.clear)
+
+    def test_mounted_sync_and_completed_poll_keep_computed_proof_counts(self) -> None:
+        with TemporaryDirectory() as temporary:
+            contract, configured, scoped = _scoped_pair(Path(temporary))
+            memory = contract.memory_worktree
+            _write_converted_layout(memory)
+            (memory / "onboarding").mkdir(exist_ok=True)
+            record = memory / "knowledge/invariants/INV-AAAAAA-land.json"
+            record.parent.mkdir()
+            record.write_text(invariant(), encoding="utf-8")
+            # Ignore derived caches, as on the real memory line.
+            Path(git(memory, "rev-parse", "--git-path", "info/exclude")).write_text(
+                "overview.index.json\n"
+            )
+            server = register_memory_tools.__globals__["FastMCP"]("quality-proof")
+            register_memory_tools(server, scoped)
+
+            def call(request):
+                arguments = {"request": request}
+                with tool_call_context(_TOOL, arguments, config=scoped):
+                    result = asyncio.run(server.call_tool(_TOOL, arguments))
+                return result[1]
+
+            with patch(
+                "agents_remember.worktrees.integration.configured_contract_authority.load_config",
+                return_value=configured,
+            ):
+                for expected in (1, 0):
+                    with self.subTest(count=expected):
+                        if expected == 0:
+                            record.unlink()  # A converted tree with no live invariants.
+                        request = {
+                            "repo_id": contract.repo_name,
+                            "contract_path": str(contract.contract_path),
+                        }
+                        sync = call({"mode": "sync", **request})
+                        started = call({"mode": "start", **request})
+                        _settle(contract.repo_name, started["runId"])
+                        polled = call({"mode": "poll", "run_id": started["runId"], **request})
+                        for delivered in (sync, polled):
+                            whole = json.loads(Path(delivered["log"]).read_text())
+                            self.assertEqual(whole["invariantsWithoutProofCount"], expected)
+                            self.assertEqual(delivered["invariantsWithoutProofCount"], expected)
+                            self.assertEqual(
+                                delivered["blockingCount"], whole["curatorActionableCount"]
+                            )
+                            self.assertNotIn(
+                                "invariantsWithoutProof", delivered["findingCountsByKind"]
+                            )
+                            self.assertIn("checks", whole)
+                            self.assertNotIn("checks", delivered)
+                            self.assertIsNot(delivered.get("overflow"), True)
+                            self.assertLessEqual(count_response_tokens(delivered), bound_for(_TOOL))
 
     def test_sync_failure_derives_the_largest_case(self) -> None:
         """A real sync over 25 sidecars with missing-path anchors answers 54 findings."""

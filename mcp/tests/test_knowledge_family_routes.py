@@ -24,6 +24,7 @@ from agents_remember.memory_quality.knowledge_validator import (
     validate_tree,
     writer_reported_rule_ids,
 )
+from agents_remember.memory_quality.knowledge_validator import family_routes as route_states
 from agents_remember.memory_quality.knowledge_validator.family_routes import (
     MECHANICAL,
     family_route_state,
@@ -94,6 +95,32 @@ def _add_realization(files: dict[str, bytes], path: str, entry: str) -> dict[str
 # --------------------------------------------------------------------------------------------------
 # The Doc14 family example (conforming)
 # --------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("routes", [[WORKTREES, f"{WORKTREES}/modules"], [".", WORKTREES]])
+def test_nested_family_routes_refuse_and_remain_writer_reported(routes: list[str]) -> None:
+    files = _with_family(fixture_tree_files(), routes=routes)
+    report = _validate(files, bases=[tree(dict(files), "base")])
+    nested = [one for one in report.refusals if one.rule == "R04.1-nested-routes"]
+    assert len(nested) == 1, report.render()
+    assert nested[0].path == FAMILY and routes[1] in nested[0].message
+    assert "R04.1-nested-routes" in writer_reported_rule_ids()
+
+
+def test_family_route_states_are_computed_once_per_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    original = route_states.family_route_state
+
+    def counted(*args, **kwargs):
+        calls.append(args[0].id)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(route_states, "family_route_state", counted)
+    files = fixture_tree_files()
+    _validate(files, bases=[tree(dict(files), "base")])
+    assert calls == ["FAM-SEQNTS6C"]
 
 
 def test_the_doc14_family_example_validates_with_every_route_holding_realizations() -> None:
@@ -258,6 +285,7 @@ def test_the_refusing_route_rules_are_reported_inside_the_writer() -> None:
         "R04.4-unrealized-family",
     }
     assert {rule.id for rule in ROUTE_RULES if rule.writer_reports} == {
+        "R04.1-nested-routes",
         "R04.1-route-directory",
         "R04.2-coverage",
         "R04.2-non-empty",
@@ -301,7 +329,7 @@ def test_a_family_route_is_a_repository_path_or_the_root_route(route: str) -> No
 
 def test_the_root_route_covers_a_realization_at_the_repository_root() -> None:
     files = _add_realization(fixture_tree_files(), "setup.py", "RLZ-R00TF1")
-    covered = _with_family(files, routes=[WORKTREES, MODELS_KNOWLEDGE, APPLICATION, "."])
+    covered = _with_family(files, routes=["."])
 
     uncovered = _validate(
         files, bases=[tree(dict(files), "K_B")], code=code(CODE_PATHS | {"setup.py"})
@@ -455,6 +483,9 @@ def test_the_routes_command_offers_the_suggestion_and_writes_nothing(
     [document] = json.loads(capsys.readouterr().out)
 
     assert status == 0
+    assert document["differs"] is True
+    assert cli_main(["knowledge-routes", str(memory), "--code", str(code_root)]) == 0
+    assert "differs" in capsys.readouterr().out
     assert document["state"]["routeUnassigned"] is True
     assert document["suggestion"] == {
         "family": "FAM-SEQNTS6C",

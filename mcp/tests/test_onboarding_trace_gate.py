@@ -184,6 +184,10 @@ class Leaf:
         )
 
     def write(self, owner_rows: list[dict[str, Any]], worklist: Any = None) -> Any:
+        if worklist is None:
+            computed = recompute_leaf_worklist(load_contract(self.contract()))
+            assert computed is not None
+            worklist = computed[0]
         return write_knowledge(
             WriteRequest(
                 memory_root=self.memory,
@@ -193,6 +197,8 @@ class Leaf:
                 document={"history": owner_rows},
                 commit=True,
                 worklist=worklist,
+                code_base=self.code_base,
+                memory_base=self.memory_base,
             )
         )
 

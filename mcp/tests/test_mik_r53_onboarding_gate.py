@@ -26,7 +26,7 @@ from agents_remember.application.knowledge_worklist.onboarding_trace import (
     ONBOARDING_TRACE_KIND,
     worktree_code_blobs,
 )
-from agents_remember.application.knowledge_writer import Owner, WriteRequest, write_knowledge
+from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.application.knowledge_writer.carry import mapped_anchor
 from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
@@ -63,6 +63,7 @@ from knowledge_writer_test_support import (
     git,
     write,
 )
+from writer_worklist_test_support import write_knowledge
 
 OWNER = Owner(task=TASK_ID, kind="leaf", id=LEAF_ID)
 HISTORY_PATH = f"knowledge/history/{LEAF_ID}.json"
@@ -789,7 +790,7 @@ def _closeout_world(tmp_path: Path) -> Any:
             ],
         }
     )
-    write(world.memory, {HISTORY_PATH: canonical_text(closed.model_dump(mode="json"))})
+    write(world.memory, {HISTORY_PATH: canonical_text(closed.to_document())})
     return world
 
 

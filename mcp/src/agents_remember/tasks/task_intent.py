@@ -368,7 +368,14 @@ def _approved_packet_ref(
     # The confined owner reads once. Keep the caller's logical locator in the memo so
     # retargeting a symlink cannot hide behind unchanged bytes at its former physical target.
     record_read(root / supplied, bytes_identity(data))
-    text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    record_read(resolved, bytes_identity(data))
+    try:
+        text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeDecodeError as exc:
+        raise TaskIntentError(
+            "task-intent-requirement-packet-encoding-invalid",
+            f"approved requirement packet is not valid UTF-8: {reference.path}",
+        ) from exc
     metadata = _packet_metadata(text, packet_path=reference.path)
     identifiers = {metadata[key] for key in ("Stable ID", "Requirement ID") if key in metadata}
     if identifiers != {reference.stableId} or metadata.get("Version") != reference.version:

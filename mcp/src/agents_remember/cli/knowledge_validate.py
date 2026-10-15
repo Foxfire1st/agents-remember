@@ -6,7 +6,7 @@
 ``MEMORY_ROOT`` is a memory working tree; its ``knowledge/`` and ``onboarding/`` files are the
 candidate. ``--code`` is the paired code checkout (its working tree, or ``--code-commit`` in it).
 Each ``--base`` is a memory commit to compare anchors with (rule 6): K_B, or both parents of a merge.
-With no base every anchor is checked for path existence.
+With no base every anchor is checked for path existence and every authored record is judged as new.
 
 Every registered rule runs; there is no option that skips one. A tree whose candidate and bases all
 lack the layout marker is unconverted and out of the validator's scope, which the command says.
@@ -20,13 +20,17 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
+from agents_remember.application.memory_quality.endpoints import (
+    requirement_endpoint_documents,
+)
 from agents_remember.memory_quality.knowledge_validator.report import ValidationReport
 from agents_remember.memory_quality.knowledge_validator.trees import (
-    CodeDirectory,
     CodeTree,
     KnowledgeTreeReadError,
     code_tree_from_git,
+    code_tree_from_working_directory,
     knowledge_tree_from_directory,
     knowledge_tree_from_git,
 )
@@ -78,15 +82,42 @@ commit route. Every reported finding names its reason and the route that will re
         "--base",
         action="append",
         default=[],
-        help="A memory commit to compare anchors with (repeat for each parent of a merge).",
+        help="A memory commit to compare with (repeat for each merge parent); without --base "
+        "every authored record is judged as new.",
     )
     parser.add_argument("--json", action="store_true", help="Print the report as JSON.")
+    parser.add_argument(
+        "--coordination-root",
+        type=Path,
+        help="List requirement endpoints with their owner's state; these observations never refuse.",
+    )
 
 
-def _print(report: ValidationReport, *, as_json: bool) -> None:
+def _print(
+    report: ValidationReport,
+    *,
+    as_json: bool,
+    no_base: bool = False,
+    endpoints: list[dict[str, Any]] | None = None,
+) -> None:
+    notes = ["No --base was given: every authored record is judged as new."] if no_base else []
     if as_json:
-        print(json.dumps(report.to_document(), indent=2, sort_keys=True))
+        document = {**report.to_document(), "notes": notes}
+        if endpoints is not None:
+            document["requirementEndpoints"] = endpoints
+        print(json.dumps(document, indent=2, sort_keys=True))
         return
+    for note in notes:
+        print(note)
+    if endpoints is not None:
+        print(f"requirement endpoints ({len(endpoints)}; observations, never refusals):")
+        for endpoint in endpoints:
+            archived = " (archived)" if endpoint["archived"] else ""
+            detail = f": {endpoint['detail']}" if endpoint["detail"] else ""
+            print(
+                f"  {endpoint['path']}: {endpoint['field']}: {endpoint['key']}: "
+                f"{endpoint['state']}{archived}{detail}"
+            )
     if report.violations:
         print(report.render())
     verdict = "passes" if report.ok else "is refused"
@@ -107,7 +138,7 @@ def run(args: argparse.Namespace) -> int:
         code: CodeTree = (
             code_tree_from_git(code_root, args.code_commit)
             if args.code_commit
-            else CodeDirectory(label=code_root.as_posix(), root=code_root)
+            else code_tree_from_working_directory(code_root)
         )
     except (OSError, KnowledgeTreeReadError, ValueError) as error:
         print(f"cannot read the validator's inputs: {error}")
@@ -119,5 +150,10 @@ def run(args: argparse.Namespace) -> int:
         )
         return 0
     report = validate_tree(candidate, bases=bases, code=code)
-    _print(report, as_json=args.json)
+    endpoints = (
+        requirement_endpoint_documents(candidate, args.coordination_root.resolve())
+        if args.coordination_root is not None
+        else None
+    )
+    _print(report, as_json=args.json, no_base=not bases, endpoints=endpoints)
     return 0 if report.ok else 1

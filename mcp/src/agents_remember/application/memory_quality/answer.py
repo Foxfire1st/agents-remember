@@ -258,6 +258,16 @@ def quality_result_answer(whole: dict[str, Any]) -> dict[str, Any]:
     answer["status"] = "passed" if ok else "failed"
     carry_quality_keys(whole, answer, ("repoId", "onboardingRoot"))
     carry_quality_keys(whole, answer, _QUALITY_OUTCOME_KEYS)
+    proof_count = whole.get("invariantsWithoutProofCount")
+    if isinstance(proof_count, int) and not isinstance(proof_count, bool) and proof_count >= 0:
+        answer["invariantsWithoutProofCount"] = proof_count
+    cache_build = whole.get("routeIndexCacheBuild")
+    if isinstance(cache_build, dict):
+        answer["routeIndexCacheBuild"] = {
+            key: cache_build[key] for key in ("builtCount", "staleCount") if key in cache_build
+        }
+        if isinstance(cache_build.get("buildErrors"), list):
+            answer["routeIndexCacheBuild"]["buildErrorCount"] = len(cache_build["buildErrors"])
     if whole.get("state") is not None:
         answer["state"] = whole["state"]
     carry_quality_keys(
