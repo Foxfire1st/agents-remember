@@ -309,10 +309,18 @@ def _regular_modes(repository: Path, path: str, holders: list[tuple[str, bool]])
 
 
 def _is_untracked(side: SyncSideRecord, path: str) -> bool:
-    """Whether a dirty path is untracked rather than modified."""
+    """Whether a dirty path is absent from both the index and HEAD.
 
-    listed = run_git(Path(side.worktree), ["ls-files", "--", path])
-    return listed.returncode == 0 and not listed.stdout.strip()
+    A staged deletion is absent from the index but still tracked by HEAD; its
+    state travels in the staged patch, not in an untracked byte mirror.
+    """
+
+    worktree = Path(side.worktree)
+    listed = run_git(worktree, ["ls-files", "--", path])
+    if listed.returncode != 0 or listed.stdout.strip():
+        return False
+    committed = run_git(worktree, ["ls-tree", "--name-only", "HEAD", "--", path])
+    return committed.returncode == 0 and not committed.stdout.strip()
 
 
 def merge_head(worktree: Path) -> str | None:
