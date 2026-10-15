@@ -99,19 +99,22 @@ def _build_serving_runtime(
     # The always-on background account (MIK-R81 rule 1): one ledger per app, shared
     # by the projector and every background loop through the runtime below.
     ledger = BackgroundLedger()
+    landing = LandingStateRefresher(config, ledger=ledger) if enabled.landing_state else None
     projector = Projector(
         config,
         cadence=cadence,
         replay=replay,
         refreshers=ProjectionRefreshers(
             provider=ProviderStateRefresher() if enabled.provider_state else None,
-            landing=LandingStateRefresher(config, ledger=ledger) if enabled.landing_state else None,
+            landing=landing,
             change_watcher=ProjectionInputWatcher(config, ledger=ledger)
             if enabled.change_watch
             else None,
         ),
         ledger=ledger,
     )
+    if landing is not None:
+        landing.bind_interest(projector.has_subscribers)
     runtime = _ServingRuntime(
         config=config,
         projector=projector,

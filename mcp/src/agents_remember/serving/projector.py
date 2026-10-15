@@ -194,6 +194,10 @@ class Projector:
         self._boot_id = uuid4().hex[:12]
         self._subscribers: set[asyncio.Queue[_Item]] = set()
 
+    def has_subscribers(self) -> bool:
+        """Whether a page currently consumes this projector's shared SSE stream."""
+        return bool(self._subscribers)
+
     async def prime(self) -> None:
         """Compute the first projection so the first client gets an immediate snapshot.
 

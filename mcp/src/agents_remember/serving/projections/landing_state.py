@@ -19,6 +19,7 @@ from agents_remember.serving.background_accounting import (
     measured,
     offload,
 )
+from agents_remember.serving.projections.landing_cadence import LandingProbeSchedule
 from agents_remember.worktrees.modules.landing import (
     current_remote_scope,
     landing_refs,
@@ -183,6 +184,10 @@ class LandingStateRefresher:
         self._max_concurrency = max_concurrency
         self._observe = observe
         self._ledger = ledger
+        # Direct observation callers retain their explicit refresh API. The serving
+        # composition binds this to its actual Projector before any loop starts.
+        self._has_interest: Callable[[], bool] | None = None
+        self._probe_schedule = LandingProbeSchedule()
         self._observations: dict[LandingContractKey, LandingObservation] = {}
         # Finished contracts without a valid final file that this process already
         # gave its one finishing attempt (MIK-R81 rule 6): success froze them and
@@ -192,6 +197,10 @@ class LandingStateRefresher:
         # check below never has to re-read the file, and so a contract rewritten *after* a cache
         # fill is still re-judged on every call (the cache keys on the final file, not the contract).
         self._frozen_cache: dict[str, tuple[int, datetime, list[dict[str, object]]]] = {}
+
+    def bind_interest(self, has_interest: Callable[[], bool]) -> None:
+        """Bind the serving projector's page interest before starting background work."""
+        self._has_interest = has_interest
 
     def current(self, contract: WorktreeContract, *, now: datetime) -> LandingRows:
         pending = unobserved_landing_refs(contract)
@@ -250,19 +259,31 @@ class LandingStateRefresher:
             await asyncio.sleep(self._interval_seconds)
 
     async def refresh_once(self, *, now: datetime | None = None) -> None:
+        if self._has_interest is not None and not self._has_interest():
+            return
         attempted_at = now or datetime.now(UTC)
         contracts = await offload(OWNER_LANDING, self._ledger, self._landing_contracts)
+        if self._has_interest is not None and not self._has_interest():
+            return
         active_keys = {
             LandingContractKey.from_contract(contract)
             for contract in contracts
             if contract.cleanup != "completed"
         }
+        due = contracts
+        if self._has_interest is not None:
+            self._probe_schedule.retain({LandingContractKey.from_contract(c) for c in contracts})
+            due = [
+                c
+                for c in contracts
+                if self._probe_schedule.due(LandingContractKey.from_contract(c), c, attempted_at)
+            ]
         semaphore = asyncio.Semaphore(self._max_concurrency)
         # One ls-remote per repository and ref for the whole sweep (F12): the scope lives
         # for this gather and dies with it, so the next sweep probes again.
         with sweep_remote_observations():
             results = await asyncio.gather(
-                *(self._observe_contract(contract, semaphore) for contract in contracts)
+                *(self._observe_contract(contract, semaphore) for contract in due)
             )
         with measured(OWNER_LANDING, self._ledger):
             by_key = {LandingContractKey.from_contract(c): c for c in contracts}
@@ -270,6 +291,8 @@ class LandingStateRefresher:
                 if rows is not None:
                     self._publish(key, rows, attempted_at=attempted_at)
                     self._maybe_freeze(by_key[key], rows, attempted_at=attempted_at)
+                    if self._has_interest is not None:
+                        self._probe_schedule.observed(key, by_key[key], rows, attempted_at)
                     if by_key[key].cleanup == "completed":
                         # The one finishing attempt this process gives a finished
                         # landing without a valid final file (MIK-R81 rule 6):
@@ -287,6 +310,8 @@ class LandingStateRefresher:
         self, contract: WorktreeContract, semaphore: asyncio.Semaphore
     ) -> tuple[LandingContractKey, LandingRows]:
         async with semaphore:
+            if self._has_interest is not None and not self._has_interest():
+                return LandingContractKey.from_contract(contract), None
             # One accounted unit per probe (MIK-R81 rule 1, F01): the worker thread's
             # own CPU is the unit -- the event loop's wait over the probe never is.
             # The sweep's probe table does not cross worker-thread boundaries on its
