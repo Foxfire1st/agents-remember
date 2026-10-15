@@ -43,7 +43,9 @@ def _register_task_reopen_tools(server: FastMCP, config: McpRuntimeConfig) -> No
     @server.tool()
     def task_reopen(contract_path: str, dry_run: bool = False) -> dict[str, Any]:
         """Reopen a COMPLETED leaf under its exact same leaf id: review, closeout and integration
-        state returns to virgin and the leaf document goes back to planning. Afterwards edit
+        state returns to virgin and the leaf document goes back to planning. A cleaned-up leaf
+        behind its master's tip restarts from that tip when its recorded landing is an ancestor
+        of it; a landing not on the line refuses. Afterwards edit
         steps via task_doc, then run a normal worktree_start. States: reopened, blocked;
         preview with dry_run. Reference: docs/reference/mcp-tools.md."""
         return task_reopen_payload(config, contract_path, dry_run=dry_run)

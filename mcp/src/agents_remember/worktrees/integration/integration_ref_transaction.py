@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +26,10 @@ from agents_remember.worktrees.modules.git import (
     is_ancestor,
     require_clean,
     require_git,
+)
+from agents_remember.worktrees.modules.landing_commit_check import (
+    commit_check_fact,
+    run_landing_commit_check,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -101,6 +107,47 @@ class CheckoutRefresh:
     new: str
 
 
+def _require_landing_commit_check(repo: Path, commit: str, *, side: str) -> None:
+    """Prove the candidate passed the repository's commit check (MIK-R152 rule 8).
+
+    The fact is the ``Commit-Check-Pass`` trailer the landing wrote on the commit
+    itself: where it names this commit's tree, the integration knows the tree
+    passed in the landing that wrote it. Where no such fact exists (a commit
+    from before the check, a pull-request merge, a provisional direct-landing
+    commit), the check runs here too, on the candidate tree in a scratch
+    worktree; its refusal stops the master-line move.
+    """
+
+    body = require_git(repo, ["log", "-1", "--format=%B", commit])
+    tree = require_git(repo, ["rev-parse", f"{commit}^{{tree}}"])
+    fact = commit_check_fact(body)
+    if fact is not None and fact[0] == tree:
+        return
+    work_parent = Path(tempfile.mkdtemp(prefix="landing-commit-check-"))
+    work = work_parent / "candidate"
+    added = run_git(repo, ["worktree", "add", "--detach", work.as_posix(), commit])
+    if added.returncode != 0:
+        shutil.rmtree(work_parent, ignore_errors=True)
+        raise RuntimeError(
+            f"integration cannot prove the {side} candidate: "
+            f"{added.stderr.strip() or added.stdout.strip()}"
+        )
+    try:
+        run_landing_commit_check(work, tree=tree)
+        refused: BaseException | None = None
+    except BaseException as error:
+        refused = error
+    removed = run_git(repo, ["worktree", "remove", "--force", work.as_posix()])
+    shutil.rmtree(work_parent, ignore_errors=True)
+    if removed.returncode != 0:
+        raise RuntimeError(
+            f"integration cannot remove its {side} commit-check worktree {work}: "
+            f"{removed.stderr.strip() or removed.stdout.strip()}"
+        )
+    if refused is not None:
+        raise refused
+
+
 def prepare_integration_ref_move(
     contract: WorktreeContract,
     commits: IntegratedCommits,
@@ -140,6 +187,17 @@ def prepare_integration_ref_move(
             contract,
             commits,
             memory_source_commit=memory_head_before,
+        )
+
+    # MIK-R152 rule 8: the master line moves only to commits whose trees passed
+    # the repository's commit check in the landing that wrote them. The landing's
+    # own fact (the trailer on the commit) proves it; without one the check runs
+    # here, and its refusal stops the move.
+    _require_landing_commit_check(contract.code_repo_path, commits.code, side="code")
+    if external:
+        assert contract.memory_repo_path is not None
+        _require_landing_commit_check(
+            contract.memory_repo_path, commits.memory_content, side="memory"
         )
 
     _require_clean_branch_checkout(

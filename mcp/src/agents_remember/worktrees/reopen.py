@@ -30,7 +30,8 @@ the leaf id never changed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import subprocess
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -56,6 +57,7 @@ from .integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
     require_terminal_lifecycle_predecessor,
 )
+from .modules.git import branch_commit, is_ancestor
 from .modules.guidance import (
     RecoveryOperation,
     RecoveryTool,
@@ -71,7 +73,6 @@ from .reopen_reset import (
 )
 from .reopen_row_guard import require_reopenable_row
 from .reopen_series import reopen_series
-from .source_lineage import lineage_block_payload, lineage_refusal, parent_source_lineage
 from .task_fact_publication import (
     contract_projection_scopes,
     preview_contract_task_facts,
@@ -324,28 +325,75 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
                 },
             )
 
-    # A terminal leaf's source already contains that leaf's exact landed commits.
-    # Pre-start lineage compares against the recorded base, which is intentionally
-    # older after a successful integration. Reopen instead proves that the current
-    # source tips are the exact durable landing recorded by this completed leaf.
-    landed = replace(
-        contract,
-        code_base_commit=contract.integrated_code_commit,
-        memory_base_commit=(
-            contract.integrated_memory_content_commit if contract.memory_mode == "external" else ""
-        ),
-    )
-    lineage = parent_source_lineage(landed)
-    if lineage_refusal(lineage) is not None:
-        assert lineage is not None
+    # A completed, cleaned-up leaf stands behind its master's tip by definition. The reopen
+    # requires only that its recorded landing is an ancestor of that tip, and restarts the
+    # leaf from the tip (MIK-R61 rule 10); the next worktree_start recreates the worktrees
+    # off the current source tips under the same leaf id.
+    ancestry = _landing_ancestry_refusal(contract)
+    if ancestry is not None:
         return WorktreeCommandResult(
             2,
             {
+                "state": "blocked",
                 **status_payload(contract),
-                **lineage_block_payload(lineage),
-                "summary": ("Reopen refused before resetting task state: " + lineage.summary),
+                "blockers": [ancestry],
+                "summary": f"Reopen refused before resetting task state: {ancestry}",
             },
         )
+    return None
+
+
+def _landing_ancestry_refusal(contract: WorktreeContract) -> str | None:
+    """Prove the recorded landing lies on the current source line (MIK-R61 rule 10).
+
+    A completed, cleaned-up leaf stands behind its master's tip by definition: the reopen
+    requires only that its landing is an ancestor of that tip, and restarts the leaf from
+    the tip. Where the landing is not an ancestor of the tip, the reopen refuses and says
+    so. The refusal names no next action a cleaned-up leaf cannot take: a sync of
+    worktrees that do not exist is such an action, so none is named.
+    """
+
+    pairs: list[tuple[str, Path | None, str, str]] = [
+        (
+            "code",
+            contract.code_repo_path,
+            contract.code_source_branch,
+            contract.integrated_code_commit,
+        )
+    ]
+    if contract.memory_mode == "external":
+        pairs.append(
+            (
+                "memory",
+                contract.memory_repo_path,
+                contract.memory_source_branch,
+                contract.integrated_memory_content_commit,
+            )
+        )
+    for side, repo, branch, landed in pairs:
+        if repo is None:
+            return (
+                f"leaf {contract.leaf_id!r} records no {side} repository, so its {side} "
+                "landing cannot be proven on the line."
+            )
+        if not landed:
+            return (
+                f"leaf {contract.leaf_id!r} records no integrated {side} landing, so the "
+                "leaf cannot start again from the tip."
+            )
+        try:
+            tip = branch_commit(repo, branch)
+        except (RuntimeError, subprocess.SubprocessError, OSError) as error:
+            return (
+                f"leaf {contract.leaf_id!r} cannot prove its {side} landing is on the "
+                f"line: the tip of {branch} cannot be read ({error})."
+            )
+        if not is_ancestor(repo, landed, tip):
+            return (
+                f"leaf {contract.leaf_id!r} landed {side} {landed}, which is not an "
+                f"ancestor of the current {branch} tip {tip}: the landing is not on the "
+                "line, so the leaf cannot start again from that tip."
+            )
     return None
 
 
@@ -565,11 +613,9 @@ def _plan_master_index_reset(
 def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:
     if not doc.master:  # the finalizer and the master sync resolve an unnamed leaf by this rule
         return master_sync.folder_master_json_path(task_root, doc)
-    root = task_root.resolve(strict=False)
-    ref = Path(doc.master)
-    candidate = (root / ref.with_suffix(".json")).resolve(strict=False)
-    if candidate.parent != root:
-        raise ReopenTaskDocumentError(
-            f"leaf master reference must resolve to a direct child of {root}: {doc.master!r}"
+    try:
+        return master_sync.master_json_path_from_ref(
+            task_root, leaf_id=doc.id, master_ref=doc.master
         )
-    return candidate
+    except ValueError as exc:
+        raise ReopenTaskDocumentError(str(exc)) from exc

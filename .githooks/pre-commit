@@ -2,10 +2,13 @@
 # Fast pre-commit tier: check the STAGED content — the thing the commit will
 # actually contain — with deterministic lint/type/generated-copy checks. Under
 # half a minute on a warm checkout. Full quality and test operations are explicit
-# developer-requested workflows, not automatic closeout or integration work.
+# developer-requested workflows, not automatic test runs.
 #
+# Every landing route of the product runs this hook on the tree it publishes
+# (MIK-R152) and refuses the landing on a failure; nothing publishes past it.
 # Bypass intentionally with `git commit --no-verify`, remembering that the flag
-# turns off every check, not just the one that annoyed you.
+# turns off every check, not just the one that annoyed you — and that no
+# product route uses it.
 
 hook_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" || exit 1
 exec "$hook_dir/_gate.sh" fast

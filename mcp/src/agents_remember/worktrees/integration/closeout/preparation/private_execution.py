@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import subprocess
+import time
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agents_remember.errors import CertificationContractError
 from agents_remember.kernel.git_command import (
     admit_private_git_preparation,
     inspect_git_preparation,
     preparation_command,
+    run_git,
     run_git_preparation,
 )
 from agents_remember.kernel.git_preparation import (
+    GitPreparationCommandError,
     PreparationAction,
     PrivateGitPreparationBinding,
     PrivateGitPreparationCapability,
@@ -29,6 +36,13 @@ from agents_remember.worktrees.integration.closeout.preparation_selection import
     begin_preparation_command,
     observe_preparation_command,
 )
+from agents_remember.worktrees.modules.git import require_git
+from agents_remember.worktrees.modules.landing_commit_check import (
+    commit_check_timeout_seconds,
+    unrunnable_hook_reason,
+    worktree_blob_map,
+)
+from agents_remember.worktrees.modules.models import PATH_SAMPLE_LIMIT
 
 from .policy import observe_git_preparation_policy
 from .selected import ReobservePreparation, SelectedCloseoutPreparation
@@ -115,6 +129,249 @@ def _terminal_record(
     return replace(selected, handoff=replace(handoff, record=record))
 
 
+#: The hook's own failure line: ``result: <step> FAIL`` (same rule as the ordinary runner).
+_RESULT_FAIL_RE = re.compile(r"^.*result:\s+(?P<step>\S+)\s+FAIL\s*$")
+
+
+def _refuse_unrunnable_preparation_hook(private_root: Path, hook_log: Path) -> None:
+    """Refuse a prepared commit where a hook file exists that Git would not run (MIK-R152 rule 6).
+
+    Porcelain ``git commit`` silently ignores a present nonexecutable hook; the
+    landing refuses before anything commits, with the reason the ordinary runner
+    would give. The refusal carries the hook log pointer: the log records the
+    reason and the elapsed time like every other hook outcome (rules 4, 9).
+    """
+
+    reason = unrunnable_hook_reason(private_root)
+    if reason is not None:
+        started = time.monotonic()
+        hook_log.write_text(
+            f"prepared commit hook refused before running: {reason}\n"
+            f"elapsed: {time.monotonic() - started:.3f}s\n",
+            encoding="utf-8",
+        )
+        pointer = f"log={hook_log.as_posix()} elapsed=0.000s unrunnable={reason}"
+        refuse(
+            "private-preparation-hook-unrunnable",
+            "a runnable pre-commit hook or none",
+            f"{reason}; {pointer}",
+        )
+
+
+def _preparation_hook_log_path(logical_root: Path) -> Path:
+    """Where one prepared commit's whole hook output lives (MIK-R152 rules 4, 9)."""
+    common = require_git(logical_root, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    return Path(common) / f"agents-remember-preparation-{uuid.uuid4().hex[:12]}.log"
+
+
+def _hook_failing_step(output: str) -> str | None:
+    """The last ``result: <step> FAIL`` line the hook output names, if any."""
+    step: str | None = None
+    for line in output.splitlines():
+        match = _RESULT_FAIL_RE.match(line.strip())
+        if match:
+            step = match.group("step")
+    return step
+
+
+def _preparation_timeout_pointer(hook_log: Path, hook_seconds: float) -> str:
+    """The log pointer shape every prepared-commit timeout carries."""
+
+    return f"log={hook_log.as_posix()} elapsed={hook_seconds:.3f}s timeout"
+
+
+class _PreparedLegHookTimeout(RuntimeError):
+    """A prepared leg's commit hook ran past the bound: partial log written, nothing published.
+
+    Raised from the original :class:`subprocess.TimeoutExpired` so the cause chain
+    keeps it; the pointer names the partial-output log the terminal record carries.
+    """
+
+    def __init__(self, hook_pointer: str) -> None:
+        self.hook_pointer = hook_pointer
+        super().__init__(
+            "the repository's commit check did not end within the bound; it was "
+            f"stopped with its children and nothing was published; {hook_pointer}; "
+            "repair the cause and run the closeout again"
+        )
+
+
+def _commit_prepared_leg(
+    capability: PrivateGitPreparationCapability,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run one prepared leg's commit through the repository hook with its log.
+
+    The exact commit sequence the closeout uses for every prepared leg (code and
+    memory): a hook file Git would not run refuses with its log before anything
+    commits; the commit runs bounded; the whole hook output with the elapsed time
+    is persisted with the pointer the terminal record carries; a hook-changed
+    admitted tree refuses with the log written. Answers the commit result and the
+    hook pointer. A timeout writes the partial-output log and raises
+    :class:`_PreparedLegHookTimeout` from the original expiry; nothing was
+    published on any refusal path. (MIK-R152 rules 3, 4, 6, 9.)
+    """
+
+    bound = commit_check_timeout_seconds(capability.binding.logical_root)
+    hook_log = _preparation_hook_log_path(capability.binding.logical_root)
+    _refuse_unrunnable_preparation_hook(capability.binding.private_root, hook_log)
+    before = _snapshot_private_tree(capability.binding.private_root)
+    hook_started = time.monotonic()
+    try:
+        result = run_git_preparation(capability, "commit", commit_timeout_s=float(bound))
+    except subprocess.TimeoutExpired as error:
+        hook_seconds = time.monotonic() - hook_started
+        _write_preparation_timeout_log(hook_log, error, hook_seconds)
+        raise _PreparedLegHookTimeout(
+            _preparation_timeout_pointer(hook_log, hook_seconds)
+        ) from error
+    except GitPreparationCommandError as error:
+        hook_pointer = _write_preparation_hook_log(
+            hook_log, error.result, time.monotonic() - hook_started
+        )
+        refuse(
+            "private-preparation-hook-changed-tree",
+            capability.binding.admitted_tree,
+            f"{error}; nothing was published; {hook_pointer}",
+        )
+    hook_seconds = time.monotonic() - hook_started
+    hook_pointer = _write_preparation_hook_log(hook_log, result, hook_seconds)
+    _refuse_hook_changed_tree(
+        capability.binding.private_root, capability.binding.admitted_tree, before, hook_pointer
+    )
+    return result, hook_pointer
+
+
+def _refuse_failed_preparation_command(step: str, hook_pointer: str) -> None:
+    """Refuse a prepared commit whose hook failed, carrying the log pointer (MIK-R152 rule 9).
+
+    The refusal names the failing step and the whole-output log; the step alone
+    cannot recover what the hook said.
+    """
+    refuse(
+        "private-preparation-command-failed",
+        "named-output recovery without rerun",
+        f"{step}; {hook_pointer}",
+    )
+
+
+def _write_preparation_timeout_log(
+    hook_log: Path, error: subprocess.TimeoutExpired, hook_seconds: float
+) -> str:
+    """Persist a prepared commit's partial hook output past the bound (MIK-R152 rules 4, 9)."
+
+    Answers the same log pointer shape as a finished run: whole output captured
+    so far, elapsed time, and the timeout outcome. The bound stops the commit
+    with its children; nothing was published.
+    """
+
+    def _text(payload: object) -> str:
+        if isinstance(payload, str):
+            return payload
+        if isinstance(payload, bytes):
+            return payload.decode("utf-8", "surrogateescape")
+        return ""
+
+    hook_log.write_bytes(
+        b"prepared commit hook output (exit=timeout):\n"
+        + _text(error.stdout).encode("utf-8", "surrogateescape")
+        + _text(error.stderr).encode("utf-8", "surrogateescape")
+        + f"\nelapsed: {hook_seconds:.3f}s timeout\n".encode()
+    )
+    return _preparation_timeout_pointer(hook_log, hook_seconds)
+
+
+def _write_preparation_hook_log(
+    hook_log: Path, result: subprocess.CompletedProcess[str], hook_seconds: float
+) -> str:
+    """Persist a prepared commit's whole hook output and elapsed time (MIK-R152 rules 4, 9)."
+
+    Answers the log pointer the terminal record carries: the hashes alone cannot
+    recover what the hook said.
+    """
+
+    stdout = result.stdout if isinstance(result.stdout, str) else ""
+    stderr = result.stderr if isinstance(result.stderr, str) else ""
+    failing = _hook_failing_step(stdout + "\n" + stderr)
+    hook_log.write_bytes(
+        f"prepared commit hook output (exit={result.returncode}):\n".encode()
+        + stdout.encode("utf-8", "surrogateescape")
+        + stderr.encode("utf-8", "surrogateescape")
+        + f"\nelapsed: {hook_seconds:.3f}s".encode()
+        + (f" failing-step: {failing}".encode() if failing else b"")
+        + b"\n"
+    )
+    pointer = f"log={hook_log.as_posix()} elapsed={hook_seconds:.3f}s"
+    return pointer if failing is None else f"{pointer} failing-step={failing}"
+
+
+def _snapshot_private_tree(private_root: Path) -> tuple[str, list[str], str, dict[str, str]]:
+    """The private index tree, tracked status, raw diff and worktree bytes a commit must not change.
+
+    Status labels cannot see a hook rewrite that keeps them, and neither can
+    the raw diff (git reports zeros for dirty worktree files instead of
+    hashing them); the worktree bytes hashed directly can (MIK-R152 rule 3).
+    """
+    tree = require_git(private_root, ["write-tree"])
+    status = sorted(
+        line
+        for line in require_git(private_root, ["status", "--porcelain=v1"]).splitlines()
+        if line and not line.startswith("??")
+    )
+    # Settle the stat cache first (see landing_commit_check._diff_head_raw): a
+    # fresh index reports zero blob identities until git hashes the worktree
+    # once, so two consecutive diffs would otherwise disagree with no byte
+    # changed. Best effort; the byte comparison below decides.
+    run_git(private_root, ["update-index", "--refresh", "-q"])
+    raw = require_git(private_root, ["diff", "HEAD", "--raw", "--no-abbrev", "--no-renames"])
+    blobs = worktree_blob_map(private_root)
+    return tree, status, raw, blobs
+
+
+def _refuse_hook_changed_tree(
+    private_root: Path,
+    admitted_tree: str,
+    before: tuple[str, list[str], str, dict[str, str]],
+    hook_pointer: str,
+) -> None:
+    """Refuse a commit whose tree is not the one the hook judged (MIK-R152 rule 3)."""
+    after_tree, _after_status, after_raw, after_blobs = _snapshot_private_tree(private_root)
+    if after_tree == admitted_tree and after_blobs == before[3]:
+        if not after_raw.strip():
+            # The commit landed the admitted tree: index and worktree equal the
+            # new HEAD, so the raw diff is empty by the commit's own effect.
+            return
+        if set(after_raw.splitlines()) == set(before[2].splitlines()):
+            # No commit happened (the hook failed and Git aborted it): the
+            # staged and worktree state is exactly what the hook judged.
+            return
+    if after_tree != admitted_tree:
+        changed = ["the index"]
+    else:
+        changed = sorted(
+            set(_raw_paths(before[2])) ^ set(_raw_paths(after_raw))
+            | {
+                path
+                for path in set(before[3]) | set(after_blobs)
+                if before[3].get(path) != after_blobs.get(path)
+            }
+        )[:PATH_SAMPLE_LIMIT]
+    refuse(
+        "private-preparation-hook-changed-tree",
+        admitted_tree,
+        f"the hook's run changed {', '.join(changed)}; nothing was published; {hook_pointer}",
+    )
+
+
+def _raw_paths(raw: str) -> list[str]:
+    """The paths one raw diff names, in sorted order."""
+    paths = set()
+    for line in raw.splitlines():
+        _meta, _, path = line.partition("\t")
+        if path:
+            paths.add(path)
+    return sorted(paths)
+
+
 def _run_once(
     selected: SelectedCloseoutPreparation,
     action: PreparationAction,
@@ -150,16 +407,25 @@ def _run_once(
     selected = replace(selected, handoff=replace(handoff, record=record))
     # Rebinding reopens the selected command before Git; the earlier inspection
     # cannot itself authorize a start after a concurrent cancellation.
+    hook_pointer = ""
     try:
-        result = run_git_preparation(_capability(selected, reobserve), action)
+        if action == "commit":
+            result, hook_pointer = _commit_prepared_leg(_capability(selected, reobserve))
+        else:
+            result = run_git_preparation(_capability(selected, reobserve), action)
     except BaseException as error:
+        detail = f"Original command did not return a proved terminal: {type(error).__name__}"
+        if action == "commit" and isinstance(error, _PreparedLegHookTimeout):
+            detail = str(error)
+        elif action == "commit" and isinstance(error, CertificationContractError):
+            detail += "; " + "; ".join(str(item["observed"]) for item in error.findings)
         _terminal_record(
             selected,
             command,
             PreparationCommandTerminal(
                 outcome="unknown",
                 observedAt=datetime.now(UTC).isoformat(),
-                detail=f"Original command did not return a proved terminal: {type(error).__name__}",
+                detail=detail,
             ),
         )
         raise
@@ -176,10 +442,12 @@ def _run_once(
             stderrSha256=hashlib.sha256(
                 result.stderr.encode("utf-8", "surrogateescape")
             ).hexdigest(),
+            detail=hook_pointer[:8192],
         ),
     )
     if result.returncode != 0:
-        refuse("private-preparation-command-failed", "named-output recovery without rerun", action)
+        step = hook_pointer.split("failing-step=")[1] if "failing-step=" in hook_pointer else action
+        _refuse_failed_preparation_command(step, hook_pointer)
     return reobserve(selected)
 
 

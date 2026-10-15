@@ -7,11 +7,13 @@ from typing import Any
 
 from agents_remember.kernel._agentic_settings_core import (
     COMPLEXITY_SCALE,
+    DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS,
     DEFAULT_LOOP_MAX_ROUNDS,
     DEFAULT_LOOP_PER_LEVEL,
     DEFAULT_REVIEWER_REUSE,
     HARNESS_IDS,
     KNOWN_CONCURRENCY_FIELDS,
+    KNOWN_LANDING_FIELDS,
     KNOWN_LOOP_COMPLEXITY_FIELDS,
     KNOWN_LOOP_DEFAULTS_FIELDS,
     KNOWN_LOOP_LEVEL_FIELDS,
@@ -25,6 +27,7 @@ from agents_remember.kernel._agentic_settings_core import (
     UNUSED_ROLE_KNOB_FIELDS,
     AgenticSettingsError,
     ConcurrencySettings,
+    LandingSettings,
     LoopComplexity,
     LoopDefaults,
     LoopSettings,
@@ -307,6 +310,26 @@ def _parse_spawn(
     if "harness" not in spawn:
         return None
     return _require_harness_id(spawn["harness"], "orchestration.spawn.harness", source, harness_ids)
+
+
+def _parse_landing(raw: object, *, source: str) -> LandingSettings:
+    """``orchestration.landing``: the landing commit-check knobs (MIK-R152).
+
+    Absent -> the default commit-check bound. Unknown keys fail loud like every
+    other orchestration family.
+    """
+    if raw is None:
+        return LandingSettings()
+    block = _require_object(raw, "orchestration.landing", source)
+    _refuse_unknown(block, KNOWN_LANDING_FIELDS, "orchestration.landing", source)
+    timeout_seconds = DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS
+    if "commitCheckTimeoutSeconds" in block:
+        timeout_seconds = _require_positive_int(
+            block["commitCheckTimeoutSeconds"],
+            "orchestration.landing.commitCheckTimeoutSeconds",
+            source,
+        )
+    return LandingSettings(commit_check_timeout_seconds=timeout_seconds)
 
 
 def _parse_quality_gate(raw: object, *, source: str) -> QualityGateSettings:

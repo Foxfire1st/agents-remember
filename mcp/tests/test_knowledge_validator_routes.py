@@ -27,6 +27,11 @@ from agents_remember.memory_quality.knowledge_validator.commit_route import (
 from agents_remember.worktrees.knowledge_validation import PairedCode, memory_commit_refusal
 from agents_remember.worktrees.services import LeafPublication, bind_worktree_services
 from agents_remember.worktrees.services import worktree_services as bound_worktree_services
+from agents_remember.worktrees.sync_transaction_authority import parse_refusal_violations
+from agents_remember.worktrees.sync_transaction_state import (
+    SyncOperationRecord,
+    SyncOperationStore,
+)
 from knowledge_validator_test_support import (
     CODE_PATHS,
     INTEGRATE,
@@ -191,6 +196,108 @@ def test_the_managed_sync_refuses_a_merge_with_duplicate_ids_until_it_is_repaire
         before,
         source_tip,
     ]
+
+
+def test_a_fast_forward_onto_an_invalid_tree_refuses_without_moving_any_ref(
+    tmp_path: Path, worktree_services: None
+) -> None:
+    """MIK-R61 rule 4 and rule 5: a fast-forward judges what it adopts before any ref moves.
+
+    The incoming converted tree carries a duplicate invariant ID, so the validator
+    refuses the fast-forward: the memory ref has not moved, the refusal is journaled,
+    and after the line is repaired a new sync passes and clears it.
+    """
+
+    fixture = SyncFixture(tmp_path)
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    memory_before = git(worktree, "rev-parse", "HEAD")
+    code_tip = fixture.move_official_code()
+    source = {
+        **fixture_tree_files(),
+        LEFT_DUPLICATE: encode(invariant_document("INV-D0P111")),
+        RIGHT_DUPLICATE: encode(invariant_document("INV-D0P111")),
+    }
+    _commit(fixture.memory_repo, source, render_memory_content_message("Source mint", code_tip))
+
+    refused = fixture.sync()
+
+    assert refused.payload["state"] == "sync-knowledge-validation-refused", refused.payload
+    assert git(worktree, "rev-parse", "HEAD") == memory_before
+    # MIK-R61 rule 5: the status carries the parsed fields, not just the journal.
+    carried = refused.payload.get("validationRefusal")
+    assert isinstance(carried, dict), refused.payload
+    assert carried["kind"] == "fast-forward"
+    assert carried["total"] >= 1
+    assert 1 <= len(carried["violations"]) <= 50
+    assert carried["total"] >= len(carried["violations"])
+    assert all(entry["path"] and entry["rule"] for entry in carried["violations"])
+    store = SyncOperationStore(fixture.contract.worktree_group)
+    journaled = store.read()
+    assert isinstance(journaled, SyncOperationRecord)
+    assert journaled.validationRefusal is not None
+    assert journaled.validationRefusal.kind == "fast-forward"
+    # MIK-R61 rule 5: the journaled entries are the validator's own per-path,
+    # per-rule violations with its true total, not one generic message.
+    assert journaled.validationRefusal.total >= 1
+    assert len(journaled.validationRefusal.violations) >= 1
+    assert len(journaled.validationRefusal.violations) <= 50
+    assert journaled.validationRefusal.total >= len(journaled.validationRefusal.violations)
+    assert all(entry.path and entry.rule for entry in journaled.validationRefusal.violations)
+
+    git(fixture.memory_repo, "rm", "-q", RIGHT_DUPLICATE)
+    git(
+        fixture.memory_repo,
+        "commit",
+        "-q",
+        "-m",
+        render_memory_content_message("Repair the duplicate", code_tip),
+    )
+    summary = str(refused.payload.get("summary"))
+    assert "resolution_action='cancel'" in summary
+    cancelled = fixture.sync(resolution_action="cancel")
+    assert cancelled.payload["state"] == "sync-cancelled", cancelled.payload
+    repaired = fixture.sync()
+
+    assert repaired.payload["state"] == "synced", repaired.payload
+    assert git(worktree, "rev-parse", "HEAD") != memory_before
+    cleared = store.read()
+    assert isinstance(cleared, SyncOperationRecord)
+    assert cleared.validationRefusal is None
+
+
+def test_a_repaired_staged_merge_clears_the_journaled_refusal(
+    tmp_path: Path, worktree_services: None
+) -> None:
+    """MIK-R61 rule 5: the refusal is journaled with its violations; a continued sync
+    validates again and clears it when the tree passes."""
+
+    fixture = SyncFixture(tmp_path)
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    work = {**fixture_tree_files(), LEFT_DUPLICATE: encode(invariant_document("INV-D0P111"))}
+    _commit(worktree, work, "Work: mint an invariant")
+    code_tip = fixture.move_official_code()
+    source = {**fixture_tree_files(), RIGHT_DUPLICATE: encode(invariant_document("INV-D0P111"))}
+    _commit(fixture.memory_repo, source, render_memory_content_message("Source mint", code_tip))
+
+    refused = fixture.sync(memory_sync_choice="merge-memory")
+
+    assert refused.payload["state"] == "sync-knowledge-validation-refused", refused.payload
+    store = SyncOperationStore(fixture.contract.worktree_group)
+    journaled = store.read()
+    assert isinstance(journaled, SyncOperationRecord)
+    assert journaled.validationRefusal is not None
+    assert journaled.validationRefusal.kind == "staged-merge"
+    assert journaled.validationRefusal.total >= 1
+
+    git(worktree, "rm", "-q", "-f", RIGHT_DUPLICATE)
+    repaired = fixture.sync()
+
+    assert repaired.payload["state"] == "synced", repaired.payload
+    cleared = store.read()
+    assert isinstance(cleared, SyncOperationRecord)
+    assert cleared.validationRefusal is None
 
 
 def test_parallel_minted_ids_sync_cleanly(tmp_path: Path, worktree_services: None) -> None:
@@ -395,3 +502,54 @@ def test_a_merge_moved_row_refuses_at_leaf_publication(
     assert refusal is not None
     assert "R09-history-rows" in refusal
     assert "R09-history-rows-merged" not in refusal
+
+
+def test_refusal_text_journals_structured_violations_with_true_total() -> None:
+    """MIK-R61 rule 5: the journal keeps per-path, per-rule entries, not one generic message."""
+
+    message = (
+        "the knowledge validator (MIK-R22) refuses this memory commit: 3 violation(s) in abc123\n"
+        "knowledge/invariants/a.json: rows: [duplicate-invariant] duplicate id INV-1\n"
+        "knowledge/cards/b.md: -: [card-body] body is empty\n"
+        "knowledge/sidecar/c.json: quorum: [sidecar-quorum] only 1 of 2 witnesses\n"
+    )
+    violations, total = parse_refusal_violations(message, context_path="staged memory merge tree")
+    assert total == 3
+    assert [(entry.path, entry.rule) for entry in violations] == [
+        ("knowledge/invariants/a.json", "duplicate-invariant"),
+        ("knowledge/cards/b.md", "card-body"),
+        ("knowledge/sidecar/c.json", "sidecar-quorum"),
+    ]
+    assert violations[0].message == "rows: duplicate id INV-1"
+    assert violations[1].message == "body is empty"
+
+
+def test_refusal_text_beyond_fifty_keeps_first_fifty_with_true_total() -> None:
+    """MIK-R61 rule 5: exactly the first inline-limit entries are kept; the total stays true."""
+
+    lines = [
+        "the knowledge validator (MIK-R22) refuses this memory commit: 60 violation(s) in abc123"
+    ]
+    lines += [
+        f"knowledge/invariants/f{i:02}.json: rows: [duplicate-invariant] duplicate id INV-{i}"
+        for i in range(60)
+    ]
+    violations, total = parse_refusal_violations(
+        "\n".join(lines), context_path="incoming memory tree abc123"
+    )
+    assert total == 60
+    assert len(violations) == 50
+    assert violations[0].path == "knowledge/invariants/f00.json"
+    assert violations[49].path == "knowledge/invariants/f49.json"
+
+
+def test_unparseable_refusal_text_is_kept_not_lost() -> None:
+    """MIK-R61 rule 5: a refusal the parser does not recognize still journals its text."""
+
+    violations, total = parse_refusal_violations(
+        "the validator is not bound in this process", context_path="staged memory merge tree"
+    )
+    assert total == 1
+    assert len(violations) == 1
+    assert violations[0].rule == "knowledge-validator"
+    assert "not bound" in violations[0].message

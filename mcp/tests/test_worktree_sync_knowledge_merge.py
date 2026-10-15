@@ -40,7 +40,6 @@ from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.ids import derived_record_id
-from agents_remember.worktrees import sync_transaction_git as seam
 from agents_remember.worktrees.knowledge_crossing import (
     apply_crossing,
     crossing_plan,
@@ -54,6 +53,7 @@ from agents_remember.worktrees.sync_transaction_git import (
     SideMergeOutcome,
     _needs_crossing_report,
 )
+from agents_remember.worktrees.sync_transaction_git import _merge as sync_git_merge
 from agents_remember.worktrees.sync_transaction_recovery import successful_crossings
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
@@ -486,10 +486,22 @@ def test_an_entry_deleted_on_one_line_and_re_anchored_on_the_other_is_deleted(
     number = str(max(int(key) for key in base["references"]) + 1)
     extra["references"][number] = {**base["references"]["1"], "note": "A second entry."}
     held = canonical_text(extra).encode("utf-8")
-    lines.on_line({APP_SIDECAR: held}, "line adds an entry")
+    # A fast-forward judges what it adopts (MIK-R61 rule 4): the added reference must be
+    # used by its card, or the validator refuses the incoming tree.
+    card_before = (lines.leaf / APP_CARD).read_bytes()
+    card = card_before.decode("utf-8").rstrip("\n")
+    lines.on_line(
+        {
+            APP_SIDECAR: held,
+            APP_CARD: f"{card}\n\nSee [{number}].\n".encode(),
+        },
+        "line adds an entry",
+    )
     assert lines.merge()["state"] == "synced"  # the leaf fast-forwards: both hold the entry
 
-    lines.on_leaf({APP_SIDECAR: _without(extra, number)})
+    # The delete takes the card line with it, or the merged tree dangles a reference
+    # the sidecar no longer defines.
+    lines.on_leaf({APP_SIDECAR: _without(extra, number), APP_CARD: card_before})
     lines.on_line({APP_SIDECAR: _edited(extra, number, blob="d" * 40)})
 
     merged = lines.merge()
@@ -723,23 +735,25 @@ def test_apply_writes_a_report_for_evidence_only_and_skip_only_plans(tmp_path: P
     ):
         written = tmp_path / "reports" / "crossing-report.json"
         with (
-            mock.patch.object(seam, "merge_head", return_value=side.sourceCommit),
-            mock.patch.object(seam, "apply_crossing") as applied,
-            mock.patch.object(seam, "write_crossing_report", return_value=written) as reported,
-            mock.patch.object(seam, "_continue_memory_merge", return_value=outcome),
+            mock.patch.object(sync_git_merge, "merge_head", return_value=side.sourceCommit),
+            mock.patch.object(sync_git_merge, "apply_crossing") as applied,
+            mock.patch.object(
+                sync_git_merge, "write_crossing_report", return_value=written
+            ) as reported,
+            mock.patch.object(sync_git_merge, "_continue_memory_merge", return_value=outcome),
         ):
-            updated = seam._apply_knowledge_merge(side, plan, completed, None)
+            updated = sync_git_merge._apply_knowledge_merge(side, plan, completed, None)
         applied.assert_called_once()
         reported.assert_called_once()
         assert updated.crossing_report == written.as_posix()
 
     with (
-        mock.patch.object(seam, "merge_head", return_value=side.sourceCommit),
-        mock.patch.object(seam, "apply_crossing"),
-        mock.patch.object(seam, "write_crossing_report") as reported,
-        mock.patch.object(seam, "_continue_memory_merge", return_value=outcome),
+        mock.patch.object(sync_git_merge, "merge_head", return_value=side.sourceCommit),
+        mock.patch.object(sync_git_merge, "apply_crossing"),
+        mock.patch.object(sync_git_merge, "write_crossing_report") as reported,
+        mock.patch.object(sync_git_merge, "_continue_memory_merge", return_value=outcome),
     ):
-        updated = seam._apply_knowledge_merge(side, _crossing_plan(), completed, None)
+        updated = sync_git_merge._apply_knowledge_merge(side, _crossing_plan(), completed, None)
     reported.assert_not_called()
     assert updated.crossing_report == ""
 

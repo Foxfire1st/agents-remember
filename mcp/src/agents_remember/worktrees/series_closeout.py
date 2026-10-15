@@ -297,7 +297,7 @@ def landed_chain_refusal(
                 "then retry"
             )
     try:
-        ordered = _ordered_atomic_landing_chain(series, landed, verify_landed=False)
+        ordered, _empty = _order_nonempty_and_prove_empties(series, landed, verify_landed=False)
         _require_chain_origin(series, ordered)
         _require_landing_spine_side(series, ordered, side="code", tip=code_tip)
         if series.memory_mode == "external":
@@ -357,12 +357,137 @@ def _require_exact_atomic_landing_chain(
     reconciled source line may reach the ref.
     """
 
-    ordered = _ordered_atomic_landing_chain(series, contracts)
+    ordered, _empty = _order_nonempty_and_prove_empties(series, contracts)
     _require_chain_origin(series, ordered)
     _require_landing_spine_side(series, ordered, side="code")
     if series.memory_mode == "external":
         _require_landing_spine_side(series, ordered, side="memory")
     return ordered
+
+
+def _empty_landing_pair(series: WorktreeContract, leaf: WorktreeContract) -> tuple[str, str] | None:
+    """The leaf's pair when its landing is empty, else ``None`` (MIK-R61 rule 1).
+
+    A landing is empty when the enclosure records a completed integration whose pair
+    equals the pair the leaf started from or was last synced to. A leaf with no
+    recorded integration is not empty: it belongs to the ordering, which refuses
+    unlanded leaves as before.
+    """
+
+    if not leaf.integrated_code_commit:
+        return None
+    if leaf.integrated_code_commit != leaf.code_base_commit:
+        return None
+    if series.memory_mode == "external":
+        if not leaf.integrated_memory_content_commit:
+            return None
+        if leaf.integrated_memory_content_commit != leaf.memory_base_commit:
+            return None
+        return (leaf.integrated_code_commit, leaf.integrated_memory_content_commit)
+    return (leaf.integrated_code_commit, "")
+
+
+def _partition_empty_landings(
+    series: WorktreeContract, contracts: dict[str, WorktreeContract]
+) -> tuple[dict[str, WorktreeContract], dict[str, WorktreeContract]]:
+    """Split landed enclosures into empty landings and landings the chain orders."""
+
+    empty: dict[str, WorktreeContract] = {}
+    full: dict[str, WorktreeContract] = {}
+    for leaf_id, leaf in contracts.items():
+        if _empty_landing_pair(series, leaf) is None:
+            full[leaf_id] = leaf
+        else:
+            empty[leaf_id] = leaf
+    return empty, full
+
+
+def empty_landing_leaf_ids(series: WorktreeContract) -> list[str]:
+    """The landed leaves whose landing is empty, in leaf-id order (MIK-R61 rule 1)."""
+
+    try:
+        contracts = exact_atomic_leaf_contracts(series, require_all=False)
+    except (CloseoutQueueError, ContractError, TaskDocumentRefError, RuntimeError):
+        return []
+    empty, _full = _partition_empty_landings(
+        series, {leaf_id: leaf for leaf_id, leaf in contracts.items() if _leaf_landed(series, leaf)}
+    )
+    return sorted(empty)
+
+
+def _chain_joint_positions(
+    series: WorktreeContract, ordered: list[WorktreeContract]
+) -> set[tuple[str, str]]:
+    """The joint pairs an empty landing may stand on (MIK-R61 rule 1).
+
+    The chain's origin, every reconciled source position the chain's own syncs recorded
+    (the series contract's and every ordered leaf's, as the spine proof reads them), and
+    every ordered leaf's landing pair.
+    """
+
+    external = series.memory_mode == "external"
+
+    def pair(code: str, memory: str) -> tuple[str, str]:
+        return (code, memory if external else "")
+
+    positions = {pair(series.code_base_commit, series.memory_base_commit)}
+    if series.sync_log:
+        origin_code, origin_memory = _series_pre_sync_base(series)
+        positions.add(pair(origin_code, origin_memory))
+    for contract in (series, *ordered):
+        for entry in contract.sync_log:
+            positions.add(pair(entry.get("codeBaseFrom", ""), entry.get("memoryBaseFrom", "")))
+            positions.add(pair(entry.get("codeBaseTo", ""), entry.get("memoryBaseTo", "")))
+    for leaf in ordered:
+        positions.add(pair(leaf.integrated_code_commit, leaf.integrated_memory_content_commit))
+    return {position for position in positions if position[0]}
+
+
+def _require_empty_landings_on_chain(
+    series: WorktreeContract,
+    ordered: list[WorktreeContract],
+    empty: dict[str, WorktreeContract],
+) -> None:
+    """Prove every empty landing stands on the chain (MIK-R61 rule 1).
+
+    An empty landing is out of the ordering, but its pair must be the chain's origin, a
+    reconciled source position, or the landing pair of an ordered leaf. Otherwise the
+    closeout refuses and names the leaf. Two enclosures that record the same pair and
+    are both not empty refuse, as one landing recorded twice; an empty landing on the
+    landing pair of an ordered leaf stands, and two empty landings on one pair stand as
+    well, each on the chain (architect D47 corrected third bullet). The both-nonempty
+    refusal already happened in the ordering above, which saw only the non-empty
+    landings.
+    """
+
+    positions = _chain_joint_positions(series, ordered)
+    for leaf_id, leaf in empty.items():
+        pair = _empty_landing_pair(series, leaf)
+        assert pair is not None
+        if pair not in positions:
+            code, memory = pair
+            detail = (
+                f"master {series.task_id!r}: leaf {leaf_id!r} lands nothing at code "
+                f"{code} / memory {memory or 'not-applicable'}, which is not the chain's "
+                "origin, a reconciled source position, or the landing pair of an ordered "
+                "leaf. Land the leaf's work with worktree_integrate, or correct its "
+                "recorded integration in its series-contract.md, then retry closeout"
+            )
+            raise CloseoutQueueError("atomic-series-leaf-chain-invalid", detail)
+
+
+def _order_nonempty_and_prove_empties(
+    series: WorktreeContract,
+    contracts: dict[str, WorktreeContract],
+    *,
+    verify_landed: bool = True,
+) -> tuple[list[WorktreeContract], dict[str, WorktreeContract]]:
+    """Order the non-empty landings and prove each empty one stands on the chain."""
+
+    empty, full = _partition_empty_landings(series, contracts)
+    ordered = _ordered_atomic_landing_chain(series, full, verify_landed=verify_landed)
+    _require_empty_landings_on_chain(series, ordered, empty)
+    return ordered, empty
 
 
 def _ordered_atomic_landing_chain(
@@ -377,6 +502,9 @@ def _ordered_atomic_landing_chain(
     reconciliation that moved the recorded base and any leaf created afterwards. With
     ``verify_landed`` false the caller has already selected the landed leaves (MIK-R52 rule 4:
     leaves that have not landed are left out) and only the order is proved here.
+
+    Empty landings (MIK-R61 rule 1) never reach this ordering: the caller partitions them
+    out first and proves each stands on the chain instead.
     """
 
     remaining = dict(contracts)
@@ -435,8 +563,10 @@ def _leaf_landing_precedes(
     The order is over the *pair*, not over the code commit alone: a leaf whose code leg is
     ``not-applicable`` lands a memory commit and records the code position it stood on, so two
     leaves may share one code commit and remain two distinct landings -- each memory commit makes
-    the pair unique. Only a pair that is equal on both sides is one landing recorded twice, and
-    that stays unordered.
+    the pair unique. Two enclosures that record the same pair and are both not empty are one
+    landing recorded twice (architect D47 corrected third bullet): they stay unordered here --
+    this ordering sees only non-empty landings, the empties partitioned out -- and the chain
+    refuses them.
     """
 
     same_code = earlier.integrated_code_commit == later.integrated_code_commit

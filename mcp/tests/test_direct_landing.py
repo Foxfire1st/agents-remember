@@ -305,6 +305,22 @@ def _converted_series_fixture(root: Path) -> dict:
     }
 
 
+def _install_passing_commit_hooks(repository: Path, log: Path) -> None:
+    """Real ``pre-commit`` and ``commit-msg`` hooks that record their run and pass."""
+
+    hooks = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "hooks"))
+    hooks.mkdir(parents=True, exist_ok=True)
+    for name in ("pre-commit", "commit-msg"):
+        hook = hooks / name
+        hook.write_text(
+            f"#!/bin/sh\necho {name} >> {shlex.quote(log.as_posix())}\nexit 0\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+    assert run_git(repository, ["hook", "run", "pre-commit"]).returncode == 0  # live
+    log.unlink()
+
+
 def _install_failing_commit_hooks(repository: Path, log: Path) -> None:
     """Real ``pre-commit`` and ``commit-msg`` hooks that record their run in ``log`` and fail."""
 
@@ -582,7 +598,12 @@ class DirectLandingTests(unittest.TestCase):
         memory_commit = landed["memoryContentCommit"]
         self.assertTrue(memory_commit)
         memory_body = git(memory, "show", "-s", "--format=%B", str(memory_commit))
-        self.assertEqual(memory_body, f"direct memory\n\nCode-Commit: {created}")
+        memory_tree = git(memory, "rev-parse", f"{memory_commit}^{{tree}}")
+        self.assertEqual(
+            memory_body,
+            f"direct memory\n\nCode-Commit: {created}\n"
+            f"Commit-Check-Pass: tree={memory_tree} hook=none",
+        )
         ledger_text = (memory / "memory.md").read_text(encoding="utf-8")
         self.assertIn(created, ledger_text)
         self.assertIn(str(memory_commit), ledger_text)
@@ -1670,9 +1691,9 @@ class DirectLandingTests(unittest.TestCase):
         family = family_row({"INV-AAAAAA": 2, "INV-BBBBBB": 1})
         world.rows(row, family, *trace_rows(world, *TRACES))
         bind_worktree_services(build_default_worktree_services())
-        # No lifecycle publication runs a commit hook, on any route (review R3, note 11 f): the
-        # memory repository's failing ``pre-commit`` and ``commit-msg`` hooks are never run, and
-        # the landing below succeeds. The checks of a publication are the gate and the validator.
+        # MIK-R152: the publication runs the repository's commit check. The failing
+        # hooks refuse the landing below; the checks of a publication are the gate,
+        # the validator and the hook.
         hook_log = Path(self.temp.name) / "memory-commit-hooks.log"
         _install_failing_commit_hooks(world.memory, hook_log)
         request = _converted_request(fixture, code)
@@ -1694,9 +1715,19 @@ class DirectLandingTests(unittest.TestCase):
 
         with mock.patch.object(KnowledgeGate, "direct_verdict", remember):
             landed = direct_landing_tool(fixture["config"], request)
+        # The failing hooks refuse at publication: nothing published, hooks ran.
+        self.assertFalse(landed["ok"], landed)
+        self.assertIn("commit check", str(landed["detail"]), landed)
+        self.assertEqual(hook_log.read_text(encoding="utf-8").splitlines(), ["pre-commit"])
+        # Passing hooks land the same call with the judged tree.
+        _install_passing_commit_hooks(world.memory, hook_log)
+        with mock.patch.object(KnowledgeGate, "direct_verdict", remember):
+            landed = direct_landing_tool(fixture["config"], request)
         self.assertTrue(landed["ok"], landed)
-        self.assertFalse(hook_log.exists())
-        self.assertEqual(len(judged), 1)
+        self.assertIn("pre-commit", hook_log.read_text(encoding="utf-8").splitlines())
+        self.assertNotIn("commit-msg", hook_log.read_text(encoding="utf-8").splitlines())
+        # The gate judged once per attempt: the refused attempt and the landing.
+        self.assertEqual(len(judged), 2)
         self.assertEqual(git(world.memory, "rev-parse", "HEAD^{tree}"), judged[0])
         record = direct_landing_store(fixture["contract"]).read()
         self.assertIsNotNone(record)
@@ -2302,14 +2333,20 @@ class DirectLandingTests(unittest.TestCase):
         )
         # Direct landing is the branch-addressed closeout route, so its memory-content
         # commit is the memory side of the same pairing: the message body verbatim plus
-        # exactly one Code-Commit trailer naming the code commit this landing verified.
+        # exactly one Code-Commit trailer naming the code commit this landing verified,
+        # and the Commit-Check-Pass trailer for its tree (MIK-R152).
         memory_body = git(memory, "show", "-s", "--format=%B", str(landed["memoryContentCommit"]))
-        self.assertEqual(memory_body, f"direct memory\n\nCode-Commit: {fixture['code_head']}")
+        memory_tree = git(memory, "rev-parse", f"{landed['memoryContentCommit']}^{{tree}}")
+        self.assertEqual(
+            memory_body,
+            f"direct memory\n\nCode-Commit: {fixture['code_head']}\n"
+            f"Commit-Check-Pass: tree={memory_tree} hook=none",
+        )
         message_file = root / "direct-memory-message.txt"
         message_file.write_text(f"{memory_body}\n", encoding="utf-8")
         self.assertEqual(
             git(memory, "interpret-trailers", "--parse", message_file.as_posix()),
-            f"Code-Commit: {fixture['code_head']}",
+            f"Code-Commit: {fixture['code_head']}\nCommit-Check-Pass: tree={memory_tree} hook=none",
         )
         self.assertEqual(git(memory, "ls-files", "memory.md"), "")
         self.assertIn("/memory.md", (memory / ".gitignore").read_text(encoding="utf-8"))
@@ -2360,9 +2397,11 @@ class DirectLandingTests(unittest.TestCase):
             git(memory, "diff-tree", "--no-commit-id", "--name-only", "-r", leaf_before, head),
             ".gitignore\nknowledge/history/260928-MIK-L97.json\nonboarding/pkg/a.py.json",
         )
+        landed_tree = git(memory, "rev-parse", f"{head}^{{tree}}")
         self.assertEqual(
             git(memory, "show", "-s", "--format=%B", head),
-            f"publish exact converted tree\n\nCode-Commit: {code}",
+            f"publish exact converted tree\n\nCode-Commit: {code}\n"
+            f"Commit-Check-Pass: tree={landed_tree} hook=none",
         )
         store = direct_landing_store(contract)
         completed = store.read()

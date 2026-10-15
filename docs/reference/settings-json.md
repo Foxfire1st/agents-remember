@@ -699,6 +699,22 @@ that names zero, a negative number or no whole number is refused at load, naming
 }
 ```
 
+### orchestration.landing
+
+`orchestration.landing.commitCheckTimeoutSeconds` is the bound on the seconds one
+landing commit-check run may take (a positive whole number; where the settings name
+none, 900). A run past the bound is stopped with its children and refuses the
+landing. The number in force is the one the settings file names at the landing:
+a changed number holds for the next landing without a restart.
+
+```jsonc
+"orchestration": {
+  "landing": {
+    "commitCheckTimeoutSeconds": 900
+  }
+}
+```
+
 ### orchestration.concurrency, orchestration.spawn
 
 `orchestration.concurrency` caps parallel orchestration fan-out:

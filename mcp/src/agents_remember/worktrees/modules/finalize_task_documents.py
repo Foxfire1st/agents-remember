@@ -28,6 +28,7 @@ from agents_remember.tasks.leaf_doc import (
 from agents_remember.tasks.master_sync import (
     demote_completed_master_if_unresolved,
     folder_master_json_path,
+    master_json_path_from_ref,
 )
 from agents_remember.tasks.retired_rows import refuse_retired_row
 from agents_remember.tasks.sprint_rows import (
@@ -167,7 +168,7 @@ class _ParentTarget:
 def _named_parent(
     task_root: Path, args: FinalizeArgs, master_ref: str, leaf_id: str
 ) -> _ParentTarget:
-    expected_parent = _expected_parent_path(task_root, master_ref)
+    expected_parent = _expected_parent_path(task_root, master_ref, leaf_id)
     _assert_parent_arguments(args, expected_parent, leaf_id)
     parent, parent_source = _read_parent(expected_parent)
     return _ParentTarget(expected_parent, parent, parent_source, _exact_parent_row(parent, leaf_id))
@@ -255,14 +256,11 @@ def _check_parent_row_path(parent_path: Path, row: SubTaskRef, leaf_path: Path) 
         )
 
 
-def _expected_parent_path(task_root: Path, master_ref: str) -> Path:
-    root = task_root.resolve(strict=False)
-    candidate = (root / Path(master_ref).with_suffix(".json")).resolve(strict=False)
-    if candidate.parent != root:
-        raise FinalizeTaskDocumentError(
-            f"leaf master reference must resolve to a direct child of {root}: {master_ref!r}"
-        )
-    return candidate
+def _expected_parent_path(task_root: Path, master_ref: str, leaf_id: str) -> Path:
+    try:
+        return master_json_path_from_ref(task_root, leaf_id=leaf_id, master_ref=master_ref)
+    except ValueError as exc:
+        raise FinalizeTaskDocumentError(str(exc)) from exc
 
 
 def _reconcile_task_documents(

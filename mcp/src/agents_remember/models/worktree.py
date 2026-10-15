@@ -154,6 +154,9 @@ class SyncOperationProjection(StrictResponseModel):
     nextArgs: dict[str, object] | None = None
     cancelArgs: dict[str, object] | None = None
     evidencePath: str | None = None
+    # A journaled validator refusal (MIK-R61 rule 5), shown by worktree_status and a
+    # repeated worktree_sync while it stands.
+    validationRefusal: dict[str, object] | None = None
 
 
 class SyncResolutionInput(StrictResponseModel):
@@ -171,6 +174,10 @@ class SyncResolutionProjection(StrictResponseModel):
     describe itself. Without it the model refused its own projection with
     ``extra_forbidden``, so a resolution that needed agent action surfaced as a
     serialization error instead of the guidance the agent needed.
+
+    ``crossing`` is the same structural-merge summary the resolution response carries
+    beside a crossing sync (MIK-R61 rule 11): what the producer puts into ``resolution``
+    is what this model declares, so a key the model lacks fails a test and not a caller.
     """
 
     side: SyncSide
@@ -178,6 +185,7 @@ class SyncResolutionProjection(StrictResponseModel):
     worktree: str | None = None
     files: list[str] = Field(default_factory=list)
     wipRestore: bool = False
+    crossing: dict[str, object] | None = None
 
 
 class AtomicSeriesActivationFact(StrictResponseModel):

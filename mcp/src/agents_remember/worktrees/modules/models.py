@@ -10,6 +10,10 @@ from typing import TypedDict
 PATH_SAMPLE_LIMIT = 30
 
 
+class CommitPublicationRefusal(RuntimeError):
+    """The commit was not published: the admitted branch, its tip or the worktree state differs."""
+
+
 @dataclass(frozen=True)
 class WorktreeCommandResult:
     returncode: int

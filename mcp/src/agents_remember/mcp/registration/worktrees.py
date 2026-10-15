@@ -176,11 +176,15 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         resolution_action: SyncResolutionAction | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Pull the moved official line into a live worktree. Answers the state reached (synced,
+        """Pull the official line into a live worktree. Returns synced,
         already-current, would-sync, sync-active, sync-resolution-required,
-        memory-sync-choice-required, blocked) and the next call with its arguments; the whole
-        result is in the log file. Sync movement compares trees and never blocks. Reference:
-        docs/reference/mcp-tools.md."""
+        memory-sync-choice-required or blocked, with next-call arguments and a log path.
+        Tree changes mark the prior review pre-sync and offer a new review; sync movement
+        never blocks. The product merges memory lines only here; raw git merge is a hand edit
+        it cannot prevent. Every memory landing judges its tree; a fast-forward judges what
+        it adopts before moving any ref.
+
+        Reference: docs/reference/mcp-tools.md."""
         return worktree_sync_payload(
             config,
             contract_path,

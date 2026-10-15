@@ -38,7 +38,7 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
     if leaf.kind != "subTask":
         return MasterSyncPlan(status="none")
     master_json_path = _master_json_path(task_root, leaf)
-    if master_json_path is None or not master_json_path.exists():
+    if master_json_path is None:
         return MasterSyncPlan(status="none")
     try:
         source_snapshot = capture_task_doc_source(master_json_path)
@@ -178,11 +178,11 @@ def folder_master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
     disagree about a leaf without a ``master`` reference -- the sync fell back to this file, the
     finalizer called the leaf standalone -- so a master whose leaves name no master kept each
     finished leaf's row at ``inProgress`` (260928-MIK: 15 rows, repaired by resync writes). All
-    three now resolve an unnamed leaf here.
+    three now resolve an unnamed leaf here, and a leaf that names its master through
+    :func:`master_json_path_from_ref`.
 
     Only a ``subTask`` has a folder master: a ``light`` or ``master`` document *is* the folder's
-    ``task.json``. A leaf that names its master gets ``None``; each caller resolves that reference
-    by its own rule.
+    ``task.json``.
     """
     if leaf.kind != "subTask" or leaf.master:
         return None
@@ -192,18 +192,43 @@ def folder_master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
 
 def _master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
     if leaf.master:
-        return _json_path_from_master_ref(task_root, leaf.master)
+        return master_json_path_from_ref(task_root, leaf_id=leaf.id, master_ref=leaf.master)
     return folder_master_json_path(task_root, leaf)
 
 
-def _json_path_from_master_ref(task_root: Path, master_ref: str | None) -> Path | None:
-    if not master_ref:
-        return None
-    ref = Path(master_ref)
-    json_ref = ref.with_suffix(".json") if ref.suffix else ref
-    candidate = (task_root / json_ref).resolve(strict=False)
+def master_json_path_from_ref(
+    task_root: Path,
+    *,
+    leaf_id: str,
+    master_ref: str,
+    refusal: type[ValueError] = MasterSyncError,
+) -> Path:
+    """Turn a leaf's ``master`` reference into its master JSON document path.
+
+    ONE RULE FOR A NAMED MASTER (MIK-R61 rule 2). The task-document master sync, the
+    finalizer and reopen resolve a named master here; their own copies are removed. The
+    reference names a document in the leaf's own task folder: ``task``, ``task.md`` and
+    ``task.json`` name the same document. A reference that leaves the task folder, that
+    cannot name a task document, or that names no existing document is refused by every
+    writer with one message carrying the leaf, the reference and the fix.
+    """
+
     root = task_root.resolve(strict=False)
-    # Cross-series master refs are explicit navigation metadata; automatic row sync is same-root only.
-    if not candidate.is_relative_to(root) or candidate.parent != root:
-        return None
+    ref = Path(master_ref)
+    if ref.suffix in ("", ".md", ".json"):
+        candidate = (root / ref.parent / (ref.stem + ".json")).resolve(strict=False)
+    else:
+        candidate = None
+    if candidate is None or candidate.parent != root:
+        raise refusal(
+            f"leaf {leaf_id!r} names master {master_ref!r}, which is not a document of this "
+            f"task folder ({root}): name a document of this folder (for example 'task.md'), "
+            "or remove the 'master' reference"
+        )
+    if not candidate.is_file():
+        raise refusal(
+            f"leaf {leaf_id!r} names master {master_ref!r}, but {candidate} does not exist: "
+            "name a document of this folder (for example 'task.md'), or remove the 'master' "
+            "reference"
+        )
     return candidate

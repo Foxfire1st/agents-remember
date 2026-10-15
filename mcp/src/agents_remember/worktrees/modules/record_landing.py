@@ -566,6 +566,12 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
             memory_content_commit=args.landed_memory_content_commit.strip(),
         ),
     )
+    # The integration result says whether the landing is empty (MIK-R61 rule 1), as the
+    # ordinary integration route does; named only when empty.
+    empty_landing = commit == contract.code_base_commit and (
+        contract.memory_mode != "external"
+        or args.landed_memory_content_commit.strip() == contract.memory_base_commit
+    )
     return WorktreeCommandResult(
         0,
         {
@@ -574,6 +580,7 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "integrationStrategy": updated.integration_strategy,
             "landedCodeCommit": commit,
             "landingTargets": claimed,
+            **({"emptyLanding": True} if empty_landing else {}),
             "summary": (
                 f"Recorded integration of {commit} on {', '.join(claimed)} via the pull-request "
                 "route. Cleanup and the series abandon guard now read this work as landed."

@@ -1,0 +1,146 @@
+"""Exact Git mutations and proofs for resumable code and memory-content sync.
+
+Split of the former single module along its parts (MIK-R61 rule 14): ``_read`` holds
+the side and stash readers, ``_proof`` the reapply proof, ``_stash`` parking and
+reapply, ``_cancel`` the cancel judgement, ``_merge`` the merge steps, ``_base`` the
+shared vocabulary. This file re-exports the previous public surface unchanged.
+"""
+
+from __future__ import annotations
+
+from agents_remember.kernel.git_command import run_git
+from agents_remember.worktrees.sync_transaction_git._base import (
+    MAX_NAMED_SYNC_PATHS,
+    CancelTreeAssessment,
+    ExpectedReappliedContent,
+    SideMergeOutcome,
+    SyncFastForwardValidationError,
+    SyncGitProofError,
+    SyncKnowledgeValidationError,
+)
+from agents_remember.worktrees.sync_transaction_git._cancel import (
+    CancelSaveError,
+    SavedUnprovenState,
+    assess_retained_tree,
+    assess_stash_tree,
+    discard_saved_unproven,
+    read_saved_unproven_state,
+    save_unproven_state,
+)
+from agents_remember.worktrees.sync_transaction_git._merge import (
+    _needs_crossing_report as _needs_crossing_report,
+)
+from agents_remember.worktrees.sync_transaction_git._merge import (
+    commit_check_report,
+    commit_check_staged_files,
+    continue_side_merge,
+    rollback_side,
+    start_side_merge,
+    validate_memory_fast_forward,
+    validate_staged_resolution,
+)
+from agents_remember.worktrees.sync_transaction_git._proof import (
+    applied_restore_failures,
+    cancelled_wip_restored,
+    capture_retained_digests,
+    expected_reapplied_content,
+    named_merge_rules,
+    parked_path_content,
+    parked_wip_failures,
+    path_fingerprint,
+    prove_parked_wip_restored,
+    reapply_merge_fault,
+    recapture_resumed_merge,
+    verify_crashed_reapply,
+    worktree_entry_content,
+)
+from agents_remember.worktrees.sync_transaction_git._read import (
+    content_conflicts,
+    create_pinned_ref,
+    delete_pinned_ref,
+    exact_created_head,
+    git_status,
+    merge_head,
+    read_ref,
+    renamed_parked_paths,
+    sample_paths,
+    side_branch_head,
+    side_merge_completed,
+    stash_entry_live,
+    stashed_parked_paths,
+    unmerged_paths,
+    worktree_dirty_paths,
+)
+from agents_remember.worktrees.sync_transaction_git._stash import (
+    apply_parked_wip,
+    clear_stale_git_locks,
+    discard_memory_cache_changes,
+    discard_owned_reapply,
+    drop_parked_wip,
+    ensure_temporary_worktree,
+    park_worktree_wip,
+    remove_temporary_worktree,
+    require_side_checkout,
+)
+
+__all__ = [
+    "MAX_NAMED_SYNC_PATHS",
+    "CancelSaveError",
+    "CancelTreeAssessment",
+    "ExpectedReappliedContent",
+    "SavedUnprovenState",
+    "SideMergeOutcome",
+    "SyncFastForwardValidationError",
+    "SyncGitProofError",
+    "SyncKnowledgeValidationError",
+    "applied_restore_failures",
+    "apply_parked_wip",
+    "assess_retained_tree",
+    "assess_stash_tree",
+    "cancelled_wip_restored",
+    "capture_retained_digests",
+    "clear_stale_git_locks",
+    "commit_check_report",
+    "commit_check_staged_files",
+    "content_conflicts",
+    "continue_side_merge",
+    "create_pinned_ref",
+    "delete_pinned_ref",
+    "discard_memory_cache_changes",
+    "discard_owned_reapply",
+    "discard_saved_unproven",
+    "drop_parked_wip",
+    "ensure_temporary_worktree",
+    "exact_created_head",
+    "expected_reapplied_content",
+    "git_status",
+    "merge_head",
+    "named_merge_rules",
+    "park_worktree_wip",
+    "parked_path_content",
+    "parked_wip_failures",
+    "path_fingerprint",
+    "prove_parked_wip_restored",
+    "read_ref",
+    "read_saved_unproven_state",
+    "reapply_merge_fault",
+    "recapture_resumed_merge",
+    "remove_temporary_worktree",
+    "renamed_parked_paths",
+    "require_side_checkout",
+    "rollback_side",
+    "run_git",
+    "sample_paths",
+    "save_unproven_state",
+    "side_branch_head",
+    "side_merge_completed",
+    "start_side_merge",
+    "stash_entry_live",
+    "stashed_parked_paths",
+    "unmerged_paths",
+    "validate_memory_fast_forward",
+    "validate_staged_resolution",
+    "verify_crashed_reapply",
+    "worktree_dirty_paths",
+    "worktree_entry_content",
+]

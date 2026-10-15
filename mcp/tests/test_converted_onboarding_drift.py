@@ -1054,7 +1054,76 @@ def test_success_brings_real_index_to_adopted_state(tmp_path: Path, bound_valida
 def test_malicious_hook_cannot_change_the_recorded_tree(
     tmp_path: Path, bound_validation: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """L44-C1-04: a hook that rewrites and stages layout bytes never reaches the commit."""
+    """L44-C1-04: a hook that rewrites and stages layout bytes is refused.
+
+    R152 governs the adoption: the repository's hook runs as the check on the
+    validated tree. The hook's bytes never reach a commit — the adoption is
+    refused naming the paths, no commit is made, the branch stays where it
+    was, and the worktree and the index hold what they held before.
+    """
+
+    seen: list[str] = []
+    real_refusal = baseline.memory_commit_refusal
+
+    def _spy(**kwargs: Any) -> Any:
+        seen.append(kwargs["candidate_tree"])
+        return real_refusal(**kwargs)
+
+    monkeypatch.setattr(baseline, "memory_commit_refusal", _spy)
+    config, _code, memory = _adoptable_converted_world(tmp_path, stale=True)
+    layout = memory / "knowledge" / "layout.json"
+    original = layout.read_bytes()
+    before = _fingerprint(memory)
+    before_stage = _stage_list(memory)
+
+    def _rev(name: str) -> str | None:
+        probe = subprocess.run(
+            ["git", "-C", str(memory), "rev-parse", "--verify", name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return probe.stdout.strip() or None if probe.returncode == 0 else None
+
+    # A first adoption: no commit and no branch exist yet.
+    assert _rev("HEAD") is None
+    hook = memory / ".git" / "hooks" / "pre-commit"
+    hook.write_text(
+        "#!/bin/sh\n"
+        f'printf \'{{"invalid": true}}\' > "{layout.as_posix()}"\n'
+        f'git -C "{memory.as_posix()}" add -A\n'
+        f'touch "{memory.as_posix()}/.hook-ran"\n',
+        encoding="utf-8",
+    )
+    os.chmod(hook, 0o755)
+    with pytest.raises(RuntimeError, match=r"knowledge/layout\.json"):
+        memory_baseline_adopt_tool(
+            config,
+            repo_id=REPO_ID,
+            accept_drift=True,
+            branches=MemoryBranches(source_branch="main", work_branch="main"),
+        )
+    assert seen, "the staged tree was never validated"
+    assert _rev("HEAD") is None, "a commit was made"
+    assert _rev("main") is None, "the branch moved"
+    assert layout.read_bytes() == original, "the hook's bytes stayed in the worktree"
+    assert _stage_list(memory) == before_stage, "the index changed"
+    # The worktree holds what it held before, plus the hook's own untracked
+    # dropping — the proof the hook ran as the check (no other line appears).
+    after_status = subprocess.run(
+        ["git", "-C", str(memory), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.splitlines()
+    assert set(after_status) - {"?? .hook-ran"} == set(before[2].splitlines()), after_status
+    assert (memory / ".hook-ran").exists(), "the hook never ran as the check"
+
+
+def test_passing_hook_adoption_records_the_validated_tree(
+    tmp_path: Path, bound_validation: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """L44-C1-04: with a passing hook the adoption records exactly the validated tree."""
 
     seen: list[str] = []
     real_refusal = baseline.memory_commit_refusal
@@ -1070,8 +1139,7 @@ def test_malicious_hook_cannot_change_the_recorded_tree(
     hook = memory / ".git" / "hooks" / "pre-commit"
     hook.write_text(
         "#!/bin/sh\n"
-        f'printf \'{{"invalid": true}}\' > "{layout.as_posix()}"\n'
-        f'git -C "{memory.as_posix()}" add -A\n'
+        f"printf 'x\\n' >> \"{memory.as_posix()}/.hook-count\"\n"
         f'touch "{memory.as_posix()}/.hook-ran"\n',
         encoding="utf-8",
     )
@@ -1093,7 +1161,10 @@ def test_malicious_hook_cannot_change_the_recorded_tree(
         "the committed layout differs from the worktree bytes validation passed"
     )
     assert layout.read_bytes() == original
-    assert not (memory / ".hook-ran").exists(), "the hook ran during publication"
+    assert (memory / ".hook-ran").exists(), "the hook never ran as the check"
+    assert (memory / ".hook-count").read_text(encoding="utf-8") == "x\n", (
+        "the hook did not run exactly once"
+    )
 
 
 def test_unreadable_history_reports_unavailable_on_converted_trees(

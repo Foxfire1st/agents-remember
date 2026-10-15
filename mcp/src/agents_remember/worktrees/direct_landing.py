@@ -106,6 +106,7 @@ from agents_remember.worktrees.integration.configured_contract_authority import 
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
     DirectLandingError,
+    DirectLandingPublicationRefused,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_execution import (
     execute_or_require_direct_landing_recovery,
@@ -168,7 +169,12 @@ from agents_remember.worktrees.modules.git import (
     head_commit,
     require_git,
     stage_tree,
+    staged_publication_tree,
     worktree_candidate_tree,
+)
+from agents_remember.worktrees.modules.landing_commit_check import (
+    LandingCommitCheckRefusal,
+    run_landing_commit_check,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -740,6 +746,17 @@ def _publish_provisional_code_commit(
             f"the branch moved from {before.head} to {tip or 'nothing'} after this "
             "landing admitted it; preview again before landing, nothing was committed",
         )
+    # MIK-R152: the repository's own pre-commit hook judges the staged tree before the
+    # ref moves. The provisional commit object is dangling until the move, so a refused
+    # check publishes nothing; its hash is journaled without a pass trailer, and the
+    # integration proves such a commit by running the check itself (rule 8).
+    with staged_publication_tree(checkout, tree):
+        try:
+            run_landing_commit_check(checkout, tree=tree)
+        except LandingCommitCheckRefusal as refused:
+            raise DirectLandingPublicationRefused(
+                "direct-landing-commit-check-failed", str(refused)
+            ) from refused
     moved = run_git(checkout, ["update-ref", before.headRef, provisional, tip])
     if moved.returncode != 0:
         raise DirectLandingError(

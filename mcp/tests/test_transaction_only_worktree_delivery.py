@@ -40,6 +40,7 @@ from agents_remember.worktrees.modules import git as git_owner
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout_external import _commit_memory_content
 from agents_remember.worktrees.modules.git import is_ancestor
+from agents_remember.worktrees.modules.landing_commit_check import LandingCommitCheckRefusal
 from agents_remember.worktrees.modules.quality import closeout_memory as memory_quality
 from agents_remember.worktrees.modules.quality import gate as quality_gate
 from agents_remember.worktrees.queue import closeout_recovery
@@ -178,12 +179,52 @@ def _install_failing_pre_commit_hooks(contract, root: Path) -> tuple[Path, Path]
     return logs
 
 
+def _install_passing_pre_commit_hooks(contract, root: Path) -> tuple[Path, Path]:
+    """Install recording passing hooks in both repositories and return their logs."""
+
+    logs = (root / "code-pre-commit.log", root / "memory-pre-commit.log")
+    repositories = (contract.code_repo_path, contract.memory_repo_path)
+    for repository, log in zip(repositories, logs, strict=True):
+        assert repository is not None
+        log.unlink(missing_ok=True)
+        hook_directory = Path(_git(repository, "rev-parse", "--git-path", "hooks"))
+        if not hook_directory.is_absolute():
+            hook_directory = repository / hook_directory
+        hook_directory.mkdir(parents=True, exist_ok=True)
+        hook = hook_directory / "pre-commit"
+        hook.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' transaction-hook-invoked >> {shlex.quote(log.as_posix())}\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+        assert hook.is_file() and hook.stat().st_mode & 0o111
+        probe = run_git(repository, ["hook", "run", "pre-commit"])
+        assert probe.returncode == 0, probe
+        assert log.read_text(encoding="utf-8").splitlines() == ["transaction-hook-invoked"]
+        log.unlink()
+    return logs
+
+
+def _assert_landed_subject(
+    repository: Path, expected: str | None, commit: str = "HEAD", hook: str = "none"
+) -> None:
+    """MIK-R152: a landed one-line message's `%s` subject carries the pass fact."""
+
+    tree = _git(repository, "rev-parse", f"{commit}^{{tree}}")
+    assert _git(repository, "log", "-1", "--format=%s", commit) == (
+        f"{expected} Commit-Check-Pass: tree={tree} hook={hook}"
+    )
+
+
 def _assert_memory_attribution(
     memory_worktree: Path,
     *,
     code_commit: str,
     content_commit: str,
     scratch: Path,
+    hook: str = "none",
 ) -> None:
     """The memory commit carries exactly one Code-Commit trailer and contains no cached ledger.
 
@@ -192,13 +233,18 @@ def _assert_memory_attribution(
     """
 
     body = _git(memory_worktree, "log", "-1", "--format=%B", content_commit)
-    assert body == f"{MESSAGES.memory}\n\nCode-Commit: {code_commit}"
+    content_tree = _git(memory_worktree, "rev-parse", f"{content_commit}^{{tree}}")
+    # MIK-R152: the memory commit carries the Commit-Check-Pass trailer for its tree
+    # beside the single Code-Commit attribution trailer.
+    check_trailer = f"Commit-Check-Pass: tree={content_tree} hook={hook}"
+    assert body == f"{MESSAGES.memory}\n\nCode-Commit: {code_commit}\n{check_trailer}"
     assert body.count("Code-Commit:") == 1
+    assert body.count("Commit-Check-Pass:") == 1
     message_file = scratch / "memory-content-message.txt"
     message_file.write_text(f"{body}\n", encoding="utf-8")
     assert (
         _git(memory_worktree, "interpret-trailers", "--parse", message_file.as_posix())
-        == f"Code-Commit: {code_commit}"
+        == f"Code-Commit: {code_commit}\n{check_trailer}"
     )
     assert (
         _git(
@@ -365,7 +411,7 @@ def test_a_moved_code_branch_refuses_the_closeout_and_a_retry_completes_it(
     applied = _apply(config, contract)  # the cause is gone: a plain retry completes
     assert applied["ok"] is True, applied
     assert _git(code, "show", "HEAD:feature.py") == "VALUE = 1"
-    assert _git(code, "log", "-1", "--format=%s") == MESSAGES.code
+    _assert_landed_subject(code, MESSAGES.code)
 
 
 @pytest.mark.parametrize("seam", SEAMS)
@@ -385,7 +431,7 @@ def test_a_moved_memory_branch_leaves_the_pair_to_the_recovery_a_retry_runs(
     with _branch_race(memory, seam), pytest.raises(RuntimeError, match=SEAMS[seam]):
         _apply(config, contract)
     landed_code = _git(contract.code_worktree, "rev-parse", "HEAD")
-    assert _git(contract.code_worktree, "log", "-1", "--format=%s") == MESSAGES.code
+    _assert_landed_subject(contract.code_worktree, MESSAGES.code)
     assert _git(memory, "rev-list", "--all", "--count") == _git(
         memory, "rev-list", "HEAD", "--count"
     )
@@ -613,7 +659,7 @@ def test_the_publication_is_bound_to_the_branch_and_the_head_the_closeout_admitt
         if side == "code":
             assert _code_and_memory_state(contract)[1:3] == before[1][1:3]
         else:  # the code commit of the pair landed; the rerun completes the pair on it
-            assert _git(contract.code_worktree, "log", "-1", "--format=%s") == MESSAGES.code
+            _assert_landed_subject(contract.code_worktree, MESSAGES.code)
         assert _memory_preparations(contract) == before[0]
 
         applied = _apply(config, contract)  # the cause is gone: the plain rerun completes
@@ -626,6 +672,48 @@ def test_the_publication_is_bound_to_the_branch_and_the_head_the_closeout_admitt
     assert json.loads(history)["closed"] is True
     for repo in (contract.code_worktree, memory):
         assert _git(repo, "rev-parse", "elsewhere") != _git(repo, "rev-parse", "HEAD")
+
+
+def _closeout_through_failing_then_passing_hooks(config, contract, messages, root):
+    """MIK-R152: the landing refuses on failing hooks, then lands on passing ones."""
+
+    _install_failing_pre_commit_hooks(contract, root)
+    assert contract.code_worktree is not None and contract.memory_worktree is not None
+    code_before = _git(contract.code_worktree, "rev-parse", "HEAD")
+    memory_before = _git(contract.memory_worktree, "rev-parse", "HEAD")
+    with ExitStack() as stack:
+        for patcher in _forbid_acceptance_tools():
+            stack.enter_context(patcher)
+        # The existing helper publishes a deliberately non-applicable waiting door.  Its
+        # disposable sprint has no queue projection, so bypass only that fixture fence while
+        # retaining the public apply admission.
+        stack.enter_context(
+            mock.patch.object(lifecycle_operations, "require_first_ready_generation")
+        )
+        preview = worktree_tools.worktree_closeout_preview_tool(
+            config, contract.contract_path.as_posix(), messages
+        )
+        assert preview["ok"] is True, preview
+        assert preview["state"] == "would-closeout"
+        with pytest.raises(LandingCommitCheckRefusal, match="commit check"):
+            worktree_tools.worktree_closeout_apply_tool(
+                config,
+                contract.contract_path.as_posix(),
+                messages,
+                CloseoutApproval(intent_note="developer approved transaction"),
+            )
+        assert _git(contract.code_worktree, "rev-parse", "HEAD") == code_before
+        assert _git(contract.memory_worktree, "rev-parse", "HEAD") == memory_before
+        code_hook_log, memory_hook_log = _install_passing_pre_commit_hooks(contract, root)
+        applied = worktree_tools.worktree_closeout_apply_tool(
+            config,
+            contract.contract_path.as_posix(),
+            messages,
+            CloseoutApproval(intent_note="developer approved transaction"),
+        )
+    assert applied["ok"] is True, applied
+    assert applied["state"] == "closed", applied
+    return applied, code_hook_log, memory_hook_log
 
 
 def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
@@ -668,33 +756,11 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
     _bind_task_without_review(contract)
     config = _public_config(tmp_path, contract)
     _assert_no_profile_or_review(config, contract)
-    code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(contract, tmp_path)
-
-    with ExitStack() as stack:
-        for patcher in _forbid_acceptance_tools():
-            stack.enter_context(patcher)
-        # The existing helper publishes a deliberately non-applicable waiting door.  Its
-        # disposable sprint has no queue projection, so bypass only that fixture fence while
-        # retaining the public apply admission.
-        stack.enter_context(
-            mock.patch.object(lifecycle_operations, "require_first_ready_generation")
-        )
-        preview = worktree_tools.worktree_closeout_preview_tool(
-            config, contract.contract_path.as_posix(), MESSAGES
-        )
-        assert preview["ok"] is True, preview
-        assert preview["state"] == "would-closeout"
-        applied = worktree_tools.worktree_closeout_apply_tool(
-            config,
-            contract.contract_path.as_posix(),
-            MESSAGES,
-            CloseoutApproval(intent_note="developer approved transaction"),
-        )
-
     # Closeout runs in this process: no detached worker, no operation record. The
     # two commits and their ancestry are the whole record of what it did.
-    assert applied["ok"] is True, applied
-    assert applied["state"] == "closed", applied
+    applied, code_hook_log, memory_hook_log = _closeout_through_failing_then_passing_hooks(
+        config, contract, MESSAGES, tmp_path
+    )
     # The response's OWN address, in the envelope's spelling. `status_payload` emits the
     # snake_case `contract_path`; the guidance guard that a seat's next move depends on reads
     # `contractPath`/`enclosurePath` (`application/tool_response.py::bound_next_step`), so a
@@ -732,7 +798,10 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
     assert mapping.code_commit == closed.code_commit
     assert mapping.memory_commit == closed.memory_content_commit
     # The validated messages are the ones that actually landed in the commit objects.
-    assert _git(contract.code_worktree, "log", "-1", "--format=%s") == MESSAGES.code
+    # The one-line code message's `%s` carries the fact; the memory message's first
+    # paragraph is bare and its trailers are pinned by `_assert_memory_attribution`.
+    _assert_landed_subject(contract.code_worktree, MESSAGES.code, hook=".git/hooks/pre-commit")
+    assert contract.memory_content_commit is not None
     assert (
         _git(contract.memory_worktree, "log", "-1", "--format=%s", closed.memory_content_commit)
         == MESSAGES.memory
@@ -745,9 +814,11 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
         code_commit=closed.code_commit,
         content_commit=closed.memory_content_commit,
         scratch=tmp_path,
+        hook=".git/hooks/pre-commit",
     )
-    assert not code_hook_log.exists()
-    assert not memory_hook_log.exists()
+    # MIK-R152: both hooks ran for the landing that published these commits.
+    assert code_hook_log.read_text(encoding="utf-8").splitlines() == ["transaction-hook-invoked"]
+    assert memory_hook_log.read_text(encoding="utf-8").splitlines() == ["transaction-hook-invoked"]
 
 
 def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, worktree_services):

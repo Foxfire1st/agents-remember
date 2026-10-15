@@ -149,9 +149,11 @@ def test_sync_records_moved_with_matching_code_on_a_memory_only_carry(
     lines = _converted_lines(tmp_path)
     contract, _reviewed = _record_review(lines)
     config = _sync_config(lines)
+    # A fast-forward judges what it adopts (MIK-R61 rule 4): the carried file must be
+    # a knowledge file location, or the validator refuses the incoming tree.
     _commit(
         lines.fixture.memory_repo,
-        {"knowledge/line-only.md": b"# line only\n"},
+        {"onboarding/line-only.md": b"# line only\n"},
         "line-only memory move",
     )
     result = worktree_tools.worktree_sync_tool(

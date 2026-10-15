@@ -395,13 +395,16 @@ someone else's staged edit). The refusal names `direct_landing` as the next acti
 call once the cause is gone, any number of times; each repeat judges the memory checkout as it is
 then.
 
-Hook behavior belongs to the selected publication route. The ordinary closeout and direct-landing
-commits written through `publish_tree_commit` use `commit-tree`, which runs no `pre-commit`,
-`commit-msg`, `prepare-commit-msg` or `post-commit` hook. The prepared closeout retains its declared
-code and memory policies: its code commit uses `--no-verify`, which skips `pre-commit` and
-`commit-msg` but still runs `prepare-commit-msg` and `post-commit`; its ordinary memory commit runs
-all four hooks. The mandatory invariant gate and knowledge validator remain the publication checks.
-A `reference-transaction` hook still runs when a branch moves through a Git ref transaction.
+Hook behavior belongs to every publication route: no landing publishes without the
+repository's own commit check (MIK-R152). The ordinary closeout and direct-landing
+commits written through `publish_tree_commit` stage the exact tree and run the `pre-commit`
+hook Git would run for a commit in that worktree before the commit object is written; a
+failing check refuses the landing, gives the index back, and moves no ref. The prepared
+closeout runs the same hook through `git commit` itself on both legs; there is no
+`--no-verify` anywhere. A passed check is recorded on the commit as a `Commit-Check-Pass`
+trailer, which the integration's master-line move reads. The mandatory invariant gate and
+knowledge validator remain the publication checks. A `reference-transaction` hook still
+runs when a branch moves through a Git ref transaction.
 
 ## Explicit Legacy Operation Repair
 

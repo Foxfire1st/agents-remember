@@ -70,6 +70,11 @@ from agents_remember.worktrees.modules.git import (
     require_git,
     stage_worktree_content,
 )
+from agents_remember.worktrees.modules.landing_commit_check import (
+    LandingCommitCheckRefusal,
+    check_published_tree,
+    restore_hook_rewritten_worktree,
+)
 from agents_remember.worktrees.services import WorktreeServicesUnboundError
 
 
@@ -428,6 +433,29 @@ def _dry_run_converted_validation(context, code_source_commit: str) -> str | Non
     return refusal
 
 
+def _require_commit_check(repo: Path, staged_tree: str) -> None:
+    """Run the repository's own pre-commit hook on the exact validated tree (MIK-R152).
+
+    Baseline adoption moves the memory repository's own default branch, so the
+    same check/no-bypass/refusal contract as every leaf landing applies: a
+    refusal publishes nothing and moves no ref. The check runs against a scratch
+    index holding exactly the validated tree, so the worktree's own index is
+    never touched. A hook that rewrites a tracked worktree file still leaves
+    its bytes behind; those paths are given back from the validated tree, so
+    the worktree holds what it held before the run began. No pass trailer is
+    written: adoption keeps its own message.
+    """
+
+    try:
+        check_published_tree(repo, staged_tree)
+    except LandingCommitCheckRefusal as refused:
+        if refused.reason == "changed":
+            restore_hook_rewritten_worktree(repo, staged_tree, refused.changed_paths)
+        raise RuntimeError(
+            f"adopted memory commit refused by the repository's commit check: {refused}"
+        ) from refused
+
+
 def _publish_validated_tree(repo: Path, staged_tree: str, message: str) -> str:
     """Record exactly the validated tree without advancing past it (L44-C1-04).
 
@@ -441,6 +469,7 @@ def _publish_validated_tree(repo: Path, staged_tree: str, message: str) -> str:
         parent = require_git(repo, ["rev-parse", "--verify", "HEAD"]).strip()
     except RuntimeError:
         parent = ""
+    _require_commit_check(repo, staged_tree)
     new_commit = require_git(
         repo,
         ["commit-tree", staged_tree, "-m", message, *(["-p", parent] if parent else [])],
@@ -483,7 +512,11 @@ def _adopt_validated_converted_tree(context, code_source_commit: str, message: s
     if refusal is not None:
         _restore_file(repo, entry, prepared)
         raise BaselineValidationRefused(refusal)
-    published = _publish_validated_tree(repo, staged, message)
+    try:
+        published = _publish_validated_tree(repo, staged, message)
+    except Exception:
+        _restore_file(repo, entry, prepared)
+        raise
     prepare_memory_cache(repo)
     _stage_for_commit(repo)
     return published

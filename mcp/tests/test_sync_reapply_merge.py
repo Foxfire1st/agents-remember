@@ -20,8 +20,14 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.application.worktree_services import (
+    bind_worktree_services,
+    build_default_worktree_services,
+)
 from agents_remember.worktrees import sync_transaction_authority
 from agents_remember.worktrees import sync_transaction_git as sync_git
+from agents_remember.worktrees.services import reset_worktree_services
+from agents_remember.worktrees.sync_transaction_git import _proof as sync_git_proof
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
     SyncOperationStore,
@@ -167,7 +173,7 @@ def git_that_fails(failing: str, words: str):  # type: ignore[no-untyped-def]
             return subprocess.CompletedProcess(args, 128, "", f"{words}\n")
         return real_run(repository, args, *more)  # type: ignore[arg-type]
 
-    return mock.patch.object(sync_git, "run_git", side_effect=run)
+    return mock.patch.object(sync_git_proof, "run_git", side_effect=run)
 
 
 def merge_values_in_use(root: Path) -> dict[str, list[str]]:
@@ -196,6 +202,11 @@ def merge_values_in_use(root: Path) -> dict[str, list[str]]:
 class ReapplyMergeTests(unittest.TestCase):
     """The proof and the cancel judge a path by what git's own reapply gives."""
 
+    def setUp(self) -> None:
+        # Fast-forwards onto converted memory run the validator (MIK-R61 rule 4).
+        bind_worktree_services(build_default_worktree_services())
+        self.addCleanup(reset_worktree_services)
+
     def test_rows_added_at_one_place_of_a_merged_catalog_finish_the_sync(self) -> None:
         for merge, merged in MERGE_CASES.items():
             with self.subTest(merge=merge), tempfile.TemporaryDirectory() as tmp:
@@ -205,7 +216,7 @@ class ReapplyMergeTests(unittest.TestCase):
                 (worktree / "other.txt").write_bytes(b"base line\nparked byte\n")
                 expected = {**snapshot_tree(worktree), **dict.fromkeys(CATALOGS, merged)}
 
-                with mock.patch.object(sync_git, "run_git", wraps=sync_git.run_git) as runner:
+                with mock.patch.object(sync_git_proof, "run_git", wraps=sync_git.run_git) as runner:
                     result = fixture.sync()
 
                 # One merge per proof (before the reapply and after it), not one per catalog.
@@ -402,7 +413,7 @@ class ReapplyMergeTests(unittest.TestCase):
             record = sync_record(fixture)
             self.assertEqual((record.phase, record.code.wipState), ("running-code", "parked"))
 
-    def test_cancel_keeps_a_later_edit_that_equals_another_algorithms_merge(self) -> None:
+    def test_cancel_saves_a_later_edit_that_equals_another_algorithms_merge(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = SyncFixture(Path(tmp))
             worktree = fixture.contract.code_worktree
@@ -416,19 +427,26 @@ class ReapplyMergeTests(unittest.TestCase):
             (worktree / "other.txt").write_bytes(b"base line\nparked byte\n")
             later_edit = the_other_merge((worktree / "rows.txt").read_bytes())
             (worktree / "rows.txt").write_bytes(later_edit)
-            held = snapshot_tree(worktree)
-            phase = sync_record(fixture).phase
+            record = sync_record(fixture)
+            generation = record.generation
 
-            refused = fixture.sync(resolution_action="cancel")
+            # MIK-R61 rule 12: no way out is manual. The later edit is saved
+            # first, then the cancel completes.
+            cancelled = fixture.sync(resolution_action="cancel")
 
-            self.assertEqual(
-                refused.payload["state"], "sync-cancel-refused-later-work", refused.payload
+            self.assertEqual(cancelled.payload["state"], "sync-cancelled", cancelled.payload)
+            self.assertIn("could not attribute", str(cancelled.payload["summary"]))
+            saved = (
+                fixture.contract.worktree_group
+                / "scratch"
+                / f"sync-cancel-generation-{generation}"
+                / "code"
             )
-            self.assertIn("no commit holds: code/rows.txt.", str(refused.payload["summary"]))
-            self.assertEqual(snapshot_tree(worktree), held)
-            self.assertEqual((worktree / "rows.txt").read_bytes(), later_edit)
-            self.assertNotEqual(git(worktree, "stash", "list"), "")
-            self.assertEqual(sync_record(fixture).phase, phase)
+            listed = (saved / "paths.txt").read_text(encoding="utf-8").splitlines()
+            self.assertIn("rows.txt", listed)
+            held = (saved / "staged.patch").read_bytes() + (saved / "unstaged.patch").read_bytes()
+            self.assertIn(b"+parked byte\n", held)
+            self.assertIn(b"+c\n+b\n+b\n+b\n+c\n", held)
 
     def test_configuration_of_the_worktree_alone_is_the_proofs_configuration(self) -> None:
         # The reapply runs in the leaf's worktree; a diff algorithm and a merge driver set
@@ -533,7 +551,10 @@ class ReapplyMergeTests(unittest.TestCase):
                 with git_that_fails(failing, words) as runner:
                     stopped = fixture.sync()
                     reapplied = snapshot_tree(worktree)
-                    refused = fixture.sync(resolution_action="cancel")
+                    # MIK-R61 rule 12: while git cannot make the merge, the
+                    # cancel cannot own the path — but no way out is manual
+                    # either. It saves the unproven state first, then cancels.
+                    saved_first = fixture.sync(resolution_action="cancel")
 
                 self.assertEqual(stopped.payload["state"], "sync-git-proof-failed", stopped.payload)
                 summary = str(stopped.payload["summary"])
@@ -543,25 +564,23 @@ class ReapplyMergeTests(unittest.TestCase):
                     [call for call in runner.call_args_list if "merge-file" in call.args[1]]
                 )
                 self.assertEqual(reapplied["notes.txt"], f"parked top\n{base}landed end\n".encode())
-                # While git cannot make the merge, the cancel cannot own the path: it refuses,
-                # says why, and changes nothing.
                 self.assertEqual(
-                    refused.payload["state"], "sync-cancel-refused-later-work", refused.payload
+                    saved_first.payload["state"], "sync-cancelled", saved_first.payload
                 )
-                refusal = str(refused.payload["summary"])
-                self.assertIn("no commit holds: code/notes.txt.", refusal)
-                self.assertIn(f"Git could not make the reapply's merge again ({said})", refusal)
-                self.assertEqual(snapshot_tree(worktree), reapplied)
-                self.assertNotEqual(git(worktree, "stash", "list"), "")
-                record = sync_record(fixture)
-                self.assertEqual((record.phase, record.code.wipState), ("running-code", "parked"))
-
-                cancelled = fixture.sync(resolution_action="cancel")
-
-                self.assertEqual(cancelled.payload["state"], "sync-cancelled", cancelled.payload)
+                self.assertIn(
+                    said,
+                    str(saved_first.payload["summary"]),
+                )
+                self.assertIn("could not attribute", str(saved_first.payload["summary"]))
                 self.assertEqual(git(worktree, "rev-parse", "HEAD"), pre_sync)
                 self.assertEqual(snapshot_tree(worktree), parked_tree)
                 self.assertEqual(git(worktree, "stash", "list"), "")
+                # F04: the save-first cancel is repeatable: a second cancel
+                # answers terminally without touching anything.
+                again = fixture.sync(resolution_action="cancel")
+                self.assertEqual(again.payload["state"], "sync-cancelled", again.payload)
+                self.assertIn("already cancelled", str(again.payload["summary"]))
+                self.assertEqual(snapshot_tree(worktree), parked_tree)
 
     def test_every_merge_rule_of_the_repository_has_its_case(self) -> None:
         unknown = {

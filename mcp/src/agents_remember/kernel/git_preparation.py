@@ -10,6 +10,7 @@ import hashlib
 import os
 import re
 import stat
+import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,14 @@ _PREPARATION_AUTHORITY = object()
 
 class GitPreparationError(ValueError):
     """An exact Git read or named private checkout violates its required binding."""
+
+
+class GitPreparationCommandError(GitPreparationError):
+    """A completed command failed readback; retain its actual output for the owning log."""
+
+    def __init__(self, detail: str, result: subprocess.CompletedProcess[str]) -> None:
+        super().__init__(detail)
+        self.result = result
 
 
 def require_git_object_id(value: str) -> None:

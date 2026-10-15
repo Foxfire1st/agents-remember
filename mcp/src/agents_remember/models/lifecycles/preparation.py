@@ -135,8 +135,12 @@ class CloseoutPreparationIntent(FrozenContractModel):
 
     @model_validator(mode="after")
     def _require_intent(self) -> Self:
-        expected_policy = "strict-code-no-verify" if self.leg == "code" else "ordinary"
-        if self.hookPolicy != expected_policy:
+        # MIK-R152 rule 7: every leg runs the commit hook. ``strict-code-no-verify``
+        # stays a loadable spelling for journaled intents written before it, but no
+        # new intent carries it and no command skips the hook for it.
+        if self.hookPolicy not in ("ordinary", "strict-code-no-verify") or (
+            self.hookPolicy == "strict-code-no-verify" and self.leg != "code"
+        ):
             raise ValueError("preparation hook policy must match its declared leg")
         _require_preparation_route(self)
         _require_preparation_reuse(self)

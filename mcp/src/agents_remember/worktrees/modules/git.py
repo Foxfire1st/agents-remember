@@ -6,7 +6,10 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from agents_remember.worktrees.modules.landing_commit_check import CommitCheckPass
 
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.git_command import (
@@ -18,6 +21,7 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.kernel.memory_ledger import LEDGER_RELATIVE_PATH, MEMORY_CACHE_EXCLUDE
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
+from agents_remember.worktrees.modules.models import CommitPublicationRefusal
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 # This module used to define its own `run_git` -- the kernel's function with the
@@ -519,6 +523,26 @@ def stage_tree(repo: Path, tree: str) -> None:
     _retarget_index(_index_shape(repo), tree)
 
 
+@contextmanager
+def staged_publication_tree(repo: Path, tree: str) -> Iterator[str]:
+    """Stage ``tree`` for a publication, giving the index back on a refusal.
+
+    The yielded tree is what the index holds inside the block. When the block
+    raises, the index is given back exactly as found (tree, flags and
+    intent-to-add entries); when it returns, the staged tree stays. A landing
+    route runs the repository's commit check inside this block (MIK-R152), so a
+    refused check leaves files and index exactly as found.
+    """
+
+    found = _index_shape(repo)
+    stage_tree(repo, tree)
+    try:
+        yield tree
+    except BaseException:
+        _give_index_back(found)
+        raise
+
+
 def unstage_bound_tree(repo: Path, staged_tree: str, before_index: str | _IndexShape) -> bool:
     """Give the index back when it still holds exactly ``staged_tree``.
 
@@ -578,10 +602,6 @@ def run_pre_commit_hook_if_configured(repo: Path) -> bool:
         return False
     require_git(repo, ["hook", "run", "pre-commit"])
     return True
-
-
-class CommitPublicationRefusal(RuntimeError):
-    """The commit was not published: the admitted branch, its tip or the worktree state differs."""
 
 
 try:  # POSIX advisory locks; where they do not exist publications are not serialized
@@ -929,12 +949,22 @@ def publish_tree_commit(
     behave as before (``commit-tree`` ignores that setting, so ``-S`` is passed when it is true),
     and the message is the one ``git commit -m`` stores in the same configuration.
 
-    This function writes through ``commit-tree`` and runs no Git commit hook. The knowledge gate
+    Before the commit object is written, the repository's own pre-commit hook runs on the
+    staged tree (MIK-R152): the hook Git would run for a commit in this worktree, started
+    here with the index holding exactly the tree to be published. A failure, a change the
+    hook's run made to the index or a tracked file, an unrunnable hook, or a run past the
+    bound refuses with :class:`LandingCommitCheckRefusal`; the index is given back and no
+    ref moves. A passed check is recorded on the commit itself as a ``Commit-Check-Pass``
+    trailer (tree and hook), which is the fact the integration's master-line move reads
+    (MIK-R152 rule 8); a repository without a hook lands as before.
+
+    This function writes through ``commit-tree`` and runs the hook itself because no Git
+    commit hook runs for a ``commit-tree`` object. The knowledge gate
     and validator have run before it is called. This describes the ordinary closeout and direct
     landing callers of this primitive, not the prepared closeout's independent policies. Prepared
-    code commits use ``--no-verify``: ``pre-commit`` and ``commit-msg`` are skipped, while
-    ``prepare-commit-msg`` and ``post-commit`` still run. Prepared memory commits use ordinary Git
-    hook behavior. No policy of those routes is changed here. The ``reference-transaction`` hook
+    code commits run the hook through ``git commit`` itself (``--no-verify`` is gone);
+    prepared memory commits use ordinary Git
+    hook behavior. The ``reference-transaction`` hook
     still runs for this primitive's ref transaction, and its refusal retains Git's own text.
     """
 
@@ -969,7 +999,25 @@ def publish_tree_commit(
                 return before.head
             if confirm is not None:
                 confirm()
-            commit, subject = _write_commit(repo, cleaned, staged, before.head)
+            from agents_remember.worktrees.modules.landing_commit_check import (  # noqa: PLC0415
+                append_commit_check_trailer,
+                run_landing_commit_check,
+            )
+
+            def _give_staged_back() -> None:
+                # Forced, not conditional: the hook's run is what changed the index, and
+                # MIK-R152 rule 4 gives it back as this call found it. The publication
+                # lock serializes product actors; a human race keeps its worktree files.
+                _give_index_back(found)
+
+            checked = run_landing_commit_check(repo, tree=staged, restore_index=_give_staged_back)
+            _refuse_unadmitted_index(repo, staged, checked=checked, give_back=_give_staged_back)
+            commit, subject = _write_commit(
+                repo,
+                append_commit_check_trailer(cleaned, staged, checked.hook),
+                staged,
+                before.head,
+            )
             _move_admitted_ref(repo, commit, subject, before)
             return commit
         except BaseException:
@@ -979,6 +1027,52 @@ def publish_tree_commit(
                 with suppress(RuntimeError):
                     _give_index_back(found)
             raise
+
+
+def _refuse_unadmitted_index(
+    repo: Path, staged: str, *, checked: CommitCheckPass, give_back: Callable[[], None]
+) -> None:
+    """Refuse where tracked state moved after the check passed (MIK-R152 rule 3).
+
+    The commit object is written from the admitted tree hash, so hook bytes can
+    never enter it; but a tracked edit between the pass and the commit — staged
+    or unstaged — means the judged state is gone, and the landing refuses with
+    the index given back instead of publishing. The index tree alone cannot see
+    an unstaged rewrite, so the admitted worktree bytes are rechecked too.
+    """
+
+    from agents_remember.worktrees.modules.landing_commit_check import (  # noqa: PLC0415
+        CheckedTree,
+        LandingCommitCheckRefusal,
+        TreeSnapshot,
+        _changed_paths,
+        _diff_head_raw,
+        worktree_blob_map,
+    )
+
+    admitted = checked.admitted
+    restaged = run_git(repo, ["write-tree"]).stdout.strip()
+    if admitted is None:
+        if restaged == staged:
+            return
+        changed: tuple[str, ...] = ("the index",)
+    else:
+        current = TreeSnapshot(
+            index_tree=restaged,
+            diff_head=_diff_head_raw(repo),
+            blobs=worktree_blob_map(repo),
+        )
+        if current == admitted:
+            return
+        changed = tuple(_changed_paths(admitted, current))
+    give_back()
+    raise LandingCommitCheckRefusal(
+        "changed",
+        checked=CheckedTree(repo=repo, tree=staged, hook=checked.hook),
+        step=None,
+        log=checked.log,
+        changed_paths=changed,
+    )
 
 
 def _ref_commit(repo: Path, ref: str) -> str:

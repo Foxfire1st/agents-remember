@@ -26,6 +26,9 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     LifecycleOperationStore,
     operation_record_path,
 )
+from agents_remember.worktrees.modules.landing_commit_check import (
+    message_with_commit_check_trailer,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     RepoBranchPlan,
@@ -72,7 +75,17 @@ def _closed_external_leaf_worktrees(
     )
     (code_worktree / "candidate.txt").write_text("candidate\n", encoding="utf-8")
     _git(code_worktree, "add", "candidate.txt")
-    _git(code_worktree, "commit", "-m", "closed code")
+    # MIK-R152: a closed leaf's commits carry the pass fact exactly as a product
+    # landing writes it, so the integration reads the fact instead of re-running
+    # the check. No hook is configured in the fixture: the fact says hook=none.
+    _git(
+        code_worktree,
+        "commit",
+        "-m",
+        message_with_commit_check_trailer(
+            code_worktree, "closed code", _git(code_worktree, "write-tree")
+        ),
+    )
     code_commit = _git(code_worktree, "rev-parse", "HEAD")
     (memory_worktree / "candidate.md").write_text("# Candidate\n", encoding="utf-8")
     prepare_memory_cache(memory_worktree)
@@ -103,7 +116,14 @@ def _closed_external_leaf_worktrees(
     assert covered.state == "written", covered.render()
     _git(memory_worktree, "add", "-A")
     _git(
-        memory_worktree, "commit", "-m", render_memory_content_message("closed memory", code_commit)
+        memory_worktree,
+        "commit",
+        "-m",
+        message_with_commit_check_trailer(
+            memory_worktree,
+            render_memory_content_message("closed memory", code_commit),
+            _git(memory_worktree, "write-tree"),
+        ),
     )
     memory_commit = _git(memory_worktree, "rev-parse", "HEAD")
     refresh_memory_cache(memory_worktree, repo_name=fixture.leaf_contract.repo_name)

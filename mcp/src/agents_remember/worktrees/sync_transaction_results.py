@@ -104,6 +104,13 @@ def resolution_required(
             "resolutionOwner": "agent",
             "summary": summary,
             "resolution": resolution,
+            **(
+                {
+                    "validationRefusal": record.validationRefusal.model_dump(mode="json"),
+                }
+                if record.validationRefusal is not None
+                else {}
+            ),
             "nextOperation": next_operation,
             "nextTool": "worktree_sync",
             "nextArgs": next_args,

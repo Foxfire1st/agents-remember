@@ -658,6 +658,9 @@ def _integrated_result(
     # reconciles the leaf document and its master row; doing it here would complete the
     # enclosure before the edge that is supposed to finalize it could ever be reached.
     observed = load_contract(contract.contract_path)
+    empty_landing = commits.code == contract.code_base_commit and (
+        contract.memory_mode != "external" or commits.memory_content == contract.memory_base_commit
+    )
     payload: dict[str, object] = {
         "state": "integrated",
         **status_payload(observed),
@@ -668,6 +671,10 @@ def _integrated_result(
         "strategy": args.strategy,
         "integrated_code_commit": commits.code,
         "integrated_memory_content_commit": commits.memory_content,
+        # The landing is empty when its pair equals the pair the leaf started from or was
+        # last synced to (MIK-R61 rule 1): it stands on the master's chain without
+        # ordering. Named only when empty, so other landings answer exactly as before.
+        **({"emptyLanding": True} if empty_landing else {}),
     }
     if handover_warning is not None:
         payload["handover_gate_warning"] = handover_warning

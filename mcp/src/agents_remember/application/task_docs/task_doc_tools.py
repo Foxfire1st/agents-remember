@@ -38,7 +38,12 @@ from agents_remember.tasks import (
     write_task_docs,
     write_task_docs_and_remove,
 )
-from agents_remember.tasks.master_sync import MasterSyncError, plan_master_sync
+from agents_remember.tasks.leaf_doc import require_task_document_in_place
+from agents_remember.tasks.master_sync import (
+    MasterSyncError,
+    master_json_path_from_ref,
+    plan_master_sync,
+)
 from agents_remember.tasks.readiness import (
     missing_unresolved_master_rows,
 )
@@ -425,6 +430,12 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     original = context.original
     doc = context.candidate
     require_retirement_proofs_unchanged(original, doc, f"task_doc {operation}")
+    if doc.kind == "subTask" and doc.master:
+        # Reject an invalid caller reference before the publication's recoverable
+        # parent-sync failure answer (MIK-R61 rule 2; MIK-R111 rule 2).
+        master_json_path_from_ref(
+            task_root, leaf_id=doc.id, master_ref=doc.master, refusal=TaskDocError
+        )
     _enforce_disposition_authority(operation, original, doc)
     _enforce_route_review_authority(operation, original, doc)
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
@@ -482,6 +493,12 @@ def _publish_task_doc_candidate(
     if master_sync.changed and master_sync.master is not None:
         if master_sync.source_snapshot is None:
             raise TaskDocError("changed master synchronization has no accepted source bytes")
+        if master_sync.master_json_path is not None:
+            # The master sync writes in place (MIK-R61 rule 3): a master document whose
+            # read path differs from the store's write target is refused before any write.
+            require_task_document_in_place(
+                master_sync.master_json_path, master_sync.master, TaskDocError
+            )
         docs.append(master_sync.master)
     if dry_run:
         preview_context = TaskDocPublication(

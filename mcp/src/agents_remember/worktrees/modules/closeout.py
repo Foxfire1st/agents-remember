@@ -93,6 +93,7 @@ from agents_remember.worktrees.route_review import (
     code_candidate_tree,
 )
 from agents_remember.worktrees.series_closeout import (
+    empty_landing_leaf_ids,
     publish_closeout_under_authority,
     refuse_series_workbench_commit,
     require_closeout_publication_authority,
@@ -328,11 +329,17 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     memory_would_commit = memory_dirty or _refresh_plans_have_work(
         refresh.metadata, refresh.entities, refresh.route_overviews, refresh.route_indexes
     )
+    # A series whose landed leaves include empty landings lists them (MIK-R61 rule 1):
+    # they stand on the chain without ordering, and the preview says so. The key is
+    # present only when there is something to list, so worlds without empty landings
+    # answer exactly as before.
+    empty_landings = empty_landing_leaf_ids(contract) if contract.kind == "series" else []
     return {
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
         "summary": closeout_summary(contract),
+        **({"emptyLandings": empty_landings} if empty_landings else {}),
         **recovery_guidance(
             "request_commit_approval",
             tool="worktree_closeout_apply",

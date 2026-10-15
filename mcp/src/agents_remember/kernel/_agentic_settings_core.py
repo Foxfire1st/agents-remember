@@ -48,8 +48,15 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "qualityGate",
         # MIK-R117: the bound on the characters of one role_message text.
         "roleMessageLimit",
+        # MIK-R152: the bound on the seconds one landing commit-check run may take.
+        "landing",
     }
 )
+# MIK-R152 rule 6: the bound on the seconds one landing commit-check run may take,
+# read from ``orchestration.landing``; where the settings name none, the run is
+# stopped with its children after this many seconds.
+DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS = 900
+KNOWN_LANDING_FIELDS = frozenset({"commitCheckTimeoutSeconds"})
 # MIK-R113 rule 4: keys an earlier build read and this one does not. A file that holds one
 # loads; none is read or checked, and :func:`unused_orchestration_keys` names the ones it holds.
 UNUSED_ORCHESTRATION_FIELDS = frozenset({"expectations", "supervisor", "agentNotifier"})
@@ -218,6 +225,17 @@ class ConcurrencySettings:
 
 
 @dataclass(frozen=True)
+class LandingSettings:
+    """``orchestration.landing`` -- the landing commit-check knobs (MIK-R152).
+
+    ``commit_check_timeout_seconds`` bounds one pre-commit hook run at a landing
+    (MIK-R152 rule 6); where the settings name none, the default holds.
+    """
+
+    commit_check_timeout_seconds: int = DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS
+
+
+@dataclass(frozen=True)
 class QualityGateSettings:
     """``orchestration.qualityGate`` -- the full quality gate's resource knobs.
 
@@ -246,6 +264,7 @@ class AgenticSettings:
     # (see :meth:`resolved_role_knobs`). Level vocabulary matches ``loops.perLevel``.
     roles_per_level: dict[str, dict[str, RoleKnobs]] = field(default_factory=dict)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
+    landing: LandingSettings = field(default_factory=LandingSettings)
     quality_gate: QualityGateSettings = field(default_factory=QualityGateSettings)
     # MIK-R117: the bound on the characters of one role_message text, read per
     # call so a changed number holds for the next call without a restart.

@@ -29,6 +29,9 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identit
     closeout_contract_sha256,
 )
 from agents_remember.worktrees.modules.git import require_git
+from agents_remember.worktrees.modules.landing_commit_check import (
+    message_with_commit_check_trailer,
+)
 from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 
 from .code_output import select_code_preparation
@@ -77,6 +80,8 @@ def _intent(
         else None
     )
     policy = observe_git_preparation_policy(root)
+    if selection.enabled and message is not None:
+        message = message_with_commit_check_trailer(root, message, selection.tree)
     private = (
         contract.worktree_group
         / "preparation"

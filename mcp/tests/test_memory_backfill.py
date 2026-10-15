@@ -136,6 +136,7 @@ class BackfillFixture:
         self.memory = self.root / "memory"
         self.code = self.root / "code"
         self.memory_branch = memory_branch
+        self.judged: list[str] = []
         for repo in (self.memory, self.code):
             repo.mkdir()
             run_git(repo, ["init", "-q", "-b", memory_branch])
@@ -216,7 +217,9 @@ class BackfillFixture:
     def apply(
         self, tip: str, *, rescue: str = "refs/backup/pre-migration", refs: tuple[str, ...] = ()
     ):
-        return apply_memory_backfill(self.request(tip, rescue=rescue, refs=refs))
+        return apply_memory_backfill(
+            self.request(tip, rescue=rescue, refs=refs), commit_check=self.judged.append
+        )
 
 
 class MemoryBackfillPlanTests(unittest.TestCase):
@@ -398,6 +401,49 @@ class MemoryBackfillApplyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fixture = BackfillFixture()
         self.addCleanup(self.fixture.close)
+
+    def test_every_rewritten_tree_passes_the_bound_commit_check(self) -> None:
+        # MIK-R152 rules 1+7: the rewritten commits are new objects on named
+        # (possibly covered) refs; every distinct rewritten tree is judged
+        # before any ref moves.
+        code = self.fixture.build_code(2)
+        memory = self.fixture.build_memory(4)
+        self.fixture.table([(code[0], memory[3]), (code[1], memory[2])])
+        self.fixture.apply(self.fixture.tip())
+
+        self.assertTrue(self.fixture.judged)
+        for tree in self.fixture.judged:
+            self.assertRegex(tree, r"^[0-9a-f]{40}$")
+        self.assertEqual(len(set(self.fixture.judged)), len(self.fixture.judged))
+
+    def test_a_failing_commit_check_moves_no_ref(self) -> None:
+        # MIK-R152 rules 1+7: a refused tree moves no named ref; the rescue
+        # refs already written stay as the undo.
+        code = self.fixture.build_code(1)
+        memory = self.fixture.build_memory(2)
+        self.fixture.table([(code[0], memory[1])])
+        tip_before = self.fixture.tip()
+
+        def refuse_everything(tree: str) -> None:
+            raise RuntimeError(f"hook says no to {tree}")
+
+        with self.assertRaisesRegex(MemoryBackfillRefusal, "no named ref moved"):
+            apply_memory_backfill(
+                self.fixture.request(self.fixture.tip()), commit_check=refuse_everything
+            )
+        self.assertEqual(self.fixture.tip(), tip_before)
+
+    def test_a_run_without_a_commit_check_is_refused_unchecked(self) -> None:
+        # MIK-R152 rules 1+7: fail closed — a migration with no check runner
+        # never moves rewritten commits silently.
+        code = self.fixture.build_code(1)
+        memory = self.fixture.build_memory(2)
+        self.fixture.table([(code[0], memory[1])])
+        tip_before = self.fixture.tip()
+
+        with self.assertRaisesRegex(MemoryBackfillRefusal, "no commit-check runner"):
+            apply_memory_backfill(self.fixture.request(self.fixture.tip()))
+        self.assertEqual(self.fixture.tip(), tip_before)
 
     def test_the_written_trailer_is_the_code_commit_the_row_named(self) -> None:
         code = self.fixture.build_code(2)

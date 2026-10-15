@@ -27,9 +27,10 @@ anywhere in the package rather than only a spawn it can see the argv of.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from collections.abc import Callable, Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,7 @@ from agents_remember.kernel.git_closeout_publication import (
 from agents_remember.kernel.git_preparation import (
     _PREPARATION_AUTHORITY,
     ExistingGitPreparationBinding,
+    GitPreparationCommandError,
     GitPreparationError,
     PreparationAction,
     PrivateGitPreparationBinding,
@@ -121,6 +123,7 @@ class _GitRun:
     input_text: str | None
     timeout: float
     environment: dict[str, str]
+    new_session: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,7 @@ class GitRunnerOptions:
     input_text: str | None = None
     timeout: float = GIT_LOCAL_TIMEOUT_SECONDS
     identity: dict[str, str] | None = None
+    new_session: bool = False
 
 
 @dataclass(frozen=True)
@@ -207,6 +211,11 @@ def run_git(
     is additive and never subtractive: the selector stripping runs first and this cannot put a
     selector back, because the names it accepts are checked against that same list.
 
+    ``options.new_session`` starts the command alone in its process group, so a timeout stops
+    the command with the children it started (MIK-R152 rule 6: a landing's commit hook runs
+    inside ``git commit``, and killing git alone would orphan it). It exists for exactly one
+    command family: the prepared closeout's commit, whose hook no outer runner watches.
+
     ``safe.directory`` names ``repo_root`` and not the ``*`` the benchmark runner used.
     That is narrower, not weaker: it is the exact tree every one of these commands
     operates on, and a wildcard additionally disarms the ownership check for any *other*
@@ -227,6 +236,7 @@ def run_git(
             input_text=settings.input_text,
             timeout=settings.timeout,
             environment=environment,
+            new_session=settings.new_session,
         ),
     )
 
@@ -333,18 +343,48 @@ def _run_git(
     stdin_kwargs: dict[str, object] = (
         {"input": stdin_input} if stdin_input is not None else {"stdin": subprocess.DEVNULL}
     )
-    return subprocess.run(
-        _git_argv(repo_root, args, execution.work_dir),
+    argv = _git_argv(repo_root, args, execution.work_dir)
+    if not execution.new_session:
+        return subprocess.run(
+            argv,
+            cwd=execution.work_dir,
+            text=not raw_output,
+            encoding=None if raw_output else "utf-8",
+            errors=None if raw_output else "surrogateescape",
+            capture_output=True,
+            env=execution.environment,
+            timeout=execution.timeout,
+            check=False,
+            **stdin_kwargs,  # type: ignore[arg-type]
+        )
+    # A new session owns its process group, so a timeout stops the command with
+    # the children it started (MIK-R152 rule 6). ``subprocess.run`` kills only
+    # the direct child; here the group goes first and the error still reads as
+    # the timeout every caller already handles.
+    process = subprocess.Popen(
+        argv,
         cwd=execution.work_dir,
         text=not raw_output,
         encoding=None if raw_output else "utf-8",
         errors=None if raw_output else "surrogateescape",
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL if stdin_input is None else subprocess.PIPE,
         env=execution.environment,
-        timeout=execution.timeout,
-        check=False,
-        **stdin_kwargs,  # type: ignore[arg-type]
+        start_new_session=True,
     )
+    try:
+        output, error_output = process.communicate(
+            input=stdin_input if stdin_input is not None else None,
+            timeout=execution.timeout,
+        )
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(process.pid, signal.SIGKILL)
+        output, error_output = process.communicate()
+        raise subprocess.TimeoutExpired(argv, execution.timeout, output, error_output) from None
+    code = process.returncode
+    return subprocess.CompletedProcess(argv, code, output, error_output)
 
 
 def _read_git_bytes(root: Path, args: list[str]) -> bytes:
@@ -805,9 +845,11 @@ def preparation_command(
         args = ["read-tree", "--reset", "-u", binding.admitted_tree]
     elif action == "commit":
         root = binding.private_root
+        # MIK-R152: the commit hook always runs. ``strict-code-no-verify`` is kept as a
+        # journal-compatibility spelling only and never skips it: ``git commit`` runs the
+        # hook Git would run for a commit in this worktree, and the caller guards the
+        # tree the hook judged against the tree the commit records (rule 3).
         args = ["commit"]
-        if binding.hook_policy == "strict-code-no-verify":
-            args.append("--no-verify")
         args.extend(["-m", binding.message])
     else:
         raise GitPreparationError("unknown private preparation action")
@@ -817,12 +859,18 @@ def preparation_command(
 def run_git_preparation(
     capability: PrivateGitPreparationCapability,
     action: PreparationAction,
+    *,
+    commit_timeout_s: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Perform one admitted command once, with exact before/after readback.
 
     Timeouts propagate; callers must retain the durable intent and inspect its one named
     output. An existing committed output is observation-only and can never be recommitted.
     Normal identity, signing, prepare-commit-msg and post-commit semantics remain Git-owned.
+
+    ``commit_timeout_s`` bounds only the commit action, alone in its process group so the
+    bound stops the commit hook with its children (MIK-R152 rule 6); other actions keep
+    the local bound.
     """
     before = inspect_git_preparation(capability)
     binding = capability.binding
@@ -833,11 +881,23 @@ def run_git_preparation(
         )
     command = preparation_command(binding, action)
     capability.require_authority()
-    result = run_git(command.cwd, list(command.args))
-    after = inspect_git_preparation(capability)
-    expected = {"create": "created", "materialize": "materialized", "commit": "committed"}
-    if result.returncode == 0 and after.state != expected[action]:
-        raise GitPreparationError("successful Git command did not produce its exact private state")
+    if action == "commit" and commit_timeout_s is not None:
+        result = run_git(
+            command.cwd,
+            list(command.args),
+            GitRunnerOptions(timeout=commit_timeout_s, new_session=True),
+        )
+    else:
+        result = run_git(command.cwd, list(command.args))
+    try:
+        after = inspect_git_preparation(capability)
+        expected = {"create": "created", "materialize": "materialized", "commit": "committed"}
+        if result.returncode == 0 and after.state != expected[action]:
+            raise GitPreparationError(
+                "successful Git command did not produce its exact private state"
+            )
+    except GitPreparationError as error:
+        raise GitPreparationCommandError(str(error), result) from error
     return result
 
 

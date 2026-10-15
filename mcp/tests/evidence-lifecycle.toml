@@ -333,6 +333,8 @@ consumers = [
   "mcp/tests/test_knowledge_worklist.py",
   "mcp/tests/test_knowledge_worklist_leaf.py",
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_l61_remaining_findings.py",
+  "mcp/tests/test_landing_commit_check.py",
   "mcp/tests/test_landing_report.py",
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_landing_unreadable_inputs.py",
@@ -352,6 +354,7 @@ consumers = [
   "mcp/tests/test_master_chain_offenders.py",
   "mcp/tests/test_master_chain_public_routes.py",
   "mcp/tests/test_master_net_generation.py",
+  "mcp/tests/test_master_ref_resolution.py",
   "mcp/tests/test_master_retirement.py",
   "mcp/tests/test_master_retirement_readiness.py",
   "mcp/tests/test_master_retirement_refusals.py",
@@ -974,6 +977,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1000,6 +1004,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1026,6 +1031,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1052,6 +1058,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1078,6 +1085,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1104,6 +1112,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1130,6 +1139,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1156,6 +1166,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1182,6 +1193,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]
@@ -1643,6 +1655,8 @@ consumers = [
   "mcp/tests/test_knowledge_worklist.py",
   "mcp/tests/test_knowledge_worklist_leaf.py",
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_l61_remaining_findings.py",
+  "mcp/tests/test_landing_commit_check.py",
   "mcp/tests/test_landing_report.py",
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_landing_unreadable_inputs.py",
@@ -1662,6 +1676,7 @@ consumers = [
   "mcp/tests/test_master_chain_offenders.py",
   "mcp/tests/test_master_chain_public_routes.py",
   "mcp/tests/test_master_net_generation.py",
+  "mcp/tests/test_master_ref_resolution.py",
   "mcp/tests/test_master_retirement.py",
   "mcp/tests/test_master_retirement_readiness.py",
   "mcp/tests/test_master_retirement_refusals.py",
@@ -2299,6 +2314,7 @@ consumers = [
   "mcp/tests/test_knowledge_overview_order.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_l61_remaining_findings.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",
 ]

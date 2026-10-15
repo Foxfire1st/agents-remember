@@ -51,6 +51,7 @@ from typing import Any
 
 from agents_remember.kernel._agentic_settings_core import (
     COMPLEXITY_SCALE,
+    DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS,
     DEFAULT_LOOP_MAX_ROUNDS,
     DEFAULT_LOOP_PER_LEVEL,
     DEFAULT_REVIEWER_REUSE,
@@ -59,6 +60,7 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_CONCURRENCY_FIELDS,
     KNOWN_GATE_DELEGATION_FIELDS,
     KNOWN_GATE_POLICY_KIND_FIELDS,
+    KNOWN_LANDING_FIELDS,
     KNOWN_LOOP_COMPLEXITY_FIELDS,
     KNOWN_LOOP_DEFAULTS_FIELDS,
     KNOWN_LOOP_LEVEL_FIELDS,
@@ -76,6 +78,7 @@ from agents_remember.kernel._agentic_settings_core import (
     AgenticSettings,
     AgenticSettingsError,
     ConcurrencySettings,
+    LandingSettings,
     LoopComplexity,
     LoopDefaults,
     LoopSettings,
@@ -104,6 +107,7 @@ from agents_remember.kernel._agentic_settings_policy import (
 from agents_remember.kernel._agentic_settings_sections import (
     _parse_concurrency,
     _parse_harnesses,
+    _parse_landing,
     _parse_loop_complexity,
     _parse_loop_defaults,
     _parse_loop_levels,
@@ -118,6 +122,7 @@ from agents_remember.kernel.recorded_reads import observed_exists, observed_text
 
 __all__ = [
     "COMPLEXITY_SCALE",
+    "DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS",
     "DEFAULT_LOOP_MAX_ROUNDS",
     "DEFAULT_LOOP_PER_LEVEL",
     "DEFAULT_REVIEWER_REUSE",
@@ -126,6 +131,7 @@ __all__ = [
     "KNOWN_CONCURRENCY_FIELDS",
     "KNOWN_GATE_DELEGATION_FIELDS",
     "KNOWN_GATE_POLICY_KIND_FIELDS",
+    "KNOWN_LANDING_FIELDS",
     "KNOWN_LOOPS_FIELDS",
     "KNOWN_LOOP_COMPLEXITY_FIELDS",
     "KNOWN_LOOP_DEFAULTS_FIELDS",
@@ -141,6 +147,7 @@ __all__ = [
     "AgenticSettings",
     "AgenticSettingsError",
     "ConcurrencySettings",
+    "LandingSettings",
     "LoopComplexity",
     "LoopDefaults",
     "LoopSettings",
@@ -149,6 +156,7 @@ __all__ = [
     "_parse_concurrency",
     "_parse_gate_policy_rule",
     "_parse_harnesses",
+    "_parse_landing",
     "_parse_loop_complexity",
     "_parse_loop_defaults",
     "_parse_loop_levels",
@@ -442,6 +450,7 @@ def _parse_orchestration(
         roles=_parse_roles(raw.get("roles"), source=source),
         roles_per_level=_parse_roles_per_level(raw.get("rolesPerLevel"), source=source),
         concurrency=_parse_concurrency(raw.get("concurrency"), source=source),
+        landing=_parse_landing(raw.get("landing"), source=source),
         quality_gate=_parse_quality_gate(raw.get("qualityGate"), source=source),
         role_message_limit=role_message_limit,
         spawn_harness=_parse_spawn(

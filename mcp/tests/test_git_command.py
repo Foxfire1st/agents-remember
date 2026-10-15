@@ -52,6 +52,7 @@ from agents_remember.kernel.git_preparation import (
 )
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.worktrees.modules import git as git_owner
+from agents_remember.worktrees.modules import landing_commit_check
 from agents_remember.worktrees.modules.git import (
     CommitPublicationRefusal,
     PublicationHooks,
@@ -60,6 +61,7 @@ from agents_remember.worktrees.modules.git import (
     publish_tree_commit,
     worktree_candidate_tree,
 )
+from agents_remember.worktrees.modules.landing_commit_check import LandingCommitCheckRefusal
 
 PACKAGE_ROOT = MCP_SRC / "agents_remember"
 
@@ -230,9 +232,16 @@ class PublishTreeCommitTests(unittest.TestCase):
                 run_git(porcelain, ["add", "-A"])
                 run_git(porcelain, ["commit", "--no-verify", "-m", message])
                 fields = ["log", "-1", "--format=%an|%ae|%cn|%ce|%B"]
-                self.assertEqual(
-                    run_git(published, fields).stdout, run_git(porcelain, fields).stdout
-                )
+                published_out = run_git(published, fields).stdout
+                porcelain_out = run_git(porcelain, fields).stdout
+                # MIK-R152: the published commit carries the Commit-Check-Pass trailer
+                # for the judged tree; everything else matches the porcelain commit.
+                stripped = published_out.rstrip()
+                trailer = stripped.splitlines()[-1]
+                self.assertTrue(trailer.startswith("Commit-Check-Pass: tree="), trailer)
+                self.assertTrue(stripped.endswith(trailer))
+                self.assertIn(f"tree={tree}", trailer)
+                self.assertEqual(stripped[: -len(trailer)].rstrip(), porcelain_out.rstrip())
                 for repo, tip in ((published, commit), (porcelain, "HEAD")):
                     raw = run_git(repo, ["cat-file", "-p", tip]).stdout
                     self.assertEqual("gpgsig" in raw, signed, raw)
@@ -546,7 +555,16 @@ class PublishTreeCommitGuardTests(unittest.TestCase):
                     if message is messages[0]:
                         publish_tree_commit(repo, message, tree=tree, before=_admitted(repo))
                         self.assertNotEqual(head_commit(repo), state[0])
-                        self.assertEqual(self._message(repo), expected)
+                        # MIK-R152: the published commit carries the Commit-Check-Pass
+                        # trailer; the cleaned message matches the porcelain commit.
+                        body = self._message(repo).decode("utf-8", "surrogateescape")
+                        stripped = body.rstrip()
+                        trailer = stripped.splitlines()[-1]
+                        self.assertTrue(trailer.startswith("Commit-Check-Pass: tree="), trailer)
+                        self.assertTrue(stripped.endswith(trailer))
+                        self.assertEqual(
+                            stripped[: -len(trailer)].rstrip().encode(), expected.rstrip()
+                        )
         self.assertGreater(stored, 60)
         self.assertGreater(refused, 40)
 
@@ -579,21 +597,67 @@ class PublishTreeCommitGuardTests(unittest.TestCase):
                 self.assertEqual(len(attempts) > 1, waited, attempts)
                 self.assertEqual((head_commit(repo), self._index(repo)), (before.head, index))
 
-    def test_no_commit_hook_runs_and_a_refusing_ref_transaction_hook_is_reported(self) -> None:
+    def test_a_tracked_edit_between_pass_and_commit_refuses_without_publishing(self) -> None:
+        # L61-R1-F01: the hook passes, then a tracked edit lands before the
+        # commit object is written. The admitted worktree bytes are rechecked
+        # through publication: the landing refuses naming the path, writes no
+        # commit, moves no ref, and gives the index back.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo(Path(tmp))
+            self._hook(repo, "pre-commit", "exit 0\n")
+            (repo / "new.txt").write_text("new\n", encoding="utf-8")
+            run_git(repo, ["add", "-A"])
+            tree = run_git(repo, ["write-tree"]).stdout.strip()
+            before = _admitted(repo)
+            head = head_commit(repo)
+            index = self._index(repo)
+            reached_write = []
+
+            real_check = landing_commit_check.run_landing_commit_check
+            real_write = git_owner._write_commit
+
+            def passing_then_mutated(*args, **kwargs):
+                passed = real_check(*args, **kwargs)
+                (repo / "new.txt").write_text("new\nchanged after hook pass\n", encoding="utf-8")
+                return passed
+
+            def mutating_write(*args, **kwargs):
+                reached_write.append(True)
+                return real_write(*args, **kwargs)
+
+            with (
+                patch.object(
+                    landing_commit_check, "run_landing_commit_check", passing_then_mutated
+                ),
+                patch.object(git_owner, "_write_commit", mutating_write),
+                self.assertRaises(LandingCommitCheckRefusal) as refused,
+            ):
+                publish_tree_commit(repo, "m", tree=tree, before=before)
+            self.assertEqual(refused.exception.reason, "changed")
+            self.assertIn("new.txt", list(refused.exception.changed_paths))
+            self.assertEqual(reached_write, [])
+            self.assertEqual(head_commit(repo), head)
+            self.assertEqual(self._index(repo), index)
+
+    def test_the_commit_hook_runs_and_a_refusing_ref_transaction_hook_is_reported(self) -> None:
+        # MIK-R152: the publication runs the repository's pre-commit hook on the staged
+        # tree and refuses when it fails; only pre-commit runs (commit-msg and the rest
+        # never do on the commit-tree path).
         with tempfile.TemporaryDirectory() as tmp:
             repo = self._repo(Path(tmp))
             ran = repo / ".git" / "hooks-that-ran"
             for name in ("pre-commit", "commit-msg", "prepare-commit-msg", "post-commit"):
                 self._hook(repo, name, f"echo {name} >> '{ran}'\nexit 1\n")
             tree = self._tree(repo, "new.txt", "new\n")
-            commit = publish_tree_commit(repo, "m", tree=tree, before=_admitted(repo))
-            self.assertEqual(head_commit(repo), commit)
-            self.assertFalse(ran.exists(), "a publication ran a commit hook")
+            with self.assertRaisesRegex(LandingCommitCheckRefusal, "commit check failed"):
+                publish_tree_commit(repo, "m", tree=tree, before=_admitted(repo))
+            self.assertEqual(ran.read_text(encoding="utf-8").split(), ["pre-commit"])
             # The hooks are armed: the porcelain commit runs the first one, and it refuses.
             self.assertNotEqual(run_git(repo, ["commit", "--allow-empty", "-m", "p"]).returncode, 0)
-            self.assertEqual(ran.read_text(encoding="utf-8").split(), ["pre-commit"])
+            self.assertEqual(ran.read_text(encoding="utf-8").split(), ["pre-commit"] * 2)
             # The ref move is a Git ref transaction, so this hook runs. When it refuses, the branch
             # has not moved, and the refusal carries the hook's text instead of "the branch moved".
+            self._hook(repo, "pre-commit", "exit 0\n")
             self._hook(
                 repo,
                 "reference-transaction",
@@ -776,7 +840,12 @@ class PrivateGitPreparationTests(unittest.TestCase):
             path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{hook}' >> '{log}'\n", encoding="utf-8")
             path.chmod(0o755)
         for policy, expected in (
-            ("strict-code-no-verify", ["prepare-commit-msg", "post-commit"]),
+            # MIK-R152 rule 7: the retired spelling stays loadable for journaled
+            # intents but never skips the hook; both policies run all four hooks.
+            (
+                "strict-code-no-verify",
+                ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"],
+            ),
             ("ordinary", ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"]),
         ):
             with self.subTest(policy=policy):

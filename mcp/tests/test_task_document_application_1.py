@@ -105,14 +105,19 @@ class ApplicationTests1(ApplicationTests):
         self.assertEqual(leaf_path.read_text(encoding="utf-8"), leaf_before)
         self.assertEqual(read_task_doc(leaf_path).title, "Smoke")
 
-    def test_explicit_cross_series_master_ref_never_falls_back_to_local_master(self) -> None:
+    def test_explicit_cross_series_master_ref_is_refused_not_fallen_back(self) -> None:
+        # MIK-R61 rule 2: a reference that leaves the task folder is refused with one
+        # message (leaf, reference, fix), never silently fallen back to the local master.
         created_master = self._create_parent_master()
         master_path = Path(str(created_master["docPath"]))
         master_before = master_path.read_bytes()
 
-        result = self._create(master="../other-series/task.md")
+        with self.assertRaises(TaskDocError) as raised:
+            self._create(master="../other-series/task.md")
 
-        self.assertNotIn("masterSync", result)
+        self.assertIn("../other-series/task.md", str(raised.exception))
+        self.assertIn("not a document of this task folder", str(raised.exception))
+        self.assertIn("name a document of this folder", str(raised.exception))
         self.assertEqual(master_path.read_bytes(), master_before)
         self.assertEqual(read_task_doc(master_path).subTasks, [])
 

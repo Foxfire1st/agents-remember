@@ -26,6 +26,9 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identit
     closeout_contract_sha256,
 )
 from agents_remember.worktrees.modules.git import require_git
+from agents_remember.worktrees.modules.landing_commit_check import (
+    message_with_commit_check_trailer,
+)
 from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 
 from .output_selection import retain_prepared_output
@@ -122,6 +125,11 @@ def _new_code_intent(handoff: CloseoutCertificationHandoff) -> CloseoutPreparati
     prefix = _code_prefix(handoff)
     policy = observe_git_preparation_policy(root)
     head = require_git(root, ["rev-parse", "--verify", "HEAD"])
+    message = effective.message_for("code") if enabled else None
+    if message is not None:
+        message = message_with_commit_check_trailer(
+            root, message, handoff.selected.run.repositoryPlan.candidateIdentity.value
+        )
     private = (
         contract.worktree_group
         / "preparation"
@@ -146,8 +154,8 @@ def _new_code_intent(handoff: CloseoutCertificationHandoff) -> CloseoutPreparati
         "parentCommit": head,
         "admittedTree": handoff.selected.run.repositoryPlan.candidateIdentity.value,
         "privateRoot": private.as_posix() if enabled else None,
-        "normalizedMessage": effective.message_for("code") if enabled else None,
-        "hookPolicy": "strict-code-no-verify",
+        "normalizedMessage": message,
+        "hookPolicy": "ordinary",
         "gitConfigSha256": policy.git_config_sha256,
         "hooksSha256": policy.hooks_sha256,
         "frozenRun": handoff.selected.state.frozenRun.model_dump(mode="json"),

@@ -29,6 +29,7 @@ from agents_remember.worktrees.modules.cleanup import (
 from agents_remember.worktrees.modules.startup.start_memory import prepare_memory_for_start
 from agents_remember.worktrees.modules.sync import sync_result
 from agents_remember.worktrees.modules.terminal_validation import terminal_preflight
+from agents_remember.worktrees.sync_transaction_git import _merge as sync_git_merge
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationStore,
 )
@@ -470,7 +471,7 @@ class WorktreeSyncTests(unittest.TestCase):
         worktree = fixture.contract.memory_worktree
         assert worktree is not None
         with mock.patch.object(
-            sync_transaction_git,
+            sync_git_merge,
             "_finish_staged_memory_merge",
             side_effect=sync_transaction_git.SyncGitProofError("interrupted before merge commit"),
         ):

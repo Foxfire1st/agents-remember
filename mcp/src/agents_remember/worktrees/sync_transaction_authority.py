@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Literal, cast
 
 from agents_remember.models.worktree import SyncPhase, SyncSide
-from agents_remember.worktrees.modules.git import branch_commit, head_commit, is_ancestor
+from agents_remember.worktrees.modules.git import (
+    branch_commit,
+    head_commit,
+    is_ancestor,
+    require_git,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_transaction_git import (
     MAX_NAMED_SYNC_PATHS,
     SyncGitProofError,
+    applied_restore_failures,
     apply_parked_wip,
     cancelled_wip_restored,
     capture_retained_digests,
@@ -31,10 +38,13 @@ from agents_remember.worktrees.sync_transaction_git import (
     verify_crashed_reapply,
 )
 from agents_remember.worktrees.sync_transaction_state import (
+    VALIDATION_REFUSAL_INLINE_LIMIT,
     SyncOperationRecord,
     SyncOperationStore,
     SyncSidePlan,
     SyncSideRecord,
+    SyncValidationRefusal,
+    SyncValidationViolation,
     operation_stamp,
     sync_side_base_ref,
     sync_side_refs,
@@ -293,6 +303,114 @@ def update_record(
     return updated
 
 
+def record_validation_refusal(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    *,
+    kind: Literal["staged-merge", "fast-forward"],
+    path: str,
+    message: str,
+) -> SyncOperationRecord:
+    """Journal a validator refusal with its violations (MIK-R61 rule 5).
+
+    The validator reports its violations as one refusal text; the journal keeps
+    the validator's own per-path, per-rule entries in order — exactly the first
+    inline-limit entries — with the validator's own total, which can exceed what
+    is inline. Reads the latest journal bytes first, so a refusal journaled after
+    a digest capture (a fresh staged merge the validator refused) keeps that capture:
+    the journal holds both, and a continued sync validates again over them.
+    """
+
+    current = store.read()
+    if (
+        not isinstance(current, SyncOperationRecord)
+        or current.generation != record.generation
+        or current.contractPath != record.contractPath
+    ):
+        current = record
+    violations, total = parse_refusal_violations(message, context_path=path)
+    refusal = SyncValidationRefusal(
+        kind=kind,
+        violations=tuple(violations),
+        total=total,
+        reportedAt=operation_stamp(),
+    )
+    updated = SyncOperationRecord.model_validate(
+        current.model_copy(
+            update={"validationRefusal": refusal, "updatedAt": operation_stamp()}
+        ).model_dump()
+    )
+    store.write(updated)
+    return updated
+
+
+#: The validator's count line: ``... refuses this memory commit: N violation(s) in <tree>``.
+_REFUSAL_COUNT_RE = re.compile(r"(\d+)\s+violation\(s\)")
+
+#: One rendered validator violation: ``path: field: [rule] message``.
+_REFUSAL_VIOLATION_RE = re.compile(
+    r"^(?P<path>.+?):\s+(?P<field>.+?):\s+\[(?P<rule>[^\]]+)\]\s?(?P<message>.*)$"
+)
+
+#: Per-entry message bound (the model's own limit).
+_REFUSAL_MESSAGE_LIMIT = 8192
+
+
+def parse_refusal_violations(
+    message: str, *, context_path: str
+) -> tuple[list[SyncValidationViolation], int]:
+    """Split a validator refusal text into its structured violations and total.
+
+    The worktree layer may not import the validator, so the rendered text is the
+    contract: the count line carries the true total, and each rendered violation
+    line carries its path, field, rule and message. Lines that do not parse are
+    kept as one entry under the validator's own name, so nothing reported is
+    lost; the returned list holds exactly the first inline-limit entries.
+    """
+
+    count_match = _REFUSAL_COUNT_RE.search(message.splitlines()[0] if message else "")
+    lines = message.splitlines()[1:]
+    parsed: list[SyncValidationViolation] = []
+    for line in lines:
+        text = line.strip()
+        if not text:
+            continue
+        match = _REFUSAL_VIOLATION_RE.match(text)
+        if match is None:
+            parsed.append(
+                SyncValidationViolation(
+                    path=context_path[:4096],
+                    rule="knowledge-validator",
+                    message=text[:_REFUSAL_MESSAGE_LIMIT] or context_path[:_REFUSAL_MESSAGE_LIMIT],
+                )
+            )
+            continue
+        field = match.group("field")
+        body = match.group("message")
+        if field != "-":
+            body = f"{field}: {body}" if body else field
+        parsed.append(
+            SyncValidationViolation(
+                path=(match.group("path") or context_path)[:4096],
+                rule=(match.group("rule") or "knowledge-validator")[:256],
+                message=(body or text)[:_REFUSAL_MESSAGE_LIMIT],
+            )
+        )
+    if not parsed:
+        text = message.strip()
+        parsed.append(
+            SyncValidationViolation(
+                path=context_path[:4096],
+                rule="knowledge-validator",
+                message=(text[:8150] + "\n[truncated: refusal text exceeds the journaled limit]")
+                if len(text) > _REFUSAL_MESSAGE_LIMIT
+                else (text or context_path)[:_REFUSAL_MESSAGE_LIMIT],
+            )
+        )
+    total = int(count_match.group(1)) if count_match else len(parsed)
+    return parsed[:VALIDATION_REFUSAL_INLINE_LIMIT], total
+
+
 def participating_sides(record: SyncOperationRecord) -> tuple[SyncSideRecord, ...]:
     return (record.code, record.memory) if record.memory is not None else (record.code,)
 
@@ -527,21 +645,42 @@ def restore_cancelled_wip(
             continue
         if side.wipState not in {"parked", "restore-conflict", "restored"}:
             continue
-        if cancelled_wip_restored(side):
-            updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
-            record = update_record(
-                store, record, phase=record.phase, side=updated, side_name=side.side
-            )
-            continue
-        state, conflicts = apply_parked_wip(side)
-        if state != "applied" or conflicts:
-            raise SyncGitProofError(
-                f"{side.side} parked worktree WIP could not be restored after cancellation: "
-                f"{', '.join(conflicts[:30]) or 'the reapply did not apply'}"
-            )
+        if not cancelled_wip_restored(side):
+            state, conflicts = apply_parked_wip(side)
+            if state != "applied" or conflicts:
+                raise SyncGitProofError(
+                    f"{side.side} parked worktree WIP could not be restored after cancellation: "
+                    f"{', '.join(conflicts[:30]) or 'the reapply did not apply'}"
+                )
+        _prove_cancelled_restore(side)
+        # The stash's second parent is the index as parked. Content restoration
+        # alone loses the staged/unstaged partition; the heads are now back, so
+        # give that exact index back before publishing the restoration proof.
+        require_git(Path(side.worktree), ["read-tree", f"{side.wipStash}^2"])
         updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
         record = update_record(store, record, phase=record.phase, side=updated, side_name=side.side)
     return record
+
+
+def _prove_cancelled_restore(side: SyncSideRecord) -> None:
+    """Prove every parked path is back before a cancel marks it restored (MIK-R61 rule 8).
+
+    A clean reapply is not proof on its own: the stash is dropped only after the full
+    stash inventory -- never the journal's path sample -- is proven restored. A failed
+    proof keeps the stash and the journal, as today.
+    """
+
+    failures = applied_restore_failures(side, side_branch_head(side))
+    if failures:
+        shown = ", ".join(failures[:MAX_NAMED_SYNC_PATHS])
+        if len(failures) > MAX_NAMED_SYNC_PATHS:
+            shown += f" and {len(failures) - MAX_NAMED_SYNC_PATHS} more"
+        count = "1 path holds" if len(failures) == 1 else f"{len(failures)} paths hold"
+        raise SyncGitProofError(
+            f"{side.side} parked worktree WIP could not be proven restored after "
+            f"cancellation: {count} none of the parked bytes: {shown}. The parked "
+            f"candidate stays in stash {side.wipStash}."
+        )
 
 
 def settle_resolved_parked_wip(

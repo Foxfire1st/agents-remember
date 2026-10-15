@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import subprocess
 from pathlib import Path
 from typing import Literal
 
@@ -17,11 +19,13 @@ from agents_remember.worktrees.knowledge_validation import (
     has_layout_marker,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.git import branch_commit
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_transaction_authority import (
     authority_refs_exist,
     command_result,
     pin_authority,
+    record_validation_refusal,
     require_pinned_authority,
     require_record_contract,
     resolution_phase,
@@ -33,10 +37,14 @@ from agents_remember.worktrees.sync_transaction_authority import (
     update_record,
 )
 from agents_remember.worktrees.sync_transaction_git import (
+    SyncFastForwardValidationError,
     SyncGitProofError,
     SyncKnowledgeValidationError,
+    applied_restore_failures,
     apply_parked_wip,
     capture_retained_digests,
+    clear_stale_git_locks,
+    commit_check_report,
     content_conflicts,
     continue_side_merge,
     drop_parked_wip,
@@ -48,7 +56,16 @@ from agents_remember.worktrees.sync_transaction_git import (
     side_branch_head,
     side_merge_completed,
     start_side_merge,
+    validate_memory_fast_forward,
     worktree_dirty_paths,
+)
+from agents_remember.worktrees.sync_transaction_parking import (
+    WIP_PATH_SAMPLE_LIMIT,
+    _adopt_orphaned_park,
+    _orphaned_park_stashes,
+    _refuse_orphaned_park,
+    _wip_stash_message,
+    orphaned_cancel_record,
 )
 from agents_remember.worktrees.sync_transaction_recovery import (
     cancel_sync,
@@ -87,10 +104,6 @@ _ACTIVE_PHASES = {
     "finalizing",
     "cancelling",
 }
-
-# The parked candidate's path sample kept in the journal. It is the proof set the restore
-# re-checks per path; the exact count is journaled alongside it.
-WIP_PATH_SAMPLE_LIMIT = 128
 
 
 def sync_contract_under_authority(
@@ -176,6 +189,12 @@ def _route_sync_record(
         return _resume_active(contract, args, store, record, fetch)
     if record is not None and not args.dry_run:
         cleanup_terminal_residue(store, record)
+    if args.resolution_action == "cancel":
+        orphaned = orphaned_cancel_record(contract, args, store, record, fetch)
+        if isinstance(orphaned, WorktreeCommandResult):
+            return orphaned
+        if orphaned is not None:
+            return _resume_active(contract, args, store, orphaned, fetch)
     if args.resolution_action is None:
         return _admit_and_run(contract, args, store, record, fetch)
     if record is not None:
@@ -214,6 +233,33 @@ def sync_input_refusal(
     return None
 
 
+def _clear_entry_git_locks(
+    contract: WorktreeContract,
+    code: SyncSideRecord,
+    memory: SyncSideRecord | None,
+) -> None:
+    """Drop stale index locks before admitting or resuming a sync (MIK-R61 rule 12).
+
+    A previous run killed inside a git operation leaves its worktree's
+    ``index.lock`` behind, and every later git command fails until it is gone.
+    The removal only takes locks no live process holds open, and it runs at
+    both entries — fresh admission and journal resume — because the crash can
+    strand either. The cleared paths go to the log; the journal's phase
+    already tells the operator the run restarted.
+    """
+
+    cleared = clear_stale_git_locks(
+        [Path(code.worktree), *([Path(memory.worktree)] if memory is not None else [])]
+    )
+    if cleared:
+        logging.getLogger(__name__).info(
+            "sync %s cleared %d stale git lock(s): %s",
+            contract.task_id,
+            len(cleared),
+            ", ".join(cleared),
+        )
+
+
 def _admit_and_run(
     contract: WorktreeContract,
     args: WorktreeArgs,
@@ -224,6 +270,7 @@ def _admit_and_run(
     code_tip, memory_tip, external = source_pair(contract)
     code = side_record(contract, "code", code_tip)
     memory = side_record(contract, "memory", memory_tip) if external else None
+    _clear_entry_git_locks(contract, code, memory)
     current = _already_current_result(
         contract,
         code,
@@ -241,8 +288,10 @@ def _admit_and_run(
         return prepared
     code, memory = prepared
     record = _new_sync_record(contract, args, predecessor, code, memory)
-    pin_authority(record)
+    # The exact parked candidates must be durable before the first ref is pinned:
+    # a partial admission can then finish its idempotent pins on cancel or resume.
     store.write(record)
+    pin_authority(record)
     for side in (record.code, record.memory):
         if side is not None and side.temporary and side.plan not in {"already-current", "skip"}:
             ensure_temporary_worktree(side)
@@ -398,8 +447,14 @@ def _park_participating_wip(
     The parked identity is journaled with the admission record, so the candidate a closeout
     leaves in its worktree is never lost to the carry. A stash that genuinely cannot be
     taken restores whatever was already parked and refuses with the typed sync refusal.
+
+    A death between a stash push and the admission journal leaves an orphan stash no
+    record names; the next admission either adopts it (clean tree, exact contract
+    message, stash parent is the pinned head) or refuses naming it, so a sync never
+    proceeds without its owner's bytes (MIK-R61 rules 7-8).
     """
 
+    named = _predecessor_named_stashes(contract)
     parked: dict[SyncSide, SyncSideRecord] = {}
     for side in (code, memory):
         if not _side_parks_wip(side):
@@ -407,7 +462,15 @@ def _park_participating_wip(
         assert side is not None
         paths = worktree_dirty_paths(side)
         if not paths:
+            adopted = _adopt_orphaned_park(contract, side, fetch, named)
+            if isinstance(adopted, WorktreeCommandResult):
+                return adopted
+            if adopted is not None:
+                parked[side.side] = adopted
             continue
+        orphans = _orphaned_park_stashes(contract, side, named)
+        if orphans:
+            return _refuse_orphaned_park(side, orphans, fetch)
         try:
             stash = park_worktree_wip(
                 side,
@@ -427,13 +490,25 @@ def _park_participating_wip(
     return parked.get("code", code), parked.get("memory", memory)
 
 
-def _wip_stash_message(contract: WorktreeContract, side: SyncSideRecord) -> str:
-    """A stash message a human can find: the operation, the side, and the exact contract."""
+def _predecessor_named_stashes(contract: WorktreeContract) -> set[str]:
+    """Stash identities the live journal still names (never orphans).
 
-    return (
-        f"agents-remember worktree_sync parked {side.side} WIP for {contract.task_id} "
-        f"({contract.contract_path.as_posix()})"
-    )
+    Entries a stranded earlier generation disclosed in its own answer stay the
+    operator's; only stashes no record names can be orphans of a dead admission.
+    A missing or unreadable journal names nothing.
+    """
+
+    try:
+        predecessor = SyncOperationStore(contract.worktree_group).read()
+    except (SyncJournalReadError, OSError, ValueError):
+        return set()
+    if not isinstance(predecessor, SyncOperationRecord):
+        return set()
+    return {
+        side.wipStash
+        for side in (predecessor.code, predecessor.memory)
+        if side is not None and side.wipStash
+    }
 
 
 def _restore_already_parked(
@@ -446,6 +521,12 @@ def _restore_already_parked(
         try:
             state, conflicts = apply_parked_wip(side)
             if state != "applied" or conflicts:
+                stranded.append(f"{side.side} ({side.wipStash})")
+                continue
+            # The stash is dropped only after every parked path is proven restored
+            # (MIK-R61 rule 8): the full stash inventory, never the journal's sample.
+            failures = applied_restore_failures(side, side_branch_head(side))
+            if failures:
                 stranded.append(f"{side.side} ({side.wipStash})")
                 continue
             drop_parked_wip(side)
@@ -552,10 +633,24 @@ def _resume_active(
     record: SyncOperationRecord,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
+    initial_admission = record.phase == "running-code" and all(
+        side.state == "pending" and not side.resultHead
+        for side in (record.code, record.memory)
+        if side is not None
+    )
     require_pinned_authority(
         record,
-        allow_expected_missing=record.phase == "finalizing",
+        allow_expected_missing=record.phase == "finalizing" or initial_admission,
     )
+    _clear_entry_git_locks(contract, record.code, record.memory)
+    retired = _retired_knowledge_blocker(record)
+    if retired is not None and args.resolution_action != "cancel" and not args.dry_run:
+        return manual_repair_result(
+            "sync-retired-knowledge-in-flight",
+            retired,
+            record,
+            fetch,
+        )
     if args.memory_sync_choice is not None and args.memory_sync_choice != record.memorySyncChoice:
         return manual_repair_result(
             "sync-input-mismatch",
@@ -565,6 +660,8 @@ def _resume_active(
         )
     if args.dry_run:
         return _active_preview(args, record, fetch)
+    if initial_admission:
+        pin_authority(record)
     return _resume_live(contract, args, store, record, fetch)
 
 
@@ -587,6 +684,28 @@ def _active_preview(
         "The active transaction has no retained conflict to continue.",
         record,
         fetch,
+    )
+
+
+def _retired_knowledge_blocker(record: SyncOperationRecord) -> str | None:
+    """Refuse a continued sync whose journal still holds a database conflict (MIK-R61 rule 6).
+
+    The sync was started by a build that merged the knowledge database; cancelling it with
+    ``worktree_sync`` works and a fresh sync starts afterwards. Empty values were already
+    dropped on read, so only a non-empty survivor refuses.
+    """
+
+    holders = sorted(
+        side.side
+        for side in (record.code, record.memory)
+        if side is not None and (side.knowledgeConflict or side.knowledgeReconciliations)
+    )
+    if not holders:
+        return None
+    return (
+        "This sync was started by a build that merged the knowledge database: its journal "
+        f"still holds an unresolved database conflict on {', '.join(holders)}. Cancel it "
+        "with worktree_sync (resolution_action='cancel') and start it again."
     )
 
 
@@ -616,18 +735,29 @@ def _run_automatic(
         record = _reconcile_completed_sides(store, record)
         if record.phase == "running-code":
             record = _run_side(store, record, "code")
-            if record.phase == "code-resolution-required":
-                return resolution_required(record, fetch)
         if record.phase == "running-memory":
             record = _run_side(store, record, "memory")
-            if record.phase == "memory-resolution-required":
-                return resolution_required(record, fetch)
-        if record.phase == "finalizing":
-            return finalize_sync(contract, store, record, fetch)
+        return _finish_automatic(contract, store, record, fetch)
+    except SyncFastForwardValidationError as error:
+        return _fast_forward_refused(store, record, error, fetch)
     except SyncKnowledgeValidationError as error:
-        return _knowledge_validation_refused(error, record, fetch)
+        return _knowledge_validation_refused(store, error, record, fetch)
     except SyncGitProofError as error:
         return manual_repair_result("sync-git-proof-failed", str(error), record, fetch)
+
+
+def _finish_automatic(
+    contract: WorktreeContract,
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    fetch: dict[str, object],
+) -> WorktreeCommandResult:
+    """Answer a side run that stopped: a retained conflict, the finalization, or a refusal."""
+
+    if record.phase in {"code-resolution-required", "memory-resolution-required"}:
+        return resolution_required(record, fetch)
+    if record.phase == "finalizing":
+        return finalize_sync(contract, store, record, fetch)
     return manual_repair_result(
         "sync-state-unrecognized",
         f"Sync stopped in unsupported phase {record.phase!r}.",
@@ -651,6 +781,10 @@ def _run_side(
             else None
         )
         return _advance_after_side(store, record, side_name, completed)
+    if side_name == "memory" and side.plan == "fast-forward":
+        # A fast-forward adopts its incoming tree as it is (MIK-R61 rule 4): a converted
+        # incoming tree is judged before anything moves, and a refusal moves no ref.
+        validate_memory_fast_forward(side, _paired_code(record))
     ensure_temporary_worktree(side)
     resumed_merge = merge_head(Path(side.worktree)) is not None
     paired = _paired_code(record)
@@ -718,14 +852,26 @@ def _persist_fresh_validator_stop(
 
 
 def _knowledge_validation_refused(
-    error: SyncKnowledgeValidationError, record: SyncOperationRecord, fetch: dict[str, object]
+    store: SyncOperationStore,
+    error: SyncKnowledgeValidationError,
+    record: SyncOperationRecord,
+    fetch: dict[str, object],
 ) -> WorktreeCommandResult:
     """The validator refused the staged memory merge (MIK-R22): name every violation and the way on.
 
     The merge stays staged and the phase is unchanged, so the same call that reached the refusal
     resumes it: ``continue`` for a retained conflict, a plain rerun for the automatic merge.
+    The refusal is journaled with its violations (MIK-R61 rule 5); a continued sync validates
+    again and clears it when the tree passes.
     """
 
+    refreshed = record_validation_refusal(
+        store,
+        record,
+        kind="staged-merge",
+        path="staged memory merge tree",
+        message=str(error),
+    )
     worktree = record.memory.worktree if record.memory is not None else "the memory worktree"
     retained = record.phase == "memory-resolution-required"
     rerun = "worktree_sync with resolution_action='continue'" if retained else "worktree_sync"
@@ -733,7 +879,38 @@ def _knowledge_validation_refused(
         f"{error}\nRecovery: repair these files in {worktree}, stage them (git add), then rerun "
         f"{rerun}; or cancel the sync with resolution_action='cancel'."
     )
-    return manual_repair_result("sync-knowledge-validation-refused", summary, record, fetch)
+    return manual_repair_result("sync-knowledge-validation-refused", summary, refreshed, fetch)
+
+
+def _fast_forward_refused(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    error: SyncFastForwardValidationError,
+    fetch: dict[str, object],
+) -> WorktreeCommandResult:
+    """The validator refused a fast-forward's incoming tree (MIK-R61 rule 4).
+
+    Nothing moved: the violation is on the source line. A rerun would judge the same
+    pinned tip again, so the way on is repairing that line, ending this sync with
+    cancel, and starting a new sync onto the repaired line. The refusal is journaled
+    with its violations (MIK-R61 rule 5).
+    """
+
+    source = record.memory.sourceCommit if record.memory is not None else "the source commit"
+    branch = record.memory.sourceBranch if record.memory is not None else "the source branch"
+    refreshed = record_validation_refusal(
+        store,
+        record,
+        kind="fast-forward",
+        path=f"incoming memory tree {source}",
+        message=str(error),
+    )
+    summary = (
+        f"{error}\nRecovery: repair the source line ({branch} at {source}), then end this "
+        "sync with worktree_sync and resolution_action='cancel' and start a new sync onto "
+        "the repaired line."
+    )
+    return manual_repair_result("sync-knowledge-validation-refused", summary, refreshed, fetch)
 
 
 def _paired_code(record: SyncOperationRecord) -> PairedCode | None:
@@ -758,10 +935,50 @@ def _continue_resolution(
             record,
             fetch,
         )
+    moved = _moved_source_sides(record)
+    if moved is not None:
+        return manual_repair_result(
+            "sync-source-moved",
+            moved,
+            record,
+            fetch,
+        )
     side = _retained_side(record)
     if side.wipState == "restore-conflict":
         return _continue_parked_wip_restore(contract, store, record, fetch)
     return _finish_retained_merge(contract, store, record, fetch)
+
+
+def _moved_source_sides(record: SyncOperationRecord) -> str | None:
+    """Refuse a continue onto a tip the official line has left behind (MIK-R61 rule 12).
+
+    A sync journaled onto a tip the line left behind is ended with cancel, not continued
+    onto it: continuing would carry the stale tip, and a stale merge stops at the commit
+    check on findings later landings already repaired. A new sync onto the line's current
+    tip then starts as every sync does.
+    """
+
+    for side in (record.code, record.memory):
+        if side is None or side.plan in {"already-current", "skip"}:
+            continue
+        repository = Path(side.repository)
+        try:
+            tip = branch_commit(repository, side.sourceBranch)
+        except (RuntimeError, subprocess.SubprocessError, OSError) as error:
+            return (
+                f"The {side.side} source tip cannot be read ({error}); the retained "
+                "resolution cannot continue onto an unreadable line. Run worktree_sync "
+                "again once the line reads, or cancel it with resolution_action='cancel'."
+            )
+        if tip != side.sourceCommit:
+            return (
+                f"The {side.side} source line moved since this sync was admitted "
+                f"({side.sourceBranch} is at {tip}, the sync carries {side.sourceCommit}). "
+                "End this sync with worktree_sync and resolution_action='cancel', then "
+                "start a new sync onto the line's current tip; it is not continued onto "
+                "the tip the line left behind."
+            )
+    return None
 
 
 def _retained_side(record: SyncOperationRecord) -> SyncSideRecord:
@@ -786,11 +1003,19 @@ def _finish_retained_merge(
     try:
         result_head = continue_side_merge(side, paired_code=_paired_code(record))
     except SyncKnowledgeValidationError as error:
-        return _knowledge_validation_refused(error, record, fetch)
+        return _knowledge_validation_refused(store, error, record, fetch)
     except SyncGitProofError as error:
+        stopped = commit_check_report(side)
+        if stopped is not None:
+            return _commit_check_stopped(store, stopped, str(error), record, fetch)
         refreshed = side.model_copy(update={"conflictFiles": content_conflicts(side)})
         record = update_record(store, record, phase=record.phase, side=refreshed)
-        return manual_repair_result("sync-resolution-incomplete", str(error), record, fetch)
+        return manual_repair_result(
+            "sync-resolution-incomplete",
+            _incomplete_resolution_summary(side, str(error)),
+            record,
+            fetch,
+        )
     completed = side.model_copy(
         update={
             "state": "completed",
@@ -803,6 +1028,61 @@ def _finish_retained_merge(
         return resolution_required(record, fetch)
     record = _advance_after_side(store, record, side_name, completed)
     return _run_automatic(contract, store, record, fetch)
+
+
+def _incomplete_resolution_summary(side: SyncSideRecord, detail: str) -> str:
+    """Name the ending action on a continue that resolved nothing (MIK-R61 rule 12).
+
+    No answer of continue leaves the sync open without naming the worktree_sync action
+    that ends it: the journal keeps its phase, so the way on is resolving and continuing,
+    or cancelling.
+    """
+
+    return (
+        f"{detail} The journal keeps its phase; resolve the named paths in {side.worktree}, "
+        "stage them (git add), then run worktree_sync with resolution_action='continue'; "
+        "or end the sync with resolution_action='cancel'."
+    )
+
+
+def _commit_check_stopped(
+    store: SyncOperationStore,
+    report: dict[str, object],
+    detail: str,
+    record: SyncOperationRecord,
+    fetch: dict[str, object],
+) -> WorktreeCommandResult:
+    """Answer a continue stopped at the repository's commit check (MIK-R61 rule 12).
+
+    The content merged but the commit -- and the pre-commit check it runs -- did not. The
+    merge stays staged and the phase is unchanged, so repairing the named files, staging
+    them and continuing resumes the same merge. For each file the check judged, the answer
+    says whether the task changed it; cancel is named as the way back.
+    """
+
+    staged = report.get("staged")
+    assert isinstance(staged, list)
+    task_changed = report.get("taskChanged")
+    assert isinstance(task_changed, dict)
+    lines = [
+        f"- {path}: {'changed by the task' if task_changed.get(path) else 'from the carried line'}"
+        for path in staged
+    ]
+    side = report.get("side", "the side")
+    worktree = ""
+    retained = _retained_side(record)
+    if retained.side == side:
+        worktree = retained.worktree
+    summary = (
+        f"The {side} merge is complete in content but its commit did not pass the repository's "
+        f"commit check: {detail}\nThe check judged the merged tree:\n"
+        + "\n".join(lines)
+        + f"\nRecovery: repair the named files in {worktree}, stage them (git add), then continue "
+        "with worktree_sync and resolution_action='continue'; or end the sync with "
+        "resolution_action='cancel'."
+    )
+    record = update_record(store, record, phase=record.phase)
+    return manual_repair_result("sync-commit-check-failed", summary, record, fetch)
 
 
 def _continue_parked_wip_restore(
@@ -821,7 +1101,12 @@ def _continue_parked_wip_restore(
     except SyncGitProofError as error:
         refreshed = side.model_copy(update={"conflictFiles": content_conflicts(side)})
         record = update_record(store, record, phase=record.phase, side=refreshed)
-        return manual_repair_result("sync-resolution-incomplete", str(error), record, fetch)
+        return manual_repair_result(
+            "sync-resolution-incomplete",
+            _incomplete_resolution_summary(side, str(error)),
+            record,
+            fetch,
+        )
     completed = side.model_copy(
         update={"state": "completed", "wipState": "restored", "conflictFiles": ()}
     )
@@ -880,4 +1165,8 @@ def _advance_after_side(
     side: SyncSideRecord | None,
 ) -> SyncOperationRecord:
     phase = "running-memory" if side_name == "code" and record.memory is not None else "finalizing"
+    if side_name == "memory" and record.validationRefusal is not None:
+        # A continued sync validates again and clears the journaled refusal when the tree
+        # passes (MIK-R61 rule 5): completing the memory side proves its tree judged clean.
+        record = record.model_copy(update={"validationRefusal": None})
     return update_record(store, record, phase=phase, side=side, side_name=side_name)

@@ -122,6 +122,7 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertIsNone(settings.spawn_harness)
         self.assertIsNone(settings.quality_gate.memory_cap_bytes)
         self.assertEqual(settings.role_message_limit, 1000)
+        self.assertEqual(settings.landing.commit_check_timeout_seconds, 900)
         self.assertEqual(settings.sources, ())
 
 
@@ -521,6 +522,54 @@ class QualityGateSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(AgenticSettingsError, "executor") as caught:
             load_agentic_settings(self.coordination_root)
         self.assertIn(str(path), str(caught.exception))
+
+
+class LandingSettingsTests(unittest.TestCase):
+    """``orchestration.landing``: the landing commit-check bound (MIK-R152 rule 6)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.coordination_root = root / "ar-coordination"
+        self.coordination_root.mkdir(parents=True)
+        # A settings file of its own: nothing leaks into or out of the shared one.
+        xdg = root / "xdg"
+        xdg.mkdir()
+        self._xdg = patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg)})
+        self._xdg.start()
+
+    def tearDown(self) -> None:
+        self._xdg.stop()
+        self.tmp.cleanup()
+
+    def test_named_bound_is_honored(self) -> None:
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"landing": {"commitCheckTimeoutSeconds": 60}}},
+        )
+        settings = load_agentic_settings(self.coordination_root)
+        self.assertEqual(settings.landing.commit_check_timeout_seconds, 60)
+
+    def test_unknown_landing_key_fails_loud(self) -> None:
+        path = write_settings(
+            self.coordination_root,
+            {"orchestration": {"landing": {"skipCheck": True}}},
+        )
+        with self.assertRaisesRegex(AgenticSettingsError, "skipCheck") as caught:
+            load_agentic_settings(self.coordination_root)
+        self.assertIn(str(path), str(caught.exception))
+
+    def test_non_positive_bound_is_refused(self) -> None:
+        for bad in (0, -5):
+            with self.subTest(bad=bad):
+                write_settings(
+                    self.coordination_root,
+                    {"orchestration": {"landing": {"commitCheckTimeoutSeconds": bad}}},
+                )
+                with self.assertRaisesRegex(
+                    AgenticSettingsError, "orchestration.landing.commitCheckTimeoutSeconds"
+                ):
+                    load_agentic_settings(self.coordination_root)
 
 
 class ServiceTierSettingsTests(unittest.TestCase):

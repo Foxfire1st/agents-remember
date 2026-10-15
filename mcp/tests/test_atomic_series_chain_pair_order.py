@@ -3,8 +3,8 @@
 A leaf whose code leg is ``not-applicable`` lands a memory commit and records the code position it
 stood on, so two leaves can share one code commit and still be two distinct landings: each memory
 commit makes the pair unique. The chain therefore orders on the pair -- code ancestry where the code
-position moved, memory ancestry where it did not -- and refuses only a pair that is equal on both
-sides, which really is one landing recorded twice.
+position moved, memory ancestry where it did not -- and refuses two enclosures that record the same
+pair and are both not empty, as one landing recorded twice (architect D47 corrected third bullet).
 
 Before this case existed the ordering predicate returned "unordered" in *both* directions as soon as
 two leaves shared a code commit, so no total order could be built and the master closeout refused
@@ -348,6 +348,126 @@ class AtomicSeriesLeafSyncPositionTests(unittest.TestCase):
             "the step must carry the merged line's own commits for this direction to mean anything",
         )
 
+    def test_an_empty_landing_at_the_origin_stands_outside_the_ordering(self) -> None:
+        """MIK-R61 rule 1, conforming: a leaf that changed nothing stands on the chain.
+
+        The empty landing (recorded pair equal to its own base) at the chain's origin is
+        out of the ordering but stands: the closeout orders only the leaf that landed,
+        and names the empty leaf through the preview instead of refusing it.
+        """
+
+        series = self._series()
+        first = self._leaf(
+            series,
+            "L1",
+            code=_Side(self.code_first, self.code_second),
+            memory=_Side(self.memory_base, self.memory_first),
+        )
+        empty = self._leaf(
+            series,
+            "L2",
+            code=_Side(self.code_first, self.code_first),
+            memory=_Side(self.memory_base, self.memory_base),
+        )
+        _branch(self.code, "series", self.code_second)
+        _branch(self.memory, "series", self.memory_first)
+
+        ordered = _require_exact_atomic_landing_chain(series, {"L1": first, "L2": empty})
+
+        self.assertEqual([leaf.leaf_id for leaf in ordered], ["L1"])
+
+    def test_an_empty_landing_after_a_landed_pair_stands_outside_the_ordering(self) -> None:
+        """MIK-R61 rule 1, conforming: an empty landing on a landed pair stands.
+
+        The empty leaf's pair equals the ordered leaf's landing pair: it landed
+        nothing, so nothing is recorded twice. The closeout orders only the leaf
+        that landed and names the empty leaf through the preview instead of
+        refusing it.
+        """
+
+        series = self._series()
+        first = self._leaf(
+            series,
+            "L1",
+            code=_Side(self.code_first, self.code_second),
+            memory=_Side(self.memory_base, self.memory_first),
+        )
+        empty = self._leaf(
+            series,
+            "L2",
+            code=_Side(self.code_second, self.code_second),
+            memory=_Side(self.memory_first, self.memory_first),
+        )
+        _branch(self.code, "series", self.code_second)
+        _branch(self.memory, "series", self.memory_first)
+
+        ordered = _require_exact_atomic_landing_chain(series, {"L1": first, "L2": empty})
+
+        self.assertEqual([leaf.leaf_id for leaf in ordered], ["L1"])
+
+    def test_a_pair_recorded_twice_by_two_nonempty_landings_is_refused(self) -> None:
+        """MIK-R61 rule 1, boundary: two enclosures, same pair, both not empty.
+
+        Architect D47 corrected third bullet: two enclosures that record the same
+        pair and are both not empty refuse, as one landing recorded twice. The
+        closeout names both leaves and the shared pair.
+        """
+
+        series = self._series()
+        first = self._leaf(
+            series,
+            "L1",
+            code=_Side(self.code_first, self.code_second),
+            memory=_Side(self.memory_base, self.memory_first),
+        )
+        twice = self._leaf(
+            series,
+            "L2",
+            code=_Side(self.code_first, self.code_second),
+            memory=_Side(self.memory_base, self.memory_first),
+        )
+        _branch(self.code, "series", self.code_second)
+        _branch(self.memory, "series", self.memory_first)
+
+        with self.assertRaises(CloseoutQueueError) as refused:
+            _require_exact_atomic_landing_chain(series, {"L1": first, "L2": twice})
+
+        self.assertEqual(refused.exception.status, "atomic-series-leaf-chain-invalid")
+        message = str(refused.exception)
+        self.assertIn("'L1'", message)
+        self.assertIn("'L2'", message)
+        self.assertIn("one pair recorded by two enclosures", message)
+
+    def test_an_empty_landing_off_the_chain_is_refused_naming_the_leaf(self) -> None:
+        """MIK-R61 rule 1, boundary: an empty landing whose pair is not on the line refuses.
+
+        The closeout names the leaf and the pair it lands nothing at.
+        """
+
+        series = self._series()
+        first = self._leaf(
+            series,
+            "L1",
+            code=_Side(self.code_first, self.code_second),
+            memory=_Side(self.memory_base, self.memory_first),
+        )
+        foreign = self._leaf(
+            series,
+            "L2",
+            code=_Side(self.code_foreign, self.code_foreign),
+            memory=_Side(self.memory_second, self.memory_second),
+        )
+        _branch(self.code, "series", self.code_second)
+        _branch(self.memory, "series", self.memory_first)
+
+        with self.assertRaises(CloseoutQueueError) as refused:
+            _require_exact_atomic_landing_chain(series, {"L1": first, "L2": foreign})
+
+        self.assertEqual(refused.exception.status, "atomic-series-leaf-chain-invalid")
+        message = str(refused.exception)
+        self.assertIn("'L2'", message)
+        self.assertIn("lands nothing", message)
+
     def test_a_position_that_descends_from_a_step_does_not_vacate_it(self) -> None:
         """A recorded position reaching PAST a step cannot erase the foreign commit inside it.
 
@@ -361,6 +481,13 @@ class AtomicSeriesLeafSyncPositionTests(unittest.TestCase):
 
         Both directions of the property are one assertion: the vacated step is refused AND names
         the commit that is neither the step's endpoint nor a recorded position.
+
+        MIK-R61 rule 1 moves three of the four vacating leaves below out of the ordering:
+        each records a pair equal to its own base (an empty landing) at a position off the
+        chain, so the closeout refuses the empty landing itself -- naming the leaf and its
+        pair -- instead of reaching the membership proof. The verdict and the status are
+        unchanged; only the diagnostic for those shapes moved. The fourth shape (code spine,
+        own leaf) changed its other spine, so it is still ordered and keeps the old naming.
         """
 
         code_out = _commit(self.code, "e.txt", "code out")
@@ -456,10 +583,20 @@ class AtomicSeriesLeafSyncPositionTests(unittest.TestCase):
             _require_exact_atomic_landing_chain(series, contracts)
 
         self.assertEqual(refused.exception.status, "atomic-series-leaf-chain-invalid")
-        named = code_out if vacated_code else memory_out
-        foreign = self.code_foreign if vacated_code else self.memory_second
-        self.assertIn(foreign, str(refused.exception))
-        self.assertNotIn(named, str(refused.exception))
+        if vacated_code and own_leaf:
+            # The vacating leaf changed its other spine, so it is ordered and the
+            # membership proof refuses naming the foreign commit, as before.
+            named = code_out
+            self.assertIn(self.code_foreign, str(refused.exception))
+            self.assertNotIn(named, str(refused.exception))
+            return
+        # Every other shape below records a pair equal to its own base (an empty
+        # landing, MIK-R61 rule 1) at a position off the chain: the closeout refuses
+        # the empty landing itself -- naming the leaf and the pair it lands nothing
+        # at -- instead of reaching the membership proof.
+        message = str(refused.exception)
+        self.assertIn("lands nothing", message)
+        self.assertTrue("'L2'" in message or "'L3'" in message, message)
 
 
 if __name__ == "__main__":
