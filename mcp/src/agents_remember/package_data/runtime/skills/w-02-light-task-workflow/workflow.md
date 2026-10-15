@@ -111,7 +111,11 @@ steps derive from it rather than replace it.
 
 ### 7. Write `task.md`
 
-Use `template.md` as the canonical scaffold. The task document is **JSON-primary**: author it with the `task_doc` MCP tool, which writes the `ar-task-document/v1` JSON and renders `task.md` / `<slug>.md`. `template.md` is the render spec, so do not hand-edit a tool-managed `task.md` — edit the JSON through `task_doc` and let it re-render. (A series *master* file stays hand-authored markdown for now.)
+Use `template.md` as the render spec for a **JSON-primary** task: author through `task_doc`,
+which writes `ar-task-document/v1` JSON and renders `task.md` / `<slug>.md`, not by hand-editing the render.
+For a new series, use `task_doc` `create` with `kind:"master"` first (`master-template.md`),
+then create indexed child documents before writing any leaf's `waitsFor`.
+Existing hand-authored Markdown documents remain as they are until intentionally migrated.
 
 Write every checkbox on its own line. Under a parent step, indent nested checklist items by two spaces and keep the verification checkbox nested under the step it validates rather than emitting it as a same-level sibling.
 
@@ -336,7 +340,8 @@ If the session ends mid-task:
 
 When the work outgrows a single-page plan, escalate to a **master + light sub-task series**. Create one
 wrapper folder with a master `task.md` (scaffold in `master-template.md`) plus flat, numbered sub-task
-files `NN_<name>.md` in execution order.
+files `NN_<name>.md` with stable creation IDs; the master's list is an index.
+Write `waitsFor` through `task_doc` with exact same-master task IDs; the product derives their order.
 
 Masters and leaves project the corpus's stable IDs and versions across that series. Every leaf
 brief, builder handoff, and reviewer verdict carries the exact applicable subset; master-exit

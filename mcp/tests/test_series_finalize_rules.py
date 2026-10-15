@@ -139,8 +139,12 @@ def test_finalize_refuses_an_unreadable_enclosure_of_an_abandoned_row(world):
 
 def test_another_member_that_cannot_be_read_does_not_refuse_and_is_reported_by_file(world):
     contract = world.series()
+    master_path = contract.task_root / "task.json"
+    master = read_task_doc(master_path).model_copy(update={"status": "inProgress"})
+    write_task_doc(contract.task_root, master)
     other = world.tasks / "master-b" / "task.json"
     other.write_text("{broken")
+    before = world.snapshot()
     for dry_run in (True, False):
         payload = _finalize(contract, dry_run=dry_run)
         assert payload["state"] == ("would-finalize" if dry_run else "finalized"), payload
@@ -149,8 +153,13 @@ def test_another_member_that_cannot_be_read_does_not_refuse_and_is_reported_by_f
         (fact,) = sprint["linkageFacts"]
         assert fact["kind"] == "sprint-member-unreadable" and fact["entry"] == "master-b"
         assert fact["file"] == other.as_posix() and "cannot be read" in fact["detail"]
+        if dry_run:
+            assert world.snapshot() == before
     assert world.sprint().subTasks[0].status == "Completed" and other.read_text() == "{broken"
-    assert read_task_doc(world.tasks / "master-a" / "task.json").status == "Completed"
+    completed = read_task_doc(master_path)
+    assert completed.status == "Completed" and completed.completedAt is not None
+    assert completed.decisions == master.decisions == []
+    assert world.sprint().decisions == [] and world.sprint().completedAt is None
 
 
 def test_a_seat_row_is_found_by_its_file_while_another_member_cannot_be_read(tmp_path):

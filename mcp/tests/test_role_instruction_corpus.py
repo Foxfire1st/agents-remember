@@ -26,6 +26,16 @@ import re
 import shutil
 from pathlib import Path
 
+import pytest
+from agents_remember.application.task_docs.task_doc_tools import (
+    TaskDocEdit,
+    TaskDocError,
+    TaskDocTarget,
+    task_doc_tool,
+)
+from agents_remember.tasks import write_task_doc
+from test_task_document import _config, _doc
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = REPOSITORY_ROOT / "skills"
 LIFECYCLE_ROOT = SKILLS_ROOT / "l-01-agent-lifecycles"
@@ -957,3 +967,43 @@ class CurationGuardTeethTests:
         assert not retired_statement_findings(
             normalize_statement(fragment_one.statement), "c-02-memory-quality-control/SKILL.md"
         ), "an undeclared surface must not be reported for a statement it never shipped"
+
+
+def test_new_series_guidance_requires_json_primary_master_before_dependencies() -> None:
+    for surface in ("skills", *GENERATED_SKILL_COPIES):
+        for name in ("SKILL.md", "template.md", "master-template.md", "workflow.md"):
+            path = REPOSITORY_ROOT / surface / "w-02-light-task-workflow" / name
+            text = " ".join(path.read_text(encoding="utf-8").split())
+            assert "runtime ships" not in text and "not tool-managed yet" not in text, path
+            assert "hand-authored markdown for now" not in text, path
+            assert '`kind:"master"`' in text, path
+            assert "before" in text and "`waitsFor`" in text and "`task_doc`" in text, path
+            assert "intentionally migrated" in text, path
+
+
+def test_native_new_master_then_indexed_leaf_dependencies(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    root = tmp_path / "tasks" / "agents-remember" / "legacy"
+
+    def call(operation, target_slug=None, **fields):
+        target = TaskDocTarget(repo_id="agents-remember", task_name=root.name, slug=target_slug)
+        return task_doc_tool(config, target, operation=operation, edit=TaskDocEdit(fields=fields))
+
+    base = dict(repo="agents-remember", createdAt="2026-01-01T00:00")
+    write_task_doc(
+        root, _doc(**base, id="A", slug="01_a", title="A", kind="subTask", master="task.md")
+    )
+    (root / "task.md").write_text("# Task: Legacy Markdown master\n", encoding="utf-8")
+    before = {path: path.read_bytes() for path in root.iterdir() if path.is_file()}
+    with pytest.raises(TaskDocError, match="master"):
+        call("set_field", "01_a", waitsFor=["B"])
+    assert {path: path.read_bytes() for path in before} == before
+    root = root.with_name("series")
+    call("create", **base, id="series", slug="series", title="Series", kind="master")
+    call("create", **base, id="A", slug="01_a", title="A", kind="subTask", master="task.md")
+    call("create", **base, id="B", slug="02_b", title="B", kind="subTask", master="task.md")
+    rows = json.loads((root / "task.json").read_bytes())["subTasks"]
+    assert [row["number"] for row in rows] == ["A", "B"]
+    assert call("set_field", "01_a", waitsFor=["B"])["ok"]
+    assert json.loads((root / "01_a.json").read_bytes())["waitsFor"] == ["B"]
+    assert "## Order" in (root / "task.md").read_text(encoding="utf-8")

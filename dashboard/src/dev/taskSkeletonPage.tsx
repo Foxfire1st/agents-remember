@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 import { dashboardStore } from '../data/store';
 import { DetailPanel } from '../panels/detail-panel/DetailPanel';
+import { NotesReaderViewer } from '../panels/notes-reader/NotesReaderViewer';
+import type { TaskArtifactReaderTarget } from '../data/taskArtifacts';
 import snapshot from '../fixtures/snapshot.json';
 import { asServedProjection } from '../test/servedProjection';
 import { RICH_DOC_PATHS, richApiAnswer, richTaskDocuments } from './taskSkeletonDocs';
@@ -83,6 +85,7 @@ export function TaskSkeletonPage() {
   const rich = params.get('rich') === '1';
   const width = Number(params.get('width')) || 0;
   const [ready, setReady] = useState(false);
+  const [artifact, setArtifact] = useState<TaskArtifactReaderTarget | null>(null);
   useEffect(() => {
     const restore = rich ? answerFromRichDocuments() : undefined;
     const projection = rich ? richProjection() : long ? longProjection() : FULL_PROJECTION;
@@ -93,6 +96,9 @@ export function TaskSkeletonPage() {
   if (!ready) return null;
   const formPaths: Record<string, string> = rich ? RICH_DOC_PATHS : FORM_DOC_PATH;
   const selected = formPaths[form] ?? formPaths.task;
-  const panel = <DetailPanel selectedId={`taskdoc:${selected}`} />;
+  // Existing sandbox only: render the real whole-log pane; no product route or store.
+  const panel = artifact
+    ? <NotesReaderViewer {...artifact} onSelectNote={() => {}} onBack={() => setArtifact(null)} />
+    : <DetailPanel selectedId={`taskdoc:${selected}`} onOpenNotes={setArtifact} onOpenChangeSet={() => {}} />;
   return width > 0 ? <div style={{ width: `${width}px`, margin: '0 auto' }}>{panel}</div> : panel;
 }

@@ -9,17 +9,17 @@ built to grow as the work unfolds.
 
 The `l-01-agent-lifecycles` architect lifecycle's `decide` step escalates a single task to a series once its size is apparent — the
 implementation plan no longer fits on a single page, or the work splits into distinct slices that each
-deserve their own checklist and commit. You can also start single and escalate later: drop in the
-master `task.md` and move the existing plan into the first `NN_<name>.md`.
+deserve their own checklist and commit. You can also start single and escalate later: create the
+JSON-primary master through `task_doc` and intentionally migrate the existing plan into its first leaf.
 
 ## The series convention
 
 - **One wrapper folder** holds the master `task.md` plus flat, numbered, descriptively-named sub-task
   files: `NN_<name>.md` (e.g. `01_job-lifecycle.md`, `02_task-format-reshape.md`). No nested phase
   folders.
-- **Append-friendly:** the next sub-task is just the next `NN_<name>.md` dropped into the same folder.
-  File numbers are stable creation IDs; the master's **Sub-tasks** list is the authoritative execution
-  order (a later-numbered sub-task may run first).
+- **Append-friendly:** create the next sub-task through `task_doc`; its render is the next `NN_<name>.md`.
+  File numbers are stable creation IDs; the master's **Sub-tasks** list is an index, not execution order.
+  Set each leaf's `waitsFor` through `task_doc`; the product derives Order from those exact task IDs.
 - **One master integration branch, one leaf enclosure per active sub-task.** The master root
   `series-contract.md` represents the integration branch and is not itself worktree material. Each
   sub-task slice gets `enclosures/<leaf-id>/series-contract.md`, its own worktree branch, and its own
@@ -33,6 +33,11 @@ master `task.md` and move the existing plan into the first `NN_<name>.md`.
   checks green before each incremental commit; testing is never deferred to the final slice.
 
 ## Master `task.md` scaffold
+
+This is a render scaffold, not a Markdown-only new-master authoring route. Use `task_doc` `create`
+with `kind:"master"` in the wrapper, then create indexed child documents before leaf `waitsFor` writes.
+Existing hand-authored Markdown documents remain as they are until intentionally migrated;
+a Markdown-only master cannot supply the JSON-primary prerequisite for those writes.
 
 ````markdown
 # Task: <Master Title>
@@ -81,14 +86,16 @@ leaf journals win and this projection is regenerated.
 
 ---
 
-## Sub-tasks (execution order)
+## Sub-tasks
 
-> File numbers are stable creation IDs; **this list is the authoritative execution order**.
+> This is the `subTasks` index; Order is derived from each leaf's `waitsFor`, not written here.
 
 1. **<Sub-task A>** · `01_<name>.md` — <scope>
 2. **<Sub-task B>** · `02_<name>.md` — <scope>
 
-Dependencies: <what must land before what>.
+Set `waitsFor` through `task_doc`, using exact same-master task IDs; Order is derived.
+Use `objective`, `requirements`, `design`, `nonGoals` and `acceptance` for their fixed content.
+Use `append_decision` and `set_subtask` for decisions and the index, not duplicate sections or header notes.
 
 ---
 
@@ -147,8 +154,8 @@ is scoped to one slice and points back at the master:
 
 ## Usage rules
 
-1. After the requirement corpus passes cold-read and developer approval, create the master `task.md`
-   and the first sub-task file together in its existing planning wrapper.
+1. After the requirement corpus passes cold-read and developer approval, create the JSON-primary
+   master through `task_doc` first, then its indexed child documents in the existing planning wrapper.
 2. Keep sub-task files flat and numbered; do not nest phase folders.
 3. Run the series through the master integration branch; create one leaf enclosure/worktree per active slice.
 4. Only the master records the version bump and release; sub-tasks never bump.

@@ -10,11 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import Literal, overload
 
 from agents_remember.kernel.direct_execution_grants import (
     ARCHITECT_GRANTER,
@@ -22,6 +21,7 @@ from agents_remember.kernel.direct_execution_grants import (
     DirectExecutionGrant,
     grants_for_task,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
     ApprovedRequirementPacketRef,
@@ -35,7 +35,6 @@ from agents_remember.observer.projection import (
     TaskCodeExampleNode,
     TaskDecisionNode,
     TaskDocNode,
-    TaskDocumentRef,
     TaskExecutionGraphNode,
     TaskExecutionNode,
     TaskHeaderNoteNode,
@@ -76,61 +75,9 @@ from agents_remember.tasks import (
     step_done,
     step_total,
 )
-from pydantic import ValidationError
 
-# A small fixed bound, not one pass per nesting level: pydantic reports ``extra_forbidden`` at
-# every nesting level in a single error report, so one pruning pass clears a document carrying
-# unknown keys simultaneously at document, step, substep, section, decision and sub-task level.
-# The bound is what stops a loc this reader cannot address from looping -- a loc step that is not
-# a key of the raw payload (the ``ref`` ``SprintExecutionNode._lift_legacy_ref`` invents for a
-# legacy bare node, or a union branch label in an edge endpoint) prunes nothing, so such a
-# document is withheld after the bound exactly as it was before this helper.
-_UNKNOWN_FIELD_PASSES = 4
-
-
-def _projected_document(payload: dict[str, object]) -> TaskDocument | None:
-    """Parse one durable task document for projection, ignoring keys this reader cannot know.
-
-    ``payload`` is durable truth written by *another* process -- the MCP server, a worktree
-    seat, a build older or newer than this reader -- so it may carry a field this reader's
-    ``TaskDocument`` version has never heard of. The authoring model is deliberately strict
-    (``extra="forbid"``) so ``task_doc`` refuses a typo, but re-applying that strictness here
-    deleted the whole document instead: a master's sub-task row then rendered "not authored as
-    a task document yet" instead of drilling in, and the on-demand body endpoint 404'd, with no
-    diagnostic anywhere. A reader must not let one unknown field erase a document.
-
-    Keys pydantic rejects as ``extra_forbidden`` are dropped and the document is validated
-    again; every other failure (missing required field, bad enum, malformed nested value) still
-    yields ``None`` exactly as before.
-    """
-    candidate: Any = payload
-    for _ in range(_UNKNOWN_FIELD_PASSES):
-        try:
-            return TaskDocument.model_validate(candidate)
-        except ValidationError as error:
-            unknown = [item["loc"] for item in error.errors() if item["type"] == "extra_forbidden"]
-            if not unknown:
-                return None
-            candidate = _without_paths(candidate, unknown)
-    return None
-
-
-def _without_paths(payload: Any, paths: list[tuple[Any, ...]]) -> Any:
-    """A deep copy of ``payload`` with every addressed key removed."""
-    pruned = deepcopy(payload)
-    for loc in paths:
-        target = pruned
-        for key in loc[:-1]:
-            try:
-                target = target[key]
-            except (KeyError, IndexError, TypeError):
-                break
-        else:
-            if isinstance(target, dict):
-                target.pop(loc[-1], None)
-            elif isinstance(target, list) and isinstance(loc[-1], int):
-                target.pop(loc[-1])
-    return pruned
+from ._task_document_parse import projected_document as _projected_document
+from ._task_order import OrderFields, build_order_fields, read_order_fields
 
 
 def read_task_documents(
@@ -153,6 +100,9 @@ def read_task_documents(
     lifecycle_maps = _task_document_lifecycle_maps(enclosures)
     docs = _iter_task_document_payloads(tasks_root, now=now)
     master_docs = _master_docs_by_ref(docs)
+    order_fields = build_order_fields(
+        {path: doc for path, payload in docs if (doc := _projected_document(payload)) is not None}
+    )
     nodes: list[TaskDocNode] = []
     for path, payload in docs:
         doc = _projected_document(payload)
@@ -167,6 +117,7 @@ def read_task_documents(
                 _TaskDocProjectionOptions(
                     include_body=False,
                     master_docs=master_docs,
+                    order_fields=order_fields,
                     coordination_root=coordination_root,
                 ),
             )
@@ -214,6 +165,7 @@ def read_task_document_body(  # pragma: no cover
         _TaskDocProjectionOptions(
             include_body=True,
             master_docs=_graph_master_docs(tasks_root, doc),
+            order_fields=read_order_fields(resolved, doc),
             coordination_root=coordination_root,
         ),
     )
@@ -667,6 +619,7 @@ class _TaskDocProjectionOptions:
 
     include_body: bool = False
     master_docs: Mapping[TaskDocumentRef, TaskDocument] | None = None
+    order_fields: Mapping[Path, OrderFields] | None = None
     coordination_root: Path | None = None
 
 
@@ -786,7 +739,18 @@ def _task_doc_node(
     lifecycle_by_dir = maps.lifecycle_by_dir
     base_dir = path.parent
     parent_lifecycle = _ref_lifecycle(base_dir, doc.master, lifecycle_by_dir)
+    order = (options.order_fields or {}).get(path)
     body_revision = _task_doc_body_revision(doc)
+    if order is not None:
+        derived = json.dumps(
+            {
+                "graph": order.graph.model_dump(mode="json") if order.graph else None,
+                "waits": [item.model_dump(mode="json") for item in order.waits_for],
+                "needed": [item.model_dump(mode="json") for item in order.needed_by],
+            },
+            sort_keys=True,
+        )
+        body_revision = hashlib.sha256((body_revision + derived).encode()).hexdigest()
     reader = _reader_fields(doc, include_body=options.include_body)
     execution_graph, execution_waves, execution_graph_view = _execution_graph_fields(
         doc, options.master_docs
@@ -820,6 +784,12 @@ def _task_doc_node(
         docPath=path.as_posix(),
         bodyRevision=body_revision,
         createdAt=doc.createdAt,
+        completedAt=_completion_time(doc),
+        waitsFor=doc.waitsFor,
+        waitsForTasks=list(order.waits_for) if order else None,
+        neededByTasks=list(order.needed_by) if order else None,
+        nonGoals=doc.nonGoals if options.include_body else None,
+        acceptance=doc.acceptance if options.include_body else None,
         ageSeconds=_file_age_seconds(path, now),
         steps=_task_step_nodes(doc, preview=preview),
         objective=reader.objective,
@@ -858,9 +828,24 @@ def _task_doc_node(
         executionNature=doc.executionNature,
         executionGraph=execution_graph,
         executionWaves=execution_waves,
-        executionGraphView=execution_graph_view,
+        executionGraphView=order.graph if order and order.graph else execution_graph_view,
         directGrant=direct_grant,
     )
+
+
+def _completion_time(doc: TaskDocument) -> str | None:
+    if doc.completedAt:
+        return doc.completedAt
+    stamps: list[tuple[datetime, str]] = []
+    for item in doc.decisions:
+        if item.decision != "Finalize task lifecycle.":
+            continue
+        try:
+            stamp = datetime.fromisoformat(item.at)
+        except ValueError:
+            continue
+        stamps.append((stamp.replace(tzinfo=UTC) if stamp.tzinfo is None else stamp, item.at))
+    return max(stamps, key=lambda pair: pair[0])[1] if stamps else None
 
 
 def _task_doc_grant_node(
@@ -891,6 +876,10 @@ def _task_doc_body_revision(doc: TaskDocument) -> str:
         "objective": doc.objective,
         "requirements": [_task_intent_body_value(value) for value in doc.requirements],
         "design": doc.design,
+        "nonGoals": doc.nonGoals,
+        "acceptance": doc.acceptance,
+        "waitsFor": doc.waitsFor,
+        "completedAt": doc.completedAt,
         "codeExamples": [example.model_dump(mode="json") for example in doc.codeExamples],
         "decisions": [item.model_dump(mode="json") for item in doc.decisions],
         "openQuestions": [_task_intent_body_value(value) for value in doc.openQuestions],

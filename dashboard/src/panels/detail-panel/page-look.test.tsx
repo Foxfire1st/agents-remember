@@ -173,8 +173,8 @@ describe('the steps table (rule 5)', () => {
     seedTaskDocuments([
       master(),
       leaf({
-        stepsDone: 2,
-        stepsTotal: 6,
+        stepsDone: 1,
+        stepsTotal: 4,
         steps: [
           step('S1', 'Write `slug.py`', 'done', { note: 'Lowercases first.' }),
           step('S2', 'Run the tests', 'inProgress', {
@@ -203,10 +203,10 @@ describe('the steps table (rule 5)', () => {
     expect(getByTestId('step-S1').querySelector('code')?.textContent).toBe('slug.py');
     expect(getByTestId('step-note-S1').textContent).toBe('Lowercases first.');
     expect(cells(getByTestId('substep-S2-S2.2')).slice(1)).toEqual(['S2.2', 'Attach the output']);
-    // the heading counts every declared step, and draws one mark for each of them
+    // MIK-R128: the heading counts and marks major steps only.
     const heading = getByTestId('steps-count');
-    expect(getByTestId('steps-progress').textContent).toBe('2 of 6 done');
-    expect(heading.firstElementChild?.children).toHaveLength(6);
+    expect(getByTestId('steps-progress').textContent).toBe('1 of 4 done');
+    expect(heading.querySelectorAll('[data-step-dot]')).toHaveLength(4);
   });
 
   it('marks the first step that is not done as the next one', () => {

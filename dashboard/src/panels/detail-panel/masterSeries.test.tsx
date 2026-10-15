@@ -564,25 +564,25 @@ describe('DetailPanel master series navigation (6g)', () => {
     expect(cells(getByTestId('subtask-open-2'))).toEqual(['99', 'Alpha later']);
   });
 
-  it('summarizes task progress with every declared parent and nested step', () => {
+  it('summarizes task progress with the projected major-step count', () => {
     seedSeries({
       sliceDoc: {
         title: 'Parallel Leaf Enclosure Workflow',
-        stepsDone: 46,
-        stepsTotal: 49,
+        stepsDone: 6,
+        stepsTotal: 7,
         steps: nestedProgressSteps(),
       },
     });
     const { getByRole, getByTestId, queryByText } = render(<DetailPanel selectedId="series" />);
 
     const row = getByTestId('subtask-open-1');
-    // the Now row carries the declared progress, not the nested recount
-    expect(getByTestId('now-steps-1').textContent).toBe('46/49');
-    expect(getByTestId('now-row-1').textContent).not.toContain('6/7');
+    // All presentations use the producer's major count, without recounting children.
+    expect(getByTestId('now-steps-1').textContent).toBe('6/7');
+    expect(getByTestId('now-steps-1').querySelectorAll('[data-step-dot]')).toHaveLength(7);
 
     fireEvent.click(row);
-    expect(getByRole('img', { name: 'steps done' }).textContent).toBe('46 of 49 done');
-    expect(queryByText('6/7')).toBeNull();
+    expect(getByRole('img', { name: 'steps done' }).textContent).toBe('6 of 7 done');
+    expect(queryByText('46/49')).toBeNull();
   });
 
   it('renders master content when a selected task-id lifecycle maps to the series task name', () => {

@@ -1,12 +1,16 @@
 // MIK-R127 evidence 1: per form, the order of the blocks on a document that
 // has everything, and on a document that has only the required fields. The
-// objective is the first block below the head on every form (MIK-R150 rule 14,
-// D237): it stands after the head and before Now or Steps.
+// objective follows the complete head and actual series line on every form
+// (MIK-R128 rule 15), before Now or Steps.
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
 import { seedTaskDocuments, taskDoc } from './test-utils';
+import { block } from './pageStyles';
+import { TaskContent } from './taskReader';
+import { fireEvent } from '@testing-library/react';
+import { vi } from 'vitest';
 
 function blockOrder(container: HTMLElement, skeleton: string): string[] {
   const root = container.querySelector(`[data-testid="${skeleton}"]`);
@@ -252,9 +256,7 @@ describe('master skeleton order (rule 4)', () => {
 
   it('draws head alone on a bare document: empty Now and Tasks stay out', () => {
     seedTaskDocuments([taskDoc({ kind: 'master', docPath: MASTER, title: 'Bare master' })]);
-    const { container, getByTestId, queryByTestId } = render(
-      <DetailPanel selectedId={`taskdoc:${MASTER}`} />,
-    );
+    const { container, getByTestId, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${MASTER}`} />);
 
     expect(getByTestId('doc-form').textContent).toBe('master');
     expect(blockOrder(container, 'skeleton-master')).toEqual(['head']);
@@ -405,9 +407,7 @@ describe('sprint skeleton order (rule 3)', () => {
         orchestrates: ['master-a'],
       }),
     ]);
-    const { container, getByTestId, queryByTestId } = render(
-      <DetailPanel selectedId={`taskdoc:${SPRINT}`} />,
-    );
+    const { container, getByTestId, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${SPRINT}`} />);
 
     expect(getByTestId('doc-form').textContent).toBe('sprint');
     expect(blockOrder(container, 'skeleton-sprint')).toEqual(['head']);
@@ -415,7 +415,136 @@ describe('sprint skeleton order (rule 3)', () => {
   });
 });
 
-describe('objective below the head (MIK-R150 rule 14)', () => {
+describe('objective after the rendered series line (MIK-R128 rule 15, evidence 12)', () => {
+  it.each(['sprint', 'master', 'task'] as const)(
+    'orders actual reader chrome before the objective on %s',
+    (form) => {
+      const doc = taskDoc({
+        id: form === 'task' ? 'L1' : 'M',
+        kind: form === 'task' ? 'subTask' : 'master',
+        form,
+        docPath: form === 'task' ? LEAF : MASTER,
+        title: form,
+        status: 'inProgress',
+        objective: 'The objective.',
+        directGrant:
+          form === 'task'
+            ? { grantedBy: 'developer', grantedAt: '2026-10-01T10:00:00Z' }
+            : undefined,
+        steps:
+          form === 'task'
+            ? [
+                {
+                  id: 'S1',
+                  title: 'Work',
+                  status: 'pending',
+                  substeps: [],
+                  noteTruncated: false,
+                  outcomeTruncated: false,
+                },
+              ]
+            : [],
+        subTasks:
+          form !== 'task'
+            ? [{ number: 'L1', name: 'Work', file: '01_leaf.md', status: 'inProgress', scope: '' }]
+            : [],
+      });
+      const view = render(
+        <TaskContent
+          docs={[doc]}
+          bodyState="unavailable"
+          onOpen={vi.fn()}
+          onJump={vi.fn()}
+          onOpenChangeSet={vi.fn()}
+        />,
+      );
+      const objective = view.getByTestId('objective-lead');
+      const seriesLine = view.getAllByTestId('open-changeset')[0];
+      expect(seriesLine.textContent).toContain(form === 'task' ? 'committed' : 'series');
+      expect(before(seriesLine, objective)).toBe(true);
+      expect(
+        before(
+          view.getByText(
+            'Full task document details are unavailable; showing the available summary.',
+          ),
+          objective,
+        ),
+      ).toBe(true);
+      if (form === 'task')
+        expect(before(view.getByTestId('taskdoc-direct-line'), objective)).toBe(true);
+      const following = view.container.querySelector(
+        `[data-block="${form === 'task' ? 'steps' : 'now'}"]`,
+      );
+      if (!following) throw new Error('missing following block');
+      expect(before(objective, following)).toBe(true);
+      for (const className of block.split(' '))
+        expect(objective.classList.contains(className)).toBe(true);
+    },
+  );
+
+  it.each(['sprint', 'master', 'task'] as const)(
+    'uses the shared titled-block spacing when %s has no series line',
+    (form) => {
+      const doc = taskDoc({
+        kind: form === 'task' ? 'subTask' : 'master',
+        form,
+        docPath: form === 'task' ? LEAF : MASTER,
+        objective: 'An objective.',
+      });
+      const view = render(
+        <TaskContent docs={[doc]} bodyState="loading" onOpen={vi.fn()} onJump={vi.fn()} />,
+      );
+      expect(view.queryByTestId('open-changeset')).toBeNull();
+      const objective = view.getByTestId('objective-lead');
+      expect(before(view.getByTestId('doc-head'), objective)).toBe(true);
+      for (const className of block.split(' '))
+        expect(objective.classList.contains(className)).toBe(true);
+    },
+  );
+
+  it.each(['master', 'task'] as const)(
+    'places structured prose without replacing old notes on %s',
+    (form) => {
+      const doc = taskDoc({
+        kind: form === 'task' ? 'subTask' : 'master',
+        form,
+        docPath: form === 'task' ? LEAF : MASTER,
+        objective: 'An objective.',
+        nonGoals: 'Not **in scope**.',
+        design: 'A design.',
+        acceptance: 'Evidence **required**.',
+        sections: [
+          { kind: 'freeform', heading: 'Historic acceptance', body: 'Preserved old prose.' },
+        ],
+      });
+      const view = render(
+        <TaskContent docs={[doc]} bodyState="unavailable" onOpen={vi.fn()} onJump={vi.fn()} />,
+      );
+      expect(blockOrder(view.container, `skeleton-${form}`)).toEqual([
+        'head',
+        'objective',
+        'nonGoals',
+        'design',
+        'acceptance',
+        'further',
+      ]);
+      expect(view.getByText('in scope').tagName).toBe('STRONG');
+      expect(view.getByText('required').tagName).toBe('STRONG');
+      expect(view.getByText('Historic acceptance')).toBeTruthy();
+    },
+  );
+
+  it('keeps long structured prose reachable without another reader route', () => {
+    const text = Array.from({ length: 12 }, (_, index) => `Paragraph ${index}.`).join('\n\n');
+    const doc = taskDoc({ kind: 'subTask', docPath: LEAF, nonGoals: text, acceptance: text });
+    const view = render(
+      <TaskContent docs={[doc]} bodyState="unavailable" onOpen={vi.fn()} onJump={vi.fn()} />,
+    );
+    expect(view.queryAllByText('Paragraph 11.')).toHaveLength(0);
+    fireEvent.click(view.getByTestId('nonGoals-toggle'));
+    fireEvent.click(view.getByTestId('acceptance-toggle'));
+    expect(view.getAllByText('Paragraph 11.')).toHaveLength(2);
+  });
   function before(first: Element, second: Element): boolean {
     return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   }

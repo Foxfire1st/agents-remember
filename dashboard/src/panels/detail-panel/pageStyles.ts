@@ -52,8 +52,8 @@ export const muted = css({ color: 'muted' });
 export const warn = css({ color: 'amber' });
 
 // ---------------------------------------------------------------------------
-// The head (rule 2): form, id and status on one line, the title, the objective
-// (D219: first under the title), the strip of labelled facts, the note lines.
+// The head (rule 2): form, id and status on one line, title, labelled facts
+// and note lines. The objective follows the complete head and series line.
 // ---------------------------------------------------------------------------
 
 export const headTop = css({
@@ -592,6 +592,15 @@ export const substep = cva({
 // Decisions: number, time and one line; the row opens the rationale in place.
 // ---------------------------------------------------------------------------
 
+export const decisionReading = css({ maxWidth: '100ch', marginInline: 'auto', minWidth: '0' });
+export const productRecords = css({
+  color: 'muted',
+  marginTop: '1rem',
+  fontSize: '0.74rem',
+  '& summary': { cursor: 'pointer' },
+  '& ul': { paddingLeft: '1.1rem' },
+  '& li': { marginBlock: '0.6rem' },
+});
 export const decisionNumber = css({ color: 'oklch(0.6 0.02 250)' });
 export const decisionAt = css({
   color: 'muted',

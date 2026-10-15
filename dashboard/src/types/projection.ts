@@ -577,10 +577,19 @@ export interface TaskDecisionNode {
   rationale: string;
 }
 
+export interface TaskDependencyNode {
+  docPath?: string;
+  id: string;
+  status: string;
+  title: string;
+}
+
 export interface TaskDocNode {
+  acceptance?: string;
   ageSeconds?: number;
   bodyRevision: string;
   codeExamples: TaskCodeExampleNode[];
+  completedAt?: string;
   createdAt: string;
   currentStep?: string;
   decisions: TaskDecisionNode[];
@@ -602,6 +611,8 @@ export interface TaskDocNode {
   kind: string;
   lifecycleId?: string;
   masterLifecycleId?: string;
+  neededByTasks?: TaskDependencyNode[];
+  nonGoals?: string;
   objective: string;
   openQuestions: string[];
   orchestrates: string[];
@@ -620,6 +631,8 @@ export interface TaskDocNode {
   subTasks: TaskSubTaskRefNode[];
   title: string;
   type: string;
+  waitsFor?: string[];
+  waitsForTasks?: TaskDependencyNode[];
 }
 
 export interface TaskDocProjectionEffect {
@@ -670,6 +683,7 @@ export interface TaskExecutionNode {
 }
 
 export interface TaskExecutionNodeView {
+  cycle?: boolean;
   executionNature?: string;
   frontierState: "landed" | "ready" | "waiting" | "in-flight" | "abandoned";
   kind: "lump" | "segment";

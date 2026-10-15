@@ -20,7 +20,7 @@ import {
   useRestHighlight,
 } from '../sprint-graph/SprintGraphView';
 import { masterTaskCounts } from './model';
-import { Block, MoreLink, plural, type DocView } from './pageParts';
+import { Block, MoreLink, SubHead, plural, type DocView } from './pageParts';
 import {
   dim,
   orderCount,
@@ -64,9 +64,12 @@ function orderRows(nodes: TaskExecutionNodeView[]): OrderRows {
   const waves = [...new Set(waiting.map((node) => node.waveIndex))].sort((a, b) => a - b);
   const rows = waves.map((wave) => {
     const inWave = waiting.filter((node) => node.waveIndex === wave);
+    const cycleNames = nodes.filter((node) => node.cycle && node.waveIndex === wave)
+      .map((node) => node.masterTitle);
     return {
       key: `wave-${wave}`,
-      label: `wave ${wave}`,
+      label: inWave.some((node) => node.cycle)
+        ? `wave ${wave} · cycle: ${cycleNames.join(', ')}` : `wave ${wave}`,
       now: false,
       nodes: [
         ...inWave.filter((node) => node.frontierState === 'ready'),
@@ -118,6 +121,7 @@ function masterOf(node: TaskExecutionNodeView, handlers: OrderHandlers): TaskDoc
 // Beside the name: how many tasks of a whole master are completed, or how many
 // tasks this part of a master holds.
 function nodeMeta(node: TaskExecutionNodeView, master: TaskDocNode | undefined): string {
+  if (master && master.kind !== 'master') return `${master.stepsDone}/${master.stepsTotal}`;
   if (node.kind === 'segment') return plural(node.leafIds.length, 'task');
   const counts = master ? masterTaskCounts(master) : undefined;
   return counts && counts.total > 0 ? `${counts.done}/${counts.total}` : '';
@@ -160,7 +164,7 @@ function OrderNode({
   );
 }
 
-function OrderRead({ nodes, shown }: { nodes: TaskExecutionNodeView[]; shown: string | null }) {
+function OrderRead({ nodes, shown, unit }: { nodes: TaskExecutionNodeView[]; shown: string | null; unit: 'task' | 'master' }) {
   const relations = shown ? orderRelations(nodes, shown) : undefined;
   if (!relations) {
     return (
@@ -169,7 +173,7 @@ function OrderRead({ nodes, shown }: { nodes: TaskExecutionNodeView[]; shown: st
         <span className={orderKey({ state: 'ready' })}>waits for nothing unfinished</span>
         <span className={orderKey({ state: 'waits' })}>waits</span>
         <span className={dim}>
-          Rest the pointer on a master: what it waits for and what waits for it light up.
+          Rest the pointer on a {unit}: what it waits for and what waits for it light up.
         </span>
       </div>
     );
@@ -178,7 +182,7 @@ function OrderRead({ nodes, shown }: { nodes: TaskExecutionNodeView[]; shown: st
     <div className={orderRead} data-testid="order-read">
       <strong>{relations.title}</strong>
       <span>waits for: {relations.waitsFor.join(', ') || 'nothing unfinished'}</span>
-      <span>needed by: {relations.neededBy.join(', ') || 'no open master'}</span>
+      <span>needed by: {relations.neededBy.join(', ') || `no open ${unit}`}</span>
     </div>
   );
 }
@@ -195,9 +199,11 @@ const nodeUnder = (target: EventTarget | null): string | undefined =>
 function OrderRowsView({
   graphView,
   handlers,
+  unit,
 }: {
   graphView: TaskExecutionGraphView;
   handlers: OrderHandlers;
+  unit: 'task' | 'master';
 }) {
   const { hot, rest, markNow } = useRestHighlight();
   const reducedMotion = useReducedMotion();
@@ -240,7 +246,7 @@ function OrderRowsView({
           </div>
         </div>
       ))}
-      <OrderRead nodes={graphView.nodes} shown={hot} />
+      <OrderRead nodes={graphView.nodes} shown={hot} unit={unit} />
     </div>
   );
 }
@@ -253,15 +259,21 @@ export function OrderBlock({
   graphView,
   handlers,
   openView,
+  form = 'sprint',
 }: {
   graphView: TaskExecutionGraphView | undefined;
   handlers: OrderHandlers;
   openView: (view: DocView) => void;
+  form?: 'sprint' | 'master';
 }) {
   if (!graphView || graphView.nodes.length === 0) return null;
   const { landed, abandoned } = orderRows(graphView.nodes);
   return (
-    <Block title="Order" block="order" count="masters not finished, by wave">
+    <Block
+      title="Order"
+      block="order"
+      count={`${form === 'master' ? 'tasks' : 'masters'} not finished, by wave`}
+    >
       <div className={orderList} data-testid="order-list">
         <div className={orderRow()} data-testid="order-done">
           <span className={orderLabel()}>
@@ -275,14 +287,36 @@ export function OrderBlock({
             {abandoned > 0 ? <span className={dim}>{abandoned} abandoned</span> : null}
           </div>
         </div>
-        <OrderRowsView graphView={graphView} handlers={handlers} />
+        <OrderRowsView graphView={graphView} handlers={handlers} unit={form === 'master' ? 'task' : 'master'} />
       </div>
       <p className={orderNote} data-testid="order-note">
-        Drawn from the execution graph of the sprint: {plural(graphView.nodes.length, 'unit')},{' '}
-        {plural(edgeCount(graphView.nodes), 'edge')}. The whole graph names the tasks of every unit
-        and the reason of every edge.
+        Drawn from{' '}
+        {form === 'master' ? 'the tasks’ waitsFor fields' : 'the execution graph of the sprint'}:{' '}
+        {plural(graphView.nodes.length, 'unit')}, {plural(edgeCount(graphView.nodes), 'edge')}. The
+        whole graph names the tasks of every unit and the reason of every edge.
       </p>
     </Block>
+  );
+}
+
+export function CanStartNext({
+  graphView,
+  handlers,
+}: {
+  graphView: TaskExecutionGraphView | undefined;
+  handlers: OrderHandlers;
+}) {
+  const ready = graphView?.nodes.filter((node) => node.frontierState === 'ready') ?? [];
+  if (ready.length === 0) return null;
+  return (
+    <div data-testid="can-start-next">
+      <SubHead title="Can start next" count={ready.length} />
+      <div className={orderNodes({ now: false })}>
+        {ready.map((node) => (
+          <OrderNode key={node.nodeId} node={node} mark="none" fade={false} handlers={handlers} />
+        ))}
+      </div>
+    </div>
   );
 }
 

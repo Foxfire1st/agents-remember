@@ -209,8 +209,8 @@ describe('completed group view (rules 3-4)', () => {
     expect(getByTestId('group-done-link').textContent).toContain('2 completed tasks');
     fireEvent.click(getByTestId('group-done-link'));
     expect(getByTestId('doc-view-title').textContent).toBe('Completed tasks');
-    expect(cells(getByText('Done one').parentElement)).toEqual(['L1', 'Done one']);
-    expect(cells(getByText('Done two').parentElement)).toEqual(['L2', 'Done two']);
+    expect(cells(getByText('Done one').closest('tr'))).toEqual(['L1', 'Done one', '—']);
+    expect(cells(getByText('Done two').closest('tr'))).toEqual(['L2', 'Done two', '—']);
 
     fireEvent.click(getByTestId('doc-view-back'));
     expect(queryByTestId('doc-view')).toBeNull();

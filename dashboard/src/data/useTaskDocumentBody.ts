@@ -94,12 +94,24 @@ function mergeCurrentReview(
   };
 }
 
+function mergeFixedProse(
+  summary: TaskDocNode,
+  body: Partial<TaskDocNode>,
+): Pick<TaskDocNode, 'nonGoals' | 'acceptance'> {
+  return {
+    nonGoals: body.nonGoals ?? summary.nonGoals,
+    acceptance: body.acceptance ?? summary.acceptance,
+  };
+}
+
 function mergeLongContent(
   summary: TaskDocNode,
   body: Partial<TaskDocNode>,
 ): Pick<
   TaskDocNode,
   | 'objective'
+  | 'nonGoals'
+  | 'acceptance'
   | 'requirements'
   | 'design'
   | 'codeExamples'
@@ -111,6 +123,7 @@ function mergeLongContent(
 > {
   return {
     objective: body.objective ?? summary.objective,
+    ...mergeFixedProse(summary, body),
     requirements: body.requirements ?? summary.requirements,
     design: body.design ?? summary.design,
     codeExamples: body.codeExamples ?? summary.codeExamples,

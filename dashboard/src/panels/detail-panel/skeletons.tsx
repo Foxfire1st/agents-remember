@@ -212,22 +212,34 @@ export function CodeExample({ example }: { example: TaskCodeExampleNode }) {
 
 // One decision: its number, its recorded time and one line of its text. The
 // row opens the whole text and the rationale in place.
-function DecisionRow({ item, number }: { item: TaskDecisionNode; number: number | undefined }) {
+function DecisionRow({
+  item,
+  number,
+  whole = false,
+}: {
+  item: TaskDecisionNode;
+  number: number | undefined;
+  whole?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div
-      className={row({ kind: 'body', opens: true, open })}
-      {...opensOn(() => setOpen((current) => !current))}
-      aria-expanded={open}
+      className={row({ kind: 'body', opens: !whole, open: whole || open })}
+      {...(whole ? {} : opensOn(() => setOpen((current) => !current)))}
+      aria-expanded={whole ? undefined : open}
       title={`recorded ${item.at}`}
       data-testid="decision-row"
     >
-      <span className={decisionNumber}>{number === undefined ? '' : `#${number}`}</span>
-      <span className={decisionAt}>{shortWhen(item.at)}</span>
+      <span className={decisionNumber} data-testid="decision-number">
+        {number === undefined ? '' : `#${number}`}
+      </span>
+      <span className={decisionAt} data-testid="decision-time">
+        {shortWhen(item.at)}
+      </span>
       <span className={decisionText} data-testid="decision-text">
         <Markdown inline>{item.decision}</Markdown>
       </span>
-      {open ? (
+      {whole || open ? (
         <div className={decisionWhy} data-testid="decision-rationale">
           <Markdown inline>{item.rationale}</Markdown>
         </div>
@@ -239,22 +251,29 @@ function DecisionRow({ item, number }: { item: TaskDecisionNode; number: number 
 export function DecisionList({
   items,
   numbers,
+  whole = false,
 }: {
   items: TaskDecisionNode[];
   numbers?: Map<TaskDecisionNode, number>;
+  whole?: boolean;
 }) {
   return (
     <Rows cols="decisions" testid="decision-list">
       {items.map((item) => (
-        <DecisionRow key={`${item.at}:${item.decision}`} item={item} number={numbers?.get(item)} />
+        <DecisionRow
+          key={`${item.at}:${item.decision}`}
+          item={item}
+          number={numbers?.get(item)}
+          whole={whole}
+        />
       ))}
     </Rows>
   );
 }
 
-// Every entry numbered from the oldest, so a decision keeps its number as newer ones arrive.
-function decisionNumbers(items: TaskDecisionNode[]): Map<TaskDecisionNode, number> {
-  const ordered = orderDecisionsNewestFirst(items);
+// Authored decisions numbered from the oldest; product records take no number.
+export function decisionNumbers(items: TaskDecisionNode[]): Map<TaskDecisionNode, number> {
+  const ordered = orderDecisionsNewestFirst(items.filter((item) => !item.product_record));
   return new Map(ordered.map((item, index) => [item, ordered.length - index] as const));
 }
 
@@ -262,8 +281,8 @@ function decisionNumbers(items: TaskDecisionNode[]): Map<TaskDecisionNode, numbe
 // five newest authored decisions, newest first. Product-written records — marked by the
 // server from the writers' own constants — count toward nothing and are not drawn here.
 // The link opens the whole log on a page of its own; it appears whenever at least one
-// entry is omitted from this page and names both counts where they differ. No link when
-// every entry is visible.
+// entry is omitted from this page and names only the authored-decision count
+// (MIK-R128 rule 13). Records remain reachable, even in a records-only log.
 export function DecisionPreview({
   items,
   repo,
@@ -280,10 +299,7 @@ export function DecisionPreview({
   const authored = items.filter((item) => !item.product_record);
   const newest = orderDecisionsNewestFirst(authored).slice(0, 5);
   const omitted = items.length - newest.length;
-  const linkLabel =
-    authored.length !== items.length
-      ? `all ${items.length} entries, ${authored.length} decision${authored.length === 1 ? '' : 's'}`
-      : `all ${items.length} decision${items.length === 1 ? '' : 's'}`;
+  const linkLabel = `all ${plural(authored.length, 'decision')}`;
   return (
     <>
       <DecisionList items={newest} numbers={decisionNumbers(items)} />
@@ -384,6 +400,40 @@ export function LongTextBlock({
         <MoreLink onClick={() => openView({ kind: viewKind })} testid={`${block}-all-link`}>
           {bounded.extent} of {title.toLowerCase()}
         </MoreLink>
+      ) : null}
+    </Block>
+  );
+}
+
+// Optional structured Markdown stays at its fixed place. Its long text opens
+// in place; it needs no new reader route or document-view kind.
+export function FixedMarkdownBlock({
+  title,
+  block,
+  text,
+}: {
+  title: string;
+  block: string;
+  text?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!text) return null;
+  const bounded = boundedText(text);
+  return (
+    <Block title={title} block={block}>
+      <div className={prose}>
+        <Markdown>{open ? text : bounded.preview}</Markdown>
+      </div>
+      {bounded.long ? (
+        <button
+          type="button"
+          className={link}
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          data-testid={`${block}-toggle`}
+        >
+          {open ? 'less' : `all ${bounded.extent} of ${title.toLowerCase()}`}
+        </button>
       ) : null}
     </Block>
   );

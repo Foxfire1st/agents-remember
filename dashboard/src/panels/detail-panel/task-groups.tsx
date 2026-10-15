@@ -7,13 +7,7 @@ import type { ReactNode } from 'react';
 
 import { cx } from '../../../styled-system/css';
 import { Markdown } from '../../grammar/Markdown';
-import { taskDocSelectionKey } from '../../data/taskIdentity';
-import type {
-  DiscardedSubTaskNode,
-  SubTaskRow,
-  TaskDocNode,
-  TaskDocumentRef,
-} from '../../types/projection';
+import type { SubTaskRow, TaskDocNode, TaskDocumentRef } from '../../types/projection';
 import {
   goneMastersLabel,
   goneTasksLabel,
@@ -23,10 +17,6 @@ import {
   masterTaskCounts,
   primaryRequirement,
   sectionIntro,
-  shortDocId,
-  sliceForRef,
-  sliceSlug,
-  sprintRowStatus,
   standingStep,
   stepMarkStates,
   subTaskKey,
@@ -39,7 +29,6 @@ import {
   ProgressBar,
   Row,
   RowHead,
-  RowLink,
   Rows,
   StepMarks,
   SubHead,
@@ -64,87 +53,33 @@ import {
   tableFrame,
   warn,
 } from './pageStyles';
-import { DiscardedSubTaskHistory } from './skeletons';
-
-export interface IndexRowHandlers {
-  sliceDocs: TaskDocNode[];
-  onOpen: (slug: string) => void;
-  onJump: (id: string) => void;
-  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
-}
-
-export interface RowTarget {
-  testid: string;
-  run: () => void;
-  title?: string;
-}
-
-// One clickable index target shared by every row: a commanded master opens
-// directly, a linked series opens by id, an authored slice opens by slug.
-export function resolveRowTarget(
-  ref: SubTaskRow,
-  position: number,
-  handlers: IndexRowHandlers,
-): RowTarget | null {
-  const masterRef = 'masterRef' in ref ? ref.masterRef : undefined;
-  const masterPath =
-    masterRef && handlers.docPathForRef ? handlers.docPathForRef(masterRef) : undefined;
-  if (masterRef && masterPath) {
-    return {
-      testid: `subtask-open-master-${position}`,
-      run: () => handlers.onJump(taskDocSelectionKey(masterPath)),
-      title: `open the ${masterPath} master document`,
-    };
-  }
-  const linkedLifecycleId = 'linkedLifecycleId' in ref ? ref.linkedLifecycleId : undefined;
-  if (linkedLifecycleId) {
-    return {
-      testid: `subtask-open-link-${position}`,
-      run: () => handlers.onJump(linkedLifecycleId),
-      title: `open the ${linkedLifecycleId} series`,
-    };
-  }
-  const match = sliceForRef(handlers.sliceDocs, ref);
-  if (match) {
-    const slug = sliceSlug(match);
-    return { testid: `subtask-open-${position}`, run: () => handlers.onOpen(slug) };
-  }
-  return null;
-}
-
-// The id and the name of an index row as one link; a row that leads nowhere
-// yet keeps the same two cells and says why.
-function IndexLink({
-  id,
-  name,
-  ref,
-  position,
-  handlers,
-}: {
-  id: string;
-  name: string;
-  ref: SubTaskRow;
-  position: number;
-  handlers: IndexRowHandlers;
-}) {
-  const target = resolveRowTarget(ref, position, handlers);
-  return (
-    <RowLink
-      id={id}
-      name={name}
-      onOpen={target?.run}
-      testid={target?.testid ?? `subtask-open-${position}`}
-      title={target ? (target.title ?? `${id} — ${name}`) : 'not authored as a task document yet'}
-    />
-  );
-}
+import { CompletedTaskList } from './CompletedTaskList';
+import { CanStartNext } from './orderGraph';
+import { docPathForTaskRef } from './model';
+import { completedEntries } from './completedTasksModel';
+import {
+  IndexLink,
+  taskRowFacts,
+  masterRowFacts,
+  resolveSprintMaster,
+  resolveRowTarget,
+  fullOrderPositions,
+  indexedRows,
+  sprintEntries,
+  groupSprintEntries,
+  type IndexRowHandlers,
+  type SprintEntry,
+} from './indexRows';
+export {
+  fullOrderPositions,
+  resolveRowTarget,
+  resolveSprintMaster,
+  sprintEntries,
+  groupSprintEntries,
+} from './indexRows';
 
 function dash(): ReactNode {
   return <span className={dim}>—</span>;
-}
-
-export function fullOrderPositions(refs: SubTaskRow[]): Map<SubTaskRow, number> {
-  return new Map(refs.map((ref, index) => [ref, index + 1] as const));
 }
 
 function splitLine(groups: {
@@ -175,27 +110,12 @@ function isEmptyIndex(groups: {
 // A master's index row: the task's own document where the row resolves one.
 // ---------------------------------------------------------------------------
 
-interface TaskRowFacts {
-  id: string;
-  name: string;
-  match: TaskDocNode | undefined;
-}
-
-function taskRowFacts(ref: SubTaskRow, sliceDocs: TaskDocNode[], parentId: string): TaskRowFacts {
-  const match = sliceForRef(sliceDocs, ref);
-  return {
-    id: shortDocId(match?.id || ref.number, parentId),
-    name: match?.title || ref.name,
-    match,
-  };
-}
-
 function StepsDone({ match }: { match: TaskDocNode | undefined }) {
   if (!match || match.stepsTotal === 0) return dash();
   const progress = taskStepProgress(match);
   return (
     <>
-      <StepMarks states={stepMarkStates(match.steps)} />
+      <StepMarks states={stepMarkStates(match.steps)} steps={match.steps} />
       {progress.done}/{progress.total}
     </>
   );
@@ -270,7 +190,7 @@ export function MasterNowBlock({
   onJump,
   docPathForRef,
 }: {
-  doc: Pick<TaskDocNode, 'id' | 'subTasks'>;
+  doc: Pick<TaskDocNode, 'id' | 'subTasks' | 'executionGraphView'>;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
@@ -313,6 +233,14 @@ export function MasterNowBlock({
       ) : (
         <p className={none}>No tasks in work.</p>
       )}
+      <CanStartNext
+        graphView={doc.executionGraphView}
+        handlers={{
+          allDocs: sliceDocs,
+          onJump,
+          docPathForRef: docPathForRef ?? ((ref) => docPathForTaskRef(sliceDocs, ref)),
+        }}
+      />
     </Block>
   );
 }
@@ -320,67 +248,6 @@ export function MasterNowBlock({
 // ---------------------------------------------------------------------------
 // A sprint's index row: the commanded master's own document where it resolves.
 // ---------------------------------------------------------------------------
-
-export function resolveSprintMaster(
-  ref: SubTaskRow,
-  allDocs: TaskDocNode[],
-  docPathForRef: ((ref: TaskDocumentRef) => string | undefined) | undefined,
-): TaskDocNode | undefined {
-  const masterRef = 'masterRef' in ref ? ref.masterRef : undefined;
-  if (!masterRef || !docPathForRef) return undefined;
-  const path = docPathForRef(masterRef);
-  return path ? allDocs.find((doc) => doc.docPath === path) : undefined;
-}
-
-export interface SprintEntry {
-  ref: SubTaskRow;
-  masterDoc: TaskDocNode | undefined;
-}
-
-// Every sprint index row with its resolution (rule 3): rows resolving to a
-// commanded master show the master's own status; seat rows and rows whose
-// master is not projected keep the row as written and stand with their status
-// group — and in the rows view — never hidden.
-export function sprintEntries(
-  doc: Pick<TaskDocNode, 'subTasks'>,
-  allDocs: TaskDocNode[],
-  docPathForRef: ((ref: TaskDocumentRef) => string | undefined) | undefined,
-): SprintEntry[] {
-  return doc.subTasks.map((ref) => ({
-    ref,
-    masterDoc: resolveSprintMaster(ref, allDocs, docPathForRef),
-  }));
-}
-
-export function sprintEntryStatus(entry: SprintEntry): string {
-  return entry.masterDoc ? sprintRowStatus(entry.ref, entry.masterDoc) : entry.ref.status;
-}
-
-export interface SprintGroups {
-  work: SprintEntry[];
-  waiting: SprintEntry[];
-  done: SprintEntry[];
-  gone: SprintEntry[];
-}
-
-export function groupSprintEntries(entries: SprintEntry[]): SprintGroups {
-  return {
-    work: entries.filter((entry) => sprintEntryStatus(entry) === 'inProgress'),
-    waiting: entries.filter((entry) => {
-      const status = sprintEntryStatus(entry);
-      return status !== 'inProgress' && status !== 'Completed' && status !== 'abandoned';
-    }),
-    done: entries.filter((entry) => sprintEntryStatus(entry) === 'Completed'),
-    gone: entries.filter((entry) => sprintEntryStatus(entry) === 'abandoned'),
-  };
-}
-
-function masterRowFacts(entry: SprintEntry): { id: string; name: string } {
-  return {
-    id: entry.masterDoc?.id ?? entry.ref.number,
-    name: entry.masterDoc?.title ?? entry.ref.name,
-  };
-}
 
 function MasterProgress({ masterDoc }: { masterDoc: TaskDocNode }) {
   const counts = masterTaskCounts(masterDoc);
@@ -586,9 +453,7 @@ function TaskWaitingRow({
     <Row testid={`waiting-row-${position}`}>
       <IndexLink id={id} name={name} ref={ref} position={position} handlers={handlers} />
       <span className={cx(dim, cell({ at: 'mid' }))}>{requirement ?? ''}</span>
-      <span className={dim}>
-        {waitingFact(ref, match)}
-      </span>
+      <span className={dim}>{waitingFact(ref, match)}</span>
     </Row>
   );
 }
@@ -610,7 +475,7 @@ export function MasterTasksBlock({
 }) {
   const groups = groupSubTaskRows(doc.subTasks);
   const positions = fullOrderPositions(doc.subTasks);
-  const handlers: IndexRowHandlers = { sliceDocs, onOpen, onJump, docPathForRef };
+  const handlers = indexedRows({ sliceDocs, onOpen, onJump, docPathForRef });
   const intro = sectionIntro(doc.sections, 'subTasks');
   // The discarded-before-start history stands beside the abandoned rows: the
   // link shows whenever either exists, so no audit is left without a way back.
@@ -647,7 +512,24 @@ export function MasterTasksBlock({
       ) : (
         <p className={none}>No waiting tasks.</p>
       )}
-      <DoneGroup count={groups.done.length} noun="task" openView={openView} />
+      <SubHead title="Completed" count={groups.done.length} />
+      <CompletedTaskList
+        preview
+        entries={completedEntries(groups.done, sliceDocs, doc.id, positions, handlers.sliceForRef)}
+        targetFor={(entry) => resolveRowTarget(entry.ref, entry.position, handlers)}
+      />
+      {groups.done.length > 0 ? (
+        <div className={lineRow}>
+          <MoreLink
+            onClick={() => openView({ kind: 'group', status: 'done' })}
+            testid="group-done-link"
+          >
+            {plural(groups.done.length, 'completed task')}
+          </MoreLink>
+        </div>
+      ) : (
+        <p className={none}>No completed tasks.</p>
+      )}
       <GoneGroup
         gone={groups.gone.length}
         discarded={discarded.length}
@@ -811,84 +693,7 @@ export function SprintMastersBlock({
   );
 }
 
-// A completed/abandoned group view: one row per document as in the index, with
-// the discarded-before-start history beside the abandoned ones.
-export function GroupViewBody({
-  refs,
-  discarded,
-  positions,
-  handlers,
-  parentId,
-  allDocs,
-}: {
-  refs: SubTaskRow[];
-  discarded: DiscardedSubTaskNode[] | undefined;
-  positions: Map<SubTaskRow, number>;
-  handlers: IndexRowHandlers;
-  // The master whose tasks these are; absent on a sprint, whose rows are masters.
-  parentId?: string;
-  allDocs?: TaskDocNode[];
-}) {
-  return (
-    <div>
-      {refs.length > 0 ? (
-        <Rows cols="group" testid="group-table">
-          {refs.map((ref) => (
-            <GroupRow
-              key={subTaskKey(ref, positions.get(ref) ?? 0)}
-              ref={ref}
-              position={positions.get(ref) ?? 0}
-              handlers={handlers}
-              parentId={parentId}
-              allDocs={allDocs}
-            />
-          ))}
-        </Rows>
-      ) : null}
-      {discarded && discarded.length > 0 ? (
-        <>
-          <SubHead title="Discarded before start" count={discarded.length} />
-          <DiscardedSubTaskHistory items={discarded} />
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function GroupRow({
-  ref,
-  position,
-  handlers,
-  parentId,
-  allDocs,
-}: {
-  ref: SubTaskRow;
-  position: number;
-  handlers: IndexRowHandlers;
-  parentId: string | undefined;
-  allDocs: TaskDocNode[] | undefined;
-}) {
-  if (parentId !== undefined) {
-    const { id, name, match } = taskRowFacts(ref, handlers.sliceDocs, parentId);
-    return (
-      <Row testid={`group-row-${position}`}>
-        <IndexLink id={id} name={name} ref={ref} position={position} handlers={handlers} />
-        <span className={dim}>
-          {(match ? primaryRequirement(match)?.label : undefined) ?? ''}
-        </span>
-      </Row>
-    );
-  }
-  const masterDoc = resolveSprintMaster(ref, allDocs ?? [], handlers.docPathForRef);
-  const { id, name } = masterRowFacts({ ref, masterDoc });
-  const counts = masterDoc ? masterTaskCounts(masterDoc) : null;
-  return (
-    <Row testid={`group-row-${position}`}>
-      <IndexLink id={id} name={name} ref={ref} position={position} handlers={handlers} />
-      <span className={dim}>{counts ? `${counts.done}/${counts.total} tasks` : ''}</span>
-    </Row>
-  );
-}
+export { GroupViewBody } from './TaskGroupView';
 
 // The sprint rows view: every manager and seat row with what the row says
 // beside what the commanded master's own document says (open truth gap 3).

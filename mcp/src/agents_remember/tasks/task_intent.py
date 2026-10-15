@@ -114,11 +114,14 @@ class TaskIntentV1(_StrictProjection):
     codeExamplesNote: str | None
     acceptanceObligations: tuple[TaskIntentAcceptanceObligation, ...]
     expectedKnowledgeEffects: tuple[TaskIntentExpectedKnowledgeEffect, ...] | None = None
+    nonGoals: str | None = None
+    acceptance: str | None = None
 
     def canonical_value(self) -> dict[str, object]:
         value = self.model_dump(mode="json", by_alias=True, exclude_none=False)
-        if value.get("expectedKnowledgeEffects") is None:
-            value.pop("expectedKnowledgeEffects", None)  # absent is absent: digests unchanged
+        for name in ("expectedKnowledgeEffects", "nonGoals", "acceptance"):
+            if value.get(name) is None:
+                value.pop(name, None)  # absent fields leave existing identities unchanged
         return value
 
 
@@ -133,6 +136,8 @@ _ROOT_FIELDS = frozenset(
         "objective",
         "requirements",
         "design",
+        "nonGoals",
+        "acceptance",
         "steps",
         "codeExamples",
         "codeExamplesNote",
@@ -181,6 +186,8 @@ def task_intent_projection(
             objective=candidate.document.objective,
             requirements=_requirements(task_root, candidate.document),
             design=candidate.document.design,
+            nonGoals=candidate.document.nonGoals,
+            acceptance=candidate.document.acceptance,
             steps=tuple(
                 TaskIntentStep.model_validate(value)
                 for value in cast(list[object], projected["steps"])
@@ -238,8 +245,9 @@ def task_intent_master_projection(
         )
     _validate_allowlisted_classifications()
     projected = _normative_projection(candidate.document)
-    if projected.get("expectedKnowledgeEffects") is None:
-        projected.pop("expectedKnowledgeEffects", None)  # leaf-only; masters project as before
+    for name in ("expectedKnowledgeEffects", "nonGoals", "acceptance"):
+        if projected.get(name) is None:
+            projected.pop(name, None)  # absent fields leave existing identities unchanged
     projected["requirements"] = [
         value.model_dump(mode="json", by_alias=True)
         for value in _requirements(task_root, candidate.document)

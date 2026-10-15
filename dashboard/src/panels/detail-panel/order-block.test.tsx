@@ -219,3 +219,69 @@ describe('the mark of the order rows (rule 11)', () => {
     expect(marks(container).Handbook).toBe('self');
   });
 });
+
+it('draws a master’s tasks after Now with ready-only next tasks and the shared rest mark', () => {
+  vi.useFakeTimers();
+  stubMotion(false);
+  const masterPath = `/tasks/${REPO}/owner/task.json`;
+  const data = [['L1', 'in-flight', 0], ['L2', 'ready', 1], ['L3', 'waiting', 1], ['L4', 'landed', -1]] as const;
+  const leafRef = (id: string) => ({ repository: REPO, path: `owner/${id}.json` });
+  const nodes = data.map(([id, state, wave]) => ({
+    ...unit(id, id, wave, state), nodeId: `${REPO}/owner/${id}.json`, masterRef: leafRef(id),
+    predecessors: id === 'L3' ? [{ predecessorRef: leafRef('L1'), predecessorTitle: 'L1', reason: 'waitsFor' }] : [],
+  }));
+  seedTaskDocuments([
+    taskDoc({ id: 'M', repository: REPO, lifecycleId: undefined, kind: 'master', form: 'master', docPath: masterPath,
+      title: 'Owner', executionGraphView: { nodes }, subTasks: data.map(([id, state]) => ({
+        number: id, name: id, file: `${id}.md`, scope: '',
+        status: state === 'landed' ? 'Completed' : state === 'in-flight' ? 'inProgress' : 'planning',
+      })),
+    }),
+    ...data.map(([id]) => taskDoc({ id, repository: REPO, lifecycleId: undefined, kind: 'subTask',
+      docPath: `/tasks/${REPO}/owner/${id}.json`, title: id, stepsDone: 1, stepsTotal: 5,
+    })),
+  ]);
+  const open = vi.fn();
+  const view = render(<DetailPanel selectedId={`taskdoc:${masterPath}`} onOpenLifecycle={open} />);
+  const blocks = [...view.container.querySelectorAll('[data-block]')].map((block) => block.getAttribute('data-block'));
+  expect(blocks.indexOf('order')).toBe(blocks.indexOf('now') + 1);
+  const next = within(view.getByTestId('can-start-next')).getAllByTestId('order-node');
+  expect(next.map((node) => node.getAttribute('title')?.split(' — ')[0])).toEqual(['L2']);
+  expect(cells(view.getByTestId('order-done').firstElementChild)).toEqual(['done', '1']);
+  const rows = view.getByTestId('order-rows');
+  const waiting = rows.querySelector(`[data-node="${REPO}/owner/L3.json"]`) as HTMLElement;
+  expect(cells(waiting)).toEqual(['L3', 'L3', '1/5']);
+  fireEvent.mouseOver(waiting);
+  act(() => { vi.advanceTimersByTime(GRAPH_REST_MS - 1); });
+  expect(waiting.getAttribute('data-mark')).toBe('none');
+  act(() => { vi.advanceTimersByTime(1); });
+  expect(waiting.getAttribute('data-mark')).toBe('self');
+  expect(rows.querySelector(`[data-node="${REPO}/owner/L1.json"]`)?.getAttribute('data-mark')).toBe('related');
+  expect(waiting.getAttribute('data-fade')).toBe('true');
+  expect(view.getByTestId('order-read').textContent).toBe('L3waits for: L1needed by: no open task');
+  fireEvent.click(waiting);
+  expect(open).toHaveBeenCalledWith(`taskdoc:/tasks/${REPO}/owner/L3.json`);
+});
+
+it.each([false, true])('names every legacy cycle member while counting completed nodes (%s)', async (allDone) => {
+  stubMotion(false);
+  const masterPath = `/tasks/${REPO}/cycle/task.json`;
+  const nodes = [
+    { ...unit('L1', 'Completed member', 1, 'landed', [['L2', 'Unfinished member']]), cycle: true },
+    { ...unit('L2', 'Unfinished member', 1, allDone ? 'landed' : 'waiting', [['L1', 'Completed member']]), cycle: true },
+  ];
+  seedTaskDocuments([taskDoc({ id: 'CYCLE', repository: REPO, lifecycleId: undefined,
+    kind: 'master', form: 'master', docPath: masterPath, executionGraphView: { nodes } })]);
+  const view = await act(async () => render(<DetailPanel selectedId={`taskdoc:${masterPath}`} />));
+  expect(cells(view.getByTestId('order-done').firstElementChild)).toEqual(['done', allDone ? '2' : '1']);
+  expect(view.container.querySelector(`[data-node="${REPO}/L1/task.json"]`)).toBeNull();
+  expect(view.queryByTestId('can-start-next')).toBeNull();
+  if (!allDone) {
+    const mark = view.getByTestId('order-wave-1').firstElementChild?.textContent;
+    expect(mark).toContain('cycle');
+    expect(mark).toContain('Completed member');
+    expect(mark).toContain('Unfinished member');
+  } else {
+    expect(view.queryByTestId('order-wave-1')).toBeNull();
+  }
+});

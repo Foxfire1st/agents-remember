@@ -18,6 +18,7 @@ from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks.document import step_done, step_total
 from agents_remember.tasks.leaf_doc import plan_leaf_doc_lifecycle_restamp
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from pydantic import ValidationError
@@ -72,9 +73,36 @@ class ApplicationTests1(ApplicationTests):
                 }
             ],
         )
-        self.assertEqual((created["stepsDone"], created["stepsTotal"]), (1, 2))
+        self.assertEqual((created["stepsDone"], created["stepsTotal"]), (0, 1))
         master = read_task_doc(Path(str(created["masterSync"]["masterDocPath"])))
         self.assertEqual(master.subTasks[0].status, "inProgress")
+
+    def test_five_major_eight_children_share_the_tool_progress_count(self) -> None:
+        # The same five/eight and states as step-marks.test.tsx, through the native writer.
+        steps = [
+            {
+                "id": f"S{i + 1}",
+                "title": f"Major {i + 1}",
+                "status": "done" if i == 0 else "pending",
+                "substeps": [
+                    {
+                        "id": f"S{i + 1}.{j + 1}",
+                        "title": f"Child {i + 1}.{j + 1}",
+                        "status": "done" if i == 0 or (i == 1 and j == 0) else "pending",
+                    }
+                    for j in range(2 if i < 4 else 0)
+                ],
+            }
+            for i in range(5)
+        ]
+        self._create_parent_master()
+        created = self._create(master="task.md", steps=steps)
+        self.assertTrue(created["ok"])
+        self.assertEqual((created["stepsDone"], created["stepsTotal"]), (1, 5))
+        doc = read_task_doc(self.coord / "tasks" / "agents-remember" / "3c-x" / "03c_x.json")
+        self.assertEqual(len(doc.steps), 5)
+        self.assertEqual(sum(len(step.substeps) for step in doc.steps), 8)
+        self.assertEqual((step_done(doc), step_total(doc)), (1, 5))
 
     def test_an_unreadable_parent_master_refuses_the_leaf_edit_rather_than_dropping_the_row(
         self,

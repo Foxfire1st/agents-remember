@@ -22,6 +22,7 @@ from agents_remember.models.task_intent import require_task_intent_identity
 
 from .document import TaskDocument
 from .execution_graph_titles import SprintGraphTitles
+from .master_order import derive_master_order, load_master_children
 from .render import render_markdown
 
 
@@ -228,6 +229,7 @@ def write_task_doc_batch(
     paths: list[tuple[Path, Path]] = []
     seen: set[Path] = set()
     grant_census: dict[tuple[str, str, str], dict[str, DirectExecutionGrant]] = {}
+    overrides = {json_path_for(root, candidate): candidate for root, candidate in documents}
     for task_root, doc in documents:
         _require_publishable_task_document(doc)
         task_root.mkdir(parents=True, exist_ok=True)
@@ -245,6 +247,11 @@ def write_task_doc_batch(
                     doc,
                     graph_titles=graph_titles if doc.executionGraph is not None else None,
                     direct_grant=_stored_grant_for(task_root, doc, grant_census),
+                    master_order=(
+                        derive_master_order(doc, load_master_children(task_root, doc, overrides))
+                        if doc.kind == "master" and not doc.is_sprint
+                        else None
+                    ),
                 ),
             )
         )

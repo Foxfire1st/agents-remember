@@ -13,75 +13,87 @@
 // MIK-R126: the rail is the SHARED `ExplorerTree` (the File viewer's tree), fed one folder at a
 // time — folders stay closed until opened, except the folders on the way to the open note, and a
 // folder answered in parts shows a row that loads the next part. No second tree is written.
-import { memo, useEffect, useState, type ReactNode } from "react";
-import { ancestorsOf, isMoreRow, useNotesFolderCache } from "./useNotesFolderCache";
-import type { RoleReportContent } from "../../data/roleReport";
-import { readRoleReport } from "../../data/roleReport";
-import type { LauncherRole } from "../../cockpit/roleLaunchModel";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { memo, useEffect, useState, type ReactNode } from 'react';
+import { ancestorsOf, isMoreRow, useNotesFolderCache } from './useNotesFolderCache';
+import type { RoleReportContent } from '../../data/roleReport';
+import { readRoleReport } from '../../data/roleReport';
+import type { LauncherRole } from '../../cockpit/roleLaunchModel';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
-import { css } from "../../../styled-system/css";
-import type { FileContent } from "../../data/files";
-import { readNote, type NoteContent } from "../../data/notes";
+import { css } from '../../../styled-system/css';
+import type { FileContent } from '../../data/files';
+import { readNote, type NoteContent } from '../../data/notes';
 import {
   listRequirements,
   readRequirement,
   type RequirementContent,
-} from "../../data/requirements";
-import type { TaskArtifactReaderTarget } from "../../data/taskArtifacts";
-import type { TaskDecisionNode } from "../../types/projection";
-import { orderDecisionsNewestFirst } from "../detail-panel/model";
-import { ExplorerTree, type ExplorerRow } from "../../grammar/ExplorerTree";
-import { DualPane, type SidecarView } from "../file-viewer/DualPane";
-import { Markdown } from "../../grammar/Markdown";
+} from '../../data/requirements';
+import type { TaskArtifactReaderTarget } from '../../data/taskArtifacts';
+import type { TaskDecisionNode } from '../../types/projection';
+import { orderDecisionsNewestFirst, shortWhen } from '../detail-panel/model';
+import { DecisionList, decisionNumbers } from '../detail-panel/skeletons';
+import {
+  page,
+  block,
+  blockHead,
+  blockLabel,
+  count,
+  decisionReading,
+  productRecords,
+} from '../detail-panel/pageStyles';
+import { plural } from '../detail-panel/pageParts';
+import { cx } from '../../../styled-system/css';
+import { ExplorerTree, type ExplorerRow } from '../../grammar/ExplorerTree';
+import { DualPane, type SidecarView } from '../file-viewer/DualPane';
+import { Markdown } from '../../grammar/Markdown';
 
-export type { TaskArtifactReaderTarget } from "../../data/taskArtifacts";
+export type { TaskArtifactReaderTarget } from '../../data/taskArtifacts';
 
 // Screen chrome — the ChangeSetViewer takeover idiom (flex column · sticky back header · rail+pane).
 const screen = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column", background: "bg" });
 const header = css({
   flexShrink: 0,
-  display: "flex",
-  alignItems: "center",
-  gap: "0.8rem",
-  paddingInline: "0.8rem",
-  paddingBlock: "0.4rem",
-  borderBottomWidth: "1px",
-  borderBottomStyle: "solid",
-  borderBottomColor: "grid",
-  background: "bgPanel",
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.8rem',
+  paddingInline: '0.8rem',
+  paddingBlock: '0.4rem',
+  borderBottomWidth: '1px',
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'grid',
+  background: 'bgPanel',
 });
 const back = css({
-  fontFamily: "mono",
-  fontSize: "0.74rem",
-  color: "amber",
-  background: "transparent",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  paddingInline: "0.5rem",
-  paddingBlock: "0.15rem",
-  cursor: "pointer",
-  _hover: { borderColor: "amber" },
+  fontFamily: 'mono',
+  fontSize: '0.74rem',
+  color: 'amber',
+  background: 'transparent',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'grid',
+  borderRadius: '2px',
+  paddingInline: '0.5rem',
+  paddingBlock: '0.15rem',
+  cursor: 'pointer',
+  _hover: { borderColor: 'amber' },
 });
-const title = css({ fontSize: "0.82rem", color: "ink", fontWeight: "600" });
+const title = css({ fontSize: '0.82rem', color: 'ink', fontWeight: '600' });
 const openPath = css({ marginLeft: "auto", fontSize: "0.74rem", fontFamily: "mono", color: "cyan", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" });
 // Rail — the ChangeSetViewer changed-files column idiom (sticky section head + amber-wash active row).
 const railCol = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column", background: "bgPanel" });
 const railHead = css({
-  position: "sticky",
-  top: "0",
-  background: "bg",
-  paddingInline: "0.6rem",
-  paddingBlock: "0.25rem",
-  fontSize: "0.68rem",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  color: "amber",
-  borderBottomWidth: "1px",
-  borderBottomStyle: "solid",
-  borderBottomColor: "grid",
+  position: 'sticky',
+  top: '0',
+  background: 'bg',
+  paddingInline: '0.6rem',
+  paddingBlock: '0.25rem',
+  fontSize: '0.68rem',
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  color: 'amber',
+  borderBottomWidth: '1px',
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'grid',
 });
 const railRow = css({
   display: "flex",
@@ -107,20 +119,19 @@ const placeholder = css({ height: "100%", display: "grid", placeItems: "center",
 // MARKDOWN note takes DualPane's partnerless-markdown path, which has no banner (only CodeSide does),
 // so a >2-MiB markdown note -- the dominant note type -- would silently drop its "showing the first
 // 2 MiB" contract. We render the same banner here, above the pane, for that case.
-const paneFill = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column" });
-const paneBody = css({ flex: "1", minHeight: "0" });
+const paneFill = css({ height: '100%', minHeight: '0', display: 'flex', flexDirection: 'column' });
+const paneBody = css({ flex: '1', minHeight: '0' });
 const truncBanner = css({
   flexShrink: 0,
-  paddingInline: "0.6rem",
-  paddingBlock: "0.2rem",
-  fontSize: "0.72rem",
-  color: "amber",
-  background: "bgPanel",
-  borderBottomWidth: "1px",
-  borderBottomStyle: "solid",
-  borderBottomColor: "grid",
+  paddingInline: '0.6rem',
+  paddingBlock: '0.2rem',
+  fontSize: '0.72rem',
+  color: 'amber',
+  background: 'bgPanel',
+  borderBottomWidth: '1px',
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'grid',
 });
-const mutedDecision = css({ opacity: "0.55" });
 
 // A fetched note mapped to DualPane's props: markdown renders full-pane as a partnerless markdown doc
 // (the File Viewer's overview treatment); other text / binary render through CodeSide.
@@ -129,20 +140,20 @@ type ArtifactContent = RoleReportContent | NoteContent | (RequirementContent & {
 function noteAsFileContent(note: ArtifactContent): FileContent {
   // CodeSide reads only language/size/truncated/content; scope/onboarding are inert for a note.
   return {
-    scope: "",
+    scope: '',
     path: note.path,
     language: note.language,
     size: note.size,
     truncated: note.truncated,
     content: note.content,
-    onboarding: { status: "missing" },
+    onboarding: { status: 'missing' },
   };
 }
 
 function dualPaneProps(note: ArtifactContent): { code: FileContent | null; sidecar: SidecarView } {
-  return note.language === "markdown"
-    ? { code: null, sidecar: { state: "markdown", body: note.content } }
-    : { code: noteAsFileContent(note), sidecar: { state: "empty" } };
+  return note.language === 'markdown'
+    ? { code: null, sidecar: { state: 'markdown', body: note.content } }
+    : { code: noteAsFileContent(note), sidecar: { state: 'empty' } };
 }
 
 function NotesTree({
@@ -262,24 +273,36 @@ function NotePane({ failed, note, kind }: {
 }
 
 function DecisionsPane({ decisions }: { decisions: TaskDecisionNode[] }) {
-  // The whole log on a page of its own, newest first by recorded time (not storage
-  // order); product-written records muted.
-  const newestFirst = orderDecisionsNewestFirst(decisions);
+  const authored = orderDecisionsNewestFirst(decisions.filter((item) => !item.product_record));
+  const records = orderDecisionsNewestFirst(decisions.filter((item) => item.product_record));
   return (
     <div className={paneFill}>
-      <div className={paneBody} style={{ overflow: "auto" }}>
-        <ul data-testid="decision-log-whole">
-          {newestFirst.map((item) => (
-            <li key={`${item.at}:${item.decision}`} className={item.product_record ? mutedDecision : undefined}>
-              <div>
-                <Markdown inline>{item.decision}</Markdown>
-              </div>
-              <div>
-                {item.at} — <Markdown inline>{item.rationale}</Markdown>
-              </div>
-            </li>
-          ))}
-        </ul>
+      <div className={paneBody} style={{ overflow: 'auto' }}>
+        <div className={page}>
+          <section className={cx(block, decisionReading)} data-testid="decision-log-whole">
+            <div className={blockHead}>
+              <h3 className={blockLabel}>Decisions</h3>
+              <span className={count}>{plural(authored.length, 'decision')}, newest first</span>
+            </div>
+            <DecisionList items={authored} numbers={decisionNumbers(decisions)} whole />
+            {records.length > 0 ? (
+              <details className={productRecords} data-testid="decision-product-records">
+                <summary>{plural(records.length, 'product record')}</summary>
+                <ul>
+                  {records.map((item, index) => (
+                    <li key={`${index}:${item.at}:${item.decision}`} title={`recorded ${item.at}`}>
+                      <span>{shortWhen(item.at)} · </span>
+                      <Markdown inline>{item.decision}</Markdown>
+                      <div>
+                        <Markdown>{item.rationale}</Markdown>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </section>
+        </div>
       </div>
     </div>
   );
@@ -303,7 +326,7 @@ function useArtifactContent(
         ? readNote(repo, master, path)
         : readRequirement(repo, master, document, path).then((data) => ({
             ...data,
-            language: "markdown" as const,
+            language: 'markdown' as const,
             truncated: false as const,
           }));
     void request.then(
@@ -438,7 +461,7 @@ function NotesReaderViewerImpl(
 ) {
   const { onSelectNote, onBack } = props;
   switch (props.kind) {
-    case "decisions":
+    case 'decisions':
       return (
         <ReaderLayout
           kind="decisions"
@@ -450,7 +473,7 @@ function NotesReaderViewerImpl(
           decisions={props.decisions}
         />
       );
-    case "task-report":
+    case 'task-report':
       return (
         <TaskReportTargetReader
           role={props.role}
@@ -460,7 +483,7 @@ function NotesReaderViewerImpl(
           onBack={onBack}
         />
       );
-    case "requirements":
+    case 'requirements':
       return (
         <RequirementsTargetReader
           repo={props.repo}
@@ -471,7 +494,7 @@ function NotesReaderViewerImpl(
           onBack={onBack}
         />
       );
-    case "notes":
+    case 'notes':
       return (
         <NotesTargetReader
           repo={props.repo}
@@ -498,14 +521,29 @@ function ReaderLayout({ kind, heading, path, onBack, failed, content, rail, deci
   return (
     <div className={screen} data-testid="notes-reader-viewer" data-artifact-kind={kind}>
       <header className={header}>
-        <button type="button" className={back} onClick={onBack} data-testid="notes-reader-back">← back</button>
-        <span className={title}>{kind === "role-report" ? "Report" : kind + " · " + heading}</span>
-        <span className={openPath} data-testid="notes-reader-open">{kind === "role-report" ? path : kind + "/" + path}</span>
+        <button type="button" className={back} onClick={onBack} data-testid="notes-reader-back">
+          ← back
+        </button>
+        <span className={title}>{kind === 'role-report' ? 'Report' : kind + ' · ' + heading}</span>
+        <span className={openPath} data-testid="notes-reader-open">
+          {kind === 'role-report' ? path : kind + '/' + path}
+        </span>
       </header>
       <PanelGroup direction="horizontal" autoSaveId="notesreader.outer" className={css({ flex: "1", minHeight: "0" })}>
-        {rail ? <><Panel defaultSize={26} minSize={16}>{rail}</Panel><PanelResizeHandle className={handle} /></> : null}
+        {rail ? (
+          <>
+            <Panel defaultSize={26} minSize={16}>
+              {rail}
+            </Panel>
+            <PanelResizeHandle className={handle} />
+          </>
+        ) : null}
         <Panel minSize={30}>
-          {decisions ? <DecisionsPane decisions={decisions} /> : <NotePane failed={failed} note={content} kind={kind} />}
+          {decisions ? (
+            <DecisionsPane decisions={decisions} />
+          ) : (
+            <NotePane failed={failed} note={content} kind={kind} />
+          )}
         </Panel>
       </PanelGroup>
     </div>
@@ -516,9 +554,11 @@ type ReaderProps = (TaskArtifactReaderTarget & { onSelectNote: (path: string) =>
   { kind: "role-report"; report: RoleReportContent; onBack: () => void };
 
 function Reader(props: ReaderProps) {
-  return props.kind === "role-report"
-    ? <ReaderLayout kind="role-report" heading="Report" path={props.report.path} onBack={props.onBack} failed={false} content={props.report} />
-    : <NotesReaderViewerImpl {...props} />;
+  return props.kind === 'role-report' ? (
+    <ReaderLayout kind="role-report" heading="Report" path={props.report.path} onBack={props.onBack} failed={false} content={props.report} />
+  ) : (
+    <NotesReaderViewerImpl {...props} />
+  );
 }
 
 // Memoized (tab-switch CPU): kept mounted (hidden) once opened — the shell re-renders on

@@ -58,6 +58,7 @@ from .execution_graph_validation import (
     find_execution_graph_cycle,
     validate_execution_graph,
 )
+from .progress import current_step, step_done, step_total  # noqa: F401  # preserve public exports
 from .route_review import (  # noqa: F401  # preserve existing task-document model exports
     ReviewApproval,
     ReviewFinding,
@@ -678,6 +679,8 @@ class TaskDocument(_Doc):
     repo: str
     type: str = ""
     createdAt: str
+    completedAt: str | None = None
+    waitsFor: list[str] | None = None
     master: str | None = None
     # Extra "**Key:** value" header lines beyond the standard block (e.g. Verified/Source); R4.
     headerNotes: list[HeaderNote] = Field(default_factory=list)
@@ -705,6 +708,8 @@ class TaskDocument(_Doc):
     objective: str = ""
     requirements: list[str | ApprovedRequirementPacketRef] = Field(default_factory=list)
     design: str | None = None
+    nonGoals: str | None = None
+    acceptance: str | None = None
     steps: list[Step] = Field(default_factory=list)
     codeExamples: list[CodeExample] = Field(default_factory=list)
     # Why code examples are absent (e.g. "Drafted at the plan gate.") -- distinguishes a
@@ -860,40 +865,6 @@ class TaskDocument(_Doc):
         if not branch:
             raise ValueError("integrationBranch must not be blank")
         self.integrationBranch = branch
-
-
-def _declared_statuses(doc: TaskDocument) -> list[StepStatus]:
-    """Every declared step and substep, matching terminal-readiness semantics."""
-    statuses: list[StepStatus] = []
-    for step in doc.steps:
-        statuses.append(step.status)
-        statuses.extend(sub.status for sub in step.substeps)
-    return statuses
-
-
-def step_total(doc: TaskDocument) -> int:
-    return len(_declared_statuses(doc))
-
-
-def step_done(doc: TaskDocument) -> int:
-    return sum(1 for status in _declared_statuses(doc) if status == "done")
-
-
-def current_step(doc: TaskDocument) -> str | None:
-    """The active step for the dashboard: first in-progress/blocked, else first unfinished."""
-    for step in doc.steps:
-        if step.status in ("inProgress", "blocked"):
-            return f"{step.id} — {step.title}"
-        for sub in step.substeps:
-            if sub.status in ("inProgress", "blocked"):
-                return f"{step.id}/{sub.id} — {sub.title}"
-    for step in doc.steps:
-        if step.status != "done":
-            return f"{step.id} — {step.title}"
-        for sub in step.substeps:
-            if sub.status != "done":
-                return f"{step.id}/{sub.id} — {sub.title}"
-    return None
 
 
 def series_total(doc: TaskDocument) -> int:

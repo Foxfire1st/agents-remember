@@ -13,6 +13,8 @@ import {
 
 import { cx } from '../../../styled-system/css';
 import { Markdown } from '../../grammar/Markdown';
+import type { TaskStepNode } from '../../types/projection';
+import { StepDot } from './StepDot';
 import {
   arrow,
   bar,
@@ -381,7 +383,7 @@ export function Pip({ state, className }: { state: PipState; className?: string 
 // while each one can be seen.
 const PIP_LIMIT = 12;
 
-export function StepMarks({ states }: { states: PipState[] }) {
+export function StepMarks({ states, steps }: { states: PipState[]; steps?: TaskStepNode[] }) {
   if (states.length === 0) return null;
   if (states.length > PIP_LIMIT) {
     const done = states.filter((state) => state === 'done').length;
@@ -391,7 +393,12 @@ export function StepMarks({ states }: { states: PipState[] }) {
   return (
     <span className={pips} aria-hidden="true">
       {states.map((state, index) => (
-        <Pip key={index} state={state} />
+        <StepDot
+          key={steps?.[index]?.id ?? index}
+          state={state}
+          step={steps?.[index]}
+          index={index}
+        />
       ))}
     </span>
   );

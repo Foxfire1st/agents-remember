@@ -3,7 +3,8 @@
 // a fixed order; a block without content is absent. Nothing is drawn twice,
 // and what is long shows its first lines and a link to a view of its own. The
 // page leads with the head on every form and the objective first after it
-// (MIK-R150 rule 14, D237): it stands below the head, above Now or Steps.
+// (MIK-R128 rule 15): it stands below the complete head and series line,
+// above Now or Steps.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { TaskRequirementLinksProvider } from '../../grammar/TaskRequirementLinks';
@@ -34,6 +35,7 @@ import {
   DocHead,
   DocViewShell,
   FurtherNotesBlock,
+  FixedMarkdownBlock,
   LongTextBlock,
   ObjectiveLead,
   ReaderHead,
@@ -43,12 +45,12 @@ import {
   StepsBlock,
   TaskNotes,
   REFERENCE_BOUND,
-  type ChainLink,
-  type DocView,
   type HeadCount,
+  type DocView,
   useDocView,
 } from './skeletons';
 import { DocContentView } from './docViews';
+import { OverviewTop, TaskBodyNotice } from './readerTop';
 import { OrderBlock, OrderGraphViewBody } from './orderGraph';
 import {
   GroupViewBody,
@@ -63,6 +65,7 @@ import {
 } from './task-groups';
 import {
   dirName,
+  docPathForTaskRef,
   docChain,
   docForm,
   docIdentity,
@@ -124,36 +127,9 @@ export interface ReaderPool {
   seriesList: SeriesNode[];
 }
 
-// The head, the objective first after it (MIK-R150 rule 14), then the body
-// notice and change-set bar shared by the sprint and master skeletons (rule 2
-// first, structure after).
-function OverviewTop({
-  doc,
-  chain,
-  counts,
-  bodyState,
-  onJump,
-  openView,
-  onOpenChangeSet,
-}: {
-  doc: TaskDocNode | MasterDocView;
-  chain: ChainLink[];
-  counts: HeadCount[];
-  bodyState: TaskDocumentBodyState | undefined;
-  onJump: (id: string) => void;
-  openView: (view: DocView) => void;
-  onOpenChangeSet?: (target: ChangeSetTarget) => void;
-}) {
-  return (
-    <>
-      <DocHead doc={doc} chain={chain} onJump={onJump} openView={openView} counts={counts} />
-      <ObjectiveLead text={doc.objective} openView={openView} />
-      <TaskBodyNotice state={bodyState} />
-      <ReaderHead doc={doc} bodyState={bodyState} kind="master" onOpenChangeSet={onOpenChangeSet} />
-    </>
-  );
-}
-
+// The complete overview head includes its body notice and series/change-set
+// line. The objective follows that line with titled-block spacing (MIK-R128
+// rule 15), then the master's non-goals (rule 6).
 // How many masters a sprint commands: its rows that name a master document.
 // Seat rows are rows of the sprint and no masters.
 function commandedMasters(doc: TaskDocNode | MasterDocView): HeadCount[] {
@@ -546,6 +522,16 @@ function MasterPageBody({
         onJump={onJump}
         docPathForRef={docPathForRef}
       />
+      <OrderBlock
+        graphView={doc.executionGraphView}
+        openView={openView}
+        form="master"
+        handlers={{
+          allDocs: sliceDocs,
+          onJump,
+          docPathForRef: docPathForRef ?? ((ref) => docPathForTaskRef(sliceDocs, ref)),
+        }}
+      />
       <MasterTasksBlock
         doc={doc}
         sliceDocs={sliceDocs}
@@ -555,6 +541,14 @@ function MasterPageBody({
         openView={openView}
       />
       <RequirementsBlock requirements={doc.requirements} openView={openView} />
+      <LongTextBlock
+        title="Design"
+        block="design"
+        text={doc.design ?? ''}
+        viewKind="design"
+        openView={openView}
+      />
+      <FixedMarkdownBlock title="Acceptance" block="acceptance" text={doc.acceptance} />
       <DecisionsBlock doc={doc} onOpenNotes={onOpenNotes} />
       <FurtherNotesBlock further={further} references={doc.references} openView={openView} />
       {bodyState !== 'loading' ? (
@@ -588,6 +582,13 @@ function MasterViewBody({
   docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
   onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
+  if (view.kind === 'orderGraph' && doc.executionGraphView) {
+    return (
+      <DocViewShell title="Order" count="all tasks" onBack={onBack}>
+        <OrderGraphViewBody graphView={doc.executionGraphView} />
+      </DocViewShell>
+    );
+  }
   if (view.kind === 'group') {
     const groups = groupSubTaskRows(doc.subTasks);
     const refs = view.status === 'done' ? groups.done : groups.gone;
@@ -637,7 +638,12 @@ function DirectExecutionSwitch({ doc }: { doc: TaskDocNode }) {
         <span className={directKnob} />
       </button>
       {on && grant ? <span className={directGiven}>given by {grant.grantedBy}</span> : null}
-      {notice ? <span className={directNote} data-testid="taskdoc-direct-note"> · {notice}</span> : null}
+      {notice ? (
+        <span className={directNote} data-testid="taskdoc-direct-note">
+          {' '}
+          · {notice}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -666,12 +672,11 @@ function TaskDirectGrant({ doc }: { doc: TaskDocNode }) {
 
 // Two served grants match when the server names the same giver at the same time;
 // the row's other fields never reopen the control's state.
-function sameServedGrant(
-  next: DirectGrantNode | null,
-  prev: DirectGrantNode | null,
-): boolean {
-  return (next?.grantedBy ?? null) === (prev?.grantedBy ?? null) &&
-    (next?.grantedAt ?? null) === (prev?.grantedAt ?? null);
+function sameServedGrant(next: DirectGrantNode | null, prev: DirectGrantNode | null): boolean {
+  return (
+    (next?.grantedBy ?? null) === (prev?.grantedBy ?? null) &&
+    (next?.grantedAt ?? null) === (prev?.grantedAt ?? null)
+  );
 }
 
 // The control's live grant: the served add/remove/issuer change replaces it, a
@@ -774,7 +779,6 @@ function TaskReaderPage({
     <TaskRequirementBoundary doc={doc} onOpenNotes={onOpenNotes}>
       <div className={page} data-task-leaf-key={leafKey} data-testid="skeleton-task">
         <DocHead doc={doc} chain={chain} onJump={jump} openView={openView} />
-        <ObjectiveLead text={doc.objective} openView={openView} />
         <TaskDirectGrant doc={doc} />
         <TaskBodyNotice state={bodyState} />
         <ReaderHead
@@ -784,6 +788,8 @@ function TaskReaderPage({
           leaf={doc.id}
           onOpenChangeSet={onOpenChangeSet}
         />
+        <ObjectiveLead text={doc.objective} openView={openView} />
+        <FixedMarkdownBlock title="Non-goals" block="nonGoals" text={doc.nonGoals} />
         <StepsBlock steps={doc.steps} done={progress.done} total={progress.total} />
         <ReviewBlock review={doc.reviewState} openView={openView} />
         <RequirementsBlock requirements={doc.requirements} openView={openView} />
@@ -794,6 +800,7 @@ function TaskReaderPage({
           viewKind="design"
           openView={openView}
         />
+        <FixedMarkdownBlock title="Acceptance" block="acceptance" text={doc.acceptance} />
         <CodeTitlesBlock examples={doc.codeExamples} openView={openView} />
         <DecisionsBlock doc={doc} onOpenNotes={onOpenNotes} />
         {bodyState !== 'loading' ? (
@@ -968,23 +975,7 @@ export function TaskReader(props: Parameters<typeof TaskReaderPage>[0]) {
   return <TaskReaderPage key={docIdentity(props.doc)} {...props} />;
 }
 
-export function TaskBodyNotice({ state }: { state: TaskDocumentBodyState | undefined }) {
-  if (state === 'loading') {
-    return (
-      <p className="muted" role="status">
-        Loading complete task document…
-      </p>
-    );
-  }
-  if (state === 'unavailable') {
-    return (
-      <p className="muted">
-        Full task document details are unavailable; showing the available summary.
-      </p>
-    );
-  }
-  return null;
-}
+export { TaskBodyNotice } from './readerTop';
 
 // A row whose ref points at another master is a parallel/external series:
 // resolveRowTarget in task-groups.tsx opens it, so the readers share the one

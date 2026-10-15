@@ -42,12 +42,19 @@ The task document is **JSON-primary**: an `ar-task-document/v1` JSON file is the
 
 Because the JSON encodes step/substep status explicitly, a tool-managed document is legible on the dashboard — the observer projects leaf documents through their enclosure entry in `enclosures[].enclosurePath`, at step granularity. The same schema/tool serves a *lightweight* document for the smallest single-session build (a THIN doc: title plus a few steps — chat is never a build route, so even micro-work gets this thin doc and stays legible on the dashboard) and a *full* one for a durable task; the difference is content completeness, not a separate format.
 
-Scope and transition: the tool manages **`light` and `subTask`** documents, and the format also covers a series **master** (`kind:"master"`: a structured `subTasks` index + ordered `sections` that preserve a master's bespoke prose, so a re-render is lossless). Masters and existing markdown task files stay hand-authored markdown until the runtime ships `task_doc` and they are intentionally migrated — new tasks adopt the JSON-primary format going forward.
+Scope and transition: `task_doc` manages **`light`, `subTask` and `master`** documents.
+A master carries a structured `subTasks` index and ordered `sections` that preserve its bespoke prose,
+so a re-render is lossless.
+Create a new series master through `task_doc` `create` with `kind:"master"` in the wrapper,
+then create its indexed child documents before writing any leaf's `waitsFor`.
+Existing hand-authored Markdown documents remain as they are until intentionally migrated;
+a Markdown-only master does not satisfy the JSON-primary prerequisite for `waitsFor` writes.
 
 ## Master-Task Composition (task series)
 
 When a task outgrows a single-page plan, escalate to a **master + light sub-task series**. One wrapper
-folder holds a master `task.md` plus flat, numbered sub-task files (`NN_<name>.md`) in execution order;
+folder holds a master `task.md` plus flat, numbered sub-task files (`NN_<name>.md`) with stable creation IDs;
+write `waitsFor` through `task_doc` with exact same-master task IDs to derive Order, not a free-form section;
 `master-template.md` is the canonical scaffold.
 
 The series lifecycle follows **one master = one integration branch, one leaf = one enclosure worktree**:
@@ -102,10 +109,10 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
     (`master-template.md`): one wrapper folder (master `task.md` + flat `NN_<name>.md` sub-tasks),
     a master integration branch, one leaf enclosure/worktree per active slice, leaf integration into
     the master branch, and a final master release at the end.
-14. Tool-managed task documents are JSON-primary: author `light` and `subTask` documents through the
+14. Tool-managed task documents are JSON-primary: author `light`, `subTask` and new `master` documents through the
     `task_doc` MCP tool (which writes the `ar-task-document/v1` JSON and renders the markdown); do not
-    hand-edit a generated `task.md`. `template.md`/`master-template.md` are the render spec; series
-    master files can remain hand-authored markdown until intentionally migrated.
+    hand-edit a generated `task.md`. `template.md`/`master-template.md` are the render spec; existing
+    hand-authored documents can remain Markdown until intentionally migrated.
 15. Worktree-backed task status reaches `Completed` through `lifecycle_finalize_task`, not immediately
     after closeout. The finalizer updates the current task and the immediate parent row after the task
     commit is proven landed on the parent source branch; it does not recursively complete ancestors.

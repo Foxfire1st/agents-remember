@@ -1,20 +1,20 @@
-"""The on-demand task-document body reads one document, not the task corpus.
+"""On-demand task-document bodies use named inputs, not a task-corpus scan.
 
 ``read_task_document_body`` serves the dashboard's task-document endpoint. Its projection
-must stay byte-identical to the corpus-wide projection it replaced while touching only the
-requested document and the masters its sprint graph names, and the corpus enumeration that
-the always-on projection still needs must keep excluding non-canonical JSON.
+must match corpus admission while reading the requested document, named graph masters,
+owning master and explicitly listed children, never unrelated corpus documents.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agents_remember.serving.projections.snapshots_impl import _common, _task_documents
+from agents_remember.serving.projections.snapshots_impl import _common, _task_documents, _task_order
 from agents_remember.serving.projections.snapshots_impl._common import (
     _iter_task_document_payloads,
     _iter_task_json,
@@ -27,7 +27,8 @@ from agents_remember.serving.projections.snapshots_impl._task_documents import (
     _TaskDocProjectionOptions,
     read_task_document_body,
 )
-from agents_remember.tasks import TaskDocument
+from agents_remember.tasks import TASK_DOCUMENT_SCHEMA, TaskDocument
+from agents_remember.tasks.master_order import MasterOrder
 from agents_remember.worktrees.task_resolver import ARCHIVE_DIR, ENCLOSURES_DIR
 from test_observer_projection import FRESH
 
@@ -184,6 +185,7 @@ def touches(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Touches]:
     monkeypatch.setattr(os, "scandir", listing)
     monkeypatch.setattr(_common, "_read_json", reading)
     monkeypatch.setattr(_task_documents, "_read_json", reading)
+    monkeypatch.setattr(_task_order, "_read_json", reading)
     yield record
 
 
@@ -224,7 +226,9 @@ def test_one_body_read_touches_the_same_files_whatever_the_corpus_size(
         ]
     else:
         own = {"leaf": "01_leaf.json", "master": "task.json"}[document]
-        assert read == [f"tasks/repo-a/series/{own}"]
+        assert read == [f"tasks/repo-a/series/{own}"] + (
+            ["tasks/repo-a/series/task.json"] if document == "leaf" else []
+        )
         assert listed == []
 
 
@@ -261,3 +265,115 @@ def test_enumeration_keeps_exactly_the_canonical_depth_documents_the_recursive_g
             "repo-a/linked-task/task.json",
         }
     )
+
+
+@pytest.mark.parametrize("boundary", ["owner", "listed-child"])
+@pytest.mark.parametrize("schema", [None, TASK_DOCUMENT_SCHEMA, "wrong-schema"])
+def test_named_order_reads_preserve_raw_corpus_admission(
+    tmp_path: Path, touches: _Touches, boundary: str, schema: str | None
+) -> None:
+    series = tmp_path / "tasks" / REPO / "series"
+    master = _write(
+        series / "task.json",
+        kind="master",
+        executionNature="atomic",
+        subTasks=[
+            {"number": "L1", "name": "Leaf", "status": "planning", "file": "01_leaf.md"},
+            {"number": "L2", "name": "Gate", "status": "planning", "file": "02_gate.md"},
+            {"number": "L3", "name": "Missing", "status": "planning", "file": "03_missing.md"},
+        ],
+    )
+    leaf = _write(series / "01_leaf.json", id="L1", master="task.md", waitsFor=["L2"])
+    gate = _write(series / "02_gate.json", id="L2", master="task.md", waitsFor=["L1", "L404"])
+    unrelated = _write(tmp_path / "tasks" / REPO / "unrelated" / "task.json", kind="light")
+    target = master if boundary == "owner" else gate
+    payload = json.loads(target.read_bytes())
+    payload.pop("schema")
+    if schema is not None:
+        payload["schema"] = schema
+    payload["futureVersionField"] = {"retained": True}
+    target.write_text(json.dumps(payload), encoding="utf-8")
+    before = {path: path.read_bytes() for path in (master, leaf, gate, unrelated)}
+
+    body = read_task_document_body(tmp_path, doc_path=str(leaf), enclosures=[], now=FRESH)
+    assert body is not None
+    expected_reads = [leaf, master]
+    if boundary != "owner" or schema == TASK_DOCUMENT_SCHEMA:
+        expected_reads += [gate, series / "03_missing.json"]
+    assert touches.read == expected_reads
+    assert touches.listed == []
+    corpus = _task_documents.read_task_documents(tmp_path, enclosures=[], now=FRESH)
+    summary = next(node for node in corpus if node.id == "L1")
+    assert (body.waitsForTasks, body.neededByTasks, body.executionGraphView) == (
+        summary.waitsForTasks,
+        summary.neededByTasks,
+        summary.executionGraphView,
+    )
+    admitted_owner = boundary != "owner" or schema == TASK_DOCUMENT_SCHEMA
+    assert [node.id for node in body.waitsForTasks or []] == (["L2"] if admitted_owner else [])
+    assert [node.id for node in body.neededByTasks or []] == (
+        ["L2"] if schema == TASK_DOCUMENT_SCHEMA else []
+    )
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize("size", [32, 128])
+@pytest.mark.parametrize("entry", ["body", "corpus"])
+def test_ready_membership_is_indexed_once_per_native_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    size: int,
+    entry: str,
+    record_property: Callable[[str, object], None],
+) -> None:
+    series = tmp_path / "tasks" / REPO / "series"
+    rows = [
+        {"number": f"L{i}", "name": f"Leaf {i}", "status": "planning", "file": f"{i}.md"}
+        for i in range(1, size + 1)
+    ]
+    rows.append({"number": "L0", "name": "Landed", "status": "Completed", "file": "0.md"})
+    master = _write(series / "task.json", kind="master", executionNature="atomic", subTasks=rows)
+    _write(series / "0.json", id="L0", master="task.md", status="Completed")
+    for i in range(1, size + 1):
+        _write(series / f"{i}.json", id=f"L{i}", master="task.md", waitsFor=["L0"])
+
+    def read() -> list[str]:
+        nodes = (
+            [read_task_document_body(tmp_path, doc_path=str(master), enclosures=[], now=FRESH)]
+            if entry == "body"
+            else _task_documents.read_task_documents(tmp_path, enclosures=[], now=FRESH)
+        )
+        assert all(node is not None for node in nodes)
+        return [node.model_dump_json(by_alias=True, exclude_none=True) for node in nodes if node]
+
+    control = read()
+    derive = _task_order.derive_master_order
+    counts = {"comparisons": 0, "iterations": 0, "items": 0}
+
+    class CountedId(str):
+        def __eq__(self, other: object) -> bool:
+            counts["comparisons"] += 1
+            return super().__eq__(other)
+
+        __hash__ = str.__hash__
+
+    class CountedReady(tuple):
+        def __iter__(self) -> Iterator[str]:
+            counts["iterations"] += 1
+            for value in super().__iter__():
+                counts["items"] += 1
+                yield value
+
+    def counted(master: TaskDocument, children: dict[str, TaskDocument]) -> MasterOrder | None:
+        order = derive(master, children)
+        assert order is not None and len(order.ready_ids) == size
+        return replace(order, ready_ids=CountedReady(CountedId(key) for key in order.ready_ids))
+
+    monkeypatch.setattr(_task_order, "derive_master_order", counted)
+    for call in range(2):
+        counts.update(comparisons=0, iterations=0, items=0)
+        assert read() == control
+        record_property(f"ready_operations_call_{call}", dict(counts))
+        assert counts["comparisons"] <= 2 * size
+        assert counts["iterations"] == 1
+        assert counts["items"] == size

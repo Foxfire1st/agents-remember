@@ -257,8 +257,8 @@ const LEAVES: LeafSpec[] = [
 ];
 
 function leafDoc(leaf: LeafSpec): TaskDocNode {
-  // As the projection counts: every declared step, parents and nested ones.
-  const declared = leaf.steps.flatMap((entry) => [entry, ...entry.substeps]);
+  // As the projection counts: major steps only; nested detail remains on its step.
+  const declared = leaf.steps;
   const done = declared.filter((entry) => entry.status === 'done').length;
   const packet = `requirements/${leaf.requirement}-v1.md`;
   return base({
@@ -266,6 +266,8 @@ function leafDoc(leaf: LeafSpec): TaskDocNode {
     title: leaf.title,
     docPath: docPath(MASTER_DIR, leaf.slug),
     status: leaf.status,
+    completedAt: leaf.status === 'Completed'
+      ? `2026-10-${leaf.number.slice(1).padStart(2, '0')}T12:00:00Z` : undefined,
     steps: leaf.steps,
     stepsDone: done,
     stepsTotal: declared.length,
@@ -401,7 +403,11 @@ function richMaster(): TaskDocNode {
       '[SBX-R02@v1](requirements/SBX-R02-v1.md) — word_count, owned by L2.',
       'Every further helper has its own packet under `requirements/`, registered in `requirements/README.md`.',
     ],
-    decisions: decisions(7, 'text helpers'),
+    decisions: [
+      ...decisions(7, 'text helpers'),
+      { at: '2026-10-10T12:00:00Z', decision: 'Finalize task lifecycle.',
+        rationale: 'Made-up retained product record for the sandbox only.', product_record: true },
+    ],
     references: [
       '[Sandbox direction](notes/SANDBOX-DIRECTION.md)',
       '[State of the run](notes/STATE.md)',

@@ -3038,10 +3038,59 @@
       "title": "TaskDecisionNode",
       "type": "object"
     },
+    "TaskDependencyNode": {
+      "additionalProperties": false,
+      "description": "A direct same-master dependency, including a no-longer-listed task.",
+      "properties": {
+        "docPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Docpath"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "status"
+      ],
+      "title": "TaskDependencyNode",
+      "type": "object"
+    },
     "TaskDocNode": {
       "additionalProperties": false,
       "description": "A task document's progress and reader content (slice 3c, surface 7).\n\nRead from the JSON-primary ``ar-task-document/v1`` document, so the dashboard\ncan show what a task is doing without opening files on disk. ``lifecycleId``\nis runtime attachment, not the admission ticket: planning documents can be\nprojected before an enclosure or lifecycle exists.",
       "properties": {
+        "acceptance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Acceptance"
+        },
         "ageSeconds": {
           "anyOf": [
             {
@@ -3065,6 +3114,18 @@
           },
           "title": "Codeexamples",
           "type": "array"
+        },
+        "completedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completedat"
         },
         "createdAt": {
           "default": "",
@@ -3266,6 +3327,33 @@
           "default": null,
           "title": "Masterlifecycleid"
         },
+        "neededByTasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TaskDependencyNode"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Neededbytasks"
+        },
+        "nonGoals": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nongoals"
+        },
         "objective": {
           "default": "",
           "title": "Objective",
@@ -3381,6 +3469,36 @@
           "default": "",
           "title": "Type",
           "type": "string"
+        },
+        "waitsFor": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitsfor"
+        },
+        "waitsForTasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TaskDependencyNode"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitsfortasks"
         }
       },
       "required": [
@@ -3620,6 +3738,18 @@
       "additionalProperties": false,
       "description": "Render-ready per-node sprint graph model (L12-R4).\n\n``nodeId`` is a stable semantic identity: a lump's master ref key, or the\nref key plus a segment ordinal for a segmented master. ``waveIndex`` is the\n1-based derived wave; ``frontierState`` is derived mechanically from task\nstatuses and the graph edges -- the dashboard styles, never re-derives.",
       "properties": {
+        "cycle": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle"
+        },
         "executionNature": {
           "anyOf": [
             {

@@ -309,6 +309,58 @@ class TaskPageSkeletonProjectionTests(unittest.TestCase):
         self.assertEqual(node.reviewState.findings[0].description, "y" * 8000)
         self.assertFalse(node.reviewState.findings[0].descriptionTruncated)
 
+    def test_legacy_completion_uses_latest_valid_record_in_summary_and_body(self) -> None:
+        old, new = "2026-10-01T00:00:00+00:00", "2026-10-09T00:00:00+00:00"
+        for stamps, explicit, expected in [
+            ([new, old], None, new),
+            ([old, new], None, new),
+            ([new, "invalid", old], None, new),
+            (["invalid"], None, None),
+            ([new, old], "2026-10-12T00:00:00+00:00", "2026-10-12T00:00:00+00:00"),
+        ]:
+            with self.subTest(stamps=stamps, explicit=explicit):
+                root = self.coord / "tasks" / REPO / "legacy-time"
+                write_task_doc(
+                    root,
+                    TaskDocument.model_validate(
+                        _base(
+                            "LEGACY-TIME",
+                            "subTask",
+                            status="Completed",
+                            completedAt=explicit,
+                            decisions=[
+                                {
+                                    "at": stamp,
+                                    "decision": "Finalize task lifecycle.",
+                                    "rationale": "Retained landing.",
+                                }
+                                for stamp in stamps
+                            ]
+                            + [
+                                {
+                                    "at": "2026-10-13T00:00:00+00:00",
+                                    "decision": "Authored decision.",
+                                    "rationale": "Not a landing.",
+                                }
+                            ],
+                        )
+                    ),
+                )
+                before = (root / "task.json").read_bytes()
+                summary = next(
+                    node
+                    for node in read_task_documents(self.coord, enclosures=[], now=NOW)
+                    if node.id == "LEGACY-TIME"
+                )
+                body = read_task_document_body(
+                    self.coord, doc_path=str(root / "task.json"), enclosures=[], now=NOW
+                )
+                self.assertIsNotNone(body)
+                assert body is not None
+                self.assertEqual(summary.completedAt, expected)
+                self.assertEqual(body.completedAt, expected)
+                self.assertEqual((root / "task.json").read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

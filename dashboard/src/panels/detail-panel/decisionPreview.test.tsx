@@ -53,7 +53,7 @@ describe('DecisionPreview (rule 6 front page)', () => {
     });
   });
 
-  it('excludes product-written records from the five and names both counts', () => {
+  it('excludes product-written records from authored numbering and the link count', () => {
     const items = [
       decision('2026-10-01T00:00:00+00:00', 'decision 1'),
       decision('2026-10-02T00:00:00+00:00', 'Finalize task lifecycle.', true),
@@ -66,9 +66,12 @@ describe('DecisionPreview (rule 6 front page)', () => {
     expect(view.queryByText('Finalize task lifecycle.')).toBeNull();
     expect(view.queryByText('Removed step S1.')).toBeNull();
     expect(view.getByText('decision 2')).toBeTruthy();
-    expect(view.getByTestId('decision-log-all-link').textContent).toContain(
-      'all 4 entries, 2 decisions',
-    );
+    expect(
+      view
+        .getAllByTestId('decision-row')
+        .map((row) => row.querySelector('[data-testid="decision-number"]')?.textContent),
+    ).toEqual(['#2', '#1']);
+    expect(view.getByTestId('decision-log-all-link').textContent).toContain('all 2 decisions');
   });
 
   it('shows the link when only lifecycle records are omitted', () => {
@@ -79,9 +82,7 @@ describe('DecisionPreview (rule 6 front page)', () => {
     const view = render(
       <DecisionPreview items={items} repo="r" master="m" title="t" onOpenNotes={vi.fn()} />,
     );
-    expect(view.getByTestId('decision-log-all-link').textContent).toContain(
-      'all 2 entries, 1 decision',
-    );
+    expect(view.getByTestId('decision-log-all-link').textContent).toContain('all 1 decision');
   });
 
   it('chooses the five newest by time from an unsorted log, not the array tail', () => {

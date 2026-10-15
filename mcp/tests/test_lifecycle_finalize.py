@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -166,7 +167,24 @@ class LifecycleFinalizeTests(_FinalizeFixtures):
     def test_finalized_updates_leaf_and_immediate_parent_row(self) -> None:
         contract = self._contract()
         leaf_json, master_json = self._docs(contract)
+        decisions = [
+            {
+                "at": "2026-06-23T22:10+00:00",
+                "decision": "Keep the authored decision.",
+                "rationale": "Its text, time and position must survive finalization.",
+            },
+            {
+                "at": "2026-06-23T22:05+00:00",
+                "decision": "Finalize task lifecycle.",
+                "rationale": "Keep this existing product record too; do not migrate it.",
+            },
+        ]
+        for path in (leaf_json, master_json):
+            data = read_task_doc(path).model_dump(by_alias=True)
+            data["decisions"] = decisions
+            write_task_doc(path.parent, TaskDocument.model_validate(data))
 
+        before_landing = datetime.now().astimezone().replace(microsecond=0)
         result = finalize_result(
             FinalizeArgs(
                 contract_path=contract.contract_path,
@@ -180,11 +198,42 @@ class LifecycleFinalizeTests(_FinalizeFixtures):
         payload = _payload(result)
         self.assertEqual(payload["state"], "finalized")
         self.assertEqual(payload["cleanup"]["state"], "already-completed")
-        self.assertEqual(read_task_doc(leaf_json).status, "Completed")
+        leaf = read_task_doc(leaf_json)
+        self.assertEqual(leaf.status, "Completed")
+        assert leaf.completedAt is not None
+        completed_at = datetime.fromisoformat(leaf.completedAt)
+        self.assertLessEqual(before_landing, completed_at)
+        self.assertLessEqual(completed_at, datetime.now().astimezone())
         master = read_task_doc(master_json)
         self.assertEqual(master.subTasks[0].status, "Completed")
         self.assertEqual(master.status, "inProgress")
-        self.assertEqual(master.decisions[0].decision, "Finalize task lifecycle.")
+        self.assertIsNone(master.completedAt)
+        for doc in (leaf, master):
+            self.assertEqual([entry.model_dump() for entry in doc.decisions], decisions)
+        self.assertEqual(payload["landedCommit"], contract.integrated_code_commit)
+        self.assertEqual(payload["targetBranch"], contract.code_source_branch)
+        self.assertEqual(payload["taskUpdates"]["leaf"]["state"], "updated")
+        self.assertEqual(payload["taskUpdates"]["parent"]["subtaskNumber"], "14")
+        self.assertEqual(payload["summary"], "Task lifecycle finalized.")
+        before_retry = _sources(leaf_json, master_json)
+        retry = finalize_result(FinalizeArgs(contract_path=contract.contract_path))
+        self.assertEqual(_payload(retry)["state"], "finalized")
+        self.assertEqual(_payload(retry)["taskUpdates"]["leaf"]["state"], "already-completed")
+        self.assertEqual(_sources(leaf_json, master_json), before_retry)
+
+    def test_already_completed_legacy_documents_are_not_migrated(self) -> None:
+        contract = self._contract()
+        leaf_json, master_json = self._docs(contract, rows=[dict(_row(), status="Completed")])
+        leaf = read_task_doc(leaf_json).model_copy(update={"status": "Completed"})
+        write_task_doc(leaf_json.parent, leaf)
+        before = _sources(leaf_json, master_json)
+
+        result = finalize_result(FinalizeArgs(contract_path=contract.contract_path))
+
+        self.assertEqual(_payload(result)["state"], "finalized")
+        self.assertEqual(_payload(result)["taskUpdates"]["leaf"]["state"], "already-completed")
+        self.assertIsNone(read_task_doc(leaf_json).completedAt)
+        self.assertEqual(_sources(leaf_json, master_json), before)
 
     def test_second_document_publish_failure_rolls_back_leaf_and_parent(self) -> None:
         contract = self._contract()

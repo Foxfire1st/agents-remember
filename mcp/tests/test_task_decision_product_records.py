@@ -2,7 +2,8 @@
 
 An entry the product writes itself is a record of an act, not a decision: the
 projection marks it from the writers' own constants, the page matches no text, and the
-stored entry keeps its shape. These cases pin the predicate and the finalizer's entry.
+stored entry keeps its shape. These cases pin the predicate for existing records;
+the finalizer no longer writes a decision (MIK-R128 rule 14).
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from agents_remember.tasks.document import (
     SKIP_STEP_DECISION_PREFIX,
     is_product_record_decision,
 )
-from agents_remember.worktrees.modules.finalize_task_documents import _finalized_decisions
 
 
 def test_writer_constants_are_marked_and_authored_text_is_not() -> None:
@@ -24,10 +24,3 @@ def test_writer_constants_are_marked_and_authored_text_is_not() -> None:
     assert is_product_record_decision("Finalize task lifecycle") is False
     assert is_product_record_decision("Removed steppe.") is False
     assert is_product_record_decision("") is False
-
-
-def test_finalizer_entry_keeps_its_shape_and_is_marked() -> None:
-    [first, *_] = _finalized_decisions({"decisions": []})
-    assert set(first) == {"at", "decision", "rationale"}
-    assert first["decision"] == "Finalize task lifecycle."
-    assert is_product_record_decision(first["decision"]) is True

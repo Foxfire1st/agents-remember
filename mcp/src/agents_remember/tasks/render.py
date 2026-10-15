@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from agents_remember.kernel.direct_execution_grants import DirectExecutionGrant
 
+    from .master_order import MasterOrder
+
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
     ApprovedRequirementPacketRef,
@@ -52,16 +54,21 @@ def render_markdown(
     *,
     graph_titles: SprintGraphTitles | None = None,
     direct_grant: DirectExecutionGrant | None = None,
+    master_order: MasterOrder | None = None,
 ) -> str:
     if doc.kind == "master":
-        return _render_master(doc, graph_titles=graph_titles)
+        return _render_master(doc, graph_titles=graph_titles, master_order=master_order)
     title = f"# Task: {doc.title}"
     if doc.kind == "subTask":
         title = f"{title} (Sub-task {doc.id})"
     parts: list[str] = [title, "", *_header_lines(doc, direct_grant=direct_grant)]
     parts += _section("Objective", [doc.objective or "_To be defined._"])
+    if doc.nonGoals:
+        parts += _section("Non-goals", [doc.nonGoals])
     parts += _section("Requirements", _requirement_lines(doc.requirements))
     parts += _section("Design", [doc.design or "No design reasoning needed."])
+    if doc.acceptance:
+        parts += _section("Acceptance", [doc.acceptance])
     parts += _section("Implementation Steps", _step_lines(doc.steps))
     parts += _section("Route Review", _route_review_lines(doc.routeReview))
     if doc.executionRegistrations:
@@ -99,7 +106,12 @@ _MARKER: dict[str, str] = {
 }
 
 
-def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None = None) -> str:
+def _render_master(
+    doc: TaskDocument,
+    *,
+    graph_titles: SprintGraphTitles | None = None,
+    master_order: MasterOrder | None = None,
+) -> str:
     """Render a series ``master``: header + the ordered ``sections`` plan.
 
     Each section is freeform prose (a verbatim ``body``) or a structured block --
@@ -109,10 +121,13 @@ def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None 
     rendered (L14-R1): the durable markdown must show the sprint → master list.
     """
     parts: list[str] = [f"# Task: {doc.title}", "", *_header_lines(doc)]
+    parts += _master_fixed_prose_lines(doc)
     if doc.executionGraph is not None:
         parts += _section(
             "Execution Graph", _execution_graph_lines(doc.executionGraph, graph_titles)
         )
+    if master_order is not None:
+        parts += _section("Order", _master_order_lines(master_order))
     for section in doc.sections:
         parts += _section(section.heading, _master_body(doc, section))
     if (
@@ -131,6 +146,44 @@ def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None 
     if doc.discardedSubTasks:
         parts += _section("Discarded Sub-Tasks", _discarded_subtask_lines(doc.discardedSubTasks))
     return "\n".join(parts) + "\n"
+
+
+def _master_fixed_prose_lines(doc: TaskDocument) -> list[str]:
+    parts: list[str] = []
+    if doc.objective:
+        parts += _section("Objective", doc.objective.split("\n"))
+    if doc.nonGoals:
+        parts += _section("Non-goals", [doc.nonGoals])
+    if doc.requirements:
+        parts += _section("Requirements", _requirement_lines(doc.requirements))
+    if doc.design:
+        parts += _section("Design", doc.design.split("\n"))
+    if doc.acceptance:
+        parts += _section("Acceptance", [doc.acceptance])
+    return parts
+
+
+def _master_order_lines(order: MasterOrder) -> list[str]:
+    completed = sum(task.status == "Completed" for task in order.tasks)
+    lines = [
+        f"Completed tasks: {completed}.",
+        "",
+        "| Wave | Task | State | Waits for |",
+        "| --- | --- | --- | --- |",
+    ]
+    if any(task.cycle and task.status != "Completed" for task in order.tasks):
+        lines[2:2] = [f"Legacy cycle members: {', '.join(order.cycle_ids)}.", ""]
+    for task in sorted(order.tasks, key=lambda task: task.wave):
+        if task.status == "Completed":
+            continue
+        wave = "in work" if task.status == "inProgress" and not task.cycle else str(task.wave)
+        if task.cycle:
+            wave = f"{wave} (cycle)"
+        name = f"[{task.id} — {task.title}]({task.file})" if task.file else task.id
+        lines.append(
+            f"| {wave} | {_cell(name)} | {task.status} | {_cell(', '.join(task.waits_for))} |"
+        )
+    return lines
 
 
 def _master_body(doc: TaskDocument, section: Section) -> list[str]:
@@ -191,6 +244,12 @@ def _master_ref_link(ref: SubTaskRef) -> str:
     return f"../{target}"
 
 
+def _waits_for_header(doc: TaskDocument) -> list[str]:
+    if not doc.waitsFor:
+        return []
+    return ["**Waits for:** " + ", ".join(f"`{task_id}`" for task_id in doc.waitsFor)]
+
+
 def _header_lines(
     doc: TaskDocument, *, direct_grant: DirectExecutionGrant | None = None
 ) -> list[str]:
@@ -207,6 +266,7 @@ def _header_lines(
         lines.append(f"**Direct execution:** {direct_grant.describe()}")
     if doc.master:
         lines.append(f"**Master:** `{doc.master}`")
+    lines.extend(_waits_for_header(doc))
     if doc.orchestrates:  # the orchestration-command relation (L14); master-only by schema
         lines.append("**Orchestrates:** " + ", ".join(f"`{name}`" for name in doc.orchestrates))
     if doc.integrationBranch:

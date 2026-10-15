@@ -123,7 +123,7 @@ def _config(coord: Path) -> McpRuntimeConfig:
 
 
 class SchemaTests(unittest.TestCase):
-    def test_progress_counts_every_declared_parent_and_child(self) -> None:
+    def test_progress_counts_major_steps_without_changing_completion_readiness(self) -> None:
         doc = _doc(
             steps=[
                 {
@@ -138,8 +138,8 @@ class SchemaTests(unittest.TestCase):
                 {"id": "S2", "title": "Two", "status": "done"},
             ]
         )
-        # Parent S1 remains visible beside its two children, plus S2: 4 units, 2 done.
-        self.assertEqual((step_done(doc), step_total(doc)), (2, 4))
+        # Presentation counts major steps; readiness still checks the nested work.
+        self.assertEqual((step_done(doc), step_total(doc)), (1, 2))
         self.assertEqual(
             [(item.id, item.parentId, item.status) for item in completion_blockers(doc)],
             [("S1", None, "inProgress"), ("S1.b", "S1", "pending")],

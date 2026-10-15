@@ -9,7 +9,6 @@ from typing import Any
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
-    FINALIZE_TASK_LIFECYCLE_DECISION,
     SubTaskRef,
     TaskDocSourceReadError,
     TaskDocSourceSnapshot,
@@ -360,7 +359,7 @@ def _leaf_completion_candidate(doc: TaskDocument) -> TaskDocument:
         return doc
     data = doc.model_dump(by_alias=True)
     data["status"] = "Completed"
-    data["decisions"] = _finalized_decisions(data)
+    data["completedAt"] = datetime.now().astimezone().isoformat(timespec="seconds")
     return TaskDocument.model_validate(data)
 
 
@@ -378,12 +377,7 @@ def _parent_completion_candidate(
         )
     refs[index]["status"] = "Completed"
     updated = TaskDocument.model_validate(data)
-    updated = demote_completed_master_if_unresolved(updated)
-    if updated == doc:
-        return doc
-    data = updated.model_dump(by_alias=True)
-    data["decisions"] = _finalized_decisions(data)
-    return TaskDocument.model_validate(data)
+    return demote_completed_master_if_unresolved(updated)
 
 
 def _task_update_payload(
@@ -400,17 +394,6 @@ def _task_update_payload(
     if not dry_run:
         payload["renderedPath"] = path.with_suffix(".md").as_posix()
     return payload
-
-
-def _finalized_decisions(data: dict[str, Any]) -> list[dict[str, str]]:
-    return [
-        {
-            "at": datetime.now().astimezone().isoformat(timespec="minutes"),
-            "decision": FINALIZE_TASK_LIFECYCLE_DECISION,
-            "rationale": "The finalizer proved the task commit landed on the parent target branch, cleanup completed, and task documents could be reconciled.",
-        },
-        *data.get("decisions", []),
-    ]
 
 
 def resolve_series_targets(contract: WorktreeContract, args: FinalizeArgs) -> FinalizeTaskTargets:

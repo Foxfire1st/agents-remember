@@ -1,12 +1,13 @@
 // MIK-R127 rule 2: the head, on every form. Form, id and status on one line, then the
 // title; then one strip of short facts, the label above the value; then the status note
 // and the header notes as labelled lines that open in place. The objective is no
-// longer drawn here: under MIK-R150 rule 14 (D237) it is the first block after
-// the head, drawn by the skeletons.
+// longer drawn here: the skeletons place it below the complete head and
+// series line (MIK-R128 rule 15).
 import { Fragment, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import { cx } from '../../../styled-system/css';
 import { Markdown } from '../../grammar/Markdown';
+import { taskDocSelectionKey } from '../../data/taskIdentity';
 import type { TaskDocNode, TaskHeaderNoteNode } from '../../types/projection';
 import {
   boundedText,
@@ -20,6 +21,7 @@ import {
 import { Clip, MoreLink, StatusWord, type DocView } from './pageParts';
 import {
   arrow,
+  block,
   blockLabel,
   dim,
   docId,
@@ -55,6 +57,8 @@ export type HeadDoc = Pick<
   | 'requirements'
   | 'executionNature'
   | 'integrationBranch'
+  | 'waitsForTasks'
+  | 'neededByTasks'
 >;
 
 // A count the strip states beside the facts: the masters of a sprint, the tasks of a master.
@@ -107,6 +111,18 @@ export function DocHead({
       <div className={facts} data-testid="doc-facts">
         <ChainFact doc={doc} form={form} chain={chain} onJump={onJump} />
         <PrimaryFact primary={primary} />
+        <DependencyFact
+          label="Waits for"
+          testid="doc-waits-for"
+          tasks={doc.waitsForTasks}
+          onJump={onJump}
+        />
+        <DependencyFact
+          label="Needed by"
+          testid="doc-needed-by"
+          tasks={doc.neededByTasks}
+          onJump={onJump}
+        />
         <DocFacts doc={doc} counts={counts} notes={notes.facts} />
       </div>
       <HeadNotes doc={doc} notes={notes} openView={openView} />
@@ -235,8 +251,8 @@ function LeadTools({
   );
 }
 
-// The objective, first block after the head on every form (MIK-R150 rule 14,
-// D237), under a heading like every block of the page (D223). Closed it shows
+// The objective follows the complete head and series line on every form
+// (MIK-R128 rule 15), using the same spacing as every titled block. Closed it shows
 // its first lines, so the facts and the first rows stay on the first screen;
 // "more" opens it in place. A text beyond the long-text bound (rule 6) opens to
 // that bound, and the link to the view that holds it whole stands beside "more"
@@ -252,7 +268,7 @@ export function ObjectiveLead({ text, openView }: { text: string; openView: (vie
   const tall = isTallLead(text, height);
   const whole = open || !tall;
   return (
-    <div className={lead} data-block="objective" data-testid="objective-lead">
+    <div className={cx(block, lead)} data-block="objective" data-testid="objective-lead">
       <h3 className={blockLabel}>Objective</h3>
       <div
         ref={ref}
@@ -289,6 +305,40 @@ function Fact({
       <span className={factLabel}>{label}</span>
       <span className={factValue}>{children}</span>
     </div>
+  );
+}
+
+// Both dependency directions use the projected references; a missing document
+// remains visible with its served state, but cannot navigate to an invented path.
+function DependencyFact({
+  label,
+  testid,
+  tasks,
+  onJump,
+}: {
+  label: string;
+  testid: string;
+  tasks: HeadDoc['waitsForTasks'];
+  onJump: (id: string) => void;
+}) {
+  if (!tasks?.length) return null;
+  return (
+    <Fact label={label} testid={testid}>
+      {tasks.map((task) => (
+        <span key={task.id}>
+          <button
+            type="button"
+            className={link}
+            disabled={!task.docPath}
+            onClick={() => task.docPath && onJump(taskDocSelectionKey(task.docPath))}
+            title={task.title}
+          >
+            {task.id} · {task.title}
+          </button>
+          <span className={dim}> · {task.status}</span>
+        </span>
+      ))}
+    </Fact>
   );
 }
 

@@ -143,7 +143,7 @@ export function StepsBlock({
       block="steps"
       count={
         <>
-          <StepMarks states={stepMarkStates(steps)} />
+          <StepMarks states={stepMarkStates(steps)} steps={steps} />
           <span role="img" aria-label="steps done" data-testid="steps-progress">
             {done} of {total} done
           </span>

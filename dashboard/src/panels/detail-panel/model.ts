@@ -227,6 +227,10 @@ export type MasterDocView = Pick<
   | 'headerNotesTotal'
   | 'reviewState'
   | 'design'
+  | 'nonGoals'
+  | 'acceptance'
+  | 'completedAt'
+  | 'waitsFor'
   | 'type'
   | 'form'
   | 'executionNature'
@@ -667,11 +671,15 @@ export type StepDisplayState = 'done' | 'current' | 'blocked' | 'next' | 'pendin
 // The state a step shows (rule 5): done, in work, blocked, the first one that
 // is not done ("next"), or pending.
 export function stepDisplayState(
-  step: Pick<TaskStepNode, 'id' | 'status'>,
+  step: Pick<TaskStepNode, 'id' | 'status'> & Partial<Pick<TaskStepNode, 'substeps'>>,
   firstOpen: string | undefined,
 ): StepDisplayState {
   if (step.status === 'done') return 'done';
-  if (step.status === 'inProgress') return 'current';
+  if (
+    step.status === 'inProgress' ||
+    step.substeps?.some((item) => item.status === 'inProgress' || item.status === 'done')
+  )
+    return 'current';
   if (step.status === 'blocked') return 'blocked';
   if (step.id === firstOpen) return 'next';
   return 'pending';
@@ -684,14 +692,10 @@ export function substepDisplayState(status: string): StepDisplayState {
   return status === 'blocked' ? 'blocked' : 'pending';
 }
 
-// One mark per declared step, parents and nested steps in the order they are
-// written: the same steps the count beside the marks is taken over.
+// MIK-R128: one mark per major step, matching the producer's major-only count.
 export function stepMarkStates(steps: TaskStepNode[]): StepDisplayState[] {
   const firstOpen = firstOpenStepId(steps);
-  return steps.flatMap((step) => [
-    stepDisplayState(step, firstOpen),
-    ...step.substeps.map((item) => substepDisplayState(item.status)),
-  ]);
+  return steps.map((step) => stepDisplayState(step, firstOpen));
 }
 
 // The step a task in work stands at (rule 4): the one in progress, else the

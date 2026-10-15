@@ -674,6 +674,16 @@
       {
         "ageSeconds": 660.0,
         "bodyRevision": "rev-3",
+        "nonGoals": "This simulated document does not exercise a live coordinator.",
+        "acceptance": "The sampled contract remains type checked.",
+        "completedAt": "2026-06-14T08:50:00+00:00",
+        "waitsFor": ["SIM-2"],
+        "waitsForTasks": [
+          { "id": "SIM-2", "title": "Simulated prerequisite", "status": "Completed", "docPath": "/tasks/sim/02.md" }
+        ],
+        "neededByTasks": [
+          { "id": "SIM-3", "title": "Simulated dependent", "status": "planning", "docPath": "/tasks/sim/03.md" }
+        ],
         "codeExamples": [
           {
             "distinctChange": "type-level path diff",
@@ -985,6 +995,7 @@
               "leafTitles": ["Shared framework"],
               "waveIndex": 1,
               "frontierState": "in-flight",
+              "cycle": false,
               "executionNature": "organizational",
               "predecessors": []
             },

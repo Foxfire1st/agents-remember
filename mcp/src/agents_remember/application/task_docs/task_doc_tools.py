@@ -66,8 +66,16 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 from . import task_doc_steps, task_sprint_linkage
+from .task_doc_content_edits import (
+    _apply_append_decision,
+    _apply_set_field,
+    _apply_set_status,
+    _upsert_section,
+    _upsert_subtask,
+)
 from .task_doc_discard import DiscardUnstartedRequest, discard_unstarted_subtask
-from .task_doc_phrases import _MUTABLE_FIELDS, _updated_phrase
+from .task_doc_field_homes import enforce_prose_field_homes, enforce_waits_for_write
+from .task_doc_phrases import _updated_phrase
 from .task_doc_publication import (
     TaskDocPublication,
     preview_task_doc_projection_effects,
@@ -429,6 +437,8 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     task_root = context.task_root
     original = context.original
     doc = context.candidate
+    enforce_prose_field_homes(original, doc)
+    enforce_waits_for_write(task_root, operation, context.payload_fields, doc)
     require_retirement_proofs_unchanged(original, doc, f"task_doc {operation}")
     if doc.kind == "subTask" and doc.master:
         # Reject an invalid caller reference before the publication's recoverable
@@ -490,7 +500,10 @@ def _publish_task_doc_candidate(
     source_snapshots = [context.selected_snapshot]
     if master_sync.source_snapshot is not None:
         source_snapshots.append(master_sync.source_snapshot)
-    if master_sync.changed and master_sync.master is not None:
+    refresh_order = (
+        operation in {"create", "replace", "set_field"} and "waitsFor" in context.payload_fields
+    ) or (original is not None and (original.waitsFor or []) != (doc.waitsFor or []))
+    if (master_sync.changed or refresh_order) and master_sync.master is not None:
         if master_sync.source_snapshot is None:
             raise TaskDocError("changed master synchronization has no accepted source bytes")
         if master_sync.master_json_path is not None:
@@ -511,7 +524,13 @@ def _publish_task_doc_candidate(
             tuple(source_snapshots),
         )
         validate_task_doc_transaction(task_doc_publication_transaction(preview_context))
-        result = task_doc_preview(operation, doc, task_root, master_sync=master_sync)
+        result = task_doc_preview(
+            operation,
+            doc,
+            task_root,
+            master_sync=master_sync,
+            overrides={json_path_for(task_root, candidate): candidate for candidate in docs},
+        )
         result["updated"] = _updated_phrase(operation, context.edit, result)
         result["projectionEffects"] = [
             effect.model_dump(mode="json")
@@ -835,22 +854,6 @@ class _Edit:
     lifecycle_id: str | None
 
 
-def _apply_set_status(data: dict[str, Any], edit: _Edit) -> None:
-    status = edit.fields.get("status")
-    if status is None:
-        raise TaskDocError("set_status requires fields.status")
-    data["status"] = status
-
-
-def _apply_set_field(data: dict[str, Any], edit: _Edit) -> None:
-    updates = {key: value for key, value in edit.fields.items() if key in _MUTABLE_FIELDS}
-    if not updates:
-        raise TaskDocError(
-            f"set_field requires at least one of: {', '.join(sorted(_MUTABLE_FIELDS))}"
-        )
-    data.update(updates)
-
-
 def _apply_set_step(data: dict[str, Any], edit: _Edit) -> None:
     task_doc_steps.set_step(data, kind=edit.kind, step=edit.step)
 
@@ -892,13 +895,6 @@ def _apply_set_section(data: dict[str, Any], edit: _Edit) -> None:
     # A leaf doc may carry freeform sections (R4); the schema validator backstops the
     # leaf "freeform only" rule, so there is no master-only gate here (unlike set_subtask).
     _upsert_section(data, edit.section)
-
-
-def _apply_append_decision(data: dict[str, Any], edit: _Edit) -> None:
-    if not edit.decision:
-        raise TaskDocError("append_decision requires a decision object")
-    decisions: list[dict[str, Any]] = data.setdefault("decisions", [])
-    decisions.append(edit.decision)
 
 
 # Operations that mutate an existing document in place. Anything absent here (create,
@@ -1068,36 +1064,6 @@ def _raise_for_completion_blockers(doc: TaskDocument) -> None:
         return
     exact = [blocker.model_dump() for blocker in blockers]
     raise TaskDocError(f"task completion refused; unresolved work units: {exact!r}")
-
-
-def _upsert_subtask(data: dict[str, Any], subtask: dict[str, Any]) -> None:
-    number = subtask.get("number")
-    if not number:
-        raise TaskDocError("set_subtask requires subtask.number")
-    refs: list[dict[str, Any]] = data.setdefault("subTasks", [])
-    updates = {key: subtask[key] for key in ("name", "file", "status", "scope") if key in subtask}
-    existing = next((ref for ref in refs if ref.get("number") == number), None)
-    if existing is None:
-        new_ref: dict[str, Any] = {"number": str(number), "name": subtask.get("name", str(number))}
-        new_ref.update(updates)
-        refs.append(new_ref)
-    else:
-        existing.update(updates)
-
-
-def _upsert_section(data: dict[str, Any], section: dict[str, Any]) -> None:
-    heading = section.get("heading")
-    if not heading:
-        raise TaskDocError("set_section requires section.heading")
-    sections: list[dict[str, Any]] = data.setdefault("sections", [])
-    updates = {key: section[key] for key in ("kind", "body") if key in section}
-    existing = next((sec for sec in sections if sec.get("heading") == heading), None)
-    if existing is None:
-        new_section: dict[str, Any] = {"heading": heading}
-        new_section.update(updates)
-        sections.append(new_section)
-    else:
-        existing.update(updates)
 
 
 def _remove_subtask(
