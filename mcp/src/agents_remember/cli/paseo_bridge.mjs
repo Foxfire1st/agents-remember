@@ -211,9 +211,9 @@
 //     `agent-create` is such a row: without a model it calls this client's createAgent(), because
 //     the public client only creates an agent for a provider/model pair.
 
-import { nonEmpty, serverIdOf } from './paseo_bridge_primitives.mjs'
+import { failure, nonEmpty, optionalText, requiredText, serverIdOf } from './paseo_bridge_primitives.mjs'
+import { openWorkspace } from './paseo_workspaces.mjs'
 import { listLiveAgents } from './paseo_live_agents.mjs'
-import { createHash } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -437,66 +437,6 @@ function tierOptions(features) {
 
 async function readRuntimeInfo({ daemon }) {
   return { serverId: serverIdOf(daemon) }
-}
-
-async function openWorkspace({ api, daemon }, input) {
-  const cwd = requiredText(input, 'cwd')
-  let workspace
-  let preparation = null
-  if (!('masterProject' in input) && !('task' in input)) {
-    workspace = (await api.workspaces.open(cwd)).current()
-    preparation = 'opened'
-  } else {
-    const { masterProject, task } = input
-    if (!masterProject || typeof masterProject !== 'object' || Array.isArray(masterProject) ||
-        !task || typeof task !== 'object' || Array.isArray(task)) {
-      throw failure('invalid_bridge_payload', 'Master/task workspace placement must be complete.')
-    }
-    const directory = requiredText(masterProject, 'directory')
-    const masterKey = requiredText(masterProject, 'key')
-    const name = requiredText(masterProject, 'name')
-    const taskKey = requiredText(task, 'key')
-    const title = requiredText(task, 'title')
-    const project = (await daemon.addProject(directory)).project
-    if (!nonEmpty(project?.projectId)) {
-      throw failure('paseo_bridge_invalid_reply', 'The Paseo runtime returned a project without an id.')
-    }
-    await daemon.renameProject(project.projectId, name)
-    const idempotencyKey = 'ar-task-workspace:v2:' + createHash('sha256')
-      .update(JSON.stringify([masterKey, taskKey])).digest('hex')
-    const handle = await api.workspaces.create({
-      source: { kind: 'directory', path: cwd, projectId: project.projectId }, idempotencyKey,
-      onEvent(snapshot) {
-        if (preparation === null) preparation = snapshot.workspace ? 'found' : 'created'
-      }
-    })
-    // Creation replay holds an old descriptor; refresh before trusting membership or liveness.
-    workspace = await handle.refresh()
-    if (!workspace || workspace.archivingAt || workspace.archivedAt ||
-        workspace.projectId !== project.projectId ||
-        !nonEmpty(workspace.workspaceDirectory) || path.resolve(workspace.workspaceDirectory) !== path.resolve(cwd)) {
-      throw failure('paseo_call_failed', 'The Paseo task workspace is unavailable or has different placement.')
-    }
-    const named = await handle.setTitle(title)
-    workspace = { ...workspace, name: named.title }
-  }
-  if (!nonEmpty(workspace?.id) || !nonEmpty(workspace.workspaceDirectory)) {
-    throw failure(
-      'paseo_bridge_invalid_reply',
-      'The Paseo runtime returned a workspace without an id and a directory.'
-    )
-  }
-  return {
-    serverId: serverIdOf(daemon),
-    ...(preparation ? { preparation } : {}),
-    workspace: {
-      id: workspace.id,
-      directory: workspace.workspaceDirectory,
-      name: workspace.name ?? null,
-      projectId: workspace.projectId ?? null,
-      projectKind: workspace.projectKind ?? null
-    }
-  }
 }
 
 async function createAgent({ api, daemon }, input) {
@@ -1124,21 +1064,6 @@ function projectAgent(agent) {
 
 
 
-function requiredText(input, name) {
-  const value = optionalText(input, name)
-  if (!value) throw failure('invalid_bridge_payload', `The Paseo bridge payload needs a non-empty ${name}.`)
-  return value
-}
-
-function optionalText(input, name) {
-  const value = input[name]
-  if (value === undefined || value === null) return null
-  if (typeof value !== 'string') {
-    throw failure('invalid_bridge_payload', `The Paseo bridge payload field ${name} must be text.`)
-  }
-  return value.trim() ? value : null
-}
-
 function requiredLabels(input) {
   const labels = input.labels
   const valid =
@@ -1243,10 +1168,6 @@ async function finish(exitCode, reply, connection) {
 
 function logToStderr(fields, message) {
   console.error(message ?? '', fields ?? '')
-}
-
-function failure(code, message) {
-  return Object.assign(new Error(message), { code, bridgeFailure: true })
 }
 
 // A failure a command raised with `failure` keeps its code. Anything else the client threw is the

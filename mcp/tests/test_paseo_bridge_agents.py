@@ -140,13 +140,17 @@ export function createPaseoApi(daemon) {
           workspaceDirectory: scenario.mappedDirectory ?? options.source.path,
           projectId: scenario.mappedProjectId ?? options.source.projectId,
           projectKind: 'non_git', archivingAt: scenario.archivingAt ?? null,
-          name: 'previous title'
+          name: 'previous title',
+          ...scenario.workspaceReplays?.[options.idempotencyKey]
         }
-        options.onEvent?.(scenario.workspaceFound ? { phase: 'completed', workspace } : { phase: 'accepted' })
+        options.onEvent?.(scenario.workspaceFound || scenario.workspaceReplays?.[options.idempotencyKey]
+          ? { phase: 'completed', workspace } : { phase: 'accepted' })
         return {
+          current: () => workspace,
           refresh: async () => {
             record({ via: 'workspace.refresh', id: workspace.id })
-            return scenario.mappedMissing ? null : workspace
+            return scenario.mappedMissing || scenario.hiddenWorkspaceKeys?.includes(options.idempotencyKey)
+              ? null : workspace
           },
           setTitle: async (title) => {
             record({ via: 'workspace.setTitle', id: workspace.id, title })
