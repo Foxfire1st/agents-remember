@@ -7,6 +7,7 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest';
 import { ReviewSurface } from './ReviewSurface';
 import { SUBJECT_HOLD_MS } from './ReviewNavigation';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 import {
   HBJ,
   HBJ_ID,
@@ -33,7 +34,10 @@ import {
 } from './walk.test-utils';
 
 installWorld();
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  resetCardCachesForTests();
+  vi.useRealTimers();
+});
 
 const ZS9 = bodyOf('INV-ZS9ZS878');
 const ZS9_SUBJECT = ZS9.payload!.knowledge.revision_selection!.record_id;

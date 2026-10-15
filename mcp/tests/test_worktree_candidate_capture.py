@@ -36,6 +36,7 @@ import pytest
 from agents_remember.kernel import git_command
 from agents_remember.kernel.git_command import run_git_with_index
 from agents_remember.models.memory_content_excludes import MEMORY_CONTENT_EXCLUDES
+from agents_remember.worktrees.modules import capture_index as index_owner
 from agents_remember.worktrees.modules import git as capture_owner
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from knowledge_index_test_support import rewrite_in_the_second_of_the_index_write
@@ -79,7 +80,7 @@ def previous_capture(repo: Path, index_path: Path, exclude_paths: tuple[str, ...
         isolated_index = Path(temporary) / "index"
         add_args = ["add", "-A"]
         if exclude_paths:
-            add_args.extend(["--", ".", *map(capture_owner._excluded_pathspec, exclude_paths)])
+            add_args.extend(["--", ".", *map(index_owner._excluded_pathspec, exclude_paths)])
         actions = [("seed candidate index", ["read-tree", "HEAD"])]
         if exclude_paths:
             actions.append(
@@ -733,6 +734,9 @@ def test_a_copy_git_cannot_use_falls_back_to_the_full_capture_and_the_same_tree(
     # Every step of the copy's capture hands over on a Git error, and the tree is the full one's.
     worktree = worktrees("failing steps")
     _edited(worktree)
+    # The trust-flag listing only runs when the copy carries a flag: mark one untouched file so
+    # the "ls-files" failure below fails a listing that runs, not one the capture skips.
+    git(worktree.root, "update-index", "--assume-unchanged", "dir/b.txt")
     expected = previous_capture(worktree.root, worktree.scratch / "old" / "index")
     real = capture_owner.run_git_with_index
     for step in ("read-tree", "ls-files", "add", "write-tree"):
@@ -747,6 +751,7 @@ def test_a_copy_git_cannot_use_falls_back_to_the_full_capture_and_the_same_tree(
 
         with (
             mock.patch.object(capture_owner, "run_git_with_index", failing),
+            mock.patch.object(index_owner, "run_git_with_index", failing),
             mock.patch.object(capture_owner, "_tree_from_head", wraps=full) as fallback,
         ):
             tree = worktree_candidate_tree(worktree.root, worktree.scratch / "new" / "index")
@@ -754,7 +759,7 @@ def test_a_copy_git_cannot_use_falls_back_to_the_full_capture_and_the_same_tree(
 
     # A copy that cannot be read (the index is locked away) is the same hand-over.
     with (
-        mock.patch.object(capture_owner, "copy_git_index", side_effect=PermissionError("denied")),
+        mock.patch.object(index_owner, "copy_git_index", side_effect=PermissionError("denied")),
         mock.patch.object(capture_owner, "_tree_from_head", wraps=full) as fallback,
     ):
         assert worktree_candidate_tree(worktree.root, worktree.scratch / "n" / "index") == expected
@@ -786,12 +791,12 @@ def test_the_index_copy_keeps_the_time_git_reads_from_the_index_file(worktree: W
     assert target.read_bytes() == index.read_bytes()
     assert target.stat().st_mtime_ns == index.stat().st_mtime_ns
     copies: list[tuple[Path, Path]] = []
-    real = capture_owner.copy_git_index
+    real = index_owner.copy_git_index
 
     def recording(source: Path, destination: Path) -> None:
         copies.append((source, destination))
         real(source, destination)
 
-    with mock.patch.object(capture_owner, "copy_git_index", recording):
+    with mock.patch.object(index_owner, "copy_git_index", recording):
         capture(worktree)
     assert [source for source, _ in copies] == [index]

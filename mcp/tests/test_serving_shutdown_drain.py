@@ -4,7 +4,7 @@ Serving shutdown must cancel the recurring owner *and* wait for the off-loop
 ``LeafArchiveRecovery.tick`` worker it is running. Cancelling an ``asyncio.to_thread`` call does not
 stop the underlying thread, so a teardown that only cancelled the owner task could return while the
 recovery was still reading receipts or writing an archive outcome. The drain boundary is the
-``_to_thread_drained_on_cancel`` helper the owner calls its worker through; the teardown that
+``background_accounting.offload`` helper the owner calls its worker through; the teardown that
 consumes it is the lifespan's own ``background`` collection, cancelled as a group and then awaited
 one task at a time.
 
@@ -191,6 +191,7 @@ class _ServingFixture:
                 projector=SimpleNamespace(prime=mock.AsyncMock(), run=_parked_forever),
                 review_trees_shutdown=self.review_trees_shutdown,
                 clock=self.clock.now,
+                background_ledger=None,
             ),
         )
 
@@ -213,6 +214,7 @@ class _ServingFixture:
                 ("_metrics_loop", _parked_forever),
                 ("_held_delivery_loop", _parked_forever),
                 ("_workspace_river_compaction_loop", _parked_forever),
+                ("_warmup_watch_loop", _parked_forever),
                 ("start_heap_tracing", lambda: False),
                 ("malloc_trim_enabled", lambda: False),
                 ("LeafArchiveRecovery", lambda _config: self.recovery),
@@ -511,13 +513,30 @@ def _observe_worker_drain(probe: _TickProbe, draining: asyncio.Event) -> Any:
 
     def task_factory(owner_loop: asyncio.AbstractEventLoop, coroutine: Any, **kwargs: Any) -> Any:
         frame = getattr(coroutine, "cr_frame", None)
-        if frame is not None and frame.f_locals.get("func") == probe.tick:
+        func = frame.f_locals.get("func") if frame is not None else None
+        # The production handoff measures the worker through a thin wrapper (F01): follow
+        # the functools ``__wrapped__`` link so the witness still names the exact thread
+        # task running the probe, wrapper or not.
+        if func is not None and getattr(func, "__wrapped__", func) == probe.tick:
             return ObservedWorker(coroutine, loop=owner_loop, **kwargs)
         return asyncio.Task(coroutine, loop=owner_loop, **kwargs)
 
+    real_wait = asyncio.wait
+
+    async def observed_wait(futures: Any, **kwargs: Any) -> Any:
+        owner = asyncio.current_task()
+        if (
+            owner is not None
+            and owner.cancelling()
+            and any(isinstance(task, ObservedWorker) for task in futures)
+        ):
+            draining.set()
+        return await real_wait(futures, **kwargs)
+
     loop.set_task_factory(task_factory)
     try:
-        yield
+        with mock.patch.object(asyncio, "wait", observed_wait):
+            yield
     finally:
         loop.set_task_factory(previous_factory)
 

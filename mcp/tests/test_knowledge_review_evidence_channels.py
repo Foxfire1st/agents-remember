@@ -50,13 +50,19 @@ from agents_remember.worktrees.integration.closeout.curator_coherence_publicatio
     curator_coherence_action,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from agents_remember_test_support.testing.review_git_trees import (
+    INVARIANT,
+    World,
+    build_world,
+    commit,
+)
 from curator_coherence_test_support import (
     prepared_publish_inputs,
     read_prepared_candidate_set,
     write_curator_task_topology,
 )
 from pydantic import ValidationError
-from test_review_git_trees import INVARIANT, World, _resolve, _seed, build_world, commit
+from test_review_git_trees import _resolve, _seed
 from test_worktree_support import write_passing_route_review
 
 pytestmark = [pytest.mark.evidence_unit, pytest.mark.usefixtures("worktree_services")]

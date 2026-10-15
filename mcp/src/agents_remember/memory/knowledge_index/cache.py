@@ -105,7 +105,10 @@ class KnowledgeIndexCache:
     def for_git_tree(self, repository: Path, revision: str) -> KnowledgeIndex:
         """Open the index of the Git tree ``revision`` names, read through Git objects."""
 
-        resolved = run_git(repository, ["rev-parse", "--verify", "--quiet", f"{revision}^{{tree}}"])
+        resolved = run_git(
+            repository,
+            ["--no-replace-objects", "rev-parse", "--verify", "--quiet", f"{revision}^{{tree}}"],
+        )
         if resolved.returncode != 0:
             raise MemoryTreeError(f"{revision!r} names no Git tree in {repository}")
         index = self._reuse(resolved.stdout.strip())

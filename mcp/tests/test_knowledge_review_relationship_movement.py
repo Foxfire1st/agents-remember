@@ -31,6 +31,7 @@ from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantI
 from agents_remember.models.knowledge.source import FileLocator
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.documents import record_path
+from agents_remember_test_support.testing.review_git_trees import FAMILY, build_world
 from diff_scope_test_support import (
     SUCCESSOR_PATH,
     _claim_id_for_path,
@@ -51,7 +52,7 @@ from test_knowledge_review_source_endpoints import (
     build_endpoint_fixture,
     compose_endpoint_review,
 )
-from test_review_git_trees import FAMILY, _resolve, build_world
+from test_review_git_trees import _resolve
 
 pytestmark = pytest.mark.evidence_unit
 

@@ -23,12 +23,117 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
+from typing import cast
 
 from agents_remember.kernel.git_command import GitRunnerOptions, git_environment, run_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 _PROBE_TIMEOUT_SECONDS = 8
+
+
+_LS_REMOTE_SWEEP: ContextVar[dict[tuple[str, str], object] | None] = ContextVar(
+    "ls_remote_sweep", default=None
+)
+_LS_REMOTE_LOCK = threading.Lock()
+
+
+class _RemotePending:
+    """One in-flight sweep computation another thread is already running (F12)."""
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.result: object = None
+
+
+def _sweep_memo[R](key: tuple[str, str], compute: Callable[[], R]) -> R:
+    """Run ``compute`` once per sweep for ``key``, sharing the result across threads.
+
+    Identical remote commands from different contracts in one sweep run once; the owner
+    computes while the other threads wait, and every waiter shares the owner's answer --
+    failures included. The next sweep computes again, because a remote moves. ``compute``
+    must not raise: expected remote failures are answers, and anything unexpected escapes
+    to the observation boundary while the wait stays bounded by the probe timeout.
+    """
+
+    scope = _LS_REMOTE_SWEEP.get()
+    if scope is None:
+        return compute()
+    with _LS_REMOTE_LOCK:
+        if key in scope:
+            seen = scope[key]
+            mine = False
+            pending = seen if isinstance(seen, _RemotePending) else None
+        else:
+            pending = _RemotePending()
+            scope[key] = pending
+            mine = True
+    if not mine:
+        if isinstance(seen, _RemotePending):
+            if not seen.event.wait(timeout=_PROBE_TIMEOUT_SECONDS + 10):
+                raise RuntimeError(f"landing sweep computation for {key[1]} timed out")
+            return cast("R", seen.result)
+        return cast("R", seen)
+    result = compute()
+    assert pending is not None
+    with _LS_REMOTE_LOCK:
+        scope[key] = result
+        pending.result = result
+        pending.event.set()
+    return result
+
+
+@contextmanager
+def sweep_remote_observations() -> Iterator[None]:
+    """Within the block, one ``ls-remote`` per repository and ref runs once (F12).
+
+    A sweep's contracts usually watch the same origin branches; without the scope each
+    contract probes them again. The scope lives and dies with the sweep: the next sweep
+    probes again, because a remote moves. Failures are remembered too -- a dead remote
+    fails once per sweep, not once per contract -- and anything unrememberable (no
+    branch, no repository) never enters the scope. Scopes nest like the other request
+    scopes: an inner scope joins the open one.
+    """
+
+    if _LS_REMOTE_SWEEP.get() is not None:
+        yield
+        return
+    token = _LS_REMOTE_SWEEP.set({})
+    try:
+        yield
+    finally:
+        _LS_REMOTE_SWEEP.reset(token)
+
+
+def current_remote_scope() -> dict[tuple[str, str], object] | None:
+    """The open sweep's remote-probe table, if any, for handoff into worker threads."""
+
+    return _LS_REMOTE_SWEEP.get()
+
+
+def observe_with_remote_scope[R](
+    observe: Callable[[WorktreeContract], R],
+    scope: dict[tuple[str, str], object] | None,
+    contract: WorktreeContract,
+) -> R:
+    """Run ``observe`` with the sweep's probe table joined (F12).
+
+    Landing observations run in worker threads, where the sweep's context does not reach;
+    the caller captures :func:`current_remote_scope` in the event loop and rejoins it here
+    so one repository and ref still probes once per sweep across threads.
+    """
+
+    if scope is None:
+        return observe(contract)
+    token = _LS_REMOTE_SWEEP.set(scope)
+    try:
+        return observe(contract)
+    finally:
+        _LS_REMOTE_SWEEP.reset(token)
 
 
 def landing_active(contract: WorktreeContract) -> bool:
@@ -49,9 +154,17 @@ def _remote_branch(repo: Path, branch: str) -> tuple[str, str | None]:
 
     ``("observed", sha)`` the branch is on origin; ``("observed", None)`` origin was reachable but
     the branch is not there yet; ``("missing", None)`` the probe could not run (offline / no origin).
+    Within a sweep scope one repository and ref probe once, whatever the answer (F12).
     """
     if not branch or not repo.exists():
         return ("missing", None)
+    key = (repo.as_posix(), branch)
+    return _sweep_memo(key, lambda: _probe_remote_branch(repo, branch))
+
+
+def _probe_remote_branch(repo: Path, branch: str) -> tuple[str, str | None]:
+    """One ``ls-remote`` for ``origin/<branch>``: answers, never raises for remote failure."""
+
     try:
         result = run_git(
             repo,
@@ -77,6 +190,14 @@ def _default_branch(repo: Path) -> str:
     """
     if not repo.exists():
         return "main"
+    # One symref probe per repository per sweep (F12): every contract names the same
+    # protected target, so the first contract's answer serves the whole sweep.
+    return _sweep_memo((repo.as_posix(), "\0default-branch"), lambda: _probe_default_branch(repo))
+
+
+def _probe_default_branch(repo: Path) -> str:
+    """One ``ls-remote --symref`` for ``origin/HEAD``; ``"main"`` on any failure."""
+
     try:
         result = run_git(
             repo,

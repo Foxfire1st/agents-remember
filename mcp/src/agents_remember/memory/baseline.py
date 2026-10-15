@@ -57,10 +57,9 @@ from agents_remember.worktrees.knowledge_validation import (
     PairedCode,
     memory_commit_refusal,
 )
+from agents_remember.worktrees.modules.capture_index import _IndexCopyUnusable, _real_index
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.modules.git import (
-    _IndexCopyUnusable,
-    _real_index,
     _require_git_with_index,
     branch_commit,
     commit_if_dirty,

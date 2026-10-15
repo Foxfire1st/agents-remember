@@ -46,7 +46,11 @@ from agents_remember.application.review_source_inventory import (
     review_inventory,
     source_tree_side,
 )
-from agents_remember.kernel.git_command import read_git_blob_bytes, run_git
+from agents_remember.kernel.git_command import (
+    memo_git_object_lookups,
+    read_git_blob_bytes,
+    run_git,
+)
 from agents_remember.kernel.git_preparation import GitPreparationError, require_git_object_id
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge.review import ReviewRefusal
@@ -120,15 +124,16 @@ def read_review_source_content(
     generation's.
     """
 
-    resolved = resolve_review_candidate(
-        config, request.repository_id, request.master, request.leaf_id
-    )
-    if isinstance(resolved, ReviewRefusal):
-        return _refused(request.repository_id, resolved)
-    inadmissible = _inadmissible(request, resolved)
-    if inadmissible is not None:
-        return _refused(request.repository_id, inadmissible)
-    return _content(config, request, resolved)
+    with memo_git_object_lookups():
+        resolved = resolve_review_candidate(
+            config, request.repository_id, request.master, request.leaf_id
+        )
+        if isinstance(resolved, ReviewRefusal):
+            return _refused(request.repository_id, resolved)
+        inadmissible = _inadmissible(request, resolved)
+        if inadmissible is not None:
+            return _refused(request.repository_id, inadmissible)
+        return _content(config, request, resolved)
 
 
 def _refused(repository_id: str, why: ReviewRefusal) -> ReviewSourceContentResult:

@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalStore
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import TERMINAL_STATES
 from agents_remember.observer.projection import (
     TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
@@ -37,8 +36,8 @@ from agents_remember.observer.reducer import (
     WorkspaceStructure,
     project_workspace,
 )
-from agents_remember.observer.store import EventStore
 from agents_remember.providers.status import refresh_current_provider_state
+from agents_remember.serving.delta import StableProjectionState, stable_projection_state
 from agents_remember.serving.projections.contract_snapshot import ContractSnapshotCache
 from agents_remember.serving.projections.paths import observer_root
 from agents_remember.serving.projections.projection_inputs import (
@@ -51,6 +50,9 @@ from agents_remember.serving.projections.snapshots import (
     read_ledger,
     read_route_coverage,
     read_sidecar_staleness,
+)
+from agents_remember.serving.projections.snapshots_impl._lifecycle_logs import (
+    read_lifecycle_logs,
 )
 
 if TYPE_CHECKING:
@@ -87,72 +89,14 @@ class _RepoSurfaceCacheEntry:
 _repo_surface_cache: dict[tuple[tuple[str, str, str], ...], _RepoSurfaceCacheEntry] = {}
 
 
-@dataclass
-class _LifecycleLogCacheEntry:
-    mtime_ns: int
-    size: int
-    log_events: list[Event]
-
-
 # ONE leaf-enclosure-contract enumeration + parse pass per tick, shared by
 # read_enclosures, read_engine_process_facts, and drift-snapshot pruning (each previously ran its
 # own walk + load_contract pass = 3x per tick). The cache reuses a parsed contract while its
 # (mtime_ns, size, ctime_ns) is unchanged and prunes to the live enumeration each build. Mutated only on the
 # projection worker thread (ticks are serialized by the projector's awaited asyncio.to_thread),
-# matching the module-level cache discipline of _lifecycle_log_cache below.
+# matching the module-level cache discipline of the lifecycle-log cache
+# in snapshots_impl._lifecycle_logs.
 _contract_snapshot_cache = ContractSnapshotCache()
-
-# The projection re-read + re-validated EVERY lifecycle's full events.jsonl
-# each 1s tick. Heartbeats append only every 15s (and stop entirely once a leaf is parked past its
-# inactivity cutoff), so most logs are byte-identical between ticks. This cache reuses the parsed
-# event list when a log's (mtime_ns, size) is unchanged, bounding per-tick parse cost to the logs
-# that actually changed. Keyed by log path; pruned to the live set each tick so it cannot leak.
-_lifecycle_log_cache: dict[str, _LifecycleLogCacheEntry] = {}
-
-
-def read_lifecycle_logs(root: Path) -> list[list[Event]]:
-    """Every per-lifecycle log under ``lifecycles/<id>/events.jsonl``, validated (cached).
-
-    Heartbeats are coalesced into ``heartbeat.json`` sidecars, so a heartbeat tick changes one tiny
-    JSON file instead of invalidating the cached parse of the full event log.
-    """
-    store = EventStore(root)
-    lifecycles_dir = root / "lifecycles"
-    if not lifecycles_dir.is_dir():
-        return []
-    logs: list[list[Event]] = []
-    seen: set[str] = set()
-    for entry in sorted(lifecycles_dir.iterdir()):
-        if not entry.is_dir():
-            continue
-        path = entry / "events.jsonl"
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        key = str(path)
-        seen.add(key)
-        cached = _lifecycle_log_cache.get(key)
-        if (
-            cached is not None
-            and cached.mtime_ns == stat.st_mtime_ns
-            and cached.size == stat.st_size
-        ):
-            log_events = cached.log_events
-        else:
-            log_events = store.read_log(entry.name)
-            _lifecycle_log_cache[key] = _LifecycleLogCacheEntry(
-                mtime_ns=stat.st_mtime_ns, size=stat.st_size, log_events=log_events
-            )
-        events = list(log_events)
-        heartbeat = store.read_heartbeat(entry.name)
-        if heartbeat is not None and (not events or heartbeat.ts >= events[-1].ts):
-            events.append(heartbeat)
-        if events:
-            logs.append(events)
-    for stale in [key for key in _lifecycle_log_cache if key not in seen]:
-        _lifecycle_log_cache.pop(stale, None)
-    return logs
 
 
 def write_projection(root: Path, projection: WorkspaceProjection) -> None:
@@ -216,9 +160,16 @@ def project_and_write(
     *,
     now: datetime | None = None,
     refresh: ProjectionRefresh | None = None,
+    previous_stable: StableProjectionState | None = None,
     tick: ProjectionTickState | None = None,
 ) -> WorkspaceProjection:
-    """Read logs + structural + analytical snapshots, reduce the tree, write it atomically."""
+    """Read logs + structural + analytical snapshots, reduce the tree, write it atomically.
+
+    ``latest-state.json`` (and its metrics sibling) is rewritten only when the
+    projection's stable content moved since ``previous_stable`` (MIK-R81 rule 3:
+    a tick whose content did not change costs no file write and wakes no echo).
+    The first projection (``previous_stable=None``) always writes.
+    """
     tick = tick or ProjectionTickState()
     moment = now or datetime.now(UTC)
     root = observer_root(config)
@@ -270,8 +221,11 @@ def project_and_write(
             if lifecycle.state not in TERMINAL_STATES
         }
     )
+    # The prune notes its own write at its own boundary (or nothing when it wrote
+    # nothing): no after-the-fact certification here (MIK-R81 rule 3, F07).
     _warn_if_task_documents_payload_over_budget(projection, now=moment)
-    write_projection(root, projection)
+    if previous_stable is None or stable_projection_state(projection) != previous_stable:
+        write_projection(root, projection)
     return projection
 
 

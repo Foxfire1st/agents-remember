@@ -9,6 +9,7 @@ has just proven, from ``/proc``, to be the sandbox's own.
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -225,6 +226,12 @@ def _provision(
         install = ops.runtime_install(checkout)
         provision = install.get("host")
         if not isinstance(provision, dict):
+            # The R108 answer guard can cut a long install answer to its short
+            # form, which names the filed report but drops the host part
+            # (L81-F29): read the filed report the answer names instead of
+            # failing a provision the report shows succeeded.
+            provision = _host_from_report(install.get("reportPath"))
+        if not isinstance(provision, dict):
             raise StepFailed(
                 "runtime_install",
                 f"{_error_text(install)}; the public install returned no host part",
@@ -301,6 +308,20 @@ def _bring_up(
         return 1
     out(layout.dashboard_url)
     return 0
+
+
+def _host_from_report(report_path: object) -> dict[str, Any] | None:
+    """The filed install report's host part, or None when it cannot be read."""
+    if not isinstance(report_path, str):
+        return None
+    try:
+        report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(report, dict):
+        return None
+    host = report.get("host")
+    return host if isinstance(host, dict) else None
 
 
 def _error_text(report: dict[str, Any]) -> str:

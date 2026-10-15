@@ -12,7 +12,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.worktrees.modules.landing import landing_refs, unobserved_landing_refs
+from agents_remember.observer.projection import LandingRefNode
+from agents_remember.serving.background_accounting import (
+    OWNER_LANDING,
+    BackgroundLedger,
+    measured,
+    offload,
+)
+from agents_remember.worktrees.modules.landing import (
+    current_remote_scope,
+    landing_refs,
+    observe_with_remote_scope,
+    sweep_remote_observations,
+    unobserved_landing_refs,
+)
 from agents_remember.worktrees.task_resolver import (
     is_foreign_enclosure_contract,
     iter_leaf_enclosure_contracts,
@@ -22,6 +35,7 @@ from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,
 )
+from pydantic import ValidationError
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -31,6 +45,10 @@ if TYPE_CHECKING:
 LANDING_REFRESH_INTERVAL_SECONDS = 30.0
 LANDING_REFRESH_CONCURRENCY = 4
 LANDING_STALE_AFTER_SECONDS = 120.0
+#: A finished landing without a valid final file gets exactly one observation
+#: attempt per dashboard process (MIK-R81 rule 6); a sweep carries at most this
+#: many such finishing attempts beside its open-arc probes.
+FINISHING_PROBE_PER_SWEEP = 4
 # Landing freeze: a finished contract's landing arc is FROZEN after one fully-observed
 # probe — the facts are persisted beside the contract and the contract leaves the refresh sweep
 # forever. Without this every closed-out task in the coordination root stays "landing-active"
@@ -158,12 +176,18 @@ class LandingStateRefresher:
         interval_seconds: float = LANDING_REFRESH_INTERVAL_SECONDS,
         max_concurrency: int = LANDING_REFRESH_CONCURRENCY,
         observe: LandingObserver = landing_refs,
+        ledger: BackgroundLedger | None = None,
     ) -> None:
         self._coordination_root = config.coordination_root
         self._interval_seconds = interval_seconds
         self._max_concurrency = max_concurrency
         self._observe = observe
+        self._ledger = ledger
         self._observations: dict[LandingContractKey, LandingObservation] = {}
+        # Finished contracts without a valid final file that this process already
+        # gave its one finishing attempt (MIK-R81 rule 6): success froze them and
+        # failure left them visibly missing, and neither is probed again here.
+        self._finished_attempts: set[LandingContractKey] = set()
         # path -> (final-file mtime_ns, frozenAt, rows). frozenAt rides along so the freshness
         # check below never has to re-read the file, and so a contract rewritten *after* a cache
         # fill is still re-judged on every call (the cache keys on the final file, not the contract).
@@ -203,12 +227,14 @@ class LandingStateRefresher:
         key = path.as_posix()
         cached = self._frozen_cache.get(key)
         if cached is None or cached[0] != mtime:
-            loaded = _load_final(path)
+            loaded = _load_final(path, contract)
             if loaded is None:
                 return None
             cached = (mtime, loaded[0], loaded[1])
             self._frozen_cache[key] = cached
         if _frozen_before_contract(cached[1], contract):
+            return None
+        if not _final_matches_contract(cached[2], contract):
             return None
         return cached[2]
 
@@ -225,35 +251,56 @@ class LandingStateRefresher:
 
     async def refresh_once(self, *, now: datetime | None = None) -> None:
         attempted_at = now or datetime.now(UTC)
-        contracts = self._landing_contracts()
+        contracts = await offload(OWNER_LANDING, self._ledger, self._landing_contracts)
         active_keys = {
             LandingContractKey.from_contract(contract)
             for contract in contracts
             if contract.cleanup != "completed"
         }
         semaphore = asyncio.Semaphore(self._max_concurrency)
-        results = await asyncio.gather(
-            *(self._observe_contract(contract, semaphore) for contract in contracts)
-        )
-        by_key = {LandingContractKey.from_contract(c): c for c in contracts}
-        for key, rows in results:
-            if rows is not None:
-                self._publish(key, rows, attempted_at=attempted_at)
-                self._maybe_freeze(by_key[key], rows, attempted_at=attempted_at)
-        # Copy-on-write publication keeps projection reads immutable and bounds retention to the
-        # contracts that are landing-active in the latest enclosure sweep.
-        self._observations = {
-            key: observation
-            for key, observation in self._observations.items()
-            if key in active_keys
-        }
+        # One ls-remote per repository and ref for the whole sweep (F12): the scope lives
+        # for this gather and dies with it, so the next sweep probes again.
+        with sweep_remote_observations():
+            results = await asyncio.gather(
+                *(self._observe_contract(contract, semaphore) for contract in contracts)
+            )
+        with measured(OWNER_LANDING, self._ledger):
+            by_key = {LandingContractKey.from_contract(c): c for c in contracts}
+            for key, rows in results:
+                if rows is not None:
+                    self._publish(key, rows, attempted_at=attempted_at)
+                    self._maybe_freeze(by_key[key], rows, attempted_at=attempted_at)
+                    if by_key[key].cleanup == "completed":
+                        # The one finishing attempt this process gives a finished
+                        # landing without a valid final file (MIK-R81 rule 6):
+                        # success froze it above, failure stays visibly missing.
+                        self._finished_attempts.add(key)
+            # Copy-on-write publication keeps projection reads immutable and bounds retention to the
+            # contracts that are landing-active in the latest enclosure sweep.
+            self._observations = {
+                key: observation
+                for key, observation in self._observations.items()
+                if key in active_keys
+            }
 
     async def _observe_contract(
         self, contract: WorktreeContract, semaphore: asyncio.Semaphore
     ) -> tuple[LandingContractKey, LandingRows]:
         async with semaphore:
+            # One accounted unit per probe (MIK-R81 rule 1, F01): the worker thread's
+            # own CPU is the unit -- the event loop's wait over the probe never is.
+            # The sweep's probe table does not cross worker-thread boundaries on its
+            # own (F12): capture it here and rejoin it inside the thread.
+            scope = current_remote_scope()
+            observe = self._observe
+            ledger = self._ledger
             try:
-                rows = await asyncio.to_thread(self._observe, contract)
+                # Cancellation-drain attribution (F01): the probe runs through the owned
+                # offload, so a cancelled sweep still awaits the worker and records its
+                # final delta instead of losing the unit with the waiter.
+                rows = await offload(
+                    OWNER_LANDING, ledger, observe_with_remote_scope, observe, scope, contract
+                )
             except Exception:
                 # Required boundary containment, not a retry layer: one malformed remote-command
                 # result must become explicit missing/stale truth instead of killing the shared
@@ -269,6 +316,7 @@ class LandingStateRefresher:
     def _landing_contracts(self) -> list[WorktreeContract]:
         tasks_root = self._coordination_root / "tasks"
         contracts: list[WorktreeContract] = []
+        terminal_attempts = 0
         for path in iter_leaf_enclosure_contracts(tasks_root):
             try:
                 contract = load_contract(path)
@@ -281,19 +329,29 @@ class LandingStateRefresher:
                     path.as_posix(),
                 )
                 continue
+            if contract.cleanup != "completed":
+                # Any live arc resets the finishing budget: the arc that finishes
+                # next (e.g. after a reopen) is a new arc with a new attempt.
+                self._finished_attempts.discard(LandingContractKey.from_contract(contract))
             if not self._needs_live_probe(contract):
                 continue
+            if contract.cleanup == "completed":
+                # Admission is bounded independently of concurrent probes. Unattempted
+                # terminal arcs remain eligible for a later sweep, including at startup.
+                if terminal_attempts >= FINISHING_PROBE_PER_SWEEP:
+                    continue
+                terminal_attempts += 1
             contracts.append(contract)
         return contracts
 
     def _needs_live_probe(self, contract: WorktreeContract) -> bool:
-        """Observe open landing arcs, with one finishing attempt for an arc already in flight."""
+        """Observe open arcs and attempt each missing terminal observation once per process."""
         if contract.cleanup == "abandoned":
             return False
         if contract.cleanup == "completed":
             return (
-                LandingContractKey.from_contract(contract) in self._observations
-                and self._frozen_rows(contract) is None
+                self._frozen_rows(contract) is None
+                and LandingContractKey.from_contract(contract) not in self._finished_attempts
             )
         return (
             contract.closeout_status == "completed" or contract.integration_status != "not-started"
@@ -345,7 +403,9 @@ class LandingStateRefresher:
         ]
         payload = {"frozenAt": attempted_at.isoformat(), "facts": frozen_rows}
         try:
-            atomic_write_text(path, json.dumps(payload, indent=1))
+            # Our own freeze never wakes our own projector (MIK-R81 rule 3, F07): the
+            # published identity is recorded from the owning transaction, not after it.
+            atomic_write_text(path, json.dumps(payload, indent=1), note_own=True)
             # A replacement can retain its mtime; retire the previous arc's cached facts.
             self._frozen_cache.pop(path.as_posix(), None)
         except OSError:
@@ -383,7 +443,9 @@ def _final_path(contract: WorktreeContract) -> Path:
     return contract.contract_path.parent / LANDING_FINAL_BASENAME
 
 
-def _load_final(path: Path) -> tuple[datetime, list[dict[str, object]]] | None:
+def _load_final(
+    path: Path, contract: WorktreeContract
+) -> tuple[datetime, list[dict[str, object]]] | None:
     """``(frozenAt, reducer-shaped rows)``, or ``None`` for anything we cannot trust as final.
 
     A file with no usable ``frozenAt`` is treated exactly like a corrupt one: its provenance
@@ -391,22 +453,98 @@ def _load_final(path: Path) -> tuple[datetime, list[dict[str, object]]] | None:
     re-freeze after its finishing probe; completed history stays explicitly missing.
     """
     try:
+        return _parse_final(path, contract)
+    except _UntrustedFinal:
+        return None
+
+
+class _UntrustedFinal(Exception):
+    """A landing-final file that must read as honest missing (F16)."""
+
+
+def _parse_final(
+    path: Path, contract: WorktreeContract
+) -> tuple[datetime, list[dict[str, object]]]:
+    """Parse a trusted final, raising :class:`_UntrustedFinal` for anything else."""
+    try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    except (OSError, ValueError) as error:
+        raise _UntrustedFinal from error
     if not isinstance(payload, dict):
-        return None
+        raise _UntrustedFinal
     frozen_at = _parse_stamp(payload.get("frozenAt"))
     facts = payload.get("facts")
     if frozen_at is None or not isinstance(facts, list):
-        return None
+        raise _UntrustedFinal
     if not all(isinstance(row, dict) for row in facts):
-        return None
+        raise _UntrustedFinal
+    if not facts:
+        # An empty final proves nothing about the arc (F16): honest missing, with its one
+        # eligible finishing attempt, instead of a valid-looking empty history.
+        raise _UntrustedFinal
     # Project every row onto the reducer-known keys: files written by earlier builds carry a
     # ``"frozen": true`` marker that ``LandingRefNode`` (extra="forbid") would reject. Stripping
     # here keeps the projection tick alive against files already on disk, not just new writes.
     rows = [{key: value for key, value in row.items() if key in _LANDING_ROW_KEYS} for row in facts]
+    if not all(_is_complete_final_row(row) for row in rows):
+        # Arbitrary or corrupt rows -- after stripping, missing their participant (kind/label)
+        # or reducer completeness (state/factState) -- are not history (F16): honest missing.
+        raise _UntrustedFinal
+    try:
+        for row in rows:
+            LandingRefNode(**row)
+    except ValidationError:
+        # Invalid optional reducer field types (a non-string detail, a non-numeric
+        # staleSeconds) must never be served into later model validation (F16).
+        raise _UntrustedFinal from None
+    if not _final_matches_contract(rows, contract):
+        # A row set that is not this contract's successful arc -- a PR-only row, an
+        # all-missing arc, a foreign branch, a stale participant set -- must not
+        # suppress the one eligible finishing attempt (F16): honest missing.
+        raise _UntrustedFinal
     return frozen_at, rows
+
+
+def _final_matches_contract(rows: list[dict[str, object]], contract: WorktreeContract) -> bool:
+    """Whether stripped rows are exactly this contract's successful landing arc (F16).
+
+    Only contract-static expectations are checked -- no live probes (a frozen final
+    exists precisely so completed history costs no observation): the exact expected
+    participant kind set, the feat/mem branch labels pinned by the contract, the
+    origin/ shape of the dynamic target label, the PR label shape, and every fact
+    ``observed`` (the freezer only ever writes a fully-observed probe).
+    """
+    kinds = {row.get("kind") for row in rows}
+    expected_kinds = {"origin-feat", "origin-main", "pr"}
+    if contract.memory_mode == "external" and contract.memory_repo_path is not None:
+        expected_kinds.add("origin-mem-main")
+    if len(rows) != len(expected_kinds) or kinds != expected_kinds:
+        return False
+    by_kind = {row["kind"]: row for row in rows}
+    if by_kind["origin-feat"].get("label") != f"origin/{contract.code_source_branch}":
+        return False
+    if "origin-mem-main" in by_kind and (
+        by_kind["origin-mem-main"].get("label") != f"origin/{contract.memory_source_branch}"
+    ):
+        return False
+    main_label = by_kind["origin-main"].get("label")
+    if not isinstance(main_label, str) or not main_label.startswith("origin/"):
+        return False
+    pr_label = by_kind["pr"].get("label")
+    if not isinstance(pr_label, str) or not (pr_label == "PR" or pr_label.startswith("PR #")):
+        return False
+    return all(row.get("factState") == "observed" for row in rows)
+
+
+_FINAL_ROW_REQUIRED_KEYS = ("kind", "label", "state", "factState")
+
+
+def _is_complete_final_row(row: dict[str, object]) -> bool:
+    """Whether a stripped final row names its participant and carries reducer completeness."""
+
+    return all(
+        isinstance(row.get(key), str) and row.get(key) != "" for key in _FINAL_ROW_REQUIRED_KEYS
+    )
 
 
 def _parse_stamp(value: object) -> datetime | None:

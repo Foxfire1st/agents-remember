@@ -226,6 +226,7 @@ def document_chats(
 ) -> dict[str, Any]:
     records = _records(config, selection, request_id)
     agents = []
+    asked: list[str] = []
     # Host reads are bounded per request; old archived Projects actors are walked in pages.
     for receipt in records[offset : offset + 3]:
         # A record of the Projects listing is checked for damage here, when the read reaches it.
@@ -233,6 +234,7 @@ def document_chats(
         agent_id = _hosted_agent_id(record)
         if agent_id is None:
             continue
+        asked.append(agent_id)
         reading = read_agent(config, agent_id)
         if not reading.reachable:
             return {"agents": [], "detail": reading.unreachable_reason, "unavailable": True}
@@ -241,5 +243,13 @@ def document_chats(
         agents.append(_document_agent(record))
         if not selection.sprint_document_ref:
             break
+    if asked:
+        # A clicked agent goes first in a warmup pass that is still running
+        # (MIK-R145 rule 4): the click names the agent before its own chat is
+        # drawn, so the pass loads it next instead of after the rest. The import
+        # stays here because the warmup module reads this route's record helpers.
+        from agents_remember.cli.paseo_warmup_state import TRACKER  # noqa: PLC0415
+
+        TRACKER.promote(asked)
     next_offset = offset + 3 if not agents and offset + 3 < len(records) else None
     return {"agents": agents, "nextOffset": next_offset}

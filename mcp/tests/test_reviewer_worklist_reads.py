@@ -34,7 +34,7 @@ from agents_remember.kernel.recorded_reads import (
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
 from agents_remember.worktrees.modules import contract_reader
-from test_review_git_trees import (
+from agents_remember_test_support.testing.review_git_trees import (
     LEAF,
     MASTER,
     ORIGIN,
@@ -43,8 +43,8 @@ from test_review_git_trees import (
     _repository,
     commit,
     git,
-    world,
 )
+from test_review_git_trees import world
 from test_review_read_latency import _body, _live, _ports, _query
 
 

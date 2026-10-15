@@ -48,6 +48,7 @@ try:
     from pnt_sandbox.layout import (
         MARKER_NAME,
         PASEO_VERSION,
+        PROJECT_HARNESS_MARKERS,
         REPOSITORY_ID,
         SANDBOX_SCHEMA,
         SandboxLayout,
@@ -232,6 +233,17 @@ class SandboxCase(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
+        # Only the owned fixture tree supplies harness markers. Ancestor markers
+        # belong to the machine running the tests, including transient /tmp state.
+        exists = Path.exists
+        ancestors = set(self.root.parents)
+
+        def fixture_exists(path: Path) -> bool:
+            if path.parent in ancestors and path.name in PROJECT_HARNESS_MARKERS:
+                return False
+            return exists(path)
+
+        self.enterContext(mock.patch.object(Path, "exists", fixture_exists))
         self.layout = SandboxLayout(
             self.root / "sandbox", paseo_port=free_port(), dashboard_port=free_port()
         )

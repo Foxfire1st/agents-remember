@@ -103,7 +103,10 @@ def with_prose_companions[T](files: Mapping[str, T]) -> dict[str, T]:
 def git_tree_snapshot(repository: Path, revision: str) -> MemoryTreeSnapshot:
     """Read the memory tree ``revision`` names (a commit, a tree or a ref) through Git objects."""
 
-    tree = _git_output(repository, ["rev-parse", "--verify", "--quiet", f"{revision}^{{tree}}"])
+    tree = _git_output(
+        repository,
+        ["--no-replace-objects", "rev-parse", "--verify", "--quiet", f"{revision}^{{tree}}"],
+    )
     if tree is None:
         raise MemoryTreeError(f"{revision!r} names no Git tree in {repository}")
     entries = _indexed_entries(read_git_tree_bytes(repository, tree))

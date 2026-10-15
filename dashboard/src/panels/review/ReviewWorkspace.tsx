@@ -19,7 +19,7 @@ import type { ReviewFamilyContextEntry } from '../../data/reviewFamily';
 import { selectedRevision } from './SubjectReview';
 import { carriedPage } from '../../data/review';
 import type { LaneRead, ReviewUnexplainedLane } from '../../data/reviewLane';
-import { treeComparisonNumber, useReviewTrees } from '../../data/reviewTrees';
+import { prefetchCardEntries, treeComparisonNumber, useReviewTrees } from '../../data/reviewTrees';
 import type { ReviewPageRequest } from './ReviewReadCycle';
 import { FamilyReviewCenter } from './FamilyReviewCenter';
 import { FamilyTree, type FamilySelection, type WalkedTree } from './FamilyTree';
@@ -297,6 +297,7 @@ function useWalkedSelection(
     state: WorkspaceState;
     navigation?: ReviewNavigationState;
     onPageSelect: (page: ReviewPageRequest | undefined) => void;
+    prefetchCards: (invariants: string[]) => void;
   },
 ) {
   const { payload, reading, selectorId, scope } = shown;
@@ -326,7 +327,8 @@ function useWalkedSelection(
     walk,
     chosen: marked(),
     treeChosen: marked(walked),
-    choose: (selection: FamilySelection) => chooseSubject(walked, selection, state, navigation),
+    choose: (selection: FamilySelection) =>
+      chooseSubject(walked, selection, state, navigation, actions.prefetchCards),
     rosterNext,
   };
 }
@@ -368,9 +370,18 @@ function WorkspaceBody({
   const returning = useMarkerReturnState();
   const comparison = treeComparisonNumber(payload.limitations);
   const leafTrees = useReviewTrees(repo, master, leaf, { comparison }, comparison !== undefined);
+  // The rail tree's selections start their cards beside the subject request too (L81-R1-F18):
+  // the same bound prefetch the center roster's `choose` uses, shared with the rail below.
+  const prefetchFamilyCards = (invariants: string[]) =>
+    prefetchCardEntries(repo, master, leaf, comparison, invariants);
   const { walk, chosen, treeChosen, choose, rosterNext } = useWalkedSelection(
     { payload, reading, selectorId, scope: `${repo}/${master}/${leaf}/${history ?? 'live'}` },
-    { state, navigation, onPageSelect },
+    {
+      state,
+      navigation,
+      onPageSelect,
+      prefetchCards: prefetchFamilyCards,
+    },
   );
   return (
     <div
@@ -380,14 +391,7 @@ function WorkspaceBody({
       data-diff-layout={state.layout}
       data-full-file={String(state.fullFile)}
     >
-      <ReviewScopeHeader
-        payload={payload}
-        repo={repo}
-        master={master}
-        leaf={leaf}
-        history={history}
-        status={readingState(reading)}
-      />
+      <ReviewScopeHeader payload={payload} repo={repo} master={master} leaf={leaf} history={history} status={readingState(reading)} />
       <button
         type="button"
         className={jump}
@@ -410,6 +414,7 @@ function WorkspaceBody({
         subject={navigation?.subject}
         changesOpen={changesOpen}
         leafTrees={leafTrees}
+        prefetchCards={prefetchFamilyCards}
       />
       <WorkspaceCenter
         payload={payload}
@@ -603,6 +608,7 @@ function WorkspaceRail({
   subject,
   changesOpen,
   leafTrees,
+  prefetchCards,
 }: {
   payload: ReviewPayload;
   repo: string;
@@ -617,6 +623,7 @@ function WorkspaceRail({
   subject?: ReviewNavigationState['subject'];
   changesOpen: boolean;
   leafTrees: ReturnType<typeof useReviewTrees>;
+  prefetchCards: (invariants: string[]) => void;
 }) {
   const tree = walkedTreeOf(walk, payload, navigation?.catalogue);
   const families = (
@@ -630,6 +637,7 @@ function WorkspaceRail({
       subject={subject}
       navigation={navigation}
       traversalEnabled={!changesOpen}
+      prefetchCards={prefetchCards}
     />
   );
   return (
@@ -756,6 +764,7 @@ function FamilyRailContext({
   subject,
   navigation,
   traversalEnabled,
+  prefetchCards,
 }: {
   payload: ReviewPayload;
   state: WorkspaceState;
@@ -765,6 +774,7 @@ function FamilyRailContext({
   subject?: ReviewNavigationState['subject'];
   navigation?: ReviewNavigationState;
   traversalEnabled: boolean;
+  prefetchCards: (invariants: string[]) => void;
 }) {
   const context = payload.family_context;
   return (
@@ -781,6 +791,14 @@ function FamilyRailContext({
       subject={subject}
       traversalEnabled={traversalEnabled}
       onSubjectSelect={(next, selection) => {
+        // The new set's cards start now, beside the subject request -- not after it
+        // resolves (L81-R1-F18). The walked entries name the set, as in `chooseSubject`.
+        if (selection) {
+          const entry = walked.entries.find(
+            (row) => row.family_id === selection.familyId,
+          );
+          if (entry) prefetchCards(familyInvariantSet(entry));
+        }
         navigation?.onSelect(next, selection, { keepTree: true });
         state.setChosen(selection ?? null);
       }}
@@ -903,18 +921,30 @@ function revealCenter(center: React.RefObject<HTMLDivElement | null>): void {
   if (surface) surface.scrollTop = 0;
 }
 
+// The invariants whose entries make one family's cards: every member's invariant, sorted, so one
+// family is one cards read (mirrors cardInvariants in FamilyReviewCenter for the walked entry).
+function familyInvariantSet(entry: ReviewFamilyContextEntry): string[] {
+  const keys = new Set<string>();
+  for (const row of [...entry.before.members, ...entry.after.members])
+    if (row.invariant_id) keys.add(row.invariant_id);
+  return [...keys].sort();
+}
+
 // A selection of a row the tree shows, which may be a kept family's: the walked tree keeps (MIK-R39).
 function chooseSubject(
   walked: ReviewFamilyContextEntry[],
   selection: FamilySelection,
   state: WorkspaceState,
   navigation?: ReviewNavigationState,
+  prefetchCards?: (invariants: string[]) => void,
 ): void {
   const family = walked.find((entry) => entry.family_id === selection.familyId);
   if (!family) {
     state.setChosen(selection);
     return;
   }
+  // The new set's cards start now, beside the subject request -- not after it resolves (L81-R1-F18).
+  prefetchCards?.(familyInvariantSet(family));
   const member = [...family.before.members, ...family.after.members].find(
     (row) => row.invariant_revision_id === selection.memberRevisionId,
   );

@@ -21,6 +21,15 @@ from agents_remember.models.knowledge.read import KnowledgeReadRequest, PathSeed
 from agents_remember.models.knowledge.review_source_content import ReviewSourceExpansion
 from agents_remember.models.knowledge.source import FileLocator
 from agents_remember.models.knowledge_files import canonical_text
+from agents_remember_test_support.testing.review_git_trees import (
+    CODE_FILE,
+    CODE_V1,
+    INVARIANT,
+    World,
+    build_world,
+    commit,
+    git,
+)
 from anchor_fixture_models import GitBlobIdentity, SourceAnchorDraft
 from fastapi.testclient import TestClient
 from knowledge_rows_test_support import (
@@ -35,7 +44,6 @@ from knowledge_rows_test_support import (
 )
 from test_knowledge_review_source_content import _blob_text, _object_id
 from test_knowledge_review_source_endpoints import _public_resolution, _source_app, _source_params
-from test_review_git_trees import CODE_FILE, CODE_V1, INVARIANT, World, build_world, commit, git
 
 pytestmark = pytest.mark.evidence_unit
 

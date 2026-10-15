@@ -27,7 +27,15 @@ from agents_remember.kernel.canonical_json import sha256_digest
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.worktrees.modules.future_code_candidate import capture_future_code_candidate
 from agents_remember.worktrees.worktree_contract import load_contract
-from test_review_git_trees import LEAF, MASTER, REPO, World, build_world, commit, git
+from agents_remember_test_support.testing.review_git_trees import (
+    LEAF,
+    MASTER,
+    REPO,
+    World,
+    build_world,
+    commit,
+    git,
+)
 
 pytestmark = pytest.mark.evidence_unit
 

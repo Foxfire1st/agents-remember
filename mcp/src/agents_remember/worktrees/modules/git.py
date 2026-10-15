@@ -14,13 +14,12 @@ if TYPE_CHECKING:
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.git_command import (
     GitRunnerOptions,
-    copy_git_index,
     ref_compare_and_swap_args,
     run_git,
     run_git_with_index,
 )
-from agents_remember.kernel.memory_ledger import LEDGER_RELATIVE_PATH, MEMORY_CACHE_EXCLUDE
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
+from agents_remember.worktrees.modules import capture_index
 from agents_remember.worktrees.modules.models import CommitPublicationRefusal
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -56,14 +55,6 @@ def _require_git_with_index(repo: Path, args: list[str], index: Path) -> str:
     return result.stdout.strip()
 
 
-def _excluded_pathspec(path: str) -> str:
-    return MEMORY_CACHE_EXCLUDE if path == LEDGER_RELATIVE_PATH else f":(top,exclude){path}"
-
-
-class _IndexCopyUnusable(Exception):
-    """The capture from a copy of the worktree's index cannot answer; the full capture does."""
-
-
 def worktree_candidate_tree(
     repo: Path, index_path: Path, *, exclude_paths: tuple[str, ...] = ()
 ) -> str:
@@ -78,7 +69,7 @@ def worktree_candidate_tree(
 
     **Work in proportion to what changed (MIK-R40 rule 1).** The private index starts as a copy of
     the worktree's own index, which carries the file times Git recorded, so ``git add`` hashes only
-    the files Git cannot prove unchanged (:func:`_tree_from_index_copy`). When that copy cannot be
+    the files Git cannot prove unchanged (:func:`capture_index._tree_from_index_copy`). When that copy cannot be
     made or Git reports an error on the way, the capture is taken again from an empty index, which
     hashes every file (:func:`_tree_from_head`): slower, the same tree, never a guess.
     """
@@ -87,107 +78,9 @@ def worktree_candidate_tree(
     with TemporaryDirectory(prefix=f".{index_path.name}-", dir=index_path.parent) as temporary:
         scratch = Path(temporary)
         try:
-            return _tree_from_index_copy(repo, scratch / "index", exclude_paths)
-        except _IndexCopyUnusable:
+            return capture_index._tree_from_index_copy(repo, scratch / "index", exclude_paths)
+        except capture_index._IndexCopyUnusable:
             return _tree_from_head(repo, scratch / "full-index", exclude_paths)
-
-
-def _tree_from_index_copy(repo: Path, index: Path, exclude_paths: tuple[str, ...]) -> str:
-    """Capture through a private copy of the worktree's own index, trusting Git's own evidence.
-
-    The copy is brought to exactly the state the full capture starts from -- ``HEAD``'s entries and
-    nothing else -- before any file is added, so both captures add the same files to the same
-    entries and return the same tree for every worktree state:
-
-    * **The copy keeps the index file's time** (:func:`copy_git_index`). Git re-checks by content
-      every entry recorded in the second the index was written, and it recognises those entries by
-      the index file's own time; a plain copy would lose that and keep the old blob of a same-size
-      rewrite made in that second.
-    * **A one-way merge of ``HEAD`` into the copy** (``read-tree -m -i HEAD``) leaves ``HEAD``'s
-      entries: an entry whose path and content equal ``HEAD``'s keeps the file times the index
-      recorded, and every other entry -- a staged change, a staged addition, a removal -- becomes
-      ``HEAD``'s entry with no file times, or is dropped. A staged path that is ignored and not in
-      ``HEAD`` is therefore not in the tree, exactly as in the full capture. ``-i`` keeps the merge
-      from consulting the working tree, which the capture reads only through ``git add``.
-    * **No entry is trusted over its file.** ``assume-unchanged`` and ``skip-worktree`` tell
-      ``git add`` to keep the index's blob whatever the file holds; a kept entry carries them over
-      from the real index, so both are cleared on the copy. The real index keeps them.
-
-    Whatever is not proven unchanged by the recorded file times is hashed by ``git add``, as in the
-    full capture. An index whose file times are stale costs what the full capture costs.
-
-    **What trusting Git's evidence leaves out.** A file whose recorded times still match is not
-    read, so a conversion rule that changed after the file was recorded -- a ``.gitattributes``
-    line, ``core.autocrlf``, a filter -- is not applied to it again. That is what ``git add -A``
-    does on the worktree's own index, and therefore what a commit made from that index records;
-    the full capture converted such a file again and so named a tree the index does not stage.
-    Once the file itself is touched, both captures read and convert it.
-    """
-
-    real_index, top = _real_index(repo)
-    try:
-        copy_git_index(real_index, index)
-    except OSError as error:
-        raise _IndexCopyUnusable(f"the worktree's index cannot be copied: {error}") from error
-    _index_step(repo, index, ["read-tree", "-m", "-i", "HEAD"])
-    _clear_trust_flags(top, index)
-    if exclude_paths:
-        _index_step(repo, index, ["update-index", "--force-remove", "--", *exclude_paths])
-    _index_step(repo, index, _add_all_args(exclude_paths))
-    return _index_step(repo, index, ["write-tree"]).strip()
-
-
-def _real_index(repo: Path) -> tuple[Path, Path]:
-    """The worktree's own index file and its top-level directory.
-
-    The index file is only ever read, as bytes, to be copied: no Git command of the capture reads
-    it, so none can refresh it or leave a lock beside it.
-    """
-
-    located = run_git(
-        repo, ["rev-parse", "--path-format=absolute", "--git-path", "index", "--show-toplevel"]
-    )
-    lines = located.stdout.splitlines()
-    if located.returncode != 0 or len(lines) != 2 or not all(lines):
-        raise _IndexCopyUnusable(f"the worktree's index cannot be located: {located.stderr}")
-    return Path(lines[0]), Path(lines[1])
-
-
-def _index_step(repo: Path, index: Path, args: list[str], *, paths: str | None = None) -> str:
-    """One Git command against the private copy; a failure hands the capture to the full one."""
-
-    result = run_git_with_index(repo, args, index, input_text=paths)
-    if result.returncode != 0:
-        raise _IndexCopyUnusable(f"git {args[0]} failed on the index copy: {result.stderr.strip()}")
-    return result.stdout
-
-
-def _clear_trust_flags(top: Path, index: Path) -> None:
-    """Clear ``assume-unchanged`` and ``skip-worktree`` on every entry of the private copy.
-
-    It runs in the worktree's top-level directory: ``ls-files`` lists only the entries under the
-    directory it runs in, and ``git add -A`` updates the whole worktree wherever it runs.
-    """
-
-    listing = _index_step(top, index, ["ls-files", "-v", "-z"])
-    flagged = [
-        row[2:]
-        for row in listing.split("\0")
-        if len(row) > 2 and (row[0].islower() or row[0] == "S")
-    ]
-    if not flagged:
-        return
-    paths = "".join(f"{path}\0" for path in flagged)
-    # One flag per command: ``update-index`` applies only the last of several such options.
-    for option in ("--no-assume-unchanged", "--no-skip-worktree"):
-        _index_step(top, index, ["update-index", "-z", option, "--stdin"], paths=paths)
-
-
-def _add_all_args(exclude_paths: tuple[str, ...]) -> list[str]:
-    args = ["add", "-A"]
-    if exclude_paths:
-        args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
-    return args
 
 
 def _tree_from_head(repo: Path, isolated_index: Path, exclude_paths: tuple[str, ...]) -> str:
@@ -198,7 +91,7 @@ def _tree_from_head(repo: Path, isolated_index: Path, exclude_paths: tuple[str, 
         actions.append(
             ("exclude derived files", ["update-index", "--force-remove", "--", *exclude_paths])
         )
-    actions.append(("materialize candidate tree", _add_all_args(exclude_paths)))
+    actions.append(("materialize candidate tree", capture_index._add_all_args(exclude_paths)))
     for action, args in actions:
         result = run_git_with_index(repo, args, isolated_index)
         if result.returncode != 0:
@@ -212,7 +105,8 @@ def _tree_from_head(repo: Path, isolated_index: Path, exclude_paths: tuple[str, 
             "could not resolve candidate tree: "
             f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
         )
-    return result.stdout.strip()
+    tree = result.stdout.strip()
+    return tree
 
 
 def current_branch(repo: Path) -> str:
@@ -302,7 +196,7 @@ def repository_identity(repo: Path | None) -> Path | None:
 def _status_args(exclude_paths: tuple[str, ...]) -> list[str]:
     args = ["status", "--porcelain"]
     if exclude_paths:
-        args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
+        args.extend(["--", ".", *map(capture_index._excluded_pathspec, exclude_paths)])
     return args
 
 
@@ -327,6 +221,14 @@ def require_clean(repo: Path, label: str, *, exclude_paths: tuple[str, ...] = ()
 
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    if ancestor == descendant:
+        # A commit is its own ancestor exactly when Git can read it; the
+        # verify form is the read's own memoized existence probe (F17), so a
+        # repeated self-check costs no new child.
+        return (
+            run_git(repo, ["rev-parse", "--verify", "--quiet", f"{ancestor}^{{commit}}"]).returncode
+            == 0
+        )
     return run_git(repo, ["merge-base", "--is-ancestor", ancestor, descendant]).returncode == 0
 
 
@@ -431,7 +333,7 @@ def stage_worktree_content(
     args = ["add", "-A"]
     if exclude_paths:
         step(["update-index", "--force-remove", "--", *exclude_paths])
-        args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
+        args.extend(["--", ".", *map(capture_index._excluded_pathspec, exclude_paths)])
     step(args)
 
 

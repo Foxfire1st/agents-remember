@@ -132,6 +132,10 @@ class AttentionDismissalStore:
             self.log_path(),
             [record.model_dump_json(by_alias=True, exclude_none=True) for record in records],
             ATTENTION_DISMISSAL_OWNERSHIP,
+            # Our own prune never wakes our own projector (MIK-R81 rule 3, F07): the rewrite
+            # records its own descriptor identity under the store lock, and a prune that
+            # writes nothing records nothing.
+            note_own=True,
         )
 
 

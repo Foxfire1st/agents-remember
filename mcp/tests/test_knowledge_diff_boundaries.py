@@ -12,6 +12,7 @@ than dropped, and no field of the response can carry a verdict about what a chan
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -172,11 +173,27 @@ def test_the_expansion_names_both_requested_trees_and_every_path_they_differ_at(
     assert fixture.before_tree_id in expansion.command
     assert fixture.after_tree_id in expansion.command
     # The advertised command is the interface this response's own paths came from, and it is the
-    # delimiter-safe one: ``--raw -z`` keeps a name containing a tab or a newline whole, while the
+    # delimiter-safe raw+numstat one: ``-z`` keeps a name containing a tab or a newline whole, while the
     # line-oriented form would print a quoted, escaped string that is not the address the same file
     # is expanded by (ICR-R02).
     assert "HEAD" not in expansion.command
-    assert "--raw -z" in expansion.command and "--name-only" not in expansion.command
+    command = shlex.split(expansion.command)
+    assert command == [
+        "git",
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--raw",
+        "--numstat",
+        "--no-abbrev",
+        "-z",
+        "--no-renames",
+        fixture.before_tree_id,
+        fixture.after_tree_id,
+    ]
+    assert "--name-only" not in command
     # Every changed path is classified exactly once across the lists, and the first two do not
     # overlap. ``attributed_changed_paths`` is the *measured* changed set intersected with the paths a
     # registered claim resolves (ICR-R04): the union the comparison's record half reaches also names

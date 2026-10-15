@@ -45,6 +45,7 @@ from agents_remember.serving._app_routes import (
     _register_action_routes,
     _register_projection_routes,
 )
+from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
@@ -95,15 +96,21 @@ def _build_serving_runtime(
     loop, and nothing that handles a request reads it.
     """
     enabled = live_inputs.resolved(replay)
+    # The always-on background account (MIK-R81 rule 1): one ledger per app, shared
+    # by the projector and every background loop through the runtime below.
+    ledger = BackgroundLedger()
     projector = Projector(
         config,
         cadence=cadence,
         replay=replay,
         refreshers=ProjectionRefreshers(
             provider=ProviderStateRefresher() if enabled.provider_state else None,
-            landing=LandingStateRefresher(config) if enabled.landing_state else None,
-            change_watcher=ProjectionInputWatcher(config) if enabled.change_watch else None,
+            landing=LandingStateRefresher(config, ledger=ledger) if enabled.landing_state else None,
+            change_watcher=ProjectionInputWatcher(config, ledger=ledger)
+            if enabled.change_watch
+            else None,
         ),
+        ledger=ledger,
     )
     runtime = _ServingRuntime(
         config=config,
@@ -113,6 +120,7 @@ def _build_serving_runtime(
         build=process_serving_build(),
         interval=cadence.interval,
         review_trees_shutdown=collaborators.review_trees_shutdown,
+        background_ledger=ledger,
     )
     # The serving daemon samples labeled provider
     # containers on its own cadence (decoupled from the 1s projection tick) into

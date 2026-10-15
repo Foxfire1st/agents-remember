@@ -121,13 +121,13 @@ class GateStore:
             return self._root / "lifecycles" / lifecycle_id / "gates.jsonl"
         return self._root / "workspace" / "gates.jsonl"
 
-    def append(self, record: GateRecord) -> None:
+    def append(self, record: GateRecord, *, note_own: bool = False) -> None:
         """Append one snapshot to its log, creating parent dirs on first write."""
         GATE_OWNERSHIP.check_declared_writer()
         path = self.log_path(record.lifecycleId)
         line = record.model_dump_json(by_alias=True, exclude_none=True)
         with exclusive_access(path, GATE_OWNERSHIP):
-            append_line(path, line)
+            append_line(path, line, note_own=note_own)
 
     def read(self, lifecycle_id: str | None) -> list[GateRecord]:
         """Read a gate log back as validated snapshots (empty when absent).

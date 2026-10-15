@@ -20,6 +20,7 @@ import { ExpressionCards } from './ExpressionCards';
 import { expressionCards } from './focusedCards';
 import { type IntentMarkerScopeValue, IntentMarkerScope } from './intentMarkerScope';
 import { SourceContent, type SourceMarkers } from './SourceContent';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 
 type Scenario =
   'precuration' | 'curated' | 'before_unread' | 'after_unread' | 'both_unread' | 'partial';
@@ -41,6 +42,7 @@ const AFTER_TREE = 'a'.repeat(40);
 const task = { repo: 'agents-remember', master: 'm', leaf: 'l' };
 
 afterEach(() => {
+  resetCardCachesForTests();
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();

@@ -44,6 +44,10 @@ export class DaemonClient {
   async close() { this.state = { status: 'disposed' } }
   getConnectionState() { return scenario.lost ? { status: 'disconnected' } : this.state }
   getLastServerInfoMessage() { return { serverId: scenario.serverId } }
+  async getDaemonStatus() {
+    record({ via: 'getDaemonStatus', pid: process.pid, stat: readFileSync(`/proc/${process.pid}/stat`, 'utf8') })
+    return { serverId: scenario.serverId, pid: process.pid }
+  }
   // One page of the runtime's agent listing, as the host pages it: at most 200 a page. A
   // `cursorless` listing announces its further agents and names no page to read them from.
   async fetchAgents(options) {
@@ -329,12 +333,34 @@ class AgentStateScriptTests(unittest.TestCase):
         self.assertEqual(len(long_reply[:3000]), 3000)
         self.assertGreater(len(long_reply[:3000].encode("utf-16-le")) // 2, 3000)
 
+    def _start_fields(self, answer: dict[str, Any]) -> dict[str, Any]:
+        reads = [call for call in self.recorded() if call["via"] == "getDaemonStatus"]
+        self.assertEqual(len(reads), 2)
+        self.assertEqual(reads[0]["pid"], reads[1]["pid"])
+        fields = reads[0]["stat"].rsplit(")", 1)[1].split()
+        identity = {
+            "pid": reads[0]["pid"],
+            "processStart": fields[19],
+            "bootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+        }
+        self.assertEqual(answer["startIdentity"], identity)
+        self.assertIsNone(answer["startDetail"])
+        return {"startIdentity": identity, "startDetail": None}
+
     def test_agents_live_lists_in_pages_and_says_when_the_listing_did_not_end(self) -> None:
         answer = self.call("agents-live", payload={}, listing={"count": 450, "archivedEvery": 9})
         live = [f"agent-{index}" for index in range(450) if index % 9]
-        self.assertEqual(answer, {"serverId": SERVER_ID, "agentIds": live, "complete": True})
         self.assertEqual(
-            [call["page"] for call in self.recorded()],
+            answer,
+            {
+                "serverId": SERVER_ID,
+                "agentIds": live,
+                "complete": True,
+                **self._start_fields(answer),
+            },
+        )
+        self.assertEqual(
+            [call["page"] for call in self.recorded() if call["via"] == "fetchAgents"],
             [{"limit": 200}, {"limit": 200, "cursor": "200"}, {"limit": 200, "cursor": "400"}],
         )
         # A runtime with more agents than the read's bound: the answer says it did not end.
@@ -342,7 +368,12 @@ class AgentStateScriptTests(unittest.TestCase):
             "agents-live", payload={}, listing={"count": 2100, "archivedEvery": 2100}
         )
         self.assertFalse(answer["complete"])
-        self.assertEqual(len(self.recorded()), 10)
+        self.assertEqual(
+            len([call for call in self.recorded() if call["via"] == "fetchAgents"]), 10
+        )
+        self.assertEqual(
+            len([call for call in self.recorded() if call["via"] == "getDaemonStatus"]), 2
+        )
         self.assertEqual(len(answer["agentIds"]), 1999)
         # A page that announces more agents and names no next page: the listing did not end.
         answer = self.call(
@@ -351,8 +382,19 @@ class AgentStateScriptTests(unittest.TestCase):
             listing={"count": 450, "archivedEvery": 9, "cursorless": True},
         )
         first_page = [f"agent-{index}" for index in range(200) if index % 9]
-        self.assertEqual(answer, {"serverId": SERVER_ID, "agentIds": first_page, "complete": False})
-        self.assertEqual([call["page"] for call in self.recorded()], [{"limit": 200}])
+        self.assertEqual(
+            answer,
+            {
+                "serverId": SERVER_ID,
+                "agentIds": first_page,
+                "complete": False,
+                **self._start_fields(answer),
+            },
+        )
+        self.assertEqual(
+            [call["page"] for call in self.recorded() if call["via"] == "fetchAgents"],
+            [{"limit": 200}],
+        )
 
     def test_a_recorded_agent_a_listing_did_not_reach_is_unknown_to_the_tree_and_not_gone(
         self,
@@ -384,7 +426,10 @@ class AgentStateScriptTests(unittest.TestCase):
         with self.runtime(listing={**listing, "cursorless": True}):
             cut = document_chat_tree(self.config, selections)
         self.assertEqual(cut, {"chats": [{"agents": None}, {"agents": None}]})
-        self.assertEqual([call["page"] for call in self.recorded()], [{"limit": 200}])
+        self.assertEqual(
+            [call["page"] for call in self.recorded() if call["via"] == "fetchAgents"],
+            [{"limit": 200}],
+        )
         # A listing the host ended says which agent it holds and which it no longer does.
         with self.runtime(listing=listing):
             ended = document_chat_tree(self.config, selections)

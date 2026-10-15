@@ -13,12 +13,14 @@ from agents_remember.models.lifecycles.operation import (
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache import (
+    resolve_lifecycle_operation_location,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocation,
     LifecycleOperationLocationError,
     located_lifecycle_operation_store,
     require_contract_matches_lifecycle_operation_location,
-    resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_projection import (
     OperationProjectionContext,
@@ -51,19 +53,37 @@ def observe_operation(
     return None if current is None else operation_projection(current, contract=contract)
 
 
-def latest_operation_projection(contract_path: Path) -> LifecycleOperationProjection | None:
-    contract = load_contract(contract_path)
+def latest_operation_projection(
+    contract_path: Path,
+    *,
+    contract: WorktreeContract | None = None,
+    location: LifecycleOperationLocation | None = None,
+) -> LifecycleOperationProjection | None:
+    """The latest lifecycle operation projection for one enclosure contract.
+
+    The location resolves once for all three journals (MIK-R81 rule 3), not once
+    per journal: resolution re-derives locator paths and re-parses the locator
+    and manifest, which dominates the tick's enclosure pass at corpus scale.
+    """
+    contract = contract or load_contract(contract_path)
+    try:
+        location = location or resolve_lifecycle_operation_location(
+            contract.coordination_root,
+            contract.contract_path,
+        )
+        require_contract_matches_lifecycle_operation_location(contract, location)
+    except LifecycleOperationLocationError:
+        # Structural enclosure projection must remain total across pre-locator
+        # contracts and damaged locator state. The task-addressed operation
+        # surfaces still return the exact adoption/repair refusal; this aggregate
+        # reader can only state that no operation is safely projectable.
+        return None
     records: list[LifecycleOperationRecord] = []
     for kind in ("closeout", "integrate", "direct-landing"):
         try:
-            store = located_lifecycle_operation_store(contract, kind)
-            record = _project_observed_record(store.read())
-        except LifecycleOperationLocationError:
-            # Structural enclosure projection must remain total across pre-locator
-            # contracts and damaged locator state. The task-addressed operation
-            # surfaces still return the exact adoption/repair refusal; this aggregate
-            # reader can only state that no operation is safely projectable.
-            return None
+            record = _project_observed_record(
+                LifecycleOperationStore(location.journal_path(kind)).read()
+            )
         except LifecycleOperationReadError as error:
             return lifecycle_journal_read_decision(kind, error).projection()
         if record is not None:

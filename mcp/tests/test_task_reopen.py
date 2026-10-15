@@ -14,9 +14,11 @@ from agents_remember.tasks import (
     write_task_doc,
 )
 from agents_remember.worktrees import reopen as reopen_module
+from agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache import (
+    resolve_lifecycle_operation_location,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     inspect_lifecycle_operation_locator,
-    resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.modules.git import branch_commit, branch_exists
 from agents_remember.worktrees.modules.startup.series_attach import series_attach_result

@@ -99,7 +99,33 @@ def read_task_documents(
         return []
     lifecycle_maps = _task_document_lifecycle_maps(enclosures)
     docs = _iter_task_document_payloads(tasks_root, now=now)
-    master_docs = _master_docs_by_ref(docs)
+    return project_task_doc_nodes(
+        docs,
+        lifecycle_maps=lifecycle_maps,
+        now=now,
+        options=_TaskDocProjectionOptions(
+            include_body=False,
+            master_docs=_master_docs_by_ref(docs),
+            coordination_root=coordination_root,
+        ),
+    )
+
+
+def project_task_doc_nodes(
+    docs: list[tuple[Path, dict[str, object]]],
+    *,
+    lifecycle_maps: _TaskDocumentLifecycleMaps,
+    now: datetime,
+    options: _TaskDocProjectionOptions,
+) -> list[TaskDocNode]:
+    """Project task-document summaries for exactly the given payloads (F09).
+
+    The whole-corpus reader and the path-directed incremental refresh share this:
+    the same payloads always project the same nodes, so a refresh that re-projects
+    only the changed documents (plus their dependency closure) merges byte-equal
+    results with a full reference.
+    """
+    master_docs = options.master_docs
     order_fields = build_order_fields(
         {path: doc for path, payload in docs if (doc := _projected_document(payload)) is not None}
     )
@@ -115,10 +141,10 @@ def read_task_documents(
                 lifecycle_maps,
                 now,
                 _TaskDocProjectionOptions(
-                    include_body=False,
+                    include_body=options.include_body,
                     master_docs=master_docs,
                     order_fields=order_fields,
-                    coordination_root=coordination_root,
+                    coordination_root=options.coordination_root,
                 ),
             )
         )
@@ -270,8 +296,25 @@ def read_series_documents(
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
         return []
-    nodes: list[SeriesNode] = []
     docs = list(_iter_task_document_payloads(tasks_root, now=now))
+    return project_series_nodes(docs, coordination_root=coordination_root, now=now)
+
+
+def project_series_nodes(
+    docs: list[tuple[Path, dict[str, object]]],
+    *,
+    coordination_root: Path,
+    now: datetime,
+) -> list[SeriesNode]:
+    """Project series checklists for exactly the given payloads (F09).
+
+    Shares the whole-corpus reader's projection so incremental refresh merges
+    byte-equal results. The subtask leaf map is rebuilt from the given payloads:
+    incremental callers pass the affected payloads plus the retained corpus payloads
+    for any folder whose master re-projects, so cross-document subtask joins resolve
+    identically to the full reference.
+    """
+    tasks_root = coordination_root / "tasks"
     leaf_ids_by_dir: dict[str, dict[str, str]] = {}
     for leaf_path, leaf_payload in docs:
         leaf_id = leaf_payload.get("id")
@@ -279,6 +322,7 @@ def read_series_documents(
             leaf_ids_by_dir.setdefault(leaf_path.parent.as_posix(), {})[leaf_id] = (
                 leaf_path.as_posix()
             )
+    nodes: list[SeriesNode] = []
     for path, payload in docs:
         if payload.get("kind") != "master":
             continue

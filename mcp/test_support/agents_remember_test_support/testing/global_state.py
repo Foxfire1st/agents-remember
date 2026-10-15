@@ -299,9 +299,24 @@ PROCESS_MUTABLE_STATES = (
         "A preceding module cannot suppress a task-payload warning.",
     ),
     _row(
-        "serving.projections.projection_store",
+        "serving.projections.snapshots_impl._lifecycle_logs",
         "_lifecycle_log_cache",
         "Forget lifecycle filesystem memoization between test modules.",
+    ),
+    _row(
+        "serving.projections.snapshots_impl._closeout_queue",
+        "_digest_file_stats",
+        "Forget retained task-tree file identities between test modules.",
+    ),
+    _row(
+        "worktrees.integration.lifecycle.lifecycle_location_cache",
+        "_location_cache",
+        "Forget retained lifecycle locations between test modules.",
+    ),
+    _row(
+        "worktrees.integration.lifecycle.lifecycle_operation_store",
+        "_record_cache",
+        "Forget stat-bound lifecycle operation records between test modules.",
     ),
     _row(
         "serving.projections.projection_store",

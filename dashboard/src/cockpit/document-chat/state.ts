@@ -4,6 +4,7 @@ import { canonicalLauncherRole, type RoleDocumentScope, type RoleExecutionReceip
 import { useKnownChats, useSelectionAgents } from "./knownChats";
 import { bindingInTree, documentBindings, documentChatAgent, type DocumentAgent } from "./model";
 import { useDocumentAgents } from "./useDocumentAgents";
+import { useWarmupStatus } from "./warmup";
 
 export interface DocumentChatProps {
   taskDocumentRef?: TaskDocumentRef;
@@ -35,6 +36,9 @@ export function useDocumentChat({ taskDocumentRef, taskDocuments, series, active
   const [launcherScope, setLauncherScope] = useState<string | null>(null);
   const agent = displayedAgent(currentLaunch, taskDocumentRef, agents);
   const target = agentTarget(agent);
+  // MIK-R145 rule 6: while the host-start loading runs, its one line and whether
+  // the shown agent is still pending, so the pane can say it is being loaded now.
+  const warmupPicture = useWarmupPicture(active, target);
   const presentation = chatPresentation(scope, available, { agents, roles: binding.roles.length }, Boolean(target), launcherScope);
   const onExecution = (receipt: RoleExecutionReceipt, selection: RoleDocumentScope) => {
     // The explicit Investigator request stays in the launcher/host tabs; the document's primary
@@ -51,10 +55,39 @@ export function useDocumentChat({ taskDocumentRef, taskDocuments, series, active
     onAvailability: setAvailable, onExecution,
     onToggleLauncher: () => setLauncherScope(launcherScope === scope ? null : scope),
     onRetry: () => setRevision((current) => current + 1),
+    ...warmupPicture,
   };
 }
 
+/** The shown agent's warmup state for the pane (L81-R1-F28): pending, in flight,
+ *  failed and not-loaded-for-memory each render their own truth with the run's
+ *  reason. A loaded agent renders nothing; an unknown one falls back to the
+ *  older pending/in-flight lists, then to nothing. */
+export interface WarmupAgentPicture {
+  agentId: string;
+  state: string;
+  reason: string | null;
+}
+
+export function warmupAgentState(
+  warmup: { pending: string[]; inFlight: string[]; agents: Record<string, { state: string; reason: string | null }> } | null | undefined,
+  agentId: string,
+): WarmupAgentPicture | null {
+  const row = warmup?.agents[agentId];
+  if (row && row.state !== "loaded") return { agentId, state: row.state, reason: row.reason };
+  if (row) return null;
+  if (warmup?.pending.includes(agentId)) return { agentId, state: "pending", reason: null };
+  if (warmup?.inFlight.includes(agentId)) return { agentId, state: "loading", reason: null };
+  return null;
+}
+
 type LaunchedRequest = { scope: string; selection: RoleDocumentScope; requestId: string };
+
+function useWarmupPicture(active: boolean, target: ReturnType<typeof agentTarget>) {
+  const warmup = useWarmupStatus(active);
+  return { warmupLine: warmup?.line ?? null,
+    warmupAgent: target ? warmupAgentState(warmup, target.agentId) : null };
+}
 
 function launchedForScope(launched: LaunchedRequest | null, scope: string) {
   return launched?.scope === scope ? launched : null;
@@ -84,4 +117,3 @@ function chatPresentation(scope: string, available: boolean, chat: { agents: Doc
   return { showLauncher: available && startable && known && (!hasTarget || launcherScope === scope),
     hideFrame: available && known && !hasTarget, hasControl: available && hasTarget, asking: available && !known };
 }
-

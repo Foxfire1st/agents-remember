@@ -14,6 +14,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import type { ReviewTreesResult } from '../../data/reviewTrees';
 import { ReviewSurface } from './ReviewSurface';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 
 const captured = <T,>(name: string): T =>
   JSON.parse(
@@ -27,6 +28,7 @@ const leafTrees = captured<ReviewTreesResult>('../../data/reviewTrees.captured.j
 const CHANGED = 'mcp/src/agents_remember/application/review_source_admission.py';
 
 afterEach(() => {
+  resetCardCachesForTests();
   cleanup();
   vi.unstubAllGlobals();
 });

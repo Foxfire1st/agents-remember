@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.own_writes import OWN_WRITES
 from agents_remember.kernel.primitives.observer_paths import (
     DRIFT_SNAPSHOT_SCHEMA,
     drift_snapshot_dir,
@@ -21,7 +22,7 @@ from agents_remember.serving.projections.contract_snapshot import (
 
 
 def prune_orphaned_drift_snapshots(
-    config: Any, *, contracts: ContractSnapshot | None = None
+    config: Any, *, contracts: ContractSnapshot | None = None, note_own: bool = False
 ) -> dict[str, object]:
     """Remove valid drift snapshots that no longer map to a configured repo or live worktree.
 
@@ -51,7 +52,9 @@ def prune_orphaned_drift_snapshots(
             kept += 1
             continue
         removed.append(
-            _remove_snapshot_file(path, repository=repository, branch=branch, dry_run=False)
+            _remove_snapshot_file(
+                path, repository=repository, branch=branch, dry_run=False, note_own=note_own
+            )
         )
     return {"removed": removed, "kept": kept, "skipped": skipped}
 
@@ -80,7 +83,7 @@ def _read_valid_snapshot(path: Path) -> dict[str, Any] | None:
 
 
 def _remove_snapshot_file(
-    path: Path, *, repository: str, branch: str, dry_run: bool
+    path: Path, *, repository: str, branch: str, dry_run: bool, note_own: bool = False
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "path": path.as_posix(),
@@ -93,7 +96,12 @@ def _remove_snapshot_file(
     if dry_run:
         return {**result, "would_remove": True}
     try:
-        path.unlink()
+        if note_own:
+            with OWN_WRITES.announcing(path.as_posix()) as announcement:
+                path.unlink()
+                OWN_WRITES.note_removed(path.as_posix(), announcement=announcement)
+        else:
+            path.unlink()
     except OSError as error:
         return {**result, "reason": str(error)}
     return {**result, "removed": True}

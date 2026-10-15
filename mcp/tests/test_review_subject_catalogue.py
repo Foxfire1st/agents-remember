@@ -23,6 +23,14 @@ from agents_remember.application.review_candidate_resolution import ReviewCandid
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
+from agents_remember_test_support.testing.review_git_trees import (
+    CODE_FILE,
+    LEAF,
+    MASTER,
+    REPO,
+    build_world,
+    commit,
+)
 from diff_scope_test_support import DiffFixture, build_diff_fixture, rebuild_after_tree
 from read_scope_test_support import (
     APPLICABILITY,
@@ -32,7 +40,6 @@ from read_scope_test_support import (
     ReadScopeFixture,
     build_read_scope_fixture,
 )
-from test_review_git_trees import CODE_FILE, LEAF, MASTER, REPO, build_world, commit
 
 pytestmark = pytest.mark.evidence_unit
 

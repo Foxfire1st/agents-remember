@@ -42,12 +42,7 @@ from agents_remember.models.knowledge.review_meaning_effects import (
     EFFECT_EXPLANATIONS,
     NONE_TEXT,
 )
-from knowledge_index_test_support import (
-    commit_all,
-    init_repository,
-    write_document,
-)
-from test_review_git_trees import (
+from agents_remember_test_support.testing.review_git_trees import (
     FAMILY,
     INVARIANT,
     LEAF,
@@ -57,6 +52,11 @@ from test_review_git_trees import (
     _write,
     build_world,
     invariant,
+)
+from knowledge_index_test_support import (
+    commit_all,
+    init_repository,
+    write_document,
 )
 
 pytestmark = pytest.mark.evidence_unit

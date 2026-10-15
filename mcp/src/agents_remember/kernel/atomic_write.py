@@ -14,16 +14,18 @@ their store's lock before publishing.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sys
 import threading
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from glob import escape
 from pathlib import Path
 from uuid import uuid4
 
 from agents_remember.errors import AtomicReplaceError
+from agents_remember.kernel.own_writes import OWN_WRITES
 
 
 def _temp_path_for(path: Path) -> Path:
@@ -105,7 +107,7 @@ def _fsync_directory(directory: Path) -> None:
         os.close(handle)
 
 
-def atomic_write_bytes(path: Path, payload: bytes) -> None:
+def atomic_write_bytes(path: Path, payload: bytes, *, note_own: bool = False) -> None:
     """Publish ``payload`` at ``path``: readers see the old file or the new one, never both.
 
     Creates ``path``'s parent, writes and fsyncs a private temp, replaces the
@@ -113,30 +115,50 @@ def atomic_write_bytes(path: Path, payload: bytes) -> None:
     ``BaseException``, so a ``KeyboardInterrupt`` or a cancellation between the write and
     the replace does not leave an orphan either. A process that is killed leaves one; the next
     publish of ``path`` removes it (:func:`_remove_abandoned_temps`).
+
+    With ``note_own``, announce the path before publishing and keep the temporary
+    descriptor open through rename and directory fsync. Its post-rename identity and
+    the payload digest are recorded only after durability succeeds. Native events
+    received while the note is pending are judged on the next watcher pass; a failed
+    write clears the announcement. Outside changes before the late note fail its
+    identity/digest check, so they still wake the projector. No file operation holds
+    the own-write registry's metadata lock.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _temp_path_for(path)
-    with _temps_in_flight_guard:
-        _temps_in_flight.add(tmp)
-    try:
-        with tmp.open("wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-    finally:
+    operation = OWN_WRITES.announcing(os.fspath(path)) if note_own else nullcontext()
+    with operation as announcement:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _temp_path_for(path)
         with _temps_in_flight_guard:
-            _temps_in_flight.discard(tmp)
-    _remove_abandoned_temps(path)
-    _fsync_directory(path.parent)
+            _temps_in_flight.add(tmp)
+        try:
+            with tmp.open("wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+                os.replace(tmp, path)
+                written = os.fstat(handle.fileno())
+                _remove_abandoned_temps(path)
+                _fsync_directory(path.parent)
+                if note_own:
+                    OWN_WRITES.note_written_identity(
+                        os.fspath(path),
+                        written,
+                        content_sha256=hashlib.sha256(payload).hexdigest(),
+                        announcement=announcement,
+                    )
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        finally:
+            with _temps_in_flight_guard:
+                _temps_in_flight.discard(tmp)
 
 
-def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+def atomic_write_text(
+    path: Path, text: str, *, encoding: str = "utf-8", note_own: bool = False
+) -> None:
     """:func:`atomic_write_bytes` for text. The encoding is explicit, never the locale's."""
-    atomic_write_bytes(path, text.encode(encoding))
+    atomic_write_bytes(path, text.encode(encoding), note_own=note_own)
 
 
 def atomic_replace(source: Path, destination: Path) -> None:

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from agents_remember.errors import LockCapabilityError
 from agents_remember.kernel import file_lock
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.own_writes import OWN_WRITES
 from agents_remember.kernel.primitives import checkout_coordination
 
 DURABLE_STORE_CONTRACT = "ar-durable-store/1.0"
@@ -290,44 +291,61 @@ def read_log_text(log_path: Path) -> str:
     return log_path.read_text(encoding="utf-8")
 
 
-def append_line(log_path: Path, line: str) -> None:
+def append_line(log_path: Path, line: str, *, note_own: bool = False) -> None:
     """Append one record. The caller holds :func:`exclusive_access`; this only writes.
 
     ``fsync`` before the handle closes: an append-only log whose last records are still in the
     page cache is not durable across a host loss, and every store here exists to survive exactly
     the restart that a durable timer would not.
+
+    With ``note_own``, the append's own descriptor identity is recorded while the caller's
+    lock is still held (F07): no lock-respecting writer can land between the commit and
+    the note, so the entry binds this transaction's bytes, never a later append's.
     """
-    _prepare_append_target(log_path)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    append_lines(log_path, [line], note_own=note_own)
 
 
-def append_lines(log_path: Path, lines: list[str]) -> None:
+def append_lines(log_path: Path, lines: list[str], *, note_own: bool = False) -> None:
     """Append several records with one flush while the caller holds the store lock.
 
     A transition batch is one durability unit: either every validated snapshot reaches the
     append before the single fsync, or the caller raises before writing any of them. This avoids
     turning a bounded sweep into one full log fold and one disk blocker per row.
+
+    With ``note_own``, the batch's own descriptor identity is recorded while the caller's
+    lock is still held (F07), exactly like :func:`append_line`.
     """
     if not lines:
         return
-    _prepare_append_target(log_path)
-    with log_path.open("a", encoding="utf-8") as handle:
-        handle.write("".join(f"{line}\n" for line in lines))
-        handle.flush()
-        os.fsync(handle.fileno())
+    operation = OWN_WRITES.announcing(os.fspath(log_path)) if note_own else nullcontext()
+    with operation as announcement:
+        _prepare_append_target(log_path)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("".join(f"{line}\n" for line in lines))
+            handle.flush()
+            # A writer ignoring the store lock can append between flush and fstat.
+            # That missed watch event is recovered by the projector's bounded healing
+            # pass; this identity capture serializes only lock-respecting writers.
+            written = os.fstat(handle.fileno())
+            os.fsync(handle.fileno())
+            if note_own:
+                OWN_WRITES.note_written_identity(
+                    os.fspath(log_path), written, announcement=announcement
+                )
 
 
-def rewrite_lines(log_path: Path, lines: list[str], ownership: StoreOwnership) -> None:
+def rewrite_lines(
+    log_path: Path, lines: list[str], ownership: StoreOwnership, *, note_own: bool = False
+) -> None:
     """Rewrite a locked log through the shared atomic-publish owner.
 
     The caller must already hold this log's exclusive store lock. An empty record set writes
     an empty file and never unlinks the destination.
+
+    With ``note_own``, the rewrite's own transaction identity is recorded (F07).
     """
     _require_rewrite_access(log_path, ownership.store)
-    atomic_write_text(log_path, "".join(f"{line}\n" for line in lines))
+    atomic_write_text(log_path, "".join(f"{line}\n" for line in lines), note_own=note_own)
 
 
 def _prepare_append_target(log_path: Path) -> None:

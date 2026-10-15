@@ -67,7 +67,12 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
     # real route's output against that model. Validating here instead would re-parse ~1.3 MB
     # per request and hand back exactly what the memo exists to save.
     body = dict(_projection_body_cache.body(snapshot))
-    body.update(served_state_tail(build=runtime.build))
+    body.update(
+        served_state_tail(
+            build=runtime.build,
+            watcher_health=runtime.projector.watcher_health(),
+        )
+    )
     return JSONResponse(content=body, headers=headers)
 
 
@@ -131,7 +136,11 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
         },
     )
     async def api_stream() -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_events(runtime.projector, build=runtime.build):
+        async for event in stream_events(
+            runtime.projector,
+            build=runtime.build,
+            watcher_health=runtime.projector.watcher_health(),
+        ):
             yield event
 
     # The raw river: every ``event`` frame is a verbatim observer JSONL record replayed from
@@ -152,9 +161,22 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
         last_event_id: Annotated[str | None, Header()] = None,
     ) -> AsyncIterator[ServerSentEvent]:
         async for event in stream_raw_events(
-            runtime.config, last_event_id=last_event_id, interval=runtime.interval
+            runtime.config,
+            last_event_id=last_event_id,
+            interval=runtime.interval,
+            ledger=runtime.background_ledger,
         ):
             yield event
+
+    # MIK-R81 rule 1: the always-on background account. Read-only; a failure
+    # here never touches anything the dashboard serves (the route builds no
+    # projection and writes nothing).
+    @app.get("/api/diagnostics/background")
+    def api_diagnostics_background() -> JSONResponse:
+        ledger = runtime.background_ledger
+        if ledger is None:
+            raise HTTPException(status_code=503, detail="background accounting not ready")
+        return JSONResponse(content=ledger.snapshot())
 
 
 # --- action routes ---------------------------------------------------------------------------------

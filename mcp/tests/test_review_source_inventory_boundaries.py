@@ -14,12 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from agents_remember.application import review_source_inventory
 from agents_remember.application.review_source_inventory import (
     byte_form,
     review_inventory,
     tree_difference_observation,
 )
-from agents_remember.memory.knowledge.diff_display import TreePaths, TreeSide
+from agents_remember.kernel.git_command import PARSED_DIFF_OPTIONS, run_git
+from agents_remember.memory.knowledge import read_anchors
+from agents_remember.memory.knowledge.diff_display import TreeChange, TreePaths, TreeSide
+from agents_remember.memory.knowledge.read_anchor_memo import TREE_ENTRIES
 from diff_scope_test_support import (
     _git,
     independent_changed_records,
@@ -137,6 +141,92 @@ def build_inventory_fixture(directory: Path, *, non_utf8: bool = False) -> Inven
 # Git's own status letters, restated here so the comparison is against the repository's answer and
 # not against a helper the implementation also uses.
 GIT_STATUS_LETTERS = {"A": "added", "D": "deleted", "M": "modified", "T": "type_changed"}
+
+
+def test_combined_inventory_equals_two_native_calls_for_rename_binary_and_space(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = build_inventory_fixture(tmp_path)
+    (fixture.root / PLAIN_PATH).rename(fixture.root / "src/renamed file.py")
+    _git(fixture.root, ["add", "-A"])
+    _git(fixture.root, ["commit", "-qm", "rename"])
+    before = TreeSide(tree_id=fixture.base_commit, root=str(fixture.root))
+    after = TreeSide(
+        tree_id=_git(fixture.root, ["rev-parse", "HEAD^{tree}"]), root=str(fixture.root)
+    )
+    assert before.tree_id is not None and after.tree_id is not None
+    endpoints = [before.tree_id, after.tree_id]
+    raw = run_git(
+        fixture.root, ["diff", *PARSED_DIFF_OPTIONS, "--raw", "-z", "--no-renames", *endpoints]
+    )
+    numstat = run_git(
+        fixture.root, ["diff", *PARSED_DIFF_OPTIONS, "--numstat", "-z", "--no-renames", *endpoints]
+    )
+    assert raw.returncode == numstat.returncode == 0
+    content = {
+        row.split("\t", 2)[2]: "-" in row.split("\t", 2)[:2]
+        for row in numstat.stdout.split("\0")
+        if row
+    }
+    tokens = raw.stdout.split("\0")[:-1]
+    entries = []
+    for metadata, path in zip(tokens[::2], tokens[1::2], strict=True):
+        old_mode, new_mode, _, _, status = metadata[1:].split(" ")
+        kind = (
+            "submodule"
+            if "160000" in (old_mode, new_mode)
+            else "symlink"
+            if "120000" in (old_mode, new_mode)
+            else "binary"
+            if content[path]
+            else "text"
+        )
+        entries.append(
+            TreeChange(
+                path=path,
+                status=GIT_STATUS_LETTERS[status],
+                content=kind,
+                mode_change=status == "M" and old_mode != new_mode,
+                detail="",
+            )
+        )
+    entries.sort(key=lambda entry: entry.path)
+    expected = TreePaths(
+        available=True, paths=tuple(entry.path for entry in entries), entries=tuple(entries)
+    )
+    expected_entries = {}
+    for tree in endpoints:
+        for path in expected.paths:
+            lookup = run_git(fixture.root, ["ls-tree", "-z", tree, "--", f":(literal){path}"])
+            assert lookup.returncode == 0
+            entry = None if not lookup.stdout else tuple(lookup.stdout.split("\t", 1)[0].split(" "))
+            expected_entries[(str(fixture.root), tree, path)] = entry
+    executed: list[list[str]] = []
+
+    def counted(root: Path, args: list[str]):
+        executed.append(args)
+        return run_git(root, args)
+
+    monkeypatch.setattr(review_source_inventory, "run_git", counted)
+    assert tree_difference_observation(before, after) == expected
+    assert len(executed) == 1 and {"--raw", "--numstat"} <= set(executed[0])
+    assert content[BINARY_PATH] and "src/renamed file.py" in expected.paths
+    assert PLAIN_PATH in expected.paths  # The existing no-renames policy retains the deletion.
+    # Both names of the rename, absent ends included, retain each native entry's mode and type.
+    for key, entry in expected_entries.items():
+        assert TREE_ENTRIES.get(key) == (entry,), key
+    assert TREE_ENTRIES.get((str(fixture.root), fixture.candidate_commit, PLAIN_PATH)) is None
+    assert TREE_ENTRIES.get((str(fixture.root / "foreign"), endpoints[0], PLAIN_PATH)) is None
+    point_reads = []
+
+    def point_counted(root: Path, args: list[str]):
+        point_reads.append(args)
+        return run_git(root, args)
+
+    monkeypatch.setattr(read_anchors, "run_git", point_counted)
+    for (root, tree, path), entry in expected_entries.items():
+        assert read_anchors._tree_entry(Path(root), tree, path) == entry
+    assert point_reads == []
 
 
 def test_the_inventory_lists_every_changed_path_of_the_bound_pair_with_gits_own_status(

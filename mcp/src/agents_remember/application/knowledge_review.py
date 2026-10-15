@@ -137,6 +137,7 @@ from agents_remember.application.review_revision_comparison import (
 )
 from agents_remember.application.review_source_inventory import (
     inventory_limitations,
+    memo_tree_observations,
     review_inventory,
     source_pane,
     source_tree_side,
@@ -156,6 +157,7 @@ from agents_remember.application.review_task_context import (
     index_incompleteness,
     task_context_review,
 )
+from agents_remember.kernel.git_command import memo_git_object_lookups, shared_blob_reads
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
@@ -189,6 +191,7 @@ from agents_remember.models.knowledge.view import (
     MAX_VIEW_ROWS,
 )
 from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
+from agents_remember.worktrees.modules.capture_baseline import memo_capture_baselines
 
 __all__ = [
     "EMPTY_REVIEW_RECORDS",
@@ -246,7 +249,13 @@ def read_complete_knowledge_review(
     recheck before publication (ICR-R01) is the composition's own and is unchanged.
     """
 
-    with same_request_digests():
+    with (
+        same_request_digests(),
+        memo_git_object_lookups(),
+        memo_tree_observations(),
+        shared_blob_reads(),
+        memo_capture_baselines(),
+    ):
         resolved = resolve_review_candidate(
             config,
             request.repository_id,

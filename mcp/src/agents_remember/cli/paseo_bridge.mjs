@@ -211,6 +211,8 @@
 //     `agent-create` is such a row: without a model it calls this client's createAgent(), because
 //     the public client only creates an agent for a provider/model pair.
 
+import { nonEmpty, serverIdOf } from './paseo_bridge_primitives.mjs'
+import { listLiveAgents } from './paseo_live_agents.mjs'
 import { createHash } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -244,8 +246,6 @@ const MESSAGE_LIMIT = 800
 // agents-live: the runtime refuses a page above 200 entries; ten pages bound the read at 2,000
 // agents. Only the runtime's own word that no agents follow ends a listing: a read that stops
 // at the bound, or at a page that names no next page, answers that the listing did not end.
-const LIVE_PAGE_LIMIT = 200
-const LIVE_PAGES = 10
 // agent-state and agent-resume: the runtime's word for an agent without a running harness
 // process, the timeline entries that mark the end of a turn, how many entries are read from the
 // end, and the length of the reply text that is returned.
@@ -735,27 +735,6 @@ async function readAgentState({ api, daemon }, input) {
   return { serverId: serverIdOf(daemon), agent: agent ? await agentState(api, agent) : null }
 }
 
-async function listLiveAgents({ daemon }) {
-  const agentIds = []
-  let cursor = null
-  let complete = false
-  for (let page = 0; page < LIVE_PAGES; page += 1) {
-    const listed = await daemon.fetchAgents({
-      page: { limit: LIVE_PAGE_LIMIT, ...(cursor ? { cursor } : {}) }
-    })
-    for (const entry of listed.entries ?? []) {
-      const agent = entry?.agent
-      if (nonEmpty(agent?.id) && !nonEmpty(agent.archivedAt)) agentIds.push(agent.id)
-    }
-    // The listing has ended when the runtime says that no agents follow, and only then. A page
-    // without a next page ends the read, not the listing.
-    complete = listed.pageInfo?.hasMore === false
-    cursor = nonEmpty(listed.pageInfo?.nextCursor) ? listed.pageInfo.nextCursor : null
-    if (complete || cursor === null) break
-  }
-  return { serverId: serverIdOf(daemon), agentIds, complete }
-}
-
 async function resumeAgent({ api, daemon }, input) {
   const agentId = requiredText(input, 'agentId')
   const serverId = serverIdOf(daemon)
@@ -1143,9 +1122,7 @@ function projectAgent(agent) {
   }
 }
 
-function serverIdOf(daemon) {
-  return daemon.getLastServerInfoMessage().serverId
-}
+
 
 function requiredText(input, name) {
   const value = optionalText(input, name)
@@ -1313,9 +1290,7 @@ function positiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
-function nonEmpty(value) {
-  return typeof value === 'string' && value.trim() ? value : null
-}
+
 
 function text(value) {
   return String(value ?? '').slice(0, MESSAGE_LIMIT)

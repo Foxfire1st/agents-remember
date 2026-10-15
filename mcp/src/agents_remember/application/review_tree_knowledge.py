@@ -73,9 +73,11 @@ from agents_remember.application.review_unexplained_lane import (
 from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
 from agents_remember.kernel.git_command import (
     PARSED_DIFF_OPTIONS,
+    memo_git_object_lookups,
     read_git_blob_bytes,
     read_git_blobs_bytes,
     run_git,
+    shared_blob_reads,
 )
 from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -138,8 +140,24 @@ def read_review_trees(
     *,
     processes: ReviewerWorklistProcesses | None = None,
 ) -> ReviewTreesResult:
-    """The tree view of one leaf: its comparison, currentness and worklist."""
+    """The tree view of one leaf: its comparison, currentness and worklist.
 
+    Within one request the same Git lookup of the same object is made once
+    (MIK-R81 rule 7): the comparison, the currentness and the worklist all read
+    the same trees, and the memo keeps the first answer of every content-addressed
+    lookup for the rest of the read.
+    """
+
+    with memo_git_object_lookups(), shared_blob_reads():
+        return _read_review_trees(config, query, processes=processes)
+
+
+def _read_review_trees(
+    config: McpRuntimeConfig,
+    query: ReviewTreesQuery,
+    *,
+    processes: ReviewerWorklistProcesses | None = None,
+) -> ReviewTreesResult:
     found = _comparison(config, query)
     if isinstance(found, ReviewRefusal):
         return ReviewTreesResult(
@@ -761,7 +779,14 @@ def side_currentness(trees: ReviewTrees) -> dict[str, dict[str, Any]]:
                 index.record_ids("invariant").value,
                 index.record_ids("family").value,
             )
-            result[name] = {**currentness.to_document(), "indexState": index.state.state}
+            document = currentness.to_document()
+            # Review responses retain the MIK-R03 listing: all entries are checked,
+            # but only entries that are not current are listed (MIK-R81 preservation).
+            for invariant in document["invariants"]:
+                invariant["entries"] = [
+                    entry for entry in invariant["entries"] if entry["state"] != "current"
+                ]
+            result[name] = {**document, "indexState": index.state.state}
     return result
 
 

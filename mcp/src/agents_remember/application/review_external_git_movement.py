@@ -19,6 +19,7 @@ from agents_remember.application.review_final_output_receipt import (
     require_comparison_repositories,
     select_review_comparison,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.review_external_movement import (
     ExternalGitMovement,
@@ -551,7 +552,7 @@ def _findings(
             declared=contract.code_work_branch,
             recorded=candidate.tree,
             detail="the retained uncommitted candidate records a tree pin, not an observed work-branch head; work-head ancestry cannot be measured",
-            branch_left=_text(lambda: current_branch(contract.code_worktree))
+            branch_left=_text(lambda: _worktree_branch(contract.code_worktree))
             != contract.code_work_branch,
         )
     else:
@@ -588,7 +589,7 @@ def _work_branch_finding(contract: WorktreeContract, *, recorded: str) -> _Findi
     """The code work branch: is the worktree on it, and does its tip still descend from the record?"""
 
     branch = contract.code_work_branch
-    checked_out = _text(lambda: current_branch(contract.code_worktree))
+    checked_out = _text(lambda: _worktree_branch(contract.code_worktree))
     if checked_out != branch:
         shown = checked_out or "no branch (a detached HEAD)"
         return _unreadable(
@@ -727,10 +728,24 @@ def _tip(repository: Path, branch: str) -> _BranchTip:
 
 
 def _object_readable(repository: Path, commit: str) -> bool:
-    """Whether one exact commit object exists here, asked so a missing object is not an error."""
+    """Whether one exact commit object exists here, asked so a missing object is not an error.
+
+    The probe peels to the commit's tree rather than re-verifying the commit:
+    a commit that names a tree is readable, and the read resolves through the
+    request's memoized object lookups, so a commit the read already proved (its
+    base, its recorded identity) is not asked about twice (MIK-R81 rule 7,
+    F17). The outcome is the same existence answer — only missing objects read
+    fresh — because only a readable commit has a tree.
+    """
 
     try:
-        return is_ancestor(repository, commit, commit)
+        return (
+            run_git(
+                repository,
+                ["--no-replace-objects", "rev-parse", "--verify", "--quiet", f"{commit}^{{tree}}"],
+            ).returncode
+            == 0
+        )
     except (OSError, RuntimeError):
         return False
 
@@ -751,6 +766,40 @@ def _text(reader: Callable[[], str]) -> str:
         return reader()
     except (OSError, RuntimeError):
         return ""
+
+
+def _worktree_branch(worktree: Path) -> str:
+    """The worktree's current branch without asking Git, falling back to asking.
+
+    ``git branch --show-current`` prints the ``HEAD`` symref's branch, or nothing for a
+    detached ``HEAD``; both are plain file reads (the worktree's ``.git`` pointer, then its
+    ``HEAD``), so the common layout answers with no child (MIK-R81 rule 7, F17). Any doubt —
+    an unreadable pointer, a relative administrative directory, a missing ``HEAD`` — falls
+    back to asking Git, so an exotic setup answers exactly as before, with one child.
+    """
+
+    try:
+        dotgit = worktree / ".git"
+        if dotgit.is_dir():
+            head = dotgit / "HEAD"
+        else:
+            text = dotgit.read_text(encoding="utf-8").strip()
+            if not text.startswith("gitdir: "):
+                raise OSError(f"unknown .git pointer in {worktree}")
+            gitdir = Path(text[len("gitdir: ") :].strip())
+            if not gitdir.is_absolute():
+                raise OSError(f"relative administrative directory in {worktree}")
+            head = gitdir / "HEAD"
+        content = head.read_text(encoding="utf-8").strip()
+    except OSError:
+        return current_branch(worktree)
+    if content.startswith("ref: "):
+        reference = content[len("ref: ") :].strip()
+        prefix = "refs/heads/"
+        return reference[len(prefix) :] if reference.startswith(prefix) else ""
+    if content and all(character in "0123456789abcdef" for character in content.lower()):
+        return ""
+    return current_branch(worktree)
 
 
 def _observed(findings: Sequence[_Finding], channel: GitMovementChannel) -> str | None:

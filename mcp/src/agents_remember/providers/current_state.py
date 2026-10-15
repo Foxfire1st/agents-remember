@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     ProviderScope,
@@ -47,8 +48,7 @@ def write_current_provider_state(
 ) -> dict[str, Any]:
     payload = build_current_provider_state(config, status, checked_at=checked_at)
     path = current_state_path(config)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n", note_own=True)
     return {"path": path.as_posix(), "state": payload}
 
 

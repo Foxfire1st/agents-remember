@@ -44,6 +44,7 @@ from agents_remember.kernel.git_closeout_publication import (
     GitCloseoutPublicationObservation,
     GitCloseoutPublicationResult,
 )
+from agents_remember.kernel.git_object_memo_keys import _memo_cat_file, _memo_rev_parse
 from agents_remember.kernel.git_preparation import (
     _PREPARATION_AUTHORITY,
     ExistingGitPreparationBinding,
@@ -337,6 +338,12 @@ def _run_git(
 def _run_git(
     repo_root: Path, args: list[str], execution: _GitRun, *, raw_output: bool = False
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    memo = _OBJECT_LOOKUPS.get()
+    key = _memo_key(repo_root, args, execution, raw_output=raw_output) if memo is not None else None
+    if memo is not None and key is not None and key in memo:
+        held = memo[key]
+        assert isinstance(held, subprocess.CompletedProcess)
+        return held  # type: ignore[return-value]
     stdin_input: str | bytes | None = execution.input_text
     if raw_output and stdin_input is not None:
         stdin_input = stdin_input.encode("utf-8")
@@ -345,7 +352,7 @@ def _run_git(
     )
     argv = _git_argv(repo_root, args, execution.work_dir)
     if not execution.new_session:
-        return subprocess.run(
+        result = subprocess.run(
             argv,
             cwd=execution.work_dir,
             text=not raw_output,
@@ -357,34 +364,40 @@ def _run_git(
             check=False,
             **stdin_kwargs,  # type: ignore[arg-type]
         )
-    # A new session owns its process group, so a timeout stops the command with
-    # the children it started (MIK-R152 rule 6). ``subprocess.run`` kills only
-    # the direct child; here the group goes first and the error still reads as
-    # the timeout every caller already handles.
-    process = subprocess.Popen(
-        argv,
-        cwd=execution.work_dir,
-        text=not raw_output,
-        encoding=None if raw_output else "utf-8",
-        errors=None if raw_output else "surrogateescape",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        stdin=subprocess.DEVNULL if stdin_input is None else subprocess.PIPE,
-        env=execution.environment,
-        start_new_session=True,
-    )
-    try:
-        output, error_output = process.communicate(
-            input=stdin_input if stdin_input is not None else None,
-            timeout=execution.timeout,
+    else:
+        # A new session owns its process group, so a timeout stops the command with
+        # the children it started (MIK-R152 rule 6). ``subprocess.run`` kills only
+        # the direct child; here the group goes first and the error still reads as
+        # the timeout every caller already handles.
+        process = subprocess.Popen(
+            argv,
+            cwd=execution.work_dir,
+            text=not raw_output,
+            encoding=None if raw_output else "utf-8",
+            errors=None if raw_output else "surrogateescape",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL if stdin_input is None else subprocess.PIPE,
+            env=execution.environment,
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired:
-        with suppress(ProcessLookupError, PermissionError, OSError):
-            os.killpg(process.pid, signal.SIGKILL)
-        output, error_output = process.communicate()
-        raise subprocess.TimeoutExpired(argv, execution.timeout, output, error_output) from None
-    code = process.returncode
-    return subprocess.CompletedProcess(argv, code, output, error_output)
+        try:
+            output, error_output = process.communicate(
+                input=stdin_input if stdin_input is not None else None,
+                timeout=execution.timeout,
+            )
+        except subprocess.TimeoutExpired:
+            with suppress(ProcessLookupError, PermissionError, OSError):
+                os.killpg(process.pid, signal.SIGKILL)
+            output, error_output = process.communicate()
+            raise subprocess.TimeoutExpired(argv, execution.timeout, output, error_output) from None
+        code = process.returncode
+        result = subprocess.CompletedProcess(argv, code, output, error_output)
+    # A failure is never kept: a missing object created later in the request must
+    # read fresh (F20). Only a successful immutable lookup is an immutable answer.
+    if memo is not None and key is not None and result.returncode == 0:
+        memo[key] = result
+    return result
 
 
 def _read_git_bytes(root: Path, args: list[str]) -> bytes:
@@ -421,6 +434,109 @@ _BLOB_READS: ContextVar[dict[tuple[str, str], bytes] | None] = ContextVar(
 )
 
 
+_OBJECT_LOOKUPS: ContextVar[
+    dict[tuple[str, str, tuple[str, ...], tuple[tuple[str, str], ...], bool], object] | None
+] = ContextVar("git_object_lookups", default=None)
+
+
+@contextmanager
+def memo_git_object_lookups() -> Iterator[None]:
+    """Within the block, the same Git lookup of the same object runs once (MIK-R81 rule 7).
+
+    Only successful lookups whose answer the effective execution determines are kept: an
+    object ID is the hash of its bytes, and the worktree's own index location is a pure
+    function of the execution, so a repeated successful lookup can only return the same
+    answer. A failed lookup is never kept — an object created later in the request reads
+    fresh. Anything that names a ref, a worktree, the index or a session (``HEAD``,
+    branches, ``for-each-ref``, ``status``, ``cat-file --batch``, ``update-ref``, ``add``,
+    ``write-tree`` …) runs every time, exactly as without the block, and so does every
+    form whose answer replace refs or ref movement can redirect: pretty-printed, typed,
+    and peeled object reads (``cat-file -p``/``-t``/``<type>``, ``<sha>^{...}``,
+    ``<sha>:<path>``), tree listings, revision walks, and merge-base (F20). The one
+    exception is a peel behind a leading ``--no-replace-objects`` -- git's own global
+    flag, which makes the read name the true object behind any replace ref, so those
+    answers are immutable and collapse like any other content-addressed read. The cache lives and
+    dies with the block and is keyed by the effective execution (repository, working
+    directory, isolated index/object storage) and the exact argv, so two different stores
+    or working directories never share an answer. Scopes nest: an inner scope inside an
+    already-open one joins it, so one subject read keeps one lookup cache no matter how
+    many wrapped ports it passes through (F17); the outermost exit still ends it.
+    """
+
+    if _OBJECT_LOOKUPS.get() is not None:
+        yield
+        return
+    token = _OBJECT_LOOKUPS.set({})
+    try:
+        yield
+    finally:
+        _OBJECT_LOOKUPS.reset(token)
+
+
+# The only flags a memoized argv may carry, per verb. Anything else runs fresh:
+# an unlisted flag may change what the command asks about (F20).
+_REV_PARSE_FLAGS = frozenset({"--verify", "--quiet"})
+_CAT_FILE_FLAGS = frozenset({"-e"})
+# One exact argv naming no object at all: locating the worktree's own index file and top-level
+# directory is a pure function of the effective execution (repository, working directory,
+# environment), so the same execution asks it once per request scope (F17). Anything with a
+# different index file, object directory or working directory is a different key (F20).
+_INDEX_LOCATION_ARGV = (
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-path",
+    "index",
+    "--show-toplevel",
+)
+
+
+def _flags_of(rest: list[str]) -> set[str] | None:
+    """The dash-flags in ``rest``, or None when any entry is not a plain flag."""
+    flags = {arg for arg in rest if arg.startswith("-")}
+    if any(not arg.startswith("--") and len(arg) != 2 for arg in flags):
+        return None
+    return flags
+
+
+def _memo_key(
+    repo_root: Path, args: list[str], execution: _GitRun, *, raw_output: bool
+) -> tuple[str, str, tuple[str, ...], tuple[tuple[str, str], ...], bool] | None:
+    """The memo key for an immutable object lookup, else None (run it fresh)."""
+    if not args or execution.input_text is not None:
+        return None
+    # A leading ``--no-replace-objects`` is git's own global flag (it must precede
+    # the verb): the read names the true object behind any replace ref, so peels
+    # spelled with it are immutable content-addressed answers (F17+F20).
+    no_replace = args[0] == "--no-replace-objects"
+    body = args[1:] if no_replace else args
+    if not body:
+        return None
+    verb, rest = body[0], body[1:]
+    positionals = [arg for arg in rest if not arg.startswith("-")]
+    flags = _flags_of(rest)
+    if flags is None:
+        return None
+    allowed = (
+        (
+            verb == "rev-parse"
+            and flags <= _REV_PARSE_FLAGS
+            and _memo_rev_parse(positionals, no_replace)
+        )
+        or (verb == "cat-file" and flags <= _CAT_FILE_FLAGS and _memo_cat_file(rest, no_replace))
+        or (not no_replace and tuple(args) == _INDEX_LOCATION_ARGV)
+    )
+    if not allowed:
+        return None
+    environment = execution.environment
+    return (
+        repo_root.as_posix(),
+        execution.work_dir.as_posix(),
+        tuple(args),
+        tuple(sorted(environment.items())),
+        raw_output,
+    )
+
+
 @contextmanager
 def shared_blob_reads() -> Iterator[None]:
     """Within the block, a blob read from a repository is not read from it a second time.
@@ -432,6 +548,9 @@ def shared_blob_reads() -> Iterator[None]:
     repository too, so an object one repository lacks is still missing from it.
     """
 
+    if _BLOB_READS.get() is not None:
+        yield
+        return
     token = _BLOB_READS.set({})
     try:
         yield

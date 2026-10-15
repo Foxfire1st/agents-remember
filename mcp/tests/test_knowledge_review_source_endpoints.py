@@ -33,6 +33,10 @@ from agents_remember.serving.changeset import (
 )
 from agents_remember.serving.review import register_review_routes
 from agents_remember.worktrees.modules import future_code_candidate as capture_owner
+from agents_remember.worktrees.modules.capture_baseline import (
+    capture_baseline_unchanged,
+    memo_capture_baselines,
+)
 from agents_remember.worktrees.modules.future_code_candidate import (
     FutureCodeCandidateIdentity,
     capture_future_code_candidate,
@@ -45,6 +49,18 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     load_contract,
     write_contract,
+)
+from agents_remember_test_support.testing.review_git_trees import (
+    CODE_FILE,
+    CODE_V1,
+    INVARIANT,
+    LEAF,
+    MASTER,
+    REPO,
+    World,
+    build_world,
+    commit,
+    git,
 )
 from diff_scope_test_support import (
     BATCH_PATH_CANDIDATE_TEXT,
@@ -64,18 +80,6 @@ from read_scope_test_support import (
     RESOLUTION_PATH,
     SYNCHRONIZATION_PATH,
     UNPARSED_PATH,
-)
-from test_review_git_trees import (
-    CODE_FILE,
-    CODE_V1,
-    INVARIANT,
-    LEAF,
-    MASTER,
-    REPO,
-    World,
-    build_world,
-    commit,
-    git,
 )
 
 pytestmark = pytest.mark.evidence_unit
@@ -849,3 +853,96 @@ def test_a_task_context_review_states_a_damaged_half_and_still_lists_the_source_
     assert (
         named.status_code == 404 and named.json()["refusal"]["code"] == "candidate_dataset_absent"
     )
+
+
+@pytest.mark.parametrize("side", ["code", "memory"])
+def test_a_file_changed_after_write_tree_cannot_be_certified_by_a_later_snapshot(
+    source_world: World, monkeypatch: pytest.MonkeyPatch, side: str
+) -> None:
+    world = source_world
+    owner = (
+        capture_owner
+        if side == "code"
+        else __import__(
+            "agents_remember.application.review_tree_comparison",
+            fromlist=["worktree_candidate_tree"],
+        )
+    )
+    original = owner.worktree_candidate_tree
+    worktree = world.code_worktree if side == "code" else world.memory_worktree
+    path = CODE_FILE if side == "code" else "changed-during-capture.txt"
+
+    def capture_then_edit(repo: Path, index_path: Path, **kwargs: object) -> str:
+        tree = original(repo, index_path, **kwargs)  # type: ignore[arg-type]
+        (repo / path).write_text("changed after Git captured the tree\n")
+        return tree
+
+    with memo_capture_baselines():
+        with monkeypatch.context() as patch:
+            patch.setattr(owner, "worktree_candidate_tree", capture_then_edit)
+            resolved = _public_resolution(world)
+        assert resolved.candidate_identity is not None and resolved.trees is not None
+        tree = (
+            resolved.candidate_identity.codeCandidateTree
+            if side == "code"
+            else (resolved.trees.record.memory_candidate.tree)
+        )
+        assert not capture_baseline_unchanged(worktree, tree=tree)
+        result = compose_review(resolved, world.review())
+        assert result.state == "refused" and result.refusal is not None
+        assert result.refusal.code == "candidate_unresolved"
+
+
+def test_a_fast_tree_recheck_still_checks_the_recorded_base_commit(source_world: World) -> None:
+    world = source_world
+    with memo_capture_baselines():
+        resolved = _public_resolution(world)
+        assert resolved.candidate_identity is not None and resolved.contract is not None
+        assert capture_baseline_unchanged(
+            world.code_worktree, tree=resolved.candidate_identity.codeCandidateTree
+        )
+        resolved = replace(resolved, contract=replace(resolved.contract, code_base_commit="0" * 40))
+        result = compose_review(resolved, world.review())
+        assert result.state == "refused" and result.refusal is not None
+        assert "base commit" in (result.refusal.offending_input or "")
+
+
+def test_memory_head_only_movement_rechecks_and_refuses_equal_physical_files(
+    source_world: World,
+) -> None:
+    world = source_world
+    repo = world.memory_worktree
+    before_head = git(repo, "rev-parse", "HEAD")
+    # An ignored path changes capture eligibility through HEAD, with no index/file edit.
+    (repo / ".gitignore").write_text("head-only.txt\n")
+    (repo / "head-only.txt").write_text("tracked at the next HEAD\n")
+    git(repo, "add", ".gitignore")
+    git(repo, "add", "-f", "head-only.txt")
+    git(repo, "commit", "-qm", "track ignored path at another endpoint")
+    after_head = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-ref", "HEAD", before_head)
+    with memo_capture_baselines():
+        resolved = _public_resolution(world)
+        assert resolved.trees is not None
+        recorded = resolved.trees.record.memory_candidate.tree
+        assert capture_baseline_unchanged(repo, tree=recorded)
+        index_path = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+        index_before = index_path.read_bytes()
+        files_before = {
+            p.relative_to(repo): p.read_bytes()
+            for p in repo.rglob("*")
+            if p.is_file() and ".git" not in p.relative_to(repo).parts
+        }
+        git(repo, "update-ref", "HEAD", after_head)
+        assert index_path.read_bytes() == index_before
+        assert files_before == {
+            p.relative_to(repo): p.read_bytes()
+            for p in repo.rglob("*")
+            if p.is_file() and ".git" not in p.relative_to(repo).parts
+        }
+        assert not capture_baseline_unchanged(repo, tree=recorded)
+        result = compose_review(resolved, world.review())
+        assert result.state == "refused" and result.refusal is not None
+        assert result.refusal.offending_input == "memory candidate"
+        assert result.refusal.expected == recorded
+        assert result.refusal.observed != recorded

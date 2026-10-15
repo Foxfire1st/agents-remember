@@ -169,7 +169,9 @@ class StateEtagTests(unittest.TestCase):
         self.addCleanup(published.stop)
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, tick=None, refresh=None: held[0],
+            side_effect=lambda config, *, now, tick=None, refresh=None, previous_stable=None: held[
+                0
+            ],
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -238,7 +240,7 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
             tasks.mkdir()
             changed = asyncio.Event()
             pacer = mock.Mock(spec=ChangePacer)
-            pacer.notify_change.side_effect = lambda _domains: changed.set()
+            pacer.notify_change.side_effect = lambda _domains, _paths=frozenset(): changed.set()
             native = mock.Mock(wraps=RustNotify)
             with (
                 mock.patch.dict("os.environ", {"WATCHFILES_FORCE_POLLING": "true"}),
@@ -277,7 +279,10 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
             pacer.set_watcher_healthy(True)
             pacer.notify_change(frozenset({ProjectionDomain.LIFECYCLES}))
             clock[0] = 1
-            self.assertEqual((await pacer.wait()).reason, "change")
+            wake = await pacer.wait()
+            self.assertEqual(wake.reason, "change")
+            # The tick covered the wake: acknowledged invalidations clear (F06).
+            pacer.acknowledge(wake)
             clock[0] = 2
             pacer.notify_change(frozenset({ProjectionDomain.TASKS}))
             clock[0] = 6
@@ -286,10 +291,12 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
             clock[0] = 8
             pacer.notify_change(frozenset({ProjectionDomain.WORKSPACE}))
             clock[0] = 9
+            wake = await pacer.wait()
             self.assertEqual(
-                (await pacer.wait()).domains,
+                wake.domains,
                 frozenset({ProjectionDomain.TASKS, ProjectionDomain.WORKSPACE}),
             )
+            pacer.acknowledge(wake)
             for duration, rest in ((0.2, 1), (2, 2), (30, 3)):
                 pacer.projection_completed(duration)
                 pacer.notify_change(frozenset({ProjectionDomain.TASKS}))
@@ -300,7 +307,9 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await pacer.wait()).reason, "interval")
             pacer.set_watcher_healthy(True)
             pacer.projection_completed(0.2)
-            self.assertEqual(pacer._next_deadline(), (27, "heartbeat"))
+            # The outage published no full refresh, so recovery demands one
+            # every-domain refresh before ordinary pacing resumes (F06).
+            self.assertEqual(pacer._next_deadline(), (13, "full"))
 
     async def test_live_tick_completion_paces_success_failure_and_startup(self) -> None:
         projector = Projector(
@@ -352,15 +361,35 @@ class BackgroundLandingTests(unittest.IsolatedAsyncioTestCase):
                 write_contract(contract.contract_path, contract)
             observe = mock.Mock(
                 return_value=[
-                    {"kind": "pr", "label": "PR", "state": "merged", "factState": "observed"}
+                    {"kind": "pr", "label": "PR", "state": "merged", "factState": "observed"},
+                    {
+                        "kind": "origin-feat",
+                        "label": "origin/main",
+                        "state": "tip",
+                        "factState": "observed",
+                    },
+                    {
+                        "kind": "origin-main",
+                        "label": "origin/main",
+                        "state": "tip",
+                        "factState": "observed",
+                    },
+                    {
+                        "kind": "origin-mem-main",
+                        "label": "origin/main",
+                        "state": "tip",
+                        "factState": "observed",
+                    },
                 ]
             )
             refresher = LandingStateRefresher(_config(root), observe=observe)
             paths = [contract.contract_path for contract in [live, *history[:4]]]
+            now = datetime.now(UTC) + timedelta(seconds=1)
+            for contract in history:
+                refresher._maybe_freeze(contract, observe.return_value, attempted_at=now)
             with mock.patch.object(
                 landing_module, "iter_leaf_enclosure_contracts", return_value=paths
             ):
-                now = datetime.now(UTC) + timedelta(seconds=1)
                 await refresher.refresh_once(now=now)
                 observe.assert_called_once_with(live)
                 paths.extend(contract.contract_path for contract in history[4:])
@@ -378,7 +407,7 @@ class BackgroundLandingTests(unittest.IsolatedAsyncioTestCase):
                 refresher.current(finished, now=now)
                 atomic_write = landing_module.atomic_write_text
 
-                def replace_at_same_mtime(path: Path, text: str) -> None:
+                def replace_at_same_mtime(path: Path, text: str, *, note_own: bool = False) -> None:
                     atomic_write(path, text)
                     os.utime(path, ns=(old_mtime, old_mtime))
 
@@ -394,7 +423,7 @@ class BackgroundLandingTests(unittest.IsolatedAsyncioTestCase):
                 historical_rows = refresher.current(history[0], now=now)
                 assert final_rows is not None and historical_rows is not None
                 self.assertEqual(final_rows[0]["state"], "merged")
-                self.assertEqual(historical_rows[0]["factState"], "missing")
+                self.assertEqual(historical_rows[0]["factState"], "observed")
                 building = replace(live, cleanup="reopened", closeout_status="not-started")
                 write_contract(building.contract_path, building)
                 await refresher.refresh_once(now=now + timedelta(seconds=3))
@@ -422,7 +451,25 @@ class BackgroundLandingTests(unittest.IsolatedAsyncioTestCase):
             write_contract(live.contract_path, live)
             observe = mock.Mock(
                 return_value=[
-                    {"kind": "pr", "label": "PR", "state": "open", "factState": "observed"}
+                    {"kind": "pr", "label": "PR", "state": "merged", "factState": "observed"},
+                    {
+                        "kind": "origin-feat",
+                        "label": "origin/main",
+                        "state": "tip",
+                        "factState": "observed",
+                    },
+                    {
+                        "kind": "origin-main",
+                        "label": "origin/main",
+                        "state": "tip",
+                        "factState": "observed",
+                    },
+                    {
+                        "kind": "origin-mem-main",
+                        "label": "origin/main",
+                        "state": "tip",
+                        "factState": "observed",
+                    },
                 ]
             )
             refresher = LandingStateRefresher(_config(root), observe=observe)

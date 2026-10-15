@@ -26,6 +26,7 @@ from agents_remember.models.role_launcher import RoleDispatchRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving import _app_lifespan as lifespan
 from agents_remember.serving._app_common import _ServingRuntime
+from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.tasks import read_task_doc
 from agents_remember.worktrees.modules import cleanup, terminal_abandon, terminal_cleanup
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -401,7 +402,10 @@ class LeafAgentArchiveTests(_FinalizeFixtures):
                 loop.call_soon_threadsafe(observed.set)
                 return {"found": True, "archived": True}
 
-            runtime = cast(_ServingRuntime, SimpleNamespace(config=self.config))
+            runtime = cast(
+                _ServingRuntime,
+                SimpleNamespace(config=self.config, background_ledger=BackgroundLedger()),
+            )
             with patch.object(archive, "bridge_call", side_effect=host) as call:
                 owner = asyncio.create_task(lifespan._leaf_archive_recovery_loop(runtime))
                 try:
@@ -592,6 +596,7 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
             _ServingRuntime,
             SimpleNamespace(
                 config=SimpleNamespace(),
+                background_ledger=BackgroundLedger(),
                 observer_root=None,
                 clock=lambda: None,
                 review_trees_shutdown=None,
@@ -604,6 +609,7 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
             patch.object(lifespan, "malloc_trim_enabled", return_value=False),
             patch.object(lifespan, "_metrics_loop", partial(record, "metrics")),
             patch.object(lifespan, "_held_delivery_loop", partial(record, "held-delivery")),
+            patch.object(lifespan, "_warmup_watch_loop", partial(record, "warmup-watch")),
             patch.object(
                 lifespan, "_workspace_river_compaction_loop", partial(record, "river-compaction")
             ),
@@ -621,6 +627,7 @@ def test_the_recovery_loop_is_a_background_task_of_the_serving_lifespan_and_keep
         "metrics",
         "projection",
         "river-compaction",
+        "warmup-watch",
     ]
 
 

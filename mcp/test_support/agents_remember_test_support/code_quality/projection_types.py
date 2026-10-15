@@ -30,7 +30,10 @@ from agents_remember.serving.served_state import ServedWorkspaceProjection
 SCHEMA_OUTPUT = Path("dashboard/src/types/projection.schema.json")
 TYPESCRIPT_OUTPUT = Path("dashboard/src/types/projection.ts")
 
-DEFINITION_RENAMES = {"ServingBuildPayload": "ServingBuild"}
+DEFINITION_RENAMES = {
+    "ServingBuildPayload": "ServingBuild",
+    "WatcherHealthPayload": "WatcherHealth",
+}
 NAMED_VOCABULARIES = (
     ("LifecycleProjection", "state", "State"),
     ("LifecycleProjection", "phase", "Phase"),

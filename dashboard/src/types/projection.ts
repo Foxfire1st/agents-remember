@@ -789,6 +789,11 @@ export interface ToolReportNode {
   tool: string;
 }
 
+export interface WatcherHealth {
+  downSince?: number;
+  running: boolean;
+}
+
 export type SubTaskRow = TaskSubTaskRefNode | SeriesSubTaskNode;
 
 export interface WorkspaceProjection {
@@ -802,4 +807,5 @@ export interface WorkspaceProjection {
   providers: ProviderNode[];
   version: number;
   servingBuild?: ServingBuild;
+  watcherHealth?: WatcherHealth;
 }

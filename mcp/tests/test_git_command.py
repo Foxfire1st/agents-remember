@@ -53,6 +53,12 @@ from agents_remember.kernel.git_preparation import (
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.worktrees.modules import git as git_owner
 from agents_remember.worktrees.modules import landing_commit_check
+from agents_remember.worktrees.modules.capture_baseline import (
+    begin_capture_baseline,
+    capture_baseline_unchanged,
+    memo_capture_baselines,
+    note_capture_baseline,
+)
 from agents_remember.worktrees.modules.git import (
     CommitPublicationRefusal,
     PublicationHooks,
@@ -62,6 +68,7 @@ from agents_remember.worktrees.modules.git import (
     worktree_candidate_tree,
 )
 from agents_remember.worktrees.modules.landing_commit_check import LandingCommitCheckRefusal
+from agents_remember_test_support.testing.git_command import _commit, _init
 
 PACKAGE_ROOT = MCP_SRC / "agents_remember"
 
@@ -69,23 +76,6 @@ PACKAGE_ROOT = MCP_SRC / "agents_remember"
 # either through the module object (``subprocess.run``) or through a name it imported from
 # it (``from subprocess import run``); the sweep below follows both.
 SPAWN_FUNCTIONS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
-
-
-def _init(repo: Path) -> None:
-    repo.mkdir(parents=True, exist_ok=True)
-    for args in (
-        ["init", "-b", "main"],
-        ["config", "user.email", "git-command@example.invalid"],
-        ["config", "user.name", "Git Command Tests"],
-    ):
-        assert run_git(repo, args).returncode == 0, args
-
-
-def _commit(repo: Path, name: str, body: str) -> str:
-    (repo / name).write_text(body, encoding="utf-8")
-    assert run_git(repo, ["add", "-A"]).returncode == 0
-    assert run_git(repo, ["commit", "-m", f"add {name}"]).returncode == 0
-    return run_git(repo, ["rev-parse", "HEAD"]).stdout.strip()
 
 
 def _selectors(decoy: Path) -> dict[str, str]:
@@ -783,6 +773,140 @@ class CandidateTreeConcurrencyTests(unittest.TestCase):
             self.assertEqual(len(set(trees)), 1)
             self.assertFalse(index.exists())
             self.assertEqual(list(root.glob(f".{index.name}-*")), [])
+
+
+class CandidateTreeTrustFlagTests(unittest.TestCase):
+    """The capture clears trust flags, skipping the listing when none exist (F17)."""
+
+    def test_a_clean_copy_skips_the_flag_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            _init(repo)
+            _commit(repo, "file.txt", "one\n")
+            seen: list[list[str]] = []
+            real_run = subprocess.run
+
+            def counting(*args: object, **kwargs: object) -> object:
+                argv = args[0] if isinstance(args[0], list) else []
+                if argv and argv[0] == "git":
+                    seen.append([str(word) for word in argv[1:]])
+                return real_run(*args, **kwargs)  # type: ignore[arg-type]
+
+            with patch.object(subprocess, "run", counting):
+                tree = worktree_candidate_tree(repo, root / "candidate.index")
+            self.assertEqual(tree, run_git(repo, ["rev-parse", "HEAD^{tree}"]).stdout.strip())
+            self.assertFalse(any(argv[:1] == ["ls-files"] for argv in seen))
+
+    def test_assume_unchanged_is_detected_and_cleared(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            _init(repo)
+            _commit(repo, "file.txt", "one\n")
+            assert run_git(repo, ["update-index", "--assume-unchanged", "file.txt"]).returncode == 0
+            (repo / "file.txt").write_text("changed\n", encoding="utf-8")
+            tree = worktree_candidate_tree(repo, root / "candidate.index")
+            blob = run_git(repo, ["rev-parse", f"{tree}:file.txt"]).stdout.strip()
+            content = run_git(repo, ["cat-file", "-p", blob]).stdout
+            self.assertEqual(content, "changed\n")
+            # The worktree's own index keeps its flag: the capture clears only its copy.
+            listing = run_git(repo, ["ls-files", "-v"]).stdout
+            self.assertTrue(listing.startswith("h "))
+
+    def test_skip_worktree_is_detected_and_cleared(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            _init(repo)
+            _commit(repo, "file.txt", "one\n")
+            assert run_git(repo, ["update-index", "--skip-worktree", "file.txt"]).returncode == 0
+            (repo / "file.txt").write_text("changed\n", encoding="utf-8")
+            tree = worktree_candidate_tree(repo, root / "candidate.index")
+            blob = run_git(repo, ["rev-parse", f"{tree}:file.txt"]).stdout.strip()
+            content = run_git(repo, ["cat-file", "-p", blob]).stdout
+            self.assertEqual(content, "changed\n")
+
+
+class CaptureBaselineTests(unittest.TestCase):
+    """The fast recheck: an unmoved worktree proves itself without re-deriving (F17)."""
+
+    def _repo(self, root: Path) -> Path:
+        repo = root / "repo"
+        _init(repo)
+        _commit(repo, "file.txt", "one\n")
+        return repo
+
+    def test_an_unmoved_dirty_worktree_proves_itself(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = self._repo(root)
+            (repo / "file.txt").write_text("dirty\n", encoding="utf-8")
+            with memo_capture_baselines():
+                before = begin_capture_baseline(repo)
+                tree = worktree_candidate_tree(repo, root / "note.index")
+                note_capture_baseline(repo, tree=tree, before=before)
+                self.assertTrue(capture_baseline_unchanged(repo, tree=tree))
+
+    def test_a_file_edit_is_a_doubt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = self._repo(root)
+            with memo_capture_baselines():
+                before = begin_capture_baseline(repo)
+                tree = worktree_candidate_tree(repo, root / "note.index")
+                note_capture_baseline(repo, tree=tree, before=before)
+                (repo / "file.txt").write_text("edited\n", encoding="utf-8")
+                self.assertFalse(capture_baseline_unchanged(repo, tree=tree))
+
+    def test_a_staged_change_is_a_doubt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = self._repo(root)
+            with memo_capture_baselines():
+                before = begin_capture_baseline(repo)
+                tree = worktree_candidate_tree(repo, root / "note.index")
+                note_capture_baseline(repo, tree=tree, before=before)
+                (repo / "staged.txt").write_text("staged\n", encoding="utf-8")
+                assert run_git(repo, ["add", "staged.txt"]).returncode == 0
+                self.assertFalse(capture_baseline_unchanged(repo, tree=tree))
+
+    def test_a_new_commit_is_a_doubt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = self._repo(root)
+            with memo_capture_baselines():
+                before = begin_capture_baseline(repo)
+                tree = worktree_candidate_tree(repo, root / "note.index")
+                note_capture_baseline(repo, tree=tree, before=before)
+                _commit(repo, "second.txt", "two\n")
+                self.assertFalse(capture_baseline_unchanged(repo, tree=tree))
+
+    def test_a_head_only_move_is_not_a_tree_doubt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = self._repo(root)
+            with memo_capture_baselines():
+                before = begin_capture_baseline(repo)
+                tree = worktree_candidate_tree(repo, root / "note.index")
+                note_capture_baseline(repo, tree=tree, before=before)
+                assert run_git(repo, ["branch", "other"]).returncode == 0
+                assert run_git(repo, ["symbolic-ref", "HEAD", "refs/heads/other"]).returncode == 0
+                # The HEAD moved with the index and every file untouched: the same
+                # derivation inputs capture to the same tree, so the proof stands.
+                self.assertTrue(capture_baseline_unchanged(repo, tree=tree))
+
+    def test_without_a_scope_or_a_baseline_nothing_is_proven(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = self._repo(root)
+            tree = worktree_candidate_tree(repo, root / "note.index")
+            self.assertFalse(capture_baseline_unchanged(repo, tree=tree))
+            with memo_capture_baselines():
+                self.assertFalse(capture_baseline_unchanged(repo, tree=tree))
+                self.assertFalse(
+                    capture_baseline_unchanged(repo, tree="0" * 40),
+                )
 
 
 class PrivateGitPreparationTests(unittest.TestCase):

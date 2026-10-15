@@ -9,8 +9,10 @@ state; the sim's throwaway root is held alive for the server's lifetime.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import threading
+import urllib.request
 from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -398,6 +400,25 @@ def _build_app(
     return _DashboardApp(app, sim)
 
 
+def _print_background_status(host: str, port: int) -> None:
+    """Print the dashboard's own background-work totals (MIK-R81 rule 1).
+
+    Best-effort: the diagnostics route is observability, so its failure prints
+    one unavailable line and never changes the status exit code.
+    """
+    from agents_remember.serving.background_accounting import (  # noqa: PLC0415
+        describe_snapshot,
+    )
+
+    url = f"http://{host}:{port}/api/diagnostics/background"
+    try:
+        with urllib.request.urlopen(url, timeout=STATUS_TIMEOUT_SECONDS) as response:
+            payload = json.load(response)
+        print(describe_snapshot(payload))
+    except Exception as error:
+        print(f"background work: unavailable ({error})")
+
+
 def _run_daemon_command(
     args: argparse.Namespace, config: serving_daemon.McpRuntimeConfig, port: int
 ) -> int:
@@ -413,6 +434,7 @@ def _run_daemon_command(
                 f"dashboard daemon running: pid {state.pid}, http://{state.host}:{state.port}/ "
                 f"(v{state.version}); log: {state.log_path}"
             )
+            _print_background_status(state.host, state.port)
         else:
             print("dashboard daemon not running")
         host = observe_host(config)

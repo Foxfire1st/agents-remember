@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
+import tempfile
 from collections.abc import Iterator
-from dataclasses import dataclass
+from contextlib import contextmanager as _contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -25,6 +27,7 @@ from agents_remember.application.knowledge_currentness.observe import OpenedCode
 from agents_remember.application.knowledge_review import (
     compose_review,
     list_knowledge_review_entries,
+    read_complete_knowledge_review,
 )
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
 from agents_remember.application.review_artifact_cleanup import (
@@ -37,272 +40,49 @@ from agents_remember.application.review_candidate_resolution import (
 from agents_remember.application.review_source_content import read_review_source_content
 from agents_remember.application.review_tree_knowledge import read_review_trees
 from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
-from agents_remember.memory.knowledge_index import text_uuid
+from agents_remember.memory.knowledge_index import MemoryTreeError, text_uuid
 from agents_remember.models.knowledge.read import InvariantIdentitySeed
-from agents_remember.models.knowledge.review import ReviewRefusal, ReviewSurfaceRequest
+from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.models.knowledge.review_source_content import ReviewSourceContentRequest
 from agents_remember.models.knowledge.review_tree_entries import (
     EXCERPT_MAX_LINES,
     ReviewTreeEntry,
 )
+from agents_remember.models.knowledge.review_trees import ReviewTreeSideState
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.serving.review_trees import ReviewTreesQuery, register_review_trees_route
+from agents_remember.worktrees.modules.capture_baseline import (
+    begin_capture_baseline,
+    capture_baseline_unchanged,
+    memo_capture_baselines,
+    note_capture_baseline,
+)
+from agents_remember.worktrees.modules.git import (
+    worktree_candidate_tree,
+)
 from agents_remember.worktrees.services import (
     ReviewArtifactCleanupRequest,
     reset_worktree_services,
 )
+from agents_remember_test_support.testing.review_git_trees import (
+    CODE_FILE,
+    FAMILY,
+    INVARIANT,
+    LEAF,
+    MASTER,
+    REPO,
+    World,
+    _write,
+    build_world,
+    commit,
+    converted_memory,
+    git,
+    history_file,
+    invariant,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-REPO = "agents-remember"
-MASTER = "260101_tree_review"
-TASK = "260101-TRV"
-LEAF = "260101-TRV-L1"
-INVARIANT = "INV-AAAAAA"
-FAMILY = "FAM-F00001"
-CODE_FILE = "pkg/a.py"
-CODE_V1 = "def land(value):\n    return value\n\n\ndef keep():\n    return 1\n"
-ORIGIN = {"task": "260101-OLD", "leaf": "260101-OLD-L1"}
-INVARIANT_PATH = f"knowledge/invariants/{INVARIANT}-land.json"
-
-
-def git(root: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(root), "GIT_CONFIG_NOSYSTEM": "1"},
-    )
-    if result.returncode != 0:
-        raise AssertionError(f"fixture git {' '.join(args)} failed: {result.stderr.strip()}")
-    return result.stdout.strip()
-
-
-def _write(root: Path, files: dict[str, str]) -> None:
-    for relative, content in files.items():
-        target = root / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-
-
-def commit(root: Path, files: dict[str, str], trailer: str | None = None) -> str:
-    _write(root, files)
-    git(root, "add", "-A")
-    message = "change" if trailer is None else f"memory\n\nCode-Commit: {trailer}"
-    git(root, "commit", "-q", "--allow-empty", "-m", message)
-    return git(root, "rev-parse", "HEAD")
-
-
-def invariant(revision: int = 1, statement: str = "Values land unchanged.") -> str:
-    return canonical_text(
-        {
-            "schema": "ar-invariant/v1",
-            "id": INVARIANT,
-            "revision": revision,
-            "status": "accepted",
-            "statement": statement,
-            "applicability": "Always.",
-            "conditions": [],
-            "exclusions": [],
-            "supersedes": [],
-            "admission": "legacy-unassessed",
-            "origin": ORIGIN,
-        }
-    )
-
-
-def converted_memory(code: Path, code_commit: str) -> dict[str, str]:
-    tree = git(code, "rev-parse", f"{code_commit}^{{tree}}")
-    trees = CodeTrees.open(code, tree, tree)
-    blob = trees.base()[CODE_FILE]
-
-    def realization(entry_id: str, name: str) -> dict[str, Any]:
-        locator = {"kind": "symbol", "name": name}
-        resolved = trees.resolve(CODE_FILE, locator, blob, blob)
-        assert resolved is not None
-        return {
-            "id": entry_id,
-            "invariant": INVARIANT,
-            "anchor": {"locator": locator, "blob": blob, "content": resolved.content},
-            "role": "primary-authority",
-            "rationale": "It is the rule.",
-        }
-
-    return {
-        "knowledge/layout.json": canonical_text(
-            {"schema": "ar-memory-layout/v2", "conversion": "1"}
-        ),
-        INVARIANT_PATH: invariant(),
-        f"knowledge/families/{FAMILY}-landing.json": canonical_text(
-            {
-                "schema": "ar-family/v1",
-                "id": FAMILY,
-                "revision": 1,
-                "status": "accepted",
-                "title": "Landing",
-                "guarantee": "Landing holds.",
-                "members": [INVARIANT],
-                "routes": ["pkg"],
-                "admission": "legacy-unassessed",
-                "origin": ORIGIN,
-            }
-        ),
-        f"onboarding/{CODE_FILE}.md": "# a\n",
-        f"onboarding/{CODE_FILE}.json": canonical_text(
-            {
-                "schema": "ar-onboarding-file/v1",
-                "path": CODE_FILE,
-                "references": {},
-                "realizes": [realization("RLZ-A00001", "land"), realization("RLZ-A00002", "keep")],
-            }
-        ),
-        "onboarding/overview.md": "# root\n\n## What This Repo Is\n\nThe repository root route.\n",
-    }
-
-
-def history_file() -> str:
-    return canonical_text(
-        {
-            "schema": "ar-history/v1",
-            "leaf": LEAF,
-            "closed": False,
-            "rows": [
-                {
-                    "id": "ROW-9Q7K3F",
-                    "subject": FAMILY,
-                    "disposition": "no_impact",
-                    "reason": "every member still holds together",
-                    "items": [],
-                    "examined": [{"id": INVARIANT, "revision": 2}],
-                }
-            ],
-        }
-    )
-
-
-@dataclass
-class World:
-    root: Path
-    config: McpRuntimeConfig
-    code: Path
-    memory: Path
-    code_worktree: Path
-    memory_worktree: Path
-    task_root: Path
-    code_base: str
-    memory_base: str
-
-    def contract(self, *, live: bool = True, **recorded: str) -> Path:
-        enclosure = self.task_root / "enclosures" / LEAF.lower()
-        enclosure.mkdir(parents=True, exist_ok=True)
-        path = enclosure / "series-contract.md"
-        code_worktree = self.code_worktree if live else self.root / "removed-code"
-        memory_worktree = self.memory_worktree if live else self.root / "removed-memory"
-        lines = [
-            "---",
-            "schema: ar-series-contract/v1",
-            "schemaVersion: 1.0",
-            "kind: leaf",
-            "task_id: 260101_TREE-REVIEW",
-            f"task_name: {MASTER}",
-            f"repo_name: {REPO}",
-            "workflow_kind: light-task",
-            "memory_mode: external",
-            "",
-            "coordination:",
-            f"  root: {self.config.coordination_root}",
-            f"  task_root: {self.task_root}",
-            f"  task_artifact: {self.task_root / 'task.md'}",
-            f"  worktree_group: {self.root / 'group'}",
-            f"  leaf_id: {LEAF}",
-            f"  parent_task_name: {MASTER}",
-            "",
-            "code:",
-            f"  repo_path: {self.code}",
-            "  source_branch: main",
-            "  work_branch: leaf",
-            f"  base_commit: {self.code_base}",
-            f"  worktree: {code_worktree}",
-            "",
-            "memory:",
-            "  mode: external",
-            f"  repo_path: {self.memory}",
-            "  source_branch: main",
-            "  work_branch: leaf",
-            f"  base_commit: {self.memory_base}",
-            f"  worktree: {memory_worktree}",
-            f"  ledger: {memory_worktree / 'memory.md'}",
-            "",
-            "closeout:",
-            "  status: not-started",
-        ]
-        if recorded:
-            lines += [f"  {key}: {value}" for key, value in recorded.items()]
-        path.write_text("\n".join([*lines, "---", ""]), encoding="utf-8")
-        return path
-
-    def edit(self) -> None:
-        """The leaf's uncommitted change: a body edit of ``land`` and a revised statement."""
-
-        (self.code_worktree / CODE_FILE).write_text(
-            CODE_V1.replace("return value", "return value + 0"), encoding="utf-8"
-        )
-        _write(
-            self.memory_worktree,
-            {
-                INVARIANT_PATH: invariant(2, "Values land exactly as given."),
-                f"knowledge/history/{LEAF}.json": history_file(),
-            },
-        )
-
-    def review(self, **fields: Any) -> ReviewSurfaceRequest:
-        return ReviewSurfaceRequest(repository_id=REPO, master=MASTER, leaf_id=LEAF, **fields)
-
-
-def _repository(root: Path) -> Path:
-    root.mkdir(parents=True)
-    git(root, "init", "-q", "-b", "main")
-    git(root, "config", "user.email", "fixture@example.invalid")
-    git(root, "config", "user.name", "tree review fixture")
-    return root
-
-
-def build_world(tmp_path: Path) -> World:
-    code = _repository(tmp_path / "repos" / "code")
-    code_base = commit(code, {CODE_FILE: CODE_V1})
-    memory = _repository(tmp_path / "repos" / "memory")
-    memory_base = commit(memory, converted_memory(code, code_base), trailer=code_base)
-    code_worktree, memory_worktree = tmp_path / "group" / "code", tmp_path / "group" / "memory"
-    git(code, "worktree", "add", "-q", "-b", "leaf", str(code_worktree))
-    git(memory, "worktree", "add", "-q", "-b", "leaf", str(memory_worktree))
-    coordination = tmp_path / "coordination"
-    task_root = coordination / "tasks" / REPO / MASTER
-    task_root.mkdir(parents=True)
-    (task_root / "task.md").write_text("# task\n", encoding="utf-8")
-    (task_root / "task.json").write_text(json.dumps({"id": TASK}), encoding="utf-8")
-    config = McpRuntimeConfig(
-        workspace_root=tmp_path,
-        coordination_root=coordination,
-        config_path=tmp_path / "config.json",
-        transcript_root=tmp_path / "transcripts",
-    )
-    made = World(
-        tmp_path,
-        config,
-        code,
-        memory,
-        code_worktree,
-        memory_worktree,
-        task_root,
-        code_base,
-        memory_base,
-    )
-    made.contract()
-    return made
 
 
 @pytest.fixture
@@ -475,6 +255,10 @@ def test_the_tree_view_shows_currentness_per_side_and_the_worklist_without_a_kno
     assert before["code_tree"]["tree_id"] == view.comparison.code_base.tree
     assert {one["id"]: one["state"] for one in before["invariants"]} == {INVARIANT: "current"}
     assert {one["id"]: one["state"] for one in after["invariants"]} == {INVARIANT: "stale"}
+    assert before["invariants"][0]["entries"] == []
+    assert [one["id"] for one in after["invariants"][0]["entries"]] == ["RLZ-A00001"]
+    assert before["counts"] == {"stale": 0, "unverifiable": 0, "unrealized": 0, "current": 1}
+    assert after["counts"] == {"stale": 1, "unverifiable": 0, "unrealized": 0, "current": 0}
     assert after["families"] == [
         {"id": FAMILY, "members": 1, "stale_members": 1, "stale": [INVARIANT]}
     ]
@@ -491,6 +275,210 @@ def test_the_tree_view_shows_currentness_per_side_and_the_worklist_without_a_kno
     assert view.entries == ()  # the cards' entries are read per selection, never leaf-wide
     change = next(one for one in worklist.changes if one["path"] == CODE_FILE)
     assert [hunk["linked"] for hunk in change["hunks"]] == [True]
+
+
+@pytest.mark.parametrize("extra_files", [0, 8])
+def test_a_subject_read_starts_at_most_40_git_children(world: World, extra_files: int) -> None:
+    """MIK-R81 rule 7: one subject read stays within its Git child budget.
+
+    operation the dashboard's default review route renders -- with a selected subject, not the
+    trees-only route: the asserts below require the composed knowledge pane, the measured
+    source inventory and the bound comparison, which a trees-only answer cannot produce, so a
+    fix pointed at the wrong route fails here rather than passing. The count is taken at the
+    runner, so a child saved is a child counted.
+
+    The first recording read, the next cold read on recorded state and the warm read
+    are each counted, including comparison writes, pins and index construction. Both stay within budget, and both answers are identical:
+    rule 7 changes how many requests are sent, not what a response holds. The read is sampled at
+    two corpus sizes (the fixture world, and the same world with eight extra code files and
+    eight extra invariants riding the candidate): the count is per read, not per file, so both
+    samples stay within budget.
+    """
+    world.edit()
+    for index in range(extra_files):
+        (world.code_worktree / f"pkg/extra{index}.py").write_text(
+            f"def f{index}():\n    return {index}\n", encoding="utf-8"
+        )
+        (world.memory_worktree / f"knowledge/invariants/INV-X{index:05d}-e.json").write_text(
+            invariant(1, f"Extra {index}.").replace(INVARIANT, f"INV-X{index:05d}"),
+            encoding="utf-8",
+        )
+    children = 0
+    child_argv: list[list[str]] = []
+    real_run = subprocess.run
+
+    def counting(*args: Any, **kwargs: Any) -> Any:
+        nonlocal children
+        argv = args[0] if args else []
+        if isinstance(argv, list) and argv and argv[0] == "git":
+            children += 1
+            child_argv.append(argv)
+        return real_run(*args, **kwargs)
+
+    def counted() -> Any:
+        nonlocal children
+        children = 0
+        child_argv.clear()
+        with mock.patch.object(subprocess, "run", counting):
+            return read_complete_knowledge_review(world.config, world.review(selector=_seed()))
+
+    # The recording read is budgeted too: rule 7 names no prime exception, so the read that
+    # records the comparison, writes the pins and builds the indexes stays within the same
+    # ceiling as the reads that follow it.
+    primed = counted()
+    prime_children = children
+    assert primed.state == "review" and primed.payload is not None, primed.refusal
+    assert prime_children <= 40, (
+        f"recording subject read started {prime_children} git children: {child_argv!r}"
+    )
+
+    cold = counted()
+    cold_children = children
+    warm = counted()
+    warm_children = children
+    assert cold.state == "review" and cold.payload is not None, cold.refusal
+    assert warm.state == "review" and warm.payload is not None, warm.refusal
+    assert primed.model_dump(mode="json", by_alias=True) == cold.model_dump(
+        mode="json", by_alias=True
+    ), "the recording read answers what the later reads answer"
+    assert cold_children <= 40, f"cold subject read started {cold_children} git children"
+    assert warm_children <= 40, f"warm subject read started {warm_children} git children"
+    assert warm.model_dump(mode="json", by_alias=True) == cold.model_dump(
+        mode="json", by_alias=True
+    )
+    # The actual subject read, not the trees route: the composed knowledge pane states the
+    # selected subject on both sides, the source pane measured the bound pair's inventory,
+    # and the payload binds the comparison and the candidate.
+    for result in (cold, warm):
+        assert result.payload is not None
+        knowledge = result.payload.knowledge
+        assert knowledge.before_statement.text == "Values land unchanged."
+        assert knowledge.after_statement.text == "Values land exactly as given."
+        assert result.payload.comparison is not None
+        assert result.payload.candidate.leaf_id == LEAF
+        assert CODE_FILE in [entry.path for entry in result.payload.source.inventory.entries]
+
+
+def test_an_unmoved_worktree_skips_to_the_tree_a_rederive_would_derive(world: World) -> None:
+    """F17: the fast recheck stands for the same tree, not a cheaper different one.
+
+    Classification of the recheck captures the read-latency instruments count: the resolve
+    captures each worktree, the recheck proves the worktree unmoved and skips the second
+    derivation. This test pins the skip's meaning — a forced fresh derivation beside a hit
+    names the identical tree — so the instruments' lower counts record the same proof for
+    fewer children, not a skipped currentness check. A moved worktree misses and re-derives
+    to its new tree.
+    """
+
+    world.edit()
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Path(tmp)
+        for worktree in (world.code_worktree, world.memory_worktree):
+            with memo_capture_baselines():
+                before = begin_capture_baseline(worktree)
+                tree = worktree_candidate_tree(worktree, scratch / "resolve.index")
+                note_capture_baseline(worktree, tree=tree, before=before)
+                assert capture_baseline_unchanged(worktree, tree=tree)
+                rederived = worktree_candidate_tree(worktree, scratch / "recheck.index")
+                assert rederived == tree
+        moved = world.code_worktree / "pkg" / "a.py"
+        moved.write_text("VALUE = 2\n", encoding="utf-8")
+        with memo_capture_baselines():
+            before = begin_capture_baseline(world.code_worktree)
+            tree = worktree_candidate_tree(world.code_worktree, scratch / "resolve2.index")
+            note_capture_baseline(world.code_worktree, tree=tree, before=before)
+            moved.write_text("VALUE = 3\n", encoding="utf-8")
+            assert not capture_baseline_unchanged(world.code_worktree, tree=tree)
+            assert worktree_candidate_tree(world.code_worktree, scratch / "recheck2.index") != tree
+
+
+def _side_record(before_tree: str, after_tree: str) -> Any:
+    """A minimal comparison record naming two memory trees (F19 unit seam)."""
+
+    return SimpleNamespace(
+        converted_base=None,
+        memory_base=SimpleNamespace(tree=before_tree),
+        memory_candidate=SimpleNamespace(tree=after_tree),
+    )
+
+
+def test_a_failed_cache_construction_is_both_sides_unavailable_history(world: World) -> None:
+    """F19: a faulted real cache constructor keeps the old typed side outcomes."""
+    record = _side_record("0" * 40, "1" * 40)
+    for fault in (MemoryTreeError("index build broke"), OSError("disk gone")):
+        with mock.patch.object(review_tree_comparison, "KnowledgeIndexCache", side_effect=fault):
+            trees = review_tree_comparison._open_sides(
+                world.config.coordination_root, record, world.memory, None
+            )
+        assert trees.before.wire.state == "unavailable-history"
+        assert trees.after.wire.state == "unavailable-history"
+        assert "cannot be indexed" in (trees.before.wire.detail or "")
+        assert trees.before.database is None and trees.after.database is None
+
+
+def test_both_sides_unavailable_never_constructs_the_cache(world: World) -> None:
+    """F19: known-unavailable sides never touch the real cache directory."""
+    record = _side_record("0" * 40, "1" * 40)
+    states: dict[str, tuple[ReviewTreeSideState, str]] = {
+        "before": ("unavailable-history", "before is gone"),
+        "after": ("unavailable-history", "after is gone"),
+    }
+    with mock.patch.object(
+        review_tree_comparison, "KnowledgeIndexCache", side_effect=AssertionError("constructed")
+    ) as constructor:
+        trees = review_tree_comparison._open_sides(
+            world.config.coordination_root, record, world.memory, None, states=states
+        )
+    constructor.assert_not_called()
+    assert trees.before.wire.state == "unavailable-history"
+    assert trees.before.wire.detail == "before is gone"
+    assert trees.after.wire.state == "unavailable-history"
+    assert trees.after.wire.detail == "after is gone"
+
+
+def test_live_sides_share_one_constructed_cache(world: World) -> None:
+    """F19: successful two-side sharing is preserved, with exact response bytes."""
+    asked: list[str] = []
+
+    class _FakeIndex:
+        def __init__(self, tree: str) -> None:
+            self.state = SimpleNamespace(state="complete", problems=())
+            self.database_path = world.config.coordination_root / f"{tree}.sqlite"
+
+    class _FakeCache:
+        def __init__(self, directory: object) -> None:
+            self.directory = directory
+
+        def for_git_tree(self, _repository: object, tree: str) -> Any:
+            asked.append(tree)
+
+            @_contextmanager
+            def _open() -> Any:
+                yield _FakeIndex(tree)
+
+            return _open()
+
+    record = _side_record("0" * 40, "1" * 40)
+    made: list[_FakeCache] = []
+    real = review_tree_comparison.KnowledgeIndexCache
+
+    def _construct(directory: object) -> _FakeCache:
+        cache = _FakeCache(directory)
+        made.append(cache)
+        return cache
+
+    with mock.patch.object(review_tree_comparison, "KnowledgeIndexCache", _construct):
+        trees = review_tree_comparison._open_sides(
+            world.config.coordination_root, record, world.memory, None
+        )
+    assert len(made) == 1
+    assert asked == ["0" * 40, "1" * 40]
+    assert trees.before.wire.state == "available"
+    assert trees.before.wire.tree == "0" * 40
+    assert trees.before.wire.index_state == "complete"
+    assert trees.after.wire.state == "available"
+    assert trees.after.wire.tree == "1" * 40
+    assert real is not None
 
 
 def _without_keep(world: World) -> str:

@@ -64,11 +64,11 @@ from agents_remember.models.knowledge.review_trees import (
 )
 from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.tasks import store as task_store
+from agents_remember.worktrees.modules import capture_index
 from agents_remember.worktrees.modules import git as capture_owner
 from agents_remember.worktrees.services import reset_worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract
-from knowledge_index_test_support import rewrite_in_the_second_of_the_index_write
-from test_review_git_trees import (  # noqa: F401 - ``world`` is the fixture
+from agents_remember_test_support.testing.review_git_trees import (
     CODE_FILE,
     CODE_V1,
     INVARIANT,
@@ -81,8 +81,9 @@ from test_review_git_trees import (  # noqa: F401 - ``world`` is the fixture
     converted_memory,
     git,
     invariant,
-    world,
 )
+from knowledge_index_test_support import rewrite_in_the_second_of_the_index_write
+from test_review_git_trees import world  # noqa: F401 - ``world`` is the fixture
 
 SUBJECT_READ_CHILDREN = 80  # the packet's bound for one subject read (rule 7)
 
@@ -188,7 +189,7 @@ def _verb(argv: list[str]) -> str:
 def measured() -> Iterator[Measured]:
     seen = Measured()
     run = subprocess.run
-    from_copy = capture_owner._tree_from_index_copy
+    from_copy = capture_index._tree_from_index_copy
     from_head = capture_owner._tree_from_head
     resolve = review_candidate_resolution._live_resolution
 
@@ -212,7 +213,7 @@ def measured() -> Iterator[Measured]:
 
     with (
         mock.patch.object(git_command.subprocess, "run", counting_run),
-        mock.patch.object(capture_owner, "_tree_from_index_copy", counting_copy),
+        mock.patch.object(capture_index, "_tree_from_index_copy", counting_copy),
         mock.patch.object(capture_owner, "_tree_from_head", counting_head),
         mock.patch.object(review_candidate_resolution, "_live_resolution", counting_resolution),
     ):
@@ -242,9 +243,12 @@ def test_a_subject_read_resolves_once_and_captures_each_worktree_once_and_for_th
     assert review.payload is not None and review.payload.evidence.channels
     # The records half and the composition read one resolution (rule 2).
     assert seen.resolutions == 1
-    # One capture per worktree for the resolution and one for the recheck before publication
-    # (ICR-R01); never the full capture, which hashes every file.
-    assert seen.captures == {"code": 2, "memory": 2} and seen.full_captures == 0
+    # One capture per worktree for the resolution; the recheck before publication (ICR-R01)
+    # still runs, but the resolve-time baseline proves the worktree unmoved, so it stands for
+    # the remembered tree instead of deriving it again — one capture per worktree, never the
+    # full capture, which hashes every file. The skip's meaning is pinned beside the subject
+    # budget: a forced re-derivation beside a hit names the identical tree.
+    assert seen.captures == {"code": 1, "memory": 1} and seen.full_captures == 0
     assert seen.verbs["mktree"] == 0 and seen.verbs["hash-object"] == 0
     assert len(seen.children) <= SUBJECT_READ_CHILDREN, seen.verbs
 
@@ -260,10 +264,11 @@ def test_a_subject_read_resolves_once_and_captures_each_worktree_once_and_for_th
             read()
         assert (seen.resolutions, seen.full_captures) == (1, 0)
         assert seen.captures == {"code": 1, "memory": 1}, seen.captures
-    # The task-context read (no subject) publishes a comparison, so it rechecks like a subject read.
+    # The task-context read (no subject) publishes a comparison, so it rechecks like a subject read:
+    # one capture per worktree, with the recheck standing for the remembered trees.
     with measured() as seen:
         assert ports.review(world.review()).state == "review"
-    assert seen.resolutions == 1 and seen.captures == {"code": 2, "memory": 2}
+    assert seen.resolutions == 1 and seen.captures == {"code": 1, "memory": 1}
     # No read wrote a worktree's own index or left a lock beside it (ICR-R01).
     assert _real_indexes(world) == indexes
 
@@ -342,14 +347,16 @@ def test_a_converted_base_tree_git_holds_is_not_written_again(world: World) -> N
         assert key.memory_base == trees.record.memory_base.tree
 
         # Every later read of the same inputs uses the recorded tree, once Git confirmed it: no
-        # tree is written, no converted file is loaded, and the answer is the same.
+        # tree is written, no converted file is loaded, and the answer is the same. The
+        # confirmation is the resolve-time baseline proof, so the recheck stands for the
+        # remembered candidate instead of capturing each worktree a second time.
         with measured() as again:
             repeat = ports.review(request)
         assert _body(repeat) == _body(review)
         assert again.verbs["mktree"] == 0 and again.verbs["hash-object"] == 0
         assert convert.call_count == 1
         assert len(again.children) <= SUBJECT_READ_CHILDREN, again.verbs
-        assert again.resolutions == 1 and again.captures == {"code": 2, "memory": 2}
+        assert again.resolutions == 1 and again.captures == {"code": 1, "memory": 1}
 
         # A new comparison of the same leaf (the candidate changed) still names the same inputs.
         (world.code_worktree / "pkg" / "b.py").write_text("B = 1\n", encoding="utf-8")
@@ -737,7 +744,9 @@ def test_a_read_after_an_edit_shows_the_new_content_and_nothing_composed_is_kept
         first, second = read(), read()
     assert first == second and first[0] == "Values land exactly as given."
     assert composed.call_count == 2 and seen.resolutions == 2
-    assert seen.captures == {"code": 4, "memory": 4}
+    # Two reads, one capture per worktree per read: each read's recheck proves its worktrees
+    # unmoved and stands for the remembered trees instead of capturing twice.
+    assert seen.captures == {"code": 2, "memory": 2}
 
     # An edit of a knowledge file, then of a code file: the next read is the new comparison.
     (world.memory_worktree / INVARIANT_PATH).write_text(

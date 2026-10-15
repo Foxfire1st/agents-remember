@@ -23,7 +23,7 @@
 // (no tree comparison and no unreadable side; nothing here applies). A body that is none of these,
 // and a request that never reached the server, are failures in the shared review vocabulary.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 
 import { qs } from './files';
 import {
@@ -331,6 +331,84 @@ export function treeComparisonNumber(limitations: string[]): number | undefined 
 
 // The entries of one selection's invariants, from the comparison the review payload names. The
 // answer is kept with the question it answers, so a superseded selection never draws its cards.
+//
+// The kept answers live outside the hook, in a bounded store keyed by the whole question: the
+// loading switch unmounts the cards (WorkspaceCenter shows the status instead), and a hook-held
+// answer would die with it and refetch on remount (L81-R1-F18). A remount with an unchanged set
+// finds the kept answer -- or the shared request still in flight -- and sends no second cards
+// request through pending or answer. A changed set prefetched on selection (prefetchCards, below)
+// is already in flight before the subject resolves, instead of waiting for it.
+const CARD_ANSWERS_MAX = 20;
+const cardAnswers = new Map<string, ReviewTreesRead>();
+const cardInflight = new Map<string, Promise<ReviewTreesRead>>();
+
+function cardsKey(repo: string, master: string, leaf: string, comparison: number, wanted: string) {
+  return `${repo}/${master}/${leaf}/${comparison}/${wanted}`;
+}
+
+function keepCardAnswer(key: string, read: ReviewTreesRead): void {
+  cardAnswers.set(key, read);
+  while (cardAnswers.size > CARD_ANSWERS_MAX) {
+    const oldest = cardAnswers.keys().next();
+    if (oldest.done) break;
+    cardAnswers.delete(oldest.value);
+  }
+}
+
+function fetchCardEntries(
+  key: string,
+  repo: string,
+  master: string,
+  leaf: string,
+  comparison: number,
+  invariants: string[],
+): Promise<ReviewTreesRead> {
+  const held = cardInflight.get(key);
+  if (held) return held;
+  // No abort: the fetch is shared across mounts, and aborting on one unmount would cancel the
+  // answer a remount is about to reuse. A superseded selection never draws it -- the hook only
+  // ever shows the answer whose key matches its own question.
+  const fetch = reviewTrees(repo, master, leaf, { comparison, invariants }).then(
+    (result) => reviewTreesRead(result),
+    (cause: unknown) => ({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }) as ReviewTreesRead,
+  );
+  const tracked = fetch.then((read) => {
+    cardInflight.delete(key);
+    // Only an answered read is kept: a failed fetch stays uncached, so a remount retries it
+    // exactly as a fresh mount would, instead of showing one transient failure forever.
+    if (read.phase === 'trees') keepCardAnswer(key, read);
+    return read;
+  });
+  cardInflight.set(key, tracked);
+  return tracked;
+}
+
+// A new test (or dev session) drops the kept answers: each test renders a fresh session, and a
+// kept answer from another test's fetch would hide the request the test asserts.
+export function resetCardCachesForTests(): void {
+  cardAnswers.clear();
+  cardInflight.clear();
+}
+
+// Start one selection's cards read now, before its subject resolves: a member click whose family
+// is already displayed names its invariant set from the old payload, so the cards request flies
+// beside the subject request instead of after it. Best-effort and idempotent: a kept answer or a
+// shared request is reused, and a set the subject never confirms simply stays cached until it
+// ages out.
+export function prefetchCardEntries(
+  repo: string,
+  master: string,
+  leaf: string,
+  comparison: number | undefined,
+  invariants: string[],
+): void {
+  if (comparison === undefined || invariants.length === 0) return;
+  const wanted = [...invariants].sort().join(',');
+  const key = cardsKey(repo, master, leaf, comparison, wanted);
+  if (cardAnswers.has(key) || cardInflight.has(key)) return;
+  void fetchCardEntries(key, repo, master, leaf, comparison, wanted.split(','));
+}
+
 export function useReviewTreeEntries(
   repo: string,
   master: string,
@@ -338,30 +416,30 @@ export function useReviewTreeEntries(
   comparison: number | undefined,
   invariants: string[],
 ): ReviewTreesRead | null {
-  const wanted = invariants.join(',');
-  const key = `${repo}/${master}/${leaf}/${comparison ?? ''}/${wanted}`;
-  const [read, setRead] = useState<{ key: string; read: ReviewTreesRead } | null>(null);
+  const wanted = [...invariants].sort().join(',');
+  const key =
+    comparison === undefined ? null : cardsKey(repo, master, leaf, comparison, wanted);
+  const [, retell] = useReducer((telling: number) => telling + 1, 0);
   useEffect(() => {
-    if (comparison === undefined || !wanted) return undefined;
-    const superseded = new AbortController();
-    const apply = (next: ReviewTreesRead) => {
-      if (!superseded.signal.aborted) setRead({ key, read: next });
-    };
-    void reviewTrees(
+    if (key === null || !wanted) return undefined;
+    if (cardAnswers.has(key)) return undefined;
+    let alive = true;
+    void fetchCardEntries(
+      key,
       repo,
       master,
       leaf,
-      { comparison, invariants: wanted.split(',') },
-      '',
-      superseded.signal,
-    ).then(
-      (result) => apply(reviewTreesRead(result)),
-      (cause: unknown) => apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }),
-    );
-    return () => superseded.abort();
+      comparison as number,
+      wanted.split(','),
+    ).then(() => {
+      if (alive) retell();
+    });
+    return () => {
+      alive = false;
+    };
   }, [repo, master, leaf, comparison, wanted, key]);
-  if (comparison === undefined || !wanted) return null;
-  return read?.key === key ? read.read : { phase: 'loading' };
+  if (key === null || !wanted) return null;
+  return cardAnswers.get(key) ?? { phase: 'loading' };
 }
 
 // The tree view read for one task context. A superseded read (the props moved while it was in

@@ -65,8 +65,15 @@ from agents_remember.models.knowledge.review_family_context import (
 )
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.worktrees.services import reset_worktree_services
+from agents_remember_test_support.testing.review_git_trees import (
+    LEAF,
+    MASTER,
+    REPO,
+    TASK,
+    World,
+    git,
+)
 from pydantic import ValidationError
-from test_review_git_trees import LEAF, MASTER, REPO, TASK, World, git
 
 A, B, C, D, E, F, G, H, K, M, N, P, R, S, X = (f"INV-{letter * 6}" for letter in "ABCDEFGHKMNPRSX")
 FAM1, FAM2, FAM3 = "FAM-F00001", "FAM-F00002", "FAM-F00003"

@@ -44,6 +44,16 @@ from agents_remember.models.knowledge.review_trees import ReviewTreesResult
 from agents_remember.serving import build_info
 from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.review_trees import register_review_trees_route
+from agents_remember_test_support.testing.review_git_trees import (
+    CODE_FILE,
+    CODE_V1,
+    LEAF,
+    MASTER,
+    REPO,
+    World,
+    _repository,
+    commit,
+)
 from agents_remember_test_support.testing.waits import (
     HANG_GUARD_SECONDS,
     wait_until,
@@ -68,17 +78,7 @@ from reviewer_worklist_process_test_support import (
 from reviewer_worklist_process_test_support import (
     WORKLIST_REPLY as _REPLY,
 )
-from test_review_git_trees import (  # noqa: F401 - fixture
-    CODE_FILE,
-    CODE_V1,
-    LEAF,
-    MASTER,
-    REPO,
-    World,
-    _repository,
-    commit,
-    world,
-)
+from test_review_git_trees import world  # noqa: F401 - fixture
 from test_review_read_latency import _body, _live, _ports, _query, _unconverted_base
 from test_reviewer_worklist_reads import (  # noqa: F401 - fixture
     _child_script,
@@ -738,11 +738,7 @@ def test_the_reviewers_diff_reads_do_not_depend_on_the_users_git_configuration(
 
 
 def test_every_parsed_diff_names_its_own_prefix_colour_and_driver() -> None:
-    for args in (
-        review_source_inventory._RAW_ARGS,
-        review_source_inventory._NUMSTAT_ARGS,
-    ):
-        assert set(PARSED_DIFF_OPTIONS) <= set(args)
+    assert set(PARSED_DIFF_OPTIONS) <= set(review_source_inventory._RAW_ARGS)
     assert set(DIFF_PREFIX_OPTIONS) <= set(code.BLOB_DIFF_ARGS)
     assert {"--no-color", "--no-ext-diff"} <= set(code.BLOB_DIFF_ARGS)
 
@@ -765,14 +761,17 @@ def test_each_published_diff_command_is_the_argument_list_its_measurement_execut
     assert review_rename_inference.git_rename_inference(before, after).available
     inventory = review_source_inventory.review_inventory(before, after)
     assert inventory.state == "measured"
-    (_, rename_args), (raw_root, raw_args), (_, numstat_args) = executed
+    (_, rename_args), (raw_root, raw_args) = executed
     sources = review_rename_inference.RenameInferenceSources(before_code=before, after_code=after)
     assert review_rename_inference.rename_command(sources) == " ".join(("git", *rename_args))
     assert inventory.command == " ".join(("git", "-C", str(raw_root), *raw_args))
     expansion = TREE_DIFF_COMMAND.format(before_tree=before.tree_id, after_tree=after.tree_id)
     assert expansion == " ".join(("git", *raw_args))
-    assert numstat_args == [*review_source_inventory._NUMSTAT_ARGS, before.tree_id, after.tree_id]
-    for args in (rename_args, raw_args, numstat_args):
+    # One child now measures the raw change records and the numstat line counts together:
+    # the executed call carries both halves' flags, and the published command matches it.
+    assert set(review_source_inventory._RAW_ARGS) == set(raw_args) - {before.tree_id, after.tree_id}
+    assert "--raw" in raw_args and "--numstat" in raw_args
+    for args in (rename_args, raw_args):
         assert set(PARSED_DIFF_OPTIONS) <= set(args)
 
 

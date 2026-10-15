@@ -32,6 +32,13 @@ import tracemalloc
 from collections.abc import Callable
 from pathlib import Path
 
+from agents_remember.serving.background_accounting import (
+    OWNER_METRICS,
+    BackgroundLedger,
+    measured,
+    offload,
+)
+
 logger = logging.getLogger(__name__)
 
 _ENV_FLAG = "AR_HEAP_DIAG"
@@ -207,7 +214,7 @@ def take_snapshot() -> tracemalloc.Snapshot:
     )
 
 
-async def heap_diag_loop() -> None:
+async def heap_diag_loop(ledger: BackgroundLedger | None = None) -> None:
     """The slow opt-in snapshot/report loop; the heavy pure-Python work runs off the event loop.
 
     tracemalloc snapshots are not free, so this task exists solely
@@ -235,9 +242,10 @@ async def heap_diag_loop() -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            snapshot = await asyncio.to_thread(take_snapshot)
-            report = await asyncio.to_thread(format_heap_report, snapshot, previous)
-            logger.warning("%s", report)
+            snapshot = await offload(OWNER_METRICS, ledger, take_snapshot)
+            report = await offload(OWNER_METRICS, ledger, format_heap_report, snapshot, previous)
+            with measured(OWNER_METRICS, ledger):
+                logger.warning("%s", report)
             previous = snapshot
         except Exception:
             logger.exception("heap diagnostic snapshot failed; retrying next interval")

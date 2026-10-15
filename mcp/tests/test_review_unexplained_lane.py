@@ -56,9 +56,15 @@ from agents_remember.models.knowledge.review_trees import (
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.serving.review_trees import ReviewTreesQuery, register_review_trees_route
 from agents_remember.worktrees.services import reset_worktree_services
+from agents_remember_test_support.testing.review_git_trees import (
+    LEAF,
+    MASTER,
+    REPO,
+    World,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from test_review_git_trees import LEAF, MASTER, REPO, World, world  # noqa: F401 - the fixture
+from test_review_git_trees import world  # noqa: F401 - the fixture
 
 A, B, C = "INV-AAAAAA", "INV-BBBBBB", "INV-CCCCCC"
 ORIGIN = {"task": "260101-OLD", "leaf": "260101-OLD-L1"}

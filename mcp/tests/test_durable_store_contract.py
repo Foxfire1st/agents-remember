@@ -289,7 +289,10 @@ class InProcessExclusivityTests(_TempRoot):
         parked_already: list[bool] = []
         real_rewrite = attention_module.rewrite_lines
 
-        def parking_rewrite(path: Path, lines: list[str], ownership: object) -> None:
+        def parking_rewrite(
+            path: Path, lines: list[str], ownership: object, *, note_own: bool = False
+        ) -> None:
+            self.assertTrue(note_own, "the actual dashboard sweep attributes its own rewrite")
             park = False
             with park_guard:
                 if not parked_already:
@@ -298,7 +301,7 @@ class InProcessExclusivityTests(_TempRoot):
             if park:
                 parked.set()
                 release.wait(WATCHDOG_SECONDS)
-            real_rewrite(path, lines, ownership)  # type: ignore[arg-type]
+            real_rewrite(path, lines, ownership, note_own=note_own)  # type: ignore[arg-type]
 
         def sweep() -> None:
             try:

@@ -13,10 +13,12 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationProjection,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache import (
+    resolve_lifecycle_operation_location,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocation,
     LifecycleOperationLocationError,
-    resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.integration.lifecycle.observation.projection import (
     unreadable_contract_operation_projections,

@@ -21,11 +21,12 @@ touches this cache.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
+from agents_remember.tasks.task_paths import is_archived_path, is_below_notes
 from agents_remember.worktrees.task_resolver import (
     is_foreign_enclosure_contract,
     iter_leaf_enclosure_contracts,
@@ -82,39 +83,78 @@ class ContractSnapshotCache:
     def __init__(self) -> None:
         self._entries: dict[Path, _ParseCacheEntry] = {}
 
-    def build(self, tasks_root: Path) -> ContractSnapshot:
-        """Enumerate + parse the live leaf contracts once; publish an immutable snapshot."""
+    def build(self, tasks_root: Path, only: Collection[Path] | None = None) -> ContractSnapshot:
+        """Enumerate + parse the live leaf contracts once; publish an immutable snapshot.
+
+        With ``only``, no enumeration happens: exactly those contract paths are
+        stat-checked and (re-)parsed, deletions drop their entries, and everything
+        else is retained as-is (F09). The caller passes ``only`` only from a complete
+        wake path sample, which holds every watcher-accepted change including
+        additions, so nothing outside it could have moved; full refreshes enumerate
+        and reconcile, which also prunes entries whose paths left the tree.
+        """
+        if only is not None:
+            return self._build_scoped(tasks_root, only)
         contracts: dict[Path, WorktreeContract] = {}
         skipped: set[Path] = set()
         seen: set[Path] = set()
         for path in iter_leaf_enclosure_contracts(tasks_root):
             seen.add(path)
-            stat = _safe_stat(path)
-            contract = self._cached_contract(path, stat)
+            contract = self._parse_live(path)
             if contract is None:
-                try:
-                    contract = load_contract(path)
-                except (ContractError, OSError):
-                    self._entries.pop(path, None)
-                    skipped.add(path)
-                    continue
-                if stat is not None:
-                    self._entries[path] = _ParseCacheEntry(
-                        mtime_ns=stat.st_mtime_ns,
-                        size=stat.st_size,
-                        ctime_ns=stat.st_ctime_ns,
-                        contract=contract,
-                    )
-                else:
-                    self._entries.pop(path, None)
-            if is_foreign_enclosure_contract(path, contract.task_artifact):
-                self._entries.pop(path, None)
                 skipped.add(path)
                 continue
             contracts[path] = contract
         for stale in [path for path in self._entries if path not in seen]:
             del self._entries[stale]
         return ContractSnapshot(contracts=MappingProxyType(contracts), skipped=frozenset(skipped))
+
+    def _build_scoped(self, tasks_root: Path, only: Collection[Path]) -> ContractSnapshot:
+        """Re-parse exactly the given contract paths against the retained entries."""
+        for path in only:
+            if is_archived_path(path) or is_below_notes(path, tasks_root):
+                continue
+            try:
+                is_file = path.is_file()
+            except OSError:
+                is_file = False
+            if not is_file:
+                self._entries.pop(path, None)
+                continue
+            self._parse_live(path)
+        contracts = {
+            path: entry.contract
+            for path, entry in self._entries.items()
+            if entry.contract is not None
+        }
+        skipped = {path for path in only if path not in contracts}
+        return ContractSnapshot(contracts=MappingProxyType(contracts), skipped=frozenset(skipped))
+
+    def _parse_live(self, path: Path) -> WorktreeContract | None:
+        """The cached parse while its stat identity holds, else a fresh parse."""
+        stat = _safe_stat(path)
+        contract = self._cached_contract(path, stat)
+        if contract is None:
+            try:
+                contract = load_contract(path)
+            except (ContractError, OSError):
+                self._entries.pop(path, None)
+                return None
+            if stat is not None:
+                self._entries[path] = _ParseCacheEntry(
+                    mtime_ns=stat.st_mtime_ns,
+                    size=stat.st_size,
+                    ctime_ns=stat.st_ctime_ns,
+                    contract=contract,
+                )
+            else:
+                # No stat to bind the parse to: usable once, never cached (a failed
+                # stat must not introduce a new skip path).
+                self._entries.pop(path, None)
+        if is_foreign_enclosure_contract(path, contract.task_artifact):
+            self._entries.pop(path, None)
+            return None
+        return contract
 
     def _cached_contract(self, path: Path, stat: os.stat_result | None) -> WorktreeContract | None:
         """The cached parse, only while the stat identity (mtime_ns + size + ctime_ns) holds."""

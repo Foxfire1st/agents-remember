@@ -42,6 +42,12 @@ from agents_remember.observer.store import (
     workspace_base_offset,
     workspace_river_read,
 )
+from agents_remember.serving.background_accounting import (
+    OWNER_EVENT_TAIL,
+    BackgroundLedger,
+    measured,
+    offload,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -348,7 +354,11 @@ def _ready_payload(stored_ts: str | None) -> dict[str, object]:
 
 
 async def stream_raw_events(
-    config: McpRuntimeConfig, *, last_event_id: str | None = None, interval: float = 1.0
+    config: McpRuntimeConfig,
+    *,
+    last_event_id: str | None = None,
+    interval: float = 1.0,
+    ledger: BackgroundLedger | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """Emit raw ``event`` SSE records, resuming from ``last_event_id`` then tailing new lines.
 
@@ -373,27 +383,35 @@ async def stream_raw_events(
         offsets = cursor_offsets
         stored_ts: str | None = None
     else:
-        offsets, stored_ts = await asyncio.to_thread(_initial_offsets_and_last_ts, root)
+        offsets, stored_ts = await offload(
+            OWNER_EVENT_TAIL, ledger, _initial_offsets_and_last_ts, root
+        )
     ready_sent = False
     while True:
-        events, offsets = await asyncio.to_thread(
-            read_new_events, root, offsets, limit=DEFAULT_EVENT_BATCH
+        events, offsets = await offload(
+            OWNER_EVENT_TAIL, ledger, read_new_events, root, offsets, limit=DEFAULT_EVENT_BATCH
         )
         for event in events:
             # ServerSentEvent JSON-encodes whatever it is given (the state channel passes dicts),
             # so emit the object parsed and validated by ``read_new_events`` -- passing the
             # pre-serialized JSONL string would double-encode the wire (`data: "{...}"`).
-            yield ServerSentEvent(data=event.payload, event="event", id=event.cursor, retry=2000)
+            with measured(OWNER_EVENT_TAIL, ledger):
+                payload = ServerSentEvent(
+                    data=event.payload, event="event", id=event.cursor, retry=2000
+                )
+            yield payload
         if events:
             # More backlog may remain; drain it promptly but yield to the loop between chunks.
             await asyncio.sleep(0)
             continue
         if not ready_sent:
             ready_sent = True
-            yield ServerSentEvent(
-                data=_ready_payload(stored_ts),
-                event="ready",
-                id=encode_cursor(offsets),
-                retry=2000,
-            )
+            with measured(OWNER_EVENT_TAIL, ledger):
+                payload = ServerSentEvent(
+                    data=_ready_payload(stored_ts),
+                    event="ready",
+                    id=encode_cursor(offsets),
+                    retry=2000,
+                )
+            yield payload
         await asyncio.sleep(interval)

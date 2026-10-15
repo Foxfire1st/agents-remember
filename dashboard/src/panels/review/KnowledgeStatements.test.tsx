@@ -36,6 +36,7 @@ import type {
   ReviewSideContent,
 } from '../../data/review';
 import { ReviewSurface } from './ReviewSurface';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 
 const REPO = 'agents-remember';
 const MASTER = '260921_complete-code-and-intent-review';
@@ -201,6 +202,7 @@ async function reviewed(
 }
 
 afterEach(() => {
+  resetCardCachesForTests();
   cleanup();
   vi.unstubAllGlobals();
 });

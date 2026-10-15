@@ -83,7 +83,7 @@ def _enclosure_from_contract(contract: WorktreeContract) -> EnclosureNode:
         memoryWorktreeExists=(
             contract.memory_worktree.exists() if contract.memory_worktree else False
         ),
-        lifecycleOperation=latest_operation_projection(contract.contract_path),
+        lifecycleOperation=latest_operation_projection(contract.contract_path, contract=contract),
     )
 
 

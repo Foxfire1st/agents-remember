@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewPayload, ReviewResult } from '../../data/review';
 import { ReviewSurface } from './ReviewSurface';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 
 const captured = (name: string): ReviewResult =>
   JSON.parse(
@@ -20,6 +21,7 @@ const response = (body: unknown): Response =>
   ({ ok: true, status: 200, json: async () => body }) as Response;
 
 afterEach(() => {
+  resetCardCachesForTests();
   cleanup();
   vi.unstubAllGlobals();
 });

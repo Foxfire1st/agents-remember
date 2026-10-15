@@ -137,9 +137,13 @@ def worklist_path(contract: WorktreeContract) -> Path | None:
 
 
 def persist_worklist(path: Path, document: dict[str, Any]) -> None:
-    atomic_write_text(
-        path, json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    )
+    text = json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    try:
+        if path.read_text(encoding="utf-8", newline="") == text:
+            return
+    except (OSError, UnicodeError):
+        pass
+    atomic_write_text(path, text)
 
 
 def read_leaf_worklist(contract_path: Path) -> dict[str, Any] | None:

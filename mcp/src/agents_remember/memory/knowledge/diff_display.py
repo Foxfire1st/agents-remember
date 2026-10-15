@@ -105,7 +105,17 @@ DIFF_EXPANSION_REFERENCE = "diff_knowledge_scope:full-selected-candidate-source-
 # (:func:`agents_remember.application.review_source_inventory.tree_difference_observation`), and it
 # passes this very tuple. The published command below is built from the same tuple, so the text a
 # reader is handed and the arguments the measurement executes have one source and cannot differ.
-TREE_DIFF_ARGS = ("diff", *PARSED_DIFF_OPTIONS, "--raw", "-z", "--no-renames")
+# One child returns both raw change records and the numstat content classification.
+# The shared tuple also keeps the published expansion command exact.
+TREE_DIFF_ARGS = (
+    "diff",
+    *PARSED_DIFF_OPTIONS,
+    "--raw",
+    "--numstat",
+    "--no-abbrev",
+    "-z",
+    "--no-renames",
+)
 
 # The command this operation's expansion reference describes. It is stated in full so the reference
 # is reproducible without reading this module: the two tree objects are substituted, never a branch,

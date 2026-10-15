@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -552,6 +554,50 @@ def lifecycle_operation_record_access(path: Path):
         yield
 
 
+#: How many journal records are kept. One entry per journal path; beyond this
+#: the oldest entry leaves first and a counter says so (D2/D3).
+_RECORD_CACHE_MAX = 4096
+
+
+@dataclass
+class _RecordCacheEntry:
+    identity: tuple[int, int, int]
+    record: LifecycleOperationRecord | None
+
+
+class _RecordCacheMiss:
+    """Sentinel: no cached record for this journal at this stat identity."""
+
+
+_RECORD_CACHE_MISS = _RecordCacheMiss()
+
+_record_cache: dict[str, _RecordCacheEntry] = {}
+_record_cache_lock = threading.Lock()
+_record_cache_stats: dict[str, int] = {"drops": 0}
+
+
+def _record_cache_get(
+    key: str, identity: tuple[int, int, int]
+) -> LifecycleOperationRecord | _RecordCacheMiss | None:
+    with _record_cache_lock:
+        entry = _record_cache.get(key)
+    if entry is None or entry.identity != identity:
+        return _RECORD_CACHE_MISS
+    return entry.record
+
+
+def _record_cache_put(
+    key: str, identity: tuple[int, int, int], record: LifecycleOperationRecord | None
+) -> None:
+    with _record_cache_lock:
+        if len(_record_cache) >= _RECORD_CACHE_MAX and key not in _record_cache:
+            # Insertion-ordered: the first key is the oldest entry.
+            oldest = next(iter(_record_cache))
+            del _record_cache[oldest]
+            _record_cache_stats["drops"] += 1
+        _record_cache[key] = _RecordCacheEntry(identity, record)
+
+
 class LifecycleOperationStore:
     """One validated current snapshot per task and operation kind."""
 
@@ -559,6 +605,36 @@ class LifecycleOperationStore:
         self.path = path
 
     def read(self) -> LifecycleOperationRecord | None:
+        """The current record, reused while the journal file is byte-identical.
+
+        Journals are replaced atomically, so a stat identity names exact bytes
+        (MIK-R81 rule 3): the tick reads hundreds of journals per refresh and
+        re-reading plus re-validating every unchanged one dominates that pass.
+        Absence (no journal yet) caches like any other byte state; every error
+        re-reads fresh, so a torn or half-written journal never sticks.
+        """
+        key = self.path.as_posix()
+        try:
+            stat = self.path.stat()
+            identity = (stat.st_mtime_ns, stat.st_size, stat.st_ctime_ns)
+        except OSError:
+            identity = None
+        if identity is not None:
+            cached = _record_cache_get(key, identity)
+            if not isinstance(cached, _RecordCacheMiss):
+                # A deep copy: callers own the record they get (a transform may
+                # mutate in place), so the cached original must never escape.
+                return None if cached is None else cached.model_copy(deep=True)
+        record = self._read_uncached()
+        if identity is not None:
+            # The cached copy is never the object handed out: the caller owns
+            # its record outright, exactly as before this cache existed.
+            _record_cache_put(
+                key, identity, None if record is None else record.model_copy(deep=True)
+            )
+        return record
+
+    def _read_uncached(self) -> LifecycleOperationRecord | None:
         try:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:

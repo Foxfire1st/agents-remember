@@ -479,13 +479,21 @@ def _identity_object_id(identity: Any) -> str:
 def _tree_exists(repository_root: Path, tree_id: str) -> bool:
     """Return whether the requested tree object is present in the selected repository.
 
-    Never remembered: holding a tree is a fact about the repository, not the id -- it can be fetched,
-    or pruned, lose its alternate or become unreadable -- so every resolver asks Git afresh, and the
-    remembered content answers are served only behind a probe that succeeded.
+    Never remembered across reads: holding a tree is a fact about the repository, not the id --
+    it can be fetched, or pruned, lose its alternate or become unreadable -- so every read asks
+    Git afresh, and the remembered content answers are served only behind a probe that succeeded.
+    Within one read, the request's object-lookup scope may collapse a repeated probe of the same
+    tree into one child (MIK-R81 rule 7): the scope lives and dies with the read, a failed probe
+    is never kept, and any answer the probe guards is still read behind it. The probe spells the
+    peel the read's other verifications spell, so a tree the read already proved shares their
+    child instead of spending its own.
     """
 
-    result = run_git(repository_root, ["cat-file", "-e", f"{tree_id}^{{tree}}"])
-    return result.returncode == 0
+    result = run_git(
+        repository_root,
+        ["--no-replace-objects", "rev-parse", "--verify", "--quiet", f"{tree_id}^{{tree}}"],
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
 
 
 def _tree_entry(repository_root: Path, tree_id: str, path: str) -> tuple[str, str, str] | None:
@@ -526,9 +534,24 @@ def _tree_entry(repository_root: Path, tree_id: str, path: str) -> tuple[str, st
     # Only a lookup that answered reaches here, so ``None`` is Git's own "no entry at this path"
     # about an existing immutable tree -- as permanent as a found entry, and remembered the same way.
     entry = _parse_ls_tree(result.stdout)
-    if is_complete_object_id(tree_id):
-        TREE_ENTRIES.put(key, entry)
+    remember_tree_entry(repository_root, tree_id, confined, entry)
     return entry
+
+
+def remember_tree_entry(
+    repository_root: Path, tree_id: str, path: str, entry: tuple[str, str, str] | None
+) -> None:
+    """Keep an actual immutable-tree observation, whether from ls-tree or a raw diff.
+
+    This shares the point lookup's existing bound and key; presence probes still run in the
+    resolver. A raw diff caller supplies only its compared repository and endpoints.
+    """
+    confined = _confined_posix_relative(path)
+    if confined is None or not is_complete_object_id(tree_id):
+        return
+    if entry is not None and not is_complete_object_id(entry[2]):
+        return
+    TREE_ENTRIES.put((str(repository_root), tree_id, confined), entry)
 
 
 class _UnaddressableRecordedPath(Exception):

@@ -23,6 +23,7 @@ from agents_remember.application.knowledge_review import (
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.serving.review import KNOWLEDGE_REVIEW_ROUTE
+from agents_remember_test_support.testing.review_git_trees import build_world
 from diff_scope_test_support import rebuild_after_tree, replace_after_tree
 from fastapi.testclient import TestClient
 from knowledge_rows_test_support import INDEX_REPOSITORY_ID, open_knowledge_store
@@ -46,7 +47,6 @@ from test_review_family_context import (
     members_of,
     review,
 )
-from test_review_git_trees import build_world
 
 pytestmark = pytest.mark.evidence_unit
 

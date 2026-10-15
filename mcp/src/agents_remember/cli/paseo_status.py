@@ -70,19 +70,52 @@ class AgentReading:
 
 
 @dataclass(frozen=True, slots=True)
+class HostStartIdentity:
+    """The host process's OS birth tick, scoped to one operating-system boot."""
+
+    pid: int
+    process_start: str
+    boot_id: str
+
+    def record(self) -> dict[str, object]:
+        return {"pid": self.pid, "processStart": self.process_start, "bootId": self.boot_id}
+
+    @classmethod
+    def from_record(cls, value: object) -> HostStartIdentity | None:
+        if not isinstance(value, dict):
+            return None
+        pid, start, boot = value.get("pid"), value.get("processStart"), value.get("bootId")
+        if (
+            type(pid) is not int
+            or pid <= 0
+            or not isinstance(start, str)
+            or not start.isdecimal()
+            or int(start) <= 0
+            or not isinstance(boot, str)
+            or not boot.strip()
+        ):
+            return None
+        return cls(pid, start, boot)
+
+
+@dataclass(frozen=True, slots=True)
 class LiveAgents:
     """The agents the runtime holds that are not archived, from one listing.
 
     ``reachable`` is false when there is no usable answer; ``unreachable_reason`` then says why.
     ``complete`` is true only when the runtime said that the listing ended. Otherwise (the
     bridge's bound was reached, or a page announced more agents without naming where) an agent
-    that is absent from ``agent_ids`` is unknown, not gone.
+    that is absent from ``agent_ids`` is unknown, not gone. ``server_id`` names the daemon
+    that answered, so the dashboard's server notices a start of the host (MIK-R145 rule 1).
     """
 
     reachable: bool = True
     unreachable_reason: str | None = None
     agent_ids: frozenset[str] = frozenset()
     complete: bool = True
+    server_id: str = ""
+    start_identity: HostStartIdentity | None = None
+    start_detail: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,7 +278,16 @@ def read_live_agents(config: McpRuntimeConfig) -> LiveAgents:
         return LiveAgents(
             reachable=False, unreachable_reason="the bridge returned an unreadable agent listing"
         )
-    return LiveAgents(agent_ids=frozenset(agent_ids), complete=complete)
+    server_id = reply.get("serverId")
+    return LiveAgents(
+        agent_ids=frozenset(agent_ids),
+        complete=complete,
+        server_id=server_id if isinstance(server_id, str) else "",
+        start_identity=HostStartIdentity.from_record(reply.get("startIdentity")),
+        start_detail=reply.get("startDetail")
+        if isinstance(reply.get("startDetail"), str)
+        else None,
+    )
 
 
 @dataclass(frozen=True, slots=True)

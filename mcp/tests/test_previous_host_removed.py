@@ -411,6 +411,7 @@ ROUTES = {
     "/api/role-launch/reports": {"GET"},
     "/api/role-launch/document-chats": {"POST"},
     "/api/role-launch/document-chats/tree": {"POST"},
+    "/api/role-launch/warmup": {"GET"},  # MIK-R81: host-start loading progress.
 }
 METHODS = ("GET", "POST", "PUT", "DELETE")
 
@@ -427,7 +428,7 @@ class FormerRouteTests(unittest.TestCase):
             transcript_root=root / "coordination" / "logs" / "mcp",
         )
 
-    def test_the_launcher_registers_its_nine_routes_and_answers_404_on_the_former_paths(
+    def test_the_launcher_registers_its_ten_routes_and_answers_404_on_the_former_paths(
         self,
     ) -> None:
         app = FastAPI()

@@ -487,7 +487,7 @@ def test_a_git_that_cannot_run_is_unavailable_rather_than_an_absent_path(
     ``ls-tree`` invocation raise the ``OSError`` a missing or non-executable Git binary raises, and
     delegates every other command of the read to the real runner. The delegate is what makes the
     case measure the branch rather than a stub — the availability probe before the lookup
-    (``git cat-file -e <tree>^{tree}``) still runs for real and still answers *available*, so the
+    (``git --no-replace-objects rev-parse --verify --quiet <tree>^{tree}``) still runs for real and still answers *available*, so the
     observation can only come from the lookup that failed. The recorded command sequence is asserted,
     so a read that never reached the intercepted call fails here instead of passing on a different
     producer's answer.
@@ -550,7 +550,13 @@ def test_a_git_that_cannot_run_is_unavailable_rather_than_an_absent_path(
         KnowledgeReadRequest(seed=PathSeed(path=recorded)),
     )
     assert unavailable.state == "page", unavailable.refusal
-    assert recorded_commands[0] == ["cat-file", "-e", f"{fixture.git_tree_id}^{{tree}}"], (
+    assert recorded_commands[0] == [
+        "--no-replace-objects",
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{fixture.git_tree_id}^{{tree}}",
+    ], (
         "the availability probe is the first command the read issues, and it is delegated: the tree "
         f"below really is available, so the answer cannot come from the availability branch: "
         f"{recorded_commands}"
@@ -660,7 +666,13 @@ def test_a_lookup_that_answered_non_zero_is_unavailable_rather_than_an_absent_pa
         KnowledgeReadRequest(seed=PathSeed(path=recorded)),
     )
     assert unavailable.state == "page", unavailable.refusal
-    assert recorded_commands[0] == ["cat-file", "-e", f"{fixture.git_tree_id}^{{tree}}"], (
+    assert recorded_commands[0] == [
+        "--no-replace-objects",
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{fixture.git_tree_id}^{{tree}}",
+    ], (
         "the availability probe is delegated and the tree below really is available, so the tree "
         f"cannot be the producer of this answer: {recorded_commands}"
     )

@@ -26,11 +26,20 @@ from agents_remember.application.review_comparison_generation import (
 from agents_remember.application.review_comparison_reopen import reopen_comparison_generation
 from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.serving.review import register_review_routes
+from agents_remember_test_support.testing.review_git_trees import (
+    CODE_FILE,
+    LEAF,
+    MASTER,
+    REPO,
+    World,
+    build_world,
+    commit,
+    git,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from test_knowledge_review_comparison_generation import _assemble_legacy_manifest, _legacy_manifest
 from test_knowledge_review_source_endpoints import _public_resolution, _source_params
-from test_review_git_trees import CODE_FILE, LEAF, MASTER, REPO, World, build_world, commit, git
 
 pytestmark = pytest.mark.evidence_unit
 REVIEW_ROUTE = "/api/review/intent"

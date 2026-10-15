@@ -13,12 +13,61 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 from agents_remember.errors import LockCapabilityError
 
 
 class LockAcquisitionTimeout(LockCapabilityError):
     """The caller's finite exclusion budget expired; the resource was not entered."""
+
+
+class FileLease:
+    """One OS descriptor hold, independent of the thread that acquired it."""
+
+    def __init__(self, handle: BinaryIO) -> None:
+        self._handle = handle
+
+    @property
+    def closed(self) -> bool:
+        return self._handle.closed
+
+    def close(self) -> None:
+        if not self._handle.closed:
+            try:
+                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                self._handle.close()
+
+
+def try_file_lease(resource_path: Path, resource: str) -> FileLease | None:
+    """Take an OS hold without waiting; no thread mutex survives this call.
+
+    The empty sibling lock contains no data and is never removed. Exclusion ends
+    when its descriptor closes or its process dies, regardless of file existence.
+    """
+    path = lock_path_for(resource_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mutex = thread_mutex_for(resource_path)
+    if not mutex.acquire(blocking=False):
+        return None
+    try:
+        try:
+            _verify_lock_capability(path, resource, time.monotonic())
+        except LockAcquisitionTimeout:
+            return None
+        handle = path.open("a+b")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.close()
+            return None
+        except BaseException:
+            handle.close()
+            raise
+        return FileLease(handle)
+    finally:
+        mutex.release()
 
 
 def _acquire_flock(descriptor: int, deadline: float | None) -> None:

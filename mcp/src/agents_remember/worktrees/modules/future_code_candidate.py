@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.errors import FutureCodeCandidateError
-from agents_remember.worktrees.modules.git import head_commit, worktree_candidate_tree
+from agents_remember.worktrees.modules.capture_baseline import (
+    begin_capture_baseline,
+    note_capture_baseline,
+)
+from agents_remember.worktrees.modules.git import (
+    head_commit,
+    worktree_candidate_tree,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -32,17 +40,23 @@ def capture_future_code_candidate(contract: WorktreeContract) -> FutureCodeCandi
         )
     try:
         observed_head = head_commit(contract.code_worktree)
+        before = begin_capture_baseline(contract.code_worktree)
         candidate_tree = _candidate_tree(contract)
         if head_commit(contract.code_worktree) != observed_head:
             raise FutureCodeCandidateError(
                 "future-code-candidate-head-moved",
                 "code HEAD moved while deriving the isolated add-all future-code candidate",
             )
-        return FutureCodeCandidateIdentity(
+        identity = FutureCodeCandidateIdentity(
             observedCodeHead=observed_head,
             codeBaseCommit=contract.code_base_commit,
             codeCandidateTree=candidate_tree,
         )
+        # HEAD guards the source identity; equal snapshots spanning the capture guard
+        # the tree. A post-capture snapshot alone cannot certify the tree Git captured.
+        with suppress(OSError, RuntimeError):
+            note_capture_baseline(contract.code_worktree, tree=candidate_tree, before=before)
+        return identity
     except FutureCodeCandidateError:
         raise
     except (OSError, RuntimeError, ValidationError) as exc:

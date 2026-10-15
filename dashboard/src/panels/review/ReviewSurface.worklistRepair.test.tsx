@@ -6,6 +6,7 @@ import type { ReviewTreesResult, ReviewWorklistView } from '../../data/reviewTre
 import { ReviewSurface } from './ReviewSurface';
 import { captured, catalogue, selectedMemberId, serve, target } from './l86.test-utils';
 import { treeViewStore } from './triageViewPreference';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 
 const trees = captured<ReviewTreesResult>('l86.trees.captured.json');
 const familyCards = captured<ReviewTreesResult>('l86.cards.captured.json');
@@ -13,6 +14,7 @@ const memberCards = captured<ReviewTreesResult>('l86.member-cards.captured.json'
 const familyId = catalogue.outline!.families.find((one) => one.id === 'FAM-2HBJREC2')!.selector_id;
 const reason = 'Synthetic unreadable candidate code input';
 beforeEach(() => {
+  resetCardCachesForTests();
   localStorage.clear();
   treeViewStore.getState().setView('all');
 });

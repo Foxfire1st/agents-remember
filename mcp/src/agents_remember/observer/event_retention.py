@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
+from agents_remember.kernel.own_writes import OWN_WRITES
 from agents_remember.observer.store import (
     HEARTBEAT_KIND,
     WORKSPACE_SOURCE,
@@ -94,6 +95,7 @@ def prune_expired_lifecycle_event_logs(
     *,
     now: datetime,
     protected_lifecycle_ids: frozenset[str] | set[str] = frozenset(),
+    note_own: bool = False,
 ) -> list[Path]:
     """Delete lifecycle event logs that have gone dormant past their inactivity TTL.
 
@@ -109,21 +111,52 @@ def prune_expired_lifecycle_event_logs(
         return []
     removed: list[Path] = []
     for entry in sorted(lifecycles_dir.iterdir()):
-        path = entry / "events.jsonl"
-        if not entry.is_dir() or not path.is_file():
-            continue
-        if entry.name in protected_lifecycle_ids:
-            continue  # part of a live master series -> never pruned by inactivity
-        if not lifecycle_is_dormant(path, now=now):
-            continue
-        # F7 reclamation owns the whole dormant lifecycle directory, not only events.jsonl.
-        # Heartbeats are coalesced into heartbeat.json and served-onboarding state may also live
-        # beside the log; unlinking only the log makes every such directory permanently
-        # unreapable. The lifecycle is dormant and unprotected at this point, so reclaim the
-        # complete directory through the same project-and-prune boundary.
-        shutil.rmtree(entry)
-        removed.append(path)
+        pruned = prune_one_lifecycle_log(
+            lifecycles_dir,
+            entry.name,
+            now=now,
+            protected_lifecycle_ids=protected_lifecycle_ids,
+            note_own=note_own,
+        )
+        if pruned is not None:
+            removed.append(pruned)
     return removed
+
+
+def prune_one_lifecycle_log(
+    lifecycles_dir: Path,
+    lifecycle_id: str,
+    *,
+    now: datetime,
+    protected_lifecycle_ids: frozenset[str] | set[str] = frozenset(),
+    note_own: bool = False,
+) -> Path | None:
+    """Reclaim one dormant lifecycle directory; its events.jsonl path, else None (F09).
+
+    The same expiry predicate as the whole-tree prune, scoped to a single id so a
+    path-directed refresh reaps only the lifecycles its wake named. Expiry of unnamed
+    lifecycles waits for the next heartbeat/full reconciliation, which scans all.
+    """
+    if lifecycle_id in protected_lifecycle_ids:
+        return None  # part of a live master series -> never pruned by inactivity
+    entry = lifecycles_dir / lifecycle_id
+    path = entry / "events.jsonl"
+    if not entry.is_dir() or not path.is_file():
+        return None
+    if not lifecycle_is_dormant(path, now=now):
+        return None
+    # F7 reclamation owns the whole dormant lifecycle directory, not only events.jsonl.
+    # Heartbeats are coalesced into heartbeat.json and served-onboarding state may also live
+    # beside the log; unlinking only the log makes every such directory permanently
+    # unreapable. The lifecycle is dormant and unprotected at this point, so reclaim the
+    # complete directory through the same project-and-prune boundary.
+    if note_own:
+        with OWN_WRITES.announcing(entry.as_posix()) as announcement:
+            shutil.rmtree(entry)
+            OWN_WRITES.note_removed(entry.as_posix(), announcement=announcement)
+    else:
+        shutil.rmtree(entry)
+    return path
 
 
 def compact_workspace_river(

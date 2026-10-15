@@ -19,6 +19,7 @@ import { ReviewReadCache } from './ReviewReadCache';
 import { shownPayload } from './ReviewOutcome';
 import { ReviewSurface } from './ReviewSurface';
 import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 
 // These are complete HTTP bodies captured from the public authorship + real review route, following the
 // published cursors at page size 4 as test_review_family_context_population.py::walk_responses does. No
@@ -84,6 +85,7 @@ vi.mock('../../data/useReviewCatalogue', async (importOriginal) => {
 });
 
 afterEach(() => {
+  resetCardCachesForTests();
   cleanup();
   vi.unstubAllGlobals();
 });

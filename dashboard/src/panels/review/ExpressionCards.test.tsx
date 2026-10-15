@@ -12,6 +12,7 @@ import type { ReviewPayload, ReviewResult } from '../../data/review';
 import type { ReviewTreeEntry, ReviewTreesResult } from '../../data/reviewTrees';
 import { ExpressionCards } from './ExpressionCards';
 import { cardCounts, cardScope, expressionCards, type CardScope } from './focusedCards';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 
 const captured = <T,>(name: string): T =>
   JSON.parse(
@@ -23,6 +24,7 @@ const real = (id: string): ReviewTreeEntry =>
   structuredClone(cardsBody.entries!.find((entry) => entry.id === id)!);
 
 afterEach(() => {
+  resetCardCachesForTests();
   cleanup();
   vi.unstubAllGlobals();
 });

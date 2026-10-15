@@ -31,6 +31,13 @@ from agents_remember.application.knowledge_review import (
 from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.serving.review import register_review_routes, review_request_from_query
+from agents_remember_test_support.testing.review_git_trees import (
+    INVARIANT,
+    LEAF,
+    MASTER,
+    REPO,
+    build_world,
+)
 from diff_scope_test_support import DiffFixture, build_diff_fixture
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -41,7 +48,7 @@ from test_knowledge_review_surface import (
     review_config,
     review_request,
 )
-from test_review_git_trees import INVARIANT, LEAF, MASTER, REPO, _resolve, _seed, build_world
+from test_review_git_trees import _resolve, _seed
 
 pytestmark = pytest.mark.evidence_unit
 

@@ -47,6 +47,7 @@ from agents_remember.cli.paseo_launch import (
     mint_agent_id,
 )
 from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.paseo_warmup import register_warmup_route
 from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_document_chat_tree import register_document_chat_tree_route
 from agents_remember.cli.role_document_chats import register_document_chat_route
@@ -144,6 +145,7 @@ def register_role_launch_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     )
     register_document_chat_route(app, config)
     register_document_chat_tree_route(app, config)
+    register_warmup_route(app)
     register_role_report_route(app, config)
 
 

@@ -24,11 +24,13 @@ from agents_remember.tasks import (
     TaskExecutionRegistration,
     capture_task_doc_source,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache import (
+    resolve_lifecycle_operation_location,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleLocatorObservation,
     LifecycleOperationLocationError,
     inspect_lifecycle_operation_locator,
-    resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.integration.lifecycle.observation.projection import (
     current_operation_projections,

@@ -18,8 +18,15 @@ from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.worktrees.modules.future_code_candidate import capture_future_code_candidate
 from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember_test_support.testing.review_git_trees import (
+    CODE_FILE,
+    INVARIANT,
+    World,
+    build_world,
+    commit,
+    git,
+)
 from test_knowledge_review_source_endpoints import _public_resolution
-from test_review_git_trees import CODE_FILE, INVARIANT, World, build_world, commit, git
 
 pytestmark = pytest.mark.evidence_unit
 

@@ -31,12 +31,14 @@ in this module selects a record, ranks a path or states what a change means.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.application.review_relationship_movement import source_locations
-from agents_remember.kernel.git_command import PARSED_DIFF_OPTIONS, run_git
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.diff_display import (
     TREE_DIFF_ARGS,
     TreeChange,
@@ -45,6 +47,8 @@ from agents_remember.memory.knowledge.diff_display import (
     TreeSide,
     no_tree_difference_probe,
 )
+from agents_remember.memory.knowledge.read_anchor_memo import is_complete_object_id
+from agents_remember.memory.knowledge.read_anchors import remember_tree_entry
 from agents_remember.models.knowledge.diff import (
     KnowledgeDiffItem,
     KnowledgeDiffResult,
@@ -70,6 +74,7 @@ __all__ = [
     "inventory_command",
     "inventory_limitations",
     "is_text_path",
+    "memo_tree_observations",
     "review_inventory",
     "source_pane",
     "source_tree_side",
@@ -80,7 +85,7 @@ __all__ = [
 # rather than a cached artifact, because a caller acts on it by running the command beside it.
 SOURCE_INVENTORY_REFERENCE = "review:source-change-inventory-of-the-bound-code-tree-pair"
 
-# The two Git questions this module asks, each once per measurement. ``--no-renames`` is deliberate
+# The two output forms this module asks for in one measurement. ``--no-renames`` is deliberate
 # and is the shipped comparison's own policy: a rename is a deletion of one path and an addition of
 # another, and reporting a rename would attribute the candidate's *new* path to a baseline path no
 # recorded anchor names. ``-z`` is what makes the two interfaces delimiter-safe: records are
@@ -90,7 +95,6 @@ SOURCE_INVENTORY_REFERENCE = "review:source-change-inventory-of-the-bound-code-t
 # built from, and ``inventory_command`` below publishes it too: the call and both published texts
 # have that one source.
 _RAW_ARGS = TREE_DIFF_ARGS
-_NUMSTAT_ARGS = ("diff", *PARSED_DIFF_OPTIONS, "--numstat", "-z", "--no-renames")
 
 # The Git status letters this vocabulary names. A letter outside the table is still listed, as
 # ``unknown`` with its own letter stated, rather than dropped or mapped onto a neighbouring status.
@@ -154,6 +158,8 @@ class _RawRecord:
     new_mode: str
     status: str
     path: str
+    old_object: str
+    new_object: str
 
     @property
     def is_submodule(self) -> bool:
@@ -206,12 +212,89 @@ def tree_difference_observation(before: TreeSide, after: TreeSide) -> TreePaths:
     an empty change set. The trees are addressed by object id and never by a branch, a working tree or
     ``HEAD``, so a comparison of published snapshots cannot silently become a comparison of whatever
     is checked out now.
+
+    Within one request scope (see :func:`memo_tree_observations`), one pair is measured once: the
+    inventory, the worklist and the subject entries all render the same observation rather than each
+    measuring the pair again (MIK-R81 rule 7). Only an available observation is kept; a pair Git
+    could not compare is measured again, exactly as without the scope.
     """
 
     if before.tree_id is None or after.tree_id is None:
         return no_tree_difference_probe(before, after)
     if before.root is None or after.root is None:
         return TreePaths(available=False, detail=_NO_ROOT_DETAIL)
+    scope = _OBSERVATIONS.get()
+    key = _observation_key(before, after) if scope is not None else None
+    if scope is not None and key is not None and key in scope:
+        return scope[key]
+    observed = _measure_tree_difference(before, after)
+    if scope is not None and key is not None and observed.available:
+        scope[key] = observed
+    return observed
+
+
+_OBSERVATIONS: ContextVar[dict[tuple[str, str, str], TreePaths] | None] = ContextVar(
+    "tree_difference_observations", default=None
+)
+
+
+@contextmanager
+def memo_tree_observations() -> Iterator[None]:
+    """Within the block, one tree pair's difference is measured once (MIK-R81 rule 7).
+
+    The key is the two endpoint trees behind whatever spelling named them -- a base commit and its
+    tree are one pair -- resolved through the request's own memoized object lookups, so the
+    normalization itself costs no new child for endpoints the read already asked about. Scopes nest
+    like the object-lookup scope: an inner scope joins the open one.
+    """
+
+    if _OBSERVATIONS.get() is not None:
+        yield
+        return
+    token = _OBSERVATIONS.set({})
+    try:
+        yield
+    finally:
+        _OBSERVATIONS.reset(token)
+
+
+def _observation_key(before: TreeSide, after: TreeSide) -> tuple[str, str, str] | None:
+    """The memo key for one pair, or ``None`` when either endpoint does not resolve.
+
+    An unresolvable endpoint is measured fresh and never kept: the failure is the answer's own
+    detail, and a later creation must still measure.
+    """
+
+    root = Path(after.root) if after.root is not None else None
+    if root is None or before.tree_id is None or after.tree_id is None:
+        return None
+    before_root = before.root if before.root is not None else after.root
+    assert before_root is not None
+    before_tree = _endpoint_tree(before_root, before.tree_id)
+    assert after.root is not None
+    after_tree = _endpoint_tree(after.root, after.tree_id)
+    if before_tree is None or after_tree is None:
+        return None
+    return (root.as_posix(), before_tree, after_tree)
+
+
+def _endpoint_tree(root: str, endpoint: str) -> str | None:
+    """The exact tree one endpoint names, through the request's memoized lookups."""
+
+    resolved = run_git(
+        Path(root),
+        ["--no-replace-objects", "rev-parse", "--verify", "--quiet", f"{endpoint}^{{tree}}"],
+    )
+    if resolved.returncode != 0:
+        return None
+    tree = resolved.stdout.strip()
+    return tree or None
+
+
+def _measure_tree_difference(before: TreeSide, after: TreeSide) -> TreePaths:
+    """Measure one pair's difference: the former body of :func:`tree_difference_observation`."""
+
+    assert before.tree_id is not None and after.tree_id is not None and after.root is not None
     root = Path(after.root)
     raw = run_git(root, [*_RAW_ARGS, before.tree_id, after.tree_id])
     if raw.returncode != 0:
@@ -224,10 +307,17 @@ def tree_difference_observation(before: TreeSide, after: TreeSide) -> TreePaths:
                 after_root=after.root,
             ),
         )
-    records = _raw_records(raw.stdout)
+    records, classified = _diff_records(raw.stdout)
     if records is None:
         return TreePaths(available=False, detail=_UNPARSED_DETAIL)
-    classified = _content_classification(root, before.tree_id, after.tree_id)
+    for record in records:
+        for tree, mode, object_id in (
+            (before.tree_id, record.old_mode, record.old_object),
+            (after.tree_id, record.new_mode, record.new_object),
+        ):
+            kind = "commit" if mode == _SUBMODULE_MODE else "tree" if mode == "040000" else "blob"
+            entry = None if mode == "000000" else (mode, kind, object_id)
+            remember_tree_entry(root, tree, record.path, entry)
     changes = _changes(records, classified)
     carried = tuple(change for change in changes if is_text_path(change.path))
     uncarried = tuple(change for change in changes if not is_text_path(change.path))
@@ -299,32 +389,48 @@ def _count(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-def _raw_records(output: str) -> tuple[_RawRecord, ...] | None:
-    """Return one record per changed path, or ``None`` when the output is not the declared format.
+def _diff_records(
+    output: str,
+) -> tuple[tuple[_RawRecord, ...] | None, Mapping[str, bool] | None]:
+    """Read raw metadata/path pairs and numstat records by kind, with NUL-safe paths.
 
-    The ``-z`` form is a NUL-terminated alternation of one metadata field and one path, so it is read
-    as exactly that: an odd token count, a field that does not begin with ``:``, a metadata row that
-    does not carry Git's five fields or an empty path each mean the output is not this interface's and
-    the whole observation is refused. Paths are carried verbatim -- split on NUL and never trimmed --
-    because the name *is* the address the same file is expanded with.
+    A metadata record consumes its following path, even if that name starts with a colon.
+    Invalid raw data refuses the inventory; invalid line counts leave its content unmeasured.
+    No ordering between the two record kinds is assumed.
     """
 
     tokens = output.split("\0")
     if tokens and tokens[-1] == "":
         tokens.pop()
-    if not tokens:
-        # Two trees that agree print nothing at all, and that is a *measured* empty change set: the
-        # one answer this function must not confuse with a malformed one.
-        return ()
-    if len(tokens) % 2:
-        return None
     records: list[_RawRecord] = []
-    for index in range(0, len(tokens), 2):
-        record = _raw_record(tokens[index], tokens[index + 1])
-        if record is None:
-            return None
-        records.append(record)
-    return tuple(records)
+    classified: dict[str, bool] = {}
+    content_valid = True
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if token.startswith(":"):
+            if index == len(tokens):
+                return None, None
+            record = _raw_record(token, tokens[index])
+            index += 1
+            if record is None:
+                return None, None
+            records.append(record)
+        else:
+            fields = token.split("\t", 2)
+            if (
+                len(fields) != 3
+                or not fields[2]
+                or any(value != "-" and not value.isdecimal() for value in fields[:2])
+            ):
+                content_valid = False
+            else:
+                classified[fields[2]] = "-" in fields[:2]
+    if tokens and not records:
+        return None, None
+    content_valid = content_valid and set(classified) == {record.path for record in records}
+    return tuple(records), classified if content_valid else None
 
 
 def _raw_record(metadata: str, path: str) -> _RawRecord | None:
@@ -333,40 +439,29 @@ def _raw_record(metadata: str, path: str) -> _RawRecord | None:
     if not metadata.startswith(":") or not path:
         return None
     fields = metadata[1:].split(" ")
-    if len(fields) != 5 or not _is_mode(fields[0]) or not _is_mode(fields[1]) or not fields[4]:
+    if (
+        len(fields) != 5
+        or not _is_mode(fields[0])
+        or not _is_mode(fields[1])
+        or not is_complete_object_id(fields[2])
+        or not is_complete_object_id(fields[3])
+        or not fields[4]
+    ):
         return None
-    return _RawRecord(old_mode=fields[0], new_mode=fields[1], status=fields[4][0], path=path)
+    return _RawRecord(
+        old_mode=fields[0],
+        new_mode=fields[1],
+        status=fields[4][0],
+        path=path,
+        old_object=fields[2],
+        new_object=fields[3],
+    )
 
 
 def _is_mode(field: str) -> bool:
     """Whether one mode field is Git's six-digit octal permission word."""
 
     return len(field) == 6 and all(character in "01234567" for character in field)
-
-
-def _content_classification(
-    root: Path, before_tree: str, after_tree: str
-) -> Mapping[str, bool] | None:
-    """Return one ``path -> is binary`` measurement for the same pair, or ``None`` if it failed.
-
-    ``--numstat`` reports a text path's two line counts and ``-`` for both when Git considers the
-    content binary, which is the measured fact "this path's content cannot be rendered as text". Its
-    ``-z`` records are read the same way as the raw ones, so a name containing a tab is still one
-    name: the two count fields are split off the left and the remainder is the path.
-    """
-
-    result = run_git(root, [*_NUMSTAT_ARGS, before_tree, after_tree])
-    if result.returncode != 0:
-        return None
-    measured: dict[str, bool] = {}
-    for record in result.stdout.split("\0"):
-        if not record:
-            continue
-        fields = record.split("\t", 2)
-        if len(fields) != 3 or not fields[2]:
-            return None
-        measured[fields[2]] = "-" in (fields[0], fields[1])
-    return measured
 
 
 def _changes(

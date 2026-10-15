@@ -37,10 +37,12 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.task_paths import leaf_enclosure_path
+from agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache import (
+    resolve_lifecycle_operation_location,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
     inspect_lifecycle_operation_locator,
-    resolve_lifecycle_operation_location,
 )
 from agents_remember.worktrees.integration.lifecycle.observation.projection import (
     unreadable_contract_operation_projections,

@@ -77,22 +77,21 @@ from agents_remember.worktrees.integration.closeout.curator_coherence_publicatio
 )
 from agents_remember.worktrees.services import reset_worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-from curator_coherence_test_support import (
-    prepared_publish_inputs,
-    read_prepared_candidate_set,
-    write_curator_task_topology,
-)
-from test_review_git_trees import (
+from agents_remember_test_support.testing.review_git_trees import (
     FAMILY,
     INVARIANT,
     World,
-    _resolve,
-    _seed,
     build_world,
     commit,
     git,
     invariant,
 )
+from curator_coherence_test_support import (
+    prepared_publish_inputs,
+    read_prepared_candidate_set,
+    write_curator_task_topology,
+)
+from test_review_git_trees import _resolve, _seed
 from test_worktree_support import write_passing_route_review
 
 pytestmark = pytest.mark.evidence_unit

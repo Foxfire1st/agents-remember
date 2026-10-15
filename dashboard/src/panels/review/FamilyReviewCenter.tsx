@@ -1,7 +1,7 @@
-import { css } from '../../../styled-system/css';
+import { GuaranteeComparisonBlock } from './FamilyGuarantees';
+import { shell, sectionLabel, card, muted, prose, rows, linkButton } from './familyCenterStyles';
 import type {
   ReviewFamilyContextEntry,
-  ReviewFamilyGuarantee,
   ReviewFamilyMember,
   ReviewFamilySideName,
   ReviewPayload,
@@ -16,7 +16,7 @@ import {
   type FamilyExpressionExcerpt,
   type FamilyExcerptOccurrence,
 } from './familyExpressions';
-import { FAMILY_SIDES, guaranteeComparison } from '../../data/review';
+import { FAMILY_SIDES } from '../../data/review';
 import {
   treeComparisonNumber,
   useReviewTreeEntries,
@@ -25,15 +25,11 @@ import {
 import { ExpressionCards } from './ExpressionCards';
 import { MemberFamilyLabel } from './MarkerTargetState';
 import {
-  GuaranteeTextChange,
   IntentWordDiffScope,
-  OneSidedGuaranteeLabel,
   guaranteeFact,
-  guaranteeTextChange,
   useTreeComparison,
 } from './IntentWordDiff';
 import { SubjectKnowledge } from './SubjectWorklistIdentity';
-import { guaranteeRevisionLabels, revisionMeta } from './statementWording';
 import { planningMarks } from './worklistGroups';
 import { cardScope } from './focusedCards';
 import { familyTriage, memberChanges, orderMemberRows, outlineGroups } from './changeTriage';
@@ -44,7 +40,6 @@ import {
   GuaranteeChangeBadge,
 } from './ChangeBadges';
 import { useTreeOrder, type TreeOrder } from './triageOrderPreference';
-import { DiffPane } from '../changeset/DiffPane';
 import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
 import { ReviewExpressions } from './ReviewExpressions';
 import { KnowledgeStatements } from './KnowledgeStatements';
@@ -57,167 +52,6 @@ import {
 } from './SubjectReview';
 import type { ReviewSubject } from './ReviewNavigation';
 import { RosterLine, RosterNext, emptyRosterSentence, type FamilySelection } from './FamilyTree';
-
-const shell = css({
-  background: 'bgPanel',
-  borderWidth: '1px',
-  borderStyle: 'solid',
-  borderColor: 'grid',
-  borderRadius: '3px',
-  padding: '1.1rem',
-  minWidth: '0',
-  display: 'grid',
-  gap: '1.2rem',
-  alignContent: 'start',
-});
-
-const sectionLabel = css({
-  color: 'cyan',
-  fontSize: '0.72rem',
-  letterSpacing: '0.1em',
-  textTransform: 'uppercase',
-  margin: '0 0 0.25rem',
-});
-
-const card = css({
-  borderWidth: '1px',
-  borderStyle: 'solid',
-  borderColor: 'grid',
-  borderRadius: '3px',
-  padding: '0.5rem 0.6rem',
-  background: 'bg',
-  minWidth: '0',
-});
-
-const muted = css({ color: 'muted', fontSize: '0.8rem', margin: '0.2rem 0' });
-
-const prose = css({
-  whiteSpace: 'pre-wrap',
-  margin: '0.2rem 0',
-  fontSize: '0.9rem',
-  lineHeight: '1.8',
-});
-
-const rows = css({ margin: '0.2rem 0', paddingLeft: '1.1rem' });
-
-const linkButton = css({
-  background: 'transparent',
-  border: 'none',
-  color: 'amber',
-  cursor: 'pointer',
-  font: 'inherit',
-  padding: '0',
-  textDecoration: 'underline',
-  _focusVisible: { outline: '1px solid var(--amber)', outlineOffset: '2px' },
-});
-
-function GuaranteeBlock({ guarantee, side }: { guarantee: ReviewFamilyGuarantee; side?: string }) {
-  return (
-    <div
-      className={card}
-      data-review-content="guarantee"
-      data-testid="review-center-guarantee"
-      data-revision={guarantee.revision_id}
-    >
-      <p className={sectionLabel}>Joint guarantee{side ? ` · ${side}` : ''}</p>
-      <p className={prose}>{guarantee.joint_guarantee}</p>
-      <p className={muted}>State at origin: {guarantee.state_at_origin}</p>
-      <details data-disclosure="identifiers">
-        <summary>Guarantee record</summary>
-        <p className={muted}>
-          family {guarantee.family_id}
-          {side ? ` · ${side} snapshot` : ''} · revision {guarantee.revision_id} · version{' '}
-          {guarantee.display_version}
-          {guarantee.acceptance_ref ? ` · accepted by ${guarantee.acceptance_ref}` : ''}
-        </p>
-      </details>
-    </div>
-  );
-}
-
-function GuaranteeComparisonBlock({
-  entry,
-  layout,
-}: {
-  entry: ReviewFamilyContextEntry;
-  layout: DiffLayout;
-}) {
-  // A tree comparison's changed guarantee text reads as one word-diffed passage (MIK-R35).
-  const wordDiff = useTreeComparison();
-  const textChange = wordDiff ? guaranteeTextChange(entry) : null;
-  if (textChange) return <GuaranteeTextChange {...textChange} />;
-  const comparison = guaranteeComparison(entry);
-  if (comparison.kind === 'unrecorded') {
-    return (
-      <p className={muted} data-testid="review-center-guarantee-unrecorded">
-        no guarantee is compared here: neither snapshot selected a family revision for this family.
-        The composition&apos;s own statement is: {comparison.detail}
-      </p>
-    );
-  }
-  if (comparison.kind === 'one_sided') {
-    const other = comparison.side === 'before' ? 'after' : 'before';
-    return (
-      <div data-testid="review-center-guarantee-one-sided" data-side={comparison.side}>
-        {wordDiff ? (
-          <OneSidedGuaranteeLabel side={comparison.side} other={entry[other]} />
-        ) : (
-          <p className={muted}>
-            {comparison.side === 'after' ? 'Added guarantee' : 'Removed guarantee'} · recorded on{' '}
-            {comparison.side} only · no {other} revision
-          </p>
-        )}
-        <GuaranteeBlock guarantee={comparison.guarantee} side={comparison.side} />
-      </div>
-    );
-  }
-  if (comparison.kind === 'unchanged_revision') {
-    return (
-      <div data-testid="review-center-guarantee-unchanged">
-        <p className={muted}>Guarantee unchanged · same recorded revision</p>
-        <GuaranteeBlock guarantee={comparison.guarantee} />
-      </div>
-    );
-  }
-  if (comparison.kind === 'identical_text') {
-    // MIK-R31 rule 3: the guarantee is the family's one authored text field, so identical text is
-    // "wording unchanged", shown once, with the revisions as compact metadata and the IDs in details.
-    const { before, after } = comparison;
-    return (
-      <div data-testid="review-center-guarantee-identical-text">
-        <p className={muted}>
-          Wording unchanged · {revisionMeta(...guaranteeRevisionLabels(before, after))}
-        </p>
-        <GuaranteeBlock guarantee={after} />
-        <details data-disclosure="identifiers">
-          <summary>Revision records</summary>
-          <p className={muted}>
-            before revision {before.revision_id} · after revision {after.revision_id}
-          </p>
-        </details>
-      </div>
-    );
-  }
-  return (
-    <div data-testid="review-center-guarantee-changed">
-      <p className={muted}>
-        the family guarantee changed between {comparison.before.revision_id} and{' '}
-        {comparison.after.revision_id}:
-      </p>
-      <DiffPane
-        before={comparison.before.joint_guarantee}
-        after={comparison.after.joint_guarantee}
-        language="text"
-        mode={layout}
-        collapse={false}
-      />
-      <p className={muted}>
-        before revision {comparison.before.revision_id} · after revision{' '}
-        {comparison.after.revision_id}
-      </p>
-    </div>
-  );
-}
 
 function RealizationClaims({ member }: { member: ReviewFamilyMember }) {
   if (!member.sources.length) {
@@ -1157,7 +991,9 @@ function CenterExpressions({
 
 // The invariants whose entries make the cards: every member of the selected family (both sides),
 // or the selected invariant alone when it has no family on this page. Sorted, so one selection is
-// one read.
+// one read. A click on another member of the family that is already shown keeps the same set, so
+// the kept answer stands and no second cards read is sent (MIK-R81 rule 7); the subject's own id
+// joins the set only where no family is shown.
 function cardInvariants(
   entry: ReviewFamilyContextEntry | undefined,
   subject: ReviewSubject | undefined,
@@ -1165,7 +1001,7 @@ function cardInvariants(
   const keys = new Set<string>();
   for (const row of entry ? [...entry.before.members, ...entry.after.members] : [])
     if (row.invariant_id) keys.add(row.invariant_id);
-  if (subject?.kind === 'invariant') keys.add(subject.id);
+  if (!entry && subject?.kind === 'invariant') keys.add(subject.id);
   return [...keys].sort();
 }
 

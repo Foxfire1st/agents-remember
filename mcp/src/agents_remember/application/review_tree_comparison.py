@@ -39,6 +39,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -80,7 +81,16 @@ from agents_remember.models.knowledge.review_trees import (
 from agents_remember.models.knowledge_files.canonical import parse_json
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.tasks.task_paths import slugify
-from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.modules.capture_baseline import (
+    begin_capture_baseline,
+    capture_baseline_unchanged,
+    note_capture_baseline,
+)
+from agents_remember.worktrees.modules.git import (
+    branch_commit,
+    head_commit,
+    worktree_candidate_tree,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only; the resolution module imports this one
@@ -284,7 +294,12 @@ def _live_draft(
     code_candidate_tree: str,
 ) -> ReviewTreeComparisonRecord:
     code_repository = contract.code_repo_path
-    base_commit = _require(code_repository, f"{contract.code_base_commit}^{{commit}}", "code base")
+    # Enclosure contracts record the base as a full commit SHA, so the tree peel
+    # below verifies both that it names a commit and which tree it names: a
+    # separate ``^{commit}`` existence probe would ask Git the same question
+    # twice (MIK-R81 rule 7, F17). A non-commit base still refuses here, naming
+    # the code base and the revision Git could not peel.
+    base_commit = contract.code_base_commit
     base_tree = _require(code_repository, f"{base_commit}^{{tree}}", "code base")
     try:
         memory_base = paired_memory_commit(
@@ -338,12 +353,20 @@ def _live_draft(
 
 def _capture(memory_worktree: Path) -> str:
     try:
+        head_before = head_commit(memory_worktree)
+        before = begin_capture_baseline(memory_worktree)
         with TemporaryDirectory(prefix="ar-review-memory-") as scratch:
-            return worktree_candidate_tree(memory_worktree, Path(scratch) / "index")
+            tree = worktree_candidate_tree(memory_worktree, Path(scratch) / "index")
+        head_after = head_commit(memory_worktree)
     except (RuntimeError, OSError) as error:
         raise TreeSideUnreadable(
             "memory candidate", f"the memory worktree {memory_worktree} cannot be captured: {error}"
         ) from error
+    # Keep a tree proof only when neither HEAD nor the inputs spanning capture moved.
+    if head_before == head_after:
+        with suppress(OSError, RuntimeError):
+            note_capture_baseline(memory_worktree, tree=tree, before=before, head=head_before)
+    return tree
 
 
 def recheck_memory_candidate(trees: ReviewTrees) -> ReviewRefusal | None:
@@ -351,11 +374,15 @@ def recheck_memory_candidate(trees: ReviewTrees) -> ReviewRefusal | None:
 
     if not trees.live or trees.memory_worktree is None:
         return None
+    recorded = trees.record.memory_candidate.tree
+    if capture_baseline_unchanged(trees.memory_worktree, tree=recorded):
+        # The resolve-time baseline proves nothing moved: same head, same index file, same
+        # file stats. The re-derivation below would capture this same tree.
+        return None
     try:
         current = _capture(trees.memory_worktree)
     except TreeSideUnreadable as error:
         return _unresolved(error.side, error.detail)
-    recorded = trees.record.memory_candidate.tree
     if current == recorded:
         return None
     return ReviewRefusal(
@@ -374,8 +401,22 @@ def recheck_memory_candidate(trees: ReviewTrees) -> ReviewRefusal | None:
 def _candidate_side(repository: Path, durable_line: str, tree: str) -> ReviewTreeSide:
     """A candidate is committed when the durable line's tip holds exactly this tree."""
 
-    tip = _git(repository, "rev-parse", "--verify", "--quiet", f"{durable_line}^{{commit}}")
-    if tip is not None and _git(repository, "rev-parse", f"{tip}^{{tree}}") == tree:
+    try:
+        tip: str | None = branch_commit(repository, durable_line)
+    except (OSError, RuntimeError):
+        tip = None
+    if (
+        tip is not None
+        and _git(
+            repository,
+            "--no-replace-objects",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{tip}^{{tree}}",
+        )
+        == tree
+    ):
         return ReviewTreeSide(repository=str(repository), tree=tree, commit=tip)
     return ReviewTreeSide(repository=str(repository), tree=tree)
 
@@ -600,10 +641,11 @@ def _recorded(
         if repinned is not None:
             return repinned
         return latest, directory / f"{latest.number}.json"
+    listed = _listed_pin_shas(draft)
     number = 1 + max(
         [
             *(record.number for record in existing),
-            *_ref_numbers(draft),
+            *_ref_numbers(draft, listed=listed),
         ],
         default=0,
     )
@@ -618,7 +660,7 @@ def _recorded(
             "memory_candidate": _with_ref(draft.memory_candidate, ref),
         }
     )
-    pinned = _pin(record)
+    pinned = _pin(record, hints=listed)
     if pinned is not None:
         return pinned
     path = directory / f"{number}.json"
@@ -636,22 +678,61 @@ def _with_ref(side: ReviewTreeSide, ref: str) -> ReviewTreeSide:
     return side if side.commit is not None else side.model_copy(update={"ref": ref})
 
 
-def _ref_numbers(draft: ReviewTreeComparisonRecord) -> list[int]:
+def _ref_numbers(
+    draft: ReviewTreeComparisonRecord,
+    *,
+    listed: dict[tuple[str, str], str] | None = None,
+) -> list[int]:
     prefix = f"{REVIEW_REF_NAMESPACE}/{draft.task_id}/{draft.leaf_id}/"
-    numbers: list[int] = []
+    shas = listed if listed is not None else _listed_pin_shas(draft)
+    return sorted(
+        {
+            int(name[len(prefix) :])
+            for (_repository, name) in shas
+            if name.startswith(prefix) and name[len(prefix) :].isdigit()
+        }
+    )
+
+
+def _listed_pin_shas(draft: ReviewTreeComparisonRecord) -> dict[tuple[str, str], str]:
+    """Every pin ref under this leaf's namespace, with the tree it names now.
+
+    One ``for-each-ref`` per repository lists names and trees together, so the later
+    create-only pins start from what the listing already saw instead of re-verifying
+    each ref (MIK-R81 rule 7, F17). The listing is a hint, not a lock: a create that
+    finds the ref changed re-verifies fresh before it refuses or keeps anything.
+    """
+
+    prefix = f"{REVIEW_REF_NAMESPACE}/{draft.task_id}/{draft.leaf_id}/"
+    shas: dict[tuple[str, str], str] = {}
     for repository in {draft.code_candidate.repository, draft.memory_candidate.repository}:
-        listed = _git(Path(repository), "for-each-ref", "--format=%(refname)", prefix) or ""
-        numbers += [
-            int(name[len(prefix) :]) for name in listed.split() if name[len(prefix) :].isdigit()
-        ]
-    return numbers
+        listed = _git(Path(repository), "for-each-ref", "--format=%(refname) %(objectname)", prefix)
+        for line in (listed or "").splitlines():
+            name, _, sha = line.partition(" ")
+            if name.startswith(prefix) and sha.strip():
+                shas[(repository, name)] = sha.strip()
+    return shas
 
 
-def _pin(record: ReviewTreeComparisonRecord) -> ReviewRefusal | None:
+#: The listing saw no such ref: the first create attempt tries the create first.
+_PIN_ABSENT = object()
+
+
+def _pin(
+    record: ReviewTreeComparisonRecord,
+    *,
+    hints: dict[tuple[str, str], str] | None = None,
+) -> ReviewRefusal | None:
     """Pin each uncommitted candidate (create-only), or refuse naming the repository and the ref.
 
     A pin already naming its tree is kept. A ref naming anything else is never moved: the
     comparison is refused. On any failure the pins this call created are removed again.
+
+    ``hints`` carries the pin listing the number computation already took: a side whose ref the
+    listing saw naming its tree is kept, and a side the listing saw missing tries its create
+    first, without re-verifying either. A hint is never a decision — a create that finds the ref
+    changed re-verifies fresh, and a listed tree that is not this tree still verifies fresh
+    before it refuses — so contention answers exactly as without the listing.
     """
 
     made: list[tuple[Path, str]] = []
@@ -659,7 +740,8 @@ def _pin(record: ReviewTreeComparisonRecord) -> ReviewRefusal | None:
         if side.ref is None:
             continue
         repository = Path(side.repository)
-        created, current, reason = _create_pin(repository, side.ref, side.tree)
+        hint = hints.get((side.repository, side.ref), _PIN_ABSENT) if hints is not None else None
+        created, current, reason = _create_pin(repository, side.ref, side.tree, hint)
         if created is None:
             for done_repository, done_ref in made:
                 run_git(done_repository, ["update-ref", "-d", done_ref])
@@ -671,18 +753,30 @@ def _pin(record: ReviewTreeComparisonRecord) -> ReviewRefusal | None:
     return None
 
 
-def _create_pin(repository: Path, ref: str, tree: str) -> tuple[bool | None, str | None, str]:
+def _create_pin(
+    repository: Path, ref: str, tree: str, hint: str | object | None = None
+) -> tuple[bool | None, str | None, str]:
     """Create one pin if it is absent: ``(True, …)`` made, ``(False, …)`` already named ``tree``.
 
     Pinning is idempotent (MIK-R42): readers opening the same new comparison at once all try to
     create the same pin, and a ref that already names this very tree is the answer they wanted,
     whoever made it. A brief lock held by another of them is retried. ``None`` is a refusal: the
     ref names something else, or Git failed for another reason (``current`` and the reason say).
+
+    ``hint`` is what the pin listing saw for this ref: ``_PIN_ABSENT`` tries the create first,
+    the listed tree itself is kept without re-verifying, and anything else verifies fresh —
+    the listing only ever saves a child, never decides a refusal or a keep.
     """
 
     reason = "update-ref failed"
     for attempt in range(_PIN_ATTEMPTS):
-        current = _git(repository, "rev-parse", "--verify", "--quiet", ref)
+        if hint is _PIN_ABSENT and attempt == 0:
+            current = None
+        elif isinstance(hint, str) and hint == tree and attempt == 0:
+            return False, hint, ""
+        else:
+            current = _git(repository, "rev-parse", "--verify", "--quiet", ref)
+        hint = None
         if current == tree:
             return False, current, ""
         if current is not None:
@@ -725,9 +819,22 @@ def _open_sides(
         record.converted_base.tree if record.converted_base is not None else record.memory_base.tree
     )
     trees = {"before": before_tree, "after": record.memory_candidate.tree}
+    sides_states = states or {}
+    live = [side for side in _SIDES if side not in sides_states]
+    cache: KnowledgeIndexCache | None = None
+    fault: Exception | None = None
+    if live:
+        # One index cache for the live sides (MIK-R81 rule 7): the cache probes
+        # its directory once at construction, and the live sides share it. When
+        # both sides are already known-unavailable the directory is never
+        # constructed (F19) — there is nothing to index for either side.
+        try:
+            cache = KnowledgeIndexCache(default_cache_directory(coordination_root))
+        except (MemoryTreeError, OSError, ValueError) as error:
+            fault = error
     opened = {
         side: _open_side(
-            coordination_root, memory_repository, side, trees[side], (states or {}).get(side)
+            cache, memory_repository, side, trees[side], sides_states.get(side), fault=fault
         )
         for side in _SIDES
     }
@@ -740,22 +847,39 @@ def _open_sides(
     )
 
 
-def _open_side(
-    coordination_root: Path,
+def _open_side(  # noqa: PLR0913 -- the fault rides beside the side's own open inputs
+    cache: KnowledgeIndexCache | None,
     repository: Path,
     side: Literal["before", "after"] | str,
     tree: str,
     unavailable: tuple[ReviewTreeSideState, str] | None,
+    *,
+    fault: Exception | None = None,
 ) -> TreeKnowledge:
     wire_side: Literal["before", "after"] = "before" if side == "before" else "after"
     if unavailable is not None:
+        # A predeclared side keeps its own state and detail even when the shared
+        # cache construction failed beside it (F19): the fault never overwrites it.
         state, detail = unavailable
         return TreeKnowledge(
             wire=ReviewKnowledgeSide(side=wire_side, state=state, tree=tree, detail=detail),
             database=None,
         )
+    if fault is not None:
+        # The shared construction failed: this live side reports exactly what two
+        # failed per-side constructions reported on BASE (F19) — its own tree and
+        # the constructor's error, not a shared wording.
+        return TreeKnowledge(
+            wire=ReviewKnowledgeSide(
+                side=wire_side,
+                state="unavailable-history",
+                tree=tree,
+                detail=f"the memory tree {tree} cannot be indexed: {fault}",
+            ),
+            database=None,
+        )
+    assert cache is not None  # Live sides with no fault share one built cache.
     try:
-        cache = KnowledgeIndexCache(default_cache_directory(coordination_root))
         with cache.for_git_tree(repository, tree) as index:
             state = index.state
             database = index.database_path
@@ -972,7 +1096,7 @@ def _git(repository: Path, *args: str) -> str | None:
 
 
 def _require(repository: Path, revision: str, side: str) -> str:
-    value = _git(repository, "rev-parse", "--verify", "--quiet", revision)
+    value = _git(repository, "--no-replace-objects", "rev-parse", "--verify", "--quiet", revision)
     if value is None:
         raise TreeSideUnreadable(side, f"{revision!r} names nothing in {repository}")
     return value
@@ -983,8 +1107,10 @@ def _has_marker(repository: Path, tree: str) -> bool:
 
 
 def _pinned_version(repository: Path, tree: str) -> str | None:
-    if not _has_marker(repository, tree):
-        return None
+    # One lookup, not two (MIK-R81 rule 7): reading the blob answers an absent
+    # path the same way the type pre-check did (a missing path fails either
+    # command), and a path that names a tree fails the blob read exactly as the
+    # pre-check refused it.
     text = _git(repository, "cat-file", "blob", f"{tree}:{LAYOUT_MARKER_PATH}")
     if text is None:
         return None

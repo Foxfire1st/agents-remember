@@ -21,6 +21,7 @@ from agents_remember.worktrees.integration.closeout.curator_coherence import (
     curator_coherence_paths,
     require_current_curator_coherence,
 )
+from agents_remember_test_support.testing.review_git_trees import CODE_FILE
 from curator_coherence_test_support import (
     prepared_publish_inputs,
     read_prepared_candidate_set,
@@ -31,7 +32,6 @@ from test_knowledge_review_evidence_channels import (
     _assessment_revision,
     build_recorded_fixture,
 )
-from test_review_git_trees import CODE_FILE
 
 pytestmark = [pytest.mark.evidence_unit, pytest.mark.usefixtures("worktree_services")]
 

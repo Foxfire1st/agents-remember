@@ -29,11 +29,27 @@ give back everything the memo exists to save.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
+
+from pydantic import BaseModel
 
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.observer.projection import WorkspaceProjection
 from agents_remember.serving.build_info import ServingBuild
+
+
+class WatcherHealthPayload(BaseModel):
+    """The change watcher's health as the served state carries it (MIK-R81 rule 5).
+
+    ``running`` says whether the watcher's change detection is trusted right
+    now; ``downSince`` is wall-clock seconds of when it last went down, absent
+    while it runs. Absence of the whole key (not a fabricated row) is the
+    answer where no watcher is configured.
+    """
+
+    running: bool
+    downSince: float | None = None
 
 
 class ServedWorkspaceProjection(WorkspaceProjection):
@@ -44,14 +60,17 @@ class ServedWorkspaceProjection(WorkspaceProjection):
     """
 
     servingBuild: ServingBuildPayload | None = None
+    watcherHealth: WatcherHealthPayload | None = None
 
 
-SERVED_TAIL_FIELDS: tuple[str, ...] = ("servingBuild",)
+SERVED_TAIL_FIELDS: tuple[str, ...] = ("servingBuild", "watcherHealth")
 """The keys :func:`served_state_tail` may add -- exactly this model's extension over the
 projection it wraps. Named so the assembly and the contract cannot drift apart silently."""
 
 
-def served_state_tail(*, build: ServingBuild | None) -> dict[str, Any]:
+def served_state_tail(
+    *, build: ServingBuild | None, watcher_health: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """The serve-time tail, JSON-ready, to be merged onto a copy of the memoized dump.
 
     A missing build fact is OMITTED: absence is not a fabricated claim.
@@ -59,4 +78,11 @@ def served_state_tail(*, build: ServingBuild | None) -> dict[str, Any]:
     tail: dict[str, Any] = {}
     if build is not None:
         tail["servingBuild"] = build.payload().model_dump(mode="json", exclude_none=True)
+    if watcher_health is not None:
+        # Validated against the declared tail model so the assembly cannot drift
+        # from the contract; a row that fails validation is omitted, never served raw.
+        with contextlib.suppress(ValueError):
+            tail["watcherHealth"] = WatcherHealthPayload.model_validate(watcher_health).model_dump(
+                mode="json", exclude_none=True
+            )
     return tail

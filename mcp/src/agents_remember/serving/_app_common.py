@@ -12,6 +12,7 @@ from fastapi.sse import ServerSentEvent
 from pydantic import BaseModel
 
 from agents_remember.observer import observer_root
+from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.knowledge_reader import KnowledgeReaderPort
 from agents_remember.serving.projector import ProjectionReplay, Projector
@@ -100,12 +101,15 @@ async def stream_events(
     projector: Projector,
     *,
     build: ServingBuild | None = None,
+    watcher_health: dict[str, Any] | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one atomic projector subscription.
 
     Module-level (not a route closure) so it is unit-testable without an HTTP client.
     ``build`` (the boot-time serving stamp) rides the snapshot as
     ``servingBuild`` so the cockpit can render which process/commit is answering.
+    ``watcher_health`` rides as ``watcherHealth`` (whether the change watcher is
+    running, and since when it is not), OMITTED where no watcher is configured.
 
     The tail rides the ``snapshot`` ONLY: a ``delta`` is one projection node, not a state
     body, so there is nothing there for a whole-workspace stamp to be a field of. That
@@ -122,7 +126,12 @@ async def stream_events(
             else:
                 payload = _encode(delta.data)
             if delta.event == "snapshot":
-                payload.update(served_state_tail(build=build))
+                payload.update(
+                    served_state_tail(
+                        build=build,
+                        watcher_health=watcher_health,
+                    )
+                )
             yield ServerSentEvent(data=payload, event=delta.event, id=str(seq), retry=2000)
 
 
@@ -250,6 +259,9 @@ class _ServingRuntime:
     build: ServingBuild
     interval: float
     review_trees_shutdown: Callable[[], None] | None = None
+    # The always-on background account (MIK-R81 rule 1): the projector and every
+    # background loop record their units here; the diagnostics route serves it.
+    background_ledger: BackgroundLedger | None = None
 
     @property
     def observer_root(self) -> Path:
