@@ -17,6 +17,7 @@ content identity.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 
 CONTENT_PREFIX = "sha256:"
 
@@ -50,7 +51,14 @@ def range_bytes(data: bytes, start: int, end: int) -> bytes:
 
     if start < 1 or end < start:
         raise RangeOutsideBlobError(f"lines {start}-{end} are not a one-based inclusive range")
-    lines = blob_lines(data)
+    return range_from_lines(blob_lines(data), start, end)
+
+
+def range_from_lines(lines: Sequence[bytes], start: int, end: int) -> bytes:
+    """Read an inclusive range from a blob's previously split, unmodified lines."""
+
+    if start < 1 or end < start:
+        raise RangeOutsideBlobError(f"lines {start}-{end} are not a one-based inclusive range")
     if end > len(lines):
         raise RangeOutsideBlobError(
             f"lines {start}-{end} are not lines the blob holds (it holds {len(lines)})"

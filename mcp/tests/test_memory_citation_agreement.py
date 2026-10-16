@@ -522,7 +522,7 @@ class EscapedPipeAnchorTests(WorldCase):
     def test_a_row_written_with_the_escape_survives_the_cell_scan(self) -> None:
         """The cell is not split, and the anchor the row declares is the source's own spelling."""
         row = r"| describes it | `useEffect(cb, [a \| b])` | x.ts:1-1 |"
-        found = inline_scan.split_row(row)
+        found = [row[start:end].strip() for start, end in inline_scan.cell_spans(row)]
         self.assertEqual(len(found), 3)
         self.assertEqual(
             [one.text for one in cells.parse_row(1, found[1], found[2]).anchors], ["useEffect"]

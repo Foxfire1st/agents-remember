@@ -94,7 +94,7 @@ class PrecisionFixtures(unittest.TestCase):
         into a reported defect -- which is the false positive that decided this check.
         """
         row = WINDOWS_PREFIX_ROW + " L12-L20 |"
-        self.assertEqual(len(inline_scan.split_row(row)), 3)
+        self.assertEqual(len(inline_scan.cell_spans(row)), 3)
         self.assert_clean(document("| Class | Unit | Citations |", "| --- | --- | --- |", row))
 
     def test_a_diff_quoted_in_a_fenced_block_is_the_document_working(self) -> None:

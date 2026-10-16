@@ -208,6 +208,7 @@ consumers = [
   "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_context_providers.py",
   "mcp/tests/test_controlplane_store_durability.py",
+  "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
@@ -1603,6 +1604,7 @@ consumers = [
   "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_context_providers.py",
   "mcp/tests/test_controlplane_store_durability.py",
+  "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
@@ -2207,6 +2209,7 @@ replacement_contract = "node:mcp/tests/test_knowledge_conversion.py::test_a_card
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_citation_fix_documents.py",
+  "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",

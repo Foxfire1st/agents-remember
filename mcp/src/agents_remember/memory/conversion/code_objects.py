@@ -28,11 +28,11 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.memory_quality.style.citations import extents, grammars
+from agents_remember.models.knowledge_files import anchor_content
 from agents_remember.models.knowledge_files.anchor_content import (
     RangeOutsideBlobError,
     content_identity,
-    line_count,
-    range_bytes,
+    range_from_lines,
 )
 
 _FILE_MODES: Final = frozenset({"100644", "100755", "120000"})
@@ -62,6 +62,7 @@ class CodeObjects:
     _modes: dict[str, dict[str, str]] = field(default_factory=dict)
     """Tree entry modes by path, for each tree :meth:`tree` read (MIK-R53 rule 3)."""
     _blobs: dict[str, bytes] = field(default_factory=dict)
+    _lines: dict[str, list[bytes]] = field(default_factory=dict)
     _definitions: dict[tuple[str, str, str], dict[str, list[extents.Extent]]] = field(
         default_factory=dict
     )
@@ -243,7 +244,14 @@ class CodeObjects:
         return spans[0] if len(spans) == 1 else None
 
     def line_count(self, blob_id: str) -> int:
-        return line_count(self.blob(blob_id))
+        return len(self._blob_lines(blob_id))
+
+    def _blob_lines(self, blob_id: str) -> list[bytes]:
+        """Split each blob once for this conversion, shared across paths and anchors."""
+
+        if blob_id not in self._lines:
+            self._lines[blob_id] = anchor_content.blob_lines(self.blob(blob_id))
+        return self._lines[blob_id]
 
     def content(
         self,
@@ -275,7 +283,7 @@ class CodeObjects:
         else:
             start, end = int(str(locator["start"])), int(str(locator["end"]))
         try:
-            return content_identity(range_bytes(data, start, end))
+            return content_identity(range_from_lines(self._blob_lines(blob_id), start, end))
         except RangeOutsideBlobError:
             return None
 

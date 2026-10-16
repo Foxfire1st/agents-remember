@@ -50,6 +50,7 @@ unit-regression = [
   "mcp/tests/test_context_packet_cli.py",
   "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_context_providers.py",
+  "mcp/tests/test_conversion_cost_scans.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_curator_coherence_file_transport.py",
