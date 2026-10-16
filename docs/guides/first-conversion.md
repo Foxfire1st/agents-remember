@@ -55,6 +55,17 @@ The memory repository has an official line (a branch leaves start from).
 4. Every other open line of that repository crosses at its next `worktree_sync` with
    `merge-memory` (MIK-R24 rule 8).
 
+## Authored migration prose after conversion
+
+The converter preserves source identities and exported wording; it is not a style-rewriting pass.
+For subsequent authored invariant revisions, family guarantees and history reasons, use the
+[shared STE-inspired writing profile](../../skills/l-01-agent-lifecycles/reference/shared-writing-profile.md).
+The migration procedure must link that profile before assessment waves start. Compare each proposed
+rewrite's promise and semantic scope with its exact baseline and obtain independent meaning review
+before publication through the normal writer. Keep producer statements, source/evidence identities,
+closed history and original revisions inspectable. Do not bulk-rewrite frozen records or treat
+successful conversion, a shorter sentence or a vocabulary check as proof of equivalent meaning.
+
 ## The converter stays
 
 The conversion command, its read-only reader of the legacy database, and

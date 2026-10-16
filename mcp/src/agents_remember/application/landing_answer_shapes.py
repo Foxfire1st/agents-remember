@@ -653,8 +653,14 @@ def project_task_doc_answer(
         answer = {key: value for key, value in whole.items() if key in allowed}
         if operation == "create" and isinstance(whole.get("renderedPath"), str):
             answer["renderedPath"] = whole["renderedPath"]
-        if operation in _TASK_DOC_REVIEW_OPS and "reviewState" in whole:
-            answer["reviewState"] = whole["reviewState"]
+        if operation in _TASK_DOC_REVIEW_OPS:
+            answer.update(
+                {
+                    state_key: whole[state_key]
+                    for state_key in ("reviewState", "memoryReviewState", "reviewKind")
+                    if state_key in whole
+                }
+            )
         if operation == "record_route_review" and isinstance(whole.get("taskDocumentPath"), str):
             answer["taskDocumentPath"] = whole["taskDocumentPath"]
     master_sync = answer.get("masterSync")

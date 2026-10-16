@@ -620,7 +620,7 @@ CURATION_POLICY_STATEMENTS: dict[str, tuple[str, ...]] = {
         "prepare → publish → validate",
     ),
     "skills/l-01-agent-lifecycles/roles/curator.md": (
-        "Run the complete curation operation at intake and after every repair, and clear the coherence gate,",
+        "At intake and after every repair, run the full curation operation and coherence gate",
     ),
 }
 

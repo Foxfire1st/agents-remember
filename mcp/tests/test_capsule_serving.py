@@ -351,6 +351,7 @@ def _synthetic_corpus(root: Path, *, origin: str, skill_name: str) -> SkillSourc
             operation: {
                 "source": f"operations/{operation}.md",
                 "purpose": f"{operation} rules",
+                "audience": "all",
                 "applies_to_roles": [
                     role for role in ALL_ROLES if operation in OPERATIONS_BY_ROLE[role]
                 ],

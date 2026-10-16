@@ -39,6 +39,7 @@
     "orientation": {
       "source": "operations/orientation.md",
       "purpose": "Read the supplied role binding and durable inputs; ask only for missing taskless target facts.",
+      "audience": "sections",
       "applies_to_roles": [
         "architect",
         "orchestrator",
@@ -55,6 +56,7 @@
     "planning": {
       "source": "operations/planning.md",
       "purpose": "Shape a bounded plan and requirement set; Architect delegation starts with one Manager for one master, one Orchestrator for concurrent masters, unless the developer chooses otherwise.",
+      "audience": "sections",
       "applies_to_roles": [
         "architect",
         "designer",
@@ -65,6 +67,7 @@
     "implementation": {
       "source": "operations/implementation.md",
       "purpose": "Implement one selected leaf and report its change and verification evidence.",
+      "audience": "sections",
       "applies_to_roles": [
         "worker"
       ]
@@ -72,6 +75,7 @@
     "review": {
       "source": "operations/review.md",
       "purpose": "Independently review the complete assigned candidate or sealed fix-verification scope.",
+      "audience": "sections",
       "applies_to_roles": [
         "reviewer",
         "manager",
@@ -82,6 +86,7 @@
     "curation": {
       "source": "operations/curation.md",
       "purpose": "Reconcile intent, code, reports, onboarding, and admitted knowledge for one leaf.",
+      "audience": "sections",
       "applies_to_roles": [
         "curator",
         "manager"
@@ -90,6 +95,7 @@
     "coordination": {
       "source": "operations/coordination.md",
       "purpose": "Start and message role agents on the Paseo host against exact canonical AR task references.",
+      "audience": "sections",
       "applies_to_roles": [
         "architect",
         "orchestrator",
@@ -99,6 +105,7 @@
     "authorized-closeout": {
       "source": "operations/closeout.md",
       "purpose": "Coordinate the existing authorized paired code/memory closeout with its exact evidence.",
+      "audience": "all",
       "applies_to_roles": [
         "manager",
         "orchestrator",
@@ -108,6 +115,7 @@
     "recovery": {
       "source": "operations/recovery.md",
       "purpose": "Resume the same task and the same role agents; reconcile uncertainty before retrying.",
+      "audience": "sections",
       "applies_to_roles": [
         "architect",
         "orchestrator",
@@ -122,6 +130,7 @@
     "bootstrap": {
       "source": "operations/bootstrap.md",
       "purpose": "The new user's first hour: the memory repository from nothing to a resolving context, and the failure states a new user actually hits.",
+      "audience": "sections",
       "applies_to_roles": [
         "bootstrap"
       ]
@@ -556,6 +565,124 @@
     "criteria": []
   },
   "references": {
+    "curator-authoring-d301": {
+      "source": "reference/curator-authoring-d301.md",
+      "description": "Named-step authoring procedures; capsule retains inputs, whole output and step limits.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Curation workflow 1: Reconcile, not before",
+      "roles": ["curator"]
+    },
+    "curator-handoff-d301": {
+      "source": "reference/curator-handoff-d301.md",
+      "description": "Memory comparison and handover procedures; capsule retains output identities and lane limits.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Curation workflow 7: Undergo the independent fact-check, not before; reuse at Curation workflow 8: Repair, then republish",
+      "roles": ["curator"]
+    },
+    "reviewer-orient-d301": {
+      "source": "reference/reviewer-orient-d301.md",
+      "description": "Scope inspection before Reviewer Process step 1.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach step 1 (orient and scope), not before",
+      "roles": ["reviewer"]
+    },
+    "reviewer-baseline-d301": {
+      "source": "reference/reviewer-baseline-d301.md",
+      "description": "Route, evidence-class and sealing instructions before Reviewer baseline steps.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach step 3 (baseline steps 3–5), not before",
+      "roles": ["reviewer"]
+    },
+    "reviewer-adjudication-d301": {
+      "source": "reference/reviewer-adjudication-d301.md",
+      "description": "Knowledge-effects check before requirement adjudication.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach step 7 (requirement adjudication), not before",
+      "roles": ["reviewer"]
+    },
+    "reviewer-memory-d301": {
+      "source": "reference/reviewer-memory-d301.md",
+      "description": "Cut-card and added-file checks before memory review.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach step 8 (memory review), not before",
+      "roles": ["reviewer"]
+    },
+    "reviewer-master-exit-d301": {
+      "source": "reference/reviewer-master-exit-d301.md",
+      "description": "Master-exit completeness checks.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach master-exit review, not before",
+      "roles": ["reviewer"]
+    },
+    "bootstrap-foundation-d301": {
+      "source": "reference/bootstrap-foundation-d301.md",
+      "description": "Foundation state and ownership instructions before Bootstrap step 7.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach step 7 (Reach the repository's knowledge foundation), not before",
+      "roles": ["bootstrap"]
+    },
+    "curator-intake-details": {
+      "source": "reference/curator-intake-details.md",
+      "description": "Supplied reader arguments and scoped read-tool signatures.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Curation workflow 1: Reconcile, not before",
+      "roles": ["curator"]
+    },
+    "curator-message-details": {
+      "source": "reference/curator-message-details.md",
+      "description": "Message payload fields and automatic filed-message location.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Curation workflow 1: Reconcile, not before",
+      "roles": ["curator"]
+    },
+    "curator-card-details": {
+      "source": "reference/curator-card-details.md",
+      "description": "Overview/card and trace-row formats and the batch citation command.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Curation workflow 4: L3 is last resort, not before",
+      "roles": ["curator"]
+    },
+    "curator-worklist-details": {
+      "source": "reference/curator-worklist-details.md",
+      "description": "Writer row refusals and format syntax, read when answering the worklist.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Curation workflow 2: Before ingest, not before",
+      "roles": ["curator"]
+    },
+    "curator-writer-details": {
+      "source": "reference/curator-writer-details.md",
+      "description": "Command/options and check messages at step 2; record formats and read-back call at step 3.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Curation workflow 2: Before ingest, not before",
+      "roles": ["curator", "manager"]
+    },
+    "shared-writing-profile": {
+      "source": "reference/shared-writing-profile.md",
+      "description": "One STE-inspired authoring profile with independent meaning comparison; no automatic semantic gate.",
+      "injected": false,
+      "step_detail": true,
+      "step": "when you reach Curation workflow 2: Before ingest, not before",
+      "roles": ["curator", "worker", "reviewer"]
+    },
+    "visual-explainer-authoring": {
+      "source": "reference/visual-explainer-authoring.md",
+      "description": "Apply the shared writing profile to optional visual walkthroughs without replacing required evidence.",
+      "injected": false,
+      "roles": ["worker", "curator", "reviewer"]
+    },
     "rationale": {
       "source": "reference/rationale.md",
       "description": "Reference-only: rationale, provenance, and credits consolidated out of the normative path.",

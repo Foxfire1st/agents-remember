@@ -32,10 +32,12 @@ from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
     resolve_terminal_leaf_doc,
 )
+from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
 from agents_remember.worktrees.review_history import (
     ReviewHistoryError,
     begin_task_review,
     record_task_review,
+    review_state_field,
 )
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
@@ -159,6 +161,7 @@ def _record_route_review_bound(
 ) -> TaskDocument:
     if payload is None:
         raise TaskDocError("record_route_review requires a review object")
+    _require_code_route_kind(payload)
     if doc.kind == "master":
         _require_master_route_review_binding(binding)
         contract = binding.contract
@@ -248,6 +251,9 @@ def _begin_task_review_bound(
 def candidate_root_for_review(
     contract: WorktreeContract | None,
     repo_root: Path | None,
+    *,
+    review_kind: str = "code",
+    memory_root: Path | None = None,
 ) -> Path | None:
     """Resolve the candidate root a review record binds through the contract authority.
 
@@ -257,11 +263,37 @@ def candidate_root_for_review(
     caller resolves the byte identity from the returned root; ``None`` means
     the identity is unproven and admits no same-round record.
     """
+    if review_kind == "memory":
+        if contract is not None and contract.memory_worktree is not None:
+            return contract.memory_worktree
+        return memory_root
     if contract is not None and contract.kind == "leaf":
         worktree = contract.code_worktree
         if worktree.is_dir():
             return worktree
     return repo_root
+
+
+def candidate_identity_for_review(
+    config: McpRuntimeConfig,
+    contract: WorktreeContract | None,
+    repo_id: str,
+    payload: dict[str, Any] | None,
+) -> str | None:
+    """Bind record-only checks to the selected lane's admitted candidate, not its sibling."""
+    try:
+        lane = review_state_field(payload)
+    except ReviewHistoryError as exc:
+        raise TaskDocError(f"{exc.status}: {exc}") from exc
+    repository = config.repositories.get(repo_id)
+    return resolve_candidate_identity(
+        candidate_root_for_review(
+            contract,
+            repo_root_opt(config, repo_id),
+            review_kind="memory" if lane == "memoryReviewState" else "code",
+            memory_root=repository.memory_root if repository is not None else None,
+        )
+    )
 
 
 def _record_task_review_bound(
@@ -285,6 +317,35 @@ def _record_task_review_bound(
         raise TaskDocError(f"{exc.status}: {exc}") from exc
 
 
+def with_review_lane_result(
+    result: dict[str, Any], doc: TaskDocument, operation: str, payload: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Retain code state and explicitly identify the lane changed by a review operation."""
+    if doc.memoryReviewState is not None:
+        result["memoryReviewState"] = doc.memoryReviewState.model_dump(mode="json")
+    if operation in {"begin_review", "record_review", "record_route_review"}:
+        kind = (payload or {}).get("reviewKind", "code")
+        result["reviewKind"] = kind
+        if kind == "memory" and result.get("ok"):
+            if operation == "begin_review" and doc.memoryReviewState is not None:
+                result["updated"] = f"memory review round {doc.memoryReviewState.round} begun"
+            elif operation == "record_review":
+                result["updated"] = "memory review recorded"
+    return result
+
+
+def _require_code_route_kind(payload: dict[str, Any]) -> None:
+    """Memory results publish no code-route evidence and never alter its passed state."""
+    try:
+        lane = review_state_field(payload)
+    except ReviewHistoryError as exc:
+        raise TaskDocError(f"{exc.status}: {exc}") from exc
+    if lane == "memoryReviewState":
+        raise TaskDocError(
+            "memory reviews use record_review with reviewKind=memory, not record_route_review"
+        )
+
+
 def _state_payload(payload: dict[str, Any], review: Any = None) -> dict[str, Any]:
     """Keep route evidence out of the shared, generic state transition.
 
@@ -294,9 +355,10 @@ def _state_payload(payload: dict[str, Any], review: Any = None) -> dict[str, Any
     resolved separately from the contract and passed alongside.
     """
 
+    _require_code_route_kind(payload)
     state = {
         key: payload[key]
-        for key in ("verdict", "verdictRef", "findings", "remainingFindingIds")
+        for key in ("verdict", "verdictRef", "findings", "remainingFindingIds", "reviewKind")
         if key in payload
     }
     if "candidateTree" not in state:
@@ -312,7 +374,7 @@ def _route_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in payload.items()
-        if key not in {"findings", "remainingFindingIds"}
+        if key not in {"findings", "remainingFindingIds", "reviewKind"}
     }
 
 
@@ -401,6 +463,7 @@ def _enforce_route_review_authority(
     original: TaskDocument | None,
     candidate: TaskDocument,
 ) -> None:
+    _enforce_memory_review_authority(operation, original, candidate)
     candidate_review = candidate.routeReview.model_dump_json() if candidate.routeReview else None
     original_review = (
         original.routeReview.model_dump_json()
@@ -415,6 +478,22 @@ def _enforce_route_review_authority(
         raise TaskDocError(
             "replace cannot add, remove, or change route-review evidence; "
             "use task_doc.record_route_review"
+        )
+
+
+def _enforce_memory_review_authority(
+    operation: str, original: TaskDocument | None, candidate: TaskDocument
+) -> None:
+    """Keep the independent memory record under the dedicated review publisher only."""
+    before = original.memoryReviewState if original is not None else None
+    after = candidate.memoryReviewState
+    if operation == "create" and after is not None:
+        raise TaskDocError(
+            "create cannot author memory-review state; use begin_review/record_review with reviewKind=memory"
+        )
+    if operation == "replace" and before != after:
+        raise TaskDocError(
+            "replace cannot change or erase memory-review state; use begin_review/record_review with reviewKind=memory"
         )
 
 

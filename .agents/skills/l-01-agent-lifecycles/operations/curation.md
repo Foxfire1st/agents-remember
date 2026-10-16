@@ -1,157 +1,95 @@
+
+<!-- ar:roles all -->
 # Operation — Curation
 
-**What it covers:** the leaf coherence pass — reconciling intended, current, and implemented meaning
-and writing the affected onboarding. The Manager starts the Curator when the Worker's first freeze exists;
-the Worker and Reviewer supply the candidate-bound inputs directly. It also carries the repository's
-**first or resumed knowledge
-foundation**, which is the same curator's authoring work with a different admission and scope.
+<!-- ar:roles all -->
+**Scope:** reconcile a leaf's intended, current and implemented meaning; write affected onboarding. The Manager starts the Curator at the Worker's first freeze; Worker and Reviewer supply candidate-bound inputs directly. It also covers **first or resumed repository knowledge foundation**: the same authoring work, different admission/scope.
 
-**When it is selected:** a leaf has a Worker's freeze and affected memory surfaces. The Manager supplies the
-assignment; the Worker sends its hand-off list and the Reviewer sends the code freeze it passed.
-Its second, bounded entry — a repository's first or resumed
-knowledge foundation, before any leaf exists — is stated under *The repository-foundation entry* below.
+<!-- ar:roles all -->
+**Select:** leaf Worker freeze plus affected memory. The Manager assigns; the Worker sends its list; the Reviewer sends its passed code freeze.
+The role's Inputs state the bounded foundation entry before any leaf exists.
 
+<!-- ar:roles all -->
 ## Who carries it, and their job
 
+<!-- ar:roles curator -->
 | Role | Its job in this operation |
 | --- | --- |
 | curator | performs the three-way reconciliation, writes through one admitted writer and hands the memory candidate directly to the Reviewer |
 | worker | supplies the exact freeze and hand-off list; answers code questions and receives evidenced code concerns directly |
 | reviewer | supplies the passed code freeze, checks the memory candidate and answers code findings, including after code PASS |
+<!-- ar:roles manager -->
 | manager | starts the Curator, reads leaf state from reports and retains task acceptance and landing authority |
 
+
+<!-- ar:roles all -->
 Reconciliation and transaction ownership stay disjoint: the Curator reconciles and writes memory; the Manager owns the
 transaction. The curator runs no Git write: no stage, commit, branch or ref change, or stash operation.
 The curator never runs the closeout preview, never stages a sync resolution or repairs closeout transaction state, and
 never decides whether a leaf lands.
 
-The manager's half is a **leaf**-entry fact. On the repository-foundation entry there is no leaf, no
-manager and no brief. The foundation is
-reached the way the `c-14-knowledge-bootstrap` skill states: the taskless **bootstrap** seat carries
-the read-and-report step, a curator seat opened on a **task document** authors it on that task's
-line, and the taskless writer is run by an instructed session that follows this role's own rules and
-whose admission is the writer's own (see below).
+<!-- ar:roles curator -->
+Manager ownership applies to the **leaf** entry. Foundation has no leaf, Manager or brief.
 
+<!-- ar:roles curator -->
 ## Required inputs
 
-The brief binds the assignment; the Worker's and Reviewer's direct handovers supply the candidate-bound
-inputs. None is inferred from transcript memory:
-
+<!-- ar:roles all -->
 1. **The captured change set** — code diff from the leaf's base to its actual pre-closeout candidate with counters and paths,
    identified by the Worker against the leaf contract's recorded range, not a guess.
-2. **The leaf task doc** — including the approved requirement corpus ruling and every exact stable-ID
-   + version canonical packet the brief names.
-3. **`notes/`** — the builder turn report, plus the candidate-bound route-review verdict when review
-   was requested.
 
-Also required: the existing onboarding contracts and entity records for the affected routes (read
-before replacing their account of current intent); the code and memory worktree paths; the
-knowledge files of this leaf's memory worktree (cards and sidecars under `onboarding/`, records under
-`knowledge/`), which the hand-off is written into and the next task's planner reads from its own base;
-and the enclosure contract path that scopes the curator's MCP tools to this leaf.
+<!-- ar:roles curator -->
+3. **`notes/`**: builder report and, when requested, candidate-bound route-review verdict.
 
+<!-- ar:roles curator -->
+<!-- ar:roles all -->
 Intake is **rejected** when an applicable packet is missing, unapproved, or version-mismatched. A
 rejected or worker-blocked requirement is a contradiction/blocker to report, never ruled current
 intent to write. Atomic child leaves have no leaf route-review record; when review is requested,
 their accumulated change is reviewed on the canonical master at master-to-parent integration.
 
+<!-- ar:roles curator -->
 ## Bound Paseo intake and capabilities
 
-For an AR-launched Paseo capsule, read the rendered task document and canonical JSON at the exact
-`rendered_path` and `json_path` supplied by `taskDocReadArgs`, with your own file tools.
+<!-- ar:roles curator -->
+For AR-launched Paseo, use your file tools to read rendered task and canonical JSON at `taskDocReadArgs`' exact `rendered_path` and `json_path`.
 `task_doc` writes and does not read. Call these AR tools only on `agents-remember-task`.
-Use the handover's `arMcpContext.readerArguments` and the actual
-tool schemas: `knowledge_read` takes `memoryRoot`; only `read_ar_files` uses `task_context` with the
-canonical task reference and enclosure contract. Missing scope fields and refused
-capabilities are blockers, not permission to use another AR server or an unscoped command. Read the
-assignment's applicable task packets, not an unrelated role or the complete hierarchy by default.
+Read [scoped read signatures]({{detail:reference/curator-intake-details.md}}) when you reach **Curation workflow 1: Reconcile**, not before. Missing scope or refused capabilities block work; never switch AR servers or use unscoped commands. Read assignment-applicable packets, not unrelated roles or the whole hierarchy by default.
 
-Name the immutable baseline and candidate records through admitted scoped `knowledge_read` on `agents-remember-task`, open the named files with your own tools, and read the full comparison in the `knowledge_diff` report
-before semantic changes, preserve the baseline, and read admitted records back under that authority.
-The MIK writer below remains the owner. Use only the source-bound command admitted for the selected
-runtime; if this compiled Paseo capsule exposes no writer and admits no such command, report the
-required records not written. That limitation belongs to this capsule, not MIK generally. Never use
-another installation's command or an internal writer to bypass the refusal. Verify every output
-resolves inside the selected memory root.
+<!-- ar:roles curator -->
+Preserve the immutable baseline; compare fully and read admitted records back.
+The MIK writer retains ownership. Use only the selected runtime's admitted source-bound command; if this Paseo capsule exposes no writer and admits none, report required records not written. This limits the capsule, not MIK. Never bypass refusal with another installation's command or an internal writer. Verify every output resolves inside the selected memory root.
 
 
-For the selected converted memory root, the admitted file-writer command is
-`agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the hand-off list>
---authorization-ref <ref> --commit --json`. It writes files and publishes no dataset;
-The CLI has no `--baseline`, `--publish` or `--publish-to` options; its parser rejects them before
-the file writer is invoked.
+<!-- ar:roles curator -->
 
-On a development install the producer is the build that serves the agent: the tool server
-that started it, or the command line of the same build. It is the clean main checkout, and the
-serving commit is the ruler. Every run states its ruler. The leaf's own source is no producer for
-the leaf's memory, with or without an admission. A leaf that changes the writer or the check proves
-it on fixtures and scratch copies; that proof is evidence of the build, and this text orders no
-fixture procedure. Nothing is installed for a run, no guard is switched off, and no producer stands
-in for one that refused.
 
-An explicit report-only assignment delivers only its requested report and bound upstream message,
-without onboarding writes, MQC, coherence, indexes, or comparison production. It does not claim the
-normal authoring pass complete; that pass retains all the full-operation obligations below.
+<!-- ar:roles all -->
+On development installs, only the serving build produces: the starting tool server or that same build's CLI. Use the clean main checkout; its serving commit is the ruler. Every run states its ruler. Leaf source never produces leaf memory, admitted or not. Prove leaf writer/check changes on fixtures and scratch copies; that evidences the build, not an ordered fixture procedure. Install nothing for a run, disable no guard, substitute no producer after refusal.
 
+<!-- ar:roles curator -->
+<!-- ar:roles curator -->
 ## Normal workflow
 
-1. **Reconcile three ways.** The pass succeeds only when these three bodies agree, or every material
-   divergence is surfaced directly to its answering seat under the handover rules below:
-   - the existing system's **current intent** — source, tests, onboarding contracts, entity
-     boundaries, durable incident lessons;
-   - the **ruled change intent** — the task, developer decisions, approved design notes, builder
-     report, reviewer verdict;
-   - the **implemented reality** — the complete fed change set and its verification evidence.
-2. **Route the durable knowledge through the real writer.** The reconciliation's requirement-shaped items
-   are authored knowledge, not onboarding prose. Every target in it carries its own authored `rationale` (why
-   that place carries the obligation) and optionally a `role`, as `../templates/curator-handoff-list.md` states;
-   the writer never generates a rationale and refuses a list with an unexplained target
-   (`realization_rationale_absent`). Hand the same JSON hand-off list to
-   `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the list>
-   --authorization-ref <the authorization this run is admitted under> --commit --json`. The writer writes files in
-   this leaf's memory worktree: records under `knowledge/`, `realizes` and `proves` entries in the file sidecars,
-   and the leaf's history file. Nothing is published: the files are committed with the leaf's memory branch, and
-   the next task's planner reads them from its own base. **Consume the report, not the exit status:** its state
-   is `written`, `planned` or `refused`; a refused run wrote nothing and names every problem with its own reason.
-   A partial hand-off therefore stays visible; it is never rounded up to "the batch went through". The command
-   needs converted memory: on the legacy format it refuses with `legacy-format` and names the conversion command.
-3. **Examine family coverage and author it as part of the same list.** For every scoped obligation, decide whether
-   the evidence and the project's intent justify a joint obligation with others. Where they do, author a `family`
-   record in the list's `records` section, as `../templates/curator-handoff-list.md` states: the family's **own**
-   guarantee text, its members, its routes and its admission — one obligation may belong to several families.
-   Nothing is grouped by directory, route, label or shared anchor. A member or membership change **prompts a fresh
-   look at the affected recorded guarantee**: update the stored family record only where that is justified, answer
-   the family's worklist item with a history row that says what was examined. When you restate a family's
-guarantee, name the family in `history` as a `changed` row with your `effect`; the writer fills the
-family's own revision. Never let an implementation
-   change rewrite member intent or family meaning by itself. An external document a card rests on is cited as an
-   `external` reference target in the card's sidecar, never as a repository path with a Git blob. Name that
-   document in the handoff evidence for the record's `origin`, so the evidence shows which external document
-   each backed record rests on. Read the result
-   back — the writer's report, and the records `knowledge_read` with `view="family"` names over this leaf's memory worktree, opened with your own tools — and
-   carry the coverage into the handoff: the families authored or updated, and those examined and left unchanged.
-4. **Route every change-set item and every notes item to the right home** through the
-   `c-05-create-or-update-onboarding-files` skill workflow:
-   - changed source files → their file-level sidecars with compact current contracts and a newest
-     semantic-history entry; a mechanical consumer change with no contract impact gets a precise
-     reviewed no-impact entry, not invented architecture prose;
-   - route overviews → body updates when route meaning changed, otherwise an explicit reviewed
-     no-impact history entry only when that overview was reviewed;
-   - entity catalog → only for real load-bearing entity changes;
-   - a notes item with no file, route, or entity home → the L3 Operational-Notes target, **last
-     resort only**, never the default drop point for an inconvenient finding;
-   - generated route indexes → regenerate with `route_index_refresh` on `agents-remember-task` scoped to this leaf.
-5. **Reject overview-dumping and task-log-dumping.** Never add an overview heading named for a leaf or date;
-   update the overview body that owns the meaning. Preserve a truth when it is important to future
-   correctness, non-obvious, and expensive to rediscover. Omit code narration, temporary branch
-   facts, raw test totals, generic implementation-round chronology, and facts obvious from code and
-   tests.
+<!-- ar:roles curator -->
+1. **Reconcile** current intent, ruled intent and implemented reality; surface every material divergence.
+<!-- ar:roles curator -->
+2. **Before ingest**, each invariant's `scope` states applicability, conditions and exclusions; provenance is not scope.
+<!-- ar:roles curator -->
+3. Group only justified obligations; membership changes prompt a fresh guarantee check. Implementation alone never changes invariant or family meaning.
+<!-- ar:roles curator -->
+4. L3 is last resort; entity edits need real entity changes.
+<!-- ar:roles curator -->
+5. No task/date overview headings or task-log dumping.
+<!-- ar:roles all -->
+Use `agents-remember-task`.
 6. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
    its exact command and scope: the changed sidecars, the affected overviews/indexes/entities,
    `git diff --check` in the memory worktree, and the full `memory_quality_check` operation. Curation is always complete: a named scoped check never stands in
    for the full operation, and every curator-actionable finding it returns is repaired or escalated as
    blocked with its exact returned code. Run it at intake and after every repair until
    `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`. When the coherence record is then missing or stale, clear the coherence gate as §Authority gates states, before the closeout.
+<!-- ar:roles all -->
 7. **Undergo the independent fact-check (second reader, MIK-R53 rule 5).** Before the closeout of a leaf
    on converted memory, a seat that wrote none of the leaf's cards or records fact-checks the
    curation: every changed card, sidecar and record statement by statement against the leaf's final
@@ -160,72 +98,42 @@ family's own revision. Never let an implementation
    `../criteria/onboarding-memory.md` (they replace that file's Update History criteria). Blocking
    findings are repaired before the closeout, with a re-run of the full operation after each repair.
    This is a lifecycle step: the closeout does not check it.
-8. **Repair, then republish.** After each repair, re-run the full operation before handoff.
+<!-- ar:roles curator -->
+8. **Repair, then republish.**
 
-## Scope before ingest
+<!-- ar:roles curator -->
 
-For every authored invariant, the hand-off template's curator-owned `scope` must carry applicability,
-conditions and exclusions before ingest. Workflow or provenance text is never semantic scope;
-missing or malformed scope is a named `unfilled_curation_scope` refusal.
 
-The reviewer compares the leaf's base and candidate from Git (the code trees and the knowledge files of the
-two memory trees), so the curator records no separate comparison.
+<!-- ar:roles curator -->
 
-## The repository-foundation entry — the curator's work, before a leaf exists
 
-Curation's ordinary shape is a leaf's coherence pass. A repository's **first or resumed knowledge
-foundation** is the same *work* in its other entry, and it is selected when the scope is the
-repository's foundation rather than one leaf's delta: a new project entering ordinary setup, an
-existing project whose memory holds no knowledge records, or an explicitly requested bootstrap of an
-existing project. Its procedure is the `c-14-knowledge-bootstrap` skill.
+<!-- ar:roles curator -->
+Reviewer compares Git bases/candidates; Curator records no separate comparison.
 
-What stays identical is the ownership: the reconciliation and the authored knowledge — supported
-invariants and facets, justified family guarantees with their members, applicability, essential
-conditions, exclusions and source realizations — belong to this role either way, and
-there is still exactly one admitted writer. What changes is the
-**carrier**, the admission and the scope:
-
-| | Leaf coherence pass | Repository-foundation entry |
-| --- | --- | --- |
-| Carrier | this seat, opened on the leaf's task document | an **instructed session** with no task document, which runs the taskless writer and authors under this role's own rules, or the taskless **bootstrap** seat for the read-and-report step |
-| Scope | this leaf's captured pre-closeout change set | the requested project scope |
-| Required inputs | the brief, the change set, `notes/`, the enclosure contract | the declared repository entry, the resolved context, the requested scope, the available sources, the current knowledge state |
-| Writer entry | `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --commit` | `agents-remember knowledge-bootstrap --repo <repo_id> … --commit`, from a session with **no enclosure in scope** — the taskless writer refuses one (`enclosure_in_scope`) so a bootstrap can never write onto a task's line |
-| Onboarding | written by this pass | optional input: the foundation neither requires onboarding to exist nor writes any |
-| Missing inputs | intake is rejected | there is no brief, no change set and no enclosure contract to intake, and no task document is fabricated to give this entry an argument list — the carrier holds no task document, and no curator seat is opened on an invented one |
-
-Neither entry substitutes for the other: `knowledge-ingest` needs an enclosure contract and is not the
-route for a repository that has no leaf, and no leaf, worktree, enclosure or task document is ever
-fabricated to give the foundation entry an argument list. **The commit word is the developer's on both
-entries.** Planning is the default: a run without that word writes no file and no commit. A foundation run that examined only part of its scope reports itself partial
-and names the areas it did not reach; it never claims the foundation complete for them.
-
+<!-- ar:roles curator -->
+<!-- ar:roles all -->
 ## Authority gates
 
+<!-- ar:roles all -->
 - **Onboarding writes only.** The curator never writes code, never edits task docs, gates, lifecycle
   state, worktree contracts, or closeout state, never mutates task-doc status, and never performs
   closeout/integration/finalization.
-- **The knowledge write keeps its existing owner.** The curator *invokes*
-  `agents-remember knowledge-ingest` on the leaf entry and the taskless
-  `agents-remember knowledge-bootstrap` on the repository-foundation entry; it never writes a record,
-  a sidecar entry or a history file by hand, never opens or edits the derived index, and uses no MCP
-  tool as a write route (none writes knowledge). `--commit` stays the write word on both entries: it
-  writes files, and it is not a Git action and not an acceptance. A zero exit is not proof that
-  anything was written. The
-  report's state and its listed records, entries and refusals are the evidence, and a refused run is
-  reported exactly as it came back.
+<!-- ar:roles curator -->
+<!-- ar:roles curator -->
 - **Scope the MCP tools on `agents-remember-task` with the enclosure contract path.** Without it they resolve the **official**
   memory repo — read-only for the diagnostics, but `route_index_refresh` writes, so an unscoped call
   dirties a repository the curator does not own and blocks the next `worktree_start` until a human
-  reverts it. Check `onboardingRoot` in the response: it must be this leaf's memory worktree.
-  Preview a write with `dry_run=true` when you want the file list.
+  reverts it.
+<!-- ar:roles all -->
 - **Do not invent a future code commit hash**, advance fingerprints to an uncommitted tree, or add
   attestation prose to silence a finding. The closeout transaction records the actual code and
   memory commits after this handoff.
+<!-- ar:roles all -->
 - **The completed curation result is evidence for the curator handoff, not a closeout or integration
   gate**, and it is not a claim about the whole repository. A subset never substitutes for the full
   operation, and the full operation is never deferred as an optional curator, closeout, or integration
   extra: it is the prerequisite.
+<!-- ar:roles all -->
 - **`curator_coherence` is the authority a curator produces when the checklist requires it** — run
   `prepare` → `publish` → `validate` and publish when a healthy memory reports
   `checklistStatus=coherence-required` with a successful `prepare` and `candidateCount 0`.
@@ -233,61 +141,47 @@ and names the areas it did not reach; it never claims the foundation complete fo
   Validate before closeout. The frozen record names that candidate; closeout's history and
   fingerprint writes do not make it evidence about the later live tree, so do not validate that
   tree again after closeout as a prerequisite to integration.
-- **A discovered incident, opportunity, alternative frame, or forward-learning hypothesis is not
-  automatically current intent.** Use the `capture-candidate` disposition with an explicit evidence
-  reference and confidence in the rationale, then let the owning hierarchy route it. Do not create a
+<!-- ar:roles curator -->
+- Apply the role's discovery/current-intent rule. Use `capture-candidate`; put explicit evidence/confidence in the rationale; let the owning hierarchy route it. Do not create a
   new register or silently turn novelty into truth.
 
+<!-- ar:roles curator -->
 ## Failure handling
 
-- **Do not confuse test-green with intent-green.** Tests prove selected executable behavior; they do
-  not prove that ownership, non-goals, negative knowledge, or the separation between agent cognition
-  and control-plane state stayed coherent.
-- **Do not promote a historical oddity** into a permanent invariant without checking its causal
-  applicability and reconsideration condition.
-- **A partial or refused knowledge hand-off stays partial.** A run the writer reports as `planned`
-  wrote nothing; a `refused` run wrote nothing and names every problem with its own reason — correct
-  the list and run it again. A rerun that changes a target's `rationale` or `role` rewrites the
-  `realizes` entry this leaf wrote from that entry; the entry keeps its ID. A refused run is never
-  rounded up to "the batch went through".
-- **If any side of the three-way comparison is missing or ambiguous enough that curation would become
-  guesswork**, ask the Worker about code or the Reviewer about its verdict directly; ask the Manager only
-  when the missing row is a matter of ownership or authority.
-- **A code concern goes to the Reviewer and Worker, even after code PASS.** State the requirement or
-  report mismatch with its evidence; repair no code and write no knowledge claiming behaviour the code lacks.
-  The Reviewer answers by taking it into its findings and reopening that point, or explaining why it does not
-  hold. Name the finding and answer in the Curator report; an unresolved disagreement goes to the Manager.
-- Report **dirty-source drift**, missing onboarding, or other findings exactly as returned; never
-  convert a subset result into a full-quality claim.
+<!-- ar:roles curator -->
+Tests do not prove intent coherence.
+<!-- ar:roles curator -->
+Historical oddities need causal applicability and a reconsideration condition.
+<!-- ar:roles curator -->
+- **Keep partial/refused hand-offs partial.** `planned` and `refused` wrote nothing; refusal names every problem/reason: correct the list and rerun.
 
-## Messages
+<!-- ar:roles curator -->
+- **If any comparison side is missing or guesswork-level ambiguous**, ask the Worker directly about code or Reviewer about verdict; ask the Manager only for ownership/authority.
+<!-- ar:roles curator -->
+- **Send code concerns to Reviewer and Worker, including after code PASS.** Evidence the requirement/report mismatch; repair no code or author knowledge claiming absent behaviour.
+  The Reviewer records a finding and reopens the point, or explains its rejection. Report the finding and answer; send unresolved disagreement to the Manager.
 
-Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.
-
+<!-- ar:roles all -->
+<!-- ar:roles curator -->
 ## Handoff / exit
 
-On an AR-launched leaf capsule, use `role_message` on `agents-remember-task` directly to the Reviewer,
-with the handover's role-and-task arguments. An agent ID is used only whole and unchanged as supplied
-by a sender line, start result or handover. A Curator starts no role: the starter briefs an agent and becomes
-its parent, so no seat starts its own checker. A dashboard launch needs no parent. Send questions requiring the developer's decision to your parent; without a parent, ask in your own chat. Repository-foundation and other admissions keep their brief's transport without a fallback.
+<!-- ar:roles curator -->
+For AR-launched leaves, send directly to Reviewer via `role_message` on `agents-remember-task` with handover role/task arguments. Use only whole, unchanged agent IDs from sender lines, start results or handovers.
 
-The curator's memory candidate goes directly to the Reviewer for its whole memory check; the report payload follows `../roles/curator.md` §Outputs.
-The structured coherence record and its generated projection are the durable output — not the
-transcript. Write the record before ending the turn;
-terminal/finalizer evidence attests only that this turn ended. Do not hand-write a curator certification.
+<!-- ar:roles curator -->
+Send the memory candidate directly to Reviewer for its whole memory check; use `../roles/curator.md` §Outputs.
+The coherence record/projection, not the transcript, are durable output. Write the record before turn end; terminal/finalizer evidence proves only turn end. Do not hand-write a curator certification.
 
-Each handover names the leaf, the thing's exact identity (the Worker's code head and change hash, and
-the memory candidate's identity), its report or verdict path, and the whole next stretch requested.
-The memory check keeps separate sealed reports, finding IDs and its own pass count: it opens
-no code-review round, resets no code verdict and adds no IDs to the code baseline. Its ordinary limit is
-the same number of passes as the code review. A pass beyond the settings limit
-needs the architect's or the developer's word recorded by the Manager. Receive memory findings or PASS
-directly from the Reviewer and repair within that lane; the Manager carries none of these handovers.
+<!-- ar:roles curator -->
+Read [handoff procedures]({{detail:reference/curator-handoff-d301.md}}) when you reach **Curation workflow 7: Undergo the independent fact-check**, not before; reuse at **Curation workflow 8: Repair, then republish**. Each handover names leaf, code head/change hash, memory identity, report/verdict path and whole next stretch. Reviewer records `begin_review`/`record_review`, `reviewKind=memory`: separate sealed memory IDs/reports/count, code-review limit; code state unchanged. Extras need Manager-recorded architect/developer approval. Under-way reviews finish as begun; new lanes apply after landing.
 
+<!-- ar:roles curator -->
 Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.
 
-If a required Manager notice cannot be delivered, record it as pending in your report, continue independent work, and retry it with `role_message` on `agents-remember-task`; do not turn this transport failure into a developer question in your own chat.
+<!-- ar:roles curator -->
+If required Manager notice fails delivery, report it pending, continue independent work and retry via `role_message` on `agents-remember-task`; never ask the developer in your chat instead.
 
+<!-- ar:roles all -->
 The Manager hears from the Curator only for these delivery and seat problems, ownership or authority,
 a pass beyond the settings limit, a code finding disputed with the Reviewer, or a sync step assigned
 to the Manager. It reads ordinary state from reports and never relays the contents. Memory conflicts
@@ -295,16 +189,10 @@ in the Worker's supported leaf sync come directly to the Curator; transaction st
 Manager. Contact another leaf only for a dependency named by a requirement or the Manager; other
 cross-leaf matters go through the Manager.
 
-Inside the assignment the Curator organises its work with whatever its harness offers, including
-sub-agents at any size, without a prescribed number or depth. The seat checks and answers for their
-work, credits their parts in its report, and hands it over under its own name. Boundary messages,
-task records and product operations changing leaf state are the seat's own acts. A harness sub-agent
-holds no AR seat, starts no role and has the same working folder, permissions and assignment. Nobody
-checks itself through a sub-agent; the memory check stays the Reviewer's. Keep exactly one Curator
-writer through the admitted writer. A harness without sub-agents can perform the same assignment.
-
+<!-- ar:roles curator -->
+<!-- ar:roles all -->
 For a native memory-file sync conflict, repair only the memory content inside your admitted write surface. The Manager captures, verifies and stages the resolution; the Worker continues the supported sync with `resolution_action="continue"`. Do not stage files or change transaction authority.
 
-Developer questions and relayed answers follow `operations/orientation.md`.
-
+<!-- ar:roles curator -->
+<!-- ar:roles all -->
 Required input: the permission non-bypass boundary in `operations/orientation.md` — a denied or unanswered harness request is never worked around with another tool, command, helper seat, or later turn.

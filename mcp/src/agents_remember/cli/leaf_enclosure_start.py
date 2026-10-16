@@ -35,6 +35,7 @@ from agents_remember.application.worktree_tool_requests import StartExecution, T
 from agents_remember.application.worktree_tools import worktree_start_tool
 from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
+from agents_remember.tasks.launch_review_read import tolerate_unreadable_review
 from agents_remember.worktrees.services import bind_worktree_services
 
 COMMAND = "start-leaf-enclosure"
@@ -207,7 +208,9 @@ def run(args: argparse.Namespace) -> int:
                 f"start holds ({differing}); nothing was started.",
             )
         # Nothing the start prints may reach standard output: it carries the one reply.
-        with contextlib.redirect_stdout(sys.stderr):
+        # Context variables do not cross exec: scope this launch-only recovery here,
+        # after root validation, without changing public worktree/task readers.
+        with contextlib.redirect_stdout(sys.stderr), tolerate_unreadable_review():
             created = worktree_start_tool(
                 config, identity, execution=StartExecution(skip_provider_setup=True)
             )

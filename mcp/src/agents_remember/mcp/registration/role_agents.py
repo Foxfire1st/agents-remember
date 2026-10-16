@@ -80,6 +80,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
         feature_values: dict[str, StrictBool | StrictStr] | None = None,
         replaces_agent_id: str | None = None,
         replaces_interrupt_turn: bool = False,
+        step_up: str | None = None,
     ) -> dict[str, object]:
         """Start one role agent for one canonical selection with the caller as parent, starting in Paseo. Only a role agent that AR launched can call this. A request id reconciles the same agent, never a second. Only the agent that started an execution repeats its request_id. Answers ok, the agent id and the handover location; rejected (the launch is closed; no usable agent exists). Starts run one at a time. A call waits up to 60 seconds for another start to end, then is refused; nextAction says to call again with the same arguments. Reference: docs/reference/mcp-tools.md."""
         call = RoleStartCall(
@@ -94,6 +95,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
             feature_values=feature_values or {},
             replaces_agent_id=replaces_agent_id,
             replaces_interrupt_turn=replaces_interrupt_turn,
+            step_up=step_up,
         )
         return await asyncio.to_thread(role_start_payload, config, call)
 

@@ -63,13 +63,14 @@ def delivery(
 def test_task_and_skill_content_cannot_enter_the_instruction_slot() -> None:
     """The value type refuses an instruction parameter smuggled through the task channel."""
 
-    # There is no field to smuggle anything through: the value carries the binding, the
-    # instruction stream and the digest, and the task channel belongs to the caller.
+    # The admitted detail channel is separate from instructions; task text still has no field.
     assert set(CapsuleDelivery.__dataclass_fields__) == {
         "binding",
         "trusted_instructions",
         "semantic_digest",
+        "detail_references",
     }
+    assert delivery().detail_references == ()
 
     with pytest.raises(Exception, match="non-empty trusted instruction stream"):
         delivery(instructions="   ")

@@ -7,6 +7,77 @@ actual role variants and equivalent preserved boundaries, not weaker permissions
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
+from agents_remember.application.skill_resources.capsule import (
+    CapsuleSeatAddress,
+    routed_admission_for,
+)
+from agents_remember.cli.role_instruction_details import compose_launch_instructions
+from agents_remember.models.role_capsules.manifest import parse_composition_manifest
+from agents_remember.models.role_capsules.types import (
+    CapsuleAdmittedFacts,
+    CapsuleBinding,
+    CapsuleOperation,
+    CapsuleRole,
+    CapsuleRoleSeat,
+    CapsuleToolPolicy,
+    compute_content_digest,
+)
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.serving.capsule_delivery import capsule_delivery_from
+
+
+def delivered_step(
+    root: Path,
+    role_operation: tuple[CapsuleRole, CapsuleOperation],
+    source: str,
+    step: str,
+    report_path: Path,
+) -> tuple[str, str]:
+    """Read one declared detail through real admission, compilation and launch delivery.
+
+    Return the resolved instructions and that exact delivered file, not a concatenation
+    of references which could hide missing role declarations or broken step links.
+    """
+    role, operation = role_operation
+    manifest = (root / "composition-manifest.json").read_bytes()
+    parsed = parse_composition_manifest(manifest)
+    binding = CapsuleBinding(
+        operation=operation,
+        admitted=CapsuleAdmittedFacts(
+            task_reference="fixture/leaf.json",
+            task_document_digest=compute_content_digest(b'{"id":"leaf"}'),
+            seat=CapsuleRoleSeat(role, parsed.roles[role].altitude),
+            repository_id="fixture",
+            work_branch="fixture",
+            tool_policy=CapsuleToolPolicy(granted=frozenset(PUBLIC_TOOLS)),
+        ),
+    )
+    admission = routed_admission_for(
+        root, "composition-manifest.json", manifest, CapsuleSeatAddress(role, operation)
+    )
+    outcome = compile_admitted_capsule(binding, admission)
+    assert outcome.ok, outcome.render_explanation()
+    assert outcome.result is not None
+    delivery = capsule_delivery_from(outcome.result)
+    references = [entry for entry in delivery.detail_references if entry.source_path == source]
+    assert len(references) == 1, f"{role}/{operation}: missing or duplicate {source}"
+    reference = references[0]
+    assert reference.step == step
+    assert reference.content == (root / source).read_bytes()
+    instructions, record = compose_launch_instructions(delivery, str(report_path), {})
+    entries = [entry for entry in record["detailReferences"] if entry["sourcePath"] == source]
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["step"] == step
+    path = Path(entry["path"])
+    assert f"]({path.as_posix()})" in instructions
+    assert "{{detail:" not in instructions
+    assert path.read_bytes() == reference.content
+    return instructions, path.read_text(encoding="utf-8")
+
 
 ROLES = (
     "architect",
@@ -85,10 +156,43 @@ def autonomy_clauses(role: str) -> dict[str, tuple[str, ...]]:
             "A harness without sub-agents can do all the same work.",
         ),
     }
+    if role == "reviewer":
+        equivalents = {
+            "affirmative freedom": "Organise assignment work at any size with any harness facilities.",
+            "own split": "You choose the split; roles order work at task boundaries.",
+            "seat checks credits and answers": "You answer for all work: check helpers\u2019 work, report their parts, and hand over under your name.",
+            "seat boundary acts": "Every boundary act remains yours: inter-seat messages, task records and product operations changing leaf state.",
+            "helper seat role and scope": "Harness sub-agents hold no AR role or seat, start no role, and share your working folder, permissions and assignment.",
+            "independent review": "Sub-agents cannot self-check: code and memory changes require the independent Reviewer, never their author\u2019s helper.",
+            "no harness dependency": "Harnesses without sub-agents can do the same work.",
+        }
+        for name, equivalent in equivalents.items():
+            clauses[name] += (equivalent,)
     if role == "curator":
+        equivalents = {
+            "affirmative freedom": "Organise assignment work with any harness facilities, at any size.",
+            "own split": "Use harness sub-agents freely; neither number nor depth is prescribed.",
+            "seat checks credits and answers": "You answer for all work: verify delegates, report their parts and hand over under your name.",
+            "seat boundary acts": "You own every boundary act: cross-seat messages, task records and leaf-state-changing product operations.",
+            "helper seat role and scope": "Sub-agents hold no AR role or seat, start no role and share your folder, permissions and assignment.",
+            "independent review": "No self-check through sub-agents: the Reviewer retains your memory-candidate check.",
+        }
+        for name, equivalent in equivalents.items():
+            clauses[name] += (equivalent,)
         clauses["one curator writer"] = (
             "Keep exactly one Curator writer through the admitted writer",
+            "Keep exactly one Curator writer through the admitted route, never a helper lane.",
         )
+        completed_forms = {
+            "affirmative freedom": "Organise work at any size with any harness facilities.",
+            "own split": "Helper number/depth is unrestricted.",
+            "seat checks credits and answers": "You answer for all work. Verify helpers, report their parts and hand over under your name.",
+            "seat boundary acts": "You own inter-seat messages, task records and leaf-state-changing operations.",
+            "helper seat role and scope": "Helpers share your assignment, folder and permissions; they hold no AR role/seat and start none.",
+            "independent review": "No helper self-checking: the independent Reviewer retains memory-candidate review.",
+        }
+        for name, equivalent in completed_forms.items():
+            clauses[name] += (equivalent,)
     return clauses
 
 
@@ -161,54 +265,75 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
     "roles/reviewer.md": {
         "verdict to worker": (
             "hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states",
+            "Write/record the verdict and hand it directly to the leaf\u2019s Worker per `../operations/review.md` §Outputs.",
         ),
         "sealed whole repair": (
             "A block names the report with sealed findings and requests the whole repair stretch",
+            "A block names the sealed-findings report and requests the whole repair stretch",
         ),
         "pass to curator": (
             "code PASS also goes directly to the Curator with your hand-off list for that freeze",
+            "send code PASS and your freeze hand-off list directly to the Curator",
         ),
         "memory verdict to curator": (
             "hand it directly to the leaf's Worker as `../operations/review.md` §Outputs states",
+            "Review the Curator\u2019s memory change in its separate sealed lane; send findings or PASS directly to the Curator.",
         ),
         "identity and whole stretch": (
             "candidate head and change hash from the Worker's report, or memory change identity), report or verdict path, and request the recipient's whole next stretch",
+            "Every leaf hand-over names the leaf, exact object (Worker-reported candidate head and change hash, or memory change identity), report/verdict path, and requests the recipient\u2019s whole next stretch.",
         ),
         "own code begin": (
             "record your own begin and result as `../operations/review.md` §Outputs states",
+            "On taking a leaf code hand-over within the settings limit, record your begin/result per `../operations/review.md` §Outputs.",
         ),
         "own code result": (
             "record your own begin and result as `../operations/review.md` §Outputs states",
+            "On taking a leaf code hand-over within the settings limit, record your begin/result per `../operations/review.md` §Outputs.",
         ),
         "preceding result": (
             "record your own begin and result as `../operations/review.md` §Outputs states",
+            "On taking a leaf code hand-over within the settings limit, record your begin/result per `../operations/review.md` §Outputs.",
         ),
         "manager acceptance": (
             "The Manager accepts the verdict for the gate and records the architect's or the developer's authorization beyond the limit.",
+            "The Manager accepts the gate verdict and records architect/developer authorization beyond the limit.",
         ),
         "sealed memory lane": (
             "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
+            "Curator memory review keeps its separately sealed lane per `../operations/review.md` §Boundaries",
+            "Record memory rounds with `begin_review`/`record_review`, `reviewKind=memory`: separate baseline/list",
         ),
         "memory leaves code untouched": (
             "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
+            "Curator memory review keeps its separately sealed lane per `../operations/review.md` §Boundaries",
+            "unchanged code state",
         ),
         "memory ordinary limit": (
             "Curator memory review keeps its separately sealed lane as `../operations/review.md` §Boundaries states",
+            "Curator memory review keeps its separately sealed lane per `../operations/review.md` §Boundaries",
+            "same limit; extras need architect/developer approval recorded by Manager in leaf decisions.",
         ),
         "memory extra approval": (
             "the task's architect or the developer must authorize an extra pass, and the Manager records that authorization in the leaf's decisions",
+            "extra passes require the task\u2019s architect or developer\u2019s authorization, recorded by the Manager in leaf decisions",
+            "extras need architect/developer approval recorded by Manager in leaf decisions.",
         ),
         "post-pass concern": (
             "Answer a Curator finding that code fails the requirement or contradicts the Worker's report as `../operations/review.md` §Boundaries states, including after code PASS.",
+            "Answer Curator findings of code failing requirements or contradicting the Worker\u2019s report per `../operations/review.md` §Boundaries, even after code PASS.",
         ),
         "reopen or refute answer": (
             "Answer a Curator finding that code fails the requirement or contradicts the Worker's report as `../operations/review.md` §Boundaries states, including after code PASS.",
+            "Answer Curator findings of code failing requirements or contradicting the Worker\u2019s report per `../operations/review.md` §Boundaries, even after code PASS.",
         ),
         "busy retry": (
             "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/review.md` §Boundaries states.",
+            "Apply `../operations/review.md` §Boundaries to taken hand-overs and provider, seat and busy refusals.",
         ),
         "upward notice recovery": (
             "Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/review.md` §Boundaries states.",
+            "Apply `../operations/review.md` §Boundaries to taken hand-overs and provider, seat and busy refusals.",
         ),
     },
     "operations/review.md": {
@@ -235,9 +360,11 @@ LEAF_CLAUSES: dict[str, dict[str, tuple[str, ...]]] = {
         ),
         "sealed memory lane and count": (
             "Curator memory checks keep separately sealed reports, IDs and a count with the same settings limit as code",
+            "Curator memory checks use their own sealed reports, IDs and recorded lane: `begin_review`/`record_review` with `reviewKind=memory`, same settings limit and extra-round approval as code.",
         ),
         "memory leaves code untouched": (
             "they open no review-state round, reset no passed code review and add no IDs to its baseline",
+            "They open no code review-state round, reset no passed code review and add no IDs to its baseline.",
         ),
         "memory extra approval": (
             "Any extra memory pass follows `../operations/curation.md` §Handoff / exit states.",

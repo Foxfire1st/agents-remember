@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,7 +24,6 @@ from agents_remember.application.context_packet import (
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.application.role_launch_context import (
     LEAF_ROLES,
-    ROLE_LEVELS,
     RoleLaunchContext,
     resolve_role_launch_context,
     selection_binding,
@@ -40,11 +39,12 @@ from agents_remember.cli.paseo_catalog import (
     resolve_agent_selection,
 )
 from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.cli.role_instructions import (
-    compose_role_instructions,
     instruction_metadata,
     launch_choice_metadata,
 )
+from agents_remember.cli.role_launch_defaults import role_defaults
 from agents_remember.cli.role_launch_receipts import (
     _message_binding_projection_reference,
 )
@@ -56,7 +56,7 @@ from agents_remember.cli.role_launch_workspace import (
     _leaf_contract_path,
     _resolve_workspace,
 )
-from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.cli.role_step_up_runtime import selected_defaults
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
 from agents_remember.models.role_identity import canonical_role
@@ -207,11 +207,13 @@ def prepare_role_handover(  # noqa: PLR0913 -- chat_started rides the rule-6 lau
     request_id: uuid.UUID,
     started_by: StartingAgent | None = None,
     chat_started: bool = False,
+    step_up: str | None = None,
 ) -> PreparedRoleHandover:
     """Prepare the canonical role handover and the exact launch inputs of one role."""
 
     # The selection is validated against the cached catalog before anything is created for it.
     defaults, harness_order = _role_defaults(config, context)
+    defaults = selected_defaults(config, context, defaults, step_up)
     agent_id, session_options = resolve_agent_selection(
         config, defaults, harness_order, agent_override
     )
@@ -379,33 +381,7 @@ def _launcher_catalog(
 def _role_defaults(
     config: McpRuntimeConfig, context: RoleLaunchContext
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
-    repository = context.effective_task.ref.repository if context.effective_task else None
-    repo_scope = config.repositories.get(repository) if repository else None
-    settings = load_agentic_settings(
-        config.coordination_root,
-        repo_root=repo_scope.path if repo_scope else None,
-    )
-    knobs = settings.resolved_role_knobs(context.role, ROLE_LEVELS[context.role])
-    agent_id = knobs.harness or settings.spawn_harness
-    return (
-        {
-            "agent": agent_id,
-            "model": knobs.model,
-            "effort": knobs.effort,
-            "serviceTier": knobs.service_tier,
-            "mode": knobs.mode,
-            "featureValues": dict(knobs.feature_values),
-            "notes": knobs.notes,
-            "role": context.role,
-            "notesKey": knobs.origins["notes"].key
-            if "notes" in knobs.origins
-            else f"orchestration.roles.{context.role}.notes",
-            "hostRole": read_host_role(config, context.role),
-            "settingsSources": [path.as_posix() for path in settings.sources],
-            "fieldOrigins": {key: asdict(origin) for key, origin in knobs.origins.items()},
-        },
-        settings.harness_ids,
-    )
+    return role_defaults(config, context, read_host_role(config, context.role))
 
 
 def _ar_mcp_context(
@@ -629,9 +605,9 @@ def _compile_handover(
     if request_id is None:
         raise ValueError("A message binding requires its durable requestId.")
     task_document_digest = _digest(task_reads)
-    instructions, instruction_record = compose_role_instructions(
-        capsule.delivery.trusted_instructions,
-        capsule.delivery.semantic_digest,
+    instructions, instruction_record = compose_launch_instructions(
+        capsule.delivery,
+        report_path,
         request.session_options.get("choices", {}).get("notes", {}),
     )
     effective_digest = instruction_record["semanticDigest"]

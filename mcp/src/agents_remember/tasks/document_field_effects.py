@@ -52,6 +52,7 @@ from .document import (
     TaskEnclosureRef,
     TaskExecutionRegistration,
 )
+from .route_review import ReviewRound
 
 
 class TaskDocumentFieldEffect(StrEnum):
@@ -180,6 +181,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "decisions": AUDIT,
         "routeReview": EVIDENCE,
         "reviewState": EVIDENCE,
+        "memoryReviewState": EVIDENCE,
         "openQuestions": NORMATIVE,
         "references": EVIDENCE,
         "subTasks": STRUCTURAL | PROGRESS_AND_READINESS,
@@ -227,6 +229,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "text": EVIDENCE,
     },
     ReviewState: {
+        "recordedRounds": EVIDENCE,
         "round": EVIDENCE,
         "pending": EVIDENCE,
         "baselineFindings": EVIDENCE,
@@ -237,6 +240,12 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "approval": EVIDENCE,
         "developerApproval": EVIDENCE,
         "additionalRounds": EVIDENCE,
+    },
+    ReviewRound: {
+        "round": EVIDENCE,
+        "kind": EVIDENCE,
+        "findingsRemain": EVIDENCE,
+        "verdictRef": EVIDENCE,
     },
     RouteReviewRecord: {
         "candidateTree": EVIDENCE,

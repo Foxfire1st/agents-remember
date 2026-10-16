@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
 from agents_remember.application.role_capsules.sources import CapsuleAdmissionRequest
 from agents_remember.application.skill_resources.capsule import (
@@ -162,6 +163,44 @@ STAGE_PARTS = {
     ),
 }
 
+# Reviewer equivalents only: untouched roles still require their own wording.
+REVIEWER_STAGE_EQUIVALENTS = {
+    "Your stage ends when a verdict over the whole requirement": "Your stage ends at a recorded verdict covering the whole requirement",
+    "with its findings and its coverage": "its findings and coverage",
+    "you repair, and you go on": "Repair faults from your work or instrument and continue",
+    "says in its last line what it waits for and from whom": "If your stage is unfinished at turn end, state what and whom you await in your last line",
+    "You stop for an open permission prompt": "Stop for open permission prompts",
+    "a refusal by a product guard": "product-guard/AR-tool refusals with correct input or naming unowned state",
+    "a question about what the requirement means": "requirement-meaning questions",
+    "an effect outside your own worktree": "effects outside your worktree, scratch folder and task",
+}
+
+
+CURATOR_STAGE_EQUIVALENTS = {
+    "you repair, and you go on": "Repair faults your work or instrument causes, then continue",
+    "Your report names what you repaired": "Report your repairs.",
+    "says in its last line what it waits for and from whom": "If unfinished, end your turn with the awaited thing and its owner.",
+    "a refusal by a product guard": "a product-guard or AR-tool refusal with correct input or unowned state",
+    "a question about what the requirement means": "a requirement-meaning question",
+    "an effect outside your own worktree": "effects outside your worktree, scratch folder and task",
+}
+
+
+def _facet_variants(parts: tuple[str, ...], facet: str) -> tuple[str, ...]:
+    if parts == STAGE_PARTS["reviewer"] and facet in REVIEWER_STAGE_EQUIVALENTS:
+        return facet, REVIEWER_STAGE_EQUIVALENTS[facet]
+    if parts == STAGE_PARTS["curator"] and facet in CURATOR_STAGE_EQUIVALENTS:
+        return facet, CURATOR_STAGE_EQUIVALENTS[facet]
+    return (facet,)
+
+
+def _delete_facet(section: str, parts: tuple[str, ...], facet: str) -> str:
+    flat = _flatten(section)
+    for variant in _facet_variants(parts, facet):
+        flat = flat.replace(_flatten(variant), "", 1)
+    return flat
+
+
 #: Rule 9 sentences (evidence 10).
 RULE_NINE = {
     "reviewer": (
@@ -282,7 +321,11 @@ def _section_missing(section: str | None, parts: tuple[str, ...]) -> list[str]:
     if section is None:
         return ["no stage-end section"]
     flat = _flatten(section)
-    return [part for part in parts if _flatten(part) not in flat]
+    return [
+        part
+        for part in parts
+        if not any(_flatten(variant) in flat for variant in _facet_variants(parts, part))
+    ]
 
 
 def _check_source_sections(role: str, parts: tuple[str, ...], missing: list[str]) -> None:
@@ -302,12 +345,13 @@ def _check_compiled_sections(role: str, parts: tuple[str, ...], missing: list[st
                 missing.append(f"compiled {root.name} {role}/{operation}: stage-end section {gap}")
 
 
-def test_stage_end_sections_hold_in_sources_and_compiled_texts() -> None:
+@pytest.mark.parametrize("role", STAGE_PARTS)
+def test_stage_end_sections_hold_in_sources_and_compiled_texts(role: str) -> None:
     """Evidence 6, rules 6 to 8: the four roles hold the section and its parts."""
     missing: list[str] = []
-    for role, parts in STAGE_PARTS.items():
-        _check_source_sections(role, parts, missing)
-        _check_compiled_sections(role, parts, missing)
+    parts = STAGE_PARTS[role]
+    _check_source_sections(role, parts, missing)
+    _check_compiled_sections(role, parts, missing)
     assert missing == [], "\n".join(missing)
 
 
@@ -363,40 +407,54 @@ def _mutate_section(role: str, mutate) -> str:
     return head + mutate(section) + tail
 
 
-def test_stage_section_binding_fails_on_deletion_and_relocation() -> None:
+@pytest.mark.parametrize("role", STAGE_PARTS)
+def test_stage_section_binding_fails_on_deletion_and_relocation(role: str) -> None:
     """Every required facet, deleted or moved out of the section, fails the check."""
-    for role, parts in STAGE_PARTS.items():
-        for facet in parts:
-            deleted = _mutate_section(
-                role, lambda section, facet=facet: section.replace(facet, "", 1)
-            )
-            assert _section_missing(_section_of(deleted), parts), (
-                f"{role}: deleting {facet!r} still holds"
-            )
-            relocated = _mutate_section(
-                role,
-                lambda section, facet=facet: (
-                    section.replace(facet, "", 1) + "\n\n## Elsewhere\n\n" + facet + "\n"
-                ),
-            )
-            assert _section_missing(_section_of(relocated), parts), (
-                f"{role}: relocating {facet!r} still holds"
-            )
+    parts = STAGE_PARTS[role]
+    original = (CANONICAL_SKILLS / LIFECYCLE / "roles" / f"{role}.md").read_text()
+    assert _section_missing(_section_of(original), parts) == [], role
+    for facet in parts:
+        deleted = _mutate_section(
+            role, lambda section, facet=facet: _delete_facet(section, parts, facet)
+        )
+        assert _flatten(deleted) != _flatten(original), f"{role}: deletion must change text"
+        assert _section_missing(_section_of(deleted), parts), (
+            f"{role}: deleting {facet!r} still holds"
+        )
+        relocated = _mutate_section(
+            role,
+            lambda section, facet=facet: (
+                _delete_facet(section, parts, facet)
+                + "\n\n## Elsewhere\n\n"
+                + "\n".join(_facet_variants(parts, facet))
+                + "\n"
+            ),
+        )
+        assert _section_missing(_section_of(relocated), parts), (
+            f"{role}: relocating {facet!r} still holds"
+        )
 
 
-def test_compiled_section_binding_fails_on_deletion_and_relocation() -> None:
+@pytest.mark.parametrize("role", STAGE_PARTS)
+def test_compiled_section_binding_fails_on_deletion_and_relocation(role: str) -> None:
     """The same deletion/relocation proof on one compiled capsule per role."""
     root = CANONICAL_SKILLS / LIFECYCLE
-    for role, parts in STAGE_PARTS.items():
-        operation = _role_operations(role)[0]
-        compiled = _compile(root, role, operation)
-        for facet in parts:
-            flat_facet = _flatten(facet)
-            assert _section_missing(_section_of(compiled), parts) == []
-            deleted = compiled.replace(facet, "", 1).replace(flat_facet, "", 1)
-            assert _section_missing(_section_of(deleted), parts), (
-                f"compiled {role}/{operation}: deleting {facet!r} still holds"
-            )
+    parts = STAGE_PARTS[role]
+    operation = _role_operations(role)[0]
+    compiled = _compile(root, role, operation)
+    for facet in parts:
+        assert _section_missing(_section_of(compiled), parts) == []
+        section = _section_of(compiled)
+        assert section is not None
+        deleted = compiled.replace(section, "\n" + _delete_facet(section, parts, facet) + "\n", 1)
+        assert _flatten(deleted) != _flatten(compiled), "control must delete real instructions"
+        assert _section_missing(_section_of(deleted), parts), (
+            f"compiled {role}/{operation}: deleting {facet!r} still holds"
+        )
+        relocated = deleted + "\n\n## Elsewhere\n\n" + "\n".join(_facet_variants(parts, facet))
+        assert _section_missing(_section_of(relocated), parts), (
+            f"compiled {role}/{operation}: relocating {facet!r} still holds"
+        )
 
 
 def test_rule_nine_sentences_hold_for_reviewer_worker_manager() -> None:

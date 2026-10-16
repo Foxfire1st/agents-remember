@@ -78,7 +78,6 @@ from agents_remember.cli.role_held_messages import (
     waiting_total,
     withdraw_message,
 )
-from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_preparation import (
     ROLE_MESSAGE_TOOL,
     ROLE_START_TOOL,
@@ -116,6 +115,7 @@ from agents_remember.cli.role_message_delivery import (
     _store_message,
 )
 from agents_remember.cli.role_message_files import file_line, utc_stem
+from agents_remember.cli.role_start_answer import started_answer
 from agents_remember.errors import RolePreparationError
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
@@ -500,6 +500,7 @@ def _start_role(
                 "replacesAgentId": call.replaces_agent_id,
                 "replacesInterruptTurn": call.replaces_interrupt_turn,
                 "chatStarted": binding is None,
+                "stepUp": call.step_up,
             }
         )
     except (ValidationError, ValueError) as error:
@@ -667,65 +668,7 @@ def second_copy_loaded(receipt: dict[str, Any]) -> bool:
 
 
 def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str, Any]:
-    """The tool's answer, read from the receipt the start path wrote for this request."""
-
-    try:
-        receipt = _read_receipt(
-            _receipt_path(
-                config, request, request.request_id if request.role in TASKLESS_ROLES else None
-            )
-        )
-    except HTTPException as error:
-        raise _launch_refused(str(error.detail)) from error
-    if receipt is None or receipt.get("requestId") != str(request.request_id):
-        raise _launch_refused("The start was answered but its receipt cannot be read back.")
-    execution = str(receipt.get("status"))
-    agent_id = _started_agent_id(receipt)
-    launch = (
-        "rejected"
-        if execution == "rejected"
-        else "unknown"
-        if execution in {"starting", "unknown"}
-        else "held"
-        if execution == "held"
-        else "running"
-    )
-    if execution == "stopped" and isinstance(agent_id, str):
-        _refuse_agent_that_is_gone(config, agent_id, execution)
-    report = receipt.get("report")
-    artifact = receipt.get("handoverArtifact")
-    next_action = {
-        "running": None,
-        "held": "The seat is held and takes its first turn with the first message addressed "
-        "to it; no new start is needed.",
-        "rejected": "The launch is closed and agentId names no agent that can be used. Resolve "
-        "the reason in detail, then start again with a new request id.",
-        "unknown": f"Call {ROLE_START_TOOL} again with the same request id and selection: it "
-        "reconciles the same agent and never creates a second.",
-    }[launch]
-    result = {
-        "ok": launch == "running",
-        "status": launch,
-        "detail": str(receipt.get("detail") or "") + _projects_preparation_note(receipt),
-        "requestId": str(request.request_id),
-        "role": request.role,
-        "agentId": agent_id,
-        "secondCopyLoaded": second_copy_loaded(receipt),
-        "parentAgentId": receipt.get("parentAgentId"),
-        "reportPath": report.get("path") if isinstance(report, dict) else None,
-        "handoverArtifactPath": artifact.get("path") if isinstance(artifact, dict) else None,
-        "executionStatus": execution,
-        **({"preparation": receipt["preparation"]} if "preparation" in receipt else {}),
-        "choices": launch_choice_metadata(receipt.get("choices", {})),
-        **(
-            {"taskDocumentFiles": receipt["taskDocumentFiles"]}
-            if receipt.get("taskDocumentFiles")
-            else {}
-        ),
-        **({"warning": receipt["warning"]} if receipt.get("warning") else {}),
-        **({"nextAction": next_action} if next_action else {}),
-    }
-    return result
+    return started_answer(config, request)
 
 
 def _refuse_agent_that_is_gone(config: McpRuntimeConfig, agent_id: str, execution: str) -> None:

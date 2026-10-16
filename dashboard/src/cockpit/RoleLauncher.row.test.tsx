@@ -17,7 +17,33 @@ import modeBarSrc from '../grammar/ModeBar.tsx?raw';
 import roleLauncherSrc from './role-launcher/RoleLauncher.tsx?raw';
 import roleLaunchFeaturesSrc from './RoleLaunchFeatures.tsx?raw';
 
-const AGENTS = [
+import { RoleLauncher } from "./role-launcher/RoleLauncher";
+import { RoleExecutionStatus } from "./RoleExecutionStatus";
+import { StepUpStatus } from "./role-launcher/StepUpControl";
+import type { RoleDefaults, RoleAgentChoice } from "./roleLaunchModel";
+
+it("steps up from one row control with a reason and shows the execution model", async () => {
+  const launch = vi.fn().mockResolvedValue(undefined);
+  vi.spyOn(window, "prompt").mockReturnValue("The task needs another approach.");
+  const defaults: RoleDefaults = { agent: "codex", model: "gpt-a", stepUp: { model: "gpt-b" } };
+  const view = render(<RoleLauncher tasks={[]} roleDefaults={defaults} agents={AGENTS}
+    selection={{ role: "architect" }} optionsReady optionsLoading={false} busy={false} optionsError={null}
+    executionError={null} onSelectionChange={vi.fn()} onLaunch={launch} onRevive={vi.fn()}
+    onRetry={vi.fn()} onRefreshOptions={vi.fn()} onRefreshCatalog={vi.fn()} onRefreshResult={vi.fn()} />);
+  fireEvent.click(view.getByRole("button", { name: "Step up role" }));
+  expect(launch).toHaveBeenCalledWith({ role: "architect", stepUp: "The task needs another approach." });
+  const status = render(<RoleExecutionStatus className="status" execution={{ status: "running", canStart: false, canRevive: false, stepUp: { model: "gpt-b" } }} />);
+  expect(status.getByText("Stepped-up · gpt-b")).toBeTruthy();
+  const pending = { status: "starting", canStart: false, canRevive: false, stepUp: { source: "step-up requested: The task needs another approach." } };
+  status.rerender(<><StepUpStatus execution={pending} /><RoleExecutionStatus className="status" execution={pending} /></>);
+  expect(status.getAllByText("Stepped-up · host default")).toHaveLength(2);
+  const observed = { ...pending, status: "running", stepUp: { ...pending.stepUp, model: "eve-default" } };
+  status.rerender(<><StepUpStatus execution={observed} /><RoleExecutionStatus className="status" execution={observed} /></>);
+  expect(status.getAllByText("Stepped-up · eve-default")).toHaveLength(2);
+  expect(status.queryByText("Stepped-up · host default")).toBeNull();
+});
+
+const AGENTS: RoleAgentChoice[] = [
   {
     id: 'codex',
     label: 'Codex',

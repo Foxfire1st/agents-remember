@@ -124,6 +124,16 @@ function resultBodies(): Record<string, unknown>[] {
   return seen.filter((call) => call.url === "/api/role-launch/result").map((call) => call.body as Record<string, unknown>);
 }
 
+it("dispatches a reasoned step-up for an occupied task seat without permission overrides", async () => {
+  const selection = { ...TASK_SELECTION, stepUp: "The repairs have stalled." };
+  const live = liveFor(selection, { currentScopedExecution: { status: "completed", canStart: false, canRevive: false } });
+  const run = writers();
+  reply("/api/role-launch/dispatch", 409, { detail: "busy" });
+  await dispatchRoleAction(live, run, "start", selection);
+  expect(seen[0]?.body).toEqual({ ...TASK_SELECTION, stepUp: "The repairs have stalled.", action: "start", requestId: expect.any(String) });
+  expect(seen[0]?.body).not.toHaveProperty("agentOverride");
+});
+
 describe("L150-CODE-02: a mismatched dispatch receipt terminates the dispatch", () => {
   it("sets the mismatch error and issues no immediate result poll", async () => {
     const live = liveFor(REQUEST_SELECTION);

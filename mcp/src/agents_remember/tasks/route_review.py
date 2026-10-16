@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -110,6 +111,15 @@ class ReviewApproval(_RouteReviewDoc):
         return trimmed
 
 
+class ReviewRound(_RouteReviewDoc):
+    """A recorded round, not a later check of its unchanged candidate's record."""
+
+    round: int = Field(ge=1)
+    kind: Literal["code", "memory"]
+    findingsRemain: bool
+    verdictRef: str | None = None
+
+
 class ReviewState(_RouteReviewDoc):
     """Small persisted state for one monotonic review sequence."""
 
@@ -138,6 +148,7 @@ class ReviewState(_RouteReviewDoc):
     approval: ReviewApproval | None = None
     developerApproval: str | None = Field(default=None, max_length=8192)
     additionalRounds: int = Field(default=0, ge=0)
+    recordedRounds: list[ReviewRound] = Field(default_factory=list)
 
     @field_validator("developerApproval")
     @classmethod
@@ -182,6 +193,16 @@ class ReviewState(_RouteReviewDoc):
         if not set(self.remainingFindingIds).issubset(set(finding_ids)):
             raise ValueError("review remaining findings must belong to the sealed baseline")
         return self
+
+
+def _require_memory_rounds(state: ReviewState) -> ReviewState:
+    """The memory lane cannot borrow code rounds, including from historical mixed records."""
+    if any(row.kind != "memory" for row in state.recordedRounds):
+        raise ValueError("memoryReviewState recordedRounds must contain only memory reviews")
+    return state
+
+
+MemoryReviewState = Annotated[ReviewState, AfterValidator(_require_memory_rounds)]
 
 
 class RouteReviewRecord(_RouteReviewDoc):

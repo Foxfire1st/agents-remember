@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
 from agents_remember.cli import leaf_enclosure_start, role_launch_workspace
 from agents_remember.cli.__main__ import build_parser, main
@@ -26,10 +27,14 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+from test_role_step_up import launch_world
+
+__all__ = ["launch_world"]
 
 IDENTITY = TaskIdentity(
     repo_id="sandbox-app",
@@ -485,6 +490,76 @@ class LeafEnclosureChildProcessTests(unittest.TestCase):
         self.assertEqual(len(outcome["summary"]), 800)
         self.assertTrue(outcome["summary"].endswith("the last words"))
         self.assertIn("(refused): mmmm", outcome["summary"])
+
+
+def test_private_enclosure_child_tolerates_review_only_during_start(launch_world) -> None:
+    world = launch_world
+    raw = json.loads(world.leaf.path.read_text())
+    raw["reviewState"] = {"round": 7, "limit": 8, "recordedRounds": "broken"}
+    world.leaf.path.write_text(json.dumps(raw))
+    before = world.leaf.path.read_bytes()
+    child = """
+import contextlib, io, json, sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from agents_remember.cli import leaf_enclosure_start as command
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.tasks import write_task_doc
+from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks.launch_review_read import launch_review_read
+from agents_remember.worktrees.modules.startup.leaf_ref_start import resolve_start_leaf_doc_id
+root = Path(sys.argv[1])
+config = McpRuntimeConfig(config_path=root/'settings.json', coordination_root=root/'coordination',
+    workspace_root=root/'projects', transcript_root=root/'logs', repositories={
+        'agents-remember': RepositoryScope(repo_id='agents-remember', path=root/'projects/agents-remember')})
+identity = {'repoId':'agents-remember','taskName':'master','worktreeName':'leaf',
+    'leafId':'01_LEAF','parentTask':'sprint', **command._held_roots(config, 'agents-remember')}
+ref = TaskDocumentRef(repository='agents-remember', path='master/01_leaf.json')
+path = TaskDocumentTopology(config.coordination_root).path_for_ref(ref)
+before = path.read_bytes()
+assert not launch_review_read.get()
+def start(_config, _identity, **_options):
+    resolved_id = resolve_start_leaf_doc_id(
+        SimpleNamespace(coordination_root=config.coordination_root, code_repository_name='agents-remember'),
+        SimpleNamespace(worktree_name='leaf', leaf_id='01_LEAF', task_name='master', parent_task=None))
+    assert resolved_id == '01_LEAF'
+    document = TaskDocumentTopology(config.coordination_root).resolve(ref).document
+    assert document.review_read_error
+    assert path.read_bytes() == before
+    write_task_doc(path.parent, document)
+    assert json.loads(path.read_text())['reviewState'] == json.loads(before)['reviewState']
+    return {'ok':True}
+output = io.StringIO()
+with (patch.object(command, 'declare_process_role'), patch.object(command, 'bind_worktree_services'),
+      patch.object(command, 'load_config', return_value=config),
+      patch.object(command, 'worktree_start_tool', side_effect=start),
+      patch.object(sys, 'stdin', io.StringIO(json.dumps(identity))), contextlib.redirect_stdout(output)):
+    status = command.main(['--config', str(config.config_path)])
+assert status == 0, output.getvalue()
+assert not launch_review_read.get()
+try:
+    TaskDocumentTopology(config.coordination_root).resolve(ref)
+except ValueError:
+    pass
+else:
+    raise AssertionError('ordinary task reader accepted unreadable review')
+print(output.getvalue())
+"""
+    completed = subprocess.run(
+        [sys.executable, "-P", "-c", child, str(world.config.coordination_root.parent)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout) == {"ok": True}
+    assert json.loads(world.leaf.path.read_bytes())["reviewState"] == raw["reviewState"]
+    assert json.loads(before)["reviewState"] == raw["reviewState"]
+    with pytest.raises(ValueError):
+        TaskDocumentTopology(world.config.coordination_root).resolve(world.leaf.ref)
 
 
 if __name__ == "__main__":

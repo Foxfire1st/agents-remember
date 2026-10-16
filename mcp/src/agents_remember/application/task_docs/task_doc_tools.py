@@ -47,7 +47,6 @@ from agents_remember.tasks.master_sync import (
 from agents_remember.tasks.readiness import (
     missing_unresolved_master_rows,
 )
-from agents_remember.worktrees.candidate_identity import resolve_candidate_identity
 from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.queue.closeout_queue_evidence import (
     require_register_sections_valid,
@@ -101,9 +100,9 @@ from .task_doc_route_review import (
     _record_task_review_bound,
     _RouteReviewBinding,
     _validate,
-    candidate_root_for_review,
-    repo_root_opt,
+    candidate_identity_for_review,
     review_settings_limit,
+    with_review_lane_result,
 )
 from .task_doc_section_scaffolding import scaffold_register_sections
 from .task_execution_topology import (
@@ -124,6 +123,7 @@ from .task_retirement_authority import (
     require_row_not_retired,
     retirement_only_refusal,
 )
+from .task_review_step_up import with_review_step_up
 
 VALID_OPERATIONS = (
     "create",
@@ -364,11 +364,12 @@ def task_doc_tool(
     edit: TaskDocEdit = NO_EDIT,
     call: TaskDocCall = DEFAULT_TASK_DOC_CALL,
 ) -> dict[str, Any]:
-    return run_task_doc_call(
+    result = run_task_doc_call(
         config.coordination_root,
         target.repo_id,
         lambda: _task_doc_tool_locked(config, target, operation=operation, edit=edit, call=call),
     )
+    return with_review_step_up(config, result)
 
 
 def _task_doc_tool_locked(
@@ -444,7 +445,13 @@ def _task_doc_tool_locked(
     )
     _validate_task_doc_candidate(candidate_context)
     return _with_file_rows(
-        _publish_task_doc_candidate(candidate_context, dry_run=call.dry_run), file_rows
+        with_review_lane_result(
+            _publish_task_doc_candidate(candidate_context, dry_run=call.dry_run),
+            doc,
+            operation,
+            edit.review,
+        ),
+        file_rows,
     )
 
 
@@ -600,10 +607,8 @@ def _prepare_task_doc_edit(
             original,
             request.edit.review,
             settings_limit=review_settings_limit(request.config.coordination_root),
-            actual_candidate=resolve_candidate_identity(
-                candidate_root_for_review(
-                    request.contract, repo_root_opt(request.config, request.repo_id)
-                )
+            actual_candidate=candidate_identity_for_review(
+                request.config, request.contract, request.repo_id, request.edit.review
             ),
         )
     elif request.operation == "record_route_review":
@@ -618,10 +623,8 @@ def _prepare_task_doc_edit(
             request.edit.review,
             binding,
             settings_limit=review_settings_limit(request.config.coordination_root),
-            actual_candidate=resolve_candidate_identity(
-                candidate_root_for_review(
-                    binding.contract, repo_root_opt(request.config, request.repo_id)
-                )
+            actual_candidate=candidate_identity_for_review(
+                request.config, binding.contract, request.repo_id, request.edit.review
             ),
         )
     else:

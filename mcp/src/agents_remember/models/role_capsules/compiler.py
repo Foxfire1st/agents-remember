@@ -30,6 +30,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from agents_remember.errors import CapsuleCompilationError
+from agents_remember.models.role_capsules.audiences import select_operation_audience
+from agents_remember.models.role_capsules.details import compile_detail_references
 from agents_remember.models.role_capsules.diagnostics import (
     CapsuleConflictRecord,
     CapsuleManifest,
@@ -118,11 +120,32 @@ def compile_role_capsule(
         identities,
         _preferred_paths(identities, selection, binding),
     )
-    blocks = tuple(item.block() for item in resolved)
+    operation = parsed.operations[binding.operation]
+    blocks = tuple(
+        select_operation_audience(
+            item.block(),
+            operation.audience,
+            operation.applies_to_roles,
+            scope.role,
+            source_text=item.source.text(),
+        )
+        if item.composition_root == "operation"
+        else item.block()
+        for item in resolved
+    )
     task_context = verified_task_context(binding, projection)
     tools = narrow_tool_requests(_declared_tools(scope), binding)
     skills = skill_references(scope, parsed, by_path)
+    details = compile_detail_references(blocks, parsed.detail_references, by_path, scope.role)
     digest = semantic_digest(binding, blocks, task_context, tools, skills)
+    if details:
+        digest = compute_semantic_digest(
+            digest
+            + "\n"
+            + "\n".join(
+                f"detail\t{entry.source_path}\t{entry.revision}\t{entry.step}" for entry in details
+            )
+        )
     return CapsuleCompilationResult(
         capsule=CapsuleCapsule(
             instruction_units=tuple(
@@ -134,6 +157,7 @@ def compile_role_capsule(
             requested_tools=tools,
             semantic_digest=digest,
             binding=binding,
+            detail_references=details,
         ),
         manifest=compiled_manifest(
             scope,
@@ -253,7 +277,9 @@ def semantic_digest(
     # in the manifest) and must not change the capsule.
     lines.append("specializations\t" + ",".join(_selected_specializations(blocks)))
     lines += [
-        f"block\t{block.composition_root}\t{block.identity}\t{block.revision}" for block in blocks
+        f"block\t{block.composition_root}\t{block.identity}\t{block.revision}\t"
+        f"{compute_content_digest(block.content.encode('utf-8'))}"
+        for block in blocks
     ]
     lines += [f"tool\t{request.tool_id}" for request in tools]
     lines += [

@@ -21,6 +21,7 @@ from agents_remember.cli.paseo_bridge import (
     require_bridge_runtime,
 )
 from agents_remember.cli.role_instructions import launch_choice_metadata
+from agents_remember.cli.role_step_up import label_step_up_choices
 from agents_remember.kernel._agentic_settings_core import (
     NON_PERMISSION_FEATURES,
     native_service_tier,
@@ -130,6 +131,7 @@ def launcher_options(
         agent_id, options = resolve_agent_selection(config, defaults, harness_order, None)
         role_defaults = {
             "agent": agent_id,
+            "stepUp": defaults.get("stepUp"),
             "model": options.get("model"),
             "effort": options.get("effort"),
             "serviceTier": defaults.get("serviceTier")
@@ -266,7 +268,13 @@ def resolve_agent_selection(
             ),
         ],
     )
-    mode, choices["mode"] = _resolve_mode(mode, choices["mode"], agent, defaults.get("role"))
+    mode, choices["mode"] = _resolve_mode(
+        mode,
+        choices["mode"],
+        agent,
+        defaults.get("role"),
+        host_default=defaults.get("useHostDefaultMode", False),
+    )
     model = (
         next((row for row in agent["models"] if row["id"] == model_id), None)
         if model_id
@@ -342,6 +350,7 @@ def resolve_agent_selection(
     )
     if "service_tier" in features:
         options["serviceTier"] = features["service_tier"]
+    label_step_up_choices(options, defaults)
     return agent_id, options
 
 
@@ -410,7 +419,12 @@ def _choice_source(choice: dict[str, Any], key: str, role: str | None) -> str:
 
 
 def _resolve_mode(
-    mode: str | None, choice: dict[str, Any], agent: dict[str, Any], role: str | None
+    mode: str | None,
+    choice: dict[str, Any],
+    agent: dict[str, Any],
+    role: str | None,
+    *,
+    host_default: bool = False,
 ) -> tuple[str | None, dict[str, Any]]:
     if agent.get("listingError") or agent.get("modesKnown") is False:
         raise LaunchSelectionRefused(
@@ -418,7 +432,10 @@ def _resolve_mode(
             f"Role {role}: modes for {agent['id']} are not known: {agent.get('listingError') or 'the host did not return its mode catalog'}; refresh the host catalog before starting.",
         )
     modes = agent["modes"]
-    if mode is None:
+    if mode is None and host_default:
+        mode = agent.get("defaultModeId")
+        choice = {"value": mode, "source": "host default"}
+    elif mode is None:
         safe = {"claude": "default", "codex": "auto"}.get(agent["id"])
         mode = safe if any(row["id"] == safe for row in modes) else None
         choice = {
@@ -428,7 +445,7 @@ def _resolve_mode(
             if mode
             else "no named least working mode offered for this agent kind",
         }
-    elif not any(row["id"] == mode for row in modes):
+    if mode is not None and not any(row["id"] == mode for row in modes):
         raise LaunchSelectionRefused(
             "mode_not_offered",
             f"Role {role}: {_choice_source(choice, 'mode', role)}={mode!r} is not offered for {agent['id']}; offered: {[row['id'] for row in modes]}",

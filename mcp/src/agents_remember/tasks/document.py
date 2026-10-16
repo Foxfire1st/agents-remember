@@ -26,7 +26,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ModelWrapValidatorHandler,
     PrivateAttr,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    ValidationError,
     field_validator,
     model_serializer,
     model_validator,
@@ -58,8 +62,10 @@ from .execution_graph_validation import (
     find_execution_graph_cycle,
     validate_execution_graph,
 )
+from .launch_review_read import launch_review_fallback, preserve_unreadable_review
 from .progress import current_step, step_done, step_total  # noqa: F401  # preserve public exports
 from .route_review import (  # noqa: F401  # preserve existing task-document model exports
+    MemoryReviewState,
     ReviewApproval,
     ReviewFinding,
     ReviewState,
@@ -733,6 +739,7 @@ class TaskDocument(_Doc):
     # Missing review state means zero rounds.  The state is written only by the dedicated
     # begin/record review operations; generic task mutations cannot rewrite it.
     reviewState: ReviewState | None = None
+    memoryReviewState: MemoryReviewState | None = None
     openQuestions: list[str | AcceptanceObligationQuestion] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     # subTasks is the master series index (master-only). sections is the master's ordered
@@ -751,6 +758,34 @@ class TaskDocument(_Doc):
     # The sprint's first-class seats (L14-R3): role + label + correlatable identity + state.
     # Legal only on an orchestration sprint; roles are unique among non-retired seats.
     seats: list[SprintSeat] = Field(default_factory=list)
+
+    _unreadable_review: dict[str, tuple[Any, str]] = PrivateAttr(default_factory=dict)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _launch_without_unreadable_review(
+        cls, value: Any, handler: ModelWrapValidatorHandler[Self]
+    ) -> Self:
+        try:
+            return handler(value)
+        except ValidationError as error:
+            fallback = launch_review_fallback(value, error)
+            if fallback is None:
+                raise
+            data, unreadable = fallback
+            document = handler(data)
+            document._unreadable_review = unreadable
+            return document
+
+    @property
+    def review_read_error(self) -> str | None:
+        return "; ".join(error for _, error in self._unreadable_review.values()) or None
+
+    @model_serializer(mode="wrap")
+    def _preserve_unreadable_review(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, Any]:
+        return preserve_unreadable_review(handler(self), self._unreadable_review, info)
 
     @model_validator(mode="after")
     def _check_kind_fields(self) -> Self:

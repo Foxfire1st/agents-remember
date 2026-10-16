@@ -32,6 +32,7 @@ from agents_remember.cli.role_launch_receipts import (
     _request_digest,
     _write_receipt,
 )
+from agents_remember.cli.role_step_up_decisions import record_step_up
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
 
@@ -65,6 +66,7 @@ class _Replacement:
     replaces_agent_id: str | None = None
     interrupt_turn: bool = False
     request_id: str | None = None
+    step_up: bool = False
 
 
 def _reconcile_prior_execution(
@@ -88,7 +90,12 @@ def _reconcile_prior_execution(
                 status_code=409,
                 detail="This request id is already bound to different AR task or agent-selection content.",
             )
-        if current.get("status") in {"starting", "unknown"}:
+        record_step_up(config, current)
+        if current.get("status") in {"starting", "unknown"} or (
+            current.get("stepUp")
+            and current.get("status") == "rejected"
+            and current.get("replayRequest")
+        ):
             return _execute_prepared_launch(config, path, current)
         return JSONResponse(_refresh_execution(config, path, current))
     if str(current.get("role")) in LEAF_ROLES or str(request.role) in LEAF_ROLES:
@@ -191,6 +198,7 @@ def _reconcile_leaf_occupancy(
                     "Nothing was archived."
                 ),
             )
+        _require_step_up_idle(reading, holder, replacement)
         if (
             reading.turn_active or reading.lifecycle == "running"
         ) and not replacement.interrupt_turn:
@@ -205,6 +213,7 @@ def _reconcile_leaf_occupancy(
                 ),
             )
         current["replaceAuthorizedBy"] = caller
+
         current["replaceAuthorizedAt"] = _now_iso()
         _record_holder_replacement(current, holder, caller, replacement.request_id)
         _write_receipt(path, current)
@@ -222,6 +231,43 @@ def _reconcile_leaf_occupancy(
             "follows the same rule and offers the replacing start on this line."
         ),
     )
+
+
+def require_step_up_archive_idle(
+    config: McpRuntimeConfig, receipt: dict[str, Any], launch_call: dict[str, Any]
+) -> None:
+    """Renew the predecessor's idle proof immediately before a saved call archives it.
+
+    Reservation is not a live-state lease: a retry or a receipt recovered from history
+    must read again, even when a preceding archive was reported as settled.
+    """
+    holder = launch_call.get("archiveAgentId")
+    if not receipt.get("stepUp") or not isinstance(holder, str) or not holder:
+        return
+    reading = read_agent(config, holder)
+    if not reading.reachable:
+        raise HostUnreachableRefusal(
+            f"The Paseo runtime cannot be reached, so step-up predecessor agent {holder} "
+            "cannot be read; nothing was started or archived. "
+            f"Retry the same request when the host is reachable. {reading.unreachable_reason}"
+        )
+    if reading.found and not reading.archived:
+        _require_step_up_idle(reading, holder, _Replacement(step_up=True))
+
+
+def _require_step_up_idle(reading: AgentReading, holder: str, replacement: _Replacement) -> None:
+    if not replacement.step_up:
+        return
+    if reading.pending_permission:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Agent {holder} is busy: permission prompt {reading.pending_permission}. Resolve this prompt in the dashboard, then start again; nothing was archived.",
+        )
+    if reading.turn_active or reading.lifecycle == "running":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Agent {holder} is busy in a turn; step-up never interrupts it. Start again after its turn; nothing was archived.",
+        )
 
 
 def _record_holder_replacement(

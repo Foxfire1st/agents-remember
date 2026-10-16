@@ -550,7 +550,27 @@ Paseo role launches read these choices from the host's running catalog, not a bu
 | `featureValues` | `featureValues` | Boolean for each toggle; option ID for each selection |
 | `serviceTier` | `featureValues.service_tier` | Speed selection; `fast` normalizes to native `priority` |
 | `notes` | `notes` (host page: When to use) | User's plain instruction text; user layer/profile only |
+| `stepUp` | none | One user-layer alternative with the same launch fields and optional `afterTries`; never nested. |
 | `launchArgs`, `promptKeywords`, `sessionCommands` | none | Accepted; no code reads them in this build. `server_info` names the ones a file holds under `unusedSettingsKeys`. |
+
+`orchestration.roles.<role>.stepUp` names an alternative `harness`, `model`, `effort`,
+`serviceTier`, `mode`, `featureValues`, and `notes`. It is user-layer only. For Worker,
+a try is a recorded code-review round ending with findings remaining; for Curator it is
+a recorded memory-review round (`reviewKind: "memory"`). A record-only check of the
+same candidate is not another try. `afterTries` defaults to three on these roles and must
+be a positive whole number; other roles accept a step-up only on request and refuse
+`afterTries`. Unknown fields, a nested step-up, and choices equal to the base role refuse
+with the file and key. The product supplies no alternative model.
+
+At the threshold, the next start validates the alternative against the host's catalog,
+then replaces an idle seat through its normal retirement route. An active turn or an open
+permission prompt refuses the replacement without interrupting it. `role_start(step_up="one
+sentence explaining why")` and the launcher's **Step up** control select the same user-owned
+alternative without a count; neither supplies mode nor permission features. Choices omitted
+from a different harness/model never inherit the base role's choices. Their host defaults
+remain identified in the answer. The decision log preserves a task's stepped-up seat across
+later starts; review rounds, their limit, and sealed findings do not reset. Removing the
+alternative does not alter the running agent; the next start uses the base role and says so.
 
 A mode or `notes` in a repository's `system/settings.json` refuses loading, naming the file and
 key, in both `roles` and `rolesPerLevel`. Feature authority is classified by the product:

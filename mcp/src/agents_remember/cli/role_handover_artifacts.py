@@ -10,11 +10,15 @@ its assignment in context can read it again.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import stat
 import tempfile
 from pathlib import Path
 from typing import Any
+
+from agents_remember.errors import AgentsRememberError
+from agents_remember.models.role_capsules.types import CapsuleDetailReference
 
 # A first message of 300,000 bytes has to launch; this bound only keeps a runaway compilation
 # from being written to a task's report folder.
@@ -50,6 +54,93 @@ def write_handover_artifact(report_path: str, content: str) -> dict[str, Any]:
         "sha256": hashlib.sha256(body).hexdigest(),
         "bytes": len(body),
     }
+
+
+def write_detail_artifacts(
+    report_path: str, references: tuple[CapsuleDetailReference, ...]
+) -> dict[str, Path]:
+    """Freeze each admitted detail file beside this request's handover, once."""
+    report = Path(report_path)
+    paths: dict[str, Path] = {}
+    for reference in references:
+        name = hashlib.sha256(reference.source_path.encode("utf-8")).hexdigest()
+        path = report.with_name(f"{report.stem}.detail-{name}.md")
+        _write_once(
+            _canonical(path),
+            reference.content,
+            f"This role request already has different detail content in {path}; start under a new request id.",
+        )
+        paths[reference.source_path] = path
+    return paths
+
+
+def write_step_up_artifact(report_path: str, material: dict[str, Any]) -> dict[str, Any]:
+    """Freeze takeover material beside the request's handover; the receipt keeps its bytes."""
+    content = json.dumps(material, indent=2, ensure_ascii=False) + "\n"
+    body = content.encode("utf-8")
+    path = Path(report_path).with_suffix(".step-up.json")
+    if len(body) > MAX_HANDOVER_ARTIFACT_BYTES:
+        raise AgentsRememberError(
+            f"The takeover material at {path} exceeds the artifact size limit."
+        )
+    canonical = _canonical(path)
+    _write_takeover(canonical, body)
+    return {
+        "path": path.as_posix(),
+        "canonicalPath": canonical.as_posix(),
+        "sha256": hashlib.sha256(body).hexdigest(),
+        "bytes": len(body),
+        "content": content,
+    }
+
+
+def takeover_artifact_line(reference: dict[str, Any]) -> str:
+    """Bind the named sidecar bytes to the immutable primary handover."""
+    return f"Read takeover material at {reference['path']} (SHA-256 {reference['sha256']})"
+
+
+def restore_step_up_artifact(saved: dict[str, Any], message: str, *, receipt: Path) -> None:
+    """Restore only frozen takeover bytes, refusing changed, nonregular or rebound targets."""
+    if not saved.get("stepUp"):
+        return
+    reference = saved.get("stepUpArtifact")
+    report = saved.get("report") or {}
+    remedy = f"The takeover material recorded by receipt {receipt} cannot be verified; restore its original reference and retry the same request."
+    if not isinstance(reference, dict) or not isinstance(report.get("path"), str):
+        raise AgentsRememberError(remedy)
+    content = reference.get("content")
+    expected = Path(report["path"]).with_suffix(".step-up.json")
+    if (
+        not isinstance(content, str)
+        or reference.get("path") != expected.as_posix()
+        or reference.get("canonicalPath") != _canonical(expected).as_posix()
+    ):
+        raise AgentsRememberError(
+            f"Takeover material at {expected} is missing or rebound. {remedy}"
+        )
+    body = content.encode("utf-8")
+    if (
+        len(body) > MAX_HANDOVER_ARTIFACT_BYTES
+        or reference.get("bytes") != len(body)
+        or reference.get("sha256") != hashlib.sha256(body).hexdigest()
+        or takeover_artifact_line(reference) not in message
+    ):
+        raise AgentsRememberError(
+            f"Takeover material at {expected} has no matching saved hash. {remedy}"
+        )
+    _write_takeover(_canonical(expected), body)
+
+
+def _write_takeover(path: Path, body: bytes) -> None:
+    remedy = (
+        f"The takeover material at {path} must be an unchanged regular file. "
+        "Remove the changed or nonregular target and retry the same request; "
+        "saved receipts restore only their original bytes."
+    )
+    try:
+        _write_once(path, body, remedy)
+    except (OSError, ValueError) as error:
+        raise AgentsRememberError(remedy) from error
 
 
 def artifact_line(reference: dict[str, Any]) -> str:
@@ -156,6 +247,12 @@ def _matches(path: Path, expected: bytes, refusal: str) -> bool:
         return False
     if not stat.S_ISREG(mode):
         raise ValueError("The task handover artifact path is not a regular file.")
-    if path.read_bytes() != expected:
-        raise ValueError(refusal)
+    # Open without following a swapped link, and never block on a swapped FIFO.
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError("The task handover artifact path is not a regular file.")
+        if opened.st_size != len(expected) or stream.read(len(expected) + 1) != expected:
+            raise ValueError(refusal)
     return True

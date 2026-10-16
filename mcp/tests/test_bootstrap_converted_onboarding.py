@@ -36,6 +36,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from agents_remember_test_support.testing.leaf_instruction_wording import delivered_step
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -434,7 +435,7 @@ def test_bootstrap_skill_texts_carry_no_legacy_card_format() -> None:
         assert "## Update History" not in text, relative
 
 
-def test_bootstrap_skill_texts_state_the_fixer_and_the_order() -> None:
+def test_bootstrap_skill_texts_state_the_fixer_and_the_order(tmp_path: Path) -> None:
     """Rules 1/4/5: the fixer replaces the tables; the first hour runs in order."""
 
     bootstrap = (REPO_ROOT / "skills/c-03-repo-bootstrap/SKILL.md").read_text(encoding="utf-8")
@@ -459,7 +460,24 @@ def test_bootstrap_skill_texts_state_the_fixer_and_the_order() -> None:
     assert operation.index("Adopt the first attributed baseline") < operation.index(
         "Reach the repository's knowledge foundation"
     )
-    assert "already has a commit" in operation
+    instructions, foundation = delivered_step(
+        REPO_ROOT / "skills/l-01-agent-lifecycles",
+        ("bootstrap", "bootstrap"),
+        "reference/bootstrap-foundation-d301.md",
+        "when you reach step 7 (Reach the repository's knowledge foundation), not before",
+        tmp_path / "bootstrap.md",
+    )
+    assert "7. **Reach the repository's knowledge foundation.** Read" in instructions
+    assert instructions.index("Adopt the first attributed baseline") < instructions.index(
+        "7. **Reach the repository's knowledge foundation.**"
+    )
+    flat_foundation = " ".join(foundation.split())
+    assert "On a new memory repo this step runs after the baseline" in flat_foundation
+    assert "before the first baseline no leaf can exist" in flat_foundation
+    assert (
+        "Only a repository whose memory already has a commit may reach its foundation "
+        "before the onboarding or the baseline."
+    ) in flat_foundation
 
 
 def test_bootstrap_skill_texts_state_taskless_route_and_audit_trail() -> None:

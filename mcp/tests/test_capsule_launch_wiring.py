@@ -17,9 +17,13 @@ hand-built literal:
 from __future__ import annotations
 
 import json
+import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
+import agents_remember.application.skill_resources.capsule as capsule_application
 import pytest
 from agents_remember.application.role_capsules.launch import (
     FREE_AGENT_TASK_REFERENCE_PREFIX,
@@ -229,6 +233,89 @@ def test_the_mode_gate_names_capsule_or_refused_for_every_seat_class(
     assert admitted.mode is LaunchCapsuleMode.CAPSULE, admitted.explain()
     assert not admitted.is_refusal
     assert admitted.delivery is not None
+
+
+# --------------------------------------------------------------------------------------------
+# R125 evidence 5 replacement route: role-start's real compilation boundary (R112 ruling).
+# --------------------------------------------------------------------------------------------
+
+
+@pytest.fixture(name="launch_corpus")
+def launch_corpus_fixture(
+    world: tuple[Path, McpRuntimeConfig, Path], monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Change only a copied source corpus; admission, selection and compilation stay real."""
+    tmp_path, _config, _repo = world
+    shipped = Path(__file__).resolve().parents[2] / "skills/l-01-agent-lifecycles"
+    corpus = tmp_path / "launch-corpus"
+    shutil.copytree(shipped, corpus)
+
+    @contextmanager
+    def local_corpus() -> Iterator[tuple[Path, str]]:
+        yield corpus, "composition-manifest.json"
+
+    monkeypatch.setattr(capsule_application, "shipped_composition_corpus", local_corpus)
+    return corpus
+
+
+def test_role_start_replacement_route_names_an_unmarked_stage_part(
+    world: tuple[Path, McpRuntimeConfig, Path], launch_corpus: Path
+) -> None:
+    tmp_path, config, _repo = world
+    manifest = launch_corpus / "composition-manifest.json"
+    document = json.loads(manifest.read_text())
+    document["operations"]["implementation"]["audience"] = "sections"
+    manifest.write_text(json.dumps(document))
+    passage = "This stage passage has no audience."
+    for header in ("", "---\nname: fixture\n---\n\n\n"):
+        source = f"{header}{passage}\n<!-- ar:roles all -->\nShared boundary.\n"
+        (launch_corpus / "operations/implementation.md").write_text(source)
+        answer = compile_launch_capsule(
+            config,
+            LaunchCapsuleRequest(
+                role="worker", workspace_root=tmp_path, task_document_ref=LEAF_REF
+            ),
+            operation="implementation",
+        )
+        assert answer.mode is LaunchCapsuleMode.REFUSED
+        assert answer.delivery is None
+        assert answer.refusal_status == "operation-audience-invalid"
+        line = source.splitlines().index(passage) + 1
+        assert f"operations/implementation.md:{line}" in answer.refusal_detail
+        assert "stage text has no audience marking" in answer.refusal_detail
+
+
+def test_role_start_replacement_route_names_a_role_the_stage_lacks(
+    world: tuple[Path, McpRuntimeConfig, Path], launch_corpus: Path
+) -> None:
+    tmp_path, config, _repo = world
+    assert (launch_corpus / "operations/curation.md").is_file()
+    answer = compile_launch_capsule(
+        config,
+        LaunchCapsuleRequest(role="worker", workspace_root=tmp_path, task_document_ref=LEAF_REF),
+        operation="curation",
+    )
+    assert answer.mode is LaunchCapsuleMode.REFUSED
+    assert answer.delivery is None
+    assert answer.refusal_status == "operation-not-applicable"
+    assert "role 'worker'" in answer.refusal_detail
+    assert "'curation'" in answer.refusal_detail
+
+
+def test_role_start_replacement_route_names_a_missing_required_file(
+    world: tuple[Path, McpRuntimeConfig, Path], launch_corpus: Path
+) -> None:
+    tmp_path, config, _repo = world
+    (launch_corpus / "operations/implementation.md").unlink()
+    answer = compile_launch_capsule(
+        config,
+        LaunchCapsuleRequest(role="worker", workspace_root=tmp_path, task_document_ref=LEAF_REF),
+        operation="implementation",
+    )
+    assert answer.mode is LaunchCapsuleMode.REFUSED
+    assert answer.delivery is None
+    assert "operations/implementation.md" in answer.refusal_detail
+    assert answer.refusal_status == "source-missing"
 
 
 # --------------------------------------------------------------------------------------------

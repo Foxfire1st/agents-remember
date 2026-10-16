@@ -508,7 +508,7 @@ class LaunchValidationTests(PaseoCatalogTestCase):
         ):
             role_launch_preparation.prepare_role_handover(
                 self.config,
-                SimpleNamespace(role="architect"),  # type: ignore[arg-type]
+                role_launch_preparation.RoleLaunchContext("architect", None, None, None, None),
                 agent_override=RoleAgentOverride(agentId="codex", modelId="gpt-z"),
                 request_id=uuid.uuid4(),
             )

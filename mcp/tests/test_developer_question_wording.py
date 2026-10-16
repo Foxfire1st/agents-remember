@@ -109,8 +109,12 @@ def test_question_operations_keep_conditional_routing_and_pending_recovery() -> 
         "record the relayed answer in the same place and form, with the quoted words",
     ):
         assert clause in home, ("orientation", clause)
-    for operation in ("review", "curation"):
-        text = " ".join(read(LIFECYCLE / "operations" / f"{operation}.md").split())
+    for role, operation in (("reviewer", "review"), ("curator", "curation")):
+        text = (
+            role_text(role)
+            + " "
+            + " ".join(read(LIFECYCLE / "operations" / f"{operation}.md").split())
+        )
         assert pointer in text, (operation, "one-home pointer")
         assert "With a parent named in `host.parent`, send every question" not in text, (
             operation,

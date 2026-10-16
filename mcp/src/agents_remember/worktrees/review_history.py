@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from agents_remember.kernel._agentic_settings_core import DEFAULT_LOOP_MAX_ROUNDS
 from agents_remember.tasks import ReviewApproval, ReviewFinding, ReviewState, TaskDocument
+from agents_remember.tasks.route_review import ReviewRound
 
 _CANDIDATE_TREE_PATTERN = re.compile(r"^[0-9a-f]{40,64}$")
 
@@ -36,9 +37,13 @@ def begin_task_review(
     number holds for the next round.
     """
 
+    _require_readable_review(document)
     settings_number = DEFAULT_LOOP_MAX_ROUNDS if limit is None else limit
-    exception = _parse_approval_exception(payload)
-    state = document.reviewState
+    lane = review_state_field(payload)
+    exception = _parse_approval_exception(
+        {key: value for key, value in payload.items() if key != "reviewKind"} if payload else None
+    )
+    state = getattr(document, lane)
     if state is None or state.round == 0:
         if exception is not None:
             raise ReviewHistoryError(
@@ -48,7 +53,7 @@ def begin_task_review(
                 "round with an empty review object",
             )
         return document.model_copy(
-            update={"reviewState": ReviewState(round=1, pending=True, limit=settings_number)}
+            update={lane: ReviewState(round=1, pending=True, limit=settings_number)}
         )
     if state.pending:
         # A replay of an admitted operation owns the same round.  A valid exception
@@ -67,7 +72,7 @@ def begin_task_review(
         approval, allowance = exception
         return document.model_copy(
             update={
-                "reviewState": state.model_copy(
+                lane: state.model_copy(
                     update={
                         "round": state.round + 1,
                         "pending": True,
@@ -88,7 +93,7 @@ def begin_task_review(
         )
     return document.model_copy(
         update={
-            "reviewState": state.model_copy(
+            lane: state.model_copy(
                 update={"round": state.round + 1, "pending": True, "limit": task_limit}
             )
         }
@@ -114,7 +119,9 @@ def record_task_review(
     round; the same-round guard compares bindings, never caller strings.
     """
 
-    state = document.reviewState
+    _require_readable_review(document)
+    lane = review_state_field(payload)
+    state = getattr(document, lane)
     if state is None:
         state = ReviewState(round=1, pending=True)
     if settings_limit is not None and state.limit == 0:
@@ -142,7 +149,95 @@ def record_task_review(
         updated = updated.model_copy(update={"candidateTree": candidate})
     if actual_candidate is not None:
         updated = updated.model_copy(update={"candidateIdentity": actual_candidate})
-    return document.model_copy(update={"reviewState": updated})
+    updated = _with_recorded_round(state, updated, payload)
+    return document.model_copy(update={lane: updated})
+
+
+def _require_readable_review(document: TaskDocument) -> None:
+    """Launch recovery is read-only authority, never permission to replace damaged evidence."""
+    if document.review_read_error:
+        raise ReviewHistoryError(
+            "review-state-unreadable",
+            f"review-state-unreadable: repair the task's unreadable review evidence before begin_review or record_review: {document.review_read_error}",
+        )
+
+
+def review_state_field(payload: dict[str, Any] | None) -> str:
+    """Only an explicit memory kind selects the independent memory sequence."""
+    if payload is not None and not isinstance(payload, dict):
+        raise ReviewHistoryError("review-admission-invalid", "review payload must be an object")
+    kind = (payload or {}).get("reviewKind", "code")
+    if not isinstance(kind, str) or kind not in {"code", "memory"}:
+        raise ReviewHistoryError("review-kind-invalid", "reviewKind must be code or memory")
+    return "memoryReviewState" if kind == "memory" else "reviewState"
+
+
+def role_review_state(document: TaskDocument, role: str) -> ReviewState | None:
+    """Return the persisted lane for a counted role; never reinterpret legacy code rows."""
+    return {"worker": document.reviewState, "curator": document.memoryReviewState}.get(role)
+
+
+def _with_recorded_round(
+    state: ReviewState, updated: ReviewState, payload: dict[str, Any]
+) -> ReviewState:
+    if not state.pending:
+        prior = next((row for row in state.recordedRounds if row.round == state.round), None)
+        if prior and payload.get("reviewKind", prior.kind) != prior.kind:
+            raise ReviewHistoryError(
+                "review-kind-invalid",
+                "A record-only check cannot change the round's reviewKind; use begin_review for new review work.",
+            )
+        if prior and payload.get("verdictRef") is not None:
+            latest = ReviewRound.model_validate(
+                {**prior.model_dump(), "verdictRef": payload["verdictRef"]}
+            )
+            return updated.model_copy(
+                update={
+                    "recordedRounds": [
+                        latest if row.round == prior.round else row for row in state.recordedRounds
+                    ]
+                }
+            )
+        return updated
+    kind = payload.get("reviewKind", "code")
+    row = ReviewRound(
+        round=state.round,
+        kind=kind,
+        findingsRemain=bool(updated.remainingFindingIds),
+        verdictRef=payload.get("verdictRef"),
+    )
+    return updated.model_copy(update={"recordedRounds": [*state.recordedRounds, row]})
+
+
+def review_count_unavailable(state: ReviewState | None) -> str | None:
+    """Diagnose absent/incomplete typed history without inferring historical kinds."""
+    if state is None:
+        return None
+    expected = state.round - int(state.pending)
+    rows = state.recordedRounds
+    if len(rows) != expected or any(row.round != index for index, row in enumerate(rows, 1)):
+        return (
+            "reviewState.recordedRounds lacks a complete ordered typed record for every "
+            f"completed round (expected {expected}, found {len(rows)}); historical code/memory tries are unavailable."
+        )
+    return None
+
+
+def failed_role_tries(document: TaskDocument, role: str) -> int | None:
+    """Read failed code/Worker or memory/Curator rounds, never count record checks."""
+    if document.review_read_error and role in {"worker", "curator"}:
+        return None
+    return failed_review_tries(role_review_state(document, role), role)
+
+
+def failed_review_tries(state: ReviewState | None, role: str) -> int | None:
+    """A missing typed historical round makes a counted role's total unknown, not zero."""
+    kind = {"worker": "code", "curator": "memory"}.get(role)
+    if state is None or kind is None:
+        return 0
+    if review_count_unavailable(state):
+        return None
+    return sum(row.kind == kind and row.findingsRemain for row in state.recordedRounds)
 
 
 def require_pending_review(document: TaskDocument) -> ReviewState:
@@ -198,7 +293,16 @@ def _parse_candidate_tree(payload: dict[str, Any]) -> str | None:
 
 
 def _validate_publication_fields(payload: dict[str, Any]) -> None:
-    allowed = {"verdict", "findings", "remainingFindingIds", "verdictRef", "candidateTree"}
+    allowed = {
+        "verdict",
+        "findings",
+        "remainingFindingIds",
+        "verdictRef",
+        "candidateTree",
+        "reviewKind",
+    }
+    if payload.get("reviewKind", "code") not in {"code", "memory"}:
+        raise ReviewHistoryError("review-kind-invalid", "reviewKind must be code or memory")
     unknown = set(payload).difference(allowed)
     if unknown:
         raise ReviewHistoryError(

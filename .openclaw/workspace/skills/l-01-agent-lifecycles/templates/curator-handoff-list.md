@@ -23,6 +23,19 @@ produced them, outside this repository; the names are what a reader can look up.
 Emit it as **JSON, either as a fenced block in the report or as a file beside it** — one document per
 list, so the curator ingests a list rather than reading a table.
 
+## Writing and meaning review
+
+Use the [shared STE-inspired writing profile](../reference/shared-writing-profile.md) for newly
+authored invariant statements, family guarantees and history reasons. The producer-owned fields remain verbatim:
+a clearer record draft never changes the producer's original statement or its evidence. Keep the
+proposed wording separate, compare its obligation and scope against the exact existing revision,
+and obtain the independent fact-check before classifying it as `clarify` or publishing through the
+normal writer. A changed obligation needs the appropriate authored effect, not a cosmetic label.
+
+Migration authors use the same profile when assessing, demoting or revising exported records.
+Preserve admission criteria, semantic scope, exact evidence and frozen history; no bulk cosmetic
+rewrite is authorized. The migration procedure must link the profile before its waves start.
+
 ## Messages
 
 Messages wake; files carry. A message says what is asked or what is handed over, and names the files: evidence, verdicts, lists and logs are files, never pasted into a message. The full text goes in `body` and its files in `attach`; the tool files every message in the `messages` folder of the narrowest task the two agents share, and a leaf workspace links that folder as `messages`. The recipient reads the message and, where a file belongs to it, one last line naming the file and its SHA-256. A text holds at most the limit of the settings. A return goes to the parent's role with its task references, never to an id read from an earlier message.

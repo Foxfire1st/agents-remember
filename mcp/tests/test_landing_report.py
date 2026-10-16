@@ -79,6 +79,7 @@ from agents_remember.worktrees.services import (
     reset_worktree_services,
 )
 from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember_test_support.testing.leaf_instruction_wording import delivered_step
 from test_worktree_support import git, init_repo
 
 LAYOUT_MARKER = '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"}\n'
@@ -89,6 +90,25 @@ CURATOR_SENTENCES = (
     "Text is never removed to clear a finding of the quality check",
     "never into the memory worktree",
 )
+CURATOR_SENTENCE_EQUIVALENTS = {
+    CURATOR_SENTENCES[
+        0
+    ]: "For every quality-check cut card, name in the handover this task's change that made its removed text untrue.",
+}
+
+
+def _curator_landing_missing(text: str) -> list[str]:
+    reading = " ".join(text.replace("**", "").split())
+    return [
+        sentence
+        for sentence in CURATOR_SENTENCES
+        if not any(
+            " ".join(variant.split()) in reading
+            for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence))
+        )
+    ]
+
+
 REVIEWER_SENTENCES = (
     "text removed\n   without a named change is a finding",
     "an added file outside the knowledge without a place in the task's requirement",
@@ -444,21 +464,19 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
     assert len(roots) >= 9
     for root in sorted(roots):
         curator = (root / "l-01-agent-lifecycles" / "roles" / "curator.md").read_text()
-        reviewer = (root / "l-01-agent-lifecycles" / "roles" / "reviewer.md").read_text()
-        flat_curator = " ".join(curator.split())
-        flat_reviewer = " ".join(reviewer.split())
+        assert _curator_landing_missing(curator) == [], root
+        reading = " ".join(curator.replace("**", "").split())
         for sentence in CURATOR_SENTENCES:
-            assert " ".join(sentence.split()) in flat_curator, f"{sentence!r} missing in {root}"
-        for sentence in REVIEWER_SENTENCES:
-            assert " ".join(sentence.split()) in flat_reviewer, f"{sentence!r} missing in {root}"
+            mutant = reading
+            for variant in (sentence, CURATOR_SENTENCE_EQUIVALENTS.get(sentence, sentence)):
+                mutant = mutant.replace(" ".join(variant.split()), "")
+            assert mutant != reading
+            assert sentence in _curator_landing_missing(mutant)
 
     lifecycle = REPO_ROOT / "skills" / "l-01-agent-lifecycles"
     manifest_bytes = (lifecycle / "composition-manifest.json").read_bytes()
     parsed = parse_composition_manifest(manifest_bytes)
-    for role, operation, sentences in (
-        ("curator", "curation", CURATOR_SENTENCES),
-        ("reviewer", "review", ("without a named change is a finding",)),
-    ):
+    for role, operation, sentences in (("curator", "curation", CURATOR_SENTENCES),):
         seat = CapsuleRoleSeat(role=role, altitude=parsed.roles[role].altitude)  # type: ignore[arg-type]
         request = routed_admission_for(
             lifecycle,
@@ -481,10 +499,43 @@ def test_role_texts_hold_landing_sentences_everywhere() -> None:
         assert outcome.ok, outcome.render_explanation()
         assert outcome.result is not None
         text = outcome.result.render_instructions()
-        for sentence in sentences:
-            assert " ".join(sentence.split()) in " ".join(text.split()), (
-                f"{sentence!r} missing in compiled {role}/{operation}"
-            )
+        assert sentences == CURATOR_SENTENCES
+        assert _curator_landing_missing(text) == [], f"compiled {role}/{operation}"
+
+
+def _reviewer_landing_roots() -> list[Path]:
+    roots = {REPO_ROOT / "skills"}
+    roots.update(
+        path.parent.parent.parent
+        for path in REPO_ROOT.glob("**/skills/l-01-agent-lifecycles/roles/reviewer.md")
+        if ".venv" not in path.parts
+    )
+    assert len(roots) >= 9
+    return sorted(roots)
+
+
+@pytest.mark.parametrize(
+    "root", _reviewer_landing_roots(), ids=lambda root: root.relative_to(REPO_ROOT).as_posix()
+)
+def test_reviewer_landing_sentences_are_delivered_before_memory_review(
+    root: Path, tmp_path: Path
+) -> None:
+    """Both original findings live in the exact declared/delivered step-8 file."""
+    instructions, text = delivered_step(
+        root / "l-01-agent-lifecycles",
+        ("reviewer", "review"),
+        "reference/reviewer-memory-d301.md",
+        "when you reach step 8 (memory review), not before",
+        tmp_path / "review.md",
+    )
+    assert "Read [memory checks]" in instructions
+    for sentence in REVIEWER_SENTENCES:
+        flat_sentence = " ".join(sentence.split())
+        reading = " ".join(text.split())
+        assert flat_sentence in reading, f"{sentence!r} missing in delivered {root}"
+        mutant = reading.replace(flat_sentence, "")
+        assert mutant != reading
+        assert flat_sentence not in mutant
 
 
 def _leaf_pair(root: Path) -> dict[str, Any]:

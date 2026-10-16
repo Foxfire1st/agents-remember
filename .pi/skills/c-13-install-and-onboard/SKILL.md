@@ -366,6 +366,13 @@ conversion or a crossing, the refused operation is repeated and runs the ordinar
 converted route. The full procedure also lives in `docs/guides/first-conversion.md`;
 `knowledge-convert --help` states the same entry points.
 
+Authored migration prose uses the
+[shared STE-inspired writing profile](../l-01-agent-lifecycles/reference/shared-writing-profile.md).
+The converter is not a cosmetic rewrite. Before assessment waves, the migration procedure links
+that profile; later authored statements, family guarantees and history reasons preserve scope,
+source/evidence identities and frozen history, and proposed rewrites receive independent meaning
+review before the normal writer publishes. A shorter sentence does not prove equivalent meaning.
+
 The converter stays: the conversion command, its read-only reader of the legacy
 database, and conversion-format version 1 are permanent parts of the product, because
 unconverted lines live in other clones and on other machines (MIK-R46 rule 7). Never

@@ -124,9 +124,15 @@ class FakeRuntime:
                 "thinkingOptionId": payload.get("thinkingOptionId"),
                 **(
                     {"serviceTier": payload["featureValues"]["service_tier"]}
+                    if "service_tier" in payload.get("featureValues", {})
+                    else {}
+                ),
+                **(
+                    {"featureValues": dict(payload["featureValues"])}
                     if "featureValues" in payload
                     else {}
                 ),
+                **({"modeId": payload["modeId"]} if "modeId" in payload else {}),
                 "title": payload["title"],
                 "labels": payload["labels"],
                 "workspaceId": payload["workspaceId"],

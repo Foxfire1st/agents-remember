@@ -40,6 +40,7 @@ class RoleStartCall:
     # The word that the holder's turn, if it is in one, may be interrupted by the
     # replacement (rule 8). Without it a running holder is refused, as in retirement.
     replaces_interrupt_turn: bool = False
+    step_up: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +162,7 @@ class RoleStartResponse(ToolResponse):
     """
 
     operation: Literal["role_start"] = "role_start"
+    stepUp: dict[str, Any] | None = None
     status: RoleStartStatus
     detail: str
     refusal: RoleStartRefusal | None = None

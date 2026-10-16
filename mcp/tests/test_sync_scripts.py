@@ -126,6 +126,10 @@ PROJECTED_BOUNDARY_CLAUSES: tuple[BoundaryClause, ...] = (
         "core/acceptance.md", "Terminal truth is mechanical; acceptance is the owner's."
     ),
     BoundaryClause("roles/worker.md", "A finished turn is not AR acceptance."),
+    BoundaryClause(
+        "reference/shared-writing-profile.md",
+        "A clearer rewrite is never proof of preserved meaning.",
+    ),
 )
 
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")

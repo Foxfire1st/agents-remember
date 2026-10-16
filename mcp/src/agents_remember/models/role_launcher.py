@@ -78,6 +78,7 @@ class RoleLauncherOptionsRequest(RoleSelection):
 
 class RoleDispatchRequest(RoleSelection):
     request_id: uuid.UUID = Field(alias="requestId")
+    step_up: str | None = Field(default=None, alias="stepUp", min_length=1, max_length=1000)
     action: Literal["start", "revive"] = "start"
     agent_override: RoleAgentOverride | None = Field(default=None, alias="agentOverride")
     # The holder this start replaces on its leaf seat (MIK-R100 rule 9): the start

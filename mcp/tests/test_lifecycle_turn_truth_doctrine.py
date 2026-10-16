@@ -99,13 +99,12 @@ DOCTRINE_TREE = "skills/l-01-agent-lifecycles"
 TREE_LITERAL = REPOSITORY_ROOT / DOCTRINE_TREE
 
 # Every canonical surface that composes completion-truth wording belongs on this roster.
-# The composed curation operation and curator/reviewer role documents retain that sentence and
-# its mechanical reading, so they participate alongside the other remaining speakers.
+# The curation operation carries the Curator's mechanical reading; a role file without that
+# vocabulary is not itself a speaker. The census below checks both additions and removals.
 COMPLETION_TRUTH_ROSTER = (
     "skills/l-01-agent-lifecycles/core/acceptance.md",
     "skills/l-01-agent-lifecycles/operations/curation.md",
     "skills/l-01-agent-lifecycles/reference/rulings.md",
-    "skills/l-01-agent-lifecycles/roles/curator.md",
     "skills/l-01-agent-lifecycles/roles/designer.md",
     "skills/l-01-agent-lifecycles/roles/reviewer.md",
     "skills/l-01-agent-lifecycles/roles/strategist.md",
@@ -123,7 +122,7 @@ RELAY_MECHANICS_SURFACES = ("skills/l-01-agent-lifecycles/templates/turn-report.
 # The one reading every completion-truth surface must carry: the terminal outcome ends a turn and
 # nothing more. Written as one alternation so a legitimate rephrasing inside the pattern passes.
 MECHANICAL_READING = re.compile(
-    r"only that (?:the provider|this|the manager's) turn ended",
+    r"only that (?:the provider|this|the manager's) turn ended|only turn end\b",
 )
 
 
@@ -316,8 +315,8 @@ _OUTCOME_ANAPHOR = (
 # "attests only that this turn ended", "means only that the provider turn ended normally": an
 # attribution restricted to turn-end states the boundary and must not be read as a violation.
 _TURN_END_RESTRICTION = re.compile(
-    r"\b(?:attests?|attesting|means|mean|is|are|counts? as|serves as|amounts to)\s+"
-    r"(?:only|merely|nothing more than)\s+that[^.;:]{0,60}?\bturn end\w*",
+    r"\b(?:attests?|attesting|proves?|means|mean|is|are|counts? as|serves as|amounts to)\s+"
+    r"(?:only|merely|nothing more than)\s+(?:that[^.;:]{0,60}?\bturn end\w*|turn end\b)",
     re.IGNORECASE,
 )
 # "... rule 4's validation is what accepts it": here the *owner's* validation accepts the handoff,
@@ -855,12 +854,12 @@ class SilenceIsNotContradictionTests(unittest.TestCase):
     """Silence and contradiction are different states, and the classifier must say so."""
 
     def test_a_stated_clause_is_stated(self) -> None:
-        self.assertEqual(
-            classify_reading(
-                "Terminal truth attests only that this turn ended; the owner validates."
-            ),
-            Reading.STATED,
-        )
+        for text in (
+            "Terminal truth attests only that this turn ended; the owner validates.",
+            "Terminal/finalizer evidence proves only turn end.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(classify_reading(text), Reading.STATED)
 
     def test_a_prohibition_is_not_a_contradiction(self) -> None:
         """Negation-only wording states no positive reading, and must not read as a violation."""
@@ -881,13 +880,18 @@ class SilenceIsNotContradictionTests(unittest.TestCase):
     def test_stating_and_denying_is_contradicted_not_stated(self) -> None:
         """Presence of the owed sentence is not a pass; the same surface may also deny it."""
 
-        self.assertEqual(
-            classify_reading(
-                "Terminal/finalizer truth attests only that this turn ended and wakes the owner. "
-                "The manager may treat a `completed` outcome as acceptance of the handoff."
-            ),
-            Reading.CONTRADICTED,
-        )
+        for boundary in (
+            "Terminal/finalizer truth attests only that this turn ended and wakes the owner. ",
+            "Terminal/finalizer evidence proves only turn end. ",
+        ):
+            with self.subTest(boundary=boundary):
+                self.assertEqual(
+                    classify_reading(
+                        boundary
+                        + "The manager may treat a `completed` outcome as acceptance of the handoff."
+                    ),
+                    Reading.CONTRADICTED,
+                )
 
     def test_a_state_and_deny_split_across_sentences_is_contradicted(self) -> None:
         """The claim needs no second outcome token, and the split is where the guard used to read clean.

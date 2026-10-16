@@ -65,6 +65,7 @@ export interface RoleAgentChoice {
 }
 
 export interface RoleDefaults {
+  stepUp?: { model?: string; harness?: string } | null;
   agent?: string;
   model?: string;
   effort?: string;
@@ -93,6 +94,7 @@ export interface RoleAgentOverride {
 }
 
 export interface RoleScopedExecution {
+  stepUp?: { model?: string; source?: string } | null;
   status: string;
   detail?: string;
   requestId?: string;
@@ -110,6 +112,7 @@ export interface RoleScopedExecution {
 }
 
 export interface RoleLaunchSelection {
+  stepUp?: string;
   role: LauncherRole;
   sprintDocumentRef?: TaskDocumentRef;
   masterDocumentRef?: TaskDocumentRef;
@@ -291,6 +294,19 @@ export function tasklessRequestStorageKey(role: LauncherRole): string {
   return 'ar-role-taskless-request-v1:' + (role === 'investigator' ? 'system-specialist' : role);
 }
 
+function tasklessRetrySelection(
+  role: LauncherRole,
+  payload: RoleLaunchSelection | undefined,
+): RoleLaunchSelection | undefined {
+  if (!payload || canonicalLauncherRole(payload.role) !== role) return undefined;
+  const stepUp = typeof payload.stepUp === 'string' ? payload.stepUp.trim() : undefined;
+  return {
+    role: payload.role,
+    ...(stepUp ? { stepUp } : {}),
+    ...(payload.agentOverride ? { agentOverride: payload.agentOverride } : {}),
+  };
+}
+
 export function readTasklessActiveRequests(): Partial<
   Record<LauncherRole, RoleTasklessActiveRequest>
 > {
@@ -305,18 +321,14 @@ export function readTasklessActiveRequests(): Partial<
         retryPayload?: unknown;
       };
       if (typeof value.requestId !== 'string' || !value.requestId) continue;
-      const payload = value.retryPayload as RoleLaunchSelection | undefined;
+      const retryPayload = tasklessRetrySelection(
+        role,
+        value.retryPayload as RoleLaunchSelection | undefined,
+      );
       active[role] = {
         requestId: value.requestId,
         ...(value.pending === true ? { pending: true } : {}),
-        ...(payload && canonicalLauncherRole(payload.role) === role
-          ? {
-              retryPayload: {
-                role: payload.role,
-                ...(payload.agentOverride ? { agentOverride: payload.agentOverride } : {}),
-              },
-            }
-          : {}),
+        ...(retryPayload ? { retryPayload } : {}),
       };
     } catch {
       // Discard stale or malformed task-local recovery metadata.

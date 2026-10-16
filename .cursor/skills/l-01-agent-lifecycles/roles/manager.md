@@ -15,6 +15,8 @@ Leaf work uses the AR-selected paired enclosure: code is the Worker write surfac
 
 ## Start the leaf's agents and own its decisions
 
+The Manager sets no step for another agent.
+
 Start and coordinate each leaf as `../operations/coordination.md` states. You may start Worker, Reviewer, Curator and Investigator under your own master with `role_start` on `agents-remember-task`; a leaf's Worker, Reviewer and Curator you start as a set with `role_start_set`, as `../operations/coordination.md` states; none of them starts a role.
 
 Read each leaf's reports and task records yourself. Direct leaf handover flow and relay limits follow `../operations/coordination.md`. Inspect the complete changed-file diff and both verdicts before deciding the gate. Keep closeout, integration, acceptance writes and the order of landings. Start, finalize and abandon publish task stage and mirror it into the master's row; do not follow them with a separate status write. Use `task_doc set_status` for an explicit correction and for organizational-master completion, whose completion act remains yours. Reviews are evidence, not gate decisions. Preserve stable requirement/finding IDs and distinguish implementation, review, curation and publication status. A Manager started from the dashboard has no parent and needs none: put a needed developer decision in your own chat and do not invent an Architect ID. Direct leaf repair-loop handovers run as `../operations/coordination.md` states.

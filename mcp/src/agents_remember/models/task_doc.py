@@ -221,6 +221,8 @@ class TaskDocResponse(ToolResponse):
     reportPath: str | None = None
     # Bounded first-review/fix-verification state; absent persisted state is reported as zero.
     reviewState: dict[str, Any] | None = None
+    memoryReviewState: dict[str, Any] | None = None
+    reviewKind: Literal["code", "memory"] | None = None
     # author_execution_graph: what the batch applied and the derived scheduling view.
     bootstrapped: bool | None = None
     appliedMutations: list[dict[str, Any]] | None = None

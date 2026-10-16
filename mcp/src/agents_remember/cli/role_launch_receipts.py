@@ -33,9 +33,18 @@ from agents_remember.cli.investigator_receipts import (
 )
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
 from agents_remember.cli.role_activity import publish_receipt_role_agent
-from agents_remember.cli.role_handover_artifacts import restore_handover_artifact
+from agents_remember.cli.role_handover_artifacts import (
+    restore_handover_artifact,
+    restore_step_up_artifact,
+)
+from agents_remember.cli.role_instruction_details import validate_instruction_detail_artifacts
 from agents_remember.cli.role_instructions import instruction_metadata, launch_choice_metadata
+from agents_remember.cli.role_launch_choices import (
+    observe_launch_choices as _observe_launch_choices,
+)
+from agents_remember.cli.role_launch_outcome import publish_launch_outcome
 from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
+from agents_remember.cli.role_step_up_decisions import record_step_up
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import canonical_role
@@ -92,6 +101,7 @@ def _execute_prepared_launch(
         closing = _leaf_is_closing(current)
     if closing:
         return _refuse_closing_launch(config, path, current)
+    record_step_up(config, current)
     launch_call = current.get("replayRequest")
     if not isinstance(launch_call, dict):
         raise HTTPException(
@@ -105,6 +115,12 @@ def _execute_prepared_launch(
     if isinstance(predecessor, dict):
         collect_execution_reports(predecessor)
     publish_receipt_role_agent(config, current)
+    # Liveness depends on receipts; import its boundary guard only for execution.
+    from agents_remember.cli.role_launch_liveness import (  # noqa: PLC0415
+        require_step_up_archive_idle,
+    )
+
+    require_step_up_archive_idle(config, current, launch_call)
     if current.get("role") in LEAF_ROLES:
         outcome = run_launch_call(
             config, launch_call, before_create=lambda: _leaf_before_create(path, current)
@@ -115,7 +131,9 @@ def _execute_prepared_launch(
         current = _same_request_receipt(path, receipt)
         _settle_predecessor_reports(current, outcome)
         if not _leaf_is_closing(current):
-            return _publish_launch_outcome(path, current, launch_call, outcome)
+            response = _publish_launch_outcome(path, current, launch_call, outcome)
+            record_step_up(config, current)
+            return response
         if outcome.kind == "created":
             current.update(execution=outcome.execution, agent=outcome.applied, hostAgentExists=True)
             _observe_launch_choices(current, outcome.applied)
@@ -138,8 +156,10 @@ def _restore_launch_handover(
 
     artifact = current.get("handoverArtifact")
     if not isinstance(artifact, dict):
+        validate_instruction_detail_artifacts(current)
         return
     _rebind_report_access(current)
+    validate_instruction_detail_artifacts(current)
     if current.get("heldSeat") is True:
         held_opening = current.get("heldOpeningPrompt")
         if not isinstance(held_opening, str):
@@ -147,9 +167,11 @@ def _restore_launch_handover(
                 status_code=409,
                 detail="The held seat has no stored opening handover; start it again.",
             )
-        restore_handover_artifact(artifact, held_opening, receipt=path)
+        message = held_opening
     else:
-        restore_handover_artifact(artifact, _saved_first_message(launch_call), receipt=path)
+        message = _saved_first_message(launch_call)
+    restore_handover_artifact(artifact, message, receipt=path)
+    restore_step_up_artifact(current, message, receipt=path)
 
 
 def _same_request_receipt(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
@@ -200,76 +222,7 @@ def _refuse_closing_launch(
 def _publish_launch_outcome(
     path: Path, receipt: dict[str, Any], launch_call: dict[str, Any], outcome: LaunchOutcome
 ) -> JSONResponse:
-    if outcome.kind == "created":
-        receipt["execution"] = outcome.execution
-        receipt["agent"] = outcome.applied
-        if outcome.workspace_preparation in {"created", "found", "opened"}:
-            receipt.setdefault("preparation", {})["workspace"] = outcome.workspace_preparation
-        _observe_launch_choices(receipt, outcome.applied)
-        if outcome.warning:
-            receipt["warning"] = " ".join(filter(None, (receipt.get("warning"), outcome.warning)))
-        agent_call = launch_call.get("agent")
-        held = receipt.get("heldSeat") is True and (
-            not isinstance(agent_call, dict) or "prompt" not in agent_call
-        )
-        if held:
-            # A held seat (MIK-R100 rule 2): the agent exists and has taken no turn.
-            # The saved call and the opening handover stay recorded for its first message.
-            receipt.update(
-                status="held",
-                hostAgentExists=True,
-                detail=(
-                    "The Paseo runtime created the role agent without a first message; "
-                    "the seat is held and takes its first turn with the first message "
-                    "addressed to it."
-                ),
-                updatedAt=_now_iso(),
-            )
-        else:
-            receipt.update(
-                status="running",
-                hostAgentExists=True,
-                detail="The Paseo runtime created the role agent; AR acceptance remains with its owner.",
-                updatedAt=_now_iso(),
-            )
-            receipt.pop("replayRequest", None)
-        _write_receipt(path, receipt)
-        return JSONResponse(_public_execution(receipt))
-    if outcome.kind == "refused":
-        if outcome.lost_agent_id:
-            # The agent exists and can never be given its first message; the next launch on a
-            # task-bound selection archives it, as it archives the agent of an execution it
-            # replaces. A later start of a taskless role archives nothing.
-            receipt["pendingArchiveAgentId"] = outcome.lost_agent_id
-        elif not outcome.predecessor_settled:
-            # The agent this launch was to replace is still live; the next launch archives it.
-            receipt["pendingArchiveAgentId"] = launch_call["archiveAgentId"]
-        receipt.update(
-            status="rejected",
-            hostAgentExists=outcome.lost_agent_id is not None,
-            detail=(
-                "The agent of this launch never got its first message and the Paseo runtime "
-                "cannot open its session again, so this launch is closed. "
-                f"{_lost_agent_advice(receipt, outcome.lost_agent_id)} {outcome.message}"
-                if outcome.lost_agent_id
-                else "The Paseo runtime refused the launch; no agent exists under the minted "
-                f"agent id. {outcome.message}"
-            ),
-            updatedAt=_now_iso(),
-        )
-        receipt.pop("replayRequest", None)
-        _write_receipt(path, receipt)
-        return JSONResponse(_public_execution(receipt), status_code=502)
-    receipt.update(
-        status="unknown",
-        detail=(
-            f"The launch has no usable answer ({outcome.code}): {outcome.message} Retry this "
-            "same request to repeat the saved call under the same agent id."
-        ),
-        updatedAt=_now_iso(),
-    )
-    _write_receipt(path, receipt)
-    return JSONResponse(_public_execution(receipt), status_code=202)
+    return publish_launch_outcome(path, receipt, launch_call, outcome)
 
 
 def _settle_predecessor_reports(receipt: dict[str, Any], outcome: LaunchOutcome) -> None:
@@ -282,34 +235,6 @@ def _settle_predecessor_reports(receipt: dict[str, Any], outcome: LaunchOutcome)
             # The host already answered: retain its actual result and the source folder,
             # rather than misreporting a created agent as a pre-creation refusal.
             receipt["predecessorCollectionError"] = str(error)
-
-
-def _observe_launch_choices(receipt: dict[str, Any], applied: dict[str, Any] | None) -> None:
-    if applied and isinstance(receipt.get("choices"), dict):
-        for key in ("model", "effort", "mode"):
-            choice = receipt["choices"].get(key)
-            if isinstance(choice, dict):
-                choice["observedValue"] = applied.get(key)
-                if choice.get("source") == "host default":
-                    choice["value"] = applied.get(key)
-        for key, choice in receipt["choices"].get("featureValues", {}).items():
-            choice["observedValue"] = applied.get("featureValues", {}).get(key)
-        warnings = []
-        for key, choice in [
-            ("mode", receipt["choices"].get("mode", {})),
-            *[
-                (f"featureValues.{key}", value)
-                for key, value in receipt["choices"].get("featureValues", {}).items()
-            ],
-        ]:
-            if choice.get("source") not in ("host default", "none", None) and choice.get(
-                "value"
-            ) != choice.get("observedValue"):
-                warnings.append(
-                    f"{key} stated {choice.get('value')!r}, but the host reported {choice.get('observedValue')!r}."
-                )
-        if warnings:
-            receipt["warning"] = " ".join(filter(None, (receipt.get("warning"), *warnings)))
 
 
 def _lost_agent_advice(receipt: dict[str, Any], lost_agent_id: str) -> str:
@@ -703,6 +628,7 @@ def _request_digest(
                 **({"role": role_name} if role_name else {}),
             },
             "agentOverride": override,
+            **({"stepUp": request.step_up} if request.step_up is not None else {}),
         }
     )
 
@@ -726,6 +652,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
                 "capsuleOperation",
                 "arMcpContext",
                 "sessionOptions",
+                "stepUp",
                 "preparation",
                 "choices",
                 "instructionComposition",
@@ -751,9 +678,9 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
     else:
         public["canStart"] = status in {"completed", "failed", "stopped", "rejected"}
     public["canRevive"] = receipt.get("canRevive") is True
-    public["canRetry"] = status in {"starting", "unknown"} and isinstance(
-        receipt.get("replayRequest"), dict
-    )
+    public["canRetry"] = (
+        status in {"starting", "unknown"} or (status == "rejected" and bool(receipt.get("stepUp")))
+    ) and isinstance(receipt.get("replayRequest"), dict)
     if canonical_role(str(receipt.get("role", ""))) in LEAF_ROLES:
         _apply_leaf_holder(public, receipt, status)
     report = receipt.get("report")
@@ -775,6 +702,9 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             if isinstance(override, dict):
                 retry_payload["agentOverride"] = override
             public["retryPayload"] = retry_payload
+            retry_payload.update(
+                {"stepUp": receipt["requestedStepUp"]} if receipt.get("requestedStepUp") else {}
+            )
     if _leaf_is_closing(receipt) and receipt["leafArchive"].get("startRefused") is True:
         _apply_leaf_closing(public, receipt)
     reference = receipt.get("execution")

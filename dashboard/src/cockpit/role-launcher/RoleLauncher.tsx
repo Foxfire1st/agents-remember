@@ -4,6 +4,7 @@ import type { TaskEntry, TaskDocumentRef } from '../../types/projection';
 import { sameTaskDocumentRef } from '../../data/taskIdentity';
 import { RoleExecutionStatus, RoleReviveControl } from '../RoleExecutionStatus';
 import { RoleLaunchDefaults, RoleLaunchFeatures } from '../RoleLaunchFeatures';
+import { StepUpControl, StepUpStatus } from './StepUpControl';
 
 import {
   LAUNCHER_ROLES,
@@ -731,6 +732,7 @@ type LauncherOverrideProps = {
   busy: boolean;
   retryLocked: boolean;
   onSelectionChange: (selection: RoleLaunchSelection) => void;
+  basePreview: boolean;
 };
 
 function LauncherOverrideFields(props: LauncherOverrideProps) {
@@ -744,6 +746,7 @@ function LauncherOverrideFields(props: LauncherOverrideProps) {
     busy,
     retryLocked,
     onSelectionChange,
+    basePreview,
   } = props;
   const mode = modeDisclosures(choice, roleDefaults);
   return (
@@ -755,11 +758,13 @@ function LauncherOverrideFields(props: LauncherOverrideProps) {
         ready={optionsReady}
         defaults={roleDefaults}
         selectedAgentId={selectedAgentId}
+        basePreview={basePreview}
         modeLabel={mode.label}
         modeDescription={mode.description}
       />
       <RoleLaunchFeatures
         features={overrideFeatures(choice)}
+        basePreview={basePreview}
         defaults={overrideDefaults(selectedAgentId, roleDefaults)}
         override={selection.agentOverride}
         disabled={!optionsReady || optionsLoading || busy || retryLocked}
@@ -918,6 +923,23 @@ function OptionsRetryButton({
     </button>
   );
 }
+function ServiceTierChip({ roleDefaults, selectedAgentId, execution }: {
+  roleDefaults: RoleDefaults;
+  selectedAgentId: string;
+  execution: RoleScopedExecution | undefined;
+}) {
+  const tierText = serviceTierText(roleDefaults, selectedAgentId);
+  if (!tierText) return null;
+  const basePreview = Boolean(execution?.stepUp);
+  return (
+    <span data-testid="role-service-tier" className={launcherChip} title={basePreview
+      ? "Base service tier preview; not applied to the stepped-up execution."
+      : "The role service tier applies on its default agent, including model overrides; a different agent uses its native default."}>
+      {basePreview ? "Base · " : ""}{tierText}
+    </span>
+  );
+}
+
 type LauncherActionProps = {
   roleDefaults: RoleDefaults;
   selectedAgentId: string;
@@ -963,19 +985,10 @@ function LauncherButtons({
   onRefreshResult,
 }: LauncherActionProps) {
   const { launchSelection, complete, canRefreshResult } = readiness;
-  const tierText = serviceTierText(roleDefaults, selectedAgentId);
   const retry = retryOffered(readiness, retryRequestId);
   return (
     <div className={roleLauncherActions}>
-      {tierText ? (
-        <span
-          data-testid="role-service-tier"
-          className={launcherChip}
-          title="The role service tier applies on its default agent, including model overrides; a different agent uses its native default."
-        >
-          {tierText}
-        </span>
-      ) : null}
+      <ServiceTierChip roleDefaults={roleDefaults} selectedAgentId={selectedAgentId} execution={currentScopedExecution} />
       <button
         className={launcherButton({ selected: true })}
         type="button"
@@ -987,6 +1000,8 @@ function LauncherButtons({
         {startLabel}
       </button>
       <RetryButton offered={retry} busy={busy} onRetry={onRetry} />
+      <StepUpControl defaults={roleDefaults} selection={selection} disabled={!complete || !optionsReady || busy || optionsLoading || Boolean(retry)} onLaunch={onLaunch} />
+      <StepUpStatus execution={currentScopedExecution} />
       <RoleReviveControl
         execution={currentScopedExecution}
         enabled={optionsReady && complete && !busy}
@@ -1023,6 +1038,7 @@ function LauncherActionBar(props: LauncherActionProps) {
       <LauncherButtons {...props} />
       <RoleExecutionStatus
         execution={props.failureExecution}
+        showStepUp={false}
         failure={failureLine(
           props.readiness.choiceProblem,
           props.selectedAgent,
@@ -1142,6 +1158,7 @@ export function RoleLauncher(props: RoleLauncherProps) {
         modelDisplayed={modelDisplayed}
         effortDisplayed={effortDisplayed}
         retryLocked={retryLocked}
+        basePreview={Boolean(currentScopedExecution?.stepUp)}
       />
       <LauncherActionBar
         {...props}

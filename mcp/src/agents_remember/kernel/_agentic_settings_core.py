@@ -104,7 +104,7 @@ KNOWN_ROLES = frozenset(
         "bootstrap",
     }
 )
-KNOWN_ROLE_KNOB_FIELDS = frozenset(
+KNOWN_ROLE_LAUNCH_FIELDS = frozenset(
     {
         "harness",
         "model",
@@ -116,6 +116,7 @@ KNOWN_ROLE_KNOB_FIELDS = frozenset(
     }
 )
 # R71 rule 20: unknown features carry permission authority until explicitly classified.
+KNOWN_ROLE_KNOB_FIELDS = KNOWN_ROLE_LAUNCH_FIELDS | {"stepUp"}
 NON_PERMISSION_FEATURES = frozenset({"service_tier", "fast_mode"})
 
 
@@ -213,6 +214,44 @@ class RoleKnobs:
     feature_values: dict[str, str | bool] = field(default_factory=dict)
     notes: str | None = None
     origins: dict[str, RoleChoiceOrigin] = field(default_factory=dict, compare=False, repr=False)
+    step_up: RoleStepUp | None = None
+
+
+@dataclass(frozen=True)
+class RoleStepUp:
+    """One user-owned alternative; counted roles default to three failed review rounds."""
+
+    choices: RoleKnobs
+    after_tries: int | None = None
+    source: str = "role settings"
+    key: str = "stepUp"
+
+
+def require_distinct_step_up(knobs: RoleKnobs, spawn_harness: str | None = None) -> None:
+    """Compare the effective role row with its normalized, same-scope alternative."""
+    step = knobs.step_up
+    if step is None:
+        return
+    choices = step.choices
+    base = {key: getattr(knobs, key) for key in ("harness", "model", "effort", "mode", "notes")}
+    base["harness"] = knobs.harness or spawn_harness
+    if any(
+        getattr(choices, key) is not None and getattr(choices, key) != value
+        for key, value in base.items()
+    ):
+        return
+    base_features = role_feature_values(knobs, f"{step.source}: {step.key}")
+    selected_features = dict(choices.feature_values or knobs.feature_values)
+    tier = choices.service_tier or (
+        knobs.service_tier if "service_tier" not in choices.feature_values else None
+    )
+    if tier:
+        selected_features["service_tier"] = native_service_tier(tier)
+    if selected_features != base_features:
+        return
+    raise AgenticSettingsError(
+        f"{step.key} must name choices different from the effective role's own after alias normalization: {step.source}"
+    )
 
 
 @dataclass(frozen=True)
@@ -294,8 +333,9 @@ class AgenticSettings:
         base = self.roles.get(role, RoleKnobs())
         override = self.roles_per_level.get(level, {}).get(role)
         if override is None:
+            require_distinct_step_up(base, self.spawn_harness)
             return base
-        return RoleKnobs(
+        resolved = RoleKnobs(
             harness=override.harness or base.harness,
             model=override.model or base.model,
             effort=override.effort or base.effort,
@@ -304,7 +344,10 @@ class AgenticSettings:
             feature_values={**base.feature_values, **override.feature_values},
             notes=override.notes or base.notes,
             origins={**base.origins, **override.origins},
+            step_up=override.step_up or base.step_up,
         )
+        require_distinct_step_up(resolved, self.spawn_harness)
+        return resolved
 
 
 def agentic_settings_path(root: Path) -> Path:

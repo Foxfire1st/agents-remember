@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agents_remember.errors import CapsuleDeliveryError
+from agents_remember.models.role_capsules.types import CapsuleDetailReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,7 @@ class CapsuleDelivery:
     binding: CapsuleBindingIdentity
     trusted_instructions: str
     semantic_digest: str
+    detail_references: tuple[CapsuleDetailReference, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.trusted_instructions.strip():
@@ -160,4 +162,5 @@ def capsule_delivery_from(compilation: object) -> CapsuleDelivery:
         ),
         trusted_instructions=str(render()),
         semantic_digest=str(getattr(capsule, "semantic_digest", "")),
+        detail_references=getattr(capsule, "detail_references", ()),
     )

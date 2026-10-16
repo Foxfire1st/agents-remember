@@ -59,6 +59,12 @@ from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import LauncherRole, RoleSelection
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.tasks import TaskDocument
+from agents_remember_test_support.testing.capsule_wording import (
+    assert_git_comparison_scope,
+    clause_mutations,
+    clause_surface,
+    surface_clauses,
+)
 from agents_remember_test_support.testing.curation_doctrine import (
     RETIRED_CURATION_STATEMENTS,
     normalize_statement,
@@ -70,7 +76,6 @@ from agents_remember_test_support.testing.leaf_instruction_wording import (
     autonomy_clauses,
     forbidden_autonomy_clauses,
     missing_clauses,
-    normalized,
 )
 from mcp.server.fastmcp import FastMCP
 
@@ -276,18 +281,18 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "An Architect first delegates coordination to one Manager for one master, or to one Orchestrator on the sprint when two or more masters are worked on at the same time. The Orchestrator starts one Manager per master. Only the developer may choose direct coordination by the Architect. The developer may also ask for an Orchestrator above a single master. A role started from the dashboard has no parent agent and needs none. Existing approvals and rulings remain durable across reconnects and compaction; ask again only for new or changed scope, a real requirement conflict, or an unresolved human-pinned decision.",
             ],
             "roles/curator.md": [
-                "Bound intake follows `../operations/curation.md` §Bound Paseo intake and capabilities and §Required inputs, including the admitted file-writer command for the selected converted memory root.",
-                "knowledge-bootstrap` entry the `c-14-knowledge-bootstrap` skill states, which belongs to a session with **no",
-                "the taskless `agents-remember knowledge-bootstrap` entry, which belongs to a session with **no enclosure in scope** and refuses one (`enclosure_in_scope`) because a bootstrap must not write onto a task's line. Neither route is fabricated: no leaf, worktree or enclosure is ever created to give either an argument list",
+                "Intake/writer admission: `../operations/curation.md` §Required inputs and §Bound Paseo intake and capabilities.",
+                "taskless `agents-remember knowledge-bootstrap` under `c-14-knowledge-bootstrap`, with **no enclosure in scope**, otherwise `enclosure_in_scope`, never writing onto a task's line.",
+                "Never fabricate a leaf, worktree or enclosure for either route;",
                 "Those two are the only knowledge write entry points; no MCP tool writes knowledge.",
-                "Enumerate one full-intake worklist of distinct outstanding memory actions in your report:",
-                "Address handovers and count them as taken as `../operations/curation.md` §Handoff / exit states.",
+                "Report one full-intake worklist of distinct outstanding memory actions:",
                 "A Curator started from the dashboard has no parent and needs none.",
                 "A Curator starts no role:",
                 "A harness without sub-agents can do all the same work.",
             ],
             "operations/curation.md": [
-                "The reviewer compares the leaf's base and candidate from Git (the code trees and the knowledge files of the two memory trees), so the curator records no separate comparison.",
+                "Count a hand-over as taken and handle provider, seat, busy and unreachable-Manager refusals as `../operations/implementation.md` §Boundaries states.",
+                "Reviewer compares Git bases/candidates; Curator records no separate comparison.",
             ],
         }
         for source, clauses in required.items():
@@ -295,6 +300,7 @@ class InstructionFileWordingTests(unittest.TestCase):
             for clause in clauses:
                 with self.subTest(source=source, clause=clause):
                     self.assertIn(" ".join(clause.split()), reading)
+        assert_git_comparison_scope(CANONICAL / LIFECYCLE)
 
     def test_direct_closeout_keeps_the_architect_and_its_existing_gates(self) -> None:
         architect = role_text("architect")
@@ -330,31 +336,23 @@ class InstructionFileWordingTests(unittest.TestCase):
     def test_leaf_roles_and_operations_deliver_their_own_positive_obligations(
         self,
     ) -> None:
-        for source, clauses in LEAF_CLAUSES.items():
-            with self.subTest(source=source):
-                self.assertEqual(missing_clauses(read(LIFECYCLE / source), clauses), [])
+        with tempfile.TemporaryDirectory() as directory:
+            for source, clauses in LEAF_CLAUSES.items():
+                for name, alternatives in surface_clauses(source, clauses).items():
+                    with self.subTest(source=source, obligation=name):
+                        text = clause_surface(
+                            CANONICAL / LIFECYCLE, source, name, Path(directory) / "report.md"
+                        )
+                        self.assertEqual(missing_clauses(text, {name: alternatives}), [])
 
     def test_removing_each_affirmative_clause_is_detected_on_its_surface(self) -> None:
-        surfaces = dict(LEAF_CLAUSES)
-        surfaces.update(
-            {
-                f"roles/{role}.md": {
-                    **LEAF_CLAUSES.get(f"roles/{role}.md", {}),
-                    **autonomy_clauses(role),
-                }
-                for role in ROLES
-            }
-        )
-        for source, clauses in surfaces.items():
-            reading = normalized(read(LIFECYCLE / source))
-            self.assertEqual(missing_clauses(reading, clauses), [], source)
-            for name, alternatives in clauses.items():
-                with self.subTest(source=source, obligation=name):
-                    mutant = reading
-                    for clause in alternatives:
-                        mutant = mutant.replace(normalized(clause), "")
-                    self.assertNotEqual(mutant, reading, "control must remove real instructions")
-                    self.assertIn(name, missing_clauses(mutant, clauses))
+        for source, name, clauses, reading, mutant in clause_mutations(
+            CANONICAL / LIFECYCLE, ROLES
+        ):
+            with self.subTest(source=source, obligation=name):
+                self.assertEqual(missing_clauses(reading, {name: clauses[name]}), [], source)
+                self.assertNotEqual(mutant, reading, "control must remove real instructions")
+                self.assertIn(name, missing_clauses(mutant, clauses))
 
     def test_equivalent_preserved_identity_and_no_role_boundaries_are_allowed(
         self,
@@ -517,10 +515,15 @@ class InstructionFileWordingTests(unittest.TestCase):
                     )
         for role in set(LAUNCHER_ROLES) - {"architect"}:
             with self.subTest(role=role, told="a role without a parent needs none"):
-                self.assertRegex(
-                    role_text(role),
-                    r"started from the dashboard,? (has no parent|has none|needs no parent)",
-                )
+                text = role_text(role)
+                original = r"started from the dashboard,? (has no parent|has none|needs no parent)"
+                if role == "reviewer":
+                    self.assertTrue(
+                        re.search(original, text)
+                        or "A dashboard-started Reviewer has and needs no parent." in text
+                    )
+                else:
+                    self.assertRegex(text, original)
         coordination = " ".join(read(LIFECYCLE / "operations" / "coordination.md").split())
         for sentence in (
             "an Architect every role except Architect",
@@ -575,23 +578,34 @@ class InstructionFileWordingTests(unittest.TestCase):
     def test_the_curator_writer_is_admitted_for_the_selected_runtime(self) -> None:
         # MIK owns the converted file writer; a capsule without its capability reports the gap.
         curation = " ".join(read(LIFECYCLE / "operations" / "curation.md").split())
+        self.assertIn(
+            "{{detail:reference/curator-writer-details.md}}",
+            read(LIFECYCLE / "roles" / "curator.md"),
+        )
+        details = " ".join(read(LIFECYCLE / "reference" / "curator-writer-details.md").split())
+        intake = " ".join(read(LIFECYCLE / "reference" / "curator-intake-details.md").split())
+        self.assertIn("`arMcpContext.readerArguments`", intake)
+        self.assertIn("agents-remember knowledge-ingest", details)
+        self.assertIn("--authorization-ref <ref> --commit --json", details)
+        self.assertIn("The CLI has no `--baseline`, `--publish` or `--publish-to` options", details)
+        self.assertIn("its parser rejects them before the file writer is invoked", details)
         for text in (curation,):
             with self.subTest(told="operation"):
-                self.assertIn("agents-remember knowledge-ingest", text)
-                self.assertIn("--authorization-ref <ref> --commit --json", text)
-                self.assertIn("publishes no dataset", text)
+                self.assertIn("source-bound command", text)
                 self.assertIn(
-                    "The CLI has no `--baseline`, `--publish` or `--publish-to` options",
+                    "Use only the selected runtime's admitted source-bound command; if this Paseo capsule exposes no writer and admits none, report required records not written.",
                     text,
                 )
-                self.assertIn("its parser rejects them before the file writer is invoked", text)
-                self.assertIn("source-bound command", text)
+                self.assertIn(
+                    "Never bypass refusal with another installation's command or an internal writer.",
+                    text,
+                )
+                self.assertIn("Verify every output resolves inside the selected memory root.", text)
                 self.assertIn("Paseo capsule exposes no", text)
                 self.assertIn("report", text)
                 self.assertIn("not written", text)
                 self.assertIn("another installation's", text)
                 self.assertIn("`agents-remember-task`", text)
-                self.assertIn("`arMcpContext.readerArguments`", text)
                 self.assertIn("selected memory root", text)
                 self.assertIn("memory_quality_check", text)
                 self.assertIn("prepare", text)
@@ -601,10 +615,10 @@ class InstructionFileWordingTests(unittest.TestCase):
         # The role carries the same admission by reference to its operation home.
         role = role_text("curator")
         with self.subTest(told="role"):
+            self.assertIn("There is no dataset to publish.", role)
             self.assertIn(
-                "Bound intake follows `../operations/curation.md` §Bound Paseo intake and "
-                "capabilities and §Required inputs, including the admitted file-writer "
-                "command for the selected converted memory root.",
+                "Intake/writer admission: `../operations/curation.md` "
+                "§Required inputs and §Bound Paseo intake and capabilities.",
                 role,
             )
             self.assertNotIn("the writer is not available to you on this line", role)

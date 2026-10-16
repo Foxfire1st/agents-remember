@@ -457,7 +457,9 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
             (context, workspace, "codex", session_options),
         )
         resolve_workspace.assert_called_once_with(config, context)
-        resolve_agent.assert_called_once_with(config, defaults, ("codex",), None)
+        resolve_agent.assert_called_once_with(
+            config, {**defaults, "role": "architect"}, ("codex",), None
+        )
 
         self.assertEqual(prepared["capsuleOperation"], "planning")
         self.assertEqual(handover["operation"], "planning")

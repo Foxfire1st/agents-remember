@@ -1,19 +1,10 @@
 // The launcher shows one actionable failure line. Execution details belong to the chat.
 import type { RoleScopedExecution } from "./roleLaunchModel";
+import { StepUpStatus } from "./role-launcher/StepUpControl";
 
 export const HOST_UNREACHABLE_LINE = "The host is unreachable. Check the connection and refresh.";
 
-export function RoleExecutionStatus({
-  execution,
-  failure,
-  failureTestId,
-  className,
-}: {
-  execution?: RoleScopedExecution;
-  failure?: string;
-  failureTestId?: string;
-  className: string;
-}) {
+function executionFailure(execution: RoleScopedExecution | undefined): string {
   const reason = execution?.hostUnreachableReason;
   const hostFailure = execution?.hostUnreachable
     ? HOST_UNREACHABLE_LINE + (reason ? " (" + reason + ")" : "")
@@ -21,8 +12,24 @@ export function RoleExecutionStatus({
   const uncertainty = execution?.status.toLowerCase() === "unknown"
     ? "The launch is unresolved. " + (execution.detail || "No usable execution receipt has been returned.") + " Refresh the result or retry the same saved request."
     : undefined;
-  const message = [failure, hostFailure, uncertainty].filter(Boolean).join(" ");
-  if (!message) return null;
+  return [hostFailure, uncertainty].filter(Boolean).join(" ");
+}
+
+export function RoleExecutionStatus({
+  execution,
+  failure,
+  failureTestId,
+  className,
+  showStepUp = true,
+}: {
+  execution?: RoleScopedExecution;
+  failure?: string;
+  failureTestId?: string;
+  className: string;
+  showStepUp?: boolean;
+}) {
+  const message = [failure, executionFailure(execution)].filter(Boolean).join(" ");
+  if (!message) return showStepUp ? <StepUpStatus execution={execution} /> : null;
   return (
     <div className={className} role="alert" data-testid={failure ? failureTestId : "role-host-unreachable"} style={{ color: "var(--alarm)" }}>
       {message}

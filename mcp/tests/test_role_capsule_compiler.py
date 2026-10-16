@@ -3,8 +3,7 @@
 The compiler's contract is a set of observable properties, and each case here pins
 one of them:
 
-* the same admitted facts and source bytes compile to the same ordered content and
-  the same semantic digest;
+* the same admitted facts and source bytes compile to the same ordered content and the same semantic digest;
 * ephemeral diagnostics do not move that digest, while a real change to an
   applicable source block does;
 * an unrelated role's source does not reach a worker capsule at all;
@@ -150,6 +149,7 @@ def fixture_manifest_document() -> dict[str, object]:
             name: {
                 "source": f"operations/{name}.md",
                 "purpose": f"the {name} operation",
+                "audience": "all",
                 "applies_to_roles": list(FIXTURE_APPLICABILITY[name]),
             }
             for name in FIXTURE_OPERATIONS

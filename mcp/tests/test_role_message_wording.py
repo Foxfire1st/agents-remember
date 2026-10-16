@@ -20,11 +20,21 @@ import importlib.util
 import json
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
 
-from test_role_instruction_wording import HandoverTextWordingTests
+from agents_remember.models.role_capsules.types import CapsuleRoleSeat
+from agents_remember_test_support.testing.leaf_instruction_wording import (
+    LEAF_CLAUSES,
+    autonomy_clauses,
+    delivered_step,
+    missing_clauses,
+    normalized,
+)
+from test_role_capsule_audiences import _compile_corpus_pair
+from test_role_instruction_wording import PACKAGED, HandoverTextWordingTests
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE = "l-01-agent-lifecycles"
@@ -111,6 +121,47 @@ REQUIRED_MARKERS = (
     "never pasted into a message",
 )
 
+REVIEWER_MARKER_EQUIVALENTS = {
+    "limit of the settings": "Text must stay within the settings limit.",
+    "names the files": "Messages state requests or handovers and name files;",
+    "never pasted into a message": "evidence, verdicts, lists and logs stay in files, never pasted.",
+}
+
+
+CURATOR_MARKER_EQUIVALENTS = {
+    "limit of the settings": "Text never exceeds the settings limit.",
+    "names the files": "Messages state requests or handovers and name files;",
+    "never pasted into a message": "never paste evidence, verdicts, lists or logs.",
+}
+
+
+def curator_message_step(root: Path) -> str:
+    """Read only the declared payload-field file at the sending step."""
+    with tempfile.TemporaryDirectory() as directory:
+        instructions, text = delivered_step(
+            root,
+            ("curator", "curation"),
+            "reference/curator-message-details.md",
+            "when you reach Curation workflow 1: Reconcile, not before",
+            Path(directory) / "report.md",
+        )
+    assert "Read [message fields/location](" in instructions
+    return text
+
+
+def missing_markers(relative: str, text: str) -> list[str]:
+    """Equivalent wording is role-specific; every marker still has its own check."""
+    equivalents = {
+        "roles/reviewer.md": REVIEWER_MARKER_EQUIVALENTS,
+        "roles/curator.md": CURATOR_MARKER_EQUIVALENTS,
+    }.get(relative, {})
+    return [
+        marker
+        for marker in REQUIRED_MARKERS
+        if marker not in text and not (marker in equivalents and equivalents[marker] in text)
+    ]
+
+
 #: A text that tells the sender to put file-grade content into the message
 #: text. Addressing a message by agent id stays legal (the preservation
 #: boundary keeps the address by id or by role), as do naming a file's path,
@@ -192,13 +243,37 @@ def scan(roots: list[Path], files: tuple[str, ...]) -> tuple[list[str], list[str
     for root in roots:
         label = root.relative_to(REPOSITORY_ROOT).as_posix()
         for relative in files:
+            if relative == "operations/curation.md":
+                # R125 keeps repeated messages once, in each receiving role.
+                # Check both actual addressed capsules, and only the named
+                # Curator payload step for body/attach, across all ten surfaces.
+                manifest = (root / "composition-manifest.json").read_bytes()
+                for seat in (
+                    CapsuleRoleSeat("curator", "leaf"),
+                    CapsuleRoleSeat("manager", "master"),
+                ):
+                    text = _compile_corpus_pair(
+                        root, manifest, seat, "curation"
+                    ).render_instructions()
+                    detail = curator_message_step(root) if seat.role == "curator" else ""
+                    short = f"{label}/{relative}/{seat.role}"
+                    for marker in missing_markers(f"roles/{seat.role}.md", text):
+                        if marker in {"`body`", "`attach`"} and marker in detail:
+                            continue
+                        missing.append(f"{short}: missing {marker!r}")
+                    forbidden.extend(scan_lines(short, text.splitlines()))
+                    forbidden.extend(scan_lines(short + "/message-step", detail.splitlines()))
+                continue
             path = root / relative
             text = path.read_text()
             short = f"{label}/{relative}"
-            for marker in REQUIRED_MARKERS:
-                if marker not in text:
-                    missing.append(f"{short}: missing {marker!r}")
+            detail = curator_message_step(root) if relative == "roles/curator.md" else ""
+            for marker in missing_markers(relative, text):
+                if marker in {"`body`", "`attach`"} and marker in detail:
+                    continue
+                missing.append(f"{short}: missing {marker!r}")
             forbidden.extend(scan_lines(short, text.splitlines()))
+            forbidden.extend(scan_lines(short + "/message-step", detail.splitlines()))
     return missing, forbidden
 
 
@@ -275,11 +350,15 @@ class RoleMessageWordingTests(unittest.TestCase):
     def test_compiled_capsules_state_messages_as_files(self) -> None:
         forbidden: list[str] = []
         missing: list[str] = []
+        detail = curator_message_step(PACKAGED / LIFECYCLE)
+        forbidden.extend(scan_lines("compiled/curator/message-step", detail.splitlines()))
         for label, text in compiled_texts().items():
             if label.endswith("/prompt"):
-                for marker in REQUIRED_MARKERS:
-                    if marker not in text:
-                        missing.append(f"{label}: missing {marker!r}")
+                role = label.split("/")[1]
+                for marker in missing_markers(f"roles/{role}.md", text):
+                    if role == "curator" and marker in {"`body`", "`attach`"} and marker in detail:
+                        continue
+                    missing.append(f"{label}: missing {marker!r}")
             forbidden.extend(scan_lines(label, text.splitlines()))
         self.assertEqual(missing, [])
         self.assertEqual(
@@ -310,6 +389,68 @@ class RoleMessageWordingTests(unittest.TestCase):
             if expected[0] not in investigator:
                 missing.append(f"{label}/roles/investigator.md: missing {expected[0]!r}")
         self.assertEqual(missing, [])
+
+    def test_reviewer_equivalents_keep_positive_facets_and_reject_deletion(self) -> None:
+        reading = normalized((surfaces()[0] / "roles/reviewer.md").read_text())
+        clauses = {**LEAF_CLAUSES["roles/reviewer.md"], **autonomy_clauses("reviewer")}
+        self.assertEqual(missing_clauses(reading, clauses), [])
+        for name, alternatives in clauses.items():
+            with self.subTest(obligation=name):
+                mutant = reading
+                for alternative in alternatives:
+                    mutant = mutant.replace(normalized(alternative), "")
+                self.assertNotEqual(mutant, reading, "control must remove real instructions")
+                self.assertIn(name, missing_clauses(mutant, clauses))
+
+    def test_reviewer_equivalents_keep_each_message_facet_and_reject_deletion(self) -> None:
+        text = (surfaces()[0] / "roles/reviewer.md").read_text()
+        self.assertEqual(missing_markers("roles/reviewer.md", text), [])
+        for marker, equivalent in REVIEWER_MARKER_EQUIVALENTS.items():
+            with self.subTest(marker=marker):
+                self.assertIn(equivalent, text)
+                mutant = text.replace(equivalent, "").replace(marker, "")
+                self.assertIn(marker, missing_markers("roles/reviewer.md", mutant))
+        # The same alternatives cannot silently replace an untouched role's wording.
+        equivalents = " ".join((*REVIEWER_MARKER_EQUIVALENTS.values(), "`body`", "`attach`"))
+        self.assertEqual(missing_markers("roles/reviewer.md", equivalents), [])
+        for relative in (*ROLE_FILES, *OPERATION_FILES, *HANDOVER_TEMPLATE_FILES):
+            if relative == "roles/curator.md":
+                # Only the file-naming sentence is deliberately shared by these roles.
+                self.assertEqual(
+                    missing_markers(relative, equivalents),
+                    ["limit of the settings", "never pasted into a message"],
+                )
+            elif relative != "roles/reviewer.md":
+                self.assertEqual(
+                    missing_markers(relative, equivalents), list(REVIEWER_MARKER_EQUIVALENTS)
+                )
+        curator = (surfaces()[0] / "roles/curator.md").read_text()
+        payload = curator_message_step(surfaces()[0])
+        self.assertEqual(missing_markers("roles/curator.md", curator), ["`body`", "`attach`"])
+        for marker, equivalent in CURATOR_MARKER_EQUIVALENTS.items():
+            with self.subTest(role="curator", marker=marker):
+                self.assertIn(equivalent, curator)
+                mutant = curator.replace(equivalent, "").replace(marker, "")
+                self.assertNotEqual(mutant, curator)
+                self.assertIn(marker, missing_markers("roles/curator.md", mutant))
+        for marker in ("`body`", "`attach`"):
+            with self.subTest(role="curator", marker=marker):
+                self.assertIn(marker, payload)
+                mutant = payload.replace(marker, "")
+                self.assertNotEqual(mutant, payload)
+                self.assertNotIn(marker, mutant)
+        curator_equivalents = " ".join((*CURATOR_MARKER_EQUIVALENTS.values(), "`body`", "`attach`"))
+        self.assertEqual(missing_markers("roles/curator.md", curator_equivalents), [])
+        for relative in (*ROLE_FILES, *OPERATION_FILES, *HANDOVER_TEMPLATE_FILES):
+            if relative == "roles/reviewer.md":
+                self.assertEqual(
+                    missing_markers(relative, curator_equivalents),
+                    ["limit of the settings", "never pasted into a message"],
+                )
+            elif relative != "roles/curator.md":
+                self.assertEqual(
+                    missing_markers(relative, curator_equivalents), list(CURATOR_MARKER_EQUIVALENTS)
+                )
 
 
 if __name__ == "__main__":

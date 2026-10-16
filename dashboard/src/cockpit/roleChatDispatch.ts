@@ -112,6 +112,14 @@ interface DispatchRequest {
   requestBody: Record<string, unknown>;
 }
 
+function stepUpRequestFields(selection: RoleLaunchSelection, action: RoleAction): { stepUp?: string } {
+  return selection.stepUp && action === "start" ? { stepUp: selection.stepUp } : {};
+}
+
+function mayRequestStart(selection: RoleLaunchSelection, execution: RoleScopedExecution | undefined): boolean | undefined {
+  return selection.stepUp ? true : execution?.canStart;
+}
+
 // The request behind one dispatch: a fresh id (or the replayed one), the saved
 // selection for a later retry, and the body. A request-scoped start records its
 // pending request before sending.
@@ -127,6 +135,7 @@ function buildDispatchRequest(
   const requestId = replayRequestId ?? crypto.randomUUID();
   const savedLaunchSelection: RoleLaunchSelection = {
     ...requestScope,
+    ...stepUpRequestFields(selected, action),
     ...(selected.agentOverride ? { agentOverride: selected.agentOverride } : {}),
   };
   if (perRequest && action === "start" && !replayRequestId) {
@@ -140,6 +149,7 @@ function buildDispatchRequest(
     requestId,
     action,
     ...requestScope,
+    ...stepUpRequestFields(selected, action),
     ...(selected.agentOverride && !(perRequest && action === "revive")
       ? { agentOverride: selected.agentOverride }
       : {}),
@@ -328,7 +338,7 @@ function guardDispatchAction(
         activeRequestId: perRequest ? readActiveRequestId(live.activeRequestsRef, launchSelection) : undefined,
         canRetry: live.currentScopedExecution?.canRetry,
         currentStatus,
-        canStart: live.currentScopedExecution?.canStart,
+        canStart: mayRequestStart(launchSelection, live.currentScopedExecution),
       })
     : reviveDispatchBlocked({
         perRequest,

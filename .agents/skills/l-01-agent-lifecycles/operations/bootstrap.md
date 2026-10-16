@@ -1,21 +1,14 @@
+<!-- ar:roles all -->
 # Operation — Session Bootstrap
 
-**What it covers:** the new user's first hour, end to end, with the memory repository as its centre of
-gravity: what Agents Remember is for, the decisions only the developer can make, initializing the
-memory root, scaffolding the first onboarding, reaching the repository's knowledge foundation,
-adopting the first attributed baseline, and verifying the result.
+**Coverage:** the new user’s first hour around the memory repository: Agents Remember’s purpose, developer-only decisions, memory-root initialization, first onboarding, knowledge foundation, first attributed baseline and result verification.
 
 **When it is selected:** a repository has no working memory root yet, or has one that does not resolve
 — no memory root, a memory root with no baseline, the removed repo-local layout, a coordination root
-that will not resolve, or providers configured but not indexing. Once a repository has an attributed
-baseline and a resolving context, its ordinary work belongs to the lifecycle roles; this operation is
-not a maintenance posture and re-entering it to "tidy" a working installation is out of scope. A
-repository that resolves but whose **knowledge foundation** is not recorded is reached by this
-operation's step 7 rather than by a re-entry.
+that will not resolve, or providers configured but not indexing. With an attributed baseline and resolving context, ordinary work belongs to lifecycle roles; never re-enter this operation to maintain or "tidy" a working installation. For resolving repositories without a recorded **knowledge foundation**, use step 7, not re-entry.
 
 **How the carrier is started:** as a **free agent**, not a task seat, with **no task document**.
-There is no brief. This operation therefore never waits for a task document to
-appear, and never treats its absence as a condition to repair.
+There is no brief. Never wait for a task document or treat its absence as needing repair.
 
 ## Who carries it, and their job
 
@@ -29,8 +22,7 @@ become a bootstrap seat to fix its own context; it resolves context through
 
 ## Required inputs
 
-This agent is started **before** any task document exists, so its required inputs are facts about a
-workspace, not about a task:
+Started **before** any task document, this agent requires workspace facts, not task facts:
 
 - Which code repository the developer means, and its absolute root.
 - The resolved `coordinationRoot` and `workspaceRoot`, from `server_info`.
@@ -40,13 +32,11 @@ workspace, not about a task:
   2. whether they are scaffolding a new memory repo or pointing at an existing one;
   3. whether providers should index now or be deferred.
 
-A brief, ticket, leaf document, worktree contract, or gate is **not** an input this operation has, and
-their absence is normal rather than an error to repair.
+Briefs, tickets, leaf documents, worktree contracts and gates are **not** inputs; their absence is normal, not a repairable error.
 
 ## Normal workflow
 
-Each step names the surface that owns it. This operation **runs** that surface and **points at** the
-`c-*` skill that documents it; it never restates the skill's procedure.
+Each step names its owning surface. **Run** that surface and **point to** its `c-*` skill; never restate its procedure.
 
 1. **Say what Agents Remember is and what the setup will change**, in plain language, before asking
    anything to be decided. The developer must know: their code is where it is, their memory lives in a
@@ -72,18 +62,8 @@ Each step names the surface that owns it. This operation **runs** that surface a
 6. **Adopt the first attributed baseline** through `memory_baseline_adopt`, with
    `memory_baseline_status` read before and after and the drift-acceptance decision put to the
    developer rather than assumed. Procedure: the `c-10-adopt-memory-baseline` skill.
-7. **Reach the repository's knowledge foundation.** The foundation — the authored records under
-   `knowledge/` in the memory repository, as distinct from the onboarding cards and from the baseline — is the
-   curator's procedure, the `c-14-knowledge-bootstrap` skill. **This seat is the read-and-report
-   carrier that exists for it before a task does**: read the state first — `not-recorded`,
-   `recorded` at an exact identity, `unusable`, or a refused admission with its own next action —
-   report which of those it is, whether the curator's run has happened, and hand the authoring on —
-   never to this seat, which authors no records.
-   On a new memory repo this step runs after the baseline: the foundation writer needs the
-   memory commit the baseline made, and before the first baseline no leaf can exist. Only a
-   repository whose memory already has a commit may reach its foundation before the onboarding
-   or the baseline. Nothing about it
-   is fabricated to make the step run — no development leaf, worktree or enclosure is created to
+7. **Reach the repository's knowledge foundation.** Read [the procedure]({{detail:reference/bootstrap-foundation-d301.md}}) when you reach step 7, not before.
+   Nothing about it is fabricated to make the step run — no development leaf, worktree or enclosure is created to
    satisfy an argument list, and no record is written by hand.
 8. **Configure indexing, or say plainly that it is deferred.** Providers are accelerators: by-path
    retrieval keeps working without them, and a deferred provider is a named recovery action rather
@@ -110,10 +90,7 @@ operation exists to make legible; a seat that cannot name them is guessing.
 
 ## How conformance is evidenced
 
-Every claim in this agent's report must be **re-derivable by whoever reads it**, from the surface
-named for it, without asking this agent anything. A reader must be able to open the same call and get
-the same answer. That is the whole standard, and it is deliberately a different standard from a
-reviewed requirement:
+Every report claim must be **re-derivable by its reader** from its named surface without asking this agent. A reader must be able to get the same answer from the same call. This standard deliberately differs from reviewed requirements:
 
 - **This agent has no independent acceptor.** It has no task document, no gate and no reviewer in its
   loop, so its report is *completion truth* — a claim by the seat about itself — and never an
@@ -176,9 +153,5 @@ reviewed requirement:
 
 ## Handoff / exit
 
-Bootstrap ends when the seat can state, from the surfaces alone: the resolved memory root and
-coordination root; which branch the memory is founded on; whether a baseline exists and at which
-commit; whether onboarding exists; **whether the knowledge foundation is recorded, and at which
-identity, or which named state says it is not**; whether providers are indexing or deferred; and every
-step that was skipped with its reason. It ends with a durable report, and it hands ordinary work to
+Bootstrap ends when surfaces establish: resolved memory and coordination roots; foundation branch; baseline existence and commit; onboarding existence; **knowledge foundation recorded at which identity, or which named state says it is not**; whether the curator’s run happened; providers indexing or deferred; and every skipped step’s reason. It ends with a durable report, and it hands ordinary work to
 the lifecycle roles — the repository now has a context to resolve.

@@ -3,6 +3,7 @@ quality gate."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from agents_remember.kernel._agentic_settings_core import (
@@ -21,6 +22,7 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_LOOPS_FIELDS,
     KNOWN_QUALITY_GATE_FIELDS,
     KNOWN_ROLE_KNOB_FIELDS,
+    KNOWN_ROLE_LAUNCH_FIELDS,
     KNOWN_ROLES,
     KNOWN_SPAWN_FIELDS,
     UNUSED_HARNESS_ENTRY_FIELDS,
@@ -33,11 +35,13 @@ from agents_remember.kernel._agentic_settings_core import (
     LoopSettings,
     QualityGateSettings,
     RoleKnobs,
+    RoleStepUp,
     _refuse_unknown,
     _require_harness_id,
     _require_object,
     _require_positive_int,
     _require_string,
+    role_feature_values,
 )
 
 
@@ -153,35 +157,56 @@ def _parse_roles(
     for role, value in roles.items():
         knobs = _require_object(value, f"{owner}.{role}", source)
         _refuse_unknown(
-            knobs, KNOWN_ROLE_KNOB_FIELDS | UNUSED_ROLE_KNOB_FIELDS, f"{owner}.{role}", source
+            knobs,
+            KNOWN_ROLE_KNOB_FIELDS | UNUSED_ROLE_KNOB_FIELDS | {"stepUp"},
+            f"{owner}.{role}",
+            source,
         )
-        harness = None
-        if "harness" in knobs:
-            harness = _require_string(
-                knobs["harness"],
-                f"{owner}.{role}.harness",
-                source,
+        parsed[role] = _role_choices(knobs, f"{owner}.{role}", source)
+        if "stepUp" in knobs:
+            parsed[role] = replace(
+                parsed[role],
+                step_up=_parse_step_up(knobs["stepUp"], role, f"{owner}.{role}.stepUp", source),
             )
-        model = None
-        if "model" in knobs:
-            model = _require_string(knobs["model"], f"{owner}.{role}.model", source)
-        effort = None
-        if "effort" in knobs:
-            # Deliberately a free string here: the host's catalog validates it at launch.
-            effort = _require_string(knobs["effort"], f"{owner}.{role}.effort", source)
-        service_tier = _parse_service_tier(knobs, f"{owner}.{role}", source)
-        parsed[role] = RoleKnobs(
-            harness=harness,
-            model=model,
-            effort=effort,
-            service_tier=service_tier,
-            mode=_optional_role_text(knobs, "mode", f"{owner}.{role}", source),
-            notes=_optional_role_text(knobs, "notes", f"{owner}.{role}", source),
-            feature_values=_parse_feature_values(
-                knobs.get("featureValues", {}), f"{owner}.{role}.featureValues", source
-            ),
-        )
     return parsed
+
+
+def _role_choices(knobs: dict[str, Any], owner: str, source: str) -> RoleKnobs:
+    text = {
+        key: _require_string(knobs[key], f"{owner}.{key}", source)
+        for key in ("harness", "model", "effort")
+        if key in knobs
+    }
+    return RoleKnobs(
+        harness=text.get("harness"),
+        model=text.get("model"),
+        effort=text.get("effort"),
+        service_tier=_parse_service_tier(knobs, owner, source),
+        mode=_optional_role_text(knobs, "mode", owner, source),
+        notes=_optional_role_text(knobs, "notes", owner, source),
+        feature_values=_parse_feature_values(
+            knobs.get("featureValues", {}), f"{owner}.featureValues", source
+        ),
+    )
+
+
+def _parse_step_up(raw: object, role: str, owner: str, source: str) -> RoleStepUp:
+    row = _require_object(raw, owner, source)
+    _refuse_unknown(row, KNOWN_ROLE_LAUNCH_FIELDS | {"afterTries"}, owner, source)
+    if "afterTries" in row and role not in {"worker", "curator"}:
+        raise AgenticSettingsError(
+            f"{owner}.afterTries is only counted for worker and curator: {source}"
+        )
+    after = (
+        _require_positive_int(row["afterTries"], f"{owner}.afterTries", source)
+        if "afterTries" in row
+        else 3
+        if role in {"worker", "curator"}
+        else None
+    )
+    choices = _role_choices(row, owner, source)
+    role_feature_values(choices, f"{source}: {owner}")
+    return RoleStepUp(choices=choices, after_tries=after, source=source, key=owner)
 
 
 def _resolve_role_keys(raw: object, *, owner: str, source: str) -> dict[str, Any]:

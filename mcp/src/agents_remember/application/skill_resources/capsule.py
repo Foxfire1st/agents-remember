@@ -568,7 +568,18 @@ def routed_admission_for(
         role=(entry.file,),
         operation=(operation_entry.source,),
         specialization=(),
-        skill=tuple(sorted(_skill_root_source(parsed, name, origin) for name in entry.skills)),
+        skill=tuple(
+            sorted(
+                {
+                    *(_skill_root_source(parsed, name, origin) for name in entry.skills),
+                    *(
+                        detail.source
+                        for detail in parsed.detail_references
+                        if seat.role in detail.roles
+                    ),
+                }
+            )
+        ),
     )
 
 

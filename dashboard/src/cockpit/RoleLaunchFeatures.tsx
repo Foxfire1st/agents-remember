@@ -120,13 +120,21 @@ function withFeatureValue(
   return Object.keys(values).length || next.agentId || next.modelId || next.effortId ? next : undefined;
 }
 
-export function RoleLaunchFeatures({ features, defaults, override, disabled, onChange }: {
+export function RoleLaunchFeatures({ features, defaults, override, disabled, onChange, basePreview = false }: {
   features: RoleFeatureChoice[];
   defaults: RoleDefaults;
   override?: RoleAgentOverride;
   disabled: boolean;
   onChange: (override: RoleAgentOverride | undefined) => void;
+  basePreview?: boolean;
 }) {
+  if (basePreview) return features.map((feature) => (
+    <span key={feature.id} className={launcherChip}
+      title="Base launch preview; not applied to the stepped-up execution. Permission choices remain set in the user's settings.">
+      Base · {feature.label} {featureValueText(feature, defaults.featureValues?.[feature.id] ??
+        (feature.id === "service_tier" ? defaults.serviceTier === "fast" ? "priority" : defaults.serviceTier : undefined))}
+    </span>
+  ));
   const featureChoices = defaults.choices?.featureValues as
     | Record<string, { value?: unknown; source?: string }>
     | undefined;
@@ -173,14 +181,24 @@ function InstructionsChip({ defaults }: { defaults: RoleDefaults }) {
 // What the row said in words lives on: the applied mode is one chip whose
 // hover text says where the mode comes from and holds the host's description,
 // and an instruction text is one chip whose hover text names its source.
-export function RoleLaunchDefaults({ defaults, selectedAgentId, modeLabel, modeDescription, ready }: {
+export function RoleLaunchDefaults({ defaults, selectedAgentId, modeLabel, modeDescription, ready, basePreview = false }: {
   defaults: RoleDefaults;
   selectedAgentId: string;
   modeLabel?: string;
   modeDescription?: string;
   ready: boolean;
+  basePreview?: boolean;
 }) {
   if (!ready) return null;
+  if (basePreview) return (
+    <>
+      <span className={launcherChip} title="Base launch preview; not applied to the stepped-up execution.">
+        Base · {selectedAgentId === defaults.agent ? modeLabel ?? defaults.mode ?? "none stated" : "mode at start"}
+      </span>
+      {defaults.choices?.notes?.present ? <span className={launcherChip}
+        title="Base user instructions preview; not applied here as a claim about the stepped-up execution.">Base · Instructions</span> : null}
+    </>
+  );
   return (
     <>
       <ModeChip

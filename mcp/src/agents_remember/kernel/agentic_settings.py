@@ -95,6 +95,7 @@ from agents_remember.kernel._agentic_settings_core import (
     default_agentic_settings_seed,
     default_agentic_settings_seed_text,
     merge_settings,
+    require_distinct_step_up,
     require_user_agentic_settings_path,
     role_feature_values,
     unused_orchestration_keys,
@@ -224,6 +225,7 @@ def load_agentic_settings(
     _attach_role_origins(settings, layers)
     for role, knobs in settings.roles.items():
         role_feature_values(knobs, f"{source}: orchestration.roles.{role}")
+        require_distinct_step_up(knobs, settings.spawn_harness)
     for level, roles in settings.roles_per_level.items():
         for role in roles:
             role_feature_values(
@@ -278,10 +280,18 @@ def _attach_role_origins(
                     if origin.precedence >= len(layers)
                 }
     for role, knobs in settings.roles.items():
-        settings.roles[role] = replace(knobs, origins=flat.get(role, {}))
+        settings.roles[role] = _with_role_origins(knobs, flat.get(role, {}))
     for level, roles in settings.roles_per_level.items():
         for role, knobs in roles.items():
-            roles[role] = replace(knobs, origins=levels[level][role])
+            roles[role] = _with_role_origins(knobs, levels[level][role])
+
+
+def _with_role_origins(knobs: RoleKnobs, origins: dict[str, RoleChoiceOrigin]) -> RoleKnobs:
+    step = knobs.step_up
+    origin = origins.get("stepUp")
+    if step is not None and origin is not None:
+        step = replace(step, source=origin.source, key=origin.key)
+    return replace(knobs, origins=origins, step_up=step)
 
 
 def _role_row_origins(
@@ -309,7 +319,33 @@ def _role_row_origins(
         result[f"featureValues.{key}"] = RoleChoiceOrigin(
             str(source), f"{owner}.featureValues.{key}", provider, model, rank
         )
+    result.update(_step_up_row_origins(row, source, owner, (provider, model, rank)))
     return result
+
+
+def _step_up_row_origins(
+    row: dict[str, Any], source: Path, owner: str, scope: tuple[str | None, str | None, int]
+) -> dict[str, RoleChoiceOrigin]:
+    if "stepUp" not in row:
+        return {}
+    provider, model, rank = scope
+    step = row["stepUp"]
+    step_provider = step.get("harness") or provider
+    step_model = step.get("model") or (model if step_provider == provider else None)
+    keys = [
+        key for key in ("harness", "model", "effort", "mode", "serviceTier", "notes") if key in step
+    ]
+    keys.extend(f"featureValues.{key}" for key in step.get("featureValues", {}))
+    return {
+        f"stepUp.{key}" if key else "stepUp": RoleChoiceOrigin(
+            str(source),
+            f"{owner}.stepUp" + (f".{key}" if key else ""),
+            step_provider,
+            step_model,
+            rank,
+        )
+        for key in ("", *keys)
+    }
 
 
 def _refuse_repository_role_authority(raw: dict[str, Any], path: Path) -> None:
@@ -320,7 +356,7 @@ def _refuse_repository_role_authority(raw: dict[str, Any], path: Path) -> None:
     )
     for owner, roles in families:
         for role, knobs in roles.items():
-            keys = [key for key in ("mode", "notes") if key in knobs]
+            keys = [key for key in ("mode", "notes", "stepUp") if key in knobs]
             keys.extend(
                 f"featureValues.{key}"
                 for key in knobs.get("featureValues", {})

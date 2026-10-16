@@ -521,6 +521,22 @@ class LeafBindingRecoveryTests(unittest.TestCase):
         with tool_call_context("task_doc", {"operation": "record_route_review"}):
             answer = project_task_doc_answer(whole, operation="record_route_review", dry_run=False)
         self.assertEqual(answer["taskDocumentPath"], "/coord/tasks/repo-a/m/task.md")
+        for operation in ("begin_review", "record_review"):
+            with self.subTest(operation=operation):
+                memory_result = {
+                    "ok": True,
+                    "reviewKind": "memory",
+                    "reviewState": {"round": 1, "remainingFindingIds": []},
+                    "memoryReviewState": {"round": 2, "remainingFindingIds": ["M1"]},
+                    "updated": "memory review recorded",
+                    "unprojectedDebug": "not an answer field",
+                }
+                memory_answer = project_task_doc_answer(
+                    memory_result, operation=operation, dry_run=False
+                )
+                for key in ("reviewState", "memoryReviewState", "reviewKind"):
+                    self.assertEqual(memory_answer[key], memory_result[key])
+                self.assertNotIn("unprojectedDebug", memory_answer)
 
 
 class AttachDetachDryTests(unittest.TestCase):

@@ -24,7 +24,6 @@ from agents_remember.application.role_launch_context import (
     RoleLaunchContext,
     parentless_selection_violation,
     resolve_role_launch_context,
-    selection_binding,
 )
 from agents_remember.cli import role_launch_progress
 from agents_remember.cli.investigator_receipts import (
@@ -90,6 +89,11 @@ from agents_remember.cli.role_launch_receipts import (
     digest as _digest,
 )
 from agents_remember.cli.role_report import register_role_report_route
+from agents_remember.cli.role_start_execution import start_execution
+from agents_remember.cli.role_step_up_runtime import (
+    bind_step_up_predecessor,
+    successor_prompt,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import RoleStartSetCall
 from agents_remember.models.role_launcher import (
@@ -102,6 +106,7 @@ from agents_remember.serving.paseo.paseo_daemon_config import provider_denied_to
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 _DISPATCH_LOCK = threading.Lock()
+__all__ = ["_refuse_reused_request_id", "_request_digest", "prepare_role_handover"]
 # How a failed bridge call answers a launcher route; every other bridge failure is a bad gateway.
 _BRIDGE_FAILURE_STATUS = {RUNTIME_NOT_CONFIGURED: 503, BRIDGE_TIMEOUT: 504}
 
@@ -309,7 +314,9 @@ def _role_launch_result_endpoint(
         _DISPATCH_LOCK.release()
 
 
-def _missing_copies_receipt_warning(document_files: object) -> dict[str, str]:
+def _missing_copies_receipt_warning(
+    document_files: object, step_up_warning: str | None = None
+) -> dict[str, str]:
     """The receipt warning for requirement files the leaf names but lack.
 
     MIK-R111 rule 3, failure behavior: the start succeeds, and INDEX.json,
@@ -320,11 +327,11 @@ def _missing_copies_receipt_warning(document_files: object) -> dict[str, str]:
 
     missing = document_files.get("missingCopies") if isinstance(document_files, dict) else None
     if not missing:
-        return {}
+        return {"warning": step_up_warning} if step_up_warning else {}
     names = ", ".join(str(name) for name in missing)
     return {
         "warning": (
-            f"Task document copies missing: {names}. The start succeeds; the "
+            f"{step_up_warning + ' ' if step_up_warning else ''}Task document copies missing: {names}. The start succeeds; the "
             "next task_doc write on the leaf document refreshes the copies once "
             "the files exist."
         )
@@ -415,11 +422,13 @@ def _reserve_message_binding_projection(
             request.replaces_agent_id,
             request.replaces_interrupt_turn,
             str(request.request_id),
+            bool(prepared.get("stepUp")),
         ),
     )
     if prior is not None:
         return reference, None, False, prior
     if current and replaces_agent_id:
+        bind_step_up_predecessor(prepared, current)
         prepared["predecessorReports"] = {
             key: current[key] for key in ("requestId", "workspace", "report") if key in current
         }
@@ -487,72 +496,7 @@ def _start_execution(
     held: bool = False,
     opening_message: str | None = None,
 ) -> JSONResponse:
-    context = resolve_role_launch_context(config, request)
-    binding = selection_binding(request)
-    request_digest = _request_digest(context, request)
-    if request.role in TASKLESS_ROLES:
-        _migrate_taskless_legacy_receipt(config, request)
-    path = _receipt_path(
-        config, request, request.request_id if request.role in TASKLESS_ROLES else None
-    )
-    # A request that already has its receipt is answered from that receipt: the stored call or
-    # the saved execution. It is not compiled again, so a task document or capsule that changed
-    # since the launch cannot turn its repeat into a conflict.
-    if _receipt_carries_request(path, request):
-        _refuse_another_starter(path, request, started_by)
-        prior = _reconcile_prior_execution(
-            config,
-            path,
-            request,
-            request_digest,
-            _Replacement(
-                started_by,
-                request.replaces_agent_id,
-                request.replaces_interrupt_turn,
-                str(request.request_id),
-            ),
-        )
-        if prior is not None:
-            return prior
-    # A request id that belongs to an archived execution, or to another selection, is refused
-    # here: before an enclosure is created or anything else is prepared for it.
-    _refuse_reused_request_id(config, path, request)
-    role_handover = prepare_role_handover(
-        config,
-        context,
-        agent_override=request.agent_override,
-        request_id=request.request_id,
-        started_by=started_by,
-        chat_started=request.chat_started,
-    )
-    prepared = role_handover.handover
-    prompt = prepared["prompt"]
-    # The receipt of this request id may have appeared while the handover was compiled.
-    _refuse_another_starter(path, request, started_by)
-    projection_reference, replaces_agent_id, created_binding, prior = (
-        _reserve_message_binding_projection(
-            config,
-            _BindingReservation(path, request, request_digest, prepared, started_by),
-        )
-    )
-    if prior is not None:
-        return prior
-    start = _PreparedRoleStart(
-        config=config,
-        request=request,
-        context=context,
-        binding=binding,
-        request_digest=request_digest,
-        receipt_path=path,
-        role_handover=role_handover,
-        message_binding_projection=projection_reference,
-        replaces_agent_id=replaces_agent_id,
-        started_by=started_by,
-        created_message_binding=created_binding,
-        held=held,
-        opening_message=opening_message,
-    )
-    return _launch_prepared_role_session(start, prompt=prompt)
+    return start_execution(config, request, started_by, held=held, opening_message=opening_message)
 
 
 def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> JSONResponse:
@@ -570,18 +514,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
     # The compiled first message is stored once; what the agent receives names that file first.
     # A successor names the earlier agent's report paths, so that it takes over from what is
     # written (MIK-R100 rule 9).
-    if start.replaces_agent_id and isinstance(prepared.get("predecessorReports"), dict):
-        earlier = prepared["predecessorReports"].get("report") or {}
-        earlier_paths = (
-            f"its earlier report paths are {earlier.get('path')} "
-            f"(canonical {earlier.get('canonicalPath')}). "
-            if earlier.get("path")
-            else f"its earlier request id is {prepared['predecessorReports'].get('requestId')}. "
-        )
-        prompt = (
-            f"{prompt}\nSuccessor start: this seat replaces agent {start.replaces_agent_id}; "
-            f"{earlier_paths}Take over from what is written there."
-        )
+    prompt = successor_prompt(start, prompt)
     if start.opening_message and not start.held:
         # First work carried with the start (MIK-R100 rule 3): the seat opens at once
         # with its handover and that message.
@@ -623,13 +556,16 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
                 "agent": provider,
                 "sessionOptions": session_options,
                 "arMcpContext": prepared.get("arMcpContext"),
+                "stepUpArtifact": prepared.get("stepUpArtifact"),
             }
         ),
         "capsuleDigest": prepared["capsuleDigest"],
         "instructionComposition": prepared.get("instructionComposition"),
         "taskDocumentFiles": prepared.get("taskDocumentFiles"),
         "predecessorReports": prepared.get("predecessorReports"),
-        **_missing_copies_receipt_warning(prepared.get("taskDocumentFiles")),
+        **_missing_copies_receipt_warning(
+            prepared.get("taskDocumentFiles"), session_options.get("stepUpWarning")
+        ),
         "choices": session_options.get("choices", {}),
         "capsuleOperation": prepared["capsuleOperation"],
         "taskDocumentDigest": prepared["taskDocumentDigest"],
@@ -656,9 +592,12 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             if request.agent_override
             else None
         ),
+        "stepUp": session_options.get("stepUp"),
+        "requestedStepUp": request.step_up,
         "execution": {},
         "preparation": {"enclosure": workspace.get("enclosurePreparation", "not-applicable")},
         "handoverArtifact": artifact,
+        "stepUpArtifact": prepared.get("stepUpArtifact"),
         # A held seat keeps its opening handover for its first message (MIK-R100 rules 2/4).
         **(
             {"heldSeat": True, "heldOpeningPrompt": first_message(artifact, prompt)}

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from agents_remember.models.role_capsule_resources import (
     SERVER_SUPPLIED_CONTENT_TRUST,
+    CapsuleDetailReferencePayload,
     CapsuleInstructionBlockPayload,
     CapsuleRequestedToolPayload,
     CapsuleSkillReferencePayload,
@@ -106,6 +107,12 @@ def _fill_manifest(response: RoleCapsuleResponse, outcome: CapsuleCompileOutcome
             revision=reference.revision,
         )
         for reference in capsule.skill_references
+    ]
+    response.detailReferences = [
+        CapsuleDetailReferencePayload(
+            sourcePath=entry.source_path, revision=entry.revision, step=entry.step
+        )
+        for entry in capsule.detail_references
     ]
     response.requestedTools = [
         CapsuleRequestedToolPayload(toolId=request.tool_id, authority=request.authority)

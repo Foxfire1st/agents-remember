@@ -47,10 +47,10 @@ from agents_remember.cli.paseo_bridge import (
 from agents_remember.cli.paseo_launch import run_launch_call
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_activity import publish_receipt_role_agent, resume_role_agent
-from agents_remember.cli.role_handover_artifacts import restore_handover_artifact
 from agents_remember.cli.role_launch_receipts import (
     EXECUTIONS_DIRECTORY,
     _read_receipt,
+    _restore_launch_handover,
     _write_receipt,
 )
 from agents_remember.kernel.file_lock import exclusive_file_lock
@@ -740,22 +740,17 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
 
     launch_call = batch.receipt.get("replayRequest")
     opening = batch.receipt.get("heldOpeningPrompt")
-    artifact = batch.receipt.get("handoverArtifact")
     if not isinstance(launch_call, dict) or not isinstance(opening, str) or not opening:
         _release_claim(batch.folder, batch.agent_id, batch.claim)
         return {
             "outcome": "cannot-open",
             "detail": "The held seat kept no launch call or opening handover.",
         }
-    if isinstance(artifact, dict):
-        try:
-            restore_handover_artifact(artifact, opening, receipt=batch.path)
-        except ValueError:
-            _release_claim(batch.folder, batch.agent_id, batch.claim)
-            return {
-                "outcome": "cannot-open",
-                "detail": "The held seat's handover artifact no longer holds its opening handover.",
-            }
+    try:
+        _restore_launch_handover(batch.path, batch.receipt, launch_call)
+    except ValueError as error:
+        _release_claim(batch.folder, batch.agent_id, batch.claim)
+        return {"outcome": "cannot-open", "detail": str(error)}
     opening_text = opening + "\n\n" + combined_text(messages)
     call = {
         **launch_call,

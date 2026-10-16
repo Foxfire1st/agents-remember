@@ -43,6 +43,12 @@ When the master line moves, run the supported sync of your own leaf as `../opera
 
 ## Where your stage ends
 
+When your part is complete, set its task-document step to `done` via `task_doc` (`set_step`, its ID and one-line note); if none names your part, report that and set nothing. Incomplete, blocked, progress and escalation reports never mark unfinished work done.
+Call `task_doc` only on `agents-remember-task`.
+This covers only your build and evidence steps, not review, curation, task status or acceptance.
+
+When the same check or finding still fails after three repairs of your own, stop repairing, write what you tried and what still fails, and tell the Manager; the Manager steps the seat up or answers otherwise.
+
 Your stage ends when the candidate meets the requirement; the focused tests, the lint and the type check pass on its final bytes; and the report is with the Reviewer.
 
 What your own work or your own instrument breaks, you repair, and you go on: a failing test of your own, a lint or type finding, a script or check of your own making, a wrong path, a failed command. A refusal that names a fault in your own input is answered by your corrected call of the same tool. Your report names what you repaired. A failed or unrun check remains visible in your report only for a check you cannot make pass on your own ground, and says so.
