@@ -27,7 +27,6 @@ import tempfile
 import threading
 import unittest
 from collections.abc import Mapping
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -97,14 +96,6 @@ from agents_remember.models.tools.tool_answer import (
     truncate_lists,
 )
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
-from agents_remember.observer import (
-    AmbientLifecycle,
-    EventStore,
-    install_ambient,
-    new_ulid,
-    observer_root,
-)
-from agents_remember.observer.ambient import reset_ambient
 from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
@@ -698,7 +689,7 @@ def _produce_l109_read_ar_files_largest() -> tuple[str, dict[str, bool]]:
     )
 
     world = EntryPointWorld()
-    world.build(keep_lifecycle=True)
+    world.build()
     try:
         # The packet's canonical journey: a leaf Worker names twenty files
         # in its own worktrees through task scope, so cards and overviews
@@ -799,7 +790,7 @@ def _produce_l109_knowledge_read_largest() -> str:
     paging.write_family_tree(mem, paging._statements(18, words=20), directory=paging._DEEP)
     _l109_commit_all(mem, "deep family")
     world = EntryPointWorld()
-    world.build(keep_lifecycle=True)
+    world.build()
     try:
         outcome, first = world.call(
             "knowledge_read",
@@ -913,7 +904,7 @@ def _produce_l109_knowledge_diff_largest() -> str:
         (mem / record_path("invariant", inv, f"rec-{index}")).unlink()
     _l109_commit_all(mem, "change one hundred")
     world = EntryPointWorld()
-    world.build(keep_lifecycle=True)
+    world.build()
     try:
         outcome, out = world.call(
             "knowledge_diff",
@@ -1924,7 +1915,7 @@ class ToolAnswerLogTests(unittest.TestCase):
                 tool_name="ping",
                 operation="ping",
                 arguments=arguments or {},
-                caller=ToolCaller(agent_id="a1", role="worker", task="t", lifecycle_id="l1"),
+                caller=ToolCaller(agent_id="a1", role="worker", task="t"),
                 ok=ok,
                 code=code,
                 duration_ms=1.5,
@@ -2338,15 +2329,6 @@ class ToolAnswerLogTests(unittest.TestCase):
             )
 
 
-def _install_ambient(coord: Path) -> Any:
-    """Install an ambient that adopted a lifecycle for one test (rule 3)."""
-    reset_ambient()
-    amb = AmbientLifecycle(EventStore(observer_root(_stub_config(coord))))
-    amb.attach(new_ulid(), enclosure=str(coord / "contract.json"))
-    install_ambient(amb)
-    return amb
-
-
 class ToolAnswerFinalMeasureTests(unittest.TestCase):
     """The guard measures the final delivered mapping (rule 4, rule 3).
 
@@ -2360,16 +2342,15 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
     ) -> tuple[dict[str, Any], list[Any]]:
         reset_log_budgets()
         cfg = _stub_config(coord)
-        amb = _install_ambient(coord)
         seen: list[Any] = []
-        original = amb.emit_tool
-        amb.emit_tool = lambda *args, **kwargs: seen.append((args, kwargs))  # type: ignore[method-assign]
-        try:
-            with tool_call_context(tool, {}, config=cfg):
-                answer = complete_tool_response(tool, dict(whole), config=cfg)
-        finally:
-            amb.emit_tool = original  # type: ignore[method-assign]
-            reset_ambient()
+        with (
+            mock.patch(
+                "agents_remember.application.tool_response.record_tool_completed",
+                side_effect=lambda *args, **kwargs: seen.append((args, kwargs)),
+            ),
+            tool_call_context(tool, {}, config=cfg),
+        ):
+            answer = complete_tool_response(tool, dict(whole), config=cfg)
         return answer, seen
 
     def _read_line(self, coord: Path) -> dict[str, Any]:
@@ -2394,7 +2375,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
             self.assertTrue(line["guardCut"])
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_ordinary_answer_observer_matches_delivered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2405,7 +2386,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             self.assertNotIn("code", answer)
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_two_late_failures_keep_first_error_and_recount(self) -> None:
         real_write = tool_log_module.os.write
@@ -2443,7 +2424,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
                 answer.get("logError"),
                 "the tool call was not recorded: the log file cannot be written.",
             )
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_ordinary_exact_edge_with_line_failure_is_reguarded(self) -> None:
         real_write = tool_log_module.os.write
@@ -2489,7 +2470,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
             self.assertTrue(line["guardCut"])
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_full_short_form_fits_including_bookkeeping(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2509,7 +2490,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             self.assertEqual(answer.get("droppedFields", 0) + len(kept_scalars), 500)
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_cut_answer_late_failure_reguards_at_the_short_ceiling(self) -> None:
         real_write = tool_log_module.os.write
@@ -2540,7 +2521,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
             self.assertTrue(line["guardCut"])
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_line_failure_overflow_stays_in_bound_and_counts_agree(self) -> None:
         real_write = os.write
@@ -2566,7 +2547,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             self.assertIsNotNone(answer.get("logError"))
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
 
 class ToolPartialWriteTests(unittest.TestCase):
@@ -2858,7 +2839,6 @@ class ToolRaisedCallLoggingTests(unittest.TestCase):
             self.assertTrue(line["detail"].endswith(".json"))
         finally:
             world.close()
-            reset_ambient()
 
     def test_strict_argument_refusal_is_logged(self) -> None:
         world = EntryPointWorld()
@@ -2872,7 +2852,6 @@ class ToolRaisedCallLoggingTests(unittest.TestCase):
             self.assertTrue(line["detail"].endswith(".json"))
         finally:
             world.close()
-            reset_ambient()
 
 
 class ToolTerminatingRouteTests(unittest.TestCase):
@@ -2886,17 +2865,13 @@ class ToolTerminatingRouteTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.world.close()
-        reset_ambient()
 
     def _resolve(self, tool: str) -> Any:
-        amb = _install_ambient(self.world.coord)
-        state = amb.current
-        assert state is not None
-        amb.current = replace(state, enclosure=str(self.world.contract))
-        try:
+        with mock.patch(
+            "agents_remember.application.tool_answer_log._bound_enclosure_contract",
+            return_value=self.world.contract,
+        ):
             return resolve_log_roots(_stub_config(self.world.coord), tool)
-        finally:
-            reset_ambient()
 
     def test_terminating_operations_log_to_the_root(self) -> None:
         for tool in ("worktree_cleanup", "worktree_abandon", "lifecycle_finalize_task"):
@@ -2911,14 +2886,11 @@ class ToolTerminatingRouteTests(unittest.TestCase):
         self.assertTrue(Path(str(dest.enclosure_dir)).is_dir())
 
     def test_removed_group_falls_back_to_the_root(self) -> None:
-        amb = _install_ambient(self.world.coord)
-        state = amb.current
-        assert state is not None
-        amb.current = replace(state, enclosure=str(self.world.coord / "no-such-contract.md"))
-        try:
+        with mock.patch(
+            "agents_remember.application.tool_answer_log._bound_enclosure_contract",
+            return_value=self.world.coord / "no-such-contract.md",
+        ):
             dest = resolve_log_roots(_stub_config(self.world.coord), "ping")
-        finally:
-            reset_ambient()
         self.assertIsNone(dest.enclosure_dir)
         self.assertIsNotNone(dest.coord_log_dir)
 
@@ -3061,7 +3033,6 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.world.close()
-        reset_ambient()
 
     def test_logs_made_with_the_enclosure(self) -> None:
         contract = load_contract(self.world.contract)

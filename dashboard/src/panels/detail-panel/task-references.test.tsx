@@ -7,11 +7,11 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import { seedTaskDocuments, stubNotes, taskDoc } from './test-utils';
+import { seedTaskEntries, stubNotes, taskEntry, taskSummary, taskReference } from './test-utils';
 
 const REPO = 'agents-remember';
 const MASTER = '260831_closeout-certification-reform';
-const DOC_PATH = `/tasks/${REPO}/${MASTER}/23_task-references.json`;
+const DOC_PATH = `${REPO}/${MASTER}/23_task-references.json`;
 const PACKET = 'L127-R05-packet.md';
 
 const requirement = {
@@ -28,14 +28,24 @@ function seedReferenceTask() {
     'See notes/plan.md for the rollout plan',
     ...Array.from({ length: 8 }, (_, i) => `Background note ${i + 1}`),
   ];
-  seedTaskDocuments([
-    taskDoc({
-      kind: 'subTask',
-      repository: REPO,
-      docPath: DOC_PATH,
+  seedTaskEntries([
+    taskEntry({
+      id: '1',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(DOC_PATH),
       title: 'Reference task',
-      references,
-      sections: [{ kind: 'freeform', heading: 'Context', body: 'Why these references.' }],
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        references,
+        sections: [{ kind: 'freeform', heading: 'Context', body: 'Why these references.' }],
+      }),
     }),
   ]);
   stubNotes(
@@ -112,14 +122,24 @@ describe('task references (L127-C-F05)', () => {
 
 describe('master reference views (L127-C-F05)', () => {
   it('resolves note buttons in the master references view', async () => {
-    const masterPath = `/tasks/${REPO}/${MASTER}/task.json`;
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        repository: REPO,
-        docPath: masterPath,
+    const masterPath = `${REPO}/${MASTER}/task.json`;
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(masterPath),
         title: 'Reference master',
-        references: ['See notes/plan.md for the rollout plan'],
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+          references: ['See notes/plan.md for the rollout plan'],
+        }),
       }),
     ]);
     stubNotes([{ name: 'plan.md', path: 'plan.md', size: 10, language: 'markdown' }], 'note body');

@@ -50,13 +50,13 @@ function CompletedRow({ entry, target }: { entry: CompletedEntry; target: RowTar
             className={completedName}
             onClick={target.run}
             data-testid={target.testid}
-            title={target.title ?? `${entry.id} — ${entry.name}`}
-            aria-label={`${entry.id} — ${entry.name}`}
+            title={target.title ?? `${entry.id} — ${entry.entry.title}`}
+            aria-label={`${entry.id} — ${entry.entry.title}`}
           >
-            {entry.name}
+            {entry.entry.title}
           </button>
         ) : (
-          <span>{entry.name}</span>
+          <span>{entry.entry.title}</span>
         )}
       </td>
       <td>

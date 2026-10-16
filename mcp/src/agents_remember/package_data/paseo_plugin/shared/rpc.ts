@@ -10,3 +10,10 @@ export const arEmbedList = defineRpc({
     embed: z.array(z.object({ dashboardOrigin: z.string(), frameBaseUrl: z.string() })),
   }),
 });
+
+// One explicit full read per dashboard start or plugin boot, never a host poll.
+export const arHostActivitySnapshot = defineRpc({
+  name: "ar.host-activity-snapshot",
+  input: z.object({}),
+  output: z.object({ bootId: z.string() }),
+});

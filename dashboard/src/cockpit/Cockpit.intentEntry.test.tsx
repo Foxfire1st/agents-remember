@@ -8,14 +8,13 @@
 // Each case reproduces the first-ingest sequence against the real cockpit shell -- stale entry, the
 // store gains knowledge, then one trigger -- and counts requests: each trigger adds exactly one
 // summary read, and no trigger reads the subject catalogue before the reviewer is opened.
-import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { act,cleanup,fireEvent,render,waitFor,within } from '@testing-library/react';
+import { afterEach,beforeEach,expect,it,vi } from 'vitest';
 
-import { dashboardStore } from "../data/store";
-import { taskDoc as wireTaskDoc } from "../test/fixtures/wire";
-import { metricsFor } from "../types/projection";
-import type { EnclosureNode, LifecycleProjection, TaskDocNode, WorkspaceProjection } from "../types/projection";
-import { CockpitShell } from "./Cockpit";
+import { dashboardStore } from '../data/store';
+import { projection,taskEntry,taskSummary } from '../test/fixtures/wire';
+import type { EnclosureNode,TaskEntry } from '../types/projection';
+import { CockpitShell } from './Cockpit';
 
 afterEach(() => {
   cleanup();
@@ -24,45 +23,21 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-const LEAF = "direct-leaf";
-const OTHER = "other-leaf";
+const LEAF = 'direct-leaf';
+const OTHER = 'other-leaf';
 
-function leafDoc(id: string, title: string, lifecycleId: string): TaskDocNode {
-  return wireTaskDoc({
+beforeEach(() => vi.stubGlobal('CSS', { escape: (value: string) => value }));
+
+function leafEntry(id: string, title: string): TaskEntry {
+  return taskEntry({
     id,
-    kind: "subTask",
-    lifecycleId,
-    repository: "repo-a",
     title,
-    status: "inProgress",
-    createdAt: "2026-06-20T09:00:00+00:00",
-    docPath: `/tasks/repo-a/ops/${id}.json`,
-    stepsDone: 0,
-    stepsTotal: 0,
-    steps: [],
-    objective: `${title} objective.`,
-    requirements: [],
-    codeExamples: [],
-    decisions: [],
-    openQuestions: [],
-    references: [],
-    subTasks: [],
-    sections: [],
+    reference: { repository: 'repo-a', path: `ops/${id}.json` },
+    stage: 'started',
+    activity: 'works',
+    summary: taskSummary({ kind: 'subTask', form: 'task', objective: `${title} objective.` }),
+    worktrees: [liveEnclosure(id, `binding-${id}`)],
   });
-}
-
-function lifecycle(id: string, enclosure: string): LifecycleProjection {
-  return {
-    id,
-    state: "running",
-    phase: "build",
-    fleeting: false,
-    repoId: "repo-a",
-    enclosure: `/contracts/${enclosure}`,
-    startedAt: "2026-07-12T10:00:00+00:00",
-    lastEventTs: "2026-07-12T10:00:30+00:00",
-    inferred: false,
-  };
 }
 
 function liveEnclosure(leafId: string, lifecycleId: string): EnclosureNode {
@@ -70,63 +45,43 @@ function liveEnclosure(leafId: string, lifecycleId: string): EnclosureNode {
     enclosure: `/contracts/${leafId}`,
     enclosureId: leafId,
     leafId,
-    taskRoot: "/tasks/repo-a/ops",
-    taskId: "ops-master",
-    taskName: "ops",
-    repoName: "repo-a",
+    taskRoot: '/tasks/repo-a/ops',
+    taskId: 'ops-master',
+    taskName: 'ops',
+    repoName: 'repo-a',
     lifecycleId,
     worktreeGroup: `/worktrees/${leafId}`,
-    humanReviewStatus: "pending-review",
-    closeoutStatus: "not-started",
-    integrationStatus: "not-started",
-    cleanup: "pending",
+    humanReviewStatus: 'pending-review',
+    closeoutStatus: 'not-started',
+    integrationStatus: 'not-started',
+    cleanup: 'pending',
     codeWorktreeExists: true,
     memoryWorktreeExists: true,
     actions: [],
   };
 }
 
-function seedTwoLiveLeaves(): TaskDocNode[] {
-  const docs = [leafDoc(LEAF, "Direct Leaf Reader", "LC-A"), leafDoc(OTHER, "Other Leaf Reader", "LC-B")];
-  const lifecycles = [lifecycle("LC-A", LEAF), lifecycle("LC-B", OTHER)];
-  const projection: WorkspaceProjection = {
-    version: 2,
-    generatedAt: "2026-07-12T10:01:00+00:00",
-    lifecycles,
-    enclosures: [liveEnclosure(LEAF, "LC-A"), liveEnclosure(OTHER, "LC-B")],
-    providers: [],
-    activeWorktreeGroups: [LEAF, OTHER],
-    metrics: metricsFor(lifecycles),
-    analytics: {
-      driftSnapshots: [],
-      stalestSidecars: [],
-      setupSummaries: [],
-      setupProgress: [],
-      routeCoverage: [],
-      toolReports: [],
-      ledgers: [],
-      taskDocuments: docs,
-      series: [],
-      attentionQueue: [],
-      engineProcesses: [],
-    },
-  };
-  dashboardStore.getState().applySnapshot(projection);
-  return docs;
+function seedTwoLiveLeaves(): TaskEntry[] {
+  const entries = [leafEntry(LEAF, 'Direct Leaf Reader'), leafEntry(OTHER, 'Other Leaf Reader')];
+  dashboardStore.getState().applySnapshot(projection({ tasks: entries }));
+  return entries;
 }
 
-const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json' },
+  });
 
 // The routes this journey touches. `knowledge.present` is the store: false until the first ingest.
-function serve(docs: TaskDocNode[]) {
+function serve(docs: TaskEntry[]) {
   const knowledge = { present: false };
   const summary = (leaf: string) =>
     knowledge.present
       ? {
-          state: "counted",
-          operation: "read_review_intent_summary",
-          repository_id: "repo-a",
-          master: "ops",
+          state: 'counted',
+          operation: 'read_review_intent_summary',
+          repository_id: 'repo-a',
+          master: 'ops',
           leaf_id: leaf,
           counts: {
             added: 2,
@@ -139,57 +94,63 @@ function serve(docs: TaskDocNode[]) {
           },
         }
       : {
-          state: "unavailable",
-          operation: "read_review_intent_summary",
-          repository_id: "repo-a",
-          master: "ops",
+          state: 'unavailable',
+          operation: 'read_review_intent_summary',
+          repository_id: 'repo-a',
+          master: 'ops',
           leaf_id: leaf,
           refusal: {
-            code: "candidate_dataset_absent",
-            detail: "the resolved candidate dataset is absent",
+            code: 'candidate_dataset_absent',
+            detail: 'the resolved candidate dataset is absent',
             next_action: "author the candidate's knowledge",
-            offending_input: "knowledge-candidate.sqlite",
+            offending_input: 'knowledge-candidate.sqlite',
           },
         };
   const refused = {
-    state: "refused",
-    refusal: { code: "candidate_dataset_absent", detail: "no dataset", next_action: "author one" },
+    state: 'refused',
+    refusal: { code: 'candidate_dataset_absent', detail: 'no dataset', next_action: 'author one' },
   };
   const fetchMock = vi.fn(async (address: string) => {
-    const url = new URL(address, "http://dashboard.test");
-    if (url.pathname === "/api/task-document")
-      return json(docs.find((doc) => doc.docPath === url.searchParams.get("path")) ?? {});
-    if (url.pathname === "/api/review/intent/summary")
-      return json(summary(url.searchParams.get("leaf") ?? ""));
-    if (url.pathname.startsWith("/api/review/intent")) return json(refused);
-    if (url.pathname.startsWith("/api/changeset/"))
+    const url = new URL(address, 'http://dashboard.test');
+    if (url.pathname === '/api/task-document')
+      return json(
+        docs.find((doc) => doc.key === url.searchParams.get('path'))
+          ?.summary ?? {},
+      );
+    if (url.pathname === '/api/review/intent/summary')
+      return json(summary(url.searchParams.get('leaf') ?? ''));
+    if (url.pathname.startsWith('/api/review/intent')) return json(refused);
+    if (url.pathname.startsWith('/api/changeset/'))
       return json({
         counters: {
           code: { files: 0, insertions: 0, deletions: 0 },
           memory: { files: 0, insertions: 0, deletions: 0 },
         },
       });
-    if (url.pathname === "/api/files/repos") return json({ repos: [] });
+    if (url.pathname === '/api/files/repos') return json({ repos: [] });
     return json({});
   });
-  vi.stubGlobal("fetch", fetchMock);
-  const paths = () => fetchMock.mock.calls.map(([address]) => new URL(String(address), "http://dashboard.test"));
+  vi.stubGlobal('fetch', fetchMock);
+  const paths = () =>
+    fetchMock.mock.calls.map(([address]) => new URL(String(address), 'http://dashboard.test'));
   return {
     knowledge,
     summaryReads: (leaf = LEAF) =>
       paths().filter(
-        (url) => url.pathname === "/api/review/intent/summary" && url.searchParams.get("leaf") === leaf,
+        (url) =>
+          url.pathname === '/api/review/intent/summary' && url.searchParams.get('leaf') === leaf,
       ).length,
-    catalogueReads: () => paths().filter((url) => url.pathname === "/api/review/intent/entries").length,
+    catalogueReads: () =>
+      paths().filter((url) => url.pathname === '/api/review/intent/entries').length,
   };
 }
 
 // Open the leaf from the rail and wait for its stale entry: the first-ingest starting point.
 async function openStaleEntry(view: ReturnType<typeof render>, routes: ReturnType<typeof serve>) {
-  fireEvent.click(view.getByText("Direct Leaf Reader"));
-  const entry = await view.findByTestId("open-intent-review");
-  await waitFor(() => expect(entry.dataset.intentState).toBe("unavailable"));
-  expect(entry.textContent).toContain("no knowledge yet");
+  fireEvent.click(view.getByText('Direct Leaf Reader'));
+  const entry = await view.findByTestId('open-intent-review');
+  await waitFor(() => expect(entry.dataset.intentState).toBe('unavailable'));
+  expect(entry.textContent).toContain('no knowledge yet');
   expect(routes.summaryReads()).toBe(1);
   // The first ingest: the store gains knowledge, and nothing the dashboard receives says so.
   routes.knowledge.present = true;
@@ -198,20 +159,23 @@ async function openStaleEntry(view: ReturnType<typeof render>, routes: ReturnTyp
   return entry;
 }
 
-it("(a) re-validates when the task detail is shown again, once per showing, with no catalogue read", async () => {
+it('(a) re-validates when the task detail is shown again, once per showing, with no catalogue read', async () => {
   const routes = serve(seedTwoLiveLeaves());
   const view = render(<CockpitShell initialView="operations" />);
   await openStaleEntry(view, routes);
 
-  fireEvent.click(view.getByRole("radio", { name: "File Viewer" }));
-  fireEvent.click(view.getByRole("radio", { name: "Operations" }));
-  await waitFor(() => expect(view.getByTestId("open-intent-review").textContent).toContain("+2 −0"));
+  fireEvent.click(view.getByRole('radio', { name: 'File Viewer' }));
+  fireEvent.click(view.getByRole('radio', { name: 'Operations' }));
+  await waitFor(() =>
+    expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0'),
+  );
   expect(routes.summaryReads()).toBe(2);
 
   // Switching to another task and back to this one: one read for each leaf's entry, no duplicate.
-  fireEvent.click(view.getByText("Other Leaf Reader"));
+  fireEvent.click(view.getByText('Other Leaf Reader'));
+  await waitFor(() => expect(view.getByTestId('doc-id').textContent).toBe(OTHER));
   await waitFor(() => expect(routes.summaryReads(OTHER)).toBe(1));
-  fireEvent.click(view.getByText("Direct Leaf Reader"));
+  fireEvent.click(view.getByText('Direct Leaf Reader'));
   await waitFor(() => expect(routes.summaryReads()).toBe(3));
   await act(async () => {});
   expect(routes.summaryReads()).toBe(3);
@@ -219,33 +183,35 @@ it("(a) re-validates when the task detail is shown again, once per showing, with
   expect(routes.catalogueReads()).toBe(0);
 });
 
-it("(a) opening a task from another view reads its entry exactly once", async () => {
+it('(a) opening a task from another view reads its entry exactly once', async () => {
   const routes = serve(seedTwoLiveLeaves());
   const view = render(<CockpitShell initialView="operations" />);
-  fireEvent.click(view.getByRole("radio", { name: "File Viewer" }));
+  fireEvent.click(view.getByRole('radio', { name: 'File Viewer' }));
   // The rails stay on Memory; selecting a task changes the task and shows the detail in one step.
-  fireEvent.click(view.getByText("Direct Leaf Reader"));
-  const entry = await view.findByTestId("open-intent-review");
-  await waitFor(() => expect(entry.dataset.intentState).toBe("unavailable"));
+  fireEvent.click(view.getByText('Direct Leaf Reader'));
+  const entry = await view.findByTestId('open-intent-review');
+  await waitFor(() => expect(entry.dataset.intentState).toBe('unavailable'));
   await act(async () => {});
   expect(routes.summaryReads()).toBe(1);
   expect(routes.catalogueReads()).toBe(0);
 });
 
-it("(b) re-validates when the developer leaves the reviewer back to the entry", async () => {
+it('(b) re-validates when the developer leaves the reviewer back to the entry', async () => {
   const routes = serve(seedTwoLiveLeaves());
   const view = render(<CockpitShell initialView="operations" />);
   await openStaleEntry(view, routes);
   expect(routes.catalogueReads()).toBe(0);
 
-  fireEvent.click(view.getByTestId("open-intent-review"));
-  await view.findByTestId("review-surface");
+  fireEvent.click(view.getByTestId('open-intent-review'));
+  await view.findByTestId('review-surface');
   await waitFor(() => expect(routes.catalogueReads()).toBe(1));
   // Opening the reviewer is not a re-validation of the (now hidden) entry.
   expect(routes.summaryReads()).toBe(1);
 
-  fireEvent.click(view.getByTestId("review-back"));
-  await waitFor(() => expect(view.getByTestId("open-intent-review").textContent).toContain("+2 −0"));
+  fireEvent.click(view.getByTestId('review-back'));
+  await waitFor(() =>
+    expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0'),
+  );
   await act(async () => {});
   expect(routes.summaryReads()).toBe(2);
   expect(routes.catalogueReads()).toBe(1);
@@ -257,11 +223,13 @@ it("(c) re-validates when the reviewer's own refresh runs", async () => {
   const entry = await openStaleEntry(view, routes);
 
   fireEvent.click(entry);
-  const surface = await view.findByTestId("review-surface");
-  fireEvent.click(within(surface).getByTestId("review-refresh"));
+  const surface = await view.findByTestId('review-surface');
+  fireEvent.click(within(surface).getByTestId('review-refresh'));
   // The refresh itself re-reads the entry's summary once, while the reviewer is still open.
   await waitFor(() => expect(routes.summaryReads()).toBe(2));
-  await waitFor(() => expect(view.getByTestId("open-intent-review").textContent).toContain("+2 −0"));
+  await waitFor(() =>
+    expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0'),
+  );
   await act(async () => {});
   expect(routes.summaryReads()).toBe(2);
   expect(routes.catalogueReads()).toBe(1);

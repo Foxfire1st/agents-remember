@@ -44,11 +44,19 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_status
+from agents_remember.serving.changeset_cache import ChangesetCache
 from agents_remember.serving.changeset_comparison import comparison_changeset, comparison_file_diff
 from agents_remember.serving.changeset_endpoints import (
     NOT_RECORDED,
     RecordedEndpointAbsent,
     recorded_committed_range,
+)
+from agents_remember.serving.changeset_reads import change_counters as _sum
+from agents_remember.serving.changeset_reads import (
+    changed_files_with_counts,
+    commit_text_or_none,
+    head_commit,
+    working_text,
 )
 from agents_remember.serving.master_net_generation import (
     MASTER_NET_SCOPE,
@@ -59,7 +67,7 @@ from agents_remember.serving.master_net_generation import (
     select_master_net,
 )
 from agents_remember.serving.response_contract import (
-    SCOPED_READ_RESPONSES,
+    CHANGESET_READ_RESPONSES,
     ComparisonChangeSet,
     FileDiff,
     LeafChangeSet,
@@ -67,11 +75,6 @@ from agents_remember.serving.response_contract import (
     TaskChangeSet,
 )
 from agents_remember.serving.scope import FileScope, language_for, run_scoped
-from agents_remember.worktrees.modules.git import (
-    changed_files_with_counts,
-    commit_text_or_none,
-    head_commit,
-)
 from agents_remember.worktrees.task_resolver import slugify
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -88,15 +91,6 @@ def _require_contract(scope: FileScope) -> WorktreeContract:
         return load_contract(scope.contract_path)
     except (ContractError, OSError) as err:
         raise FileNotFoundError(str(scope.contract_path)) from err
-
-
-def _sum(files: list[dict[str, Any]]) -> dict[str, int]:
-    """Counters for one changed set: file count + summed insertions/deletions (binary -> 0)."""
-    return {
-        "files": len(files),
-        "insertions": sum(int(f["insertions"] or 0) for f in files),
-        "deletions": sum(int(f["deletions"] or 0) for f in files),
-    }
 
 
 def task_changeset(scope: FileScope) -> dict[str, Any]:
@@ -138,7 +132,7 @@ def file_diff(scope: FileScope, kind: str, rel: str) -> dict[str, Any]:
     relp = confine_rel(root, rel)
     before = commit_text_or_none(root, base, relp) if base else None
     after_path = root / relp
-    after = after_path.read_text(errors="replace") if after_path.is_file() else None
+    after = working_text(after_path)
     return {
         "scope": scope.scope_id,
         "kind": "memory" if kind == "memory" else "code",
@@ -617,7 +611,7 @@ def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str,
         relp = confine_rel(worktree, rel)
         before = commit_text_or_none(worktree, head_commit(worktree, "HEAD"), relp)
         after_path = worktree / relp
-        after = after_path.read_text(errors="replace") if after_path.is_file() else None
+        after = working_text(after_path)
     else:
         recorded = recorded_committed_range(contract, memory=memory)
         relp = confine_rel(recorded.repository, rel)
@@ -732,7 +726,7 @@ def _file_response(config: McpRuntimeConfig, ref: ChangesetFileRef) -> Response:
     return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
 
 
-def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
+def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> ChangesetCache:
     """Register the read-only change-set routes. Must be called BEFORE the greedy static mount.
 
     The change-set is selected by precedence ``leaf > master > scope`` (a ``leaf`` view is the per-leaf
@@ -741,12 +735,14 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     JSONResponse 400/404 idiom rather than ``run_scoped``.
     """
 
+    cache = ChangesetCache()
+
     # Two success shapes: the leaf view adds ``mode`` to the enclosure view's body, and the
     # ``leaf`` selector is what picks between them.
     @app.get(
         "/api/changeset/task",
         response_model=ComparisonChangeSet | LeafChangeSet | TaskChangeSet,
-        responses=SCOPED_READ_RESPONSES,
+        responses=CHANGESET_READ_RESPONSES,
     )
     def api_changeset_task(
         ref: Annotated[ChangesetTaskRef, Depends()], request: Request
@@ -754,30 +750,39 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
         conflict = _comparison_mode_refusal(ref.comparison, "mode" in request.query_params)
         if conflict is not None:
             return conflict
-        return _task_response(config, ref)
+        return cache.response(request, lambda: _task_response(config, ref))
 
-    @app.get("/api/changeset/file-diff", response_model=FileDiff, responses=SCOPED_READ_RESPONSES)
+    @app.get(
+        "/api/changeset/file-diff", response_model=FileDiff, responses=CHANGESET_READ_RESPONSES
+    )
     def api_changeset_file_diff(
         ref: Annotated[ChangesetFileRef, Depends()], request: Request
     ) -> Response:
         conflict = _comparison_mode_refusal(ref.comparison, "mode" in request.query_params)
         if conflict is not None:
             return conflict
-        return _file_response(config, ref)
+        return cache.response(request, lambda: _file_response(config, ref))
 
     # An unknown master (no series contract) degrades to empty lists rather than refusing. A
     # master the contract names but whose code endpoints are missing is refused by name instead
     # of being answered from a later branch tip.
     @app.get(
-        "/api/changeset/master", response_model=MasterChangeSet, responses=SCOPED_READ_RESPONSES
+        "/api/changeset/master", response_model=MasterChangeSet, responses=CHANGESET_READ_RESPONSES
     )
-    def api_changeset_master(ref: Annotated[MasterChangesetRef, Depends()]) -> Response:
-        return _master_json(
-            lambda: master_changeset(
-                config,
-                ref.repo,
-                ref.master,
-                include_leaves=ref.include_leaves,
-                pins=_pins_from_master_ref(ref),
-            )
+    def api_changeset_master(
+        ref: Annotated[MasterChangesetRef, Depends()], request: Request
+    ) -> Response:
+        return cache.response(
+            request,
+            lambda: _master_json(
+                lambda: master_changeset(
+                    config,
+                    ref.repo,
+                    ref.master,
+                    include_leaves=ref.include_leaves,
+                    pins=_pins_from_master_ref(ref),
+                )
+            ),
         )
+
+    return cache

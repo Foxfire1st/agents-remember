@@ -1,24 +1,27 @@
-import { useStore } from "zustand";
-import { createStore } from "zustand/vanilla";
+import { useStore } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 
-import type { ObserverEvent } from "../types/event";
+import type { ObserverEvent } from '../types/event';
 import type {
-  Analytics,
-  CloseoutQueueNode,
-  EnclosureNode,
-  LifecycleProjection,
-  Metrics,
-  ProviderNode,
-  ServingBuild,
-  WorkspaceProjection,
-} from "../types/projection";
-import { stableEquals, stampServed } from "./servedAges";
+Analytics,
+CloseoutQueueNode,
+EnclosureNode,
+Metrics,
+ProviderNode,
+ServingBuild,
+TaskCounts,
+TaskEntry,
+WorkspaceProjection,
+} from '../types/projection';
+import { ConditionalReads } from './conditionalReads';
+import { stableEquals,stampServed } from './servedAges';
+import { TaskDocumentResources } from './taskDocuments';
 
 // A defaulted list read keeps `applySnapshotState`'s complexity under the lint budget: the `??` lives
 // here, in a separate function, rather than adding a branch inside the snapshot applier.
 const asList = <T>(value: T[] | undefined): T[] => value ?? [];
 
-export type ConnState = "connecting" | "live" | "signal-lost";
+export type ConnState = 'connecting' | 'live' | 'signal-lost';
 
 export interface DashboardState {
   conn: ConnState;
@@ -28,7 +31,12 @@ export interface DashboardState {
   // failure overlay (e.g. the FleetingEnclosure) from the previous mode can't orphan and bleed through. In
   // production nothing calls `reset()`, so `gen` stays 0 and the canvas is never remounted by it.
   gen: number;
-  lifecycles: Record<string, LifecycleProjection>; // keyed by id
+  tasks: Record<string, TaskEntry>;
+  taskDocuments: TaskDocumentResources;
+  changeSets: ConditionalReads;
+  changeSetFiles: ConditionalReads;
+  intentSummaries: ConditionalReads;
+  taskCounts: TaskCounts;
   enclosures: Record<string, EnclosureNode>; // keyed by `enclosure`
   providers: Record<string, ProviderNode>; // keyed by id
   activeWorktreeGroups: string[]; // worktree-group basenames with a live enclosure (Topology scope)
@@ -70,7 +78,8 @@ const EVENT_WINDOW = 2000;
 // staleness displays advance locally between real emissions.
 
 /** Reuse the current value when the incoming one is stable-equal (keeps identity + anchor). */
-const reuse = <T>(current: T, incoming: T): T => (stableEquals(current, incoming) ? current : incoming);
+const reuse = <T>(current: T, incoming: T): T =>
+  stableEquals(current, incoming) ? current : incoming;
 
 /**
  * Merge an incoming collection into the id-keyed map, reusing every stable-equal node.
@@ -109,8 +118,6 @@ const stampAnalytics = (analytics: Analytics | null): void => {
     analytics.setupSummaries,
     analytics.setupProgress,
     analytics.toolReports,
-    analytics.taskDocuments,
-    analytics.series,
     analytics.attentionQueue,
     analytics.engineProcesses,
   ];
@@ -146,15 +153,19 @@ const pruneSuppressedAttention = (
 type DeltaReducer = (state: DashboardState, data: unknown) => Partial<DashboardState> | null;
 
 const DELTA_REDUCERS: Record<string, DeltaReducer> = {
-  lifecycle: (state, data) => {
-    const node = data as LifecycleProjection;
-    if (stableEquals(state.lifecycles[node.id], node)) return null;
+  task: (state, data) => {
+    const node = data as TaskEntry;
+    if (stableEquals(state.tasks[node.key], node)) return null;
     stampServed(node);
-    return { lifecycles: upsert(state.lifecycles, node, (x) => x.id) };
+    return { tasks: upsert(state.tasks, node, (item) => item.key) };
   },
-  "lifecycle.removed": (state, data) => {
-    const { id } = data as { id: string };
-    return id in state.lifecycles ? { lifecycles: remove(state.lifecycles, id) } : null;
+  'task.removed': (state, data) => {
+    const { key } = data as { key: string };
+    return key in state.tasks ? { tasks: remove(state.tasks, key) } : null;
+  },
+  taskCounts: (state, data) => {
+    const taskCounts = data as TaskCounts;
+    return stableEquals(state.taskCounts, taskCounts) ? null : { taskCounts };
   },
   enclosure: (state, data) => {
     const node = data as EnclosureNode;
@@ -162,7 +173,7 @@ const DELTA_REDUCERS: Record<string, DeltaReducer> = {
     stampServed(node);
     return { enclosures: upsert(state.enclosures, node, (x) => x.enclosure) };
   },
-  "enclosure.removed": (state, data) => {
+  'enclosure.removed': (state, data) => {
     const { enclosure } = data as { enclosure: string };
     return enclosure in state.enclosures
       ? { enclosures: remove(state.enclosures, enclosure) }
@@ -174,7 +185,7 @@ const DELTA_REDUCERS: Record<string, DeltaReducer> = {
     stampServed(node);
     return { providers: upsert(state.providers, node, (x) => x.id) };
   },
-  "provider.removed": (state, data) => {
+  'provider.removed': (state, data) => {
     const { id } = data as { id: string };
     return id in state.providers ? { providers: remove(state.providers, id) } : null;
   },
@@ -212,28 +223,9 @@ function reduceDelta(
   return reducer === undefined ? null : reducer(state, data);
 }
 
-function snapshotUnchanged(
-  state: DashboardState,
-  lifecycles: Record<string, LifecycleProjection>,
-  enclosures: Record<string, EnclosureNode>,
-  providers: Record<string, ProviderNode>,
-  activeWorktreeGroups: string[],
-  closeoutQueues: CloseoutQueueNode[],
-  metrics: Metrics | null,
-  analytics: Analytics | null,
-  servingBuild: ServingBuild | null,
-  suppressedAttentionIds: Record<string, boolean>,
-): boolean {
-  return (
-    lifecycles === state.lifecycles &&
-    enclosures === state.enclosures &&
-    providers === state.providers &&
-    activeWorktreeGroups === state.activeWorktreeGroups &&
-    closeoutQueues === state.closeoutQueues &&
-    metrics === state.metrics &&
-    analytics === state.analytics &&
-    servingBuild === state.servingBuild &&
-    suppressedAttentionIds === state.suppressedAttentionIds
+function snapshotUnchanged(state: DashboardState, incoming: Partial<DashboardState>): boolean {
+  return (Object.keys(incoming) as (keyof DashboardState)[]).every(
+    (key) => incoming[key] === state[key],
   );
 }
 
@@ -242,7 +234,10 @@ function applySnapshotState(
   set: (partial: Partial<DashboardState>) => void,
   projection: WorkspaceProjection,
 ): void {
-  const lifecycles = mergeKeyed(state.lifecycles, projection.lifecycles, (x) => x.id);
+  const tasks = mergeKeyed(state.tasks, projection.tasks, (task) =>
+    task.key,
+  );
+  const taskCounts = reuse(state.taskCounts, projection.taskCounts);
   const enclosures = mergeKeyed(state.enclosures, projection.enclosures, (x) => x.enclosure);
   const providers = mergeKeyed(state.providers, projection.providers, (x) => x.id);
   const activeWorktreeGroups = reuse(
@@ -254,13 +249,10 @@ function applySnapshotState(
   const analytics = reuse(state.analytics, projection.analytics);
   if (analytics !== state.analytics) stampAnalytics(analytics);
   const servingBuild = reuse(state.servingBuild, projection.servingBuild ?? null);
-  const suppressedAttentionIds = pruneSuppressedAttention(
-    state.suppressedAttentionIds,
-    analytics,
-  );
-  const unchanged = snapshotUnchanged(
-    state,
-    lifecycles,
+  const suppressedAttentionIds = pruneSuppressedAttention(state.suppressedAttentionIds, analytics);
+  const incoming = {
+    tasks,
+    taskCounts,
     enclosures,
     providers,
     activeWorktreeGroups,
@@ -269,31 +261,49 @@ function applySnapshotState(
     analytics,
     servingBuild,
     suppressedAttentionIds,
-  );
+  };
+  const unchanged = snapshotUnchanged(state, incoming);
   // An unchanged snapshot (a reconnect while idle) is a NO-OP: zero store writes.
-  if (unchanged && state.conn === "live") return;
+  if (unchanged && state.conn === 'live') return;
   set({
-    conn: "live",
+    conn: 'live',
     // `generatedAt` is the stamp of the last APPLIED content (the top bar's "@ hh:mm:ss"),
     // so an unchanged re-snapshot must not advance it — ages and stamp stay coherent.
     generatedAt: unchanged ? state.generatedAt : projection.generatedAt,
-    lifecycles,
-    enclosures,
-    providers,
-    activeWorktreeGroups,
-    closeoutQueues,
-    metrics,
-    analytics,
-    servingBuild,
-    suppressedAttentionIds,
+    ...incoming,
   });
 }
 
-export const dashboardStore = createStore<DashboardState>((set, get) => ({
-  conn: "connecting",
+type WorkspaceState = Pick<
+  DashboardState,
+  | 'generatedAt'
+  | 'tasks'
+  | 'taskDocuments'
+  | 'changeSets'
+  | 'changeSetFiles'
+  | 'intentSummaries'
+  | 'taskCounts'
+  | 'enclosures'
+  | 'providers'
+  | 'activeWorktreeGroups'
+  | 'closeoutQueues'
+  | 'metrics'
+  | 'analytics'
+  | 'servingBuild'
+  | 'events'
+  | 'eventsHydrated'
+  | 'eventsLastTs'
+  | 'suppressedAttentionIds'
+>;
+
+const emptyWorkspace = (): WorkspaceState => ({
   generatedAt: null,
-  gen: 0,
-  lifecycles: {},
+  tasks: {},
+  taskDocuments: new TaskDocumentResources(),
+  changeSets: new ConditionalReads(256),
+  changeSetFiles: new ConditionalReads(64, 16 * 1024 * 1024),
+  intentSummaries: new ConditionalReads(128),
+  taskCounts: { planned: 0, started: 0, aborted: 0, completed: 0, works: 0, paused: 0, unknown: 0 },
   enclosures: {},
   providers: {},
   activeWorktreeGroups: [],
@@ -305,6 +315,12 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
   eventsHydrated: false,
   eventsLastTs: null,
   suppressedAttentionIds: {},
+});
+
+export const dashboardStore = createStore<DashboardState>((set, get) => ({
+  conn: 'connecting',
+  gen: 0,
+  ...emptyWorkspace(),
   setConn: (conn) => {
     if (get().conn !== conn) set({ conn });
   },
@@ -332,7 +348,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
     set((state) => ({
       eventsHydrated: true,
       eventsLastTs:
-        typeof lastEventTs === "string"
+        typeof lastEventTs === 'string'
           ? lastEventTs
           : (state.events.at(-1)?.ts ?? state.eventsLastTs),
     })),
@@ -354,19 +370,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
   reset: () =>
     set((state) => ({
       gen: state.gen + 1,
-      generatedAt: null,
-      lifecycles: {},
-      enclosures: {},
-      providers: {},
-      activeWorktreeGroups: [],
-      closeoutQueues: [],
-      metrics: null,
-      analytics: null,
-      servingBuild: null,
-      events: [],
-      eventsHydrated: false,
-      eventsLastTs: null,
-      suppressedAttentionIds: {},
+      ...emptyWorkspace(),
     })),
 }));
 

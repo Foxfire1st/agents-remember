@@ -1,17 +1,20 @@
-"""Lifecycle-scoped attention acknowledgements: ``ar-attention-dismissal/v1``.
+"""Current attention acknowledgements: ``ar-attention-dismissal/v1``.
 
-Attention-queue items are derived from lifecycle/control-plane state on every
+Attention-queue items are derived from their native source facts on every
 projection pass. A dismissal therefore records only the live acknowledgement
-needed to hide one current occurrence until a newer signal arrives or the source
+needed to hide one current occurrence until its findings change, it recovers or the source
 leaves the live set. This file is deliberately compacted in place: attention
 items are disposable UI facts, not an audit trail.
 """
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator
 
 from agents_remember.controlplane.durable_store import (
     ATTENTION_DISMISSAL_OWNERSHIP,
@@ -21,25 +24,84 @@ from agents_remember.controlplane.durable_store import (
     rewrite_lines,
 )
 
+logger = logging.getLogger(__name__)
+
+
 ATTENTION_DISMISSAL_SCHEMA = "ar-attention-dismissal/v1"
 
 
 class AttentionDismissalRecord(DurableRecord):
-    """One ``ar-attention-dismissal/v1`` snapshot: the operator dismissed an item.
-
-    ``itemId`` is the stable :class:`AttentionItem` id (the fold key); ``kind`` /
-    ``lifecycleId`` are recorded for provenance. ``gateId`` is held by rows an earlier
-    build wrote for a gate item; nothing writes it now.
-    ``dismissedAt`` is the server wall-clock the reducer compares against the item's
-    triggering-signal timestamp.
-    """
+    """One disposable acknowledgement of a current attention occurrence."""
 
     schema_version: str = Field(default=ATTENTION_DISMISSAL_SCHEMA, alias="schema")
     itemId: str
     dismissedAt: str
-    kind: str | None = None
-    lifecycleId: str | None = None
-    gateId: str | None = None
+    kind: str
+    actionableFingerprint: str | None = None
+
+    @field_validator("kind")
+    @classmethod
+    def supported_kind(cls, value: str) -> str:
+        if value not in {"actionable-drift", "provider-down", "failed-setup", "blocked-start"}:
+            raise ValueError("the attention kind is no longer published")
+        return value
+
+    @field_validator("dismissedAt")
+    @classmethod
+    def valid_stamp(cls, value: str) -> str:
+        datetime.fromisoformat(value)
+        return value
+
+
+@dataclass
+class AttentionObservation:
+    """Proof from one actual source read, never from retained projection slots.
+
+    Incomplete enumeration or an unreadable record invalidates the whole kind's
+    removal proof. Healthy observations end an occurrence; mere absence of a bad
+    signal does not. The read's start protects a click made while it was running.
+    """
+
+    kind: str
+    observed_before: datetime
+    complete: bool = True
+    existing: set[str] = field(default_factory=set)
+    healthy: set[str] = field(default_factory=set)
+    fingerprints: dict[str, str] = field(default_factory=dict)
+
+    def observe(
+        self, item_id: str, *, healthy: bool = False, fingerprint: str | None = None
+    ) -> None:
+        self.existing.add(item_id)
+        if healthy:
+            self.healthy.add(item_id)
+        if fingerprint:
+            self.fingerprints[item_id] = fingerprint
+
+    def covers(self, record: AttentionDismissalRecord) -> bool:
+        stamp = datetime.fromisoformat(record.dismissedAt)
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=UTC)
+        return self.complete and stamp <= self.observed_before
+
+    def reclaims(self, record: AttentionDismissalRecord) -> bool:
+        fingerprint = self.fingerprints.get(record.itemId)
+        return self.covers(record) and (
+            record.itemId not in self.existing
+            or record.itemId in self.healthy
+            or (
+                fingerprint is not None
+                and record.actionableFingerprint is not None
+                and fingerprint != record.actionableFingerprint
+            )
+        )
+
+    def adopt(self, record: AttentionDismissalRecord) -> AttentionDismissalRecord:
+        """Preserve an existing acknowledgement through its first complete read."""
+        fingerprint = self.fingerprints.get(record.itemId)
+        if self.covers(record) and record.actionableFingerprint is None and fingerprint:
+            return record.model_copy(update={"actionableFingerprint": fingerprint})
+        return record
 
 
 class AttentionDismissalStore:
@@ -99,28 +161,34 @@ class AttentionDismissalStore:
             latest[record.itemId] = record
         return latest
 
-    def prune_lifecycles(self, live_lifecycle_ids: set[str]) -> int:
-        """Drop acknowledgements for missing/non-live lifecycles and compact duplicates.
+    def reconcile(
+        self, observations: list[AttentionObservation]
+    ) -> dict[str, AttentionDismissalRecord]:
+        """Reclaim only occurrences proved ended/gone by this pass, under the write lock.
 
-        The store's second write entry point, so it carries the declared-writer check too: both
-        of this log's writes are whole-file rewrites, and guarding only one of them would leave
-        half the ``writers`` claim unchecked.
+        A partial refresh supplies no observation for its unread kinds. A failed
+        reader supplies an incomplete one. Neither can remove any row of that kind.
+        Duplicate and malformed rows leave on the next required rewrite; an
+        unchanged set performs no physical write.
         """
         ATTENTION_DISMISSAL_OWNERSHIP.check_declared_writer()
+        by_kind = {observation.kind: observation for observation in observations}
         with exclusive_access(self.log_path(), ATTENTION_DISMISSAL_OWNERSHIP):
-            return self._prune_locked(live_lifecycle_ids)
-
-    def _prune_locked(self, live_lifecycle_ids: set[str]) -> int:
-        records = self.read()
-        kept = [
-            record
-            for record in self.current().values()
-            if _keep_current_record(record, live_lifecycle_ids)
-        ]
-        if len(kept) == len(records):
-            return 0
-        self._replace(kept)
-        return len(records) - len(kept)
+            records = self.read()
+            current = {record.itemId: record for record in records}
+            kept = {
+                key: observation.adopt(record) if observation is not None else record
+                for key, record in current.items()
+                if (observation := by_kind.get(record.kind)) is None
+                or not observation.reclaims(record)
+            }
+            if len(kept) != len(records) or kept != current:
+                try:
+                    self._replace(list(kept.values()))
+                except OSError:
+                    logger.warning("Attention dismissal cleanup did not hold", exc_info=True)
+                    return current
+            return kept
 
     def _replace(self, records: list[AttentionDismissalRecord]) -> None:
         """Rewrite the log. Its lock -- held by the caller across the read too -- is what makes
@@ -137,9 +205,3 @@ class AttentionDismissalStore:
             # writes nothing records nothing.
             note_own=True,
         )
-
-
-def _keep_current_record(record: AttentionDismissalRecord, live_lifecycle_ids: set[str]) -> bool:
-    if record.lifecycleId is not None:
-        return record.lifecycleId in live_lifecycle_ids
-    return record.kind == "actionable-drift"

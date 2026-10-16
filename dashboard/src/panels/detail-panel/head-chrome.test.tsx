@@ -6,8 +6,7 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import { seedProjection, seedTaskDocuments, seriesNode, taskDoc } from './test-utils';
-import { lifecycle } from '../lifecycle-list/test-utils';
+import { seedTaskEntries, taskEntry, taskSummary, taskReference, taskTree } from './test-utils';
 
 function blockOrder(container: HTMLElement, skeleton: string): string[] {
   const root = container.querySelector(`[data-testid="${skeleton}"]`);
@@ -29,9 +28,24 @@ function chromeHeadings(container: HTMLElement): Element[] {
 
 describe('head identity and title chrome (L127-C-F02)', () => {
   it('shows the own ID once in the head on a direct task document', () => {
-    const docPath = '/tasks/repo-a/m/01_unique.json';
-    seedTaskDocuments([
-      taskDoc({ id: 'UNIQUE-L127-ID', kind: 'subTask', docPath, title: 'Unique Head Title L127' }),
+    const docPath = 'repo-a/m/01_unique.json';
+    seedTaskEntries([
+      taskEntry({
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        id: 'UNIQUE-L127-ID',
+        title: 'Unique Head Title L127',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+        }),
+      }),
     ]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
 
@@ -43,98 +57,84 @@ describe('head identity and title chrome (L127-C-F02)', () => {
   });
 
   it('keeps no duplicate title on a direct master panel', () => {
-    const docPath = '/tasks/repo-a/m/task.json';
-    seedTaskDocuments([taskDoc({ id: 'M', kind: 'master', docPath, title: 'Master Chrome L127' })]);
+    const docPath = 'repo-a/m/task.json';
+    seedTaskEntries([
+      taskEntry({
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        id: 'M',
+        title: 'Master Chrome L127',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+        }),
+      }),
+    ]);
     const { container } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
 
     expect(titled(container, 'Master Chrome L127')).toHaveLength(1);
     expect(chromeHeadings(container)).toHaveLength(0);
   });
 
-  it('keeps no duplicate title on a series panel', () => {
-    const series = seriesNode({
-      seriesId: 's1',
-      title: 'Series Chrome L127',
-      docPath: '/tasks/repo-a/s1/task.json',
+  it('keeps the title once while drilling an entry child and following its parent', () => {
+    const master = taskEntry({
+      stepsDone: 0,
+      stepsTotal: 0,
+      reference: taskReference('repo-a/m/task.json'),
+      id: 'M',
+      title: 'Master L127',
+      stage: 'started',
+      summary: taskSummary({ form: 'master', kind: 'master', objective: '' }),
     });
-    seedProjection({
-      analytics: {
-        driftSnapshots: [],
-        stalestSidecars: [],
-        routeCoverage: [],
-        toolReports: [],
-        ledgers: [],
-        setupSummaries: [],
-        setupProgress: [],
-        taskDocuments: [
-          taskDoc({
-            id: 'S1M',
-            kind: 'master',
-            docPath: '/tasks/repo-a/s1/task.json',
-            title: 'Series Chrome L127',
-          }),
-        ],
-        series: [series],
-        attentionQueue: [],
-        engineProcesses: [],
-      },
-    });
-    const { container } = render(<DetailPanel selectedId="series:s1" />);
-
-    expect(titled(container, 'Series Chrome L127')).toHaveLength(1);
-    expect(chromeHeadings(container)).toHaveLength(0);
-  });
-
-  it('hides the lifecycle heading where a drilled slice owns the title', () => {
-    const master = taskDoc({
-      kind: 'master',
-      lifecycleId: 'LC-H2',
-      docPath: '/tasks/repo-a/m/task.json',
-      title: 'Lifecycle Master L127',
-      subTasks: [
-        { number: '1', name: 'Leaf one', file: '01_leaf.md', status: 'planning', scope: '' },
-      ],
-    });
-    const leaf = taskDoc({
+    const leaf = taskEntry({
+      stepsDone: 0,
+      stepsTotal: 0,
+      reference: taskReference('repo-a/m/01_leaf.json'),
       id: 'L1',
-      kind: 'subTask',
-      docPath: '/tasks/repo-a/m/01_leaf.json',
       title: 'Leaf one',
-      lifecycleId: 'LC-H2',
+      stage: 'planned',
+      summary: taskSummary({ form: 'task', objective: '' }),
     });
-    seedProjection({
-      lifecycles: [lifecycle({ id: 'LC-H2' })],
-      analytics: {
-        driftSnapshots: [],
-        stalestSidecars: [],
-        routeCoverage: [],
-        toolReports: [],
-        ledgers: [],
-        setupSummaries: [],
-        setupProgress: [],
-        taskDocuments: [master, leaf],
-        series: [],
-        attentionQueue: [],
-        engineProcesses: [],
-      },
-    });
-    const { container, getByTestId } = render(<DetailPanel selectedId="LC-H2" />);
-
-    // The lifecycle context names the panel while no single document owns it.
-    expect(chromeHeadings(container)).toHaveLength(1);
+    seedTaskEntries(taskTree(master, [leaf]));
+    const { container, getByTestId } = render(
+      <DetailPanel selectedId="taskdoc:repo-a/m/task.json" />,
+    );
+    expect(chromeHeadings(container)).toHaveLength(0);
     fireEvent.click(getByTestId('subtask-open-1'));
-    // The drilled slice draws its own title; the panel heading stands back.
     expect(chromeHeadings(container)).toHaveLength(0);
     expect(titled(container, 'Leaf one')).toHaveLength(1);
-    expect(getByTestId('series-breadcrumb')).toBeTruthy();
+    expect(getByTestId('master-parent-link')).toBeTruthy();
     expect(getByTestId('doc-form').textContent).toBe('task');
   });
 });
 
 describe('empty index blocks (L127-C-F02)', () => {
   it('omits empty Now and Tasks on a bare master', () => {
-    const docPath = '/tasks/repo-a/m/task.json';
-    seedTaskDocuments([taskDoc({ kind: 'master', docPath, title: 'Bare' })]);
+    const docPath = 'repo-a/m/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        title: 'Bare',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+        }),
+      }),
+    ]);
     const { container, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
 
     expect(blockOrder(container, 'skeleton-master')).toEqual(['head']);
@@ -142,14 +142,24 @@ describe('empty index blocks (L127-C-F02)', () => {
   });
 
   it('omits empty Now and Masters on a bare sprint', () => {
-    const docPath = '/tasks/repo-a/sprint/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        form: 'sprint',
-        orchestrates: ['master-a'],
-        docPath,
+    const docPath = 'repo-a/sprint/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
         title: 'Bare sprint',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'sprint',
+          kind: 'master',
+          orchestrates: ['master-a'],
+        }),
       }),
     ]);
     const { container, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
@@ -159,49 +169,77 @@ describe('empty index blocks (L127-C-F02)', () => {
   });
 
   it('draws head alone on a bare task', () => {
-    const docPath = '/tasks/repo-a/m/01_bare.json';
-    seedTaskDocuments([taskDoc({ kind: 'subTask', docPath, title: 'Bare task' })]);
+    const docPath = 'repo-a/m/01_bare.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        title: 'Bare task',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+        }),
+      }),
+    ]);
     const { container } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
 
     expect(blockOrder(container, 'skeleton-task')).toEqual(['head']);
   });
 
   it('keeps Tasks for discarded history with no rows', () => {
-    const docPath = '/tasks/repo-a/m/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        docPath,
+    const docPath = 'repo-a/m/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
         title: 'Audited',
-        discardedSubTasks: [
-          {
-            number: '2',
-            name: 'Never started',
-            file: '02_never_started.md',
-            scope: 'retired planning work',
-            disposition: 'discard-unstarted',
-            reason: 'No implementation was needed',
-            discardedAt: '2026-08-24T12:00:00+00:00',
-            proof: {
-              childJson: { state: 'missing' },
-              childMarkdown: { state: 'missing' },
-              version: 'task-unstarted-evidence/v1',
-              taskDocumentRef: {
-                repository: 'repo-a',
-                path: 'planning/02_never_started.json',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+          discardedSubTasks: [
+            {
+              number: '2',
+              name: 'Never started',
+              file: '02_never_started.md',
+              scope: 'retired planning work',
+              disposition: 'discard-unstarted',
+              reason: 'No implementation was needed',
+              discardedAt: '2026-08-24T12:00:00+00:00',
+              proof: {
+                childJson: { state: 'missing' },
+                childMarkdown: { state: 'missing' },
+                version: 'task-unstarted-evidence/v1',
+                taskDocumentRef: {
+                  repository: 'repo-a',
+                  path: 'planning/02_never_started.json',
+                },
+                taskState: 'planning-unstarted',
+                enclosureState: 'absent',
+                locatorState: 'absent',
+                doorState: 'absent',
+                operationState: 'absent',
+                seatState: 'absent',
+                reviewState: 'absent',
+                commitState: 'absent',
+                fingerprint: 'a'.repeat(64),
               },
-              taskState: 'planning-unstarted',
-              enclosureState: 'absent',
-              locatorState: 'absent',
-              doorState: 'absent',
-              operationState: 'absent',
-              seatState: 'absent',
-              reviewState: 'absent',
-              commitState: 'absent',
-              fingerprint: 'a'.repeat(64),
             },
-          },
-        ],
+          ],
+        }),
       }),
     ]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
@@ -211,43 +249,53 @@ describe('empty index blocks (L127-C-F02)', () => {
   });
 
   it('keeps Masters for discarded history with no rows', () => {
-    const docPath = '/tasks/repo-a/sprint/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        form: 'sprint',
-        orchestrates: ['master-a'],
-        docPath,
+    const docPath = 'repo-a/sprint/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
         title: 'Audited sprint',
-        discardedSubTasks: [
-          {
-            number: '2',
-            name: 'Never started',
-            file: '02_never_started.md',
-            scope: 'retired planning work',
-            disposition: 'discard-unstarted',
-            reason: 'No implementation was needed',
-            discardedAt: '2026-08-24T12:00:00+00:00',
-            proof: {
-              childJson: { state: 'missing' },
-              childMarkdown: { state: 'missing' },
-              version: 'task-unstarted-evidence/v1',
-              taskDocumentRef: {
-                repository: 'repo-a',
-                path: 'planning/02_never_started.json',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'sprint',
+          kind: 'master',
+          orchestrates: ['master-a'],
+          discardedSubTasks: [
+            {
+              number: '2',
+              name: 'Never started',
+              file: '02_never_started.md',
+              scope: 'retired planning work',
+              disposition: 'discard-unstarted',
+              reason: 'No implementation was needed',
+              discardedAt: '2026-08-24T12:00:00+00:00',
+              proof: {
+                childJson: { state: 'missing' },
+                childMarkdown: { state: 'missing' },
+                version: 'task-unstarted-evidence/v1',
+                taskDocumentRef: {
+                  repository: 'repo-a',
+                  path: 'planning/02_never_started.json',
+                },
+                taskState: 'planning-unstarted',
+                enclosureState: 'absent',
+                locatorState: 'absent',
+                doorState: 'absent',
+                operationState: 'absent',
+                seatState: 'absent',
+                reviewState: 'absent',
+                commitState: 'absent',
+                fingerprint: 'a'.repeat(64),
               },
-              taskState: 'planning-unstarted',
-              enclosureState: 'absent',
-              locatorState: 'absent',
-              doorState: 'absent',
-              operationState: 'absent',
-              seatState: 'absent',
-              reviewState: 'absent',
-              commitState: 'absent',
-              fingerprint: 'a'.repeat(64),
             },
-          },
-        ],
+          ],
+        }),
       }),
     ]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);

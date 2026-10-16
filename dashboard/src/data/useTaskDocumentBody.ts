@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react';
 
-import type { TaskDocNode } from '../types/projection';
+import type { TaskEntry, TaskSummary } from '../types/projection';
 
-import { fetchTaskDocument } from './taskDocuments';
+import { taskBodyKey, type TaskBodyRecord, type TaskDocumentResources } from './taskDocuments';
+import { useDashboard } from './store';
 
 export type TaskDocumentBodyState = 'loading' | 'available' | 'unavailable';
-
-const taskDocumentBodyKey = (
-  doc: Pick<TaskDocNode, 'docPath' | 'bodyRevision'> | undefined,
-): string => (doc ? `${doc.docPath}\n${doc.bodyRevision}` : '');
 
 // A summary preview restored to its whole string: where the summary names a
 // truncation and the body carries strictly more, the body is the full detail
@@ -29,9 +26,9 @@ function fullText(
 }
 
 function mergeCurrentStatus(
-  summary: TaskDocNode,
-  body: Partial<TaskDocNode>,
-): Pick<TaskDocNode, 'statusNote' | 'statusNoteTruncated' | 'headerNotes'> {
+  summary: TaskSummary,
+  body: Partial<TaskSummary>,
+): Pick<TaskSummary, 'statusNote' | 'statusNoteTruncated' | 'headerNotes'> {
   const statusNote = fullText(summary.statusNote, summary.statusNoteTruncated, body.statusNote);
   const headerNotes =
     body.headerNotes && body.headerNotes.length > (summary.headerNotes ?? []).length
@@ -40,7 +37,7 @@ function mergeCurrentStatus(
   return { statusNote: statusNote.text, statusNoteTruncated: statusNote.preview, headerNotes };
 }
 
-function mergeCurrentSteps(summary: TaskDocNode, body: Partial<TaskDocNode>): TaskDocNode['steps'] {
+function mergeCurrentSteps(summary: TaskSummary, body: Partial<TaskSummary>): TaskSummary['steps'] {
   if (
     !body.steps ||
     body.steps.length !== summary.steps.length ||
@@ -63,9 +60,9 @@ function mergeCurrentSteps(summary: TaskDocNode, body: Partial<TaskDocNode>): Ta
 }
 
 function mergeCurrentReview(
-  summary: TaskDocNode,
-  body: Partial<TaskDocNode>,
-): TaskDocNode['reviewState'] {
+  summary: TaskSummary,
+  body: Partial<TaskSummary>,
+): TaskSummary['reviewState'] {
   if (!summary.reviewState || body.reviewState?.round !== summary.reviewState.round) {
     return summary.reviewState;
   }
@@ -95,9 +92,9 @@ function mergeCurrentReview(
 }
 
 function mergeFixedProse(
-  summary: TaskDocNode,
-  body: Partial<TaskDocNode>,
-): Pick<TaskDocNode, 'nonGoals' | 'acceptance'> {
+  summary: TaskSummary,
+  body: Partial<TaskSummary>,
+): Pick<TaskSummary, 'nonGoals' | 'acceptance'> {
   return {
     nonGoals: body.nonGoals ?? summary.nonGoals,
     acceptance: body.acceptance ?? summary.acceptance,
@@ -105,10 +102,10 @@ function mergeFixedProse(
 }
 
 function mergeLongContent(
-  summary: TaskDocNode,
-  body: Partial<TaskDocNode>,
+  summary: TaskSummary,
+  body: Partial<TaskSummary>,
 ): Pick<
-  TaskDocNode,
+  TaskSummary,
   | 'objective'
   | 'nonGoals'
   | 'acceptance'
@@ -119,7 +116,6 @@ function mergeLongContent(
   | 'openQuestions'
   | 'references'
   | 'sections'
-  | 'subTasks'
 > {
   return {
     objective: body.objective ?? summary.objective,
@@ -131,11 +127,10 @@ function mergeLongContent(
     openQuestions: body.openQuestions ?? summary.openQuestions,
     references: body.references ?? summary.references,
     sections: body.sections ?? summary.sections,
-    subTasks: body.subTasks ?? summary.subTasks,
   };
 }
 
-const mergeTaskDocumentBody = (summary: TaskDocNode, body: Partial<TaskDocNode>): TaskDocNode => {
+const mergeTaskDocumentBody = (summary: TaskSummary, body: Partial<TaskSummary>): TaskSummary => {
   // The fetched body is older than the current summary whenever the summary
   // changed after the fetch: the body contributes only its long-form reader
   // content, and every head/step/review fact comes from the current summary
@@ -144,7 +139,7 @@ const mergeTaskDocumentBody = (summary: TaskDocNode, body: Partial<TaskDocNode>)
   // Where the body is current (same revision), it additionally restores the
   // fields the summary carries only as previews, so no reachable document
   // truth stays capped away (L127-C-F06).
-  const merged: TaskDocNode = { ...summary, ...mergeLongContent(summary, body) };
+  const merged: TaskSummary = { ...summary, ...mergeLongContent(summary, body) };
   if ((body.bodyRevision ?? summary.bodyRevision) !== summary.bodyRevision) {
     return merged;
   }
@@ -156,47 +151,79 @@ const mergeTaskDocumentBody = (summary: TaskDocNode, body: Partial<TaskDocNode>)
   };
 };
 
-export function useTaskDocumentBody(targetDoc: TaskDocNode | undefined): {
-  documentFor: (doc: TaskDocNode) => TaskDocNode;
+interface SettledBody {
+  key: string;
+  failed: boolean;
+  record?: TaskBodyRecord;
+}
+
+function availableBody(resources: TaskDocumentResources, key: string, settled?: SettledBody) {
+  return resources.bodies.get(key) ?? (settled?.key === key ? settled.record : undefined);
+}
+
+export function useTaskDocumentBody(entry: TaskEntry | undefined): {
+  document: TaskSummary | undefined;
   state: TaskDocumentBodyState | undefined;
 } {
-  const [bodies, setBodies] = useState<Record<string, Partial<TaskDocNode>>>({});
-  const [states, setStates] = useState<Record<string, Exclude<TaskDocumentBodyState, 'loading'>>>(
-    {},
-  );
-  const targetKey = taskDocumentBodyKey(targetDoc);
-  const targetPath = targetDoc?.docPath;
-  const cachedBody = targetKey ? bodies[targetKey] : undefined;
-
+  const resources = useDashboard((state) => state.taskDocuments);
+  const [settled, setSettled] = useState<SettledBody>();
+  const summary = entry?.summary;
+  const key = bodyKeyFor(entry);
+  // A body beyond the retention budget still belongs on the active page. It
+  // lives only with this reader; navigation cannot retain an oversized entry.
+  const active = availableBody(resources, key, settled);
+  const repository = entry?.reference?.repository;
+  const path = entry?.reference?.path;
+  const revision = summary?.bodyRevision;
   useEffect(() => {
-    if (!targetPath || !targetKey || cachedBody) return;
+    if (!repository || !path || revision === undefined || active) return;
     let live = true;
-    void fetchTaskDocument(targetPath).then(
-      (body) => {
-        if (!live) return;
-        setBodies((current) => (current[targetKey] ? current : { ...current, [targetKey]: body }));
-        setStates((current) => ({ ...current, [targetKey]: 'available' }));
+    void resources.load({ repository, path }, revision).then(
+      (record) => {
+        if (live)
+          setSettled(
+            record.body.bodyRevision === revision
+              ? { key, failed: false, record }
+              : { key, failed: true },
+          );
       },
       () => {
-        if (live) setStates((current) => ({ ...current, [targetKey]: 'unavailable' }));
+        if (live) setSettled({ key, failed: true });
       },
     );
     return () => {
       live = false;
     };
-  }, [targetPath, targetKey, cachedBody]);
-
-  const state = !targetDoc
-    ? undefined
-    : cachedBody
-      ? 'available'
-      : (states[targetKey] ?? 'loading');
-
+  }, [resources, repository, path, revision, key, active]);
   return {
-    documentFor: (doc) => {
-      const body = bodies[taskDocumentBodyKey(doc)];
-      return body ? mergeTaskDocumentBody(doc, body) : doc;
-    },
-    state,
+    document: mergeAvailableBody(summary, active?.body),
+    state: resolveBodyState(
+      Boolean(summary),
+      Boolean(active),
+      settled?.key === key && settled.failed,
+    ),
   };
+}
+
+function resolveBodyState(
+  present: boolean,
+  cached: boolean,
+  failed: boolean | undefined,
+): TaskDocumentBodyState | undefined {
+  if (!present) return undefined;
+  if (cached) return 'available';
+  return failed ? 'unavailable' : 'loading';
+}
+
+function bodyKeyFor(entry: TaskEntry | undefined): string {
+  return entry?.reference && entry.summary
+    ? taskBodyKey(entry.reference, entry.summary.bodyRevision)
+    : '';
+}
+
+function mergeAvailableBody(
+  summary: TaskSummary | undefined,
+  body: TaskSummary | undefined,
+): TaskSummary | undefined {
+  return summary && body ? mergeTaskDocumentBody(summary, body) : summary;
 }

@@ -86,6 +86,7 @@ class WarmupRun:
         self.server_id = server_id
         self.total = len(agent_ids)
         self._pending: deque[str] = deque(agent_ids)
+        self.role_receipts: dict[str, dict[str, Any]] = {}
         self._in_flight: list[str] = []
         self._memory_recheck_seconds = memory_recheck_seconds
         self._give_up_seconds = give_up_seconds

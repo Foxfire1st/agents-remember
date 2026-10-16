@@ -2,8 +2,8 @@
 
 The developer-facing **free chat** is a **launcher, not a role seat** (ruled 2026-07-09). It is
 deliberately **not** a role: the role registry
-holds only roles, and no file under `roles/` describes this mode. It has no binding,
-no worktree, and no lifecycle of its own.
+holds only roles, and no file under `roles/` describes this mode. It has no binding
+or worktree of its own.
 
 ## What it is
 

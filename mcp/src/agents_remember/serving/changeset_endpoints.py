@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.kernel.git_command import run_git
+from agents_remember.serving.changeset_reads import read_git as run_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [

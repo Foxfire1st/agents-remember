@@ -125,7 +125,7 @@ class TaskDocGraphPublicationTests(unittest.TestCase):
             task_root=task_root,
             original=None,
             candidate=self.first,
-            documents=[self.first, self.second],
+            documents=[(task_root, self.first), (task_root, self.second)],
             source_snapshots=(),
             publisher=publisher,
         )

@@ -1,15 +1,11 @@
-"""Task-document and series readers: summaries, full bodies, lifecycle binding.
-
-Task JSON is the source of truth (never the rendered markdown). These readers
-project task documents and the series checklist, resolve cross-folder lifecycle
-links, and hash full bodies for the on-demand body endpoint.
-"""
+"""Canonical task summaries, full bodies and their content revisions."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,7 +15,9 @@ from agents_remember.kernel.direct_execution_grants import (
     ARCHITECT_GRANTER,
     DEVELOPER_GRANTER,
     DirectExecutionGrant,
+    grant_store_dir,
     grants_for_task,
+    iter_grant_files,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import (
@@ -29,9 +27,6 @@ from agents_remember.models.task_intent import (
 from agents_remember.observer.projection import (
     DirectGrantNode,
     DiscardedSubTaskNode,
-    EnclosureNode,
-    SeriesNode,
-    SeriesSubTaskNode,
     TaskCodeExampleNode,
     TaskDecisionNode,
     TaskDocNode,
@@ -49,103 +44,88 @@ from agents_remember.observer.projection import (
 )
 from agents_remember.observer.projection_closeout import DiscardUnstartedProofNode
 from agents_remember.observer.projection_graph import (
-    GraphNodeLike,
-    GraphPredecessorFacts,
-    MasterGraphFacts,
     TaskExecutionGraphView,
-    build_execution_graph_view,
+)
+from agents_remember.observer.task_entries import (
+    DeclaredTaskSource,
+    TaskDocumentSource,
+    relative_task_reference,
 )
 from agents_remember.serving.projections.snapshots_impl._common import (
     _canonical_task_json_candidates,
     _file_age_seconds,
     _iter_task_document_payloads,
     _read_json,
-    _TaskDocumentLifecycleMaps,
+)
+from agents_remember.serving.projections.task_body_generation import (
+    body_input,
+    capturing_body_generation,
 )
 from agents_remember.tasks import (
     TASK_DOCUMENT_SCHEMA,
-    SprintExecutionGraph,
     TaskDocument,
-    build_graph_titles,
     current_step,
     is_product_record_decision,
-    series_abandoned,
-    series_done,
-    series_total,
     step_done,
     step_total,
 )
 
 from ._task_document_parse import projected_document as _projected_document
+from ._task_graph_view import declared_task_reference, documents_by_ref, execution_graph_view
 from ._task_order import OrderFields, build_order_fields, read_order_fields
 
 
-def read_task_documents(
-    coordination_root: Path, *, enclosures: list[EnclosureNode], now: datetime
-) -> list[TaskDocNode]:
-    """Surface 7 (slices 3c + 6g): active task-document summaries.
+def read_task_documents(coordination_root: Path, *, now: datetime) -> list[TaskDocNode]:
+    """Standalone document summaries; the served projection consumes the sources once."""
+    return [source.summary for source in read_task_sources(coordination_root, now=now)]
 
-    Reads each ``ar-task-document/v1`` JSON under ``tasks/<repo>/<task>/`` -- the
-    source of truth, never the rendered markdown. Full reader bodies are intentionally
-    omitted from this always-on projection and served by :func:`read_task_document_body`.
-    ``lifecycleId`` is optional
-    runtime context: a ``light``/``subTask`` doc uses its own lifecycle id or the
-    lifecycle of its matching leaf enclosure when present, but planning docs are
-    still projected before an enclosure exists. Master docs are projected here as
-    task documents and still projected on the series surface for compatibility.
-    """
+
+def read_task_sources(coordination_root: Path, *, now: datetime) -> list[TaskDocumentSource]:
+    """Read every canonical task summary; full bodies use the on-demand reader."""
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
         return []
-    lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    docs = _iter_task_document_payloads(tasks_root, now=now)
-    return project_task_doc_nodes(
-        docs,
-        lifecycle_maps=lifecycle_maps,
+    return project_task_sources(
+        _iter_task_document_payloads(tasks_root, now=now),
+        coordination_root=coordination_root,
         now=now,
-        options=_TaskDocProjectionOptions(
-            include_body=False,
-            master_docs=_master_docs_by_ref(docs),
-            coordination_root=coordination_root,
-        ),
     )
 
 
-def project_task_doc_nodes(
-    docs: list[tuple[Path, dict[str, object]]],
-    *,
-    lifecycle_maps: _TaskDocumentLifecycleMaps,
-    now: datetime,
-    options: _TaskDocProjectionOptions,
-) -> list[TaskDocNode]:
-    """Project task-document summaries for exactly the given payloads (F09).
-
-    The whole-corpus reader and the path-directed incremental refresh share this:
-    the same payloads always project the same nodes, so a refresh that re-projects
-    only the changed documents (plus their dependency closure) merges byte-equal
-    results with a full reference.
-    """
-    master_docs = options.master_docs
-    order_fields = build_order_fields(
-        {path: doc for path, payload in docs if (doc := _projected_document(payload)) is not None}
-    )
-    nodes: list[TaskDocNode] = []
-    for path, payload in docs:
-        doc = _projected_document(payload)
-        if doc is None:
-            continue
+def project_task_sources(
+    payloads: list[tuple[Path, dict[str, object]]], *, coordination_root: Path, now: datetime
+) -> list[TaskDocumentSource]:
+    """Project full and path-directed reads through the same canonical source builder."""
+    docs = _validated_task_documents(payloads)
+    master_docs = documents_by_ref(docs)
+    order_fields = build_order_fields(dict(docs))
+    nodes: list[TaskDocumentSource] = []
+    for path, doc in docs:
+        reference = TaskDocumentRef(
+            repository=path.parents[1].name, path=f"{path.parent.name}/{path.name}"
+        )
+        children = []
+        for row in doc.subTasks:
+            child_ref = declared_task_reference(reference, row)
+            children.append(
+                DeclaredTaskSource(child_ref, row.number, row.name, row.status, row.scope)
+            )
         nodes.append(
-            _task_doc_node(
-                doc,
+            TaskDocumentSource(
                 path,
-                lifecycle_maps,
-                now,
-                _TaskDocProjectionOptions(
-                    include_body=options.include_body,
-                    master_docs=master_docs,
-                    order_fields=order_fields,
-                    coordination_root=options.coordination_root,
+                _task_doc_node(
+                    doc,
+                    path,
+                    now,
+                    _TaskDocProjectionOptions(
+                        include_body=False,
+                        master_docs=master_docs,
+                        order_fields=order_fields,
+                        coordination_root=coordination_root,
+                    ),
                 ),
+                children=tuple(children),
+                declared_parent=relative_task_reference(reference, doc.master),
             )
         )
     return nodes
@@ -155,7 +135,6 @@ def read_task_document_body(  # pragma: no cover
     coordination_root: Path,
     *,
     doc_path: str,
-    enclosures: list[EnclosureNode],
     now: datetime,
 ) -> TaskDocNode | None:
     """Read one full task-document body for the on-demand dashboard endpoint.
@@ -163,13 +142,15 @@ def read_task_document_body(  # pragma: no cover
     The read touches the requested document and only the masters its projection consumes
     (:func:`_graph_master_docs`); it never enumerates the task corpus.
     """
-    tasks_root = (coordination_root / "tasks").resolve()
+    with body_input(coordination_root / "tasks"):
+        tasks_root = (coordination_root / "tasks").resolve()
     path = Path(doc_path)
     candidates = [path] if path.is_absolute() else [coordination_root / path, tasks_root / path]
     resolved: Path | None = None
     for candidate in candidates:
         try:
-            candidate_resolved = candidate.resolve()
+            with body_input(candidate):
+                candidate_resolved = candidate.resolve()
         except OSError:
             continue
         if candidate_resolved.is_file() and candidate_resolved.is_relative_to(tasks_root):
@@ -186,7 +167,6 @@ def read_task_document_body(  # pragma: no cover
     return _task_doc_node(
         doc,
         resolved,
-        _task_document_lifecycle_maps(enclosures),
         now,
         _TaskDocProjectionOptions(
             include_body=True,
@@ -210,152 +190,27 @@ def _graph_master_docs(tasks_root: Path, doc: TaskDocument) -> dict[TaskDocument
     paths = _canonical_task_json_candidates(
         tasks_root, [ref.path for ref in doc.executionGraph.master_refs()]
     )
-    return _master_docs_by_ref(
-        [
-            (path, payload)
-            for path in paths
-            if (payload := _read_json(path)) is not None
-            and payload.get("schema") == TASK_DOCUMENT_SCHEMA
-        ]
-    )
-
-
-def _task_document_lifecycle_maps(enclosures: list[EnclosureNode]) -> _TaskDocumentLifecycleMaps:
-    lifecycle_by_enclosure = {
-        enclosure.enclosure: enclosure.lifecycleId
-        for enclosure in enclosures
-        if enclosure.lifecycleId
-    }
-    lifecycle_by_dir = {
-        Path(enclosure.taskRoot).resolve(): enclosure.lifecycleId
-        for enclosure in enclosures
-        if enclosure.lifecycleId and enclosure.taskRoot
-    }
-    lifecycle_by_root_doc = {
-        Path(enclosure.taskRoot).resolve(): enclosure.lifecycleId
-        for enclosure in enclosures
-        if enclosure.lifecycleId
-        and enclosure.taskRoot
-        and enclosure.lifecycleId in {enclosure.taskId, enclosure.taskName}
-    }
-    # Enclosure leaf ids are lowercase directory names (enclosures/260628-l7/) while doc ids are
-    # uppercase (260628-L7), and series leaf docs carry no enclosures[] refs in practice — so this
-    # join is keyed case-insensitively on the doc's own id (the durable, human-stable key), with the
-    # filename stem kept as a legacy alternative. Suffixed reopen enclosures (…-r1) deliberately do
-    # not bind here; the sidebar admits those through its lifecycle-guarded suffix rule.
-    lifecycle_by_leaf_doc = {
-        (Path(enclosure.taskRoot).resolve(), enclosure.leafId.lower()): enclosure.lifecycleId
-        for enclosure in enclosures
-        if enclosure.lifecycleId and enclosure.taskRoot and enclosure.leafId
-    }
-    return _TaskDocumentLifecycleMaps(
-        lifecycle_by_enclosure=lifecycle_by_enclosure,
-        lifecycle_by_dir=lifecycle_by_dir,
-        lifecycle_by_root_doc=lifecycle_by_root_doc,
-        lifecycle_by_leaf_doc=lifecycle_by_leaf_doc,
-    )
-
-
-def _task_doc_lifecycle_id(
-    doc: TaskDocument, path: Path, maps: _TaskDocumentLifecycleMaps
-) -> str | None:
-    if doc.kind == "master":
-        return maps.lifecycle_by_root_doc.get(path.parent.resolve())
-    return (
-        doc.lifecycleId
-        or _doc_enclosure_lifecycle(doc, maps.lifecycle_by_enclosure)
-        or maps.lifecycle_by_leaf_doc.get((path.parent.resolve(), doc.id.lower()))
-        or maps.lifecycle_by_leaf_doc.get((path.parent.resolve(), path.stem.lower()))
-    )
-
-
-def _doc_enclosure_lifecycle(  # pragma: no cover
-    doc: TaskDocument, lifecycle_by_enclosure: dict[str, str]
-) -> str | None:
-    for enclosure in doc.enclosures:
-        lifecycle_id = lifecycle_by_enclosure.get(enclosure.enclosurePath)
-        if lifecycle_id:
-            return lifecycle_id
-    return None
-
-
-def read_series_documents(
-    coordination_root: Path, *, now: datetime
-) -> list[SeriesNode]:  # pragma: no cover
-    """Series surface (R1): per-master series progress, keyed by the task FOLDER.
-
-    Reads each ``ar-task-document/v1`` JSON with ``kind == "master"`` under
-    ``tasks/<repo>/<task>/``. Masters are also projected by :func:`read_task_documents`
-    so direct task-document selection can render them; this companion surface keeps the
-    folder-keyed series checklist where each subtask that will run is one checkbox and
-    ``doneCount`` counts the *declared* ``Completed`` subtasks, authoritative over a slice's own
-    internal steps. Abandoned rows are neither done nor part of ``totalCount``;
-    ``abandonedCount`` names them, so a master whose remaining rows are all ``Completed`` reads
-    complete.
-    """
-    tasks_root = coordination_root / "tasks"
-    if not tasks_root.is_dir():
-        return []
-    docs = list(_iter_task_document_payloads(tasks_root, now=now))
-    return project_series_nodes(docs, coordination_root=coordination_root, now=now)
-
-
-def project_series_nodes(
-    docs: list[tuple[Path, dict[str, object]]],
-    *,
-    coordination_root: Path,
-    now: datetime,
-) -> list[SeriesNode]:
-    """Project series checklists for exactly the given payloads (F09).
-
-    Shares the whole-corpus reader's projection so incremental refresh merges
-    byte-equal results. The subtask leaf map is rebuilt from the given payloads:
-    incremental callers pass the affected payloads plus the retained corpus payloads
-    for any folder whose master re-projects, so cross-document subtask joins resolve
-    identically to the full reference.
-    """
-    tasks_root = coordination_root / "tasks"
-    leaf_ids_by_dir: dict[str, dict[str, str]] = {}
-    for leaf_path, leaf_payload in docs:
-        leaf_id = leaf_payload.get("id")
-        if leaf_payload.get("kind") == "subTask" and isinstance(leaf_id, str):
-            leaf_ids_by_dir.setdefault(leaf_path.parent.as_posix(), {})[leaf_id] = (
-                leaf_path.as_posix()
-            )
-    nodes: list[SeriesNode] = []
-    for path, payload in docs:
-        if payload.get("kind") != "master":
-            continue
-        doc = _projected_document(payload)
-        if doc is None:
-            continue
-        nodes.append(
-            SeriesNode(
-                seriesId=path.parent.name,
-                repository=doc.repo,
-                title=doc.title,
-                status=doc.status,
-                createdAt=doc.createdAt,
-                objective="",
-                subTasks=_series_subtask_nodes(
-                    path,
-                    doc,
-                    direct_grants=_subtask_grant_nodes(
-                        coordination_root, tasks_root, path, doc, leaf_ids_by_dir
-                    ),
-                ),
-                discardedCount=len(doc.discardedSubTasks),
-                discardedSubTasks=_discarded_subtask_nodes(doc),
-                doneCount=series_done(doc),
-                totalCount=series_total(doc),
-                abandonedCount=series_abandoned(doc),
-                sections=[],
-                decisions=[],
-                docPath=path.as_posix(),
-                ageSeconds=_file_age_seconds(path, now),
-            )
+    master_documents = documents_by_ref(
+        _validated_task_documents(
+            [
+                (path, payload)
+                for path in paths
+                if (payload := _read_json(path)) is not None
+                and payload.get("schema") == TASK_DOCUMENT_SCHEMA
+            ]
         )
-    return nodes
+    )
+    children = [
+        ref.path
+        for parent, master in master_documents.items()
+        for row in master.subTasks
+        if (ref := declared_task_reference(parent, row)) is not None
+    ]
+    for path in _canonical_task_json_candidates(tasks_root, children) if children else ():
+        payload = _read_json(path)
+        if payload is not None and payload.get("schema") == TASK_DOCUMENT_SCHEMA:
+            master_documents.update(documents_by_ref(_validated_task_documents([(path, payload)])))
+    return master_documents
 
 
 def _grant_giver_label(grant: DirectExecutionGrant) -> str:
@@ -365,63 +220,6 @@ def _grant_giver_label(grant: DirectExecutionGrant) -> str:
     if grant.granter_agent_id:
         return f"architect {grant.granter_agent_id}"
     return ARCHITECT_GRANTER
-
-
-def _subtask_grant_nodes(
-    coordination_root: Path,
-    tasks_root: Path,
-    path: Path,
-    doc: TaskDocument,
-    leaf_ids_by_dir: Mapping[str, Mapping[str, str]],
-) -> dict[str, DirectGrantNode]:
-    """One master's subtask grants, keyed by subtask number (MIK-R94 rule 4).
-
-    Matched by leaf id against the payloads already read -- never by filename
-    guess. Unreadable grant files read as no grant (gates still refuse them).
-    """
-    try:
-        grants = grants_for_task(coordination_root, doc.repo, path.parent.name)
-    except OSError:
-        return {}
-    repo_root = tasks_root / doc.repo
-    nodes: dict[str, DirectGrantNode] = {}
-    for leaf_id, leaf_posix in leaf_ids_by_dir.get(path.parent.as_posix(), {}).items():
-        try:
-            leaf_rel = Path(leaf_posix).relative_to(repo_root).as_posix()
-        except ValueError:
-            continue
-        grant = grants.get(leaf_rel)
-        if grant is not None:
-            nodes[leaf_id] = DirectGrantNode(
-                grantedBy=_grant_giver_label(grant), grantedAt=grant.granted_at
-            )
-    return nodes
-
-
-def _series_subtask_nodes(
-    path: Path,
-    doc: TaskDocument,
-    *,
-    direct_grants: Mapping[str, DirectGrantNode] | None = None,
-) -> list[SeriesSubTaskNode]:
-    indexed = [
-        (index, sub, _series_subtask_created_at(path.parent, sub.file))
-        for index, sub in enumerate(doc.subTasks)
-    ]
-    if all(created_at for _, _, created_at in indexed):
-        indexed.sort(key=lambda item: (item[2] or "", item[0]))
-    return [
-        SeriesSubTaskNode(
-            number=sub.number,
-            name=sub.name,
-            file=sub.file,
-            status=sub.status,
-            scope=sub.scope,
-            createdAt=created_at,
-            directGrant=(direct_grants or {}).get(sub.number),
-        )
-        for _, sub, created_at in indexed
-    ]
 
 
 def _discarded_subtask_nodes(doc: TaskDocument) -> list[DiscardedSubTaskNode]:
@@ -438,31 +236,6 @@ def _discarded_subtask_nodes(doc: TaskDocument) -> list[DiscardedSubTaskNode]:
         )
         for item in doc.discardedSubTasks
     ]
-
-
-def _series_subtask_created_at(base_dir: Path, ref_file: str) -> str | None:  # pragma: no cover
-    if not ref_file:
-        return None
-    ref_path = (base_dir / ref_file).with_suffix(".json")
-    payload = _read_json(ref_path)
-    if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
-        return None
-    if payload.get("kind") == "master":
-        return None
-    doc = _projected_document(payload)
-    if doc is None:
-        return None
-    return doc.createdAt
-
-
-def _ref_lifecycle(
-    base_dir: Path, ref_file: str | None, lifecycle_by_dir: dict[Path, str]
-) -> str | None:
-    """A cross-folder ref (``../<task>/task.md``) resolves to that folder's contract-paired lifecycle;
-    a bare slug (a same-folder slice) or empty ref does not (slice 6g cross-master link)."""
-    if not ref_file or "/" not in ref_file:
-        return None
-    return lifecycle_by_dir.get((base_dir / ref_file).resolve().parent)
 
 
 def _task_step_nodes(doc: TaskDocument, *, preview: bool = False) -> list[TaskStepNode]:
@@ -581,75 +354,14 @@ def _task_review_state_node(
     )
 
 
-def _execution_graph_view(
-    graph: SprintExecutionGraph,
-    master_docs: Mapping[TaskDocumentRef, TaskDocument],
-) -> TaskExecutionGraphView:
-    """Walk one persisted graph and build its render-ready per-node view.
-
-    The observer's graph-view builder is primitives-only (layering: the
-    observer package must not import tasks), so this serving-layer seam does
-    the tasks-domain work -- derived waves, resolved edge endpoints, joined
-    titles, and per-master facts -- and feeds the builder plain data.
-    """
-
-    titles = build_graph_titles(graph, master_docs)
-    facts = {
-        ref: MasterGraphFacts(
-            status=doc.status,
-            executionNature=doc.executionNature,
-            leaf_statuses={row.number: row.status for row in doc.subTasks},
-        )
-        for ref, doc in master_docs.items()
-    }
-    predecessor_edges: dict[GraphNodeLike, list[GraphPredecessorFacts]] = {
-        node: [] for node in graph.nodes
-    }
-    for edge in graph.edges:
-        predecessor = graph.resolve_endpoint(edge.predecessor)
-        successor = graph.resolve_endpoint(edge.successor)
-        predecessor_edges[successor].append(
-            GraphPredecessorFacts(
-                predecessor=predecessor,
-                reason=edge.reason,
-                judgmentId=edge.judgmentId,
-            )
-        )
-    return build_execution_graph_view(
-        graph.nodes,
-        graph.derived_waves(),
-        predecessor_edges,
-        facts,
-        titles,
-    )
-
-
-def _master_docs_by_ref(
-    docs: list[tuple[Path, dict[str, object]]],
-) -> dict[TaskDocumentRef, TaskDocument]:
-    """Index every valid master document by its task-document reference.
-
-    The render-ready sprint graph view (L12-R4) joins master titles, leaf
-    titles, natures, and statuses from the commanded master documents; this map
-    is that join table. No bound evicts any document any more, so every master
-    under ``tasks/<repo>/<task>/`` is present and a sprint's commanded masters
-    are always in the table (see the removal rationale in ``_common.py``).
-    """
-
-    masters: dict[TaskDocumentRef, TaskDocument] = {}
-    for path, payload in docs:
-        if payload.get("kind") != "master":
-            continue
-        doc = _projected_document(payload)
-        if doc is None:
-            continue
-        repository = doc.repo
-        # Task payloads are always depth-3 under the tasks root (``_iter_task_json``), so the
-        # repo-relative path is ``parents[1]``-relative by construction; no fallback needed.
-        relative = path.relative_to(path.parents[1]).as_posix()
-        ref = TaskDocumentRef(repository=repository, path=relative)
-        masters[ref] = doc
-    return masters
+def _validated_task_documents(
+    payloads: list[tuple[Path, dict[str, object]]],
+) -> list[tuple[Path, TaskDocument]]:
+    return [
+        (path, document)
+        for path, payload in payloads
+        if (document := _projected_document(payload)) is not None
+    ]
 
 
 @dataclass(frozen=True)
@@ -761,28 +473,17 @@ def _execution_graph_fields(
             [TaskExecutionNode.model_validate(node.model_dump(mode="json")) for node in wave]
             for wave in doc.executionGraph.derived_waves()
         ],
-        _execution_graph_view(doc.executionGraph, master_docs or {}),
+        execution_graph_view(doc.executionGraph, master_docs or {}),
     )
 
 
 def _task_doc_node(
     doc: TaskDocument,
     path: Path,
-    maps: _TaskDocumentLifecycleMaps,
     now: datetime,
     options: _TaskDocProjectionOptions,
 ) -> TaskDocNode:
-    """Project one task document, carrying the resolved lifecycle id and (for a master) its index.
-
-    Cross-master links resolve here: a subTask whose ``file`` points at another master, and the doc's
-    own ``master`` parent ref, each resolve to the linked lifecycle (None when same-series/in-folder).
-    The lifecycle maps arrive whole: the doc's own id and the cross-folder link resolution are two
-    reads of the same index, and passing the id separately let them disagree.
-    """
-    lifecycle_id = _task_doc_lifecycle_id(doc, path, maps)
-    lifecycle_by_dir = maps.lifecycle_by_dir
-    base_dir = path.parent
-    parent_lifecycle = _ref_lifecycle(base_dir, doc.master, lifecycle_by_dir)
+    """Project document facts; runtime activity belongs to its qualified task entry."""
     order = (options.order_fields or {}).get(path)
     body_revision = _task_doc_body_revision(doc)
     if order is not None:
@@ -809,7 +510,6 @@ def _task_doc_node(
     ]
     return TaskDocNode(
         id=doc.id,
-        lifecycleId=lifecycle_id,
         repository=doc.repo,
         title=doc.title,
         status=doc.status,
@@ -851,14 +551,12 @@ def _task_doc_node(
                 file=ref.file,
                 status=ref.status,
                 scope=ref.scope,
-                linkedLifecycleId=_ref_lifecycle(base_dir, ref.file, lifecycle_by_dir),
                 masterRef=ref.masterRef,
             )
             for ref in doc.subTasks
         ],
         discardedCount=len(doc.discardedSubTasks) if doc.kind == "master" else None,
         discardedSubTasks=_discarded_subtask_nodes(doc) if doc.kind == "master" else None,
-        masterLifecycleId=parent_lifecycle,
         orchestrates=list(doc.orchestrates),
         seats=[
             TaskSeatNode(
@@ -903,7 +601,15 @@ def _task_doc_grant_node(
     if coordination_root is None or doc.kind != "subTask":
         return None
     try:
-        grants = grants_for_task(coordination_root, doc.repo, path.parent.name)
+        with ExitStack() as inputs:
+            if capturing_body_generation():
+                store = grant_store_dir(coordination_root)
+                inputs.enter_context(body_input(store))
+                for grant_path in iter_grant_files(
+                    store, repository=doc.repo, master=path.parent.name
+                ):
+                    inputs.enter_context(body_input(grant_path))
+            grants = grants_for_task(coordination_root, doc.repo, path.parent.name)
     except (OSError, ValueError):
         return None
     grant = grants.get(f"{path.parent.name}/{path.name}")

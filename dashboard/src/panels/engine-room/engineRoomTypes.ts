@@ -1,11 +1,11 @@
 // The Engine Room render model (slice 5e). The server composes the enclosure-centered
 // process nodes (analytics.engineProcesses) with their fact-state honesty; the client model
-// only joins each to its live lifecycle. Provider state left the surface (MIK-R112).
+// presents those nodes directly. Provider state left the surface (MIK-R112).
 // No semantics are re-derived here.
 
-import type { EngineProcessNode, LifecycleProjection } from "../../types/projection";
+import type { EngineProcessNode } from "../../types/projection";
 
-/** One enclosure process plus the live session (if any) driving it. */
+/** One server-composed enclosure process. */
 export interface EngineProcessView {
   /**
    * Stable React key for the enclosure = the node's `worktreeGroup`. It survives the
@@ -14,7 +14,6 @@ export interface EngineProcessView {
    */
   enclosureKey: string;
   node: EngineProcessNode;
-  lifecycle?: LifecycleProjection;
 }
 
 /** The Engine Room's render model: enclosure process pods. */

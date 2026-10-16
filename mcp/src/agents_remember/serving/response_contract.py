@@ -40,6 +40,7 @@ from pydantic.alias_generators import to_camel
 
 __all__ = [
     "ACTION_RESPONSES",
+    "CHANGESET_READ_RESPONSES",
     "SCOPED_READ_RESPONSES",
     "WireResponse",
 ]
@@ -617,6 +618,12 @@ SCOPED_READ_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 """The files / notes / change-set family: ``run_scoped`` and its two siblings map every domain
 error onto exactly these two statuses."""
+
+
+CHANGESET_READ_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **SCOPED_READ_RESPONSES,
+    304: {"description": "Change-set content unchanged; ETag only, no body"},
+}
 
 
 ACTION_RESPONSES: dict[int | str, dict[str, Any]] = {

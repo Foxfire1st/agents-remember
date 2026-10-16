@@ -1,109 +1,75 @@
-// Hand-authored gallery fixtures: the full grammar-state × attention-taxonomy matrix the
-// `--sim` replay can't produce (sim emits one lifecycle). Each is a valid WorkspaceProjection
-// the bench hydrates into the store. The attention queues here mirror what the reducer's
-// build_attention_queue would compute for the same tree — kept in sync by eye (sidecar-free,
-// dashboard/** is out of memory scope).
-//
-// The SCENARIOS are this file's business; the NODES are not. Every builder below now delegates to
-// `test/fixtures/wire.ts`, whose bases are assembled from the hand-maintained sampled payload in
-// `fixtures/snapshot.json`; `wire.ts`'s header records how that sample uses the generated contract,
-// so there is one definition of "the fields a served lifecycle always carries" rather than one
-// here and one per test seed. The gallery keeps its own DEFAULTS (a running lifecycle reads better
-// in a gallery than the snapshot's blocked one) by passing them explicitly — what it no longer
-// keeps is a second copy of the required-field list, which is the thing that drifts.
+// Hand-authored gallery scenarios use the sampled native wire builders. They
+// vary provider/worktree facts and attention items without keeping a second
+// required-field list or inventing task activity from session events.
 
-import { ENGINE_ROOM_SCENARIOS, OFFICIAL_LEDGER } from "../panels/engine-room/fixtures";
-import type { ObserverEvent } from "../types/event";
-import type {
-  EnclosureNode,
-  LifecycleProjection,
-  ProviderNode,
-  WorkspaceProjection,
-} from "../types/projection";
+import { ENGINE_ROOM_SCENARIOS, OFFICIAL_LEDGER } from '../panels/engine-room/fixtures';
+import type { ObserverEvent } from '../types/event';
+import type { EnclosureNode, ProviderNode, WorkspaceProjection } from '../types/projection';
 import {
   EMPTY_ANALYTICS,
   enclosure as servedEnclosure,
-  lifecycle as servedLifecycle,
   observerEvent as servedObserverEvent,
   projection as servedProjection,
   provider as servedProvider,
-} from "../test/fixtures/wire";
-
-function lifecycle(
-  over: Partial<LifecycleProjection> & Pick<LifecycleProjection, "id">,
-): LifecycleProjection {
-  return servedLifecycle({
-    state: "running",
-    phase: "build",
-    fleeting: false,
-    startedAt: "2026-06-14T09:00:00+00:00",
-    lastEventTs: "2026-06-14T09:00:30+00:00",
-    inferred: false,
-    ...over,
-  });
-}
+} from '../test/fixtures/wire';
 
 function project(over: Partial<WorkspaceProjection> = {}): WorkspaceProjection {
-  // `metrics` is derived from the lifecycles by the shared builder — one bucket per live state,
-  // read off the vocabulary. This used to be three hand-written filters here, a copy of the
-  // reducer's bucket list that missed `awaiting-developer` exactly as the server's own copy did,
-  // so the gallery could not show the state either.
   return servedProjection({
     version: 2,
-    generatedAt: "2026-06-14T09:01:00+00:00",
+    generatedAt: '2026-06-14T09:01:00+00:00',
     ...over,
   });
 }
 
 const providerRole = (id: string): string =>
-  id.includes("memory") || id.includes("grepai") ? "memory" : "code";
+  id.includes('memory') || id.includes('grepai') ? 'memory' : 'code';
 
 const ok = (id: string): ProviderNode =>
   servedProvider({
     id,
-    state: "ready",
+    state: 'ready',
     ok: true,
     watcherUp: true,
-    indexingState: "indexed",
-    scope: "workspace",
+    indexingState: 'indexed',
+    scope: 'workspace',
     role: providerRole(id),
   });
 const down = (id: string): ProviderNode =>
   servedProvider({
     id,
-    state: "stopped",
+    state: 'stopped',
     ok: false,
     watcherUp: false,
-    indexingState: "unknown",
-    scope: "workspace",
+    indexingState: 'unknown',
+    scope: 'workspace',
     role: providerRole(id),
   });
 const indexing = (id: string): ProviderNode =>
   servedProvider({
     id,
-    state: "ready",
+    state: 'ready',
     ok: true,
     watcherUp: true,
-    indexingState: "indexing",
+    indexingState: 'indexing',
     snapshotStaleSeconds: 3,
-    scope: "workspace",
+    scope: 'workspace',
     role: providerRole(id),
   });
 
 function enclosure(
-  over: Partial<EnclosureNode> & Pick<EnclosureNode, "enclosure" | "repoName" | "taskName">,
+  over: Partial<EnclosureNode> & Pick<EnclosureNode, 'enclosure' | 'repoName' | 'taskName'>,
 ): EnclosureNode {
   return servedEnclosure({
     taskId: over.enclosure,
     enclosureId: over.enclosure,
     leafId: over.taskName,
     taskRoot: over.enclosure,
-    lifecycleId: "",
+    lifecycleId: '',
     worktreeGroup: over.enclosure,
-    humanReviewStatus: "pending",
-    closeoutStatus: "pending",
-    integrationStatus: "not-started",
-    cleanup: "pending",
+    humanReviewStatus: 'pending',
+    closeoutStatus: 'pending',
+    integrationStatus: 'not-started',
+    cleanup: 'pending',
     // Live by default: the tasks surface renders a leaf only while a worktree exists (L11).
     codeWorktreeExists: true,
     memoryWorktreeExists: true,
@@ -115,11 +81,11 @@ function enclosure(
 const evt = (
   id: string,
   kind: string,
-  trust: ObserverEvent["trust"],
-  actor: ObserverEvent["actor"],
+  trust: ObserverEvent['trust'],
+  actor: ObserverEvent['actor'],
   over: Partial<ObserverEvent> = {},
 ): ObserverEvent =>
-  servedObserverEvent({ id, kind, trust, actor, ts: "2026-06-14T09:00:30+00:00", ...over });
+  servedObserverEvent({ id, kind, trust, actor, ts: '2026-06-14T09:00:30+00:00', ...over });
 
 export interface GalleryEntry {
   name: string;
@@ -129,7 +95,9 @@ export interface GalleryEntry {
 
 // Wrap one engine-room scenario (its processes + workspace stack) into a full WorkspaceProjection — the
 // shared mapping behind both the GALLERY entries and the slice-5i scenario-player frames.
-export function engineRoomProjection(scenario: (typeof ENGINE_ROOM_SCENARIOS)[number]): WorkspaceProjection {
+export function engineRoomProjection(
+  scenario: (typeof ENGINE_ROOM_SCENARIOS)[number],
+): WorkspaceProjection {
   return project({
     providers: scenario.workspace,
     analytics: {
@@ -142,189 +110,107 @@ export function engineRoomProjection(scenario: (typeof ENGINE_ROOM_SCENARIOS)[nu
 
 export const GALLERY: GalleryEntry[] = [
   {
-    name: "calm",
+    name: 'calm',
     projection: project({
-      lifecycles: [
-        lifecycle({
-          id: "build-001",
-          state: "running",
-          phase: "build",
-          repoId: "agents-remember",
-          enclosure: "wt-a",
-          staleSeconds: 12,
-        }),
-        lifecycle({ id: "fleeting-9", fleeting: true, phase: "reframe-research", staleSeconds: 4 }),
-      ],
-      providers: [ok("codegraphcontext-code"), ok("grepai-memory")],
+      providers: [ok('codegraphcontext-code'), ok('grepai-memory')],
     }),
   },
   {
-    name: "blocked",
+    name: 'blocked',
     projection: project({
-      lifecycles: [
-        lifecycle({
-          id: "plan-002",
-          state: "blocked",
-          phase: "reframe-research",
-          repoId: "agents-remember",
-          enclosure: "wt-a",
-          staleSeconds: 95,
-        }),
-      ],
-      providers: [ok("codegraphcontext-code"), ok("grepai-memory")],
+      providers: [ok('codegraphcontext-code'), ok('grepai-memory')],
     }),
   },
   {
-    name: "alarm",
+    name: 'alarm',
     projection: project({
-      lifecycles: [
-        lifecycle({ id: "build-007", state: "running", repoId: "repo-b", staleSeconds: 30 }),
-        lifecycle({
-          id: "old-003",
-          state: "paused",
-          inferred: true,
-          repoId: "repo-b",
-          staleSeconds: 5400,
-        }),
-      ],
-      providers: [down("codegraphcontext-code"), ok("grepai-memory")],
+      providers: [down('codegraphcontext-code'), ok('grepai-memory')],
       analytics: {
         ...EMPTY_ANALYTICS,
         attentionQueue: [
           {
-            id: "provider-down:codegraphcontext-code",
-            kind: "provider-down",
-            severity: "alarm",
-            lane: "repo",
-            title: "Provider codegraphcontext-code down",
-            detail: "stopped",
-            providerId: "codegraphcontext-code",
+            id: 'provider-down:codegraphcontext-code',
+            kind: 'provider-down',
+            severity: 'alarm',
+            lane: 'repo',
+            title: 'Provider codegraphcontext-code down',
+            detail: 'stopped',
+            providerId: 'codegraphcontext-code',
           },
           {
-            id: "failed-setup:wt-b",
-            kind: "failed-setup",
-            severity: "alarm",
-            lane: "worktree",
-            title: "Provider setup needs attention",
-            detail: "cgc index",
+            id: 'failed-setup:wt-b',
+            kind: 'failed-setup',
+            severity: 'alarm',
+            lane: 'worktree',
+            title: 'Provider setup needs attention',
+            detail: 'cgc index',
             waitSeconds: 40,
-            enclosure: "wt-b",
+            enclosure: 'wt-b',
           },
           {
-            id: "actionable-drift:repo-b",
-            kind: "actionable-drift",
-            severity: "warn",
-            lane: "repo",
-            title: "3 actionable drift",
+            id: 'actionable-drift:repo-b',
+            kind: 'actionable-drift',
+            severity: 'warn',
+            lane: 'repo',
+            title: '3 actionable drift',
             waitSeconds: 7200,
-            repoId: "repo-b",
-          },
-          {
-            id: "stale-session:old-003",
-            kind: "stale-session",
-            severity: "info",
-            lane: "lifecycle",
-            title: "Session gone quiet",
-            waitSeconds: 5400,
-            lifecycleId: "old-003",
-            repoId: "repo-b",
+            repoId: 'repo-b',
           },
         ],
       },
     }),
   },
   {
-    name: "full",
+    name: 'full',
     events: [
-      evt("e1", "lifecycle.started", "observed", "system", { lifecycleId: "build-001" }),
-      evt("e2", "lifecycle.promoted", "approved", "developer", {
-        lifecycleId: "build-001",
-        enclosure: "wt-a",
-        repoId: "agents-remember",
-      }),
-      evt("e3", "tool.completed", "observed", "model", { lifecycleId: "build-001" }),
-      evt("e4", "lifecycle.blocked", "observed", "model", { lifecycleId: "plan-002" }),
-      evt("e5", "correction.recorded", "inferred", "system", { lifecycleId: "old-003" }),
+      evt('e3', 'tool.completed', 'observed', 'model', { enclosure: 'build-001' }),
+      evt('e5', 'correction.recorded', 'inferred', 'system', { enclosure: 'old-003' }),
     ],
     projection: project({
-      lifecycles: [
-        lifecycle({
-          id: "build-001",
-          state: "running",
-          phase: "build",
-          repoId: "agents-remember",
-          enclosure: "wt-a",
-          staleSeconds: 12,
-        }),
-        lifecycle({
-          id: "plan-002",
-          state: "blocked",
-          phase: "reframe-research",
-          repoId: "agents-remember",
-          enclosure: "wt-a2",
-          staleSeconds: 140,
-        }),
-        lifecycle({
-          id: "old-003",
-          state: "paused",
-          inferred: true,
-          repoId: "repo-b",
-          enclosure: "wt-b",
-          staleSeconds: 6200,
-        }),
-        lifecycle({ id: "fleeting-9", fleeting: true, phase: "trust-checkpoint", staleSeconds: 8 }),
-        lifecycle({
-          id: "done-004",
-          state: "completed",
-          phase: "close",
-          repoId: "repo-b",
-          enclosure: "wt-b",
-        }),
-      ],
       enclosures: [
         enclosure({
-          enclosure: "wt-a",
-          repoName: "agents-remember",
-          taskName: "browser-dashboard",
-          lifecycleId: "build-001",
-          closeoutStatus: "completed",
-          cleanup: "pending",
+          enclosure: 'wt-a',
+          repoName: 'agents-remember',
+          taskName: 'browser-dashboard',
+          lifecycleId: 'build-001',
+          closeoutStatus: 'completed',
+          cleanup: 'pending',
           actions: [
-            { action: "integrate", enabled: true },
-            { action: "cleanup", enabled: false, disabledReason: "integration not complete" },
+            { action: 'integrate', enabled: true },
+            { action: 'cleanup', enabled: false, disabledReason: 'integration not complete' },
           ],
         }),
         enclosure({
-          enclosure: "wt-a2",
-          repoName: "agents-remember",
-          taskName: "gate-control",
-          lifecycleId: "plan-002",
+          enclosure: 'wt-a2',
+          repoName: 'agents-remember',
+          taskName: 'gate-control',
+          lifecycleId: 'plan-002',
         }),
         enclosure({
-          enclosure: "wt-b",
-          repoName: "repo-b",
-          taskName: "fission-spike",
-          lifecycleId: "old-003",
-          integrationStatus: "completed",
-          closeoutStatus: "completed",
-          cleanup: "pending",
-          actions: [{ action: "cleanup", enabled: true }],
+          enclosure: 'wt-b',
+          repoName: 'repo-b',
+          taskName: 'fission-spike',
+          lifecycleId: 'old-003',
+          integrationStatus: 'completed',
+          closeoutStatus: 'completed',
+          cleanup: 'pending',
+          actions: [{ action: 'cleanup', enabled: true }],
         }),
       ],
-      providers: [indexing("codegraphcontext-code"), ok("grepai-memory")],
+      providers: [indexing('codegraphcontext-code'), ok('grepai-memory')],
       analytics: {
         ...EMPTY_ANALYTICS,
         driftSnapshots: [
           {
-            repository: "agents-remember",
-            branch: "main",
+            repository: 'agents-remember',
+            branch: 'main',
             counts: { current: 372, drifted: 4, missingVerification: 2 },
             actionableCount: 6,
             snapshotStaleSeconds: 900,
           },
           {
-            repository: "repo-b",
-            branch: "main",
+            repository: 'repo-b',
+            branch: 'main',
             counts: { current: 88 },
             actionableCount: 0,
             snapshotStaleSeconds: 120,
@@ -332,65 +218,55 @@ export const GALLERY: GalleryEntry[] = [
         ],
         ledgers: [
           {
-            repository: "agents-remember",
+            repository: 'agents-remember',
             closeoutCount: 95,
-            lastVerifiedCodeCommit: "c041ff5fade1",
-            baseCodeCommit: "85af25823437",
+            lastVerifiedCodeCommit: 'c041ff5fade1',
+            baseCodeCommit: '85af25823437',
             rows: [
-              { codeCommit: "c041ff5fade1", memoryCommit: "dd436bcae902" },
-              { codeCommit: "08e9221abcd0", memoryCommit: "d60a0511ef34" },
+              { codeCommit: 'c041ff5fade1', memoryCommit: 'dd436bcae902' },
+              { codeCommit: '08e9221abcd0', memoryCommit: 'd60a0511ef34' },
             ],
           },
           {
-            repository: "repo-b",
+            repository: 'repo-b',
             closeoutCount: 12,
-            lastVerifiedCodeCommit: "abc1234def56",
-            baseCodeCommit: "abc1234def56",
-            rows: [{ codeCommit: "abc1234def56", memoryCommit: "fed4321cba98" }],
+            lastVerifiedCodeCommit: 'abc1234def56',
+            baseCodeCommit: 'abc1234def56',
+            rows: [{ codeCommit: 'abc1234def56', memoryCommit: 'fed4321cba98' }],
           },
         ],
         stalestSidecars: [
           {
-            onboardingFile: "observer/reducer.py.md",
-            repository: "agents-remember",
-            lastVerifiedDate: "2026-05-20",
+            onboardingFile: 'observer/reducer.py.md',
+            repository: 'agents-remember',
+            lastVerifiedDate: '2026-05-20',
             ageSeconds: 2_160_000,
           },
           {
-            onboardingFile: "serving/events.py.md",
-            repository: "agents-remember",
-            lastVerifiedDate: "2026-06-01",
+            onboardingFile: 'serving/events.py.md',
+            repository: 'agents-remember',
+            lastVerifiedDate: '2026-06-01',
             ageSeconds: 1_120_000,
           },
         ],
         attentionQueue: [
           {
-            id: "actionable-drift:agents-remember",
-            kind: "actionable-drift",
-            severity: "warn",
-            lane: "repo",
-            title: "6 actionable drift",
+            id: 'actionable-drift:agents-remember',
+            kind: 'actionable-drift',
+            severity: 'warn',
+            lane: 'repo',
+            title: '6 actionable drift',
             waitSeconds: 900,
-            repoId: "agents-remember",
-          },
-          {
-            id: "stale-session:old-003",
-            kind: "stale-session",
-            severity: "info",
-            lane: "lifecycle",
-            title: "Session gone quiet",
-            waitSeconds: 6200,
-            lifecycleId: "old-003",
-            repoId: "repo-b",
+            repoId: 'agents-remember',
           },
         ],
       },
     }),
   },
-  { name: "empty", projection: project() },
+  { name: 'empty', projection: project() },
   // The boot-step frames are hidden from the bench strip (slice 5i's scenario player plays the build-up
   // instead); the fixtures stay in ENGINE_ROOM_SCENARIOS for that reuse + the render tests.
-  ...ENGINE_ROOM_SCENARIOS.filter((scenario) => !scenario.name.startsWith("engine-boot-")).map(
+  ...ENGINE_ROOM_SCENARIOS.filter((scenario) => !scenario.name.startsWith('engine-boot-')).map(
     (scenario) => ({
       name: scenario.name,
       projection: engineRoomProjection(scenario),

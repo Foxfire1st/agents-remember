@@ -1,9 +1,7 @@
 """The dashboard's own-write registry: its own files never wake its own projector (MIK-R81 rule 3).
 
 The projection tick and the serving loops write files that live under watched
-roots: gate-log compaction rewrites ``gates.jsonl``, event retention rewrites
-per-lifecycle ``events.jsonl``, the provider refresh rewrites
-``logs/providers/status``, and the landing refresher writes
+roots: the provider refresh rewrites ``logs/providers/status``, and the landing refresher writes
 ``landing-final.json`` beside enclosure contracts. Without this registry each of
 those writes returns through inotify as a change and wakes a self-echo tick.
 

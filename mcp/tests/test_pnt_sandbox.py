@@ -735,6 +735,43 @@ def test_public_host_install_receipts_keep_payloads_and_name_admission_failures(
     assert (layout.run_dir / "host-install-command.log").is_file()
 
 
+def test_launcher_provisions_from_the_compact_installs_named_report(tmp_path, monkeypatch):
+    layout = SandboxLayout(tmp_path / "sandbox")
+    report_path = layout.coordination / "temp/tool-reports/runtime_install/install.json"
+    report_path.parent.mkdir(parents=True)
+    host = {"ok": True, "daemon": {"action": "started"}}
+    report_path.write_text(json.dumps({"ok": True, "host": host}), encoding="utf-8")
+    compact = {"ok": True, "overflow": True, "reportPath": report_path.as_posix()}
+    ops = Operations(layout, {})
+    answer = SimpleNamespace(
+        returncode=0, stdout=json.dumps({"results": [{"payload": compact}]}), stderr="", tail=""
+    )
+    monkeypatch.setattr(ops, "run", lambda *a, **k: answer)
+    supervisor = ProcessIdentity(123, 456, ("paseo",))
+    monkeypatch.setattr(ops, "paseo_supervisor", lambda: supervisor)
+    started = commands._Started()
+    assert (
+        commands._provision(layout, tmp_path / "candidate", ops, lambda line: None, started)
+        == supervisor
+    )
+    assert started.paseo is True
+    assert json.loads((layout.run_dir / "host-install-receipt.json").read_text()) == compact
+
+    # An inline host remains authoritative even when a named report disagrees.
+    inline = {
+        "ok": True,
+        "host": {"ok": True, "daemon": {"action": "untouched"}},
+        "reportPath": report_path.as_posix(),
+    }
+    answer.stdout = json.dumps({"results": [{"payload": inline}]})
+    started = commands._Started()
+    assert (
+        commands._provision(layout, tmp_path / "candidate", ops, lambda line: None, started)
+        == supervisor
+    )
+    assert started.paseo is False
+
+
 def test_foreign_package_admission_prevents_public_install_calls(tmp_path, monkeypatch):
 
     spec = importlib.util.spec_from_file_location(

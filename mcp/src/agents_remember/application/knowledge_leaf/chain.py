@@ -19,10 +19,9 @@ the read walks upward from the path.
 * **No governing family.** When no family route covers the path, the read states
   ``no_governing_family``. It is a state, not an error.
 
-**``served_earlier`` is a rendering of ``read_ar_files`` only** (:func:`shorten_served`). The
-selection always holds every chain entry; the mounted read may shorten an entry already served in
-the same lifecycle to a reference row, which keeps its position and so still counts.
-``knowledge_read`` never shortens.
+The pure :func:`shorten_served` rendering helper takes a caller-supplied predicate to mark
+entries already served. Such a reference row keeps its position and still counts; the selection
+always holds every chain entry. The helper owns no session or lifecycle state.
 """
 
 from __future__ import annotations
@@ -180,7 +179,7 @@ ShouldServe = Callable[[str, str], bool]
 
 
 def shorten_served(block: dict[str, Any], should_serve: ShouldServe) -> dict[str, Any]:
-    """``block`` with each chain entry already served in this session as a ``served_earlier`` row.
+    """Render entries marked already served by ``should_serve`` as ``served_earlier`` rows.
 
     Only the rendering changes: the row keeps its position, so the page's counts and its
     continuation are those of the full selection.

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
 import { registerTables } from './model';
-import { seedTaskDocuments, taskDoc } from './test-utils';
+import { seedTaskEntries, taskEntry, taskSummary, taskReference } from './test-utils';
 
 function tableSection(
   heading: string,
@@ -38,25 +38,36 @@ describe('register conservation (L127-C-F04)', () => {
   });
 
   it('shows the judgment register first on a sprint written priority-first', () => {
-    const docPath = '/tasks/repo-a/sprint/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        form: 'sprint',
-        orchestrates: ['master-a'],
-        docPath,
-        sections: [
-          {
-            kind: 'freeform',
-            heading: 'Priority Register',
-            body: 'Priority prose.\n\n| item | state |\n| --- | --- |\n| p1 | open |',
-          },
-          {
-            kind: 'freeform',
-            heading: 'Judgment Register',
-            body: 'Judgment prose.\n\n| item | state |\n| --- | --- |\n| j1 | shut |',
-          },
-        ],
+    const docPath = 'repo-a/sprint/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'sprint',
+          kind: 'master',
+          orchestrates: ['master-a'],
+          sections: [
+            {
+              kind: 'freeform',
+              heading: 'Priority Register',
+              body: 'Priority prose.\n\n| item | state |\n| --- | --- |\n| p1 | open |',
+            },
+            {
+              kind: 'freeform',
+              heading: 'Judgment Register',
+              body: 'Judgment prose.\n\n| item | state |\n| --- | --- |\n| j1 | shut |',
+            },
+          ],
+        }),
       }),
     ]);
     const { getByTestId } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
@@ -67,20 +78,31 @@ describe('register conservation (L127-C-F04)', () => {
 
   it("exposes a one-row table's surrounding prose one link away", () => {
     // L127-C-F04 residual: short tables keep their prose behind the link too.
-    const docPath = '/tasks/repo-a/sprint/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        form: 'sprint',
-        orchestrates: ['master-a'],
-        docPath,
-        sections: [
-          {
-            kind: 'freeform',
-            heading: 'Judgment Register',
-            body: 'BEFORE-TABLE prose.\n\n| item | state |\n| --- | --- |\n| j1 | shut |\n\nAFTER-TABLE prose.',
-          },
-        ],
+    const docPath = 'repo-a/sprint/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'sprint',
+          kind: 'master',
+          orchestrates: ['master-a'],
+          sections: [
+            {
+              kind: 'freeform',
+              heading: 'Judgment Register',
+              body: 'BEFORE-TABLE prose.\n\n| item | state |\n| --- | --- |\n| j1 | shut |\n\nAFTER-TABLE prose.',
+            },
+          ],
+        }),
       }),
     ]);
     const { getByTestId, getByText } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
@@ -92,22 +114,33 @@ describe('register conservation (L127-C-F04)', () => {
   });
 
   it('keeps every section byte one link away in a sprint register view', () => {
-    const docPath = '/tasks/repo-a/sprint/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        form: 'sprint',
-        orchestrates: ['master-a'],
-        docPath,
-        sections: [
-          {
-            kind: 'freeform',
-            heading: 'Judgment Register',
-            body:
-              'Why this shut.\n\n| item | state |\n| --- | --- |\n' +
-              ['j1', 'j2', 'j3', 'j4', 'j5', 'j6'].map((j) => `| ${j} | shut |`).join('\n'),
-          },
-        ],
+    const docPath = 'repo-a/sprint/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'sprint',
+          kind: 'master',
+          orchestrates: ['master-a'],
+          sections: [
+            {
+              kind: 'freeform',
+              heading: 'Judgment Register',
+              body:
+                'Why this shut.\n\n| item | state |\n| --- | --- |\n' +
+                ['j1', 'j2', 'j3', 'j4', 'j5', 'j6'].map((j) => `| ${j} | shut |`).join('\n'),
+            },
+          ],
+        }),
       }),
     ]);
     const { getByTestId, getByText } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
@@ -120,18 +153,30 @@ describe('register conservation (L127-C-F04)', () => {
   });
 
   it("leaves a master's register section whole in Further notes", () => {
-    const docPath = '/tasks/repo-a/m/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        docPath,
-        sections: [
-          {
-            kind: 'freeform',
-            heading: 'Judgment Register',
-            body: 'Master prose.\n\n| item | state |\n| --- | --- |\n| j1 | shut |',
-          },
-        ],
+    const docPath = 'repo-a/m/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+          sections: [
+            {
+              kind: 'freeform',
+              heading: 'Judgment Register',
+              body: 'Master prose.\n\n| item | state |\n| --- | --- |\n| j1 | shut |',
+            },
+          ],
+        }),
       }),
     ]);
     const { container, getByTestId, getByText, queryByTestId } = render(
@@ -153,12 +198,24 @@ describe('register conservation (L127-C-F04)', () => {
   });
 
   it('keeps introducing text of an intro-only decisions section', () => {
-    const docPath = '/tasks/repo-a/m/01_intro.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'subTask',
-        docPath,
-        sections: [{ kind: 'sharedDecisions', heading: 'Decisions', body: 'No calls yet.' }],
+    const docPath = 'repo-a/m/01_intro.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+          sections: [{ kind: 'sharedDecisions', heading: 'Decisions', body: 'No calls yet.' }],
+        }),
       }),
     ]);
     const { getByTestId, queryByText } = render(<DetailPanel selectedId={`taskdoc:${docPath}`} />);
@@ -168,16 +225,27 @@ describe('register conservation (L127-C-F04)', () => {
   });
 
   it('leaves a prose-only register section in Further notes', () => {
-    const docPath = '/tasks/repo-a/sprint/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        form: 'sprint',
-        orchestrates: ['master-a'],
-        docPath,
-        sections: [
-          { kind: 'freeform', heading: 'Priority Register', body: 'No table here, only prose.' },
-        ],
+    const docPath = 'repo-a/sprint/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(docPath),
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'sprint',
+          kind: 'master',
+          orchestrates: ['master-a'],
+          sections: [
+            { kind: 'freeform', heading: 'Priority Register', body: 'No table here, only prose.' },
+          ],
+        }),
       }),
     ]);
     const { container, getByTestId, queryByTestId } = render(

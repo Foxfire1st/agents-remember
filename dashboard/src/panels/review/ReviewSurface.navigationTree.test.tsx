@@ -2,12 +2,14 @@
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ReviewSurface } from './ReviewSurface';
+import { dashboardStore } from '../../data/store';
 import { firstOutlineChange, outlineCounts } from './changeTriage';
 import { treeOrderStore } from './triageOrderPreference';
 import { treeViewStore } from './triageViewPreference';
 
 import { catalogue, selectedMemberId, serve, target } from './l86.test-utils';
 beforeEach(() => {
+  dashboardStore.getState().reset();
   localStorage.clear();
   treeViewStore.getState().setView('changed');
   treeOrderStore.getState().setOrder('triage');

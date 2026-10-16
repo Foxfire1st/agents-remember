@@ -22,7 +22,7 @@ from agents_remember.tasks import (
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.master_sync import folder_master_json_path
-from agents_remember.tasks.store import restore_task_doc_sources
+from agents_remember.tasks.store import restore_task_doc_sources, write_task_doc_batch
 from agents_remember.worktrees.queue.closeout_projection_publication import (
     preview_closeout_projection_effect,
 )
@@ -86,7 +86,7 @@ class TaskDocPublication:
     task_root: Path
     original: TaskDocument | None
     candidate: TaskDocument
-    documents: list[TaskDocument]
+    documents: list[tuple[Path, TaskDocument]]
     source_snapshots: tuple[TaskDocSourceSnapshot, ...]
     publisher: Callable[[], list[tuple[Path, Path]]] | None = None
 
@@ -133,8 +133,7 @@ def publish_prepared_task_documents(
     overrides = _prepared_task_doc_overrides(
         coordination_root,
         target_repo_id,
-        task_root,
-        documents,
+        [(task_root, doc) for doc in documents],
     )
     transaction = TaskDocPublicationTransaction(
         coordination_root=coordination_root,
@@ -241,7 +240,7 @@ def task_doc_publication_transaction(
 ) -> TaskDocPublicationTransaction:
     """Build the sole exact transaction for one ordinary/remove task-doc candidate."""
 
-    graph_document = require_single_graph_document(context.documents)
+    graph_document = require_single_graph_document([doc for _root, doc in context.documents])
     graph = graph_document.executionGraph if graph_document is not None else None
     overrides = _task_doc_publication_overrides(context)
     return TaskDocPublicationTransaction(
@@ -256,8 +255,7 @@ def task_doc_publication_transaction(
         ),
         publisher=context.publisher
         or (
-            lambda: write_task_docs(
-                context.task_root,
+            lambda: write_task_doc_batch(
                 context.documents,
                 graph_titles=(
                     read_graph_titles(context.task_root.parents[1], graph)
@@ -365,7 +363,6 @@ def _task_doc_publication_overrides(
     return _prepared_task_doc_overrides(
         context.config.coordination_root,
         context.target_repo_id,
-        context.task_root,
         context.documents,
     )
 
@@ -373,12 +370,11 @@ def _task_doc_publication_overrides(
 def _prepared_task_doc_overrides(
     coordination_root: Path,
     target_repo_id: str,
-    task_root: Path,
-    documents: list[TaskDocument],
+    documents: list[tuple[Path, TaskDocument]],
 ) -> dict[TaskDocumentRef, TaskDocument]:
     root = (coordination_root / "tasks" / target_repo_id).resolve(strict=False)
     overrides: dict[TaskDocumentRef, TaskDocument] = {}
-    for document in documents:
+    for task_root, document in documents:
         path = json_path_for(task_root, document).resolve(strict=False)
         if not path.is_relative_to(root):
             raise TaskDocError(f"task document publication escapes tasks root: {path}")

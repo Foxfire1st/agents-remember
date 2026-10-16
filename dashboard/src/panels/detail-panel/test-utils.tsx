@@ -2,203 +2,123 @@ import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 
 import { dashboardStore } from '../../data/store';
-import { metricsFor } from '../../types/projection';
+import { taskReferenceKey } from '../../data/taskReference';
 import type {
-  EnclosureNode,
-  LifecycleProjection,
-  SeriesNode,
-  TaskDocNode,
+  TaskDocumentRef,
+  TaskEntry,
+  TaskSummary,
   WorkspaceProjection,
 } from '../../types/projection';
-export function taskDoc(
-  over: Partial<TaskDocNode> & Pick<TaskDocNode, 'kind' | 'docPath'>,
-): TaskDocNode {
-  return {
-    id: '1',
-    lifecycleId: 'LC-SER',
-    repository: 'repo-a',
-    title: 'doc',
-    status: 'inProgress',
-    bodyRevision: '',
-    createdAt: '2026-06-20T09:00:00+00:00',
-    // The projection's own word by default; an older cache leaves the page to
-    // derive it by the same rule.
-    form: over.kind === 'master' ? (over.orchestrates?.length ? 'sprint' : 'master') : 'task',
-    headerNotes: [],
-    // New projection bounds default to whole values: fixtures stand for
-    // freshly projected documents unless a test deletes the fields to model
-    // an older cache.
-    statusNoteTruncated: false,
-    type: '',
-    stepsDone: 0,
-    stepsTotal: 0,
-    steps: [],
-    objective: '',
-    requirements: [],
-    codeExamples: [],
-    decisions: [],
-    openQuestions: [],
-    references: [],
-    orchestrates: [],
-    executionWaves: [],
-    subTasks: [],
-    seats: [],
-    sections: [],
-    ...over,
+import { enclosure, projection, taskEntry, taskSummary } from '../../test/fixtures/wire';
+export { enclosure, taskEntry, taskSummary } from '../../test/fixtures/wire';
+
+// Test addresses use the same qualified key as a served selection and body request.
+export function taskReference(key: string): TaskDocumentRef {
+  const slash = key.indexOf('/');
+  if (slash < 1 || key.startsWith('/')) throw new Error(`Not a qualified task reference: ${key}`);
+  return { repository: key.slice(0, slash), path: key.slice(slash + 1) };
+}
+
+export function seedProjection(over: Partial<WorkspaceProjection>) {
+  dashboardStore.getState().applySnapshot(projection(over));
+}
+
+export function seedTaskEntries(tasks: TaskEntry[], over: Partial<WorkspaceProjection> = {}) {
+  seedProjection({ ...over, tasks });
+}
+
+// Authored fixture entries, including the parent's served membership and counts.
+export function taskTree(parent: TaskEntry, children: TaskEntry[]): TaskEntry[] {
+  const counts = {
+    planned: 0,
+    started: 0,
+    completed: 0,
+    aborted: 0,
+    works: 0,
+    paused: 0,
+    unknown: 0,
   };
+  for (const child of children) {
+    counts[child.stage] += 1;
+    if (child.stage === 'started') counts[child.activity ?? 'unknown'] += 1;
+  }
+  return [
+    { ...parent, children: children.map((child) => child.key), counts },
+    ...children.map((child) => ({ ...child, parent: parent.key })),
+  ];
 }
 
-export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, 'seriesId'>): SeriesNode {
-  return {
-    repository: 'repo-a',
-    title: 'series',
-    status: 'inProgress',
-    objective: '',
-    subTasks: [],
-    discardedCount: 0,
-    discardedSubTasks: [],
-    doneCount: 0,
-    totalCount: 0,
-    abandonedCount: 0,
-    createdAt: '2026-06-20T09:00:00+00:00',
-    sections: [],
-    decisions: [],
-    docPath: `/t/${over.seriesId}/task.json`,
-    ...over,
-  };
-}
-
-export function enclosure(
-  over: Partial<EnclosureNode> & Pick<EnclosureNode, 'enclosure' | 'lifecycleId'>,
-) {
-  return {
-    enclosureId: over.enclosure,
-    leafId: over.enclosure,
-    taskRoot: '/tasks/260610_browser-dashboard',
-    taskId: '260610_BROWSER-DASHBOARD',
-    taskName: '260610_browser-dashboard',
-    repoName: 'agents-remember',
-    worktreeGroup: '/worktrees/260610-browser-dashboard-s16-ar',
-    humanReviewStatus: 'pending-review',
-    closeoutStatus: 'not-started',
-    integrationStatus: 'not-started',
-    cleanup: 'pending',
-    codeWorktreeExists: true,
-    memoryWorktreeExists: true,
-    actions: [],
-    ...over,
-  } satisfies EnclosureNode;
-}
-
-// A series projection: one lifecycle, a contract-paired master, and one authored slice doc.
-const SERIES_LIFECYCLE: LifecycleProjection = {
-  id: 'LC-SER',
-  state: 'running',
-  phase: 'build',
-  fleeting: false,
-  startedAt: '2026-06-20T09:00:00+00:00',
-  lastEventTs: '2026-06-20T09:00:30+00:00',
-  inferred: false,
-};
-
-const SERIES_MASTER = seriesNode({
-  seriesId: 'series',
-  title: 'My Series',
-  objective: 'Series objective text',
-  docPath: '/tasks/repo-a/series/task.json',
-  subTasks: [
-    {
-      number: '1',
-      name: 'First slice',
-      file: '01_first.md',
-      status: 'inProgress',
-      scope: '',
-      createdAt: '2026-06-20T09:00:00+00:00',
-    },
-    {
-      number: '2',
-      name: 'Parallel series',
-      file: '../other/task.md',
-      status: 'inProgress',
-      scope: '',
-      createdAt: '2026-06-21T09:00:00+00:00',
-    },
-  ],
-  sections: [
-    {
-      kind: 'freeform',
-      heading: 'Current State',
-      body: 'Status is **strong**.\n\n| Slice | Status |\n| --- | --- |\n| 01 | done |',
-    },
-    { kind: 'subTasks', heading: 'Sub-tasks', body: '' },
-  ],
-});
+const SERIES_MASTER_REF = taskReference('repo-a/series/task.json');
+const SERIES_SLICE_REF = taskReference('repo-a/series/01_first.json');
+const OTHER_MASTER_REF = taskReference('repo-a/other/task.json');
 
 export function seedSeries(
   options: {
-    lifecycleId?: string;
-    enclosureTaskId?: string;
-    enclosureTaskName?: string;
-    sliceDoc?: Partial<TaskDocNode>;
+    sliceSummary?: Partial<TaskSummary>;
+    sliceEntry?: Partial<TaskEntry>;
+    worktrees?: TaskEntry['worktrees'];
   } = {},
 ) {
-  const lc: LifecycleProjection = { ...SERIES_LIFECYCLE, id: options.lifecycleId ?? 'LC-SER' };
-  const master = SERIES_MASTER;
-  const slice = taskDoc({
-    lifecycleId: options.lifecycleId ?? 'LC-SER',
-    kind: 'subTask',
-    title: 'First slice',
-    objective: 'Slice objective text',
-    docPath: '/tasks/repo-a/series/01_first.json',
-    stepsTotal: 1,
-    steps: [
-      {
-        id: 'S1',
-        title: 'do the thing',
-        status: 'pending',
-        substeps: [],
-        noteTruncated: false,
-        outcomeTruncated: false,
-      },
-    ],
-    ...options.sliceDoc,
+  const master = taskEntry({
+    reference: SERIES_MASTER_REF,
+    id: 'series',
+    title: 'My Series',
+    stage: 'started',
+    children: [taskReferenceKey(SERIES_SLICE_REF), taskReferenceKey(OTHER_MASTER_REF)],
+    counts: { planned: 0, started: 2, completed: 0, aborted: 0, works: 1, paused: 0, unknown: 1 },
+    summary: taskSummary({
+      form: 'master',
+      kind: 'master',
+      type: '',
+      objective: 'Series objective text',
+      sections: [
+        {
+          kind: 'freeform',
+          heading: 'Current State',
+          body: 'Status is **strong**.\n\n| Slice | Status |\n| --- | --- |\n| 01 | done |',
+        },
+        { kind: 'subTasks', heading: 'Sub-tasks', body: '' },
+      ],
+    }),
+    worktrees: options.worktrees ?? [],
   });
-  const projection: WorkspaceProjection = {
-    version: 2,
-    generatedAt: '2026-06-20T09:01:00+00:00',
-    lifecycles: [lc],
-    enclosures: options.enclosureTaskId
-      ? [
-          enclosure({
-            enclosure: '/contracts/series',
-            lifecycleId: options.lifecycleId ?? 'LC-SER',
-            leafId: options.enclosureTaskName ?? 'series',
-            taskId: options.enclosureTaskId,
-            taskName: options.enclosureTaskName ?? 'series',
-          }),
-        ]
-      : [],
-    providers: [],
-    activeWorktreeGroups: [],
-    metrics: metricsFor([lc]),
-    analytics: {
-      driftSnapshots: [],
-      stalestSidecars: [],
-      setupSummaries: [],
-      setupProgress: [],
-      routeCoverage: [],
-      toolReports: [],
-      ledgers: [],
-      taskDocuments: [slice],
-      series: [master],
-      attentionQueue: [],
-      engineProcesses: [],
-    },
-  };
-  dashboardStore.getState().applySnapshot(projection);
+  const slice = taskEntry({
+    reference: SERIES_SLICE_REF,
+    parent: taskReferenceKey(SERIES_MASTER_REF),
+    id: '1',
+    title: 'First slice',
+    stage: 'started',
+    activity: 'works',
+    stepsTotal: 1,
+    ...options.sliceEntry,
+    summary: taskSummary({
+      type: '',
+      objective: 'Slice objective text',
+      steps: [
+        {
+          id: 'S1',
+          title: 'do the thing',
+          status: 'pending',
+          substeps: [],
+          noteTruncated: false,
+          outcomeTruncated: false,
+        },
+      ],
+      ...options.sliceSummary,
+    }),
+  });
+  const other = taskEntry({
+    reference: OTHER_MASTER_REF,
+    parent: taskReferenceKey(SERIES_MASTER_REF),
+    id: '2',
+    title: 'Parallel series',
+    stage: 'started',
+    summary: taskSummary({ form: 'master', kind: 'master', type: '', objective: '' }),
+  });
+  seedTaskEntries([master, slice, other]);
 }
 
-export function nestedProgressSteps(): TaskDocNode['steps'] {
+export function nestedProgressSteps(): TaskSummary['steps'] {
   return Array.from({ length: 7 }, (_, stepIndex) => ({
     id: `S${stepIndex + 1}`,
     title: `Top level step ${stepIndex + 1}`,
@@ -214,213 +134,82 @@ export function nestedProgressSteps(): TaskDocNode['steps'] {
 }
 
 export function seedSeriesOrdering() {
-  const master = seriesNode({
-    seriesId: 'series',
+  const earlier = taskEntry({
+    reference: taskReference('repo-a/series/zulu_earlier.json'),
+    parent: taskReferenceKey(SERIES_MASTER_REF),
+    id: '01',
+    title: 'Zulu earlier',
+    stage: 'planned',
+  });
+  const later = taskEntry({
+    reference: taskReference('repo-a/series/alpha_later.json'),
+    parent: taskReferenceKey(SERIES_MASTER_REF),
+    id: '99',
+    title: 'Alpha later',
+    stage: 'started',
+  });
+  const master = taskEntry({
+    reference: SERIES_MASTER_REF,
+    id: 'series',
     title: 'Ordered Series',
-    subTasks: [
-      {
-        number: '99',
-        name: 'Alpha later',
-        file: 'alpha_later.md',
-        status: 'inProgress',
-        scope: '',
-        createdAt: '2026-06-22T09:00:00+00:00',
-      },
-      {
-        number: '01',
-        name: 'Zulu earlier',
-        file: 'zulu_earlier.md',
-        status: 'planning',
-        scope: '',
-        createdAt: '2026-06-20T09:00:00+00:00',
-      },
-    ],
+    children: [earlier.key, later.key],
+    counts: { planned: 1, started: 1, completed: 0, aborted: 0, works: 0, paused: 0, unknown: 1 },
+    summary: taskSummary({ form: 'master', kind: 'master', type: '', objective: '' }),
   });
-  const projection: WorkspaceProjection = {
-    version: 2,
-    generatedAt: '2026-06-20T09:01:00+00:00',
-    lifecycles: [],
-    enclosures: [],
-    providers: [],
-    activeWorktreeGroups: [],
-    metrics: metricsFor([]),
-    analytics: {
-      driftSnapshots: [],
-      stalestSidecars: [],
-      setupSummaries: [],
-      setupProgress: [],
-      routeCoverage: [],
-      toolReports: [],
-      ledgers: [],
-      taskDocuments: [],
-      series: [master],
-      attentionQueue: [],
-      engineProcesses: [],
-    },
-  };
-  dashboardStore.getState().applySnapshot(projection);
+  seedTaskEntries([master, earlier, later]);
 }
-
-export function seedTaskDocuments(
-  docs: TaskDocNode[],
-  over: Partial<
-    Pick<WorkspaceProjection, 'lifecycles' | 'enclosures' | 'activeWorktreeGroups'>
-  > = {},
-) {
-  seedProjection({
-    ...over,
-    analytics: {
-      driftSnapshots: [],
-      stalestSidecars: [],
-      setupSummaries: [],
-      setupProgress: [],
-      routeCoverage: [],
-      toolReports: [],
-      ledgers: [],
-      taskDocuments: docs,
-      series: [],
-      attentionQueue: [],
-      engineProcesses: [],
-    },
-  });
-}
-
-export function seedProjection(over: Partial<WorkspaceProjection>) {
-  const lifecycles = over.lifecycles ?? [];
-  const projection: WorkspaceProjection = {
-    version: 2,
-    generatedAt: '2026-06-20T09:01:00+00:00',
-    lifecycles,
-    enclosures: [],
-    providers: [],
-    activeWorktreeGroups: [],
-    metrics: metricsFor(lifecycles),
-    analytics: {
-      driftSnapshots: [],
-      stalestSidecars: [],
-      setupSummaries: [],
-      setupProgress: [],
-      routeCoverage: [],
-      toolReports: [],
-      ledgers: [],
-      taskDocuments: [],
-      series: [],
-      attentionQueue: [],
-      engineProcesses: [],
-    },
-    ...over,
-  };
-  dashboardStore.getState().applySnapshot(projection);
-}
-
-const PROMOTED_LIFECYCLE: LifecycleProjection = {
-  id: '01KVW2FE8MQK6QCQQP0J4SEK3C',
-  state: 'paused',
-  phase: 'build',
-  fleeting: false,
-  enclosure: '/contracts/16',
-  repoId: 'agents-remember',
-  startedAt: '2026-06-24T06:00:00+00:00',
-  lastEventTs: '2026-06-24T06:00:30+00:00',
-  inferred: false,
-};
-
-const PROMOTED_DOC = taskDoc({
-  lifecycleId: '260610_BROWSER-DASHBOARD',
-  kind: 'subTask',
-  title: 'Lifecycle Finalize Task',
-  docPath: '/tasks/260610_browser-dashboard/14_lifecycle-finalize-task.json',
-  objective: 'Close out the lifecycle finalizer.',
-});
-
-const PROMOTED_MASTER = taskDoc({
-  lifecycleId: '260610_BROWSER-DASHBOARD',
-  kind: 'master',
-  title: 'Browser Dashboard Series',
-  docPath: '/tasks/260610_browser-dashboard/task.json',
-  objective: 'Parent master content.',
-});
-
-const PROMOTED_LEAF = taskDoc({
-  lifecycleId: '01KVW2FE8MQK6QCQQP0J4SEK3C',
-  kind: 'subTask',
-  title: 'Engine Room Stack Entry Height',
-  status: 'inProgress',
-  docPath: '/tasks/260610_browser-dashboard/16_engine-room-stack-entry-height.json',
-  objective: 'Keep a single Engine Room enclosure entry visually bounded.',
-  requirements: [
-    'Render the selected leaf task document, not the parent task or enclosure contract.',
-  ],
-  stepsTotal: 1,
-  steps: [
-    {
-      id: 'S1',
-      title: 'Fix the stack entry height',
-      status: 'inProgress',
-      substeps: [],
-      noteTruncated: false,
-      outcomeTruncated: false,
-    },
-  ],
-  sections: [
-    {
-      kind: 'freeform',
-      heading: 'Notes',
-      body: 'This is the authored leaf task document.',
-    },
-  ],
-});
-
-const PROMOTED_SERIES = seriesNode({
-  seriesId: '260610_browser-dashboard',
-  title: 'Browser Dashboard Series',
-  docPath: '/tasks/260610_browser-dashboard/task.json',
-  subTasks: [
-    {
-      number: '16',
-      name: 'Engine Room Stack Entry Height',
-      file: '16_engine-room-stack-entry-height.md',
-      status: 'inProgress',
-      scope: '',
-      createdAt: '2026-06-24T06:00:00+00:00',
-    },
-  ],
-});
 
 export function seedPromotedLeaf() {
-  const lc = PROMOTED_LIFECYCLE;
-  const doc = PROMOTED_DOC;
-  const master = PROMOTED_MASTER;
-  const leaf = PROMOTED_LEAF;
-  const projection: WorkspaceProjection = {
-    version: 2,
-    generatedAt: '2026-06-24T06:01:00+00:00',
-    lifecycles: [lc],
-    enclosures: [
-      enclosure({
-        enclosure: '/contracts/16',
-        lifecycleId: '01KVW2FE8MQK6QCQQP0J4SEK3C',
-        leafId: '16_engine-room-stack-entry-height',
-      }),
+  const masterRef = taskReference('agents-remember/260610_browser-dashboard/task.json');
+  const leafRef = taskReference(
+    'agents-remember/260610_browser-dashboard/16_engine-room-stack-entry-height.json',
+  );
+  const master = taskEntry({
+    reference: masterRef,
+    id: '260610_BROWSER-DASHBOARD',
+    title: 'Browser Dashboard Series',
+    stage: 'started',
+    children: [taskReferenceKey(leafRef)],
+    summary: taskSummary({
+      form: 'master',
+      kind: 'master',
+      type: '',
+      objective: 'Parent master content.',
+    }),
+  });
+  const leaf = taskEntry({
+    reference: leafRef,
+    parent: taskReferenceKey(masterRef),
+    id: '16_engine-room-stack-entry-height',
+    title: 'Engine Room Stack Entry Height',
+    stage: 'started',
+    activity: 'paused',
+    stepsTotal: 1,
+    worktrees: [
+      enclosure({ enclosure: '/contracts/16', leafId: '16_engine-room-stack-entry-height' }),
     ],
-    providers: [],
-    activeWorktreeGroups: [],
-    metrics: metricsFor([lc]),
-    analytics: {
-      driftSnapshots: [],
-      stalestSidecars: [],
-      setupSummaries: [],
-      setupProgress: [],
-      routeCoverage: [],
-      toolReports: [],
-      ledgers: [],
-      taskDocuments: [master, doc, leaf],
-      series: [PROMOTED_SERIES],
-      attentionQueue: [],
-      engineProcesses: [],
-    },
-  };
-  dashboardStore.getState().applySnapshot(projection);
+    summary: taskSummary({
+      type: '',
+      objective: 'Keep a single Engine Room enclosure entry visually bounded.',
+      requirements: [
+        'Render the selected leaf task document, not the parent task or enclosure contract.',
+      ],
+      steps: [
+        {
+          id: 'S1',
+          title: 'Fix the stack entry height',
+          status: 'inProgress',
+          substeps: [],
+          noteTruncated: false,
+          outcomeTruncated: false,
+        },
+      ],
+      sections: [
+        { kind: 'freeform', heading: 'Notes', body: 'This is the authored leaf task document.' },
+      ],
+    }),
+  });
+  seedTaskEntries([master, leaf]);
 }
 
 afterEach(() => {
@@ -432,21 +221,18 @@ afterEach(() => {
 
 // What a fetch double answers: a response the page reads as JSON.
 function answer(payload: unknown): Response {
-  return { ok: true, status: 200, json: async () => payload } as unknown as Response;
+  return new Response(JSON.stringify(payload));
 }
 
 function queryOf(url: string): URLSearchParams {
   return new URLSearchParams(url.split('?', 2)[1] ?? '');
 }
 
-// The body of the task document a request names: the seeded document of that
-// path, else a bare one of the kind the path says.
-function taskDocumentBody(url: string): TaskDocNode {
-  const docPath = queryOf(url).get('path') ?? '';
-  return (
-    dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
-    taskDoc({ kind: docPath.endsWith('/task.json') ? 'master' : 'subTask', docPath })
-  );
+// The body named by a qualified request is the served summary for that entry.
+function taskDocumentBody(url: string): TaskSummary | undefined {
+  return Object.values(dashboardStore.getState().tasks).find(
+    (entry) => entry.key === queryOf(url).get('path'),
+  )?.summary;
 }
 
 // ChangeSetButton fetches its counters on mount; a tiny stub keeps the doc-reader-bar tests from

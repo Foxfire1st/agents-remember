@@ -21,6 +21,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
@@ -30,8 +31,13 @@ from agents_remember.application.task_docs.task_doc_tools import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks import store as task_store
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees.integration.terminal_enclosure_archive import (
+    terminal_contract_authority_if_present,
+)
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
+from agents_remember.worktrees.worktree_contract import load_contract
 from test_worktree_support import git, init_repo, initialized_memory_repo
 
 MASTER_ID = "260624_master"
@@ -193,6 +199,59 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
             [{"leafId": LEAF_DOC_ID, "enclosurePath": leaf_contract.as_posix()}],
         )
         self.assertEqual(started.lifecycleId, "LC-LEAF")
+        self.assertEqual(started.status, "inProgress")
+        master = read_task_doc(self.master_path)
+        self.assertEqual(master.subTasks[0].status, started.status)
+        self.assertEqual(started.steps[0].status, "pending")
+
+    def test_abandoned_leaf_restart_promotes_document_and_parent_row(self) -> None:
+        self._author_master()
+        self._author_leaf()
+        started = self._start_leaf()
+        self.assertEqual(started.returncode, 0, started.payload)
+        contract_path = leaf_enclosure_path(self.task_root, LEAF_DOC_ID)
+        abandoned = worktree_manager.abandon_result(
+            worktree_manager.WorktreeArgs(
+                contract_path=contract_path, approved=True, teardown_providers=False
+            )
+        )
+        self.assertEqual(abandoned.returncode, 0, abandoned.payload)
+        self.assertEqual(read_task_doc(self.leaf_doc_path).status, "abandoned")
+        restarted = self._start_leaf("LC-SUCCESSOR")
+        self.assertEqual(restarted.returncode, 0, restarted.payload)
+        self.assertTrue(load_contract(contract_path).code_worktree.exists())
+        self.assertEqual(read_task_doc(self.leaf_doc_path).status, "inProgress")
+        self.assertEqual(read_task_doc(self.master_path).subTasks[0].status, "inProgress")
+
+    def test_invalid_parent_refuses_abandon_before_terminal_archive(self) -> None:
+        self._author_master()
+        self._author_leaf()
+        started = self._start_leaf()
+        self.assertEqual(started.returncode, 0, started.payload)
+        contract_path = leaf_enclosure_path(self.task_root, LEAF_DOC_ID)
+        contract = load_contract(contract_path)
+        master = read_task_doc(self.master_path)
+        write_task_doc(self.task_root, master.model_copy(update={"subTasks": master.subTasks * 2}))
+        before = contract_path.read_bytes()
+        for dry_run in (True, False):
+            result = worktree_manager.abandon_result(
+                worktree_manager.WorktreeArgs(
+                    contract_path=contract_path,
+                    approved=True,
+                    teardown_providers=False,
+                    dry_run=dry_run,
+                )
+            )
+            self.assertEqual(result.returncode, 2, result.payload)
+            self.assertEqual(result.payload["code"], "task-stage-invalid")
+            self.assertIsInstance(result.payload["error"], str)
+            self.assertIn("parent master", str(result.payload["error"]))
+            next_step = result.payload["nextStep"]
+            assert isinstance(next_step, dict)
+            self.assertIn("Repair", next_step["summary"])
+            self.assertEqual(contract_path.read_bytes(), before)
+            self.assertIsNone(terminal_contract_authority_if_present(load_contract(contract_path)))
+            self.assertTrue(contract.code_worktree.exists())
 
     def test_an_existing_damaged_document_is_repaired_by_its_next_start(self) -> None:
         """A document that predates the contract is repaired by start, not by a script.
@@ -231,6 +290,42 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
         self.assertEqual(list(repaired.requirements), ["keep this requirement"])
         self.assertEqual([(step.id, step.status) for step in repaired.steps], [("S1", "pending")])
         self.assertEqual(repaired.title, "Leaf task")
+
+    def test_start_rolls_back_both_stages_if_the_master_write_fails(self) -> None:
+        self._author_master()
+        self._author_leaf()
+        started = self._start_leaf()
+        self.assertEqual(started.returncode, 0, started.payload)
+        leaf = read_task_doc(self.leaf_doc_path)
+        leaf.status = "planning"
+        write_task_doc(self.task_root, leaf)
+        master = read_task_doc(self.master_path)
+        master.subTasks[0].status = "planning"
+        write_task_doc(self.task_root, master)
+        paths = [
+            self.leaf_doc_path,
+            self.leaf_doc_path.with_suffix(".md"),
+            self.master_path,
+            self.master_path.with_suffix(".md"),
+        ]
+        before = {path: path.read_bytes() for path in paths}
+        native_write = task_store.atomic_write_text
+
+        def fail_master(path: Path, text: str) -> None:
+            if path == self.master_path:
+                raise OSError("injected master publication failure")
+            native_write(path, text)
+
+        with (
+            patch.object(task_store, "atomic_write_text", side_effect=fail_master),
+            self.assertRaisesRegex(OSError, "injected master publication failure"),
+        ):
+            self._start_leaf()
+        self.assertEqual({path: path.read_bytes() for path in paths}, before)
+        retried = self._start_leaf()
+        self.assertEqual(retried.returncode, 0, retried.payload)
+        self.assertEqual(read_task_doc(self.leaf_doc_path).status, "inProgress")
+        self.assertEqual(read_task_doc(self.master_path).subTasks[0].status, "inProgress")
 
     def test_authoring_a_leaf_with_no_master_document_is_refused_with_its_remedy(self) -> None:
         """Fail closed: a leaf whose master link nothing would ever bind is refused.

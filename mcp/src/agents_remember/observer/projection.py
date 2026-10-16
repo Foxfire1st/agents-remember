@@ -10,38 +10,27 @@ served contract honest.
 
 The shapes are client-agnostic (North-Star #2): a dashboard, a future TUI, and
 an orchestrating agent are equal clients. The state tree is expressed as linked
-flat collections (lifecycles, enclosures, providers) cross-referenced by id
-(``enclosure.lifecycleId``, ``provider.repoId``) rather than deep nesting --
-friendlier to every client than one nested document, and it keeps multi-repo
-enclosures (North-Star #4) from being keyed to a single repo.
+one reference-keyed task collection with child references and bound worktree
+facts, plus unbound enclosures and providers. Clients read these published
+relationships without reconstructing task membership or activity.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents_remember.models import task_document as task_document_models
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
-from agents_remember.observer import projection_closeout, projection_graph
-from agents_remember.observer.lifecycle_state import (
-    LIVE_STATES,
-    LifecycleVocabularyError,
-    LiveState,
-    Phase,
-    State,
-)
 
 from . import projection_task_documents as task_documents
 
-MasterExecutionNature = task_document_models.MasterExecutionNature
-CloseoutProjectionProblemNode = projection_closeout.CloseoutProjectionProblemNode
-DiscardedSubTaskNode = projection_closeout.DiscardedSubTaskNode
-TaskExecutionGraphView = projection_graph.TaskExecutionGraphView
+CloseoutProjectionProblemNode = task_documents.CloseoutProjectionProblemNode
+DiscardedSubTaskNode = task_documents.DiscardedSubTaskNode
+TaskExecutionGraphView = task_documents.TaskExecutionGraphView
 TaskStepDispositionNode = task_documents.TaskStepDispositionNode
 TaskSubStepNode = task_documents.TaskSubStepNode
 TaskStepNode = task_documents.TaskStepNode
@@ -60,14 +49,13 @@ TaskExecutionGraphNode = task_documents.TaskExecutionGraphNode
 CloseoutCandidateNode = task_documents.CloseoutCandidateNode
 CloseoutQueueNode = task_documents.CloseoutQueueNode
 TaskDependencyNode = task_documents.TaskDependencyNode
+TaskSummary = task_documents.TaskSummary
 TaskDocNode = task_documents.TaskDocNode
 DirectGrantNode = task_documents.DirectGrantNode
-SeriesSubTaskNode = task_documents.SeriesSubTaskNode
-SeriesSectionNode = task_documents.SeriesSectionNode
-SeriesNode = task_documents.SeriesNode
+
 
 type AttentionSeverity = Literal["alarm", "warn", "info"]
-type AttentionLane = Literal["repo", "worktree", "lifecycle"]
+type AttentionLane = Literal["repo", "worktree"]
 type ProcessFactState = Literal[
     "observed", "derived", "planned", "missing", "stale", "not-applicable"
 ]
@@ -92,37 +80,11 @@ class ActionAvailability(BaseModel):
     nextSafeAction: str | None = None
 
 
-class LifecycleProjection(BaseModel):
-    """One lifecycle's resolved state, folded from its event log.
-
-    Fleeting lifecycles project as bare-bones entries (no ``enclosure``);
-    persistent ones carry the full enclosure detail -- the slice-05 visual
-    distinction falls out of this shape, not UI inference.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    state: State
-    phase: Phase
-    fleeting: bool
-    enclosure: str | None = None
-    repoId: str | None = None
-    scope: str | None = None
-    startedAt: str
-    lastEventTs: str
-    staleSeconds: float | None = None
-    # True when ``state`` was *derived* by the reducer (stale heartbeat -> paused;
-    # dormant fleeting -> abandoned) rather than read from a written transition.
-    # Keeps "never pretend declared is observed" enforceable from the data alone.
-    inferred: bool = False
-
-
 class EnclosureNode(BaseModel):
     """A worktree enclosure (contract + group): the persistent identity anchor.
 
-    ``lifecycleId`` cross-references the lifecycle this enclosure anchors (it is
-    ``""`` for a legacy contract written before the lifecycle field existed).
+    ``lifecycleId`` is the contract's operation-binding key. It is not a
+    separately projected agent session or a source of task activity.
 
     ``codeWorktreeExists`` / ``memoryWorktreeExists`` are the worktree-existence
     TRUTH (L11): stat'ed at snapshot time in the I/O layer, exactly how the worktree
@@ -183,113 +145,13 @@ class ProviderNode(BaseModel):
     worktreeGroup: str | None = None
 
 
-# The states :class:`Metrics` buckets: the LIVE half of the vocabulary, verbatim.
-# ``lifecycleCount`` already counts every lifecycle, so what
-# the per-state buckets add is the live workload -- a ``completed``/``abandoned`` lifecycle is
-# history, not work in flight. This is the live half itself and not a subtraction: a set
-# difference re-derives the answer from a second list (``TERMINAL_STATES``) that could be wrong,
-# and a hand-written bucket list is exactly what let ``awaiting-developer`` inflate
-# ``lifecycleCount`` while landing in no bucket at all -- the rollup could
-# not show a lifecycle that had handed the turn back. A seventh state must join
-# ``LiveState`` or ``TerminalState`` to exist at all (``check_state_partition``); joining the
-# live half grows a bucket here, a count in the reducer, and (via ``extra="forbid"``) a loud
-# failure if the field below is missing -- never another silent zero.
-#
-# STATE OF THE MIRROR (``dashboard/src/types/projection.ts``): it holds the same partition, in the
-# same shape. It declares ``LIVE_STATES`` and ``TERMINAL_STATES`` as the two halves, spreads them
-# into ``LIFECYCLE_STATES`` (live half first, so it enumerates in exactly the order ``STATES``
-# does here -- no consumer on either side indexes it, but the two sides now agree for free), derives
-# ``State`` from that tuple and ``ActiveState`` from the live half, and sets
-# ``ACTIVE_STATES = LIVE_STATES`` -- the live half itself, not a subtraction, for the reason given
-# above. Its ``stateCountField`` matches the naming rule below; Python moved to that spelling, not
-# the other way round, because TypeScript's type-level ``Capitalize<>`` cannot lower-case a tail
-# and the runtime helper must agree with the type.
-#
-# What the two sides ENFORCE differs, and only in the direction of this file being stricter.
-# Composition alone makes two of :func:`check_state_partition`'s three refusals unrepresentable on
-# either side: a state cannot be on ``State`` yet filed nowhere, nor filed yet absent from
-# ``State``. The third -- one state filed on BOTH halves -- is representable in both, and this file
-# refuses it at import while the mirror refuses it at compile time (``ActiveState & TerminalState``
-# is constrained to ``never``, so ``tsc -b`` fails naming the offending state). Where the mirror
-# genuinely cannot follow is a duplicate WITHIN one half: ``Literal["a", "a"]`` collapses to one
-# member here, while a TypeScript tuple keeps both -- the dashboard's contract test catches that at
-# runtime instead (one bucket per live state), which is a weaker gate but not an absent one.
-ACTIVE_STATES: tuple[LiveState, ...] = LIVE_STATES
-
-
-def state_count_field(state: str) -> str:
-    """The :class:`Metrics` field that buckets one lifecycle state.
-
-    ``running`` -> ``runningCount``, ``awaiting-developer`` -> ``awaitingDeveloperCount``: the
-    package's camelCase wire convention applied to the hyphenated state name, so the field
-    *name* is derived from the vocabulary too and not merely the count behind it.
-
-    Each segment after the first has its FIRST character upper-cased and the rest left alone.
-    ``str.capitalize`` would lower-case the tail instead (``awaiting-DEVELOPER`` ->
-    ``awaitingDeveloperCount``), which both disagrees with the TypeScript mirror -- whose
-    ``Capitalize<>`` cannot lower-case a tail, so it renders ``awaitingDEVELOPERCount`` -- and
-    quietly merges states that differ only in the case of a tail. Two copies of one rule are
-    only safe while they are the same rule.
-    """
-    head, *rest = state.split("-")
-    return f"{head}{''.join(word[:1].upper() + word[1:] for word in rest)}Count"
-
-
-def state_count_fields(states: Sequence[str]) -> dict[str, str]:
-    """Map each state to its bucket field, refusing a mapping that is not one-to-one.
-
-    :func:`state_count_field` is not injective (``a-b`` and ``aB`` both bucket into
-    ``aBCount``), and a collision does not announce itself: :func:`Metrics` is keyed by
-    field, so two states sharing a bucket means the later count silently OVERWRITES the
-    earlier and the rollup under-reports without a single field being wrong-looking. The
-    collision is a naming problem in the vocabulary, so it is refused where the map is
-    built, naming both states.
-    """
-    fields: dict[str, str] = {}
-    owner: dict[str, str] = {}
-    for state in states:
-        bucket = state_count_field(state)
-        collides_with = owner.get(bucket)
-        if collides_with is not None:
-            raise LifecycleVocabularyError(
-                f"states {collides_with!r} and {state!r} both bucket into {bucket!r}; "
-                "one Metrics field cannot count two states -- rename one state"
-            )
-        owner[bucket] = state
-        fields[state] = bucket
-    return fields
-
-
-STATE_COUNT_FIELDS: dict[str, str] = state_count_fields(ACTIVE_STATES)
-"""Lifecycle state -> its ``Metrics`` bucket field, one-to-one. The reducer's counting loop and
-the vocabulary-coverage tests both read this instead of re-enumerating the buckets."""
-
-
 class Metrics(BaseModel):
-    """Workspace rollups: 3a point counts + the 3b derived aggregates.
-
-    The ``*Count`` fields below are not a free-form list: they are exactly
-    :data:`STATE_COUNT_FIELDS` (one per non-terminal lifecycle state) plus ``lifecycleCount``,
-    the all-states total. They stay written out because they are the served contract the
-    dashboard reads by name and pyright checks by name; what makes them non-drifting is that
-    the reducer fills them from the vocabulary and a test asserts this declaration equals it.
-
-    ``stalenessHistogram`` buckets every onboarding sidecar by the age of its
-    ``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free
-    verification-age distribution note 03 wanted, computed without classifying
-    drift.
-    """
+    """Workspace verification-age distribution; task counts belong to task entries."""
 
     model_config = ConfigDict(extra="forbid")
 
-    lifecycleCount: int = 0
-    runningCount: int = 0
-    blockedCount: int = 0
-    pausedCount: int = 0
-    # The NOTIFY-AND-CONTINUE turn end: the model stopped and the developer holds the turn.
-    # Non-terminal, so it belongs in the live rollup rather than in history.
-    awaitingDeveloperCount: int = 0
     stalenessHistogram: dict[str, int] = Field(default_factory=dict)
+    ignoredHostAgents: int = 0
 
 
 class DriftSnapshotNode(BaseModel):
@@ -308,6 +170,7 @@ class DriftSnapshotNode(BaseModel):
     branch: str
     counts: dict[str, int] = Field(default_factory=dict)
     actionableCount: int = 0
+    actionableFingerprint: str | None = None
     checkedAt: str | None = None
     sourceRoot: str | None = None
     memoryRoot: str | None = None
@@ -454,16 +317,11 @@ class AttentionItem(BaseModel):
     title: str
     detail: str | None = None
     waitSeconds: float | None = None
-    lifecycleId: str | None = None
     enclosure: str | None = None
     repoId: str | None = None
     providerId: str | None = None
-    # The triggering signal's timestamp (last-event / snapshot time), used to
-    # honor a current lifecycle acknowledgement: an item is suppressed while an
-    # acknowledgement at-or-after this exists, and re-surfaces when a *newer* signal arrives.
-    # ``None`` means no freshness anchor, so an acknowledgement holds until the underlying
-    # condition clears.
-    signalTs: str | None = None
+    # Complete actionable findings from the native drift producer, excluding its clock.
+    actionableFingerprint: str | None = None
 
 
 class CommitRefNode(BaseModel):
@@ -655,7 +513,7 @@ class EngineProcessFacts:
 TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES = 256 * 1024
 
 
-def task_documents_body_bytes(docs: list[TaskDocNode]) -> int:
+def task_documents_body_bytes(docs: list[TaskSummary]) -> int:
     """Approximate byte cost of task-doc reader bodies still present in the broadcast (F6 guardrail).
 
     For summary nodes this returns zero; tests seed full nodes to prove the guard still catches any
@@ -679,10 +537,49 @@ def task_documents_body_bytes(docs: list[TaskDocNode]) -> int:
     return total
 
 
+class TaskState(BaseModel):
+    """The two task facts, computed together once by the task-entry producer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: Literal["planned", "started", "aborted", "completed"]
+    activity: Literal["works", "paused", "unknown"] | None = None
+    eventAt: str | None = None
+
+
+class TaskCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    planned: int = 0
+    started: int = 0
+    aborted: int = 0
+    completed: int = 0
+    works: int = 0
+    paused: int = 0
+    unknown: int = 0
+
+
+class TaskEntry(TaskState):
+    """One qualified task, its authored summary, runtime facts and ordered children."""
+
+    key: str
+    reference: TaskDocumentRef | None = None
+    id: str
+    scope: str | None = None
+    title: str
+    stepsDone: int = 0
+    stepsTotal: int = 0
+    summary: TaskSummary | None = None
+    parent: str | None = None
+    worktrees: list[EnclosureNode] = Field(default_factory=list)
+    children: list[str] = Field(default_factory=list)
+    counts: TaskCounts = Field(default_factory=TaskCounts)
+
+
 class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 
-    Kept apart from the structural tree (lifecycles/enclosures/providers) so the
+    Kept apart from the structural task/enclosure/provider tree so the
     client-agnostic core stays small. Large raw inventories are deliberately *not*
     here -- drift rows stay in the snapshot file, the full sidecar list collapses to
     the histogram + a bounded leaderboard -- so the served projection stays lean.
@@ -701,33 +598,26 @@ class Analytics(BaseModel):
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
     toolReports: list[ToolReportNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
-    taskDocuments: list[TaskDocNode] = Field(default_factory=list)
     attentionQueue: list[AttentionItem] = Field(default_factory=list)
     # The enclosure-centered Engine Room process map (slice 5e): one node per worktree
-    # enclosure, derived from contract + status guidance + provider boot + lifecycle.
+    # enclosure, derived from contract, status guidance and provider boot.
     engineProcesses: list[EngineProcessNode] = Field(default_factory=list)
-    # The series/master surface (R1): one node per series master, keyed by its task FOLDER
-    # (masters carry no lifecycleId, so the lifecycle-keyed taskDocuments never include them).
-    series: list[SeriesNode] = Field(default_factory=list)
 
 
 class WorkspaceProjection(BaseModel):
-    """The whole resolved tree: lifecycles + enclosures + providers + metrics + analytics."""
+    """The resolved tasks, unbound worktrees, providers, counts and analytics."""
 
     model_config = ConfigDict(extra="forbid")
 
     version: int = 2
     generatedAt: str
-    lifecycles: list[LifecycleProjection] = Field(default_factory=list)
+    tasks: list[TaskEntry] = Field(default_factory=list)
+    taskCounts: TaskCounts = Field(default_factory=TaskCounts)
     enclosures: list[EnclosureNode] = Field(default_factory=list)
     providers: list[ProviderNode] = Field(default_factory=list)
-    # Worktree-group basenames whose enclosure lifecycle is still active (non-terminal,
-    # cleanup not completed/abandoned). The shared `enclosures`/`lifecycles` collections keep
-    # every historical entry for the Operations/Lifecycle history surfaces; this is the bounded
-    # active set the Topology constellation filters on so it shows live work, not all-time work.
-    # Sourced from the same `active_enclosure_worktree_groups` admission the Engine Room uses,
-    # so the two views share one definition of "active". The join key matches the worktree-scoped
-    # `ProviderNode.worktreeGroup` (a basename) and `Path(EnclosureNode.worktreeGroup).name`.
+    # Worktree-group basenames admitted by their nonterminal enclosure contracts.
+    # Engine Room and Topology use the same active_enclosure_worktree_groups
+    # membership. This is operational admission, never a task-stage source.
     activeWorktreeGroups: list[str] = Field(default_factory=list)
     # Projected closeout queues (one per sprint master with an execution graph), carrying candidate
     # states, grades, waiting reasons, and the active atomic blocker (L8-R1/R2/R5).

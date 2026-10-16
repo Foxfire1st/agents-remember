@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane.attention_dismissals import AttentionObservation
 from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -31,8 +32,10 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.observer.projection import ProviderNode
 from agents_remember.observer.provider_nodes import (
     workspace_provider_nodes,
+    workspace_repository_id,
     worktree_provider_node,
 )
+from agents_remember.observer.reducer_impl._attention import observe_providers
 from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.lifecycle.command_runner import run_command
@@ -66,8 +69,8 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     _report_label,
     _status_payload_cache,
     _task_doc_cache,
-    _TaskDocumentLifecycleMaps,
     _text_or_none,
+    surface_paths,
 )
 from agents_remember.serving.projections.snapshots_impl._runtime import (
     _cached_local_status,
@@ -79,16 +82,9 @@ from agents_remember.serving.projections.snapshots_impl._runtime import (
     refresh_engine_process_landing,
 )
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
-    _doc_enclosure_lifecycle,
-    _ref_lifecycle,
-    _series_subtask_created_at,
-    _series_subtask_nodes,
     _task_doc_body_revision,
-    _task_doc_lifecycle_id,
     _task_doc_node,
-    _task_document_lifecycle_maps,
     _task_step_nodes,
-    read_series_documents,
     read_task_document_body,
     read_task_documents,
 )
@@ -100,13 +96,11 @@ WORKTREE_PROVIDER_INSPECT_SECONDS = 5
 __all__ = [
     "STATUS_PAYLOAD_TTL_SECONDS",
     "TASK_DOCUMENT_SCHEMA",
-    "_TaskDocumentLifecycleMaps",
     "_as_float",
     "_as_int",
     "_cached_local_status",
     "_commit_meta_for",
     "_current_phase_text",
-    "_doc_enclosure_lifecycle",
     "_enclosure_from_contract",
     "_enrich_ledger_rows",
     "_git_commit_meta",
@@ -116,17 +110,12 @@ __all__ = [
     "_iter_task_document_payloads",
     "_iter_task_json",
     "_ledger_window",
-    "_ref_lifecycle",
     "_report_label",
     "_safe_status_payload",
-    "_series_subtask_created_at",
-    "_series_subtask_nodes",
     "_status_payload_cache",
     "_task_doc_body_revision",
     "_task_doc_cache",
-    "_task_doc_lifecycle_id",
     "_task_doc_node",
-    "_task_document_lifecycle_maps",
     "_task_step_nodes",
     "logger",
     "read_drift_snapshots",
@@ -135,7 +124,6 @@ __all__ = [
     "read_ledger",
     "read_providers",
     "read_route_coverage",
-    "read_series_documents",
     "read_setup_progress_nodes",
     "read_setup_summaries",
     "read_sidecar_staleness",
@@ -152,6 +140,7 @@ def read_providers(
     *,
     now: datetime,
     active_worktree_groups: set[str] | None = None,
+    observation: AttentionObservation | None = None,
 ) -> list[ProviderNode]:
     """Surfaces 1 + 4: the workspace provider snapshot plus admitted worktree stacks.
 
@@ -161,25 +150,62 @@ def read_providers(
     stack a worktree spawns at start -- bound to its worktree group + repo + role, so the engine
     room ignores parked worktrees and completed lifecycles whose providers are no longer live.
     """
-    return _workspace_providers(config, now=now) + _worktree_providers(
+    workspace = _workspace_providers(config, now=now, observation=observation)
+    worktrees = _worktree_providers(
         config.coordination_root,
         now=now,
         active_worktree_groups=active_worktree_groups,
+        observation=observation,
     )
+    observe_providers(worktrees, observation)
+    return workspace + worktrees
 
 
 def _workspace_providers(
-    config: McpRuntimeConfig, *, now: datetime
+    config: McpRuntimeConfig, *, now: datetime, observation: AttentionObservation | None = None
 ) -> list[ProviderNode]:  # pragma: no cover
+    if not config.providers:
+        return []
     payload = _read_json(current_state_path(config))
     if payload is None:
+        if observation is not None:
+            observation.complete = False
         return []
     checked_at = payload.get("checkedAt")
     stale = age_seconds(checked_at, now) if isinstance(checked_at, str) else None
     providers = payload.get("providers")
     if not isinstance(providers, dict):
+        if observation is not None:
+            observation.complete = False
         return []
-    return workspace_provider_nodes(providers, stale_seconds=stale)
+    if observation is not None and any(
+        not isinstance(providers.get(key), dict) for key in config.providers
+    ):
+        observation.complete = False
+    configured = {key: value for key, value in providers.items() if key in config.providers}
+    nodes = workspace_provider_nodes(configured, stale_seconds=stale)
+    return _observe_workspace_providers(config, nodes, observation)
+
+
+def _observe_workspace_providers(
+    config: McpRuntimeConfig,
+    nodes: list[ProviderNode],
+    observation: AttentionObservation | None,
+) -> list[ProviderNode]:
+    """Configuration owns existence; only explicit per-repo evidence owns recovery."""
+    configured_ids = set()
+    for provider in config.providers.values():
+        configured_ids.add(provider.provider_id)
+        for repository in config.repositories.values():
+            configured_ids.add(
+                f"{provider.provider_id}:{workspace_repository_id(provider.provider_id, repository.repo_id)}"
+            )
+    nodes = [node for node in nodes if node.id in configured_ids]
+    if observation is not None:
+        for identity in configured_ids:
+            observation.observe(f"provider-down:{identity}")
+        observe_providers(nodes, observation)
+    return nodes
 
 
 def _worktree_providers(
@@ -187,23 +213,27 @@ def _worktree_providers(
     *,
     now: datetime,
     active_worktree_groups: set[str] | None,
+    observation: AttentionObservation | None = None,
 ) -> list[ProviderNode]:
     """Surface 4: each worktree group's isolated provider stack, bound to its worktree + repo."""
     worktrees_root = coordination_root / "worktrees"
-    if not worktrees_root.is_dir():
-        return []
     records: list[dict[str, Any]] = []
     container_names: set[str] = set()
     settings_by_path: dict[str, dict[str, Any] | None] = {}
     runtime_specs_by_path: dict[str, dict[str, dict[str, list[str]]]] = {}
-    for path in sorted(worktrees_root.glob("*/*/provider-runtime/provider-state.json")):
+    for path in surface_paths(
+        worktrees_root, "*/*/provider-runtime/provider-state.json", observation
+    ):
         group = path.parent.parent.name
-        if active_worktree_groups is not None and group not in active_worktree_groups:
-            continue
         payload = _read_json(path)
         if payload is None or payload.get("schema") != WORKTREE_PROVIDER_STATE_SCHEMA:
+            if observation is not None:
+                observation.complete = False
             continue
-        settings = _worktree_provider_settings(payload, settings_by_path)
+        _observe_worktree_configuration(payload, group, observation)
+        if active_worktree_groups is not None and group not in active_worktree_groups:
+            continue
+        settings = _worktree_provider_settings(payload, settings_by_path, observation=observation)
         runtime_specs = _worktree_runtime_specs(settings)
         for spec in runtime_specs.values():
             container_names.update(spec["resources"])
@@ -222,6 +252,8 @@ def _worktree_providers(
             }
         )
     inspected = _inspect_containers(container_names, cwd=coordination_root)
+    if inspected is None and observation is not None:
+        observation.complete = False
     nodes: list[ProviderNode] = []
     for record in records:
         settings_key = record["settingsKey"]
@@ -262,12 +294,16 @@ def _worktree_settings_key(payload: dict[str, Any]) -> str | None:
 def _worktree_provider_settings(  # pragma: no cover
     payload: dict[str, Any],
     cache: dict[str, dict[str, Any] | None],
+    *,
+    observation: AttentionObservation | None = None,
 ) -> dict[str, Any] | None:
     raw_path = _worktree_settings_key(payload)
     if raw_path is None:
         return None
     if raw_path not in cache:
         cache[raw_path] = _read_json(Path(raw_path))
+    if cache[raw_path] is None and observation is not None:
+        observation.complete = False
     return cache[raw_path]
 
 
@@ -431,3 +467,19 @@ def _worktree_runtime_summary(  # pragma: no cover
         "watcherUp": watcher_up,
         "indexingState": "unknown",
     }
+
+
+def _observe_worktree_configuration(
+    payload: dict[str, Any], group: str, observation: AttentionObservation | None
+) -> None:
+    if observation is None:
+        return
+    settings = payload.get("isolatedProviderSettings")
+    providers = settings.get("providers") if isinstance(settings, dict) else None
+    if not isinstance(providers, list) or not all(
+        isinstance(provider, str) for provider in providers
+    ):
+        observation.complete = False
+        return
+    for provider in providers:
+        observation.observe(f"provider-down:{provider}@{group}")

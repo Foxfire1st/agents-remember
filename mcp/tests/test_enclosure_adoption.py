@@ -137,7 +137,7 @@ def test_dry_run_is_the_default_and_writes_nothing(tmp_path: Path) -> None:
     assert payload["dryRun"] is True
     assert payload["nextAction"] == "adopt"
     assert payload["nextTool"] == "worktree_enclosure_adopt"
-    apply_args = payload["nextArgs"]
+    apply_args = whole["nextArgs"]
     assert apply_args["dry_run"] is False
     assert apply_args["approved"] is True
     assert apply_args["expected_publication_request_id"] == payload["publicationRequestId"]

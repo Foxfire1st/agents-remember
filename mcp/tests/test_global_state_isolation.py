@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import tempfile
 import threading
 import unittest
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest import mock
@@ -18,9 +16,6 @@ from agents_remember.controlplane.durable_store import (
     declare_process_role,
     declared_process_role,
 )
-from agents_remember.observer.ambient import AmbientLifecycle, ambient, install_ambient
-from agents_remember.observer.store import EventStore
-from agents_remember.observer.ulid import new_ulid
 from agents_remember_test_support.testing.global_state import (
     OWNED_MUTABLE_STATES,
     PROCESS_MUTABLE_STATES,
@@ -154,26 +149,10 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
             reset_process_mutable_state()
             self.assertEqual(fake._CATALOGS, {})
 
-    def test_reset_stops_the_ambient_heartbeat_and_clears_the_singleton(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            lifecycle = AmbientLifecycle(EventStore(Path(temporary)))
-            install_ambient(lifecycle)
-            lifecycle.attach(new_ulid(), enclosure=str(Path(temporary) / "contract.json"))
-            ticker = lifecycle._ticker
-            assert ticker is not None
-            self.assertTrue(ticker.is_alive())
-            reset_process_mutable_state()
-            self.assertIsNone(ambient())
-            self.assertFalse(ticker.is_alive())
-
     def test_every_reset_row_runs_its_declared_cleanup_for_a_loaded_owner(self) -> None:
         # Ambient's actual heartbeat is exercised separately; all other registered reset
         # owners get deterministic local state so every row participates in this proof.
-        states = [
-            state
-            for state in PROCESS_MUTABLE_STATES
-            if state.reset is not None and state.reset.__name__ != "_reset_ambient"
-        ]
+        states = [state for state in PROCESS_MUTABLE_STATES if state.reset is not None]
         modules = {state.name: _module_with_owned_state(state) for state in states}
         with mock.patch.dict(
             sys.modules, {module.__name__: module for module, _ in modules.values()}

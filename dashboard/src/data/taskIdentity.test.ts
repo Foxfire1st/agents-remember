@@ -1,24 +1,15 @@
-import { describe, expect, it } from "vitest";
-
-import type { TaskDocNode } from "../types/projection";
-import { analytics, taskDoc } from "../test/fixtures/wire";
-import { masterFolderForSelection } from "./taskIdentity";
-
-// Minimal docs: only the fields the selection reads (kind/docPath/id/repository/lifecycleId) are
-// stated; the served builder fills the rest, so every override is still checked against the mirror
-// instead of asserted past it.
-function doc(partial: Partial<TaskDocNode>): TaskDocNode {
-  return taskDoc({ repository: "repo", ...partial });
-}
-
-describe("masterFolderForSelection", () => {
-  it("resolves the master folder of a selected task doc", () => {
-    const docs = [doc({ kind: "subTask", id: "L5", docPath: "/tasks/repo/ops/05.json", lifecycleId: "LC-5" })];
-    const folder = masterFolderForSelection(
-      "taskdoc:/tasks/repo/ops/05.json",
-      {},
-      analytics({ taskDocuments: docs }),
-    );
-    expect(folder).toBe("ops");
-  });
+import { expect,it } from 'vitest';
+import { chatLeaf,chatMaster } from '../test/fixtures/documentChat';
+import { qualifiedLeafKey,sameTaskDocumentRef } from './taskIdentity';
+import { taskEntrySelectionKey } from './taskReference';
+it('keeps repository qualification in selection and role-chat identity', () => {
+  if (!chatLeaf.reference) throw new Error('Fixture has no leaf document reference');
+  expect(taskEntrySelectionKey(chatLeaf.key)).toBe('taskdoc:repo/master/leaf.json');
+  expect(chatMaster.key).toBe('repo/master/task.json');
+  expect(qualifiedLeafKey(chatLeaf)).toBe('repo/master/LEAF');
+  expect(sameTaskDocumentRef(chatLeaf.reference, { ...chatLeaf.reference })).toBe(true);
+  expect(
+    sameTaskDocumentRef(chatLeaf.reference, { ...chatLeaf.reference, repository: 'other' }),
+  ).toBe(false);
+  expect(sameTaskDocumentRef(undefined, undefined)).toBe(false);
 });

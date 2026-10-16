@@ -1,24 +1,9 @@
-"""The POST action layer: pure availability mapping and attention dismissals.
-
-``evaluate_action`` stays a **pure** function over a projection -- it resolves the target and
-maps the requested action onto an HTTP status -- so the rules stay unit-testable without a
-client; the router owns the routing *and* the one durable side effect (the dismissal row).
-
-Two action families:
-
-* **Enclosure transitions** (``integrate`` / ``cleanup``): checked against the
-  reducer's **precomputed** ``ActionAvailability`` (the UI never decides safety -- North-Star),
-  attributed, and acknowledged ``202`` without mutation. Disabled actions return ``409`` with
-  the reducer's ``disabledReason``; unknown targets ``404``.
-* **Attention dismissals** (``dismiss``, leaf-28 S5.2): lifecycle-bound acknowledgements
-  for one queue occurrence, plus the repo-level ``actionable-drift`` one-shot signal.
-  The router keeps only current acknowledgement state and prunes lifecycle rows with
-  the lifecycle.
-"""
+"""Pure action availability and current attention-item dismissal intents."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import chain
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
@@ -40,29 +25,23 @@ class ActionRequest(BaseModel):
 
     target: str | None = None
     actor: Actor = "developer"
-    # Attention-queue dismiss (leaf-28 S5.2): the lifecycle-bound item being cleared.
+    # The stable item and kind published in the attention queue.
     itemId: str | None = None
     kind: str | None = None
 
 
-# The attention-queue dismiss verb (leaf-28 S5.2): records a current lifecycle-bound
-# acknowledgement.
+# The current attention acknowledgement, independent of task activity.
 DISMISS_ACTION = "dismiss"
 
 
 @dataclass(frozen=True)
 class DismissalIntent:
-    """An attention-item dismissal the router must apply (leaf-28 S5.2).
-
-    The pure evaluator returns the intent and the router writes a compact lifecycle
-    acknowledgement. ``dismissed_at`` is the server moment the reducer compares against
-    the item's triggering signal.
-    """
+    """One current acknowledgement for the item the projection actually published."""
 
     item_id: str
     dismissed_at: str
-    kind: str | None = None
-    lifecycle_id: str | None = None
+    kind: str
+    actionable_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,7 +73,9 @@ class ActionEvaluationContext:
 
 def _find_actions(projection: WorkspaceProjection, target: str) -> list[ActionAvailability] | None:
     """The target enclosure's precomputed actions (by name), or None."""
-    for enclosure in projection.enclosures:
+    for enclosure in chain(
+        projection.enclosures, chain.from_iterable(task.worktrees for task in projection.tasks)
+    ):
         if enclosure.enclosure == target:
             return enclosure.actions
     return None
@@ -106,21 +87,14 @@ def evaluate_action(
     target: str | None,
     context: ActionEvaluationContext,
 ) -> ActionOutcome:
-    """Map (action, target) onto a status + body.
-
-    The ``dismiss`` verb (leaf-28 S5.2) clears one attention item: it returns a pure
-    :class:`DismissalIntent` the router applies. Unlike an enclosure transition it
-    needs no precomputed availability, but an item must carry the lifecycle id
-    that scopes its acknowledgement row, except the repo-level ``actionable-drift``
-    signal whose snapshot timestamp scopes the occurrence.
-    """
+    """Map one requested action to its published availability or current item."""
     if action == DISMISS_ACTION:
-        return _dismiss_action_outcome(action, target, context)
+        return _dismiss_action_outcome(projection, action, context)
     return _precomputed_action_outcome(projection, action, target, context)
 
 
 def _dismiss_action_outcome(
-    action: str, target: str | None, context: ActionEvaluationContext
+    projection: WorkspaceProjection, action: str, context: ActionEvaluationContext
 ) -> ActionOutcome:
     item = (context.item_id or "").strip()
     if not item:
@@ -132,16 +106,11 @@ def _dismiss_action_outcome(
                 "action": action,
             },
         )
-    if target is None and context.kind != "actionable-drift":
-        return ActionOutcome(
-            400,
-            {
-                "status": "missing-lifecycle",
-                "detail": "dismiss requires the lifecycle target for lifecycle-bound attention items",
-                "action": action,
-                "itemId": item,
-            },
-        )
+    published = next((row for row in projection.analytics.attentionQueue if row.id == item), None)
+    if published is None:
+        return ActionOutcome(404, {"status": "unknown-item", "itemId": item})
+    if context.kind != published.kind:
+        return ActionOutcome(400, {"status": "item-kind-mismatch", "itemId": item})
     intent_body: dict[str, Any] = {
         "actor": context.actor,
         "source": "dashboard",
@@ -151,16 +120,14 @@ def _dismiss_action_outcome(
     }
     if context.kind is not None:
         intent_body["kind"] = context.kind
-    if target is not None:
-        intent_body["target"] = target
     return ActionOutcome(
         202,
         {"status": "received", "detail": "attention item dismissed", "intent": intent_body},
         dismissal=DismissalIntent(
             item_id=item,
             dismissed_at=context.now,
-            kind=context.kind,
-            lifecycle_id=target,
+            kind=published.kind,
+            actionable_fingerprint=published.actionableFingerprint,
         ),
     )
 

@@ -1,7 +1,7 @@
-// The column's presentation and controls; task/state derivation stays in LifecycleList.
+// The column's presentation and controls; stage and activity come from task entries.
 import { ToggleButton, ToggleButtonGroup } from 'react-aria-components';
 import { css, cva } from '../../../styled-system/css';
-import type { Pivot } from '../../data/selectors';
+export type Pivot = 'repo' | 'phase';
 import { columnTabButton } from '../../grammar/viewTabLook';
 import { AttentionQueue } from '../AttentionQueue';
 
@@ -173,12 +173,10 @@ export function TaskPivotBar({
   count,
   pivot,
   onPivot,
-  onOpenFromBell,
 }: {
   count: number;
   pivot: Pivot;
   onPivot: (pivot: Pivot) => void;
-  onOpenFromBell: (id: string) => void;
 }) {
   return (
     <div className={headRow}>
@@ -202,9 +200,8 @@ export function TaskPivotBar({
             BY PHASE
           </ToggleButton>
         </ToggleButtonGroup>
-        <AttentionQueue onSelect={onOpenFromBell} />
+        <AttentionQueue />
       </div>
     </div>
   );
 }
-

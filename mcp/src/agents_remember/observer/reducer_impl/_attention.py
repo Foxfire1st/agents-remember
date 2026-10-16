@@ -1,20 +1,22 @@
 """Attention queue: rank what needs the human from the reduced surfaces.
 
 Pure and deterministic: every source contributes one small builder and the
-queue sorts by (severity, wait, id). Dismissals suppress lifecycle-bound items
-until a newer triggering signal re-surfaces them.
+queue sorts by (severity, wait, id). Provider/setup/start dismissals hold until
+their native reader observes recovery or removal. Drift occurrence is carried by
+its persisted source signal.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
-from agents_remember.controlplane.attention_dismissals import AttentionDismissalRecord
+from agents_remember.controlplane.attention_dismissals import (
+    AttentionDismissalRecord,
+    AttentionObservation,
+)
 from agents_remember.observer.projection import (
     AttentionItem,
     DriftSnapshotNode,
-    LifecycleProjection,
     ProviderNode,
     SetupProgressNode,
 )
@@ -25,11 +27,9 @@ from agents_remember.observer.reducer_impl._types import AnalyticalInputs
 
 _SEVERITY_RANK: dict[str, int] = {"alarm": 0, "warn": 1, "info": 2}
 _PROVIDER_DOWN: frozenset[str] = frozenset({"stopped", "failed", "error"})
-_DISMISSABLE_REPO_KINDS: frozenset[str] = frozenset({"actionable-drift"})
 
 
 def build_attention_queue(
-    lifecycles: list[LifecycleProjection],
     providers: list[ProviderNode],
     given: AnalyticalInputs,
 ) -> list[AttentionItem]:
@@ -43,14 +43,11 @@ def build_attention_queue(
     small builder. Enclosure-derived items (pending review / worktree debt) are the
     hangar's job (5c).
 
-    ``given.attention_dismissals`` (``{itemId: AttentionDismissalRecord}``, read from the
-    compact :class:`AttentionDismissalStore`, leaf-28 S5.2) suppresses a lifecycle-bound item
-    the operator cleared while keeping the derivation pure: an item is dropped when a
-    matching lifecycle acknowledgement exists at or after its triggering ``signalTs``,
-    and re-surfaces the moment a *newer* signal arrives.
+    ``given.attention_dismissals`` is the reconciled current acknowledgement map.
+    Source cleanup owns observed recovery/removal; this pure fold only suppresses
+    a matching current item. It never infers recovery from age or a missing node.
     """
     items = [
-        *_lifecycle_attention(lifecycles),
         *_provider_attention(providers),
         *_drift_attention(given.drift_snapshots),
         *_setup_attention(given.setup_progress),
@@ -64,72 +61,21 @@ def build_attention_queue(
     return items
 
 
-# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/reducer_impl/_attention.py:78).
-def _is_dismissed(
-    item: AttentionItem, dismissals: dict[str, AttentionDismissalRecord]
-) -> bool:  # pragma: no cover
-    """True when a lifecycle acknowledgement still suppresses this item (leaf-28 S5.2).
+def _is_dismissed(item: AttentionItem, dismissals: dict[str, AttentionDismissalRecord]) -> bool:
+    """A drift acknowledgement ends only on different complete actionable findings.
 
-    A dismissal holds while it is at or after the item's triggering ``signalTs``;
-    a *newer* signal (``signalTs`` > ``dismissedAt``) re-surfaces the item. An item
-    with no ``signalTs`` anchor stays suppressed until its condition clears (it stops
-    being emitted) -- the dismissal then has nothing to hide.
+    Missing fingerprints retain existing acknowledgements through the admitted
+    first-read transition. Other kinds end through native recovery/removal proof.
     """
     dismissal = dismissals.get(item.id)
-    if dismissal is None:
+    if dismissal is None or dismissal.kind != item.kind:
         return False
-    if dismissal.kind is not None and dismissal.kind != item.kind:
-        return False
-    if item.lifecycleId is not None or dismissal.lifecycleId is not None:
-        if item.lifecycleId != dismissal.lifecycleId:
-            return False
-        return not _signal_after(item.signalTs, dismissal.dismissedAt)
-    if item.kind not in _DISMISSABLE_REPO_KINDS:
-        return False
-    return not _signal_after(item.signalTs, dismissal.dismissedAt)
-
-
-# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/reducer_impl/_attention.py:100).
-def _signal_after(signal_ts: str | None, dismissed_at: str) -> bool:  # pragma: no cover
-    """True when the triggering signal is strictly newer than the dismissal.
-
-    Parses both ISO-8601 stamps (rather than comparing strings) so a stamp printed
-    without microseconds still orders correctly.
-    """
-    if not signal_ts:
-        return False
-    signal = datetime.fromisoformat(signal_ts)
-    dismissed = datetime.fromisoformat(dismissed_at)
-    if signal.tzinfo is None:
-        signal = signal.replace(tzinfo=UTC)
-    if dismissed.tzinfo is None:
-        dismissed = dismissed.replace(tzinfo=UTC)
-    return signal > dismissed
-
-
-def _lifecycle_attention(lifecycles: list[LifecycleProjection]) -> list[AttentionItem]:
-    """An event-backed session that went quiet (one item per lifecycle).
-
-    A synthesized dormant persistent worktree (``lastEventTs == ""``) is the hangar's job
-    (note 06), not the queue.
-    """
-    return [
-        AttentionItem(
-            id=f"stale-session:{lifecycle.id}",
-            kind="stale-session",
-            severity="info",
-            lane="lifecycle",
-            title="Session gone quiet",
-            waitSeconds=lifecycle.staleSeconds,
-            lifecycleId=lifecycle.id,
-            repoId=lifecycle.repoId,
-            # The moment it last had activity (the quiet point): a revived session
-            # advances this past a dismissal and re-surfaces if it later goes quiet again.
-            signalTs=lifecycle.lastEventTs or None,
-        )
-        for lifecycle in lifecycles
-        if lifecycle.inferred and lifecycle.state == "paused" and lifecycle.lastEventTs
-    ]
+    return (
+        item.kind != "actionable-drift"
+        or item.actionableFingerprint is None
+        or dismissal.actionableFingerprint is None
+        or item.actionableFingerprint == dismissal.actionableFingerprint
+    )
 
 
 def _provider_attention(providers: list[ProviderNode]) -> list[AttentionItem]:
@@ -146,7 +92,7 @@ def _provider_attention(providers: list[ProviderNode]) -> list[AttentionItem]:
             providerId=provider.id,
         )
         for provider in providers
-        if provider.ok is False or provider.state in _PROVIDER_DOWN
+        if provider_condition(provider) == "failed"
     ]
 
 
@@ -162,7 +108,7 @@ def _drift_attention(drift_snapshots: list[DriftSnapshotNode]) -> list[Attention
             detail=_drift_attention_detail(drift),
             waitSeconds=drift.snapshotStaleSeconds,
             repoId=drift.repository,
-            signalTs=drift.checkedAt,
+            actionableFingerprint=drift.actionableFingerprint,
         )
         for drift in drift_snapshots
         if drift.actionableCount > 0
@@ -197,7 +143,7 @@ def _setup_attention(setup_progress: list[SetupProgressNode]) -> list[AttentionI
             enclosure=setup.group,
         )
         for setup in setup_progress
-        if setup.failedPhases or setup.state in {"failed", "stale"}
+        if setup_condition(setup) == "failed"
     ]
 
 
@@ -208,13 +154,12 @@ def _start_attention(start_progress: list[dict[str, Any]]) -> list[AttentionItem
     fault (faults flicker, §3.2)."""
     items: list[AttentionItem] = []
     for entry in start_progress:
-        reason = _str_or_none(entry.get("blockedReason"))
-        if reason is None:
+        group, reason = start_facts(entry)
+        if group is None or reason is None:
             continue
-        group = str(entry.get("worktreeGroup", ""))
         items.append(
             AttentionItem(
-                id=f"blocked-start:{group.rsplit('/', 1)[-1]}",
+                id=f"blocked-start:{group}",
                 kind="blocked-start",
                 severity="warn",
                 lane="worktree",
@@ -225,3 +170,49 @@ def _start_attention(start_progress: list[dict[str, Any]]) -> list[AttentionItem
             )
         )
     return items
+
+
+def provider_condition(provider: ProviderNode) -> str:
+    """A provider recurs only after an explicit healthy observation, then failure."""
+    if provider.ok is False or provider.state in _PROVIDER_DOWN:
+        return "failed"
+    if provider.ok is True or provider.state in {"running", "ready", "healthy"}:
+        return "healthy"
+    return "unknown"
+
+
+def setup_condition(setup: SetupProgressNode) -> str:
+    """A setup recurs only after observed running/completed work, then failure."""
+    if setup.failedPhases or setup.state in {"failed", "stale"}:
+        return "failed"
+    return "healthy" if setup.state in {"running", "completed"} else "unknown"
+
+
+def observe_providers(nodes: list[ProviderNode], observation: AttentionObservation | None) -> None:
+    if observation is not None:
+        for node in nodes:
+            observation.observe(
+                f"provider-down:{node.id}", healthy=provider_condition(node) == "healthy"
+            )
+
+
+def observe_setup(node: SetupProgressNode, observation: AttentionObservation | None) -> None:
+    if observation is not None:
+        observation.observe(
+            f"failed-setup:{node.group}", healthy=setup_condition(node) == "healthy"
+        )
+
+
+def observe_start(entry: dict[str, Any], observation: AttentionObservation | None) -> None:
+    """A native happy-path beat or cleared progress file ends a blocked start."""
+    if observation is not None:
+        group, reason = start_facts(entry)
+        if group is None:
+            observation.complete = False
+        else:
+            observation.observe(f"blocked-start:{group}", healthy=reason is None)
+
+
+def start_facts(entry: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The native full group and blocked reason; no reason is a happy-path beat."""
+    return _str_or_none(entry.get("worktreeGroup")), _str_or_none(entry.get("blockedReason"))

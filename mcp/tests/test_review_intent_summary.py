@@ -37,6 +37,8 @@ from agents_remember.models.knowledge.graph import FamilyMemberDraft
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.review_intent_summary import ReviewIntentSummaryResult
 from agents_remember.models.knowledge.source import FileLocator
+from agents_remember.serving.changeset_cache import ChangesetCache
+from agents_remember.serving.intent_summary_cache import ReviewIntentSummaryPort
 from agents_remember.serving.review_summary import (
     KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
     register_review_summary_route,
@@ -585,9 +587,15 @@ def test_the_route_answers_every_typed_state_in_the_body(
         "absent": intent_summary_of(_resolution(baseline_path, tmp_path / "absent.sqlite"), MASTER),
     }
     served = FastAPI()
-    register_review_summary_route(served, lambda repo, master, leaf: answers[leaf])
+    register_review_summary_route(
+        served,
+        ReviewIntentSummaryPort(
+            inputs=lambda *_: (), read=lambda repo, master, leaf, observe: answers[leaf]
+        ),
+        ChangesetCache(),
+    )
     unwired = FastAPI()
-    register_review_summary_route(unwired, None)
+    register_review_summary_route(unwired, None, ChangesetCache())
 
     with TestClient(served) as client:
         counted = client.get(

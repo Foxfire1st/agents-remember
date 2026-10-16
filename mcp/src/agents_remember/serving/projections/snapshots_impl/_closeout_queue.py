@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agents_remember.controlplane.closeout_queue_store import CloseoutQueueStore
+from agents_remember.kernel.git_reference_files import packed_references
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.projection import (
     CloseoutCandidateNode,
@@ -518,16 +519,10 @@ def _branch_tip_parts(repo_path: Path | None, branch: str) -> str | None:
     except OSError:
         pass
     try:
-        packed = (common / "packed-refs").read_text(encoding="utf-8")
+        value = packed_references(common).get(ref)
     except OSError:
         return "absent\0"
-    for line in packed.splitlines():
-        if line.startswith("#") or line.startswith("^"):
-            continue
-        sha, _, name = line.partition(" ")
-        if name.strip() == ref and sha.strip():
-            return f"tip\0{sha.strip()}\0"
-    return "absent\0"
+    return f"tip\0{value}\0" if value else "absent\0"
 
 
 def read_closeout_queues(coordination_root: Path, *, now: datetime) -> list[CloseoutQueueNode]:

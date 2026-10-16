@@ -90,7 +90,7 @@ class ApplicationTests1(ApplicationTests):
         self.assertEqual(row.status, "inProgress")
         self.assertEqual(row.scope, "keep this prose")
 
-    def test_done_child_cannot_hide_pending_parent_from_progress_or_master_sync(self) -> None:
+    def test_done_child_counts_as_progress_without_changing_document_stage(self) -> None:
         self._create_parent_master()
         created = self._create(
             master="task.md",
@@ -105,7 +105,8 @@ class ApplicationTests1(ApplicationTests):
         )
         self.assertEqual((created["stepsDone"], created["stepsTotal"]), (0, 1))
         master = read_task_doc(Path(str(created["masterSync"]["masterDocPath"])))
-        self.assertEqual(master.subTasks[0].status, "inProgress")
+        self.assertEqual(master.subTasks[0].status, "planning")
+        self.assertEqual(read_task_doc(Path(str(created["docPath"]))).status, "planning")
 
     def test_five_major_eight_children_share_the_tool_progress_count(self) -> None:
         # The same five/eight and states as step-marks.test.tsx, through the native writer.

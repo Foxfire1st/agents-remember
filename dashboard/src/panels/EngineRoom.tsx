@@ -1,22 +1,20 @@
-import { motion } from "motion/react";
-import { memo, type ReactNode, useMemo, useRef, useState } from "react";
-import { useStoreWithEqualityFn } from "zustand/traditional";
+import { motion } from 'motion/react';
+import { memo, type ReactNode, useMemo, useRef, useState } from 'react';
+import { useStoreWithEqualityFn } from 'zustand/traditional';
 
-import { css } from "../../styled-system/css";
-import {
-  selectQueue,
-} from "../data/selectors";
-import { stableEquals } from "../data/servedAges";
-import { dashboardStore, useDashboard } from "../data/store";
-import { Panel } from "../grammar/Panel";
-import type { EngineProcessNode, LedgerNode } from "../types/projection";
-import { BootTimeline } from "./engine-room/BootTimeline";
-import { buildEngineRoomModel } from "./engine-room/buildEngineRoomModel";
-import { DiagnosticsPanel } from "./engine-room/DiagnosticsPanel";
-import { EnclosureProcessMap } from "./engine-room/EnclosureProcessMap";
-import { EnclosureStackList } from "./engine-room/EnclosureStackList";
-import { useElementVisible } from "./engine-room/useElementVisible";
-import { useShouldAnimate } from "./engine-room/useShouldAnimate";
+import { css } from '../../styled-system/css';
+import { selectQueue } from '../data/selectors';
+import { stableEquals } from '../data/servedAges';
+import { dashboardStore, useDashboard } from '../data/store';
+import { Panel } from '../grammar/Panel';
+import type { EngineProcessNode, LedgerNode } from '../types/projection';
+import { BootTimeline } from './engine-room/BootTimeline';
+import { buildEngineRoomModel } from './engine-room/buildEngineRoomModel';
+import { DiagnosticsPanel } from './engine-room/DiagnosticsPanel';
+import { EnclosureProcessMap } from './engine-room/EnclosureProcessMap';
+import { BoundTaskStatus, EnclosureStackList } from './engine-room/EnclosureStackList';
+import { useElementVisible } from './engine-room/useElementVisible';
+import { useShouldAnimate } from './engine-room/useShouldAnimate';
 import {
   emptyState,
   healthDot,
@@ -31,20 +29,32 @@ import {
   roomShell,
   roomStage,
   roomZone,
-} from "./engine-room/styles";
+} from './engine-room/styles';
 
-const sizing = css({ flex: "1" });
+const sizing = css({ flex: '1' });
 
 // The human-gated lifecycle phases (T12–T18): a landing beat is in flight and waiting on a person.
 // Their phase chip pulses (gated) so the room reads as a machine being synced / landed / retired.
 const LIFECYCLE_PHASES = new Set([
-  "sync-needed",
-  "closeout-pending",
-  "commit-approval-pending",
-  "integration-pending",
-  "integration-blocked",
-  "cleanup-pending",
+  'sync-needed',
+  'closeout-pending',
+  'commit-approval-pending',
+  'integration-pending',
+  'integration-blocked',
+  'cleanup-pending',
 ]);
+
+function PhaseChip({ node, pulse }: { node: EngineProcessNode; pulse: boolean }) {
+  return (
+    <motion.span
+      className={phaseChip({ health: node.health })}
+      animate={pulse ? { opacity: [1, 0.5, 1] } : { opacity: 1 }}
+      transition={pulse ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : { duration: 0 }}
+    >
+      {node.phase}
+    </motion.span>
+  );
+}
 
 // §4.2 header: the selected enclosure's identity + health + phase + next action, plus the
 // master-caution mirror. Slice 5f: the phase chip pulses while a human-gated lifecycle beat
@@ -52,7 +62,7 @@ const LIFECYCLE_PHASES = new Set([
 function EngineRoomHeader({ node }: { node: EngineProcessNode }) {
   const animate = useShouldAnimate();
   const queue = useDashboard(selectQueue);
-  const sev = queue[0]?.severity ?? "clear";
+  const sev = queue[0]?.severity ?? 'clear';
   const phaseActive = LIFECYCLE_PHASES.has(node.phase);
   // Stilled while the room's cockpit layer is display:none (kept mounted): an infinite Motion
   // pulse on a hidden subtree would keep the frameloop + per-frame style writes alive for nothing.
@@ -61,20 +71,24 @@ function EngineRoomHeader({ node }: { node: EngineProcessNode }) {
   const pulse = animate && phaseActive && visible;
   const label = node.leafId || node.taskName;
   return (
-    <div ref={headerRef} className={roomHeader} data-testid="engine-room-header" data-phase-active={phaseActive}>
+    <div
+      ref={headerRef}
+      className={roomHeader}
+      data-testid="engine-room-header"
+      data-phase-active={phaseActive}
+    >
       <span className={roomHeaderName}>{label}</span>
       <span className={roomHeaderMeta}>
         <span className={healthDot({ health: node.health })} aria-hidden="true" />
         <span>{node.health}</span>
-        <motion.span
-          className={phaseChip({ health: node.health })}
-          animate={pulse ? { opacity: [1, 0.5, 1] } : { opacity: 1 }}
-          transition={pulse ? { duration: 1.4, repeat: Infinity, ease: "easeInOut" } : { duration: 0 }}
-        >
-          {node.phase}
-        </motion.span>
+        <PhaseChip node={node} pulse={pulse} />
         {node.leafId ? <span>{node.taskName}</span> : null}
         <span>{node.repoName}</span>
+        <BoundTaskStatus
+          enclosure={node.enclosure}
+          active={visible}
+          testid="engine-room-task-status"
+        />
       </span>
       {node.nextAction ? <span className={roomHeaderNext}>→ {node.nextAction}</span> : null}
       <span className={roomHeaderSpacer} />
@@ -105,7 +119,6 @@ function EngineRoomImpl() {
     (state) => state.analytics?.ledgers ?? EMPTY_LEDGERS,
     stableEquals,
   );
-  const lifecycles = useDashboard((state) => state.lifecycles);
   // store generation — bumped by reset() (dev-bench scenario switch). Keying the canvas by it forces a clean
   // remount across a switch so a previous mode's exiting overlay can't orphan; constant (0) in production.
   const gen = useDashboard((state) => state.gen);
@@ -114,14 +127,9 @@ function EngineRoomImpl() {
   // The model is a pure join of the two slices — rebuild only when one of them actually changes,
   // not on every render. Keyed on the identity-stable records/slices (mergeKeyed preserves the
   // records; the stableEquals selectors above preserve the slices); Object.values allocates inside.
-  const model = useMemo(
-    () =>
-      buildEngineRoomModel(engineProcesses, Object.values(lifecycles)),
-    [engineProcesses, lifecycles],
-  );
+  const model = useMemo(() => buildEngineRoomModel(engineProcesses), [engineProcesses]);
   const selected =
-    model.processes.find((view) => view.node.worktreeGroup === selectedGroup) ??
-    model.processes[0];
+    model.processes.find((view) => view.node.worktreeGroup === selectedGroup) ?? model.processes[0];
   // the OFFICIAL coupler popover reads the repo's main ledger (5h); the worktree coupler reads node.ledgerRows
   const officialLedger = selected
     ? ledgers.find((ledger) => ledger.repository === selected.node.repoName)
@@ -146,11 +154,7 @@ function EngineRoomImpl() {
             onSelect={setSelectedGroup}
           />
           <div className={roomStage} data-testid="pod-stage">
-            <EnclosureProcessMap
-              key={gen}
-              node={selected.node}
-              officialLedger={officialLedger}
-            />
+            <EnclosureProcessMap key={gen} node={selected.node} officialLedger={officialLedger} />
           </div>
           <div className={roomZone} data-testid="engine-room-diagnostics">
             <BootTimeline node={selected.node} />
@@ -164,7 +168,7 @@ function EngineRoomImpl() {
   return (
     <Panel
       testid="engine-room"
-      title={`Engine room · ${model.processes.length} ${model.processes.length === 1 ? "enclosure" : "enclosures"}`}
+      title={`Engine room · ${model.processes.length} ${model.processes.length === 1 ? 'enclosure' : 'enclosures'}`}
       className={sizing}
       fill
     >

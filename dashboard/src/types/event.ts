@@ -14,9 +14,8 @@ export interface ObserverEvent {
   trust: Trust;
   actor: Actor;
   data?: Record<string, unknown>;
-  lifecycleId?: string;
+  scopeKey?: string;
   enclosure?: string;
   repoId?: string;
-  sessionId?: string;
   spanId?: string;
 }

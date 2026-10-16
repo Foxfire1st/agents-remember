@@ -156,8 +156,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     bind_worktree_services(
         build_default_worktree_services(leaf_agent_archive=LeafAgentArchive(config))
     )
-    # One ambient lifecycle per server process; the _tool_payload choke point
-    # tags tool calls onto it once a lifecycle is started.
+    # Initialize the process's application services before registering tools.
     server_startup.initialize_mcp_application(config)
     _complete_fastmcp_settings()
     server = AgentsRememberMCP("Agents Remember", instructions=launched_server_instructions())

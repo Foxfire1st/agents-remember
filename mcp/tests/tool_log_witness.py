@@ -40,14 +40,6 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.tool_answer_log import ENCLOSURE_LOGS_DIRNAME
-from agents_remember.observer import (
-    AmbientLifecycle,
-    EventStore,
-    install_ambient,
-    new_ulid,
-    observer_root,
-)
-from agents_remember.observer.ambient import ambient, reset_ambient
 from agents_remember.worktrees.worktree_contract import load_contract
 from tool_entry_point_world import REPO, EntryPointWorld
 
@@ -141,19 +133,6 @@ def _bridge_derived_layout(world: EntryPointWorld) -> None:
     link = world.root / "repo-a"
     if not link.exists():
         link.symlink_to(world.code, target_is_directory=True)
-
-
-def _promote_ambient(world: EntryPointWorld) -> None:
-    """Adopt one enclosure contract's lifecycle as the ambient (worker)."""
-    reset_ambient()
-    amb = ambient()
-    if amb is None:
-        installed = AmbientLifecycle(
-            EventStore(observer_root(world.server._agents_remember_config))
-        )
-        install_ambient(installed)
-        amb = installed
-    amb.attach(new_ulid(), enclosure=str(world.contract))
 
 
 def _checks_destinations(
@@ -287,7 +266,6 @@ def _witness_abandon_world() -> dict[str, Any]:
         evidence["enclosure_group"] = group.as_posix()
         evidence["enclosure_logs_made_with_enclosure"] = enclosure_logs.is_dir()
 
-        _promote_ambient(world)
         evidence["before"] = {
             "at": _utc_now(),
             "enclosure_logs": _snapshot(enclosure_logs),
@@ -316,7 +294,6 @@ def _witness_abandon_world() -> dict[str, Any]:
             "worker",
         )
         # The controller plane has no enclosure binding: its calls log root.
-        reset_ambient()
         manager_refs = {
             "AR_SPRINT_REF": {"repository": REPO, "path": "sprint/task.json"},
             "AR_MASTER_REF": {"repository": REPO, "path": "m/task.json"},
@@ -385,7 +362,6 @@ def _witness_abandon_world() -> dict[str, Any]:
             "memory": _git_state(world.memory),
         }
     finally:
-        reset_ambient()
         world.close()
     return evidence
 
@@ -488,7 +464,6 @@ def _witness_cleanup_world() -> dict[str, Any]:
             "memory": _git_state(world.memory),
         }
     finally:
-        reset_ambient()
         world.close()
     return evidence
 

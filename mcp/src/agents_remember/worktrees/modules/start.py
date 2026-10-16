@@ -17,7 +17,6 @@ from agents_remember.kernel.memory_mode import (
     is_removed_memory_mode,
     memory_mode_refusal_fields,
 )
-from agents_remember.tasks.store import write_task_docs
 from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees.activation.atomic_series_activation import (
     atomic_series_status_projection,
@@ -98,14 +97,14 @@ from agents_remember.worktrees.start_progress import (
     clear_start_progress,
     write_start_progress,
 )
-from agents_remember.worktrees.task_fact_publication import (
-    contract_projection_scopes,
-    publish_task_fact_mutation,
+from agents_remember.worktrees.start_task_publication import (
+    publish_start_task_facts,
+)
+from agents_remember.worktrees.start_task_publication import (
+    task_start_authority_refusal as _task_start_authority_refusal,
 )
 from agents_remember.worktrees.task_leaf_binding import (
     TaskLeafBindingError,
-    plan_current_leaf_enclosure_registration,
-    require_current_leaf_enclosure_binding,
     require_current_start_task_binding,
 )
 from agents_remember.worktrees.task_resolver import (
@@ -249,7 +248,7 @@ def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
     try:
-        _publish_leaf_task_enclosure_binding(contract, args)
+        publish_start_task_facts(contract, dry_run=args.dry_run, started=False)
     except TaskLeafBindingError as error:
         return _task_start_authority_refusal(error)
     return WorktreeCommandResult(
@@ -603,7 +602,7 @@ def _active_existing_contract_result(
         assert lineage is not None
         return WorktreeCommandResult(2, lineage_block_payload(lineage))
     try:
-        _publish_leaf_task_enclosure_binding(existing, args)
+        publish_start_task_facts(existing, dry_run=args.dry_run)
     except TaskLeafBindingError as error:
         return _task_start_authority_refusal(error)
     if args.retry_provider_setup:
@@ -716,7 +715,7 @@ def _create_start_enclosure(
         return prepared
     contract = prepared.contract
     try:
-        projection_effects = _publish_leaf_task_enclosure_binding(contract, args)
+        projection_effects = publish_start_task_facts(contract, dry_run=args.dry_run)
     except TaskLeafBindingError as error:
         return _task_start_authority_refusal(error)
     provider_state = run_or_launch_provider_setup(
@@ -920,101 +919,6 @@ def _restartable_start_predecessor(
         return None
     existing = load_contract(planned_contract.contract_path)
     return existing if existing.cleanup in {"abandoned", "reopened"} else None
-
-
-def _task_start_authority_refusal(error: TaskLeafBindingError) -> WorktreeCommandResult:
-    next_action = "re-read-task-authority"
-    if error.status.startswith("task-enclosure-binding"):
-        next_action = "repair-task-enclosure-binding"
-    return WorktreeCommandResult(
-        2,
-        {
-            "state": error.status,
-            "status": error.status,
-            "summary": error.detail,
-            "detail": error.detail,
-            **error.facts,
-            # MIK-R111 rule 2: the recovery is a file read or a repair the
-            # prose names, not a task_doc read call (removed). No nextTool.
-            "nextAction": next_action,
-        },
-    )
-
-
-def _publish_leaf_task_enclosure_binding(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-) -> list[dict[str, object]]:
-    """Publish and read back one exact leaf/task/enclosure binding.
-
-    Starts and supported reattachments share this task-first writer.  The contract
-    is the address authority; the canonical parent row selects the JSON document.
-    An exact existing binding is a no-op, which makes retries idempotent.
-    """
-
-    if args.dry_run or contract.kind != "leaf" or not contract.leaf_id:
-        return []
-    prepared: dict[str, object] = {}
-
-    def validate() -> None:
-        plan = plan_current_leaf_enclosure_registration(
-            contract.coordination_root,
-            contract.repo_name,
-            contract.task_root,
-            contract.leaf_id,
-            contract.contract_path,
-            lifecycle_id=contract.lifecycle_id or None,
-            task_name=contract.task_name,
-        )
-        if plan.blockers:
-            raise TaskLeafBindingError(
-                "leaf enclosure registration would republish terminal status with unresolved "
-                f"work units: {[blocker.model_dump() for blocker in plan.blockers]!r}",
-                status="task-enclosure-binding-terminal-blocked",
-                facts={
-                    "leafId": plan.leaf_id,
-                    "taskName": contract.task_name,
-                    "taskDocument": plan.doc_path.as_posix(),
-                    "contractPath": plan.enclosure_path,
-                    "recoveryOperation": (
-                        "resolve the task document's unfinished work units, then re-run "
-                        "worktree_start/worktree_attach"
-                    ),
-                },
-            )
-        prepared["plan"] = plan
-
-    def projection_scopes() -> tuple:
-        plan = prepared.get("plan")
-        candidate = getattr(plan, "candidate", None)
-        return contract_projection_scopes(contract, (candidate,)) if candidate is not None else ()
-
-    def publication():
-        plan = prepared.get("plan")
-        candidate = getattr(plan, "candidate", None)
-        return write_task_docs(contract.task_root, [candidate]) if candidate is not None else []
-
-    validate()
-    plan = prepared["plan"]
-    if getattr(plan, "candidate", None) is not None:
-        published = publish_task_fact_mutation(
-            contract.coordination_root,
-            validate=validate,
-            projection_scopes=projection_scopes,
-            publication=publication,
-        )
-        effects = [effect.model_dump(by_alias=True) for effect in published.projection_effects]
-    else:
-        effects = []
-    require_current_leaf_enclosure_binding(
-        contract.coordination_root,
-        contract.repo_name,
-        contract.task_root,
-        contract.leaf_id,
-        contract.contract_path,
-        task_name=contract.task_name,
-    )
-    return effects
 
 
 def _location_refusal(error: LifecycleOperationLocationError) -> WorktreeCommandResult:

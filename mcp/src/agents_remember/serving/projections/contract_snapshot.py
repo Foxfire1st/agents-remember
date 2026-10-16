@@ -9,8 +9,7 @@ pass ONCE at tick start and hands the result to all three readers as an immutabl
 ``mtime_ns`` + size + ``ctime_ns``) so an unchanged contract file is not re-read
 or re-parsed on later ticks at all.
 
-Concurrency discipline (mirrors ``projection_store._lifecycle_log_cache``): the
-cache is mutated only inside ``build``, which runs on the projection worker
+Concurrency discipline: the cache is mutated only inside ``build``, which runs on the projection worker
 thread -- the projector serializes ticks by awaiting each ``asyncio.to_thread``
 call, so builds never overlap. The published :class:`ContractSnapshot` is an
 immutable value (read-only mapping of frozen contracts) that may be handed to any

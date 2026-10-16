@@ -30,7 +30,6 @@ from agents_remember.kernel.agentic_settings import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.server import create_server
-from agents_remember.observer.ambient import reset_ambient
 from agents_remember.worktrees.services import reset_worktree_services
 from mcp.shared.memory import create_connected_server_and_client_session
 
@@ -67,7 +66,6 @@ def call_registered_tool(
     try:
         return anyio.run(call)
     finally:
-        reset_ambient()
         reset_worktree_services()
 
 

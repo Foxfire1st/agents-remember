@@ -1,48 +1,23 @@
-"""Application service for lifecycle next-step decisions (task 27).
-
-One pure function maps the lifecycle a process adopted to the single next move,
-attached to every tool response at the ``mcp.tools.base._tool_payload`` choke
-point. A lifecycle exists from ``worktree_start`` or ``worktree_attach`` on, with
-its worktree contract: the hint delegates to the ``guidance.lifecycle_guidance``
-state machine for the operational chain and overlays a turn-end hint at the
-decision points, so the agent stops (presents the packet in prose and ends the
-turn) rather than barreling past one.
-
-The engine stays pure: ``compute_next_step`` receives already-resolved inputs
-(state, the loaded contract or ``None``, the just-completed tool name, and the
-precomputed guidance dict). All I/O -- loading the contract and running guidance
--- lives at the edge in ``next_step_for``, which is exception-contained because
-the ``_tool_payload`` emission path must never raise into a tool call.
-"""
+"""Landing next-operation guidance from the response's exact worktree contract."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from agents_remember.models.base import NextStep
 from agents_remember.worktrees.modules.guidance import lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
-if TYPE_CHECKING:
-    from agents_remember.observer.ambient import AmbientLifecycle
-    from agents_remember.observer.lifecycle_state import LifecycleState
-
 
 def compute_next_step(
-    state: LifecycleState | None,
     contract: WorktreeContract | None,
     tool_name: str,
     *,
     guidance: dict[str, Any] | None = None,
 ) -> NextStep | None:
-    """Pure: map the resolved lifecycle state to the single next move (or ``None``).
-
-    ``guidance`` is ``lifecycle_guidance(contract)`` precomputed at the edge. Returns
-    ``None`` outside any (non-terminal) lifecycle and for a lifecycle whose contract
-    could not be loaded, so such a response stays unchanged.
-    """
-    if state is None or state.is_terminal or contract is None:
+    """Map the resolved contract to its next landing move, preserving stop gates."""
+    if contract is None:
         return None
     return _linear_half_step(tool_name, contract, guidance)
 
@@ -118,26 +93,18 @@ def _opt_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def next_step_for(amb: AmbientLifecycle, tool_name: str) -> NextStep | None:
-    """Edge: resolve the active state + contract + guidance, then compute the hint.
+def next_step_for(contract_path: str | None, tool_name: str) -> NextStep | None:
+    """Resolve the response's own contract and retain its landing approval hints."""
+    contract = _load_contract(contract_path)
+    return compute_next_step(contract, tool_name, guidance=_guidance_for(contract))
 
-    Returns the MODEL, not a dump of it. The hint is a declared field of the response
-    envelope (``models.base.ResponseModel.nextStep``), so serializing it is the choke
-    point's single ``model_dump`` -- this edge used to dump it here, which is what made
-    the hint a key written into an already-dumped, already-token-counted dict.
 
-    Exception-contained: the ``_tool_payload`` emission path must never raise into
-    a tool call, so any failure yields no hint rather than breaking the response.
-    A missing or torn contract degrades to ``contract=None`` (no hint); a guidance
-    failure degrades to ``guidance=None`` (the turn-end overlay still fires).
-    """
-    try:
-        state = amb.current
-        contract = _load_contract(state) if state is not None else None
-        guidance = _guidance_for(contract)
-        return compute_next_step(state, contract, tool_name, guidance=guidance)
-    except Exception:
+def approval_stop_for(contract_path: str | None, tool_name: str) -> NextStep | None:
+    """Preserve the two preview stops from this operation's exact argument."""
+    if tool_name not in {"worktree_closeout_preview", "worktree_integrate"}:
         return None
+    contract = _load_contract(contract_path)
+    return _turn_end_after(tool_name, contract) if contract is not None else None
 
 
 def _guidance_for(contract: WorktreeContract | None) -> dict[str, Any] | None:
@@ -153,17 +120,11 @@ def _guidance_for(contract: WorktreeContract | None) -> dict[str, Any] | None:
         return None
 
 
-def _load_contract(state: LifecycleState) -> WorktreeContract | None:
-    """Load the worktree contract from the adopted lifecycle's enclosure path.
-
-    Look before leaping: a contract file that is not on disk yields ``None`` (no
-    hint) without raising. The narrow guard then covers only the genuinely
-    unexpected: a contract that exists but is torn/unparseable (e.g. a racing
-    closeout rewrite).
-    """
-    if not state.enclosure:
+def _load_contract(contract_path: str | None) -> WorktreeContract | None:
+    """A missing or concurrently rewritten contract yields no derived hint."""
+    if not contract_path:
         return None
-    path = Path(state.enclosure)
+    path = Path(contract_path)
     if not path.is_file():
         return None
     try:

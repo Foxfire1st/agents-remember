@@ -1,8 +1,7 @@
 """Log/snapshot reading and atomic projection writes -- the reducer's I/O edge.
 
-``read_lifecycle_logs`` enumerates the per-lifecycle truth; ``project_and_write``
-ties reading, the pure reduction, and the write together (the entry the serving
-layer drives on a tick). Projections are published through
+``project_and_write`` ties domain-invalidated source reads, pure reduction and
+publication together (the entry the serving layer drives on a tick). Projections are published through
 :mod:`agents_remember.kernel.atomic_write` so a polling dashboard reader never sees a
 half-written ``latest-state.json`` -- stronger than the plain ``write_text`` of the
 ``setup_progress`` precedent, which a concurrent reader can tear.
@@ -20,9 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from agents_remember.controlplane.attention_dismissals import AttentionDismissalStore
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.observer.lifecycle_state import TERMINAL_STATES
 from agents_remember.observer.projection import (
     TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
     LedgerNode,
@@ -50,9 +47,6 @@ from agents_remember.serving.projections.snapshots import (
     read_ledger,
     read_route_coverage,
     read_sidecar_staleness,
-)
-from agents_remember.serving.projections.snapshots_impl._lifecycle_logs import (
-    read_lifecycle_logs,
 )
 
 if TYPE_CHECKING:
@@ -94,8 +88,7 @@ _repo_surface_cache: dict[tuple[tuple[str, str, str], ...], _RepoSurfaceCacheEnt
 # own walk + load_contract pass = 3x per tick). The cache reuses a parsed contract while its
 # (mtime_ns, size, ctime_ns) is unchanged and prunes to the live enumeration each build. Mutated only on the
 # projection worker thread (ticks are serialized by the projector's awaited asyncio.to_thread),
-# matching the module-level cache discipline of the lifecycle-log cache
-# in snapshots_impl._lifecycle_logs.
+# matching the serialized projection input snapshot.
 _contract_snapshot_cache = ContractSnapshotCache()
 
 
@@ -179,16 +172,13 @@ def project_and_write(
     inputs = state.read(
         config,
         ProjectionReaders(
-            lifecycle=read_lifecycle_logs,
             repo_surfaces=_gather_repo_surfaces_cached,
             landing_state=tick.landing_state,
         ),
         observer_root=root,
         pass_=RefreshPass(now=moment, refresh=refresh or ProjectionRefresh.full()),
     )
-    attention_store = AttentionDismissalStore(root)
     projection = project_workspace(
-        inputs.lifecycle_logs,
         structure=WorkspaceStructure(
             enclosures=inputs.enclosures,
             providers=inputs.providers,
@@ -206,23 +196,14 @@ def project_and_write(
             route_coverage=inputs.route_coverage,
             tool_reports=inputs.tool_reports,
             ledgers=inputs.ledgers,
-            task_documents=inputs.task_documents,
-            series=inputs.series,
+            task_sources=inputs.task_sources,
+            host_activity=inputs.host_activity,
             closeout_queues=inputs.closeout_queues,
             engine_process_facts=inputs.engine_process_facts,
             engine_start_progress=inputs.engine_start_progress,
             attention_dismissals=inputs.attention_dismissals,
         ),
     )
-    attention_store.prune_lifecycles(
-        {
-            lifecycle.id
-            for lifecycle in projection.lifecycles
-            if lifecycle.state not in TERMINAL_STATES
-        }
-    )
-    # The prune notes its own write at its own boundary (or nothing when it wrote
-    # nothing): no after-the-fact certification here (MIK-R81 rule 3, F07).
     _warn_if_task_documents_payload_over_budget(projection, now=moment)
     if previous_stable is None or stable_projection_state(projection) != previous_stable:
         write_projection(root, projection)
@@ -235,10 +216,12 @@ def _warn_if_task_documents_payload_over_budget(
     """Flag (rate-limited) when the broadcast serialises a body-heavy task-doc payload.
 
     Returns the measured body-byte cost so callers/tests can assert on it. This is observability only --
-    no truncation, no contract change -- surfacing the unbounded ``analytics.taskDocuments`` payload that
-    a planned windowing follow-up will bound, so the growth is visible in logs instead of silent.
+    no truncation or contract change. Full document bodies are read on demand;
+    this measures only the text previews retained in native task summaries.
     """
-    payload_bytes = task_documents_body_bytes(projection.analytics.taskDocuments)
+    payload_bytes = task_documents_body_bytes(
+        [task.summary for task in projection.tasks if task.summary is not None]
+    )
     if payload_bytes <= TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES:
         return payload_bytes
     last = _last_task_payload_warn.get("at")
@@ -248,12 +231,10 @@ def _warn_if_task_documents_payload_over_budget(
             return payload_bytes
     _last_task_payload_warn["at"] = now
     logger.warning(
-        "analytics.taskDocuments broadcast body payload %d bytes exceeds budget %d across %d docs; "
-        "task-doc bodies are serialised into every projection tick -- F6 windowing (bodies on-demand) "
-        "is the follow-up that bounds this",
+        "task summary preview payload %d bytes exceeds budget %d across %d documents",
         payload_bytes,
         TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
-        len(projection.analytics.taskDocuments),
+        len([task.summary for task in projection.tasks if task.summary is not None]),
     )
     return payload_bytes
 

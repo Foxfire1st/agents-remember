@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalRecord
+from agents_remember.observer.host_activity import HostActivitySnapshot
 from agents_remember.observer.projection import (
     CloseoutQueueNode,
     DriftSnapshotNode,
@@ -20,13 +21,12 @@ from agents_remember.observer.projection import (
     LedgerNode,
     ProviderNode,
     RouteCoverageNode,
-    SeriesNode,
     SetupProgressNode,
     SetupSummaryNode,
     SidecarStaleNode,
-    TaskDocNode,
     ToolReportNode,
 )
+from agents_remember.observer.task_entries import TaskDocumentSource
 
 
 @dataclass(frozen=True)
@@ -79,8 +79,8 @@ class AnalyticalInputs:
     route_coverage: list[RouteCoverageNode] = field(default_factory=list)
     tool_reports: list[ToolReportNode] = field(default_factory=list)
     ledgers: list[LedgerNode] = field(default_factory=list)
-    task_documents: list[TaskDocNode] = field(default_factory=list)
-    series: list[SeriesNode] = field(default_factory=list)
+    task_sources: list[TaskDocumentSource] = field(default_factory=list)
+    host_activity: HostActivitySnapshot = field(default_factory=HostActivitySnapshot)
     closeout_queues: list[CloseoutQueueNode] = field(default_factory=list)
     engine_process_facts: list[EngineProcessFacts] = field(default_factory=list)
     engine_start_progress: list[dict[str, Any]] = field(default_factory=list)

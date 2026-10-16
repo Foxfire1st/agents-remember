@@ -1,6 +1,6 @@
 // Same-origin client for the L3 read-only change-set API (mcp/.../serving/changeset.py).
 // Mirrors data/files.ts: a `base` arg (same-origin default), typed results, a thrown
-// FilesApiError, and NO store mutation — the Change-Set Viewer owns its component state.
+// FilesApiError. The store retains bounded conditional read results; the viewer owns selection.
 // The thrown error is a `ReviewTransportError` (which IS a `FilesApiError`, so `code`/`httpStatus`
 // catchers are unaffected) and it carries the route's own refusal, reason included — see
 // `getChangeSetJson` below.
@@ -10,6 +10,7 @@
 //   /api/changeset/master?repo&master              -> the master's accumulated change-set (dedup by path, sum counts)
 import { qs } from './files';
 import { type ReviewFailure, ReviewTransportError, reviewFailureToken } from './reviewTransport';
+import { dashboardStore } from './store';
 
 // One changed file: insertion/deletion counts (null for binary) + the git status letter
 // (A/M/D/R). `hasSidecar` (code files) drives the L4 code->sidecar split affordance.
@@ -145,10 +146,14 @@ function changeSetFailure(response: Response, body: ChangeSetRefusalBody | null)
 // (`data/reviewTransport.ts`, same doctrine and the same `ReviewFailure`/token vocabulary), and the
 // thrown error stays a `FilesApiError` with the same `code`/`httpStatus`/message it always had.
 async function getChangeSetJson<T>(url: string): Promise<T> {
-  let response: Response;
   try {
-    response = await fetch(url);
+    const resources = dashboardStore.getState();
+    const cache = url.includes('/api/changeset/file-diff?')
+      ? resources.changeSetFiles
+      : resources.changeSets;
+    return await cache.load<T>(url, decodeChangeSetJson);
   } catch (cause) {
+    if (cause instanceof ReviewTransportError) throw cause;
     throw new ReviewTransportError({
       token: 'network',
       code: 'network',
@@ -157,13 +162,46 @@ async function getChangeSetJson<T>(url: string): Promise<T> {
       }`,
     });
   }
+}
+
+async function decodeChangeSetJson<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => null)) as (ChangeSetRefusalBody & T) | null;
   if (response.ok && body !== null) return body as T;
   throw new ReviewTransportError(changeSetFailure(response, body));
 }
 
+export interface ChangeSetAddress {
+  repo: string;
+  scope?: string;
+  master?: string;
+  leaf?: string;
+  mode?: LeafMode;
+  generation?: MasterNetPins;
+  comparison?: number;
+}
+
+function listUrl(target: ChangeSetAddress, base = ''): string {
+  const { repo, scope, master, leaf, mode, generation, comparison } = target;
+  if (leaf || comparison !== undefined) {
+    const params: Record<string, string> = { repo, master: master ?? '', leaf: leaf ?? '' };
+    if (comparison === undefined) params.mode = mode ?? 'committed';
+    else params.comparison = String(comparison);
+    return `${base}/api/changeset/task?${qs(params)}`;
+  }
+  if (!master) return `${base}/api/changeset/task?${qs({ repo, scope: scope ?? '' })}`;
+  return masterUrl(repo, master, { includeLeaves: true, pins: generation }, base);
+}
+
+export const peekChangeSet = (
+  target: ChangeSetAddress,
+): TaskChangeset | MasterChangeset | undefined =>
+  dashboardStore.getState().changeSets.peek(listUrl(target));
+
+export const loadChangeSet = (target: ChangeSetAddress): Promise<TaskChangeset | MasterChangeset> =>
+  getChangeSetJson(listUrl(target));
+
 export const taskChangeset = (repo: string, scope: string, base = ''): Promise<TaskChangeset> =>
-  getChangeSetJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, scope })}`);
+  getChangeSetJson<TaskChangeset>(listUrl({ repo, scope }, base));
 
 export const fileDiff = (
   repo: string,
@@ -180,6 +218,15 @@ export const masterChangeset = (
   options: MasterChangesetOptions = {},
   base = '',
 ): Promise<MasterChangeset> => {
+  return getChangeSetJson<MasterChangeset>(masterUrl(repo, master, options, base));
+};
+
+function masterUrl(
+  repo: string,
+  master: string,
+  options: MasterChangesetOptions,
+  base: string,
+): string {
   const params: Record<string, string> = { repo, master };
   if (options.includeLeaves !== undefined) {
     params.includeLeaves = String(options.includeLeaves);
@@ -189,8 +236,8 @@ export const masterChangeset = (
   for (const [key, value] of Object.entries(options.pins ?? {})) {
     if (value) params[key] = value;
   }
-  return getChangeSetJson<MasterChangeset>(`${base}/api/changeset/master?${qs(params)}`);
-};
+  return `${base}/api/changeset/master?${qs(params)}`;
+}
 
 // `masterFileDiff` — BEFORE (master base) + AFTER (selected result) content for one file in the
 // net series diff. Same /api/changeset/file-diff route, with `master` instead of an enclosure
@@ -226,7 +273,7 @@ export const leafChangeset = (
   mode: LeafMode,
   base = '',
 ): Promise<TaskChangeset> =>
-  getChangeSetJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, master, leaf, mode })}`);
+  getChangeSetJson<TaskChangeset>(listUrl({ repo, master, leaf, mode }, base));
 
 // `leafFileDiff` — BEFORE + AFTER for one file in a leaf's committed/working change-set. Same
 // /api/changeset/file-diff route, with `leaf` + `mode` (+ the qualifying `master`).
@@ -244,16 +291,6 @@ export const leafFileDiff = (
   );
 
 // Immutable trees of the review itself, including committed and uncommitted candidate content.
-export const comparisonChangeset = (
-  repo: string,
-  master: string,
-  leaf: string,
-  comparison: number,
-): Promise<TaskChangeset> =>
-  getChangeSetJson<TaskChangeset>(
-    `/api/changeset/task?${qs({ repo, master, leaf, comparison: String(comparison) })}`,
-  );
-
 export const comparisonFileDiff = (
   repo: string,
   master: string,

@@ -492,7 +492,10 @@ def _preview_reopen_transition(
         None,
         [
             effect.model_dump(by_alias=True)
-            for effect in preview_contract_task_facts(contract, tuple(documents))
+            for effect in preview_contract_task_facts(
+                contract,
+                tuple((json_path_for(contract.task_root, doc), doc) for doc in documents),
+            )
         ],
     )
 
@@ -526,7 +529,13 @@ class _ReopenPublication:
         self.doc_reset = doc_reset
 
     def projection_scopes(self) -> tuple:
-        return contract_projection_scopes(self.contract, self.prepared_documents())
+        return contract_projection_scopes(
+            self.contract,
+            tuple(
+                (json_path_for(self.contract.task_root, doc), doc)
+                for doc in self.prepared_documents()
+            ),
+        )
 
     def publish(self) -> tuple[str, dict | None]:
         docs = self.prepared_documents()

@@ -17,9 +17,9 @@
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { dashboardStore } from '../../data/store';
+import { dashboardStore, useDashboard } from '../../data/store';
 import { DocChangeSetBar } from './changeSetBar';
-import { enclosure, seedProjection } from './test-utils';
+import { enclosure, seedProjection, taskEntry } from './test-utils';
 
 const REPO = 'agents-remember';
 const MASTER = '260921_complete-code-and-intent-review';
@@ -73,12 +73,7 @@ const COUNTERS = {
 };
 
 const respond = (status: number, body: unknown) =>
-  ({
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: '',
-    json: async () => body,
-  }) as unknown as Response;
+  new Response(JSON.stringify(body), { status: status });
 
 // Answer the summary route with `summary` (or with each of `summaries` in turn); every other route is
 // the change-set counters.
@@ -99,28 +94,45 @@ function serve(summaries: Array<{ status: number; body: unknown }>) {
 const urlsOf = (fetchFn: ReturnType<typeof vi.fn>, fragment: string) =>
   fetchFn.mock.calls.map((call) => String(call[0])).filter((url) => url.includes(fragment));
 
+const leafEntry = (leaf = LEAF, worktrees: ReturnType<typeof enclosure>[] = []) =>
+  taskEntry({
+    id: leaf,
+    reference: { repository: REPO, path: `${MASTER}/${leaf}.json` },
+    worktrees,
+  });
+
 function liveLeaf(over: Partial<ReturnType<typeof enclosure>> = {}) {
   seedProjection({
-    enclosures: [
-      enclosure({
-        enclosure: '/contracts/l16',
-        lifecycleId: 'L16',
-        leafId: LEAF,
-        repoName: REPO,
-        taskName: MASTER,
-        worktreeGroup: '/worktrees/l16-ar',
-        ...over,
-      }),
+    tasks: [
+      leafEntry(LEAF, [
+        enclosure({
+          enclosure: '/contracts/l16',
+          leafId: LEAF,
+          repoName: REPO,
+          taskName: MASTER,
+          worktreeGroup: '/worktrees/l16-ar',
+          ...over,
+        }),
+      ]),
     ],
     activeWorktreeGroups: ['l16-ar'],
   });
 }
 
+function LeafBar({
+  leaf,
+  onOpen,
+}: {
+  leaf: string;
+  onOpen: (target: import('../changeset/ChangeSetViewer').ChangeSetTarget) => void;
+}) {
+  const entry = useDashboard((state) => state.tasks[`${REPO}/${MASTER}/${leaf}.json`]);
+  return <DocChangeSetBar kind="leaf" entry={entry} onOpen={onOpen} />;
+}
+
 function mount(leaf = LEAF) {
   const onOpen = vi.fn();
-  const view = render(
-    <DocChangeSetBar kind="leaf" repo={REPO} master={MASTER} leaf={leaf} onOpen={onOpen} />,
-  );
+  const view = render(<LeafBar leaf={leaf} onOpen={onOpen} />);
   return { view, onOpen };
 }
 
@@ -231,6 +243,51 @@ describe("the Intent review entry's own states (ICR-R16: brief, never swallowed)
 });
 
 describe('the entry re-reads only for its own comparison (ICR-R17)', () => {
+  it.each(['older first', 'newer first'])(
+    'reads new facts while an older summary is pending, resolving %s',
+    async (order) => {
+      liveLeaf();
+      const replies: Array<(response: Response) => void> = [];
+      const fetchFn = vi.fn(async (url: string) => {
+        if (!url.startsWith('/api/review/intent/summary')) return respond(200, COUNTERS);
+        return new Promise<Response>((resolve) => replies.push(resolve));
+      });
+      vi.stubGlobal('fetch', fetchFn);
+      const { view } = mount();
+      const entry = await view.findByTestId('open-intent-review');
+      await waitFor(() => expect(replies).toHaveLength(1));
+
+      act(() => {
+        dashboardStore.getState().applyDelta(
+          'task',
+          leafEntry(LEAF, [
+            enclosure({
+              enclosure: '/contracts/l16',
+              leafId: LEAF,
+              repoName: REPO,
+              taskName: MASTER,
+              worktreeGroup: '/worktrees/l16-ar',
+              closeoutStatus: 'completed',
+            }),
+          ]),
+        );
+      });
+      await waitFor(() => expect(replies).toHaveLength(2));
+      if (order === 'older first') {
+        await act(async () => replies[0](respond(200, counted(1, 0))));
+        expect(entry.getAttribute('data-intent-state')).toBe('loading');
+        expect(entry.textContent).not.toContain('+1');
+      }
+      await act(async () => replies[1](respond(200, counted(2, 1))));
+      await waitFor(() => expect(entry.textContent).toContain('+2 −1'));
+      if (order === 'newer first') {
+        await act(async () => replies[0](respond(200, counted(1, 0))));
+      }
+      expect(entry.textContent).toContain('+2 −1');
+      expect(urlsOf(fetchFn, '/api/review/intent/summary')).toHaveLength(2);
+    },
+  );
+
   it("ignores unrelated workspace publications and re-reads when this leaf's lifecycle moves", async () => {
     liveLeaf();
     const fetchFn = serve([
@@ -254,33 +311,37 @@ describe('the entry re-reads only for its own comparison (ICR-R17)', () => {
     // This leaf's own closeout moves: the comparison the entry opens may have changed, so it asks.
     act(() => {
       dashboardStore.getState().applyDelta(
-        'enclosure',
-        enclosure({
-          enclosure: '/contracts/l16',
-          lifecycleId: 'L16',
-          leafId: LEAF,
-          repoName: REPO,
-          taskName: MASTER,
-          worktreeGroup: '/worktrees/l16-ar',
-          closeoutStatus: 'completed',
-        }),
+        'task',
+        leafEntry(LEAF, [
+          enclosure({
+            enclosure: '/contracts/l16',
+            leafId: LEAF,
+            repoName: REPO,
+            taskName: MASTER,
+            worktreeGroup: '/worktrees/l16-ar',
+            closeoutStatus: 'completed',
+          }),
+        ]),
       );
     });
+    expect(entry.getAttribute('data-intent-state')).toBe('loading');
+    expect(entry.textContent).not.toContain('+1 −0');
     await waitFor(() => expect(urlsOf(fetchFn, '/api/review/intent/summary')).toHaveLength(2));
     await waitFor(() => expect(entry.textContent).toContain('+2 −1'));
   });
 
   it('never lets an answer for a previous leaf overwrite the leaf on screen now', async () => {
     seedProjection({
-      enclosures: ['a', 'b'].map((suffix) =>
-        enclosure({
-          enclosure: `/contracts/l17-${suffix}`,
-          lifecycleId: 'L17',
-          leafId: `260921-ICR-L17-${suffix}`,
-          repoName: REPO,
-          taskName: MASTER,
-          worktreeGroup: '/worktrees/l17-ar',
-        }),
+      tasks: ['a', 'b'].map((suffix) =>
+        leafEntry(`260921-ICR-L17-${suffix}`, [
+          enclosure({
+            enclosure: `/contracts/l17-${suffix}`,
+            leafId: `260921-ICR-L17-${suffix}`,
+            repoName: REPO,
+            taskName: MASTER,
+            worktreeGroup: '/worktrees/l17-ar',
+          }),
+        ]),
       ),
       activeWorktreeGroups: ['l17-ar'],
     });
@@ -298,15 +359,7 @@ describe('the entry re-reads only for its own comparison (ICR-R17)', () => {
       }),
     );
     const { view, onOpen } = mount('260921-ICR-L17-a');
-    view.rerender(
-      <DocChangeSetBar
-        kind="leaf"
-        repo={REPO}
-        master={MASTER}
-        leaf="260921-ICR-L17-b"
-        onOpen={onOpen}
-      />,
-    );
+    view.rerender(<LeafBar leaf="260921-ICR-L17-b" onOpen={onOpen} />);
     const entry = await view.findByTestId('open-intent-review');
     await waitFor(() => expect(entry.textContent).toContain('+1 −1'));
 

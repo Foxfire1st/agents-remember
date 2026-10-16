@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import AsyncGenerator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -14,16 +14,18 @@ from pydantic import BaseModel
 from agents_remember.observer import observer_root
 from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import ServingBuild
+from agents_remember.serving.intent_summary_cache import ReviewIntentSummaryPort
 from agents_remember.serving.knowledge_reader import KnowledgeReaderPort
+from agents_remember.serving.projections.host_activity import HostActivityReconcile
 from agents_remember.serving.projector import ProjectionReplay, Projector
 from agents_remember.serving.review import (
     KnowledgeReviewEntriesPort,
     KnowledgeReviewPort,
     ReviewSourceContentPort,
 )
-from agents_remember.serving.review_summary import ReviewIntentSummaryPort
 from agents_remember.serving.review_trees import ReviewTreesPort
 from agents_remember.serving.served_state import served_state_tail
+from agents_remember.serving.task_document_cache import TaskDocumentBodyCache
 
 # The serving app's shared logger, named after the public module so existing
 # ``assertLogs("agents_remember.serving.app", ...)`` tests keep matching.
@@ -74,27 +76,6 @@ class _ProjectionBodyCache:
 
 
 _projection_body_cache = _ProjectionBodyCache()
-
-
-def _if_none_match_matches(header: str | None, revision: str) -> bool:
-    """RFC 7232 weak comparison of an ``If-None-Match`` header against our revision.
-
-    The revision is the projector's opaque content fingerprint (boot nonce + content
-    sequence); the served ETag is its weak form ``W/"<revision>"``. Weak comparison strips
-    ``W/`` prefixes, so any listed entity-tag whose opaque value equals the revision
-    matches; ``*`` matches any current representation.
-    """
-    if header is None:
-        return False
-    for candidate in header.split(","):
-        tag = candidate.strip()
-        if tag == "*":
-            return True
-        if tag.startswith(("W/", "w/")):
-            tag = tag[2:]
-        if tag.strip('"') == revision:
-            return True
-    return False
 
 
 async def stream_events(
@@ -174,6 +155,9 @@ class ServingCollaborators:
     They are offered as one value because substituting them is one decision of the composition
     root. ``None`` on a port refuses that port's route by name.
     """
+
+    host_activity_reconcile: HostActivityReconcile | None = None
+    """The existing Paseo bridge's full-host read, bound by the CLI composition root."""
 
     knowledge_review: KnowledgeReviewPort | None = None
     """The application-tier reviewer adapter, supplied by the composition root.
@@ -262,6 +246,7 @@ class _ServingRuntime:
     # The always-on background account (MIK-R81 rule 1): the projector and every
     # background loop record their units here; the diagnostics route serves it.
     background_ledger: BackgroundLedger | None = None
+    task_bodies: TaskDocumentBodyCache = field(default_factory=TaskDocumentBodyCache)
 
     @property
     def observer_root(self) -> Path:

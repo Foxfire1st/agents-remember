@@ -21,6 +21,7 @@ from pathlib import Path
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeAbandonArguments
+from agents_remember.worktrees.abandon_task_publication import publish_abandoned_task
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
@@ -51,6 +52,7 @@ from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.state_refusals import (
     provider_setup_blocked,
     shaped_terminal_blockers,
+    task_stage_refusal,
     terminal_state_refusal,
 )
 from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
@@ -80,12 +82,12 @@ from agents_remember.worktrees.role_reports import (
     remove_group_role_folders,
 )
 from agents_remember.worktrees.services import TerminalGuard, worktree_services
+from agents_remember.worktrees.task_stage import plan_task_stage
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
     WorktreeContract,
     amend_contract,
     load_contract,
-    write_contract,
 )
 
 type TerminalItems = dict[str, dict[str, object]]
@@ -299,6 +301,10 @@ def _finish_abandon_without_remains(
             },
         )
     try:
+        try:
+            plan_task_stage(contract, "abandoned")
+        except ValueError as error:
+            return task_stage_refusal(contract, error)
         providers: dict[str, object] = worktree_services().provider_lifecycle.teardown(
             contract, dry_run=args.dry_run
         )
@@ -435,11 +441,7 @@ def _publish_abandon(
         ContractCells(cleanup="abandoned", terminal_note=terminal_note),
     )
     try:
-        citation_cache = guard.complete(
-            outcome="abandoned",
-            publish=lambda: write_contract(contract.contract_path, updated),
-            rollback_publish=lambda: write_contract(contract.contract_path, contract),
-        )
+        citation_cache, projection_effects = publish_abandoned_task(contract, updated, guard)
     except Exception as error:
         return WorktreeCommandResult(
             2,
@@ -476,6 +478,7 @@ def _publish_abandon(
             "summary": _abandon_summary(False, True),
             "providers": providers,
             "citation_source_index": citation_cache,
+            "projectionEffects": projection_effects,
             "removed_worktrees": removed_worktrees,
             "branches": branches,
             "directories": directories,

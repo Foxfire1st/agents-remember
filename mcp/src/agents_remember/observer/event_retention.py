@@ -1,17 +1,8 @@
-"""Retention policy for dashboard-served raw observer event history.
-
-The Event River is an *agent-activity* feed, not a process-liveness keepalive, so
-its history is retired by **inactivity**, per lifecycle type, rather than by a
-written ``lifecycle.ended`` event -- real sessions almost never emit one (they die
-silently). Heartbeats are liveness theater and do not count as activity here: a
-parked lifecycle that only keeps beating is still "inactive" for retention, so its
-throwaway event log can always be cleaned up regardless of lifecycle type.
-"""
+"""Bounded workspace Event River retention and cursor-safe compaction."""
 
 from __future__ import annotations
 
 import json
-import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,18 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
-from agents_remember.kernel.own_writes import OWN_WRITES
 from agents_remember.observer.store import (
-    HEARTBEAT_KIND,
     WORKSPACE_SOURCE,
     set_workspace_base_offset,
     workspace_base_offset,
     workspace_river_lock,
 )
 
-# Legacy terminal grace, kept for the explicit ``lifecycle.ended`` reader and the
-# workspace TTL below.
-LIFECYCLE_EVENT_GRACE_SECONDS = 60 * 60
+# A fresh connection replays at most the workspace river's recent hour.
 WORKSPACE_EVENT_TTL_SECONDS = 60 * 60
 WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS = 60.0
 # MIK-R114 rule 5: after every append the workspace river is never larger than
@@ -51,36 +38,13 @@ class RiverSizeBound:
     trim_to_bytes: int = WORKSPACE_EVENT_TRIM_TO_BYTES
 
 
-# Inactivity TTLs: how long a log may sit with no real (non-heartbeat) activity
-# before the dashboard retires it. Fleeting sessions and enclosure-backed
-# (promoted) lifecycles get their own knob even though they currently match.
-FLEETING_INACTIVE_TTL_SECONDS = 60 * 60
-ENCLOSURE_INACTIVE_GRACE_SECONDS = 60 * 60
-# A fresh connection replays at most this much recent history per active source,
-# so a reload never re-streams an entire long-lived log from byte zero.
-REPLAY_WINDOW_SECONDS = 60 * 60
-
-
 def initial_event_offsets(root: Path, *, now: datetime) -> dict[str, int]:
     """Starting offsets for a fresh `/api/events` connection.
 
-    Dormant lifecycle logs start at end-of-file so ancient history is never
-    replayed; active logs start at the recent retained window (not byte zero) so
-    a reload keeps useful task-local history without re-streaming the whole log.
+    The workspace source starts at its recent retained window. Its virtual
+    offset includes prior compaction so reconnects keep their cursor meaning.
     """
     offsets: dict[str, int] = {}
-    lifecycles_dir = root / "lifecycles"
-    if lifecycles_dir.is_dir():
-        cutoff = now - timedelta(seconds=REPLAY_WINDOW_SECONDS)
-        for entry in sorted(lifecycles_dir.iterdir()):
-            path = entry / "events.jsonl"
-            if not entry.is_dir() or not path.is_file():
-                continue
-            if lifecycle_is_dormant(path, now=now):
-                offsets[entry.name] = path.stat().st_size
-            else:
-                offsets[entry.name] = _first_retained_offset(path, cutoff=cutoff)
-
     workspace = root / WORKSPACE_SOURCE / "events.jsonl"
     if workspace.is_file():
         base_offset = workspace_base_offset(root)
@@ -88,75 +52,6 @@ def initial_event_offsets(root: Path, *, now: datetime) -> dict[str, int]:
             workspace, cutoff=now - timedelta(seconds=WORKSPACE_EVENT_TTL_SECONDS)
         )
     return offsets
-
-
-def prune_expired_lifecycle_event_logs(
-    root: Path,
-    *,
-    now: datetime,
-    protected_lifecycle_ids: frozenset[str] | set[str] = frozenset(),
-    note_own: bool = False,
-) -> list[Path]:
-    """Delete lifecycle event logs that have gone dormant past their inactivity TTL.
-
-    ``protected_lifecycle_ids`` are exempt from pruning regardless of inactivity: the dashboard passes
-    the lifecycle ids of every leaf in a not-yet-retired master series (see
-    ``worktree_provider_admission.series_retained_lifecycle_ids``), so a running durable task — and all
-    of its sibling leaves — keep their full event history until the whole series is archived (plus a
-    grace window). This supersedes the per-log inactivity TTL for durable, enclosure-backed work; only
-    fleeting/standalone logs are still retired by inactivity alone.
-    """
-    lifecycles_dir = root / "lifecycles"
-    if not lifecycles_dir.is_dir():
-        return []
-    removed: list[Path] = []
-    for entry in sorted(lifecycles_dir.iterdir()):
-        pruned = prune_one_lifecycle_log(
-            lifecycles_dir,
-            entry.name,
-            now=now,
-            protected_lifecycle_ids=protected_lifecycle_ids,
-            note_own=note_own,
-        )
-        if pruned is not None:
-            removed.append(pruned)
-    return removed
-
-
-def prune_one_lifecycle_log(
-    lifecycles_dir: Path,
-    lifecycle_id: str,
-    *,
-    now: datetime,
-    protected_lifecycle_ids: frozenset[str] | set[str] = frozenset(),
-    note_own: bool = False,
-) -> Path | None:
-    """Reclaim one dormant lifecycle directory; its events.jsonl path, else None (F09).
-
-    The same expiry predicate as the whole-tree prune, scoped to a single id so a
-    path-directed refresh reaps only the lifecycles its wake named. Expiry of unnamed
-    lifecycles waits for the next heartbeat/full reconciliation, which scans all.
-    """
-    if lifecycle_id in protected_lifecycle_ids:
-        return None  # part of a live master series -> never pruned by inactivity
-    entry = lifecycles_dir / lifecycle_id
-    path = entry / "events.jsonl"
-    if not entry.is_dir() or not path.is_file():
-        return None
-    if not lifecycle_is_dormant(path, now=now):
-        return None
-    # F7 reclamation owns the whole dormant lifecycle directory, not only events.jsonl.
-    # Heartbeats are coalesced into heartbeat.json and served-onboarding state may also live
-    # beside the log; unlinking only the log makes every such directory permanently
-    # unreapable. The lifecycle is dormant and unprotected at this point, so reclaim the
-    # complete directory through the same project-and-prune boundary.
-    if note_own:
-        with OWN_WRITES.announcing(entry.as_posix()) as announcement:
-            shutil.rmtree(entry)
-            OWN_WRITES.note_removed(entry.as_posix(), announcement=announcement)
-    else:
-        shutil.rmtree(entry)
-    return path
 
 
 def compact_workspace_river(
@@ -175,13 +70,8 @@ def compact_workspace_river(
     so the dashboard's hourly loop keeps calling with the age cut alone, while
     the write edge admits every append with the size cut.
 
-    The per-lifecycle logs are reclaimed wholesale by
-    :func:`prune_expired_lifecycle_event_logs`, but the shared workspace river
-    is a single append-only file that is never deleted -- so it is the one
-    river that grows unbounded on disk, even though a fresh connection already
-    only replays its last ``WORKSPACE_EVENT_TTL_SECONDS``
-    (:func:`initial_event_offsets`). Rows older than that window are therefore
-    never streamed to any client and are safe to drop physically.
+    Rows older than the replay window can be dropped physically. Every append
+    also enforces the byte ceiling, including between age-compaction passes.
 
     CURSOR-SAFETY: live ``/api/events`` clients carry a VIRTUAL byte offset for
     the workspace source. Physical compaction increases
@@ -337,61 +227,6 @@ def _line_start_offsets(path: Path) -> list[int]:
             starts.append(start)
 
 
-def lifecycle_is_dormant(path: Path, *, now: datetime) -> bool:
-    """True when a log has had no real activity past its inactivity TTL.
-
-    This is the cleanup key. ``last_activity`` ignores heartbeats, so a parked
-    session that only keeps beating still counts as inactive; fleeting and
-    enclosure-backed lifecycles each use their own TTL.
-    """
-    last_activity, is_fleeting = _retention_facts(path)
-    if last_activity is None:
-        return False
-    ttl = FLEETING_INACTIVE_TTL_SECONDS if is_fleeting else ENCLOSURE_INACTIVE_GRACE_SECONDS
-    return _seconds_since(last_activity, now) > ttl
-
-
-def last_activity_at(path: Path) -> datetime | None:
-    """Timestamp of the latest real (non-heartbeat) activity event in `path`."""
-    return _retention_facts(path)[0]
-
-
-def lifecycle_terminal_at(path: Path) -> datetime | None:
-    """Timestamp of the latest written ``lifecycle.ended`` event in `path`, if any."""
-    terminal_at: datetime | None = None
-    for _, _, payload in _iter_event_payloads(path):
-        if payload.get("kind") != "lifecycle.ended":
-            continue
-        ts = _event_time(payload)
-        if ts is not None:
-            terminal_at = ts
-    return terminal_at
-
-
-def _retention_facts(path: Path) -> tuple[datetime | None, bool]:
-    """Single-pass ``(last_real_activity_ts, is_fleeting)`` for a lifecycle log.
-
-    A lifecycle is fleeting when it started fleeting and was never promoted to a
-    persistent (enclosure-backed) lifecycle.
-    """
-    last_activity: datetime | None = None
-    fleeting = False
-    promoted = False
-    for _, _, payload in _iter_event_payloads(path):
-        kind = payload.get("kind")
-        if kind == HEARTBEAT_KIND:
-            continue
-        ts = _event_time(payload)
-        if ts is not None:
-            last_activity = ts
-        if kind == "lifecycle.started":
-            data = payload.get("data")
-            fleeting = bool(isinstance(data, dict) and data.get("fleeting"))
-        elif kind == "lifecycle.promoted":
-            promoted = True
-    return last_activity, (fleeting and not promoted)
-
-
 def _first_retained_offset(path: Path, *, cutoff: datetime) -> int:
     """Offset of the first event we cannot prove is older than ``cutoff``.
 
@@ -437,12 +272,3 @@ def _event_time(payload: dict[str, Any]) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
-
-
-def _seconds_since(ts: datetime, now: datetime) -> float:
-    now_utc = now.astimezone(UTC) if now.tzinfo is not None else now.replace(tzinfo=UTC)
-    return (now_utc - ts).total_seconds()
-
-
-def _is_expired(terminal_at: datetime, now: datetime) -> bool:
-    return _seconds_since(terminal_at, now) > LIFECYCLE_EVENT_GRACE_SECONDS

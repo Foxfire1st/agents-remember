@@ -6,6 +6,11 @@
  * running child, the permission wait, the unrecorded parent, the batch, the
  * limit, and exactly-once delivery.
  */
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { PluginLifecycleRegistration } from "@getpaseo/plugin/server";
+import { registerParentWakeEvents } from "./turn_events.ts";
 import { test } from "node:test";
 import assert from "node:assert";
 import {
@@ -326,4 +331,45 @@ test("a restart drops a claimed line waiting behind another send (L117-C1-F06)",
   const later = await flushHeldLines(tracker, sender);
   assert.equal(sent.length, 1);
   assert.equal(later.sent.length, 0);
+});
+
+
+test("contributed parent-wake handlers keep permission and turn gates and send with steer", async () => {
+  const home = mkdtempSync(join(tmpdir(), "ar-wake-handlers-"));
+  const previous = process.env.PASEO_HOME;
+  process.env.PASEO_HOME = home;
+  mkdirSync(join(home, "agents-remember"));
+  writeFileSync(join(home, "agents-remember", "role-agents.json"), JSON.stringify({ agents: RECORDS }));
+  type Handler = (event: unknown, context: unknown) => void;
+  const handlers = new Map<string, Handler>();
+  const server = { on(name: string, handler: Handler) { handlers.set(name, handler); return () => {}; } } as unknown as Pick<PluginLifecycleRegistration, "on">;
+  const sent: unknown[] = [];
+  const context = { paseo: { agents: { ref(id: string) { return { async send(text: string, options: unknown) { sent.push([id, text, options]); } }; } } } };
+  const note = async (kind: string, id: string, parentAgentId: string | null = null) => {
+    const handler = handlers.get(kind);
+    assert.ok(handler, kind);
+    handler({ agent: { id, parentAgentId }, timeline: [] }, context);
+    await new Promise<void>(resolve => setImmediate(resolve));
+  };
+  try {
+    registerParentWakeEvents(server);
+    assert.deepEqual([...handlers.keys()], ["agent.turn_started", "agent.turn_ended", "agent.permission_requested", "agent.permission_resolved", "agent.archived"]);
+    await note("agent.turn_started", "parent");
+    await note("agent.turn_started", "child", "parent");
+    await note("agent.turn_ended", "child", "parent");
+    assert.deepEqual(sent, []);
+    await note("agent.permission_requested", "parent");
+    await note("agent.turn_ended", "parent");
+    assert.deepEqual(sent, []);
+    await note("agent.permission_resolved", "parent");
+    assert.deepEqual(sent, [["parent", composeTurnEndedLine("child", CHILD), { activeTurnBehavior: "steer" }]]);
+    await note("agent.turn_started", "child", "parent");
+    await note("agent.turn_ended", "child", "parent");
+    assert.equal(sent.length, 2);
+    assert.deepEqual((sent[1] as unknown[])[2], { activeTurnBehavior: "steer" });
+  } finally {
+    if (previous === undefined) delete process.env.PASEO_HOME;
+    else process.env.PASEO_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
 });

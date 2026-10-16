@@ -2,17 +2,24 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     ProviderScope,
 )
-from agents_remember.observer.store import EventStore
+from agents_remember.observer.projection import Analytics, SetupProgressNode, WorkspaceProjection
+from agents_remember.observer.worktree_provider_admission import (
+    active_enclosure_worktree_groups,
+    admitted_worktree_groups,
+)
+from agents_remember.serving.delta import diff_projection
 from agents_remember.serving.projections.paths import observer_root
 from agents_remember.serving.projections.projection_store import (
     project_and_write,
 )
+from agents_remember.serving.projections.snapshots import read_enclosures
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
@@ -24,7 +31,7 @@ from agents_remember.worktrees.worktree_contract import (
     default_contract,
     write_contract,
 )
-from test_observer_projection import FRESH, T0, _started
+from test_observer_projection import FRESH
 
 
 class SnapshotReaderTests(unittest.TestCase):
@@ -89,8 +96,34 @@ class SnapshotReaderTests(unittest.TestCase):
 
     def test_project_and_write_end_to_end(self) -> None:
         config = self._config()
-        store = EventStore(observer_root(config))
-        store.append(_started(lifecycle_id="LC1", ts=T0))
         proj = project_and_write(config, now=FRESH)
-        self.assertEqual(proj.metrics.lifecycleCount, 1)
+        self.assertNotIn("lifecycles", proj.model_dump())
         self.assertTrue((observer_root(config) / "latest-state.json").exists())
+
+    def test_reopened_enclosure_is_not_runtime_work_but_pending_is(self) -> None:
+        config = self._config()
+        contract = self._existence_contract(config.coordination_root)
+        for cleanup, expected in (("pending", {contract.worktree_group.name}), ("reopened", set())):
+            with self.subTest(cleanup=cleanup):
+                write_contract(contract.contract_path, replace(contract, cleanup=cleanup))
+                nodes = read_enclosures(config.coordination_root)
+                self.assertEqual(admitted_worktree_groups(nodes), expected)
+                self.assertEqual(active_enclosure_worktree_groups(nodes), expected)
+
+    def test_setup_heartbeat_age_alone_emits_no_analytics_delta(self) -> None:
+        def projection(age: float) -> WorkspaceProjection:
+            return WorkspaceProjection(
+                generatedAt=FRESH.isoformat(),
+                analytics=Analytics(
+                    setupProgress=[
+                        SetupProgressNode(group="work", state="running", heartbeatAgeSeconds=age)
+                    ]
+                ),
+            )
+
+        self.assertEqual(diff_projection(projection(1), projection(12)), [])
+        changed = projection(12)
+        changed.analytics.setupProgress[0].state = "failed"
+        self.assertEqual(
+            [event.event for event in diff_projection(projection(1), changed)], ["analytics"]
+        )

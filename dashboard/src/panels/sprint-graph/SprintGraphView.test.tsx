@@ -1,7 +1,10 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act, render, screen, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { TaskExecutionGraphView, TaskExecutionNodeView } from '../../types/projection';
+import { dashboardStore } from '../../data/store';
+import type { TaskEntry, TaskExecutionGraphView, TaskExecutionNodeView } from '../../types/projection';
+import { statusWord } from '../detail-panel/pageStyles';
+import { seedTaskEntries, taskEntry } from '../detail-panel/test-utils';
 import { SprintGraphView } from './SprintGraphView';
 import { leafLineStyles, waveGridStyles } from './styles';
 
@@ -100,6 +103,7 @@ const segmentedGraph: TaskExecutionGraphView = {
 };
 
 describe('SprintGraphView (L12-R2/R6/R7)', () => {
+  beforeEach(() => dashboardStore.getState().reset());
   it('renders a zero-edge graph as one wave row of independent boxes (no predecessors)', () => {
     render(<SprintGraphView graphView={zeroEdgeGraph} />);
     expect(screen.getByTestId('sprint-graph')).toBeTruthy();
@@ -131,10 +135,41 @@ describe('SprintGraphView (L12-R2/R6/R7)', () => {
     expect(reasons).toContain("← Atomic F — the atomic block gates OM1's L3 segment");
   });
 
-  it('exposes frontier state per node for styling', () => {
-    render(<SprintGraphView graphView={segmentedGraph} />);
-    const boxes = screen.getAllByTestId('graph-box');
-    expect(boxes.map((box) => box.dataset.frontier)).toEqual(['in-flight', 'waiting', 'ready']);
+  it('updates entry-owned task words and tones while the dependency graph stays unchanged', () => {
+    const graph: TaskExecutionGraphView = {
+      nodes: [
+        node({ nodeId: 'a', masterTitle: 'Master A', frontierState: 'landed' }),
+        node({ nodeId: 'b', masterRef: MASTER_B, frontierState: 'waiting' }),
+        node({ nodeId: 'cycle', masterRef: ATOMIC_F, cycle: true }),
+        node({ nodeId: 'missing', masterRef: { ...MASTER_A, repository: 'other-repo' } }),
+      ],
+    };
+    render(<SprintGraphView graphView={graph} />);
+    const [master, waiting, cycle, missing] = screen.getAllByTestId('graph-box');
+    const cases: Array<[TaskEntry['stage'], TaskEntry['activity'], string, 'work' | 'wait' | 'done' | 'gone']> = [
+      ['started', 'works', 'works', 'work'],
+      ['started', 'paused', 'paused', 'wait'],
+      ['started', 'unknown', 'started · host state unknown', 'wait'],
+      ['planned', undefined, 'planned', 'wait'],
+      ['completed', undefined, 'completed', 'done'],
+      ['aborted', undefined, 'aborted', 'gone'],
+    ];
+    for (const [stage, activity, word, tone] of cases) {
+      act(() => seedTaskEntries([taskEntry({ reference: MASTER_A, stage, activity })]));
+      const status = within(master).getByTestId('graph-task-status');
+      expect(status.textContent).toBe(word);
+      expect(status.className).toBe(statusWord({ tone }));
+      expect(master.getAttribute('aria-label')).toBe('Master A, ' + word);
+      expect(within(master).queryByTestId('graph-readiness')).toBeNull();
+      expect(within(missing).queryByTestId('graph-task-status')).toBeNull();
+      expect(missing.getAttribute('aria-label')).toContain('task unavailable');
+    }
+    expect(within(waiting).getByTestId('graph-readiness').textContent).toBe('waiting');
+    expect(within(cycle).getByTestId('graph-readiness').textContent).toBe('cycle');
+    expect(within(missing).getByTestId('graph-readiness').textContent).toBe('ready');
+    act(() => dashboardStore.setState({ tasks: {} }));
+    expect(within(master).queryByTestId('graph-task-status')).toBeNull();
+    expect(screen.queryByTestId('graph-frontier')).toBeNull();
   });
 
   it('pins the at-most-3-per-row grid and the narrow single-column fallback (L12-R6)', () => {

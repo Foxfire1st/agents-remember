@@ -64,7 +64,6 @@ from agents_remember.kernel.sidecar_pairing import (
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import IndexMismatchError, MemoryTreeError
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
-from agents_remember.observer.ambient import ambient
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 
 # Storage modes whose card lives in a sidecar markdown file beside the route
@@ -138,10 +137,9 @@ def read_ar_files_tool(
     )
 
     file_results: list[dict[str, Any]] = []
-    event_files: list[dict[str, Any]] = []
     for rel in files:
         try:
-            result, facts = _name_one(context, code_root, rel, scope)
+            result = _name_one(context, code_root, rel, scope)
         except AuthorityError as error:
             # Confinement stays fail-closed, but at the row boundary (packet
             # Failure): one outside path earns its row and never reads outside,
@@ -152,9 +150,7 @@ def read_ar_files_tool(
                 "refusalCode": "outside-repository",
                 "refusalDetail": str(error),
             }
-            facts = {"path": rel, "lines": "named", "status": "refused", "bytes": 0}
         file_results.append(result)
-        event_files.append(facts)
 
     payload: dict[str, Any] = {
         "ok": True,
@@ -174,9 +170,6 @@ def read_ar_files_tool(
             "was measured; the cards are still named"
         )
 
-    amb = ambient()
-    if amb is not None:
-        amb.emit_read_packet(repo.repo_id, event_files)
     return payload
 
 
@@ -269,26 +262,19 @@ def _name_one(
     code_root: Path,
     path: str,
     scope: _BatchScope,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> dict[str, Any]:
     """Name what governs one path: existence, card location, record states."""
 
     rel = _confined_rel(code_root, path)
     exists = filesystem.is_file(code_root / rel)
     result: dict[str, Any] = {"path": path, "exists": exists}
-    facts: dict[str, Any] = {
-        "path": path,
-        "lines": "named",
-        "status": "missing",
-        "bytes": 0,
-    }
     if not exists:
-        return result, facts
+        return result
 
     card_rel = _governing_card(context, rel)
     if card_rel is None or scope.memory_state != "converted":
         result["card"] = None
-        return result, facts
-    facts["status"] = "found"
+        return result
 
     memory_root = context.onboarding_root.parent
     card_absolute = memory_root / "onboarding" / f"{card_rel}.md"
@@ -301,7 +287,7 @@ def _name_one(
             f"the governing card {card_rel} is indexed but has no readable file; "
             "it names no records"
         )
-        return result, facts
+        return result
     try:
         card_text = filesystem.read_text(card_absolute)
     except (UnicodeDecodeError, OSError):
@@ -316,7 +302,7 @@ def _name_one(
             f"the governing card {card_rel} is indexed but its file could not be read; "
             "it names no records"
         )
-        return result, facts
+        return result
     result["card"] = _locate(card_absolute, scope.working_folder)
 
     dataset = scope.dataset
@@ -354,7 +340,7 @@ def _name_one(
             result["statesProblem"] = records.problem
         if not records.index_complete:
             result["indexComplete"] = False
-    return result, facts
+    return result
 
 
 def _governing_card(context: CoordinationContext, rel: str) -> str | None:

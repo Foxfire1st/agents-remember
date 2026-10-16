@@ -1,45 +1,32 @@
-// MIK-R128 rule 16: completion facts and ephemeral table ordering, never a migration.
-import type { SubTaskRow, TaskDocNode } from '../../types/projection';
+// Completion facts come from the native producer; only table ordering is local.
+import type { TaskEntry } from '../../types/projection';
 import { shortDocId } from './model';
-import { indexSlices } from './indexRows';
 
 export type CompletedSort = { column: 'number' | 'time'; direction: 'asc' | 'desc' };
 export const NEWEST_COMPLETED: CompletedSort = { column: 'time', direction: 'desc' };
 export interface CompletedEntry {
-  ref: SubTaskRow;
+  entry: TaskEntry;
   position: number;
   id: string;
-  name: string;
   at?: string;
 }
 
-export function completionTime(doc: TaskDocNode | undefined): string | undefined {
-  if (!doc) return undefined;
-  if (doc.completedAt) return doc.completedAt;
-  // Legacy documents are not rewritten. Only the finalizer's exact record supplies the time.
-  return doc.decisions
-    .filter((item) => item.decision === 'Finalize task lifecycle.')
-    .map((item) => item.at)
-    .filter((at) => Number.isFinite(Date.parse(at)))
-    .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
-}
-
 export function completedEntries(
-  refs: SubTaskRow[],
-  docs: TaskDocNode[],
-  parentId: string,
-  positions: Map<SubTaskRow, number>,
-  matchFor: (ref: SubTaskRow) => TaskDocNode | undefined = indexSlices(docs),
+  parent: TaskEntry,
+  tasks: Record<string, TaskEntry>,
 ): CompletedEntry[] {
-  return refs.map((ref) => {
-    const match = matchFor(ref);
-    return {
-      ref,
-      position: positions.get(ref) ?? 0,
-      id: shortDocId(match?.id || ref.number, parentId),
-      name: match?.title || ref.name,
-      at: completionTime(match),
-    };
+  return parent.children.flatMap((reference, index) => {
+    const entry = tasks[reference];
+    return entry?.stage === 'completed'
+      ? [
+          {
+            entry,
+            position: index + 1,
+            id: shortDocId(entry.id, parent.id),
+            at: entry.summary?.completedAt ?? undefined,
+          },
+        ]
+      : [];
   });
 }
 

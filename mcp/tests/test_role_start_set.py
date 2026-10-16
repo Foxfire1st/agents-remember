@@ -20,6 +20,7 @@ from agents_remember.models.role_agents import RoleStartSetCall
 from agents_remember.models.role_launcher import RoleSelection
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import bound_for
+from agents_remember.serving.paseo.paseo_plugin_files import read_role_agents, role_agents_path
 from test_paseo_launch import LEAF_REF, MASTER_REF, SPRINT_REF
 from test_paseo_role_tools import OTHER_MASTER, RoleToolsTestCase, binding, selection_of
 
@@ -149,7 +150,25 @@ class SetStartTests(RoleToolsTestCase):
         reviewer_id = result["seats"]["reviewer"]["agentId"]
         curator_id = result["seats"]["curator"]["agentId"]
 
+        runtime = self.config.paseo_runtime
+        assert runtime is not None
+        self.assertEqual(
+            set(read_role_agents(runtime.home)),
+            {seat["agentId"] for seat in result["seats"].values()},
+        )
+        # A held receipt made by a previous build has no published identity. Its opener
+        # must establish it before the same agent-create path can start the first turn.
+        role_agents_path(runtime.home).unlink()
+        observed = []
+
+        def observe(command, payload):
+            if command == "agent-create":
+                observed.append(read_role_agents(runtime.home)[payload["agentId"]])
+
+        self.runtime.observer = observe
         opened = self.message(manager, agent_id=reviewer_id, text="Judge the first plan.")
+        self.runtime.observer = None
+        self.assertEqual([row["role"] for row in observed], ["reviewer"])
 
         self.assertEqual((opened["ok"], opened["status"]), (True, "accepted"))
         self.assertTrue(opened["openedHeldSeat"])

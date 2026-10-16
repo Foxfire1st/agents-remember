@@ -45,7 +45,8 @@ from agents_remember.cli.paseo_bridge import (
     bridge_call,
 )
 from agents_remember.cli.paseo_launch import run_launch_call
-from agents_remember.cli.paseo_status import read_agent, resume_agent
+from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.role_activity import publish_receipt_role_agent, resume_role_agent
 from agents_remember.cli.role_handover_artifacts import restore_handover_artifact
 from agents_remember.cli.role_launch_receipts import (
     EXECUTIONS_DIRECTORY,
@@ -659,7 +660,7 @@ def _check_drain_readiness(batch: _DrainBatch) -> None:
 def _resume_for_drain(batch: _DrainBatch) -> None:
     """Open the closed session for one batch; pause when it stays closed."""
 
-    resumed = resume_agent(batch.config, batch.agent_id)
+    resumed = resume_role_agent(batch.config, batch.receipt)
     if not resumed.reading.reachable:
         _release_claim(batch.folder, batch.agent_id, batch.claim)
         raise _DrainPause(
@@ -760,6 +761,7 @@ def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
         **launch_call,
         "agent": {**(launch_call.get("agent") or {}), "prompt": opening_text},
     }
+    publish_receipt_role_agent(batch.config, batch.receipt)
     outcome = run_launch_call(batch.config, call)
     if outcome.kind == "created":
         _stage_pending_lines(batch.folder, batch.agent_id, messages, _END_DELIVERED)
@@ -955,7 +957,7 @@ def _deliver_waiting(batch: _DrainBatch) -> dict[str, Any]:
 def _resume_for_send(batch: _DrainBatch) -> None:
     """Open the closed session before the one resend; pause when it stays closed."""
 
-    outcome = resume_agent(batch.config, batch.agent_id)
+    outcome = resume_role_agent(batch.config, batch.receipt)
     if not outcome.reading.reachable:
         _release_claim(batch.folder, batch.agent_id, batch.claim)
         raise _DrainPause(

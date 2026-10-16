@@ -1,50 +1,49 @@
+import { statusLabel, type TaskStatusKey } from '../panels/detail-panel/pageParts';
 import {
   memo,
   useCallback,
+  useMemo,
   useEffect,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-} from "react";
-import { motion } from "motion/react";
+} from 'react';
+import { motion } from 'motion/react';
 
-import { css, cva, cx } from "../../styled-system/css";
-import { RoleChatsPane } from "./RoleChats";
-import { clientMatchesServingBuild, servingCommitLabel } from "../data/buildIdentity";
-import { humanizeDuration } from "../data/conversation/format";
-import { startScreenWakeLock } from "../data/screenWakeLock";
-import { selectQueue } from "../data/selectors";
-import type { ConnState } from "../data/store";
-import { dashboardStore, useDashboard } from "../data/store";
-import { connectEvents, connectState } from "../data/stream";
-import { lifecycleSelectionKey, masterFolderForSelection } from "../data/taskIdentity";
-import { ModeBar } from "../grammar/ModeBar";
-import { ChangeSetViewer, type ChangeSetTarget } from "../panels/changeset/ChangeSetViewer";
-import { ReviewSurface } from "../panels/review/ReviewSurface";
-import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../data/taskArtifacts";
-import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
-import { DetailPanel } from "../panels/detail-panel/DetailPanel";
-import { IntentEntryRevalidation } from "../data/intentEntryRevalidation";
-import { parseReaderHash } from "../data/knowledgeReader";
-import type { ViewedTaskContext } from "../panels/detail-panel/state";
-import { EngineRoom } from "../panels/EngineRoom";
-import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
-import { EventRiver } from "../panels/EventRiver";
-import { FileViewer } from "../panels/file-viewer/FileViewer";
-import { Hangar } from "../panels/Hangar";
-import { KnowledgeReader } from "../panels/knowledge-reader/KnowledgeReader";
-import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
-import { MemoryMirror } from "../panels/MemoryMirror";
-import { DocumentChat } from "./document-chat/DocumentChat";
-import { usePersistedFlag, usePersistedNumber } from "../panels/file-viewer/usePersistedFlag";
-import { Topology } from "../panels/Topology";
-import type { EngineProcessNode, SeriesNode, TaskDocNode } from "../types/projection";
+import { css, cva, cx } from '../../styled-system/css';
+import { RoleChatsPane } from './RoleChats';
+import { clientMatchesServingBuild, servingCommitLabel } from '../data/buildIdentity';
+import { humanizeDuration } from '../data/conversation/format';
+import { startScreenWakeLock } from '../data/screenWakeLock';
+import { selectQueue } from '../data/selectors';
+import type { ConnState } from '../data/store';
+import { dashboardStore, useDashboard } from '../data/store';
+import { connectEvents, connectState } from '../data/stream';
+import { ModeBar } from '../grammar/ModeBar';
+import { ChangeSetViewer, type ChangeSetTarget } from '../panels/changeset/ChangeSetViewer';
+import { ReviewSurface } from '../panels/review/ReviewSurface';
+import type { TaskArtifactReaderTarget as NotesReaderTarget } from '../data/taskArtifacts';
+import { NotesReaderViewer } from '../panels/notes-reader/NotesReaderViewer';
+import { DetailPanel } from '../panels/detail-panel/DetailPanel';
+import { IntentEntryRevalidation } from '../data/intentEntryRevalidation';
+import { parseReaderHash } from '../data/knowledgeReader';
+import type { ViewedTaskContext } from '../panels/detail-panel/state';
+import { EngineRoom } from '../panels/EngineRoom';
+import { useShouldAnimate } from '../panels/engine-room/useShouldAnimate';
+import { EventRiver } from '../panels/EventRiver';
+import { FileViewer } from '../panels/file-viewer/FileViewer';
+import { Hangar } from '../panels/Hangar';
+import { KnowledgeReader } from '../panels/knowledge-reader/KnowledgeReader';
+import { LifecycleList } from '../panels/lifecycle-list/LifecycleList';
+import { MemoryMirror } from '../panels/MemoryMirror';
+import { DocumentChat } from './document-chat/DocumentChat';
+import { usePersistedFlag, usePersistedNumber } from '../panels/file-viewer/usePersistedFlag';
+import { Topology } from '../panels/Topology';
+import type { EngineProcessNode, TaskEntry } from '../types/projection';
 
-// A stable empty array so the `analytics?.taskDocuments ?? …` selector never returns a fresh reference
-// (which would churn the zustand snapshot and re-render every tick).
-const EMPTY_TASK_DOCS: TaskDocNode[] = [];
-const EMPTY_SERIES: SeriesNode[] = [];
+// A stable empty array so the `analytics?.engineProcesses ?? …` selector keeps the same
+// reference while engine-process analytics are absent.
 const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 
 // The cockpit shell: persistent command chrome that never hides the alarms —
@@ -57,139 +56,132 @@ const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 // drop the rails and span the full body width; the top-bar caution stays visible so an
 // alarm is never hidden.
 export type CockpitView =
-  | "operations"
-  | "files"
-  | "engine"
-  | "memory"
-  | "topology"
-  | "hangar"
-  | "knowledge"
-  | "chats";
+  'operations' | 'files' | 'engine' | 'memory' | 'topology' | 'hangar' | 'knowledge' | 'chats';
 
 const VIEWS: { id: CockpitView; label: string }[] = [
-  { id: "chats", label: "Chats" },
-  { id: "operations", label: "Operations" },
-  { id: "knowledge", label: "Knowledge" },
-  { id: "files", label: "File Viewer" },
+  { id: 'chats', label: 'Chats' },
+  { id: 'operations', label: 'Operations' },
+  { id: 'knowledge', label: 'Knowledge' },
+  { id: 'files', label: 'File Viewer' },
 ];
 
 // Shell layout (co-located Panda css). The shell pins to the viewport so the top + mode
 // bars stay fixed and the rails / viewport scroll internally; the marker classes (cockpit--shell /
 // shell__body / rail / viewport) are kept so the per-panel descendant rules + tests still resolve.
 const shell = css({
-  position: "relative",
-  display: "flex",
-  flexDirection: "column",
-  height: "100vh",
-  minHeight: "0",
-  overflow: "hidden",
-  padding: "0.6rem 0.8rem",
-  gap: "0.6rem",
+  position: 'relative',
+  display: 'flex',
+  flexDirection: 'column',
+  height: '100vh',
+  minHeight: '0',
+  overflow: 'hidden',
+  padding: '0.6rem 0.8rem',
+  gap: '0.6rem',
 });
 const topbar = css({
-  display: "flex",
+  display: 'flex',
   flexShrink: 0,
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "1rem",
-  borderBottomWidth: "1px",
-  borderBottomStyle: "solid",
-  borderBottomColor: "grid",
-  paddingBottom: "0.5rem",
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '1rem',
+  borderBottomWidth: '1px',
+  borderBottomStyle: 'solid',
+  borderBottomColor: 'grid',
+  paddingBottom: '0.5rem',
 });
 const title = css({
-  margin: "0",
-  fontSize: "0.9rem",
-  letterSpacing: "0.18em",
-  color: "amber",
+  margin: '0',
+  fontSize: '0.9rem',
+  letterSpacing: '0.18em',
+  color: 'amber',
   // The brand is one lockup, never `AGENTS REMEMBER ·/MISSION/CONTROL` broken across lines.
-  whiteSpace: "nowrap",
-  textShadow: "0 0 calc(6px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5)",
+  whiteSpace: 'nowrap',
+  textShadow: '0 0 calc(6px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5)',
 });
 const statusRow = css({
-  display: "flex",
-  alignItems: "center",
+  display: 'flex',
+  alignItems: 'center',
   // The top bar wraps BETWEEN fact-chips (each of which is nowrap), never mid-phrase; the
   // cluster reflows onto a second line as a whole instead of shattering into red fragments.
-  flexWrap: "wrap",
-  justifyContent: "flex-end",
-  gap: "0.9rem",
-  rowGap: "0.3rem",
-  fontSize: "0.78rem",
+  flexWrap: 'wrap',
+  justifyContent: 'flex-end',
+  gap: '0.9rem',
+  rowGap: '0.3rem',
+  fontSize: '0.78rem',
 });
-const dim = css({ color: "muted", whiteSpace: "nowrap" });
+const dim = css({ color: 'muted', whiteSpace: 'nowrap' });
 const effectsToggle = cva({
   base: {
-    font: "inherit",
-    fontSize: "0.74rem",
-    letterSpacing: "0.06em",
-    paddingInline: "0.45rem",
-    paddingBlock: "0.08rem",
-    borderRadius: "2px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    cursor: "pointer",
-    background: "transparent",
-    transition: "color 0.15s ease, border-color 0.15s ease",
-    _hover: { borderColor: "muted" },
-    _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+    font: 'inherit',
+    fontSize: '0.74rem',
+    letterSpacing: '0.06em',
+    paddingInline: '0.45rem',
+    paddingBlock: '0.08rem',
+    borderRadius: '2px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    cursor: 'pointer',
+    background: 'transparent',
+    transition: 'color 0.15s ease, border-color 0.15s ease',
+    _hover: { borderColor: 'muted' },
+    _focusVisible: { outline: '1px solid token(colors.amber)', outlineOffset: '1px' },
   },
   variants: {
     on: {
-      true: { color: "amber", borderColor: "amber" },
-      false: { color: "muted", borderColor: "grid" },
+      true: { color: 'amber', borderColor: 'amber' },
+      false: { color: 'muted', borderColor: 'grid' },
     },
   },
 });
 // The right-rail River⇄Chat switch: a small two-segment control sitting above the rail
 // content. React-state driven (railView) so the rail swaps the Event River for the single-instance chat.
 const railToggle = css({
-  display: "flex",
+  display: 'flex',
   flexShrink: 0,
-  gap: "0.25rem",
-  paddingBottom: "0.1rem",
+  gap: '0.25rem',
+  paddingBottom: '0.1rem',
 });
 const railToggleButton = cva({
   base: {
-    flex: "1",
-    font: "inherit",
-    fontSize: "0.7rem",
-    letterSpacing: "0.06em",
-    paddingBlock: "0.12rem",
-    borderRadius: "2px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    cursor: "pointer",
-    background: "transparent",
-    transition: "color 0.15s ease, border-color 0.15s ease",
-    _hover: { borderColor: "muted" },
-    _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+    flex: '1',
+    font: 'inherit',
+    fontSize: '0.7rem',
+    letterSpacing: '0.06em',
+    paddingBlock: '0.12rem',
+    borderRadius: '2px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    cursor: 'pointer',
+    background: 'transparent',
+    transition: 'color 0.15s ease, border-color 0.15s ease',
+    _hover: { borderColor: 'muted' },
+    _focusVisible: { outline: '1px solid token(colors.amber)', outlineOffset: '1px' },
   },
   variants: {
     on: {
-      true: { color: "amber", borderColor: "amber" },
-      false: { color: "muted", borderColor: "grid" },
+      true: { color: 'amber', borderColor: 'amber' },
+      false: { color: 'muted', borderColor: 'grid' },
     },
   },
 });
 const caution = cva({
-  base: { letterSpacing: "0.06em", color: "muted", whiteSpace: "nowrap" },
+  base: { letterSpacing: '0.06em', color: 'muted', whiteSpace: 'nowrap' },
   variants: {
     sev: {
-      clear: { color: "mint" },
-      info: { color: "cyan" },
-      warn: { color: "amber" },
-      alarm: { color: "alarm", animation: "pulse 0.6s steps(1) infinite" },
+      clear: { color: 'mint' },
+      info: { color: 'cyan' },
+      warn: { color: 'amber' },
+      alarm: { color: 'alarm', animation: 'pulse 0.6s steps(1) infinite' },
     },
   },
 });
 const connBadge = cva({
-  base: { fontWeight: "600", letterSpacing: "0.1em", whiteSpace: "nowrap" },
+  base: { fontWeight: '600', letterSpacing: '0.1em', whiteSpace: 'nowrap' },
   variants: {
     state: {
-      connecting: { color: "amber" },
-      live: { color: "mint" },
-      "signal-lost": { color: "alarm", animation: "pulse 0.5s steps(1) infinite" },
+      connecting: { color: 'amber' },
+      live: { color: 'mint' },
+      'signal-lost': { color: 'alarm', animation: 'pulse 0.5s steps(1) infinite' },
     },
   },
 });
@@ -197,29 +189,29 @@ const connBadge = cva({
 // views (Engine Room / Topology), which render their own internal layout.
 const bodyGrid = cva({
   base: {
-    display: "grid",
-    gridTemplateRows: "minmax(0, 1fr)",
-    gap: "0.7rem",
-    flex: "1",
-    minHeight: "0",
+    display: 'grid',
+    gridTemplateRows: 'minmax(0, 1fr)',
+    gap: '0.7rem',
+    flex: '1',
+    minHeight: '0',
   },
   variants: {
     bleed: {
       false: {
-        gridTemplateColumns: "minmax(300px, 1fr) minmax(420px, 2.2fr) minmax(260px, 0.95fr)",
+        gridTemplateColumns: 'minmax(300px, 1fr) minmax(420px, 2.2fr) minmax(260px, 0.95fr)',
       },
-      true: { gridTemplateColumns: "1fr" },
+      true: { gridTemplateColumns: '1fr' },
     },
   },
 });
 const rail = css({
-  position: "relative", // anchors the absolutely-positioned drag handle on the rail's inner edge
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.7rem",
-  minWidth: "0",
-  minHeight: "0",
-  overflow: "hidden", // the rail itself does not scroll — each panel scrolls on its own
+  position: 'relative', // anchors the absolutely-positioned drag handle on the rail's inner edge
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.7rem',
+  minWidth: '0',
+  minHeight: '0',
+  overflow: 'hidden', // the rail itself does not scroll — each panel scrolls on its own
 });
 // Operations rails are draggable (like the File Viewer's split): each rail owns a thin gutter on its
 // inner edge that drags its pixel width, persisted so the layout survives a reload. Bounds keep a rail
@@ -230,21 +222,21 @@ const RAIL_MAX = 560;
 const RAIL_STEP = 24; // keyboard nudge per ArrowLeft/ArrowRight
 const railHandle = cva({
   base: {
-    position: "absolute",
-    top: "0",
-    bottom: "0",
-    width: "7px",
-    zIndex: "3",
-    cursor: "col-resize",
-    background: "transparent",
-    transition: "background 0.15s ease",
-    _hover: { background: "amber" },
-    _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "-1px" },
+    position: 'absolute',
+    top: '0',
+    bottom: '0',
+    width: '7px',
+    zIndex: '3',
+    cursor: 'col-resize',
+    background: 'transparent',
+    transition: 'background 0.15s ease',
+    _hover: { background: 'amber' },
+    _focusVisible: { outline: '1px solid token(colors.amber)', outlineOffset: '-1px' },
   },
   variants: {
     side: {
-      left: { right: "0" }, // left rail: gutter on its right (centre-facing) edge
-      right: { left: "0" }, // right rail: gutter on its left (centre-facing) edge
+      left: { right: '0' }, // left rail: gutter on its right (centre-facing) edge
+      right: { left: '0' }, // right rail: gutter on its left (centre-facing) edge
     },
   },
 });
@@ -263,7 +255,7 @@ const RailResizeHandle = memo(function RailResizeHandle({
   width,
   onResize,
 }: {
-  side: "left" | "right";
+  side: 'left' | 'right';
   width: number;
   onResize: (next: number) => void;
 }) {
@@ -274,20 +266,20 @@ const RailResizeHandle = memo(function RailResizeHandle({
     event.currentTarget.setPointerCapture(event.pointerId);
     const move = (moveEvent: globalThis.PointerEvent) => {
       const delta = moveEvent.clientX - startX;
-      onResize(clampRail(side === "left" ? startWidth + delta : startWidth - delta));
+      onResize(clampRail(side === 'left' ? startWidth + delta : startWidth - delta));
     };
     const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   };
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const dir = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    const dir = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
     if (!dir) return;
     event.preventDefault();
-    onResize(clampRail(width + (side === "left" ? dir : -dir) * RAIL_STEP));
+    onResize(clampRail(width + (side === 'left' ? dir : -dir) * RAIL_STEP));
   };
   return (
     <div
@@ -306,20 +298,20 @@ const RailResizeHandle = memo(function RailResizeHandle({
   );
 });
 const viewport = css({
-  display: "flex",
-  flexDirection: "column",
-  minWidth: "0",
-  minHeight: "0",
-  overflow: "hidden", // the viewport does not scroll — its panel scrolls on its own
+  display: 'flex',
+  flexDirection: 'column',
+  minWidth: '0',
+  minHeight: '0',
+  overflow: 'hidden', // the viewport does not scroll — its panel scrolls on its own
 });
 // Chats is kept mounted across every view (hidden via display, never unmounted) so the host's
 // chat frame is not loaded again on a view switch.
 const chatsLayer = css({
-  display: "flex",
-  flexDirection: "column",
-  flex: "1",
-  minHeight: "0",
-  minWidth: "0",
+  display: 'flex',
+  flexDirection: 'column',
+  flex: '1',
+  minHeight: '0',
+  minWidth: '0',
 });
 // The File Viewer is kept mounted across view switches too (hidden via display, never
 // unmounted) so its repo/scope selection, open file, expanded trees, and view-mode survive a tab
@@ -354,13 +346,15 @@ export function Cockpit() {
     () =>
       connectEvents(
         (line) => dashboardStore.getState().pushEvent(line),
-        "",
+        '',
         (ready) => dashboardStore.getState().markEventsHydrated(ready?.lastEventTs),
       ),
     [],
   );
   // A shared knowledge-reader URL (`#knowledge?…`, MIK-R29) opens on the Knowledge view.
-  return <CockpitShell initialView={parseReaderHash(window.location.hash) ? "knowledge" : undefined} />;
+  return (
+    <CockpitShell initialView={parseReaderHash(window.location.hash) ? 'knowledge' : undefined} />
+  );
 }
 
 interface CockpitShellState {
@@ -369,16 +363,14 @@ interface CockpitShellState {
   changeSet: ChangeSetTarget | null;
   notes: NotesReaderTarget | null;
   notesOpen: boolean;
-  railView: "river" | "chat";
+  railView: 'river' | 'chat';
   leftRailWidth: number;
   rightRailWidth: number;
   animate: boolean;
   viewedLeafKey: string | undefined;
   viewedTask: ViewedTaskContext | undefined;
-  taskDocuments: TaskDocNode[];
-  taskSeries: SeriesNode[];
+  tasks: TaskEntry[];
   engineProcesses: EngineProcessNode[];
-  contextMaster: string | undefined;
   fullBleed: boolean;
   takeover: boolean;
   railEnter: Record<string, unknown>;
@@ -387,9 +379,7 @@ interface CockpitShellState {
   setChangeSet: (target: ChangeSetTarget | null) => void;
   setNotes: (
     target:
-      | NotesReaderTarget
-      | null
-      | ((cur: NotesReaderTarget | null) => NotesReaderTarget | null),
+      NotesReaderTarget | null | ((cur: NotesReaderTarget | null) => NotesReaderTarget | null),
   ) => void;
   setNotesOpen: (open: boolean) => void;
   setChatRail: (value: boolean) => void;
@@ -404,25 +394,24 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   const [changeSet, setChangeSet] = useState<ChangeSetTarget | null>(null);
   const [notes, setNotes] = useState<NotesReaderTarget | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [chatRail, setChatRail] = usePersistedFlag("cockpit.rail-chat", false);
-  const railView: "river" | "chat" = chatRail ? "chat" : "river";
-  const [leftRailWidth, setLeftRailWidth] = usePersistedNumber("cockpit.rail-left-w", 340);
-  const [rightRailWidth, setRightRailWidth] = usePersistedNumber("cockpit.rail-right-w", 300);
+  const [chatRail, setChatRail] = usePersistedFlag('cockpit.rail-chat', false);
+  const railView: 'river' | 'chat' = chatRail ? 'chat' : 'river';
+  const [leftRailWidth, setLeftRailWidth] = usePersistedNumber('cockpit.rail-left-w', 340);
+  const [rightRailWidth, setRightRailWidth] = usePersistedNumber('cockpit.rail-right-w', 300);
   const animate = useShouldAnimate();
   const [viewedTask, setViewedTask] = useState<ViewedTaskContext | undefined>(undefined);
   const viewedLeafKey = viewedTask?.leafKey;
-  const taskDocuments = useDashboard((s) => s.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
-  const taskSeries = useDashboard((s) => s.analytics?.series ?? EMPTY_SERIES);
-  const engineProcesses = useDashboard((s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES);
-  const contextMaster = useDashboard((s) =>
-    masterFolderForSelection(selectedId, s.lifecycles, s.analytics),
+  const taskMap = useDashboard((s) => s.tasks);
+  const tasks = useMemo(() => Object.values(taskMap), [taskMap]);
+  const engineProcesses = useDashboard(
+    (s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES,
   );
   const fullBleed =
-    view === "files" ||
-    view === "knowledge" ||
-    view === "engine" ||
-    view === "topology" ||
-    view === "chats";
+    view === 'files' ||
+    view === 'knowledge' ||
+    view === 'engine' ||
+    view === 'topology' ||
+    view === 'chats';
   const takeover = Boolean(changeSet) || notesOpen;
   const railEnter = animate ? RAIL_ENTER : RAIL_ENTER_STILL;
   return {
@@ -437,10 +426,8 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     animate,
     viewedLeafKey,
     viewedTask,
-    taskDocuments,
-    taskSeries,
+    tasks,
     engineProcesses,
-    contextMaster,
     fullBleed,
     takeover,
     railEnter,
@@ -461,15 +448,13 @@ function useCockpitShellActions(
   setChangeSet: (target: ChangeSetTarget | null) => void,
   setNotes: (
     target:
-      | NotesReaderTarget
-      | null
-      | ((cur: NotesReaderTarget | null) => NotesReaderTarget | null),
+      NotesReaderTarget | null | ((cur: NotesReaderTarget | null) => NotesReaderTarget | null),
   ) => void,
   setNotesOpen: (open: boolean) => void,
   setView: (view: CockpitView) => void,
   setSelectedId: (id: string | null) => void,
 ): {
-  setRailView: (next: "river" | "chat") => void;
+  setRailView: (next: 'river' | 'chat') => void;
   open: (id: string) => void;
   changeView: (next: CockpitView) => void;
   openChangeSet: (target: ChangeSetTarget) => void;
@@ -479,41 +464,49 @@ function useCockpitShellActions(
   selectNote: (path: string) => void;
 } {
   const setRailView = useCallback(
-    (next: "river" | "chat") => setChatRail(next === "chat"),
+    (next: 'river' | 'chat') => setChatRail(next === 'chat'),
     [setChatRail],
   );
-  const open = useCallback((id: string) => {
-    setChangeSet(null);
-    setNotesOpen(false);
-    setSelectedId(
-      id.startsWith("taskdoc:") || id.startsWith("series:") || id.startsWith("lifecycle:")
-        ? id
-        : lifecycleSelectionKey(id),
-    );
-    setView("operations");
-  }, [setChangeSet, setNotesOpen, setSelectedId, setView]);
-  const changeView = useCallback((next: CockpitView) => {
-    setChangeSet(null);
-    setNotesOpen(false);
-    setView(next);
-  }, [setChangeSet, setNotesOpen, setView]);
-  const openChangeSet = useCallback((target: ChangeSetTarget) => {
-    setNotesOpen(false);
-    setChangeSet(target);
-  }, [setChangeSet, setNotesOpen]);
-  const openNotes = useCallback((target: NotesReaderTarget) => {
-    setChangeSet(null);
-    setNotes(target);
-    setNotesOpen(true);
-  }, [setChangeSet, setNotes, setNotesOpen]);
+  const open = useCallback(
+    (id: string) => {
+      setChangeSet(null);
+      setNotesOpen(false);
+      setSelectedId(id);
+      setView('operations');
+    },
+    [setChangeSet, setNotesOpen, setSelectedId, setView],
+  );
+  const changeView = useCallback(
+    (next: CockpitView) => {
+      setChangeSet(null);
+      setNotesOpen(false);
+      setView(next);
+    },
+    [setChangeSet, setNotesOpen, setView],
+  );
+  const openChangeSet = useCallback(
+    (target: ChangeSetTarget) => {
+      setNotesOpen(false);
+      setChangeSet(target);
+    },
+    [setChangeSet, setNotesOpen],
+  );
+  const openNotes = useCallback(
+    (target: NotesReaderTarget) => {
+      setChangeSet(null);
+      setNotes(target);
+      setNotesOpen(true);
+    },
+    [setChangeSet, setNotes, setNotesOpen],
+  );
   const closeChangeSet = useCallback(() => setChangeSet(null), [setChangeSet]);
   const closeNotes = useCallback(() => setNotesOpen(false), [setNotesOpen]);
   const selectNote = useCallback(
     (path: string) =>
       setNotes((cur) => {
         // A note selection leaves the folder-open state: the reader shows the note.
-        if (cur?.kind === "notes") return { ...cur, path, folder: false };
-        if (cur?.kind === "requirements") return { ...cur, path };
+        if (cur?.kind === 'notes') return { ...cur, path, folder: false };
+        if (cur?.kind === 'requirements') return { ...cur, path };
         return cur;
       }),
     [setNotes],
@@ -543,10 +536,10 @@ function ChangeSetTakeover({
   onOpenChangeSet: (target: ChangeSetTarget) => void;
 }) {
   return (
-    <div className={cx(bodyGrid({ bleed: true }), "shell__body")} data-fullbleed={true}>
+    <div className={cx(bodyGrid({ bleed: true }), 'shell__body')} data-fullbleed={true}>
       <main
-        className={cx(viewport, "viewport")}
-        data-view={target.review ? "intent-review" : "changeset"}
+        className={cx(viewport, 'viewport')}
+        data-view={target.review ? 'intent-review' : 'changeset'}
       >
         {target.review ? (
           // A review target may carry a subject's selector or none at all: the task-context entry
@@ -556,11 +549,11 @@ function ChangeSetTakeover({
           // for a live candidate there is none of.
           <ReviewSurface
             repo={target.repo}
-            master={target.master ?? ""}
-            leaf={target.leaf ?? ""}
+            master={target.master ?? ''}
+            leaf={target.leaf ?? ''}
             selectorKind={target.review.selectorKind}
             selectorId={target.review.selectorId}
-            history={target.review.historical ? "recorded" : undefined}
+            history={target.review.historical ? 'recorded' : undefined}
             onBack={onBack}
           />
         ) : (
@@ -584,28 +577,24 @@ function NotesTakeover({
 }) {
   return (
     <div
-      className={cx(bodyGrid({ bleed: true }), "shell__body")}
+      className={cx(bodyGrid({ bleed: true }), 'shell__body')}
       data-fullbleed={true}
-      style={hidden ? { display: "none" } : undefined}
+      style={hidden ? { display: 'none' } : undefined}
       aria-hidden={hidden ? true : undefined}
     >
       <main
-        className={cx(viewport, "viewport")}
+        className={cx(viewport, 'viewport')}
         data-view={
-          target.kind === "notes"
-            ? "notes-reader"
-            : target.kind === "requirements"
-              ? "requirements-reader"
-              : target.kind === "decisions"
-                ? "decisions-reader"
-                : "report-reader"
+          target.kind === 'notes'
+            ? 'notes-reader'
+            : target.kind === 'requirements'
+              ? 'requirements-reader'
+              : target.kind === 'decisions'
+                ? 'decisions-reader'
+                : 'report-reader'
         }
       >
-        <NotesReaderViewer
-          {...target}
-          onSelectNote={onSelectNote}
-          onBack={onBack}
-        />
+        <NotesReaderViewer {...target} onSelectNote={onSelectNote} onBack={onBack} />
       </main>
     </div>
   );
@@ -631,18 +620,13 @@ function LeftRail({
   return (
     <motion.aside
       key="rail-left"
-      className={cx(rail, "rail rail--left")}
+      className={cx(rail, 'rail rail--left')}
       transition={RAIL_TRANSITION}
-      style={{ display: fullBleed ? "none" : "flex" }}
+      style={{ display: fullBleed ? 'none' : 'flex' }}
       aria-hidden={fullBleed}
       {...railEnter}
     >
-      {/* The task list is the whole rail. The attention queue is a bell in the list's head; its
-          entries open in a layer over the tree (MIK-R144 rule 3a). The two grammars of
-          grammar/Dot.tsx still meet in this one column — severities in the layer, lifecycle
-          states in the tree under it — and an amber mark up there says nothing about an amber
-          mark down here (the reducer builds no attention row for an `awaiting-developer`
-          lifecycle). Cockpit.test.tsx renders this rail and pins the two marks apart. */}
+      {/* The native task tree fills the rail; its attention bell opens a layer over it. */}
       <LifecycleList selectedId={selectedId} onSelect={onSelect} active={!fullBleed && !takeover} />
       <RailResizeHandle side="left" width={leftRailWidth} onResize={onResize} />
     </motion.aside>
@@ -656,26 +640,24 @@ export function RightRail({
   rightRailWidth,
   setRailView,
   viewedTask,
-  taskDocuments,
-  series,
+  tasks,
   onResize,
 }: {
   fullBleed: boolean;
   railEnter: Record<string, unknown>;
-  railView: "river" | "chat";
+  railView: 'river' | 'chat';
   rightRailWidth: number;
-  setRailView: (next: "river" | "chat") => void;
+  setRailView: (next: 'river' | 'chat') => void;
   viewedTask: ViewedTaskContext | undefined;
-  taskDocuments: TaskDocNode[];
-  series: SeriesNode[];
+  tasks: TaskEntry[];
   onResize: (width: number) => void;
 }) {
   return (
     <motion.aside
       key="rail-right"
-      className={cx(rail, "rail rail--right")}
+      className={cx(rail, 'rail rail--right')}
       transition={RAIL_TRANSITION}
-      style={{ display: fullBleed ? "none" : "flex" }}
+      style={{ display: fullBleed ? 'none' : 'flex' }}
       aria-hidden={fullBleed}
       {...railEnter}
     >
@@ -684,19 +666,21 @@ export function RightRail({
       {/* MIK-R122: the river keeps its remove-while-chat-shows behaviour, but the chat is
           never unmounted — only hidden — so the single frame stays loaded and keeps the
           developer's draft and scroll position across the toggle. */}
-      {railView === "river" ? (
-        <EventRiver />
-      ) : null}
+      {railView === 'river' ? <EventRiver /> : null}
       <div
-        style={{ display: railView === "chat" ? "flex" : "none", flex: "1", minHeight: "0", minWidth: "0" }}
-        aria-hidden={railView !== "chat"}
+        style={{
+          display: railView === 'chat' ? 'flex' : 'none',
+          flex: '1',
+          minHeight: '0',
+          minWidth: '0',
+        }}
+        aria-hidden={railView !== 'chat'}
         data-testid="rail-chat-keepalive"
       >
         <DocumentChat
-          active={railView === "chat" && !fullBleed}
+          active={railView === 'chat' && !fullBleed}
           taskDocumentRef={viewedTask?.taskDocumentRef}
-          taskDocuments={taskDocuments}
-          series={series}
+          tasks={tasks}
         />
       </div>
     </motion.aside>
@@ -715,7 +699,7 @@ function ViewLayer({
   return (
     <div
       className={className}
-      style={{ display: visible ? "flex" : "none" }}
+      style={{ display: visible ? 'flex' : 'none' }}
       aria-hidden={!visible}
     >
       {children}
@@ -727,8 +711,7 @@ function MainLayers({
   view,
   takeover,
   selectedId,
-  taskDocuments,
-  taskSeries,
+  tasks,
   onOpen,
   onOpenChangeSet,
   onOpenNotes,
@@ -737,22 +720,26 @@ function MainLayers({
   view: CockpitView;
   takeover: boolean;
   selectedId: string | null;
-  taskDocuments: TaskDocNode[];
-  taskSeries: SeriesNode[];
+  tasks: TaskEntry[];
   onOpen: (id: string) => void;
   onOpenChangeSet: (target: ChangeSetTarget) => void;
   onOpenNotes: (target: NotesReaderTarget) => void;
   onViewTask: (context: ViewedTaskContext | undefined) => void;
 }) {
   return (
-    <main className={cx(viewport, "viewport")} data-view={view}>
+    <main className={cx(viewport, 'viewport')} data-view={view}>
       {/* Retained pages have no dashboard entry; initialView tests can still mount their layouts. */}
-      {["memory", "topology", "hangar"].includes(view) && <ViewBody view={view} onOpen={onOpen} />}
-      {view === "engine" ? <div className={engineLayer}><EngineRoom /></div> : null}
+      {['memory', 'topology', 'hangar'].includes(view) && <ViewBody view={view} onOpen={onOpen} />}
+      {view === 'engine' ? (
+        <div className={engineLayer}>
+          <EngineRoom />
+        </div>
+      ) : null}
       {/* Operations' DetailPanel is never unmounted — only hidden — so the drilled-open sub-task
           survives a view switch instead of resetting to the master overview (see `operationsLayer`). */}
-      <ViewLayer visible={view === "operations"} className={operationsLayer}>
+      <ViewLayer visible={view === 'operations'} className={operationsLayer}>
         <DetailPanel
+          active={view === 'operations' && !takeover}
           selectedId={selectedId}
           onOpenLifecycle={onOpen}
           onOpenChangeSet={onOpenChangeSet}
@@ -763,19 +750,15 @@ function MainLayers({
       {/* The File Viewer is never unmounted — only hidden — so its repo/scope selection, open
           file, expanded trees, and view-mode survive a view switch instead of resetting. Its
           boot catalog read is deferred to the first actual showing (`active`). */}
-      <ViewLayer visible={view === "files"} className={filesLayer}>
-        <FileViewer active={view === "files"} />
+      <ViewLayer visible={view === 'files'} className={filesLayer}>
+        <FileViewer active={view === 'files'} />
       </ViewLayer>
-      <ViewLayer visible={view === "knowledge"} className={filesLayer}>
-        <KnowledgeReader active={view === "knowledge"} />
+      <ViewLayer visible={view === 'knowledge'} className={filesLayer}>
+        <KnowledgeReader active={view === 'knowledge'} />
       </ViewLayer>
       {/* Role chats stay mounted across dashboard view switches. */}
-      <ViewLayer visible={view === "chats"} className={chatsLayer}>
-        <RoleChatsPane
-          active={view === "chats" && !takeover}
-          taskDocuments={taskDocuments}
-          series={taskSeries}
-        />
+      <ViewLayer visible={view === 'chats'} className={chatsLayer}>
+        <RoleChatsPane active={view === 'chats' && !takeover} tasks={tasks} />
       </ViewLayer>
     </main>
   );
@@ -790,14 +773,16 @@ function RailedBody({
 }) {
   return (
     <div
-      className={cx(bodyGrid({ bleed: state.fullBleed }), "shell__body")}
+      className={cx(bodyGrid({ bleed: state.fullBleed }), 'shell__body')}
       data-fullbleed={state.fullBleed}
       style={{
-        ...(state.takeover ? { display: "none" } : {}),
+        ...(state.takeover ? { display: 'none' } : {}),
         // The railed grid uses the persisted rail widths; full-bleed keeps the cva's single column.
         ...(state.fullBleed
           ? {}
-          : { gridTemplateColumns: `${state.leftRailWidth}px minmax(380px, 1fr) ${state.rightRailWidth}px` }),
+          : {
+              gridTemplateColumns: `${state.leftRailWidth}px minmax(380px, 1fr) ${state.rightRailWidth}px`,
+            }),
       }}
       aria-hidden={state.takeover ? true : undefined}
     >
@@ -819,8 +804,7 @@ function RailedBody({
         view={state.view}
         takeover={state.takeover}
         selectedId={state.selectedId}
-        taskDocuments={state.taskDocuments}
-        taskSeries={state.taskSeries}
+        tasks={state.tasks}
         onOpen={actions.open}
         onOpenChangeSet={actions.openChangeSet}
         onOpenNotes={actions.openNotes}
@@ -833,15 +817,14 @@ function RailedBody({
         rightRailWidth={state.rightRailWidth}
         setRailView={actions.setRailView}
         viewedTask={state.viewedTask}
-        taskDocuments={state.taskDocuments}
-        series={state.taskSeries}
+        tasks={state.tasks}
         onResize={state.setRightRailWidth}
       />
     </div>
   );
 }
 
-export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitView } = {}) {
+export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitView } = {}) {
   // A visible cockpit means someone is MONITORING — hold the screen wake lock (the same
   // display-required request video playback uses) so watching agents work counts as activity
   // against OS idle/lock timers. Auto-releases while the tab is hidden.
@@ -857,8 +840,8 @@ export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitV
   );
 
   return (
-    <IntentEntryRevalidation shown={state.view === "operations" && !state.takeover}>
-      <div className={cx(shell, "cockpit--shell")}>
+    <IntentEntryRevalidation shown={state.view === 'operations' && !state.takeover}>
+      <div className={cx(shell, 'cockpit--shell')}>
         <TopBar />
         {state.changeSet ? (
           <ChangeSetTakeover
@@ -887,11 +870,11 @@ export function CockpitShell({ initialView = "chats" }: { initialView?: CockpitV
 
 function ViewBody({ view, onOpen }: { view: CockpitView; onOpen: (id: string) => void }) {
   switch (view) {
-    case "memory":
+    case 'memory':
       return <MemoryMirror />;
-    case "topology":
+    case 'topology':
       return <Topology onSelect={onOpen} />;
-    case "hangar":
+    case 'hangar':
       return <Hangar onSelect={onOpen} />;
     // "operations", "files", "knowledge", and "chats" are intentionally not here — all four are kept
     // mounted in CockpitShell (hidden via CSS) so their in-panel state survives a view switch; routing
@@ -924,14 +907,14 @@ function ServingBuildStamp() {
   // match) add nothing — never assert a state we cannot prove, and never fabricate a match.
   const clientMismatchNote =
     clientCurrent === false
-      ? " · client bundle differs from the serving build — reload to update"
-      : "";
+      ? ' · client bundle differs from the serving build — reload to update'
+      : '';
   return (
     <span
       className={dim}
       data-testid="serving-build"
-      data-client-build-current={clientCurrent === null ? "unknown" : String(clientCurrent)}
-      title={`Serving build v${build.version}${commitLabel ? ` @ ${commitLabel}` : ""}${build.dirty ? " (dirty — serving uncommitted code)" : ""} · process up since ${build.bootedAt}${clientMismatchNote}`}
+      data-client-build-current={clientCurrent === null ? 'unknown' : String(clientCurrent)}
+      title={`Serving build v${build.version}${commitLabel ? ` @ ${commitLabel}` : ''}${build.dirty ? ' (dirty — serving uncommitted code)' : ''} · process up since ${build.bootedAt}${clientMismatchNote}`}
     >
       {commitLabel ?? `v${build.version}`} · up {bootLabel}
     </span>
@@ -942,40 +925,33 @@ function ServingBuildStamp() {
 // its own store subscriptions, so a shell re-render (view switch) never needs to reconcile it.
 const TopBar = memo(function TopBar() {
   const conn = useDashboard((s) => s.conn);
-  const metrics = useDashboard((s) => s.metrics);
+  const taskCounts = useDashboard((s) => s.taskCounts);
   const generatedAt = useDashboard((s) => s.generatedAt);
   const queue = useDashboard(selectQueue);
-  const topSeverity = queue[0]?.severity ?? "clear"; // queue is severity-sorted server-side
+  const topSeverity = queue[0]?.severity ?? 'clear'; // queue is severity-sorted server-side
+  const counts: Array<[TaskStatusKey, number]> = [
+    ['planned', taskCounts.planned],
+    ['started', taskCounts.started],
+    ['completed', taskCounts.completed],
+    ['aborted', taskCounts.aborted],
+    ['works', taskCounts.works],
+    ['paused', taskCounts.paused],
+    ['unknown', taskCounts.unknown],
+  ];
 
   return (
     <header className={topbar}>
       <h1 className={title}>AGENTS REMEMBER · MISSION CONTROL</h1>
       <div className={statusRow}>
+        <span className={dim} data-testid="task-counts">
+          {counts.filter(([key, value]) => key !== 'unknown' || value > 0)
+            .map(([key, value]) => `${value} ${statusLabel(key)}`).join(' · ')}
+        </span>
         {/* A reassurance zero wearing an alarm glyph is a lie: render the waiting chip only
             when something actually waits. An empty queue simply shows nothing (absence = clear). */}
         {queue.length > 0 ? (
           <span className={caution({ sev: topSeverity })} data-testid="caution">
             ⚠ {queue.length} waiting
-          </span>
-        ) : null}
-        {metrics ? (
-          // Explicit scope: these are LIFECYCLE/task counts.
-          <span
-            className={dim}
-            data-testid="task-metrics"
-            title="Lifecycle task counts"
-          >
-            tasks {metrics.runningCount} running · {metrics.blockedCount} blocked
-            {/* The NOTIFY-AND-CONTINUE handoff, appended only while something is actually handed
-                back. Without it a lifecycle that has stopped and given the developer the turn is
-                in `lifecycleCount` and in none of the numbers on this bar —
-                the rollup bucket exists on the wire but nothing reads it. It follows the chip
-                above rather than the running/blocked pair: those two are the workspace's standing
-                rhythm and read fine at zero, while a permanent `0 awaiting you` is the same
-                reassurance-zero lie the caution chip refuses to tell. */}
-            {metrics.awaitingDeveloperCount > 0
-              ? ` · ${metrics.awaitingDeveloperCount} awaiting you`
-              : ""}
           </span>
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}
@@ -994,17 +970,22 @@ const RailToggle = memo(function RailToggle({
   value,
   onChange,
 }: {
-  value: "river" | "chat";
-  onChange: (next: "river" | "chat") => void;
+  value: 'river' | 'chat';
+  onChange: (next: 'river' | 'chat') => void;
 }) {
   return (
-    <div className={railToggle} role="radiogroup" aria-label="Right rail view" data-testid="rail-toggle">
+    <div
+      className={railToggle}
+      role="radiogroup"
+      aria-label="Right rail view"
+      data-testid="rail-toggle"
+    >
       <button
         type="button"
         role="radio"
-        aria-checked={value === "river"}
-        className={railToggleButton({ on: value === "river" })}
-        onClick={() => onChange("river")}
+        aria-checked={value === 'river'}
+        className={railToggleButton({ on: value === 'river' })}
+        onClick={() => onChange('river')}
         data-testid="rail-toggle-river"
       >
         River
@@ -1012,9 +993,9 @@ const RailToggle = memo(function RailToggle({
       <button
         type="button"
         role="radio"
-        aria-checked={value === "chat"}
-        className={railToggleButton({ on: value === "chat" })}
-        onClick={() => onChange("chat")}
+        aria-checked={value === 'chat'}
+        className={railToggleButton({ on: value === 'chat' })}
+        onClick={() => onChange('chat')}
         data-testid="rail-toggle-chat"
       >
         Chat
@@ -1025,7 +1006,7 @@ const RailToggle = memo(function RailToggle({
 
 function ConnBadge({ conn }: { conn: ConnState }) {
   const label =
-    conn === "live" ? "● LIVE" : conn === "signal-lost" ? "✶ SIGNAL LOST" : "… CONNECTING";
+    conn === 'live' ? '● LIVE' : conn === 'signal-lost' ? '✶ SIGNAL LOST' : '… CONNECTING';
   return (
     <span className={connBadge({ state: conn })} data-testid="conn">
       {label}
@@ -1038,17 +1019,17 @@ function ConnBadge({ conn }: { conn: ConnState }) {
 // `calm-cockpit` localStorage flag main.tsx reads on the next load. Default = effects on.
 function EffectsToggle() {
   const [on, setOn] = useState(
-    () => typeof document === "undefined" || document.documentElement.dataset.effects !== "off",
+    () => typeof document === 'undefined' || document.documentElement.dataset.effects !== 'off',
   );
   const toggle = () => {
     const next = !on;
     setOn(next);
     if (next) {
       delete document.documentElement.dataset.effects;
-      window.localStorage.removeItem("calm-cockpit");
+      window.localStorage.removeItem('calm-cockpit');
     } else {
-      document.documentElement.dataset.effects = "off";
-      window.localStorage.setItem("calm-cockpit", "1");
+      document.documentElement.dataset.effects = 'off';
+      window.localStorage.setItem('calm-cockpit', '1');
     }
   };
   return (
@@ -1058,9 +1039,13 @@ function EffectsToggle() {
       onClick={toggle}
       aria-pressed={on}
       data-testid="effects-toggle"
-      title={on ? "Effects on — click to calm (freeze motion + backdrop)" : "Calm — click to enable motion + backdrop"}
+      title={
+        on
+          ? 'Effects on — click to calm (freeze motion + backdrop)'
+          : 'Calm — click to enable motion + backdrop'
+      }
     >
-      {on ? "✦ Effects" : "❄ Calm"}
+      {on ? '✦ Effects' : '❄ Calm'}
     </button>
   );
 }

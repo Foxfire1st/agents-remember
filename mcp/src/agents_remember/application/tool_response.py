@@ -1,7 +1,7 @@
 """Complete one tool result at the application boundary.
 
 The MCP adapter supplies the tool name and raw use-case result.  This service
-selects the wire model, attaches lifecycle-wide state, finalizes the token
+selects the wire model, attaches contract guidance, finalizes the token
 count, and records the completed call.  Domain observation therefore remains
 below the application boundary; the adapter receives a protocol-ready mapping.
 """
@@ -24,7 +24,7 @@ from agents_remember.application.landing_answer_shapes import (
     project_landing_answer,
     project_task_doc_answer,
 )
-from agents_remember.application.next_step import next_step_for
+from agents_remember.application.next_step import approval_stop_for, next_step_for
 from agents_remember.application.tool_answer_log import (
     DetailRequest,
     LineRequest,
@@ -49,7 +49,6 @@ from agents_remember.models.tools.tool_answer import (
     truncate_lists,
 )
 from agents_remember.models.tools.tool_response import finalize_tool_response
-from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.tool_events import record_tool_completed
 
 _RESPONSE_PATH_FIELDS = ("contractPath", "enclosurePath")
@@ -91,11 +90,8 @@ def _names_the_same_place(observed: str, expected: str) -> bool:
 def bound_next_step(response: ResponseEnvelope, step: NextStep | None) -> NextStep | None:
     """Omit guidance whose task address contradicts the response's exact address.
 
-    The guidance a response carries is derived from the *process-global* ambient lifecycle
-    (``application/next_step.py::next_step_for`` reads ``LifecycleState.enclosure``), while the
-    response has its own address. When they disagree the guidance is about a different task, and
-    a seat following it is sent into another task's enclosure -- which is what ``260918-TSIP``
-    `T54` recorded. So the address check is a *guard*, and its two rules are:
+    The hint and response must name the same contract. A producer may supply
+    explicit recovery guidance, so every address spelling is checked:
 
     * a response that declares no contract path of its own cannot be validated, and its guidance
       is withheld rather than emitted unchecked. The old form returned the step here
@@ -130,14 +126,22 @@ def bound_next_step(response: ResponseEnvelope, step: NextStep | None) -> NextSt
     return step
 
 
-def _attach_lifecycle_tail(
-    response: ResponseEnvelope, amb: AmbientLifecycle, tool_name: str
-) -> None:
-    # A refusal/recovery producer may supply an explicit nextStep alongside its top-level
-    # recovery keys. Preserve that one authority instead of overwriting it with ambient phase
-    # guidance derived from a contract the operation intentionally refused or just rewrote.
-    step = response.nextStep or next_step_for(amb, tool_name)
-    response.nextStep = bound_next_step(response, step)
+def _attach_contract_guidance(response: ResponseEnvelope, tool_name: str) -> None:
+    # An explicit refusal/recovery hint remains authoritative.
+    path = next(
+        (
+            value
+            for field in _RESPONSE_PATH_FIELDS
+            if isinstance((value := getattr(response, field, None)), str) and value
+        ),
+        None,
+    )
+    step = response.nextStep
+    if step is None:
+        call = current_tool_call()
+        argument = call.arguments.get("contract_path") if call is not None else None
+        step = approval_stop_for(argument if isinstance(argument, str) else None, tool_name)
+    response.nextStep = bound_next_step(response, step or next_step_for(path, tool_name))
 
 
 @dataclass(frozen=True)
@@ -412,15 +416,10 @@ def complete_tool_response(
     still binds the projection, and the log line still carries the whole
     result's digest and byte size.
     """
-    amb = ambient()
     finalized = finalize_tool_response(
         tool_name,
         payload,
-        enrich=(
-            (lambda response: _attach_lifecycle_tail(response, amb, tool_name))
-            if amb is not None
-            else None
-        ),
+        enrich=lambda response: _attach_contract_guidance(response, tool_name),
     )
     call = current_tool_call()
     arguments: dict[str, Any] = dict(call.arguments) if call is not None else {}
@@ -506,18 +505,7 @@ def complete_tool_response(
         answer, delivered_tokens, _line_guard_cut = _write_delivered_line(
             lined, logged, answer, delivered_tokens, log_error
         )
-    if amb is not None and amb.current is not None:
-        # The earlier-kind active lifecycle owns this call: its event is written
-        # as it is today, and no second one goes to the workspace river. (This
-        # case ends when MIK-R113 removes the session lifecycle.)
-        amb.emit_tool(tool_name, finalized, answer_tokens=delivered_tokens)
-    else:
-        # MIK-R114 rule 1: every other call is written to the workspace river,
-        # with no active lifecycle and no call before it. The writer counts a
-        # failed write instead of breaking the call. The count the completed
-        # answer carries moved here to this leaf's delivered-answer count
-        # (`delivered_tokens`).
-        record_tool_completed(tool_name, finalized, delivered_tokens=delivered_tokens)
+    record_tool_completed(tool_name, finalized, delivered_tokens=delivered_tokens)
     return answer
 
 

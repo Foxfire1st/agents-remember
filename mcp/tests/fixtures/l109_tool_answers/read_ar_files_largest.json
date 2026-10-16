@@ -263,7 +263,7 @@
    }
   }
  ],
- "log": "/world/worktrees/repo-a/w-ar/logs/ar-tools-2000-01-01/000000000000-read_ar_files-00000000.json",
+ "log": "/world/logs/mcp/ar-tools-2000-01-01/000000000000-read_ar_files-00000000.json",
  "memoryState": "converted",
  "ok": true,
  "overviews": [

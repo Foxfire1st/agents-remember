@@ -5,9 +5,9 @@ import { fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import { seedTaskDocuments, taskDoc } from './test-utils';
+import { seedTaskEntries, taskEntry, taskSummary, taskReference } from './test-utils';
 
-const DOC = '/tasks/repo-a/m/01_long.json';
+const DOC = 'repo-a/m/01_long.json';
 
 function longText(prefix: string, lines: number): string {
   return Array.from({ length: lines }, (_, i) => `${prefix} line ${i + 1}`).join('\n');
@@ -36,8 +36,23 @@ afterEach(() => {
 
 describe('long objective and design blocks (L127-C-F03)', () => {
   it('bounds a ten-line objective with a counted link to the whole text', () => {
-    seedTaskDocuments([
-      taskDoc({ kind: 'subTask', docPath: DOC, objective: longText('Objective', 10) }),
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(DOC),
+        summary: taskSummary({
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+          objective: longText('Objective', 10),
+        }),
+      }),
     ]);
     const { container, getByTestId, queryByText } = render(
       <DetailPanel selectedId={`taskdoc:${DOC}`} />,
@@ -50,8 +65,23 @@ describe('long objective and design blocks (L127-C-F03)', () => {
   });
 
   it('opens the whole objective in its own view and restores nonzero scroll on Back', async () => {
-    seedTaskDocuments([
-      taskDoc({ kind: 'subTask', docPath: DOC, objective: longText('Objective', 10) }),
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(DOC),
+        summary: taskSummary({
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+          objective: longText('Objective', 10),
+        }),
+      }),
     ]);
     const scroll = stubScroll(312);
     try {
@@ -69,7 +99,25 @@ describe('long objective and design blocks (L127-C-F03)', () => {
   });
 
   it('bounds a long design body with its own counted view', () => {
-    seedTaskDocuments([taskDoc({ kind: 'subTask', docPath: DOC, design: longText('Design', 12) })]);
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(DOC),
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+          design: longText('Design', 12),
+        }),
+      }),
+    ]);
     const { getByTestId, queryByText } = render(<DetailPanel selectedId={`taskdoc:${DOC}`} />);
 
     expect(getByTestId('design-all-link').textContent).toContain('all 12 lines');
@@ -80,8 +128,23 @@ describe('long objective and design blocks (L127-C-F03)', () => {
   });
 
   it('renders a short objective whole with no link', () => {
-    seedTaskDocuments([
-      taskDoc({ kind: 'subTask', docPath: DOC, objective: 'Line one.\nLine two.' }),
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(DOC),
+        summary: taskSummary({
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+          objective: 'Line one.\nLine two.',
+        }),
+      }),
     ]);
     const { queryByTestId, getByText } = render(<DetailPanel selectedId={`taskdoc:${DOC}`} />);
 
@@ -90,9 +153,24 @@ describe('long objective and design blocks (L127-C-F03)', () => {
   });
 
   it('bounds long objectives on master pages too', () => {
-    const masterPath = '/tasks/repo-a/m/task.json';
-    seedTaskDocuments([
-      taskDoc({ kind: 'master', docPath: masterPath, objective: longText('Master objective', 9) }),
+    const masterPath = 'repo-a/m/task.json';
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(masterPath),
+        summary: taskSummary({
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+          objective: longText('Master objective', 9),
+        }),
+      }),
     ]);
     const { getByTestId, queryByText } = render(
       <DetailPanel selectedId={`taskdoc:${masterPath}`} />,
@@ -106,7 +184,24 @@ describe('long objective and design blocks (L127-C-F03)', () => {
     // L127-C-F03 residual: one source line can exceed any viewport.
     const paragraph = `Head marker ${'x'.repeat(20997)} tail marker`;
     expect(paragraph.length).toBe(21021);
-    seedTaskDocuments([taskDoc({ kind: 'subTask', docPath: DOC, objective: paragraph })]);
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(DOC),
+        summary: taskSummary({
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+          objective: paragraph,
+        }),
+      }),
+    ]);
     const { getByTestId, getByText, queryByText } = render(
       <DetailPanel selectedId={`taskdoc:${DOC}`} />,
     );
@@ -123,7 +218,25 @@ describe('long objective and design blocks (L127-C-F03)', () => {
 
   it('bounds a single-paragraph design the same way', () => {
     const paragraph = `Design head ${'y'.repeat(5000)} design tail`;
-    seedTaskDocuments([taskDoc({ kind: 'subTask', docPath: DOC, design: paragraph })]);
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(DOC),
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+          design: paragraph,
+        }),
+      }),
+    ]);
     const { getByTestId, queryByText } = render(<DetailPanel selectedId={`taskdoc:${DOC}`} />);
 
     expect(getByTestId('design-all-link').textContent).toContain(`${paragraph.length} characters`);

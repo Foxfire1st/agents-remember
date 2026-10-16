@@ -31,14 +31,6 @@ from agents_remember.models.tools.tool_answer import (
     strip_envelope,
     truncate_lists,
 )
-from agents_remember.observer import (
-    AmbientLifecycle,
-    EventStore,
-    install_ambient,
-    new_ulid,
-    observer_root,
-)
-from agents_remember.observer.ambient import reset_ambient
 
 # MIK-R110 rule 3: ``curator_coherence`` answers with a status -- the state,
 # the counts and what blocks -- while the candidate set, the recorded lists
@@ -787,16 +779,6 @@ def _stub_config(
             }
         ),
     )
-
-
-def _install_ambient(coord: Path):
-    """Install an ambient that adopted a lifecycle for one test (rule 3)."""
-
-    reset_ambient()
-    amb = AmbientLifecycle(EventStore(observer_root(_stub_config(coord))))
-    amb.attach(new_ulid(), enclosure=str(coord / "contract.json"))
-    install_ambient(amb)
-    return amb
 
 
 def _server_info_case() -> dict[str, Any]:

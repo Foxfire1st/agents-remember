@@ -14,7 +14,10 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.serving.projections.snapshots_impl._task_documents import read_task_documents
+from agents_remember.serving.projections.snapshots_impl._task_documents import (
+    read_task_document_body,
+    read_task_documents,
+)
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.master_order import derive_master_order, load_master_children
 from test_task_document import _config
@@ -33,6 +36,45 @@ def document(task_id: str, **fields: object) -> TaskDocument:
             **fields,
         }
     )
+
+
+def test_dependency_keeps_its_full_relative_reference_and_own_document_stage(tmp_path):
+    root = tmp_path / "tasks/agents-remember/master"
+    write_task_doc(
+        root,
+        document(
+            "master",
+            kind="master",
+            slug="task",
+            subTasks=[
+                {"number": "A", "name": "A", "file": "a.md"},
+                {"number": "B", "name": "B", "file": "../nested/b.md", "status": "planning"},
+            ],
+        ),
+    )
+    write_task_doc(root, document("A", master="task.md", waitsFor=["B"]))
+    write_task_doc(
+        root.parent / "nested", document("B", master="../master/task.md", status="Completed")
+    )
+    projected = {doc.id: doc for doc in read_task_documents(tmp_path, now=datetime.now(UTC))}
+    assert projected["A"].waitsForTasks is not None
+    dependency = projected["A"].waitsForTasks[0]
+    assert dependency.reference is not None
+    assert dependency.reference.path == "nested/b.json"
+    graph = projected["master"].executionGraphView
+    assert graph is not None
+    assert (
+        next(node for node in graph.nodes if node.masterRef.path == "nested/b.json").frontierState
+        == "landed"
+    )
+    for task_id, path in (("A", "master/a.json"), ("B", "nested/b.json")):
+        body = read_task_document_body(
+            tmp_path, doc_path=f"agents-remember/{path}", now=datetime.now(UTC)
+        )
+        assert body is not None
+        assert body.waitsForTasks == projected[task_id].waitsForTasks
+        assert body.neededByTasks == projected[task_id].neededByTasks
+        assert body.bodyRevision == projected[task_id].bodyRevision
 
 
 @pytest.fixture
@@ -99,7 +141,7 @@ def test_derived_order_uses_states_and_latest_unfinished_prerequisite():
     children = {
         name: document(name, **fields)
         for name, fields in {
-            "A": {"status": "planning", "waitsFor": []},
+            "A": {"status": "inProgress", "waitsFor": []},
             "B": {"waitsFor": []},
             "C": {"waitsFor": ["B"]},
             "D": {"waitsFor": ["A", "C", "F"]},
@@ -115,7 +157,7 @@ def test_derived_order_uses_states_and_latest_unfinished_prerequisite():
                 "number": child.id,
                 "name": child.title,
                 "file": f"{child.slug}.md",
-                "status": "inProgress" if child.id == "A" else child.status,
+                "status": "planning" if child.id == "A" else child.status,
             }
             for child in children.values()
         ],
@@ -325,9 +367,7 @@ def test_field_write_refreshes_derived_markdown_and_projected_heads_without_stor
     assert "| 2 | [A — A](a.md) | planning | B |" in rendered
     projected = {
         node.id: node
-        for node in read_task_documents(
-            root.parents[2], enclosures=[], now=datetime(2026, 1, 1, tzinfo=UTC)
-        )
+        for node in read_task_documents(root.parents[2], now=datetime(2026, 1, 1, tzinfo=UTC))
     }
     graph = projected["series"].executionGraphView
     assert graph is not None
@@ -336,19 +376,19 @@ def test_field_write_refreshes_derived_markdown_and_projected_heads_without_stor
         "B": (1, "ready"),
         "C": (1, "ready"),
     }
-    assert [(item.id, item.status) for item in projected["A"].waitsForTasks or []] == [
-        ("B", "planning")
-    ]
-    assert [(item.id, item.status) for item in projected["B"].neededByTasks or []] == [
-        ("A", "planning")
-    ]
+    assert [
+        (item.id, item.reference.path if item.reference else None, item.gone)
+        for item in projected["A"].waitsForTasks or []
+    ] == [("B", "series/b.json", False)]
+    assert [
+        (item.id, item.reference.path if item.reference else None, item.gone)
+        for item in projected["B"].neededByTasks or []
+    ] == [("A", "series/a.json", False)]
     assert call("A", fields={"waitsFor": []})["ok"]
     assert "## Order" not in (root / "task.md").read_text()
     projected = {
         node.id: node
-        for node in read_task_documents(
-            root.parents[2], enclosures=[], now=datetime(2026, 1, 1, tzinfo=UTC)
-        )
+        for node in read_task_documents(root.parents[2], now=datetime(2026, 1, 1, tzinfo=UTC))
     }
     assert projected["series"].executionGraphView is None
     assert (root / "task.json").read_bytes() == master_before
@@ -361,12 +401,10 @@ def test_removed_prerequisite_projects_gone_and_a_legacy_cycle_stays_one_wave(wo
     assert call("series", "remove_subtask", subtask={"number": "B"})["ok"]
     projected = {
         node.id: node
-        for node in read_task_documents(
-            root.parents[2], enclosures=[], now=datetime(2026, 1, 1, tzinfo=UTC)
-        )
+        for node in read_task_documents(root.parents[2], now=datetime(2026, 1, 1, tzinfo=UTC))
     }
     gone = (projected["A"].waitsForTasks or [])[0]
-    assert (gone.id, gone.status, gone.docPath) == ("B", "gone", None)
+    assert (gone.id, gone.gone, gone.reference) == ("B", True, None)
     graph = projected["series"].executionGraphView
     assert graph is not None
     blocked = next(node for node in graph.nodes if node.masterTitle == "A")
@@ -381,12 +419,11 @@ def test_removed_prerequisite_projects_gone_and_a_legacy_cycle_stays_one_wave(wo
         ],
     )
     write_task_doc(root, document("B", master="task.md", waitsFor=["A"]))
+    assert call("A", "set_status", fields={"status": "inProgress"})["ok"]
     write_task_doc(root, master)
     projected = {
         node.id: node
-        for node in read_task_documents(
-            root.parents[2], enclosures=[], now=datetime(2026, 1, 1, tzinfo=UTC)
-        )
+        for node in read_task_documents(root.parents[2], now=datetime(2026, 1, 1, tzinfo=UTC))
     }
     graph = projected["series"].executionGraphView
     assert graph is not None
@@ -408,9 +445,7 @@ def test_replace_omitted_dependency_refreshes_parent_order(world):
     assert call("A", "replace", fields=replacement)["ok"]
     assert read_task_doc(root / "a.json").waitsFor is None
     assert "## Order" not in (root / "task.md").read_text()
-    projected = read_task_documents(
-        root.parents[2], enclosures=[], now=datetime(2026, 1, 1, tzinfo=UTC)
-    )
+    projected = read_task_documents(root.parents[2], now=datetime(2026, 1, 1, tzinfo=UTC))
     assert next(node for node in projected if node.id == "series").executionGraphView is None
     assert (root / "task.json").read_bytes() == parent_json
 
@@ -509,9 +544,7 @@ def test_legacy_cycle_identity_keeps_completed_members(world, states):
     assert not set(("A", "B")) & set(order.ready_ids)
     graph = next(
         node
-        for node in read_task_documents(
-            root.parents[2], enclosures=[], now=datetime(2026, 1, 1, tzinfo=UTC)
-        )
+        for node in read_task_documents(root.parents[2], now=datetime(2026, 1, 1, tzinfo=UTC))
         if node.id == "series"
     ).executionGraphView
     assert graph is not None

@@ -42,21 +42,8 @@ from agents_remember.application.tool_response import bound_next_step
 from agents_remember.models.base import NextStep
 from agents_remember.models.task_doc import TaskDocResponse
 from agents_remember.models.worktree import WorktreeStatusResponse
-from agents_remember.observer.lifecycle_state import LifecycleState
 from agents_remember.worktrees.modules.guidance import lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract
-
-
-def _live_state() -> LifecycleState:
-    """One running lifecycle: enough for the linear half to be the branch under test."""
-
-    return LifecycleState(
-        id="01J000000000000000000000AB",
-        state="running",
-        phase="build",
-        fleeting=False,
-        started_at="2026-09-18T00:00:00+00:00",
-    )
 
 
 def _contract(
@@ -150,15 +137,14 @@ def test_two_addressed_contracts_in_sequence_yield_two_different_hints(tmp_path:
         contract_name="b.md",
         closeout_status="completed",
     )
-    state = _live_state()
 
     # The edge widens the TypedDict before it calls in (``next_step._guidance_for``): the hint
     # layer reads the guidance defensively by key, so ``compute_next_step`` declares a plain dict
     # and this case calls it the way the production path does.
     first_guidance = dict(lifecycle_guidance(first))
     second_guidance = dict(lifecycle_guidance(second))
-    first_step = compute_next_step(state, first, "worktree_status", guidance=first_guidance)
-    second_step = compute_next_step(state, second, "worktree_status", guidance=second_guidance)
+    first_step = compute_next_step(first, "worktree_status", guidance=first_guidance)
+    second_step = compute_next_step(second, "worktree_status", guidance=second_guidance)
 
     assert first_step is not None and second_step is not None
     assert first_step.summary != second_step.summary

@@ -46,7 +46,7 @@
     },
     "Analytics": {
       "additionalProperties": false,
-      "description": "The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.\n\nKept apart from the structural tree (lifecycles/enclosures/providers) so the\nclient-agnostic core stays small. Large raw inventories are deliberately *not*\nhere -- drift rows stay in the snapshot file, the full sidecar list collapses to\nthe histogram + a bounded leaderboard -- so the served projection stays lean.\n\n``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*\nsurfaces here: the reducer composes them from the structural tree + these signals (not\nfrom an input file), so a structural-only caller can still see them populated.",
+      "description": "The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.\n\nKept apart from the structural task/enclosure/provider tree so the\nclient-agnostic core stays small. Large raw inventories are deliberately *not*\nhere -- drift rows stay in the snapshot file, the full sidecar list collapses to\nthe histogram + a bounded leaderboard -- so the served projection stays lean.\n\n``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*\nsurfaces here: the reducer composes them from the structural tree + these signals (not\nfrom an input file), so a structural-only caller can still see them populated.",
       "properties": {
         "attentionQueue": {
           "items": {
@@ -83,13 +83,6 @@
           "title": "Routecoverage",
           "type": "array"
         },
-        "series": {
-          "items": {
-            "$ref": "#/$defs/SeriesNode"
-          },
-          "title": "Series",
-          "type": "array"
-        },
         "setupProgress": {
           "items": {
             "$ref": "#/$defs/SetupProgressNode"
@@ -111,13 +104,6 @@
           "title": "Stalestsidecars",
           "type": "array"
         },
-        "taskDocuments": {
-          "items": {
-            "$ref": "#/$defs/TaskDocNode"
-          },
-          "title": "Taskdocuments",
-          "type": "array"
-        },
         "toolReports": {
           "items": {
             "$ref": "#/$defs/ToolReportNode"
@@ -133,6 +119,18 @@
       "additionalProperties": false,
       "description": "One thing that needs the human, decided by the reducer (note 06, slice 05).\n\nA ranked cross-section of the structural tree + analytics signals -- the\nhome-screen attention queue. Computed server-side so every client (dashboard,\nTUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never\na client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the\nstructural tree so the UI can couple a queue item to its operation-tree node.",
       "properties": {
+        "actionableFingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actionablefingerprint"
+        },
         "detail": {
           "anyOf": [
             {
@@ -168,18 +166,6 @@
         "lane": {
           "$ref": "#/$defs/AttentionLane"
         },
-        "lifecycleId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Lifecycleid"
-        },
         "providerId": {
           "anyOf": [
             {
@@ -206,18 +192,6 @@
         },
         "severity": {
           "$ref": "#/$defs/AttentionSeverity"
-        },
-        "signalTs": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Signalts"
         },
         "title": {
           "title": "Title",
@@ -249,8 +223,7 @@
     "AttentionLane": {
       "enum": [
         "repo",
-        "worktree",
-        "lifecycle"
+        "worktree"
       ],
       "type": "string"
     },
@@ -644,6 +617,18 @@
           "title": "Actionablecount",
           "type": "integer"
         },
+        "actionableFingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actionablefingerprint"
+        },
         "branch": {
           "title": "Branch",
           "type": "string"
@@ -729,7 +714,7 @@
     },
     "EnclosureNode": {
       "additionalProperties": false,
-      "description": "A worktree enclosure (contract + group): the persistent identity anchor.\n\n``lifecycleId`` cross-references the lifecycle this enclosure anchors (it is\n``\"\"`` for a legacy contract written before the lifecycle field existed).\n\n``codeWorktreeExists`` / ``memoryWorktreeExists`` are the worktree-existence\nTRUTH (L11): stat'ed at snapshot time in the I/O layer, exactly how the worktree\ntools report existence (``contract.code_worktree.exists()`` in\n``worktree_status``). The tasks surface filters visibility on these, never on a\ncleanup-state proxy — ``cleanup: reopened`` means contract-reset-awaiting-restart\n(worktrees gone until the next ``worktree_start``), not live work.",
+      "description": "A worktree enclosure (contract + group): the persistent identity anchor.\n\n``lifecycleId`` is the contract's operation-binding key. It is not a\nseparately projected agent session or a source of task activity.\n\n``codeWorktreeExists`` / ``memoryWorktreeExists`` are the worktree-existence\nTRUTH (L11): stat'ed at snapshot time in the I/O layer, exactly how the worktree\ntools report existence (``contract.code_worktree.exists()`` in\n``worktree_status``). The tasks surface filters visibility on these, never on a\ncleanup-state proxy — ``cleanup: reopened`` means contract-reset-awaiting-restart\n(worktrees gone until the next ``worktree_start``), not live work.",
       "properties": {
         "actions": {
           "items": {
@@ -1689,115 +1674,6 @@
       "title": "LifecycleOperationProjection",
       "type": "object"
     },
-    "LifecycleProjection": {
-      "additionalProperties": false,
-      "description": "One lifecycle's resolved state, folded from its event log.\n\nFleeting lifecycles project as bare-bones entries (no ``enclosure``);\npersistent ones carry the full enclosure detail -- the slice-05 visual\ndistinction falls out of this shape, not UI inference.",
-      "properties": {
-        "enclosure": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Enclosure"
-        },
-        "fleeting": {
-          "title": "Fleeting",
-          "type": "boolean"
-        },
-        "id": {
-          "title": "Id",
-          "type": "string"
-        },
-        "inferred": {
-          "default": false,
-          "title": "Inferred",
-          "type": "boolean"
-        },
-        "lastEventTs": {
-          "title": "Lasteventts",
-          "type": "string"
-        },
-        "phase": {
-          "enum": [
-            "request",
-            "trust-checkpoint",
-            "reframe-research",
-            "decide",
-            "build",
-            "close"
-          ],
-          "title": "Phase",
-          "type": "string"
-        },
-        "repoId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Repoid"
-        },
-        "scope": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Scope"
-        },
-        "staleSeconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Staleseconds"
-        },
-        "startedAt": {
-          "title": "Startedat",
-          "type": "string"
-        },
-        "state": {
-          "enum": [
-            "running",
-            "paused",
-            "blocked",
-            "awaiting-developer",
-            "completed",
-            "abandoned"
-          ],
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "state",
-        "phase",
-        "fleeting",
-        "startedAt",
-        "lastEventTs"
-      ],
-      "title": "LifecycleProjection",
-      "type": "object"
-    },
     "LifecycleProjectionComponentBindings": {
       "additionalProperties": false,
       "description": "Identity digest claimed by every optional nested projection component.",
@@ -2037,31 +1913,11 @@
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Workspace rollups: 3a point counts + the 3b derived aggregates.\n\nThe ``*Count`` fields below are not a free-form list: they are exactly\n:data:`STATE_COUNT_FIELDS` (one per non-terminal lifecycle state) plus ``lifecycleCount``,\nthe all-states total. They stay written out because they are the served contract the\ndashboard reads by name and pyright checks by name; what makes them non-drifting is that\nthe reducer fills them from the vocabulary and a test asserts this declaration equals it.\n\n``stalenessHistogram`` buckets every onboarding sidecar by the age of its\n``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free\nverification-age distribution note 03 wanted, computed without classifying\ndrift.",
+      "description": "Workspace verification-age distribution; task counts belong to task entries.",
       "properties": {
-        "awaitingDeveloperCount": {
+        "ignoredHostAgents": {
           "default": 0,
-          "title": "Awaitingdevelopercount",
-          "type": "integer"
-        },
-        "blockedCount": {
-          "default": 0,
-          "title": "Blockedcount",
-          "type": "integer"
-        },
-        "lifecycleCount": {
-          "default": 0,
-          "title": "Lifecyclecount",
-          "type": "integer"
-        },
-        "pausedCount": {
-          "default": 0,
-          "title": "Pausedcount",
-          "type": "integer"
-        },
-        "runningCount": {
-          "default": 0,
-          "title": "Runningcount",
+          "title": "Ignoredhostagents",
           "type": "integer"
         },
         "stalenessHistogram": {
@@ -2438,195 +2294,6 @@
         "route"
       ],
       "title": "RouteCoverageNode",
-      "type": "object"
-    },
-    "SeriesNode": {
-      "additionalProperties": false,
-      "description": "A series master's progress, keyed by its task FOLDER (R1 -- never a lifecycle).\n\nThe master is also projected as a :class:`TaskDocNode` for direct document selection.\n``SeriesNode`` is the folder-keyed aggregation/compatibility surface: the master\nchecklist where each subtask that will run is one checkbox and ``doneCount`` counts the\n*declared* ``Completed`` subtasks, authoritative over a slice's own internal steps.\nAbandoned rows are neither done nor part of ``totalCount``; ``abandonedCount`` names them\nbeside the figure (\"5/5, 1 abandoned\"). Carries the full master render (subTasks +\nsections + decisions) so older clients can still render the series reader.",
-      "properties": {
-        "abandonedCount": {
-          "default": 0,
-          "title": "Abandonedcount",
-          "type": "integer"
-        },
-        "ageSeconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ageseconds"
-        },
-        "createdAt": {
-          "default": "",
-          "title": "Createdat",
-          "type": "string"
-        },
-        "decisions": {
-          "items": {
-            "$ref": "#/$defs/TaskDecisionNode"
-          },
-          "title": "Decisions",
-          "type": "array"
-        },
-        "discardedCount": {
-          "default": 0,
-          "title": "Discardedcount",
-          "type": "integer"
-        },
-        "discardedSubTasks": {
-          "items": {
-            "$ref": "#/$defs/DiscardedSubTaskNode"
-          },
-          "maxItems": 256,
-          "title": "Discardedsubtasks",
-          "type": "array"
-        },
-        "docPath": {
-          "title": "Docpath",
-          "type": "string"
-        },
-        "doneCount": {
-          "default": 0,
-          "title": "Donecount",
-          "type": "integer"
-        },
-        "objective": {
-          "default": "",
-          "title": "Objective",
-          "type": "string"
-        },
-        "repository": {
-          "title": "Repository",
-          "type": "string"
-        },
-        "sections": {
-          "items": {
-            "$ref": "#/$defs/SeriesSectionNode"
-          },
-          "title": "Sections",
-          "type": "array"
-        },
-        "seriesId": {
-          "title": "Seriesid",
-          "type": "string"
-        },
-        "status": {
-          "title": "Status",
-          "type": "string"
-        },
-        "subTasks": {
-          "items": {
-            "$ref": "#/$defs/SeriesSubTaskNode"
-          },
-          "title": "Subtasks",
-          "type": "array"
-        },
-        "title": {
-          "title": "Title",
-          "type": "string"
-        },
-        "totalCount": {
-          "default": 0,
-          "title": "Totalcount",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "seriesId",
-        "repository",
-        "title",
-        "status",
-        "docPath"
-      ],
-      "title": "SeriesNode",
-      "type": "object"
-    },
-    "SeriesSectionNode": {
-      "additionalProperties": false,
-      "description": "One ordered render section of a series master (freeform prose or a structured block).",
-      "properties": {
-        "body": {
-          "default": "",
-          "title": "Body",
-          "type": "string"
-        },
-        "heading": {
-          "title": "Heading",
-          "type": "string"
-        },
-        "kind": {
-          "title": "Kind",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "heading"
-      ],
-      "title": "SeriesSectionNode",
-      "type": "object"
-    },
-    "SeriesSubTaskNode": {
-      "additionalProperties": false,
-      "description": "One subtask of a series master -- a single checkbox.\n\n``status`` is the lever: ``planning`` -> ⬜, ``inProgress`` -> 🔨, ``Completed`` -> ✅.\n``createdAt`` is resolved from the referenced leaf task document when present; the dashboard\nuses it for creation-order display without parsing file-name prefixes.",
-      "properties": {
-        "createdAt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Createdat"
-        },
-        "directGrant": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DirectGrantNode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "file": {
-          "default": "",
-          "title": "File",
-          "type": "string"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "number": {
-          "title": "Number",
-          "type": "string"
-        },
-        "scope": {
-          "default": "",
-          "title": "Scope",
-          "type": "string"
-        },
-        "status": {
-          "title": "Status",
-          "type": "string"
-        }
-      },
-      "required": [
-        "number",
-        "name",
-        "status"
-      ],
-      "title": "SeriesSubTaskNode",
       "type": "object"
     },
     "SetupProgressNode": {
@@ -3008,6 +2675,48 @@
       "title": "TaskCodeExampleNode",
       "type": "object"
     },
+    "TaskCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "aborted": {
+          "default": 0,
+          "title": "Aborted",
+          "type": "integer"
+        },
+        "completed": {
+          "default": 0,
+          "title": "Completed",
+          "type": "integer"
+        },
+        "paused": {
+          "default": 0,
+          "title": "Paused",
+          "type": "integer"
+        },
+        "planned": {
+          "default": 0,
+          "title": "Planned",
+          "type": "integer"
+        },
+        "started": {
+          "default": 0,
+          "title": "Started",
+          "type": "integer"
+        },
+        "unknown": {
+          "default": 0,
+          "title": "Unknown",
+          "type": "integer"
+        },
+        "works": {
+          "default": 0,
+          "title": "Works",
+          "type": "integer"
+        }
+      },
+      "title": "TaskCounts",
+      "type": "object"
+    },
     "TaskDecisionNode": {
       "additionalProperties": false,
       "description": "One decision-log row of a task document.",
@@ -3042,474 +2751,36 @@
       "additionalProperties": false,
       "description": "A direct same-master dependency, including a no-longer-listed task.",
       "properties": {
-        "docPath": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Docpath"
-        },
-        "id": {
-          "title": "Id",
-          "type": "string"
-        },
-        "status": {
-          "title": "Status",
-          "type": "string"
-        },
-        "title": {
-          "title": "Title",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "title",
-        "status"
-      ],
-      "title": "TaskDependencyNode",
-      "type": "object"
-    },
-    "TaskDocNode": {
-      "additionalProperties": false,
-      "description": "A task document's progress and reader content (slice 3c, surface 7).\n\nRead from the JSON-primary ``ar-task-document/v1`` document, so the dashboard\ncan show what a task is doing without opening files on disk. ``lifecycleId``\nis runtime attachment, not the admission ticket: planning documents can be\nprojected before an enclosure or lifecycle exists.",
-      "properties": {
-        "acceptance": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Acceptance"
-        },
-        "ageSeconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ageseconds"
-        },
-        "bodyRevision": {
-          "default": "",
-          "title": "Bodyrevision",
-          "type": "string"
-        },
-        "codeExamples": {
-          "items": {
-            "$ref": "#/$defs/TaskCodeExampleNode"
-          },
-          "title": "Codeexamples",
-          "type": "array"
-        },
-        "completedAt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Completedat"
-        },
-        "createdAt": {
-          "default": "",
-          "title": "Createdat",
-          "type": "string"
-        },
-        "currentStep": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Currentstep"
-        },
-        "decisions": {
-          "items": {
-            "$ref": "#/$defs/TaskDecisionNode"
-          },
-          "title": "Decisions",
-          "type": "array"
-        },
-        "design": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Design"
-        },
-        "directGrant": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DirectGrantNode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "discardedCount": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Discardedcount"
-        },
-        "discardedSubTasks": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/DiscardedSubTaskNode"
-              },
-              "maxItems": 256,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Discardedsubtasks"
-        },
-        "docPath": {
-          "title": "Docpath",
-          "type": "string"
-        },
-        "executionGraph": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TaskExecutionGraphNode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "executionGraphView": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TaskExecutionGraphView"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "executionNature": {
-          "anyOf": [
-            {
-              "enum": [
-                "organizational",
-                "atomic"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Executionnature"
-        },
-        "executionWaves": {
-          "items": {
-            "items": {
-              "$ref": "#/$defs/TaskExecutionNode"
-            },
-            "type": "array"
-          },
-          "title": "Executionwaves",
-          "type": "array"
-        },
-        "form": {
-          "default": "task",
-          "enum": [
-            "sprint",
-            "master",
-            "task"
-          ],
-          "title": "Form",
-          "type": "string"
-        },
-        "headerNotes": {
-          "items": {
-            "$ref": "#/$defs/TaskHeaderNoteNode"
-          },
-          "title": "Headernotes",
-          "type": "array"
-        },
-        "headerNotesTotal": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Headernotestotal"
-        },
-        "id": {
-          "title": "Id",
-          "type": "string"
-        },
-        "integrationBranch": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Integrationbranch"
-        },
-        "kind": {
-          "title": "Kind",
-          "type": "string"
-        },
-        "lifecycleId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Lifecycleid"
-        },
-        "masterLifecycleId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Masterlifecycleid"
-        },
-        "neededByTasks": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/TaskDependencyNode"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Neededbytasks"
-        },
-        "nonGoals": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Nongoals"
-        },
-        "objective": {
-          "default": "",
-          "title": "Objective",
-          "type": "string"
-        },
-        "openQuestions": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Openquestions",
-          "type": "array"
-        },
-        "orchestrates": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Orchestrates",
-          "type": "array"
-        },
-        "references": {
-          "items": {
-            "type": "string"
-          },
-          "title": "References",
-          "type": "array"
-        },
-        "repository": {
-          "title": "Repository",
-          "type": "string"
-        },
-        "requirements": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Requirements",
-          "type": "array"
-        },
-        "reviewState": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TaskReviewStateNode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "seats": {
-          "items": {
-            "$ref": "#/$defs/TaskSeatNode"
-          },
-          "title": "Seats",
-          "type": "array"
-        },
-        "sections": {
-          "items": {
-            "$ref": "#/$defs/TaskSectionNode"
-          },
-          "title": "Sections",
-          "type": "array"
-        },
-        "status": {
-          "title": "Status",
-          "type": "string"
-        },
-        "statusNote": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Statusnote"
-        },
-        "statusNoteTruncated": {
+        "gone": {
           "default": false,
-          "title": "Statusnotetruncated",
+          "title": "Gone",
           "type": "boolean"
         },
-        "steps": {
-          "items": {
-            "$ref": "#/$defs/TaskStepNode"
-          },
-          "title": "Steps",
-          "type": "array"
+        "id": {
+          "title": "Id",
+          "type": "string"
         },
-        "stepsDone": {
-          "default": 0,
-          "title": "Stepsdone",
-          "type": "integer"
-        },
-        "stepsTotal": {
-          "default": 0,
-          "title": "Stepstotal",
-          "type": "integer"
-        },
-        "subTasks": {
-          "items": {
-            "$ref": "#/$defs/TaskSubTaskRefNode"
-          },
-          "title": "Subtasks",
-          "type": "array"
+        "reference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "title": {
           "title": "Title",
           "type": "string"
-        },
-        "type": {
-          "default": "",
-          "title": "Type",
-          "type": "string"
-        },
-        "waitsFor": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Waitsfor"
-        },
-        "waitsForTasks": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/TaskDependencyNode"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Waitsfortasks"
         }
       },
       "required": [
         "id",
-        "repository",
-        "title",
-        "status",
-        "kind",
-        "docPath"
+        "title"
       ],
-      "title": "TaskDocNode",
+      "title": "TaskDependencyNode",
       "type": "object"
     },
     "TaskDocProjectionEffect": {
@@ -3608,6 +2879,144 @@
         "path"
       ],
       "title": "TaskDocumentRef",
+      "type": "object"
+    },
+    "TaskEntry": {
+      "additionalProperties": false,
+      "description": "One qualified task, its authored summary, runtime facts and ordered children.",
+      "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "enum": [
+                "works",
+                "paused",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Activity"
+        },
+        "children": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Children",
+          "type": "array"
+        },
+        "counts": {
+          "$ref": "#/$defs/TaskCounts"
+        },
+        "eventAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eventat"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent"
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope"
+        },
+        "stage": {
+          "enum": [
+            "planned",
+            "started",
+            "aborted",
+            "completed"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "stepsDone": {
+          "default": 0,
+          "title": "Stepsdone",
+          "type": "integer"
+        },
+        "stepsTotal": {
+          "default": 0,
+          "title": "Stepstotal",
+          "type": "integer"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "worktrees": {
+          "items": {
+            "$ref": "#/$defs/EnclosureNode"
+          },
+          "title": "Worktrees",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stage",
+        "key",
+        "id",
+        "title"
+      ],
+      "title": "TaskEntry",
       "type": "object"
     },
     "TaskExecutionEdgeNode": {
@@ -4220,16 +3629,11 @@
       "title": "TaskSubStepNode",
       "type": "object"
     },
-    "TaskSubTaskRefNode": {
+    "TaskSummary": {
       "additionalProperties": false,
-      "description": "One slice in a master's series index -- the drill-in row (slice 6g).\n\nMirrors ``tasks.document.SubTaskRef``: ``status`` drives the index marker and ``file`` is the\ndrill-in match key (its stem resolves to the slice document's slug).",
+      "description": "A task document's progress and reader content (slice 3c, surface 7).\n\nRead from the JSON-primary ``ar-task-document/v1`` document, so the dashboard\ncan show authored task facts without opening files on disk. Planning documents\nare projected before an enclosure exists.",
       "properties": {
-        "file": {
-          "default": "",
-          "title": "File",
-          "type": "string"
-        },
-        "linkedLifecycleId": {
+        "acceptance": {
           "anyOf": [
             {
               "type": "string"
@@ -4239,12 +3643,84 @@
             }
           ],
           "default": null,
-          "title": "Linkedlifecycleid"
+          "title": "Acceptance"
         },
-        "masterRef": {
+        "ageSeconds": {
           "anyOf": [
             {
-              "$ref": "#/$defs/TaskDocumentRef"
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ageseconds"
+        },
+        "bodyRevision": {
+          "default": "",
+          "title": "Bodyrevision",
+          "type": "string"
+        },
+        "codeExamples": {
+          "items": {
+            "$ref": "#/$defs/TaskCodeExampleNode"
+          },
+          "title": "Codeexamples",
+          "type": "array"
+        },
+        "completedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completedat"
+        },
+        "createdAt": {
+          "default": "",
+          "title": "Createdat",
+          "type": "string"
+        },
+        "currentStep": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currentstep"
+        },
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/TaskDecisionNode"
+          },
+          "title": "Decisions",
+          "type": "array"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Design"
+        },
+        "directGrant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectGrantNode"
             },
             {
               "type": "null"
@@ -4252,30 +3728,276 @@
           ],
           "default": null
         },
-        "name": {
-          "title": "Name",
+        "discardedCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discardedcount"
+        },
+        "discardedSubTasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DiscardedSubTaskNode"
+              },
+              "maxItems": 256,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discardedsubtasks"
+        },
+        "executionGraph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskExecutionGraphNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "executionGraphView": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskExecutionGraphView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "executionNature": {
+          "anyOf": [
+            {
+              "enum": [
+                "organizational",
+                "atomic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executionnature"
+        },
+        "executionWaves": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/TaskExecutionNode"
+            },
+            "type": "array"
+          },
+          "title": "Executionwaves",
+          "type": "array"
+        },
+        "form": {
+          "default": "task",
+          "enum": [
+            "sprint",
+            "master",
+            "task"
+          ],
+          "title": "Form",
           "type": "string"
         },
-        "number": {
-          "title": "Number",
+        "headerNotes": {
+          "items": {
+            "$ref": "#/$defs/TaskHeaderNoteNode"
+          },
+          "title": "Headernotes",
+          "type": "array"
+        },
+        "headerNotesTotal": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Headernotestotal"
+        },
+        "integrationBranch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Integrationbranch"
+        },
+        "kind": {
+          "title": "Kind",
           "type": "string"
         },
-        "scope": {
+        "neededByTasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TaskDependencyNode"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Neededbytasks"
+        },
+        "nonGoals": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nongoals"
+        },
+        "objective": {
           "default": "",
-          "title": "Scope",
+          "title": "Objective",
           "type": "string"
         },
-        "status": {
-          "title": "Status",
+        "openQuestions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Openquestions",
+          "type": "array"
+        },
+        "orchestrates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Orchestrates",
+          "type": "array"
+        },
+        "references": {
+          "items": {
+            "type": "string"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "requirements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "reviewState": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskReviewStateNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seats": {
+          "items": {
+            "$ref": "#/$defs/TaskSeatNode"
+          },
+          "title": "Seats",
+          "type": "array"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/TaskSectionNode"
+          },
+          "title": "Sections",
+          "type": "array"
+        },
+        "statusNote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Statusnote"
+        },
+        "statusNoteTruncated": {
+          "default": false,
+          "title": "Statusnotetruncated",
+          "type": "boolean"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/TaskStepNode"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "type": {
+          "default": "",
+          "title": "Type",
           "type": "string"
+        },
+        "waitsFor": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitsfor"
+        },
+        "waitsForTasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TaskDependencyNode"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitsfortasks"
         }
       },
       "required": [
-        "number",
-        "name",
-        "status"
+        "kind"
       ],
-      "title": "TaskSubTaskRefNode",
+      "title": "TaskSummary",
       "type": "object"
     },
     "ToolReportNode": {
@@ -4317,7 +4039,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The whole resolved tree: lifecycles + enclosures + providers + metrics + analytics.",
+  "description": "The resolved tasks, unbound worktrees, providers, counts and analytics.",
   "properties": {
     "activeWorktreeGroups": {
       "items": {
@@ -4355,13 +4077,6 @@
       "title": "Generatedat",
       "type": "string"
     },
-    "lifecycles": {
-      "items": {
-        "$ref": "#/$defs/LifecycleProjection"
-      },
-      "title": "Lifecycles",
-      "type": "array"
-    },
     "metrics": {
       "$ref": "#/$defs/Metrics"
     },
@@ -4370,6 +4085,16 @@
         "$ref": "#/$defs/ProviderNode"
       },
       "title": "Providers",
+      "type": "array"
+    },
+    "taskCounts": {
+      "$ref": "#/$defs/TaskCounts"
+    },
+    "tasks": {
+      "items": {
+        "$ref": "#/$defs/TaskEntry"
+      },
+      "title": "Tasks",
       "type": "array"
     },
     "version": {

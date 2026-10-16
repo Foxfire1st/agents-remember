@@ -110,10 +110,11 @@ def _ports(world: World) -> Ports:  # noqa: F811
     ports = serving_collaborators(world.config)
     assert ports.knowledge_review is not None and ports.knowledge_review_entries is not None
     assert ports.review_intent_summary is not None and ports.review_trees is not None
+    summary_read = ports.review_intent_summary.read
     return Ports(
         review=ports.knowledge_review,
         entries=ports.knowledge_review_entries,
-        summary=ports.review_intent_summary,
+        summary=lambda repo, master, leaf: summary_read(repo, master, leaf, lambda _: None),
         trees=ports.review_trees,
     )
 

@@ -7,45 +7,13 @@ already-read inputs.
 
 from __future__ import annotations
 
-from collections import Counter
-
 from agents_remember.observer.projection import (
-    STATE_COUNT_FIELDS,
     Analytics,
     AttentionItem,
     EngineProcessNode,
-    LifecycleProjection,
-    Metrics,
-    SeriesNode,
     SidecarStaleNode,
 )
 from agents_remember.observer.reducer_impl._types import AnalyticalInputs
-
-
-def _metrics(
-    lifecycles: list[LifecycleProjection],
-    sidecars: list[SidecarStaleNode] | None = None,
-) -> Metrics:
-    """The workspace rollup: the all-states totals plus one bucket per live state.
-
-    The buckets come from :data:`STATE_COUNT_FIELDS`, not from a line per state. Three
-    hand-written ``sum(1 for lc in lifecycles if lc.state == ...)`` lines are what made a
-    lifecycle that had handed the turn back count towards ``lifecycleCount``
-    and towards nothing else. Counting by vocabulary also makes the next gap
-    impossible to ship quietly: ``Metrics`` is ``extra="forbid"``, so a state whose bucket
-    field was never declared raises here instead of vanishing into a zero.
-
-    The keyword expansion below is keyed by BUCKET, so it would silently drop a count if two
-    states shared one -- which is why :func:`state_count_fields` refuses to build a map that
-    is not one-to-one rather than leaving the loss to be noticed in a served number.
-    """
-    counts = Counter(lc.state for lc in lifecycles)
-    return Metrics(
-        lifecycleCount=len(lifecycles),
-        stalenessHistogram=staleness_histogram(sidecars) if sidecars else {},
-        **{bucket: counts[state] for state, bucket in STATE_COUNT_FIELDS.items()},
-    )
-
 
 # --- analytical rollups (slice 3b) -------------------------------------------
 
@@ -82,15 +50,13 @@ def _staleness_bucket(age: float | None) -> str:  # pragma: no cover
 def build_analytics(
     given: AnalyticalInputs,
     *,
-    series: list[SeriesNode] | None = None,
     attention_queue: list[AttentionItem] | None = None,
     engine_processes: list[EngineProcessNode] | None = None,
 ) -> Analytics:
     """Assemble the analytical surfaces; the full sidecar list collapses to a leaderboard.
 
-    ``series``, ``attention_queue`` and ``engine_processes`` are DERIVED surfaces the caller
-    computed from the same inputs, so they
-    override what ``given`` holds rather than being read out of it.
+    ``attention_queue`` and ``engine_processes`` are derived surfaces the caller
+    computed from the same inputs, rather than being read out of ``given``.
     """
     return Analytics(
         driftSnapshots=given.drift_snapshots,
@@ -100,8 +66,6 @@ def build_analytics(
         routeCoverage=given.route_coverage,
         toolReports=given.tool_reports,
         ledgers=given.ledgers,
-        taskDocuments=given.task_documents,
-        series=series if series is not None else given.series,
         attentionQueue=attention_queue or [],
         engineProcesses=engine_processes or [],
     )

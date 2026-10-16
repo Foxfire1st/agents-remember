@@ -1,15 +1,8 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { readEmbedList } from "./server/embed";
-import { readRoleAgents } from "./server/role_agents";
-import {
-  createTurnEndedTracker,
-  noteAgentArchived,
-  notePermissionRequested,
-  notePermissionResolved,
-  noteTurnEnded,
-  noteTurnStarted,
-} from "./server/turn_ended";
-import { arEmbedList } from "./shared/rpc";
+import { createHostActivityPublisher, registerHostActivityEvents } from "./server/host_activity";
+import { registerParentWakeEvents } from "./server/turn_events";
+import { arEmbedList, arHostActivitySnapshot } from "./shared/rpc";
 
 // Installed and loaded by `agents-remember paseo provision` (PNT-R01). The daemon-side behaviour
 // arrives with PNT-R04. Reading the embed list at load proves the plugin can reach what provision
@@ -25,49 +18,27 @@ export default function contribute(server: PluginServerContext) {
   console.log(`agents-remember plugin loaded; embed entries: ${embed.length}`);
   server.handle(arEmbedList, () => ({ embed }));
 
-  const turns = createTurnEndedTracker();
-
-  server.on("agent.turn_started", (event) => {
-    noteTurnStarted(
-      { id: event.agent.agentId, parentAgentId: event.agent.parentAgentId },
-      turns,
-    );
+  let activity: ReturnType<typeof createHostActivityPublisher> | undefined;
+  try {
+    if (!process.env.PASEO_HOME) throw new Error("PASEO_HOME is not set");
+    activity = createHostActivityPublisher(process.env.PASEO_HOME);
+    registerHostActivityEvents(server, activity);
+  } catch (error) {
+    console.error("agents-remember host activity initialization failed", error);
+  }
+  server.handle(arHostActivitySnapshot, async (_input, context) => {
+    if (!activity) throw new Error("host activity publication is unavailable");
+    await activity.reconcile(context.paseo);
+    return { bootId: activity.bootId };
   });
 
-  server.on("agent.turn_ended", (event, context) => {
-    void (async () => {
-      try {
-        const records = readRoleAgents(process.env.PASEO_HOME);
-        await noteTurnEnded(
-          { id: event.agent.agentId, parentAgentId: event.agent.parentAgentId },
-          event.timeline,
-          records,
-          turns,
-          context.paseo,
-        );
-      } catch (error) {
-        console.error("agents-remember turn_ended handler failed", error);
-      }
-    })();
-  });
+  registerParentWakeEvents(server);
 
-  server.on("agent.permission_requested", (event) => {
-    notePermissionRequested(event.agent.agentId, turns);
-  });
-
-  server.on("agent.permission_resolved", (event, context) => {
-    void (async () => {
-      try {
-        await notePermissionResolved(event.agent.agentId, turns, context.paseo);
-      } catch (error) {
-        console.error("agents-remember permission_resolved handler failed", error);
-      }
-    })();
-  });
-
-  server.on("agent.archived", (event) => {
-    noteAgentArchived(event.agent.agentId, turns);
-  });
-
-  return () => {};
+  return () => {
+    try {
+      activity?.unload();
+    } catch (error) {
+      console.error("agents-remember host activity unload publication failed", error);
+    }
+  };
 }

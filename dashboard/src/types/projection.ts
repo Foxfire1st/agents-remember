@@ -6,42 +6,16 @@
 // Regenerate: PYTHONPATH=mcp/src python scripts/sync-projection-types.py
 // Drift check: PYTHONPATH=mcp/src python scripts/sync-projection-types.py --check
 
-export const LIVE_STATES = ["running", "paused", "blocked", "awaiting-developer"] as const;
-
-export const TERMINAL_STATES = ["completed", "abandoned"] as const;
-
-export const LIFECYCLE_STATES = [...LIVE_STATES, ...TERMINAL_STATES] as const;
-
-export type State = (typeof LIFECYCLE_STATES)[number];
-
-export type TerminalState = (typeof TERMINAL_STATES)[number];
-
-export type ActiveState = (typeof LIVE_STATES)[number];
-
-export const ACTIVE_STATES: readonly ActiveState[] = LIVE_STATES;
-
-type FiledOnce<S extends never> = S;
-
-export type StatesAreFiledOnce = FiledOnce<ActiveState & TerminalState>;
-
-export const PHASES = ["request", "trust-checkpoint", "reframe-research", "decide", "build", "close"] as const;
-
-export type Phase = (typeof PHASES)[number];
-
 export const ATTENTION_SEVERITIES = ["alarm", "warn", "info"] as const;
-
 export type AttentionSeverity = (typeof ATTENTION_SEVERITIES)[number];
 
-export const ATTENTION_LANES = ["repo", "worktree", "lifecycle"] as const;
-
+export const ATTENTION_LANES = ["repo", "worktree"] as const;
 export type AttentionLane = (typeof ATTENTION_LANES)[number];
 
 export const PROCESS_FACT_STATES = ["observed", "derived", "planned", "missing", "stale", "not-applicable"] as const;
-
 export type ProcessFactState = (typeof PROCESS_FACT_STATES)[number];
 
 export const PROCESS_HEALTHS = ["nominal", "running", "blocked", "failed", "stale", "skipped", "unknown", "complete"] as const;
-
 export type ProcessHealth = (typeof PROCESS_HEALTHS)[number];
 
 export interface ActionAvailability {
@@ -57,25 +31,22 @@ export interface Analytics {
   engineProcesses: EngineProcessNode[];
   ledgers: LedgerNode[];
   routeCoverage: RouteCoverageNode[];
-  series: SeriesNode[];
   setupProgress: SetupProgressNode[];
   setupSummaries: SetupSummaryNode[];
   stalestSidecars: SidecarStaleNode[];
-  taskDocuments: TaskDocNode[];
   toolReports: ToolReportNode[];
 }
 
 export interface AttentionItem {
+  actionableFingerprint?: string;
   detail?: string;
   enclosure?: string;
   id: string;
   kind: string;
   lane: AttentionLane;
-  lifecycleId?: string;
   providerId?: string;
   repoId?: string;
   severity: AttentionSeverity;
-  signalTs?: string;
   title: string;
   waitSeconds?: number;
 }
@@ -154,6 +125,7 @@ export interface DiscardedSubTaskNode {
 
 export interface DriftSnapshotNode {
   actionableCount: number;
+  actionableFingerprint?: string;
   branch: string;
   checkedAt?: string;
   counts: Record<string, number>;
@@ -301,20 +273,6 @@ export interface LifecycleOperationProjection {
   worker?: LifecycleWorkerObservation;
 }
 
-export interface LifecycleProjection {
-  enclosure?: string;
-  fleeting: boolean;
-  id: string;
-  inferred: boolean;
-  lastEventTs: string;
-  phase: Phase;
-  repoId?: string;
-  scope?: string;
-  staleSeconds?: number;
-  startedAt: string;
-  state: State;
-}
-
 export interface LifecycleProjectionComponentBindings {
   /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
   approval?: string;
@@ -365,42 +323,9 @@ export interface LifecycleWorkerObservation {
   workerIdentitySha256?: string;
 }
 
-type Camel<S extends string> = S extends `${infer Head}-${infer Tail}`
-  ? `${Head}${Capitalize<Camel<Tail>>}`
-  : S;
-
-export type StateCountField<S extends ActiveState> = `${Camel<S>}Count`;
-
-export type LifecycleStateCounts = { [S in ActiveState as StateCountField<S>]: number };
-
-export function stateCountField<S extends ActiveState>(state: S): StateCountField<S> {
-  const [head, ...rest] = state.split("-");
-  const camel = head + rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
-  return `${camel}Count` as StateCountField<S>;
-}
-
-function lifecycleStateCounts(
-  lifecycles: readonly Pick<LifecycleProjection, "state">[],
-): LifecycleStateCounts {
-  return Object.fromEntries(
-    ACTIVE_STATES.map((state) => [
-      stateCountField(state),
-      lifecycles.filter((entry) => entry.state === state).length,
-    ]),
-  ) as LifecycleStateCounts;
-}
-
-export interface Metrics extends LifecycleStateCounts {
-  lifecycleCount: number;
+export interface Metrics {
+  ignoredHostAgents: number;
   stalenessHistogram: Record<string, number>;
-}
-
-export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics {
-  return {
-    lifecycleCount: lifecycles.length,
-    stalenessHistogram: {},
-    ...lifecycleStateCounts(lifecycles),
-  };
 }
 
 export interface ProjectionInvalidationResult {
@@ -460,42 +385,6 @@ export interface RouteCoverageNode {
   repository?: string;
   route: string;
   sourceFilesInScope: number;
-}
-
-export interface SeriesNode {
-  abandonedCount: number;
-  ageSeconds?: number;
-  createdAt: string;
-  decisions: TaskDecisionNode[];
-  discardedCount: number;
-  /** JSON Schema refinements: {"maxItems":256} */
-  discardedSubTasks: DiscardedSubTaskNode[];
-  docPath: string;
-  doneCount: number;
-  objective: string;
-  repository: string;
-  sections: SeriesSectionNode[];
-  seriesId: string;
-  status: string;
-  subTasks: SeriesSubTaskNode[];
-  title: string;
-  totalCount: number;
-}
-
-export interface SeriesSectionNode {
-  body: string;
-  heading: string;
-  kind: string;
-}
-
-export interface SeriesSubTaskNode {
-  createdAt?: string;
-  directGrant?: DirectGrantNode;
-  file: string;
-  name: string;
-  number: string;
-  scope: string;
-  status: string;
 }
 
 export interface ServingBuild {
@@ -570,6 +459,16 @@ export interface TaskCodeExampleNode {
   why: string;
 }
 
+export interface TaskCounts {
+  aborted: number;
+  completed: number;
+  paused: number;
+  planned: number;
+  started: number;
+  unknown: number;
+  works: number;
+}
+
 export interface TaskDecisionNode {
   at: string;
   decision: string;
@@ -578,61 +477,10 @@ export interface TaskDecisionNode {
 }
 
 export interface TaskDependencyNode {
-  docPath?: string;
+  gone: boolean;
   id: string;
-  status: string;
+  reference?: TaskDocumentRef;
   title: string;
-}
-
-export interface TaskDocNode {
-  acceptance?: string;
-  ageSeconds?: number;
-  bodyRevision: string;
-  codeExamples: TaskCodeExampleNode[];
-  completedAt?: string;
-  createdAt: string;
-  currentStep?: string;
-  decisions: TaskDecisionNode[];
-  design?: string;
-  directGrant?: DirectGrantNode;
-  discardedCount?: number;
-  /** JSON Schema refinements: {"maxItems":256} */
-  discardedSubTasks?: DiscardedSubTaskNode[];
-  docPath: string;
-  executionGraph?: TaskExecutionGraphNode;
-  executionGraphView?: TaskExecutionGraphView;
-  executionNature?: "organizational" | "atomic";
-  executionWaves: TaskExecutionNode[][];
-  form: "sprint" | "master" | "task";
-  headerNotes: TaskHeaderNoteNode[];
-  headerNotesTotal?: number;
-  id: string;
-  integrationBranch?: string;
-  kind: string;
-  lifecycleId?: string;
-  masterLifecycleId?: string;
-  neededByTasks?: TaskDependencyNode[];
-  nonGoals?: string;
-  objective: string;
-  openQuestions: string[];
-  orchestrates: string[];
-  references: string[];
-  repository: string;
-  requirements: string[];
-  reviewState?: TaskReviewStateNode;
-  seats: TaskSeatNode[];
-  sections: TaskSectionNode[];
-  status: string;
-  statusNote?: string;
-  statusNoteTruncated: boolean;
-  steps: TaskStepNode[];
-  stepsDone: number;
-  stepsTotal: number;
-  subTasks: TaskSubTaskRefNode[];
-  title: string;
-  type: string;
-  waitsFor?: string[];
-  waitsForTasks?: TaskDependencyNode[];
 }
 
 export interface TaskDocProjectionEffect {
@@ -653,6 +501,24 @@ export interface TaskDocProjectionEffect {
 export interface TaskDocumentRef {
   path: string;
   repository: string;
+}
+
+export interface TaskEntry {
+  activity?: "works" | "paused" | "unknown";
+  children: string[];
+  counts: TaskCounts;
+  eventAt?: string;
+  id: string;
+  key: string;
+  parent?: string;
+  reference?: TaskDocumentRef;
+  scope?: string;
+  stage: "planned" | "started" | "aborted" | "completed";
+  stepsDone: number;
+  stepsTotal: number;
+  summary?: TaskSummary;
+  title: string;
+  worktrees: EnclosureNode[];
 }
 
 export interface TaskExecutionEdgeNode {
@@ -772,14 +638,45 @@ export interface TaskSubStepNode {
   title: string;
 }
 
-export interface TaskSubTaskRefNode {
-  file: string;
-  linkedLifecycleId?: string;
-  masterRef?: TaskDocumentRef;
-  name: string;
-  number: string;
-  scope: string;
-  status: string;
+export interface TaskSummary {
+  acceptance?: string;
+  ageSeconds?: number;
+  bodyRevision: string;
+  codeExamples: TaskCodeExampleNode[];
+  completedAt?: string;
+  createdAt: string;
+  currentStep?: string;
+  decisions: TaskDecisionNode[];
+  design?: string;
+  directGrant?: DirectGrantNode;
+  discardedCount?: number;
+  /** JSON Schema refinements: {"maxItems":256} */
+  discardedSubTasks?: DiscardedSubTaskNode[];
+  executionGraph?: TaskExecutionGraphNode;
+  executionGraphView?: TaskExecutionGraphView;
+  executionNature?: "organizational" | "atomic";
+  executionWaves: TaskExecutionNode[][];
+  form: "sprint" | "master" | "task";
+  headerNotes: TaskHeaderNoteNode[];
+  headerNotesTotal?: number;
+  integrationBranch?: string;
+  kind: string;
+  neededByTasks?: TaskDependencyNode[];
+  nonGoals?: string;
+  objective: string;
+  openQuestions: string[];
+  orchestrates: string[];
+  references: string[];
+  requirements: string[];
+  reviewState?: TaskReviewStateNode;
+  seats: TaskSeatNode[];
+  sections: TaskSectionNode[];
+  statusNote?: string;
+  statusNoteTruncated: boolean;
+  steps: TaskStepNode[];
+  type: string;
+  waitsFor?: string[];
+  waitsForTasks?: TaskDependencyNode[];
 }
 
 export interface ToolReportNode {
@@ -794,17 +691,16 @@ export interface WatcherHealth {
   running: boolean;
 }
 
-export type SubTaskRow = TaskSubTaskRefNode | SeriesSubTaskNode;
-
 export interface WorkspaceProjection {
   activeWorktreeGroups: string[];
   analytics: Analytics;
   closeoutQueues?: CloseoutQueueNode[];
   enclosures: EnclosureNode[];
   generatedAt: string;
-  lifecycles: LifecycleProjection[];
   metrics: Metrics;
   providers: ProviderNode[];
+  taskCounts: TaskCounts;
+  tasks: TaskEntry[];
   version: number;
   servingBuild?: ServingBuild;
   watcherHealth?: WatcherHealth;

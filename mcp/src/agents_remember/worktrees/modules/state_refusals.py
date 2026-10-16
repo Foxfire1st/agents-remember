@@ -335,3 +335,14 @@ def _integrate_state_refusal(
         code="integration-blocked",
         error=message,
     )
+
+
+def task_stage_refusal(contract: WorktreeContract, error: ValueError) -> WorktreeCommandResult:
+    """Answer an invalid task/parent binding before terminal mutation."""
+    return state_refusal_result(
+        contract,
+        state="blocked",
+        code="task-stage-invalid",
+        error=str(error),
+        next=RefusalNext(summary="Repair the named task document or parent row, then retry."),
+    )

@@ -313,12 +313,7 @@ class RowStatusReflectsLandingTests(unittest.TestCase):
         self.assertEqual(row.status, "Completed")
 
     def test_the_other_three_inputs_keep_their_own_meaning(self) -> None:
-        """Step state still distinguishes started from untouched, and it cannot overrule steps.
-
-        A stale ``Completed`` document with an unresolved step is neither: the document is not
-        the landing and the step is not done, so the row stays open. An untouched leaf keeps
-        projecting its own ``planning`` state rather than being folded into ``inProgress``.
-        """
+        """The master mirrors document stage even when old progress disagrees (MIK-R167)."""
         unresolved = self._leaf(
             status="Completed",
             steps=[
@@ -328,8 +323,12 @@ class RowStatusReflectsLandingTests(unittest.TestCase):
         )
         untouched = self._leaf(status="planning", steps=[{"id": "S1", "title": "One"}])
 
-        self.assertEqual(derived_master_status(unresolved), "inProgress")
+        self.assertEqual(derived_master_status(unresolved), "Completed")
         self.assertEqual(derived_master_status(untouched), "planning")
+        marked_but_planned = self._leaf(
+            status="planning", steps=[{"id": "S1", "title": "One", "status": "done"}]
+        )
+        self.assertEqual(derived_master_status(marked_but_planned), "planning")
 
 
 class RenderTests(unittest.TestCase):

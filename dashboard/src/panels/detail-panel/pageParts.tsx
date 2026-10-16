@@ -2,6 +2,8 @@
 // its heading and count, one-line rows in aligned columns, the line of text that opens in
 // place, and the status marks. The three skeletons compose them; none holds document logic.
 import {
+  createContext,
+  useContext,
   useLayoutEffect,
   useRef,
   useState,
@@ -13,8 +15,10 @@ import {
 
 import { cx } from '../../../styled-system/css';
 import { Markdown } from '../../grammar/Markdown';
-import type { TaskStepNode } from '../../types/projection';
 import { StepDot } from './StepDot';
+import type { TaskEntry, TaskStepNode } from '../../types/projection';
+import { fmtWait } from '../../data/selectors';
+import { useTaskStatusNow } from '../../data/taskStatusClock';
 import {
   arrow,
   bar,
@@ -60,24 +64,31 @@ export type DocView =
 
 export type StatusTone = 'work' | 'wait' | 'done' | 'gone';
 
-const STATUS_WORDS: Record<string, [StatusTone, string]> = {
-  inProgress: ['work', 'in work'],
-  planning: ['wait', 'waiting'],
-  Completed: ['done', 'completed'],
-  abandoned: ['gone', 'abandoned'],
+export type TaskStatusKey = TaskEntry['stage'] | NonNullable<TaskEntry['activity']>;
+
+const STATUS_WORDS: Record<TaskStatusKey, [StatusTone, string]> = {
+  planned: ['wait', 'planned'],
+  started: ['wait', 'started'],
+  works: ['work', 'works'],
+  paused: ['wait', 'paused'],
+  unknown: ['wait', 'started · host state unknown'],
+  completed: ['done', 'completed'],
+  aborted: ['gone', 'aborted'],
 };
 
-// The word and the colour of a declared status. A status the page does not
-// know keeps its own word: every state stays readable as it was written.
-export function statusTone(status: string): StatusTone {
-  return STATUS_WORDS[status]?.[0] ?? 'wait';
+/** Presentation only: stage and activity are already decided by the server. */
+export const taskStatusKey = (task: Pick<TaskEntry, 'stage' | 'activity'>): TaskStatusKey =>
+  task.activity ?? task.stage;
+
+export function statusTone(status: TaskStatusKey): StatusTone {
+  return STATUS_WORDS[status][0];
 }
 
-export function statusLabel(status: string): string {
-  return STATUS_WORDS[status]?.[1] ?? status;
+export function statusLabel(status: TaskStatusKey): string {
+  return STATUS_WORDS[status][1];
 }
 
-export function StatusWord({ status, testid }: { status: string; testid?: string }) {
+export function StatusWord({ status, testid }: { status: TaskStatusKey; testid?: string }) {
   return (
     <span
       className={statusWord({ tone: statusTone(status) })}
@@ -86,6 +97,59 @@ export function StatusWord({ status, testid }: { status: string; testid?: string
       title={status}
     >
       {statusLabel(status)}
+    </span>
+  );
+}
+
+// Undefined means no provider; null means a hidden surface whose words must stay stopped.
+const StatusClock = createContext<number | null | undefined>(undefined);
+
+/** Visible task surfaces share one coarse display clock; nested readers reuse context. */
+export function TaskStatusClock({
+  active = true,
+  children,
+}: {
+  active?: boolean;
+  children: ReactNode;
+}) {
+  const shared = useContext(StatusClock);
+  const now = useTaskStatusNow(active && shared === undefined);
+  return (
+    <StatusClock.Provider value={shared === undefined ? (active ? now : null) : shared}>
+      {children}
+    </StatusClock.Provider>
+  );
+}
+
+/** The same served word and event age on every task surface. */
+export function TaskStatusWord({
+  task,
+  testid,
+  mark = true,
+  active = true,
+}: {
+  task: TaskEntry;
+  testid?: string;
+  mark?: boolean;
+  active?: boolean;
+}) {
+  const shared = useContext(StatusClock);
+  const local = useTaskStatusNow(active && shared === undefined && Boolean(task.eventAt));
+  const now = shared ?? local;
+  const status = taskStatusKey(task);
+  const word = statusLabel(status);
+  const age = task.eventAt && now !== undefined
+    ? Math.max(0, (now - Date.parse(task.eventAt)) / 1000)
+    : undefined;
+  return (
+    <span
+      className={statusWord({ tone: statusTone(status), mark })}
+      data-status={status}
+      data-testid={testid}
+      title={task.eventAt ?? word}
+    >
+      {word}
+      {age == null ? '' : ` ${fmtWait(age)}`}
     </span>
   );
 }

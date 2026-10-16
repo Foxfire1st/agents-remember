@@ -127,7 +127,7 @@ def _task_population(
         tasks[row.number] = MasterOrderTask(
             id=row.number,
             title=child.title if child else row.name,
-            status=row.status,
+            status=child.status if child is not None else row.status,
             file=row.file,
             waits_for=tuple(child.waitsFor or ()) if child else (),
             wave=-1,

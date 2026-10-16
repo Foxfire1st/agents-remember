@@ -1,6 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 
 import { cx } from '../../../styled-system/css';
+import { useDashboard } from '../../data/store';
+import { taskReferenceKey } from '../../data/taskReference';
+import { StatusWord, statusLabel, taskStatusKey } from '../detail-panel/pageParts';
 import { sameTaskDocumentRef } from '../../data/taskIdentity';
 import { Markdown } from '../../grammar/Markdown';
 import type {
@@ -12,7 +15,7 @@ import {
   box,
   boxHead,
   boxTitle,
-  frontier,
+  dependency,
   graph,
   leafLine,
   leaves,
@@ -31,7 +34,8 @@ import {
 // The sprint execution graph wave-grid view (L12-R2/R6). The backend projects a render-ready
 // per-node model (executionGraphView) -- kind, master ref + title, leaf ids + titles, derived
 // wave index, frontier state, execution nature, and predecessors with reasons -- so this
-// component renders projected facts verbatim and never joins raw refs or re-derives waves.
+// component keeps those dependency facts and waves. Task state words and tones come from
+// the master's entry through the shared status presentation.
 //
 // Layout: one row per derived wave; within a wave, boxes in a grid of at most 3 per row before
 // wrapping. Each box shows the master title header and one ellipsized leaf line per leaf (the
@@ -141,6 +145,12 @@ function GraphPredecessors({ node }: { node: TaskExecutionNodeView }) {
   );
 }
 
+function readinessOf(node: TaskExecutionNodeView) {
+  if (node.cycle) return 'cycle';
+  if (node.frontierState === 'ready' || node.frontierState === 'waiting') return node.frontierState;
+  return undefined;
+}
+
 function GraphBox({
   node,
   marked,
@@ -156,17 +166,20 @@ function GraphBox({
   pressed: boolean;
   onToggle: () => void;
 }) {
+  const task = useDashboard((state) => state.tasks[taskReferenceKey(node.masterRef)]);
+  const status = task ? taskStatusKey(task) : undefined;
+  const readiness = readinessOf(node);
   return (
     <div
       className={cx(box, faded && nodeFade, marked && cx(nodeMarked, nodeHot), dimmed && nodeDim)}
       data-testid="graph-box"
       data-node={node.nodeId}
-      data-frontier={node.frontierState}
+      data-readiness={readiness}
       data-marked={marked ? 'true' : 'false'}
       data-fade={faded ? 'true' : 'false'}
       role="button"
       aria-pressed={pressed}
-      aria-label={`${node.masterTitle}, ${node.frontierState}`}
+      aria-label={[node.masterTitle, status ? statusLabel(status) : 'task unavailable'].join(', ')}
       tabIndex={0}
       onClick={onToggle}
       onKeyDown={(event) => {
@@ -180,9 +193,12 @@ function GraphBox({
         <span className={boxTitle} data-testid="graph-box-title">
           {node.masterTitle}
         </span>
-        <span className={frontier({ state: node.frontierState })} data-testid="graph-frontier">
-          {node.frontierState}
-        </span>
+        {status && <StatusWord status={status} testid="graph-task-status" />}
+        {readiness && (
+          <span className={dependency({ state: readiness })} data-testid="graph-readiness">
+            {readiness}
+          </span>
+        )}
       </header>
       <GraphLeaves node={node} />
       <GraphPredecessors node={node} />

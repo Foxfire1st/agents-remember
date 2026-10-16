@@ -4,38 +4,66 @@ import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import { seedTaskDocuments, taskDoc } from './test-utils';
+import { seedTaskEntries, taskEntry, taskSummary, taskReference } from './test-utils';
 
-const MASTER = '/tasks/repo-a/m/task.json';
+const MASTER = 'repo-a/m/task.json';
 const OBJECTIVE = 'The one objective text.';
 
 describe('nothing twice (rule 8)', () => {
   function seedMaster() {
-    seedTaskDocuments([
-      taskDoc({
+    const leaf = taskEntry({
+      stepsDone: 0,
+      stepsTotal: 0,
+      reference: taskReference('repo-a/m/01_leaf.json'),
+      id: 'L1',
+      title: 'Leaf one',
+      stage: 'planned',
+    });
+    seedTaskEntries([
+      leaf,
+      taskEntry({
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(MASTER),
+        children: [leaf.key],
+        counts: {
+          planned: 1,
+          started: 0,
+          completed: 0,
+          aborted: 0,
+          works: 0,
+          paused: 0,
+          unknown: 0,
+        },
         id: 'M',
-        kind: 'master',
-        docPath: MASTER,
         title: 'Master',
-        form: 'master',
-        objective: OBJECTIVE,
-        decisions: [
-          {
-            at: '2026-10-01',
-            decision: 'Decided.',
-            rationale: 'Because.',
-            product_record: false,
-          },
-        ],
-        sections: [
-          { kind: 'subTasks', heading: 'Sub-tasks', body: 'Tasks intro prose.' },
-          { kind: 'sharedDecisions', heading: 'Shared decisions', body: 'Decisions intro prose.' },
-          { kind: 'freeform', heading: 'Echo', body: OBJECTIVE },
-          { kind: 'freeform', heading: 'Other', body: 'Other body.' },
-        ],
-        subTasks: [
-          { number: 'L1', name: 'Leaf one', file: '01_leaf.md', status: 'planning', scope: '' },
-        ],
+        summary: taskSummary({
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+          objective: OBJECTIVE,
+          decisions: [
+            {
+              at: '2026-10-01',
+              decision: 'Decided.',
+              rationale: 'Because.',
+              product_record: false,
+            },
+          ],
+          sections: [
+            { kind: 'subTasks', heading: 'Sub-tasks', body: 'Tasks intro prose.' },
+            {
+              kind: 'sharedDecisions',
+              heading: 'Shared decisions',
+              body: 'Decisions intro prose.',
+            },
+            { kind: 'freeform', heading: 'Echo', body: OBJECTIVE },
+            { kind: 'freeform', heading: 'Other', body: 'Other body.' },
+          ],
+        }),
       }),
     ]);
   }

@@ -216,7 +216,12 @@ async def _drive_warmup_run(
         async def _measured_resume(agent_id: str) -> None:
             """One warmup resume, attributed to the warmup owner on its worker (F01/F02)."""
             await offload(
-                OWNER_WARMUP, runtime.background_ledger, resume_agent, runtime.config, agent_id
+                OWNER_WARMUP,
+                runtime.background_ledger,
+                resume_agent,
+                runtime.config,
+                agent_id,
+                run.role_receipts[agent_id],
             )
 
         def progress() -> None:

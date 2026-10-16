@@ -1,111 +1,88 @@
-// Completed master rows have time ordering; sprint and abandoned rows keep their authored order.
-import type { DiscardedSubTaskNode, SubTaskRow, TaskDocNode } from '../../types/projection';
-import { masterTaskCounts, primaryRequirement, subTaskKey } from './model';
-import { Row, Rows, SubHead } from './pageParts';
-import { dim } from './pageStyles';
-import { DiscardedSubTaskHistory } from './skeletons';
+// Completed master tasks have time ordering; sprint and aborted rows keep authored order.
+import { taskEntrySelectionKey } from '../../data/taskReference';
+import type { TaskEntry,TaskSummary } from '../../types/projection';
 import { CompletedTaskList } from './CompletedTaskList';
 import { completedEntries } from './completedTasksModel';
-import {
-  IndexLink,
-  taskRowFacts,
-  masterRowFacts,
-  resolveSprintMaster,
-  resolveRowTarget,
-  indexSlices,
-  type IndexRowHandlers,
-} from './indexRows';
+import { ChildProgress,resolveRowTarget,type TaskIndexProps } from './indexRows';
+import { primaryRequirement,shortDocId } from './model';
+import { Row,RowLink,Rows,SubHead,TaskStatusWord } from './pageParts';
+import { dim } from './pageStyles';
+import { DiscardedSubTaskHistory } from './skeletons';
 
-// A completed/abandoned group view: one row per document as in the index, with
-// the discarded-before-start history beside the abandoned ones.
 export function GroupViewBody({
-  refs,
-  discarded,
-  positions,
-  handlers,
-  parentId,
-  allDocs,
-}: {
-  refs: SubTaskRow[];
-  discarded: DiscardedSubTaskNode[] | undefined;
-  positions: Map<SubTaskRow, number>;
-  handlers: IndexRowHandlers;
-  // The master whose tasks these are; absent on a sprint, whose rows are masters.
-  parentId?: string;
-  allDocs?: TaskDocNode[];
+  doc,
+  stage,
+  ...props
+}: TaskIndexProps & {
+  doc: TaskSummary;
+  stage: 'completed' | 'aborted';
 }) {
-  const completed = parentId !== undefined && refs.every((ref) => ref.status === 'Completed');
-  const completedHandlers = completed
-    ? { ...handlers, sliceForRef: indexSlices(handlers.sliceDocs) }
-    : handlers;
   return (
     <div>
-      {refs.length > 0 ? (
-        completed ? (
-          <CompletedTaskList
-            entries={completedEntries(
-              refs,
-              handlers.sliceDocs,
-              parentId!,
-              positions,
-              completedHandlers.sliceForRef,
-            )}
-            targetFor={(entry) => resolveRowTarget(entry.ref, entry.position, completedHandlers)}
-          />
-        ) : (
-          <Rows cols="group" testid="group-table">
-            {refs.map((ref) => (
-              <GroupRow
-                key={subTaskKey(ref, positions.get(ref) ?? 0)}
-                ref={ref}
-                position={positions.get(ref) ?? 0}
-                handlers={handlers}
-                parentId={parentId}
-                allDocs={allDocs}
+      {stage === 'completed' && props.entry.summary?.form !== 'sprint' ? (
+        <CompletedTaskList
+          entries={completedEntries(props.entry, props.tasks)}
+          targetFor={(item) => resolveRowTarget(item.entry, item.position, props.onJump)}
+        />
+      ) : (
+        <Rows cols="group" testid="group-table">
+          {props.entry.children.map((ref, index) => {
+            const child = props.tasks[ref];
+            return child?.stage === stage ? (
+              <TerminalRow
+                key={ref}
+                entry={child}
+                parent={props.entry}
+                position={index + 1}
+                onJump={props.onJump}
               />
-            ))}
-          </Rows>
-        )
-      ) : null}
-      {discarded && discarded.length > 0 ? (
+            ) : null;
+          })}
+        </Rows>
+      )}
+      {stage === 'aborted' && doc.discardedSubTasks?.length ? (
         <>
-          <SubHead title="Discarded before start" count={discarded.length} />
-          <DiscardedSubTaskHistory items={discarded} />
+          <SubHead title="Discarded before start" count={doc.discardedSubTasks.length} />
+          <DiscardedSubTaskHistory items={doc.discardedSubTasks} />
         </>
       ) : null}
     </div>
   );
 }
 
-function GroupRow({
-  ref,
+function TerminalRow({
+  entry,
+  parent,
   position,
-  handlers,
-  parentId,
-  allDocs,
+  onJump,
 }: {
-  ref: SubTaskRow;
+  entry: TaskEntry;
+  parent: TaskEntry;
   position: number;
-  handlers: IndexRowHandlers;
-  parentId: string | undefined;
-  allDocs: TaskDocNode[] | undefined;
+  onJump: TaskIndexProps['onJump'];
 }) {
-  if (parentId !== undefined) {
-    const { id, name, match } = taskRowFacts(ref, handlers.sliceDocs, parentId);
-    return (
-      <Row testid={`group-row-${position}`}>
-        <IndexLink id={id} name={name} ref={ref} position={position} handlers={handlers} />
-        <span className={dim}>{(match ? primaryRequirement(match)?.label : undefined) ?? ''}</span>
-      </Row>
-    );
-  }
-  const masterDoc = resolveSprintMaster(ref, allDocs ?? [], handlers.docPathForRef);
-  const { id, name } = masterRowFacts({ ref, masterDoc });
-  const counts = masterDoc ? masterTaskCounts(masterDoc) : null;
+  const sprint = parent.summary?.form === 'sprint';
   return (
     <Row testid={`group-row-${position}`}>
-      <IndexLink id={id} name={name} ref={ref} position={position} handlers={handlers} />
-      <span className={dim}>{counts ? `${counts.done}/${counts.total} tasks` : ''}</span>
+      <RowLink
+        id={sprint ? entry.id : shortDocId(entry.id, parent.id)}
+        name={entry.title}
+        testid={`subtask-open-${sprint ? 'master-' : ''}${position}`}
+        title={entry.title}
+        onOpen={entry.reference ? () => onJump(taskEntrySelectionKey(entry.key)) : undefined}
+      />
+      <span className={dim}>
+        {sprint ? (
+          <>
+            <ChildProgress entry={entry} /> tasks ·{' '}
+          </>
+        ) : entry.summary ? (
+          primaryRequirement(entry.summary)?.label
+        ) : (
+          ''
+        )}{' '}
+        <TaskStatusWord task={entry} />
+      </span>
     </Row>
   );
 }

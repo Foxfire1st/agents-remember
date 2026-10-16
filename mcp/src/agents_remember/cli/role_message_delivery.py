@@ -37,7 +37,8 @@ from agents_remember.cli.paseo_bridge import (
     bridge_call,
 )
 from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
-from agents_remember.cli.paseo_status import read_agent, resume_agent
+from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.role_activity import resume_role_agent
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_TOOL,
     _verify_leaf_revival_scope,
@@ -994,7 +995,7 @@ def _resume(config: McpRuntimeConfig, parties: _MessageParties) -> None:
                 + _start_again_next_action(binding.role, recipient_role, "for the current scope"),
                 recipientAgentId=recipient.agent_id,
             ) from error
-    outcome = resume_agent(config, recipient.agent_id)
+    outcome = resume_role_agent(config, receipt)
     reading = outcome.reading
     if not reading.reachable:
         raise _host_unreachable(str(reading.unreachable_reason))

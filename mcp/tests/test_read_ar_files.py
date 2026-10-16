@@ -55,9 +55,6 @@ from agents_remember.models.knowledge_files import (
     derived_record_id,
 )
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
-from agents_remember.observer import (
-    reset_ambient,
-)
 from knowledge_index_test_support import write_review_tree
 from knowledge_writer_test_support import CODE_FILE, build_world, canonical, commit_all
 from mcp.server.fastmcp import FastMCP
@@ -189,10 +186,9 @@ class RequestShapeTests(unittest.TestCase):
         self.onb = self._dir / "memory" / "onboarding"
         self.onb.mkdir(parents=True)
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
+        pass
 
     def _read(self, files, *, storage_mode: str = "disabled"):
         ctx = _build_context(
@@ -309,10 +305,8 @@ class NamingTests(unittest.TestCase):
         shutil.move(str(world.code), str(self.code))
         self.memory = world.memory
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
         shutil.rmtree(self._dir, ignore_errors=True)
 
     def _context(self, storage_mode: str = "repo-sidecar"):
@@ -437,10 +431,8 @@ class StaleNamingTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
         shutil.rmtree(self._dir, ignore_errors=True)
 
     def _read(self, files):
@@ -608,10 +600,8 @@ class DistinctSectionHeadingTests(unittest.TestCase):
         )
         commit_all(self.memory, "two records under two sections")
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
         shutil.rmtree(self._dir, ignore_errors=True)
 
     def test_two_records_in_one_file_resolve_to_their_own_sections(self) -> None:
@@ -647,10 +637,9 @@ class OverviewLocationTests(unittest.TestCase):
         _write_sidecar(self.onb, "pkg/sub/mod.py", "Mod body.")
         _write_route_index(self.onb, "pkg/sub", covered=["pkg/sub/mod.py"])
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
+        pass
 
     def _read(self, files):
         ctx = _build_context(
@@ -721,10 +710,9 @@ class MemoryStateTests(unittest.TestCase):
         _write_sidecar(self.onb, "pkg/mod.py", "Mod body.")
         _write_route_index(self.onb, "pkg", covered=["pkg/mod.py"])
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
+        pass
 
     def _read(self, onboarding_root: Path):
         ctx = _build_context(
@@ -773,10 +761,9 @@ class MountedContractTests(unittest.TestCase):
         (self.memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
         (self.memory / "onboarding").mkdir(parents=True)
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
+        pass
 
     def test_named_answer_validates_against_the_registered_model(self) -> None:
         card = self.memory / "onboarding" / f"{BATCH_PATH}.md"
@@ -814,10 +801,8 @@ class PublishedIntentDirectTests(unittest.TestCase):
         shutil.move(str(world.code), str(self.code))
         self.memory = world.memory
         self.config = _make_config(self._dir, self.code)
-        reset_ambient()
 
     def tearDown(self) -> None:
-        reset_ambient()
         shutil.rmtree(self._dir, ignore_errors=True)
 
     def _context(self):

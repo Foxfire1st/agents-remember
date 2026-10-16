@@ -12,8 +12,10 @@ one projection per ``interval``; ``--interval`` keeps meaning the fast-path cade
 or on a slow ``heartbeat`` when nothing changed, so a quiet daemon idles near zero CPU.
 Live ticks rest after completion for ``max(interval, min(tick duration, 3s))``. The rest
 adds at most 3s at the default interval, in addition to any running/next projection time;
-changes received meanwhile remain pending. ``/api/state`` staleness and time-derived field
-resolution are bounded by the heartbeat. The live path retains fixed-slot reader-domain snapshots and invalidates
+changes received meanwhile remain pending. A task/host input may spend ChangePacer's one early
+pass per rest window, without another producer or publication path. ``/api/state`` staleness and
+time-derived field resolution remain bounded by the heartbeat. The live path retains fixed-slot
+reader-domain snapshots and invalidates
 only the domains named by the watcher. Without a watcher (sim replay, existing tests) the
 loop keeps the exact fixed-interval full-refresh behaviour. A failed watcher requests full
 refreshes at the interval floor and retains the bounded rest, with errors reported loudly.
@@ -63,9 +65,16 @@ from agents_remember.serving.delta import (
     diff_projection,
     stable_projection_state,
 )
+from agents_remember.serving.projections.host_activity import (
+    HostActivityReconcile,
+    activity_directory,
+)
+from agents_remember.serving.projections.host_supervisor import HostSupervisorSubscription
 from agents_remember.serving.projections.projection_inputs import (
+    ProjectionDomain,
     ProjectionInputState,
     ProjectionRefresh,
+    ProjectionRefreshKind,
 )
 from agents_remember.serving.projections.projection_store import (
     ProjectionTickState,
@@ -134,6 +143,7 @@ class ProjectionRefreshers:
     provider: ProviderStateRefresh | None = None
     landing: LandingStateRefresh | None = None
     change_watcher: ChangeWatch | None = None
+    host_activity_reconcile: HostActivityReconcile | None = None
 
 
 LIVE_PROJECTION_CLOCK = ProjectionReplay()
@@ -167,6 +177,7 @@ class Projector:
         # Without one -- sim replay and the injected-now() tests -- it keeps the exact
         # legacy ``sleep(interval)`` pacemaker.
         self._change_watcher = change_watcher
+        self._host_supervisor = HostSupervisorSubscription()
         self._pacer: ChangePacer | None = (
             ChangePacer(
                 interval=interval,
@@ -175,7 +186,14 @@ class Projector:
             if change_watcher is not None
             else None
         )
-        self._input_state = ProjectionInputState() if change_watcher is not None else None
+        self._input_state = (
+            ProjectionInputState(
+                host_activity_reconcile=refreshers.host_activity_reconcile,
+                host_supervisor_armed=lambda: self._host_supervisor.armed,
+            )
+            if change_watcher is not None
+            else None
+        )
         # Instrumentation (R7 tests + ops): successful projections since run() started,
         # and why the last tick woke ("change" | "heartbeat" | "interval" | "full").
         self.projection_count = 0
@@ -240,7 +258,9 @@ class Projector:
             )
         if wake.reason == "heartbeat":
             return ProjectionRefresh.heartbeat()
-        return ProjectionRefresh.full()
+        return ProjectionRefresh(
+            ProjectionRefreshKind.FULL, wake.domains, wake.paths, wake.paths_complete
+        )
 
     def _publish_wake(self, wake: ProjectionWake | None, current: WorkspaceProjection) -> bool:
         """Publish one tick and acknowledge it; False means retry next interval.
@@ -325,6 +345,7 @@ class Projector:
                 if not self._publish_wake(wake, current):
                     continue
         finally:
+            self._host_supervisor.close()
             await _shutdown_task(watch_task, "change watcher")
             await _shutdown_task(landing_task, "landing refresher")
 
@@ -356,6 +377,16 @@ class Projector:
         """
         started = time.monotonic()
         try:
+            if self._pacer is not None and (
+                not self._host_supervisor.started
+                or (refresh is not None and refresh.affects(ProjectionDomain.HOST_ACTIVITY))
+            ):
+                directory = activity_directory(self._config)
+                await self._host_supervisor.refresh(
+                    directory.parent if directory is not None else None,
+                    self._host_exited,
+                    self._ledger,
+                )
             # _tick_sync owns the actual CPU unit, including direct replay calls.
             return await offload(
                 OWNER_PROJECTION, None, self._tick_sync, moment, refresh, self._latest_stable
@@ -363,6 +394,10 @@ class Projector:
         finally:
             if self._pacer is not None:
                 self._pacer.projection_completed(time.monotonic() - started)
+
+    def _host_exited(self) -> None:
+        if self._pacer is not None:
+            self._pacer.notify_change(frozenset({ProjectionDomain.HOST_ACTIVITY}))
 
     def _on_watch_task_done(self, task: asyncio.Task[None]) -> None:
         """A finished watcher task switches pacing to interval-driven full refreshes."""

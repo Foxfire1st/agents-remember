@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
+from agents_remember.controlplane.durable_store import StoreOwnership
 from agents_remember.errors import MemoryOptOutRefusedError
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import GitRunnerOptions
@@ -19,14 +19,9 @@ from agents_remember.tasks.leaf_doc import (
     LeafLifecycleRestampPlan,
     plan_leaf_doc_lifecycle_restamp,
 )
-from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
-    atomic_series_activation_input_refusal,
-    reconcile_selected_series_under_authority,
-)
 from agents_remember.worktrees.disabled_memory import opt_out_result_fields, subject_for_contract
 from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
-    integration_surfaces,
     repository_default_branch,
     require_proposed_work_branches,
 )
@@ -63,7 +58,6 @@ from agents_remember.worktrees.scheduling_mode import (
     commanded_sprint_masters,
     effective_execution_nature,
 )
-from agents_remember.worktrees.sync_source_refresh import fetch_source_upstreams
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
     leaf_enclosure_path,
@@ -82,6 +76,8 @@ from agents_remember.worktrees.worktree_contract import (
     default_series_contract,
     load_contract,
 )
+
+from .series_contract_activation import activate_master_series
 
 MASTER_SERIES_BOOTSTRAP_OWNERSHIP = StoreOwnership(
     store="master-series-bootstrap",
@@ -225,87 +221,11 @@ def ensure_master_series_contract(
     activation_args: WorktreeArgs | None = None,
     leaf_admission_operation: str | None = None,
 ) -> WorktreeContract | WorktreeCommandResult:
-    """Return or create the plane-owned contract for one canonical master document.
-
-    The orchestrator must be able to create the manager seat before that manager starts the
-    first leaf.  Contract and integration-branch identity therefore belong to the structural
-    plane, not to the first worker request.  First-leaf start calls this same owner so both
-    entry points remain one operation rather than competing bootstrap implementations.
-
-    Contract presence proves durable work exists; it does not own scheduling.  Once
-    this operation has recovered or created the requested contract, it publishes that
-    contract's own activation as reconciling (no other master's record is touched),
-    syncs its pinned source pair, and publishes it active before returning
-    implementation authority.
-    """
-
-    _require_commanded_atomic_master(spec)
-    if dry_run:
-        try:
-            candidate = _bootstrap_preflight_contract(spec)
-        except MasterSeriesContractAdmissionError as error:
-            return _master_series_admission_refusal(
-                spec,
-                error,
-                operation=leaf_admission_operation or "worktree_start",
-            )
-        return candidate
-
-    # Observe the journal -> task-bound-contract handoff under the same per-master
-    # mutex that publishes it.  Without this read lock a concurrent loser can see
-    # "no contract" before publication and "no journal" after retirement, then
-    # misclassify the winner's protected branch as an orphan.
-    with exclusive_access(
-        _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
-    ):
-        try:
-            preflight = _bootstrap_preflight_contract(spec)
-        except MasterSeriesContractAdmissionError as error:
-            return _master_series_admission_refusal(
-                spec,
-                error,
-                operation=leaf_admission_operation or "worktree_start",
-            )
-    invalid = atomic_series_activation_input_refusal(preflight, activation_args)
-    if invalid is not None:
-        return invalid
-    # Fetch is best-effort evidence and may touch remote-tracking refs, so it happens
-    # before repository integration authority is held.  The sync transaction derives
-    # and pins the exact local source commits again inside that authority.
-    fetch = fetch_source_upstreams(preflight)
-
-    # Manager dispatch and first-leaf start are two public entries into one bootstrap.  Hold the
-    # same host-local/process-local lock across the second existence check, both branch creations,
-    # and contract publication.  A concurrent loser therefore adopts the winner's completed edge;
-    # it can never enter rollback and delete the winner's contract.
-    _require_commanded_atomic_master(spec)
-    # Store locks never nest: finish the per-master bootstrap journal transaction
-    # before reading or writing the per-contract activation store.
-    with exclusive_access(
-        _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
-    ):
-        recovering = _recover_master_series_bootstrap(spec)
-        if recovering is not None:
-            contract = recovering
-        else:
-            try:
-                existing = _existing_master_series_contract(spec)
-            except MasterSeriesContractAdmissionError as error:
-                return _master_series_admission_refusal(
-                    spec,
-                    error,
-                    operation=leaf_admission_operation or "worktree_start",
-                )
-            if existing is not None:
-                contract = existing
-            else:
-                contract = _new_master_series_contract(spec)
-                integration_surfaces(contract)
-                _publish_master_series_contract(spec, contract)
-    return reconcile_selected_series_under_authority(
-        contract,
+    return activate_master_series(
+        spec,
+        dry_run=dry_run,
         activation_args=activation_args,
-        fetch=fetch,
+        leaf_admission_operation=leaf_admission_operation,
     )
 
 

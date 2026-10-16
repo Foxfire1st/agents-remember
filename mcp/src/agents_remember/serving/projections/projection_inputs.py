@@ -1,29 +1,26 @@
 """Domain-invalidated inputs for the shared workspace projection.
 
 The filesystem watcher names which projection domain changed. This module retains one
-bounded snapshot of each reader domain so a lifecycle write does not re-enumerate task
+bounded snapshot of each reader domain so a host activity write does not re-enumerate task
 documents, drift snapshots, provider setup, and Engine Room facts. Each domain is replaced
 as a whole when invalidated; deletion therefore reclaims retained rows on that same refresh.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
+    AttentionObservation,
 )
-from agents_remember.observer.event_retention import (
-    prune_expired_lifecycle_event_logs,
-    prune_one_lifecycle_log,
-)
-from agents_remember.observer.events import Event
 from agents_remember.observer.projection import (
     CloseoutQueueNode,
     DriftSnapshotNode,
@@ -32,34 +29,34 @@ from agents_remember.observer.projection import (
     LedgerNode,
     ProviderNode,
     RouteCoverageNode,
-    SeriesNode,
     SetupProgressNode,
     SetupSummaryNode,
     SidecarStaleNode,
-    TaskDocNode,
     ToolReportNode,
 )
-from agents_remember.observer.store import EventStore
+from agents_remember.observer.task_entries import TaskDocumentSource
 from agents_remember.observer.worktree_provider_admission import (
     active_enclosure_worktree_groups,
     admitted_worktree_groups,
-    series_retained_lifecycle_ids,
 )
 from agents_remember.serving.projections.contract_snapshot import (
     ContractSnapshot,
     ContractSnapshotCache,
 )
 from agents_remember.serving.projections.drift_snapshots import prune_orphaned_drift_snapshots
+from agents_remember.serving.projections.host_activity import (
+    HostActivityInput,
+    HostActivityReconcile,
+    HostActivitySnapshot,
+)
 from agents_remember.serving.projections.snapshots import (
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
     read_providers,
-    read_series_documents,
     read_setup_progress_nodes,
     read_setup_summaries,
     read_start_progress_entries,
-    read_task_documents,
     read_tool_reports,
     refresh_engine_process_landing,
 )
@@ -72,19 +69,12 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     _read_json,
     _task_doc_cache,
 )
-from agents_remember.serving.projections.snapshots_impl._lifecycle_logs import (
-    read_lifecycle_logs,
-    read_one_lifecycle_log,
-)
 from agents_remember.serving.projections.snapshots_impl._task_document_closure import (
     doc_projection_closure,
 )
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
-    _master_docs_by_ref,
-    _task_document_lifecycle_maps,
-    _TaskDocProjectionOptions,
-    project_series_nodes,
-    project_task_doc_nodes,
+    project_task_sources,
+    read_task_sources,
 )
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA
 from agents_remember.tasks.task_paths import (
@@ -105,15 +95,19 @@ class ProjectionDomain(StrEnum):
     """Reader domains carried by watcher invalidations."""
 
     TASKS = "tasks"
-    LIFECYCLES = "lifecycles"
     WORKSPACE = "workspace"
     DRIFT = "drift"
     PROVIDERS = "providers"
     START_PROGRESS = "start-progress"
     TOOL_REPORTS = "tool-reports"
+    HOST_ACTIVITY = "host-activity"
+
+
+logger = logging.getLogger(__name__)
 
 
 ALL_PROJECTION_DOMAINS = frozenset(ProjectionDomain)
+HEALING_PROJECTION_DOMAINS = ALL_PROJECTION_DOMAINS - {ProjectionDomain.HOST_ACTIVITY}
 
 
 class ProjectionRefreshKind(StrEnum):
@@ -137,7 +131,7 @@ class ProjectionRefresh:
 
     @classmethod
     def full(cls) -> ProjectionRefresh:
-        return cls(ProjectionRefreshKind.FULL, ALL_PROJECTION_DOMAINS)
+        return cls(ProjectionRefreshKind.FULL, HEALING_PROJECTION_DOMAINS)
 
     @classmethod
     def change(
@@ -157,7 +151,7 @@ class ProjectionRefresh:
         return self.kind == ProjectionRefreshKind.HEARTBEAT
 
     def affects(self, domain: ProjectionDomain) -> bool:
-        return self.kind == ProjectionRefreshKind.FULL or domain in self.domains
+        return domain in self.domains
 
 
 def incremental_paths(refresh: ProjectionRefresh) -> tuple[str, ...] | None:
@@ -242,43 +236,8 @@ def _is_canonical_task_doc(tasks_root: Path, path: Path) -> bool:
     )
 
 
-def _merge_doc_nodes(
-    retained: list[_DocNodeT],
-    new: list[_DocNodeT],
-    dropped: set[str],
-    now: datetime,
-) -> list[_DocNodeT]:
-    """Merge re-projected document nodes into retained ones, in full-read order (F09).
-
-    Fresh nodes replace retained ones by ``docPath`` and dropped paths leave; the
-    merged list is sorted by ``docPath`` exactly like the enumerating full reference.
-    Retained nodes keep their bytes except ``ageSeconds``, which is recomputed at the
-    pass clock with one stat per retained document -- a stat is not a read, so the
-    merge stays byte-equal to a full projection at the same clock while content
-    reads stay scoped to the re-projected closure.
-    """
-    fresh = {node.docPath: node for node in new}
-    retained_paths = {node.docPath for node in retained}
-    merged = [fresh.get(node.docPath, node) for node in retained if node.docPath not in dropped]
-    for doc_path, node in fresh.items():
-        if doc_path not in retained_paths:
-            merged.append(node)
-    merged_by_path = {node.docPath: node for node in merged}
-    merged = [merged_by_path[key] for key in sorted(merged_by_path)]
-    return [
-        node
-        if node.docPath in fresh
-        else node.model_copy(update={"ageSeconds": _file_age_seconds(Path(node.docPath), now)})
-        for node in merged
-    ]
-
-
-_DocNodeT = TypeVar("_DocNodeT", TaskDocNode, SeriesNode)
-
-
 @dataclass(frozen=True)
 class ProjectionInputs:
-    lifecycle_logs: list[list[Event]]
     enclosures: list[EnclosureNode]
     providers: list[ProviderNode]
     drift_snapshots: list[DriftSnapshotNode]
@@ -288,13 +247,13 @@ class ProjectionInputs:
     route_coverage: list[RouteCoverageNode]
     tool_reports: list[ToolReportNode]
     ledgers: list[LedgerNode]
-    task_documents: list[TaskDocNode]
-    series: list[SeriesNode]
+    task_sources: list[TaskDocumentSource]
     closeout_queues: list[CloseoutQueueNode]
     engine_process_facts: list[EngineProcessFacts]
     engine_start_progress: list[dict[str, Any]]
     attention_dismissals: dict[str, AttentionDismissalRecord]
     active_worktree_groups: list[str]
+    host_activity: HostActivitySnapshot
 
 
 @dataclass(frozen=True)
@@ -303,7 +262,7 @@ class RefreshPass:
     the pass was asked to refresh, and whether the task tree already changed under it.
 
     Every domain refresher decides from these three together -- ``tasks_changed`` alone flips
-    lifecycles, engine facts and drift regardless of what the invalidation set said -- so the
+    task entries, engine facts and drift regardless of what the invalidation set said -- so the
     pass is the frame they all run in, not three parameters each of them re-receives.
     """
 
@@ -324,8 +283,6 @@ class ActiveGroups:
     changed: bool
 
 
-LifecycleReader = Callable[[Path], list[list[Event]]]
-
 #: How long retained repo surfaces stay fresh without a full pass (F09): mirrors
 #: ``REPO_SURFACE_REFRESH_TTL_SECONDS`` in ``projection_store`` (kept as a local
 #: constant because that module imports this one). Memory edits stay visible within
@@ -340,11 +297,8 @@ RepoSurfaceReader = Callable[
 
 @dataclass(frozen=True)
 class ProjectionReaders:
-    """The three readers a projection pass reaches the outside world through: the lifecycle
-    event logs, the cached repo-surface bundle, and the optional landing-state probe. Injected
-    together as the pass's I/O seam so a test can replace the set coherently."""
+    """The repo-surface bundle and optional native landing probe for one input pass."""
 
-    lifecycle: LifecycleReader
     repo_surfaces: RepoSurfaceReader
     landing_state: LandingStateReader | None = None
 
@@ -352,26 +306,23 @@ class ProjectionReaders:
 class ProjectionInputState:
     """One fixed-slot retained input snapshot with explicit domain invalidation."""
 
-    def __init__(self, *, contract_cache: ContractSnapshotCache | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        contract_cache: ContractSnapshotCache | None = None,
+        host_activity_reconcile: HostActivityReconcile | None = None,
+        host_supervisor_armed: Callable[[], bool] | None = None,
+    ) -> None:
         self._contract_cache = contract_cache or ContractSnapshotCache()
         self._contracts: ContractSnapshot | None = None
         self._task_refresh_pending = False
         self._enclosures: list[EnclosureNode] = []
-        self._lifecycle_logs: list[list[Event]] = []
         self._providers: list[ProviderNode] = []
         self._drift_snapshots: list[DriftSnapshotNode] = []
         self._setup_summaries: list[SetupSummaryNode] = []
         self._setup_progress: list[SetupProgressNode] = []
         self._tool_reports: list[ToolReportNode] = []
-        self._task_documents: list[TaskDocNode] = []
-        self._series: list[SeriesNode] = []
-        # lifecycle id -> retained events (F09): incremental lifecycle refresh merges
-        # re-read ids into this map and rebuilds the sorted log list from it.
-        self._lifecycle_logs_by_id: dict[str, list[Event]] = {}
-        # Whether the id map is attributed (F09): only a production full read through
-        # read_lifecycle_logs (sorted-id enumeration) can attribute rows to ids, so an
-        # injected test reader leaves the map untrusted and incremental stays off.
-        self._lifecycle_ids_trusted = False
+        self._task_sources: list[TaskDocumentSource] = []
         self._closeout_queues: list[CloseoutQueueNode] = []
         self._closeout_cache: CloseoutQueueCache | None = None
         self._engine_process_facts: list[EngineProcessFacts] = []
@@ -384,6 +335,11 @@ class ProjectionInputState:
         self._provider_groups: set[str] = set()
         self._engine_groups: set[str] = set()
         self._ages_at: datetime | None = None
+        self._host_activity_reader = HostActivityInput(
+            host_activity_reconcile, host_supervisor_armed
+        )
+        self._host_activity = HostActivitySnapshot()
+        self._host_activity_started = False
 
     def read(
         self,
@@ -396,7 +352,14 @@ class ProjectionInputState:
         """Refresh invalidated domains, then return the complete current input snapshot."""
         retrying = self._task_refresh_pending
         if retrying:
-            pass_ = replace(pass_, refresh=ProjectionRefresh.full(), tasks_changed=True)
+            pass_ = replace(
+                pass_,
+                refresh=replace(
+                    ProjectionRefresh.full(),
+                    domains=HEALING_PROJECTION_DOMAINS | pass_.refresh.domains,
+                ),
+                tasks_changed=True,
+            )
         try:
             inputs = self._read_inputs(config, readers, observer_root=observer_root, pass_=pass_)
         except BaseException:
@@ -438,21 +401,22 @@ class ProjectionInputState:
             cache=self._closeout_cache,
             paths=closeout_paths,
         )
-        self._refresh_lifecycles(observer_root, pass_, lifecycle_reader=readers.lifecycle)
-        provider_groups = admitted_worktree_groups(self._enclosures, self._lifecycle_logs, now=now)
-        engine_groups = active_enclosure_worktree_groups(
-            self._enclosures, self._lifecycle_logs, now=now
-        )
+        if not self._host_activity_started or pass_.refresh.affects(ProjectionDomain.HOST_ACTIVITY):
+            self._host_activity = self._host_activity_reader.read(config)
+            self._host_activity_started = True
+        provider_groups = admitted_worktree_groups(self._enclosures)
+        engine_groups = active_enclosure_worktree_groups(self._enclosures)
         providers = ActiveGroups(provider_groups, provider_groups != self._provider_groups)
         engines = ActiveGroups(engine_groups, engine_groups != self._engine_groups)
         self._provider_groups = provider_groups
         self._engine_groups = engine_groups
 
-        self._refresh_providers(config, pass_, providers)
+        observations: list[AttentionObservation] = []
+        self._refresh_providers(config, pass_, providers, observations)
         self._refresh_engine_facts(config, pass_, engines, landing_state=readers.landing_state)
-        self._refresh_drift(config, pass_)
-        self._refresh_workspace(pass_, observer_root=observer_root)
-        self._refresh_progress(config, pass_)
+        self._refresh_drift(config, pass_, observations)
+        self._refresh_progress(config, pass_, observations)
+        self._refresh_workspace(pass_, observer_root=observer_root, observations=observations)
 
         # MIK-R81 rule 2 (F09): the repo surfaces (memory onboarding/code roots) have no
         # watch root, so no change tick can name them; they refresh on full passes and
@@ -472,7 +436,6 @@ class ProjectionInputState:
             )
         self._ages_at = now
         return ProjectionInputs(
-            lifecycle_logs=self._lifecycle_logs,
             enclosures=self._enclosures,
             providers=self._providers,
             drift_snapshots=self._drift_snapshots,
@@ -482,13 +445,13 @@ class ProjectionInputState:
             route_coverage=routes,
             tool_reports=self._tool_reports,
             ledgers=ledgers,
-            task_documents=self._task_documents,
-            series=self._series,
+            task_sources=self._task_sources,
             closeout_queues=self._closeout_queues,
             engine_process_facts=self._engine_process_facts,
             engine_start_progress=self._engine_start_progress,
             attention_dismissals=self._attention_dismissals,
             active_worktree_groups=sorted(engine_groups),
+            host_activity=self._host_activity,
         )
 
     def _surfaces_stale(self, now: datetime) -> bool:
@@ -517,12 +480,9 @@ class ProjectionInputState:
     def _refresh_tasks_full(self, config: McpRuntimeConfig, pass_: RefreshPass) -> bool:
         contracts = self._contract_cache.build(config.coordination_root / "tasks")
         enclosures = read_enclosures(config.coordination_root, contracts=contracts)
-        task_documents = read_task_documents(
-            config.coordination_root, enclosures=enclosures, now=pass_.now
-        )
-        series = read_series_documents(config.coordination_root, now=pass_.now)
+        task_sources = read_task_sources(config.coordination_root, now=pass_.now)
         # MIK-R81 rule 2 (F09): a TASKS invalidation re-reads the task tree, but the
-        # downstream cascade (lifecycles, engine facts, drift) flips only when the
+        # downstream cascade (engine facts, drift) flips only when the
         # task STRUCTURE moved -- contracts or enclosures. Documentary changes (a
         # one-keystroke draft: new bodyRevision, same structure) update the retained
         # documents the projection reads directly, and reach closeout through its own
@@ -537,8 +497,7 @@ class ProjectionInputState:
         )
         self._contracts = contracts
         self._enclosures = enclosures
-        self._task_documents = task_documents
-        self._series = series
+        self._task_sources = task_sources
         return structural
 
     def _refresh_tasks_incremental(
@@ -606,135 +565,30 @@ class ProjectionInputState:
         ]
         closure = doc_projection_closure(all_docs, affected, tasks_root)
         closure_docs = [item for item in all_docs if item[0] in closure]
-        lifecycle_maps = _task_document_lifecycle_maps(self._enclosures)
-        options = _TaskDocProjectionOptions(
-            include_body=False,
-            master_docs=_master_docs_by_ref(closure_docs),
-            coordination_root=config.coordination_root,
+        sources = project_task_sources(
+            closure_docs, coordination_root=config.coordination_root, now=pass_.now
         )
-        new_doc_nodes = project_task_doc_nodes(
-            closure_docs, lifecycle_maps=lifecycle_maps, now=pass_.now, options=options
-        )
-        closure_folders = {path.parent for path in closure}
-        series_docs = [
-            item for item in all_docs if item[0] in closure or item[0].parent in closure_folders
-        ]
-        new_series_nodes = project_series_nodes(
-            series_docs, coordination_root=config.coordination_root, now=pass_.now
-        )
-        dropped_keys = {path.as_posix() for path in dropped}
-        self._task_documents = _merge_doc_nodes(
-            self._task_documents, new_doc_nodes, dropped_keys, pass_.now
-        )
-        self._series = _merge_doc_nodes(self._series, new_series_nodes, dropped_keys, pass_.now)
-
-    def _refresh_lifecycles(
-        self,
-        observer_root: Path,
-        pass_: RefreshPass,
-        *,
-        lifecycle_reader: LifecycleReader,
-    ) -> None:
-        if not (
-            pass_.refresh.is_heartbeat
-            or pass_.tasks_changed
-            or pass_.refresh.affects(ProjectionDomain.LIFECYCLES)
-        ):
-            return
-        paths = incremental_paths(pass_.refresh)
-        if paths is not None and not pass_.tasks_changed and self._lifecycle_ids_trusted:
-            self._refresh_lifecycles_incremental(observer_root, pass_, paths, lifecycle_reader)
-            return
-        prune_expired_lifecycle_event_logs(
-            observer_root,
-            now=pass_.now,
-            protected_lifecycle_ids=series_retained_lifecycle_ids(self._enclosures, now=pass_.now),
-            note_own=True,
-        )
-        # Our own prune never wakes our own projector (MIK-R81 rule 3): the
-        # delete events of directories this tick reclaimed are our echo. The
-        # prune returns the reclaimed events.jsonl paths; the directory is noted
-        # so its heartbeat and gates sidecars read as our echo too.
-        self._read_lifecycles_full(lifecycle_reader, observer_root)
-
-    def _read_lifecycles_full(self, lifecycle_reader: LifecycleReader, observer_root: Path) -> None:
-        """Full lifecycle re-read with the retained id map rebuilt when possible (F09)."""
-        if lifecycle_reader is read_lifecycle_logs:
-            # The production reader enumerates sorted ids: attribute its rows by id
-            # in the same call, so the next incremental merge has a trusted base.
-            # Injected test readers keep the legacy unattributed contract, and the
-            # map stays untrusted until a production full read rebuilds it.
-            by_id: dict[str, list[Event]] = {}
-            self._lifecycle_logs = read_lifecycle_logs(observer_root, by_id=by_id)
-            self._lifecycle_logs_by_id = by_id
-            self._lifecycle_ids_trusted = True
-        else:
-            self._lifecycle_logs = lifecycle_reader(observer_root)
-            self._lifecycle_logs_by_id = {}
-            self._lifecycle_ids_trusted = False
-
-    def _refresh_lifecycles_incremental(
-        self,
-        observer_root: Path,
-        pass_: RefreshPass,
-        paths: tuple[str, ...],
-        lifecycle_reader: LifecycleReader,
-    ) -> None:
-        """Re-read only the lifecycles a complete wake path sample named (F09).
-
-        Prune and log reads touch only named lifecycle ids and merge into the
-        retained id map; expiry of unnamed lifecycles waits for the next
-        heartbeat/full reconciliation. A sample naming no lifecycle id falls back
-        to the full read rather than certifying a partial one.
-        """
-        named = _subtree_paths(observer_root, paths)
-        ids = {
-            path.relative_to(observer_root).parts[1]
-            for path in named
-            if len(path.relative_to(observer_root).parts) >= 2
-            and path.relative_to(observer_root).parts[0] == "lifecycles"
-        }
-        if not ids:
-            self._read_lifecycles_full(lifecycle_reader, observer_root)
-            return
-        protected = series_retained_lifecycle_ids(self._enclosures, now=pass_.now)
-        lifecycles_dir = observer_root / "lifecycles"
-        for lifecycle_id in sorted(ids):
-            pruned = prune_one_lifecycle_log(
-                lifecycles_dir,
-                lifecycle_id,
-                now=pass_.now,
-                protected_lifecycle_ids=protected,
-                note_own=True,
+        # Replacing the whole closure also drops newly invalid documents. Full and
+        # incremental reads have the same authority, including declared row facts.
+        retained_sources = {
+            source.path: replace(
+                source,
+                summary=source.summary.model_copy(
+                    update={"ageSeconds": _file_age_seconds(source.path, pass_.now)}
+                ),
             )
-            if pruned is not None:
-                self._lifecycle_logs_by_id.pop(lifecycle_id, None)
-        store = EventStore(observer_root)
-        for lifecycle_id in sorted(ids):
-            if (
-                lifecycle_id in self._lifecycle_logs_by_id
-                and not (lifecycles_dir / lifecycle_id).is_dir()
-            ):
-                self._lifecycle_logs_by_id.pop(lifecycle_id, None)
-                continue
-            events = read_one_lifecycle_log(store, lifecycles_dir, lifecycle_id)
-            if events is None:
-                self._lifecycle_logs_by_id.pop(lifecycle_id, None)
-            elif events:
-                self._lifecycle_logs_by_id[lifecycle_id] = events
-            # An empty log contributes no row, exactly like the full reference.
-            elif lifecycle_id in self._lifecycle_logs_by_id:
-                self._lifecycle_logs_by_id.pop(lifecycle_id, None)
-        self._lifecycle_logs = [
-            self._lifecycle_logs_by_id[lifecycle_id]
-            for lifecycle_id in sorted(self._lifecycle_logs_by_id)
-        ]
+            for source in self._task_sources
+            if source.path not in closure
+        }
+        retained_sources.update({source.path: source for source in sources})
+        self._task_sources = [retained_sources[path] for path in sorted(retained_sources)]
 
     def _refresh_providers(
         self,
         config: McpRuntimeConfig,
         pass_: RefreshPass,
         groups: ActiveGroups,
+        observations: list[AttentionObservation],
     ) -> None:
         now = pass_.now
         providers_changed = pass_.refresh.is_heartbeat or pass_.refresh.affects(
@@ -744,11 +598,17 @@ class ProjectionInputState:
             self._setup_summaries = read_setup_summaries(config.coordination_root, now=now)
         if not providers_changed and not groups.changed:
             return
-        self._providers = read_providers(config, now=now, active_worktree_groups=groups.groups)
+        providers = AttentionObservation("provider-down", now)
+        setup = AttentionObservation("failed-setup", now)
+        observations.extend((providers, setup))
+        self._providers = read_providers(
+            config, now=now, active_worktree_groups=groups.groups, observation=providers
+        )
         self._setup_progress = read_setup_progress_nodes(
             config.coordination_root,
             now=now,
             active_worktree_groups=groups.groups,
+            observation=setup,
         )
 
     def _refresh_engine_facts(
@@ -778,22 +638,47 @@ class ProjectionInputState:
                 contracts=self._contracts,
             )
 
-    def _refresh_drift(self, config: McpRuntimeConfig, pass_: RefreshPass) -> None:
+    def _refresh_drift(
+        self, config: McpRuntimeConfig, pass_: RefreshPass, observations: list[AttentionObservation]
+    ) -> None:
         if not pass_.tasks_changed and not pass_.refresh.affects(ProjectionDomain.DRIFT):
             return
         assert self._contracts is not None
-        prune_orphaned_drift_snapshots(config, contracts=self._contracts, note_own=True)
-        self._drift_snapshots = read_drift_snapshots(config.coordination_root, now=pass_.now)
+        drift = AttentionObservation("actionable-drift", pass_.now)
+        observations.append(drift)
+        prune_orphaned_drift_snapshots(
+            config, contracts=self._contracts, observation=drift, note_own=True
+        )
+        snapshots = read_drift_snapshots(config.coordination_root, now=pass_.now, observation=drift)
+        # Completeness governs acknowledgement adoption/removal, not visibility:
+        # a failed sibling read cannot hide a valid changed occurrence.
+        self._drift_snapshots = snapshots
 
-    def _refresh_workspace(self, pass_: RefreshPass, *, observer_root: Path) -> None:
-        if not (pass_.refresh.is_heartbeat or pass_.refresh.affects(ProjectionDomain.WORKSPACE)):
+    def _refresh_workspace(
+        self, pass_: RefreshPass, *, observer_root: Path, observations: list[AttentionObservation]
+    ) -> None:
+        if not (
+            observations
+            or pass_.refresh.is_heartbeat
+            or pass_.refresh.affects(ProjectionDomain.WORKSPACE)
+        ):
             return
-        self._attention_dismissals = AttentionDismissalStore(observer_root).current()
+        store = AttentionDismissalStore(observer_root)
+        try:
+            self._attention_dismissals = store.reconcile(observations)
+        except OSError:
+            # R166: losing a disposable write must not stop publication. Retain
+            # the last successfully read acknowledgements until a later read.
+            logger.warning("Attention dismissals could not be refreshed", exc_info=True)
 
-    def _refresh_progress(self, config: McpRuntimeConfig, pass_: RefreshPass) -> None:
+    def _refresh_progress(
+        self, config: McpRuntimeConfig, pass_: RefreshPass, observations: list[AttentionObservation]
+    ) -> None:
         if pass_.refresh.affects(ProjectionDomain.START_PROGRESS):
+            starts = AttentionObservation("blocked-start", pass_.now)
+            observations.append(starts)
             self._engine_start_progress = read_start_progress_entries(
-                config.coordination_root, now=pass_.now
+                config.coordination_root, now=pass_.now, observation=starts
             )
         if pass_.refresh.affects(ProjectionDomain.TOOL_REPORTS):
             self._tool_reports = read_tool_reports(config.coordination_root, now=pass_.now)
@@ -815,8 +700,13 @@ class ProjectionInputState:
             self._setup_progress, "heartbeatAgeSeconds", elapsed
         )
         self._tool_reports = _advance_model_age(self._tool_reports, "ageSeconds", elapsed)
-        self._task_documents = _advance_model_age(self._task_documents, "ageSeconds", elapsed)
-        self._series = _advance_model_age(self._series, "ageSeconds", elapsed)
+        aged = _advance_model_age(
+            [source.summary for source in self._task_sources], "ageSeconds", elapsed
+        )
+        self._task_sources = [
+            replace(source, summary=summary)
+            for source, summary in zip(self._task_sources, aged, strict=True)
+        ]
         self._engine_start_progress = [
             {
                 **entry,

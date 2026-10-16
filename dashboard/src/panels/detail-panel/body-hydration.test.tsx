@@ -2,25 +2,17 @@
 // L162-F01-native-reader-operands.json; no renderer-full fixture or producer double.
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { TaskDocNode } from '../../types/projection';
+import type { TaskSummary } from '../../types/projection';
 import { DetailPanel } from './DetailPanel';
-import { seedTaskDocuments, stubCounters } from './test-utils';
+import { seedTaskEntries, taskEntry, taskReference, stubCounters } from './test-utils';
 
-const summary0: TaskDocNode = {
-  id: 'hydrate-master',
-  repository: 'agents-remember',
-  title: 'hydrate-master',
-  status: 'planning',
+const summary0: TaskSummary = {
   kind: 'master',
   form: 'master',
   type: 'Code',
   statusNoteTruncated: false,
   headerNotes: [],
   headerNotesTotal: 0,
-  stepsDone: 0,
-  stepsTotal: 0,
-  docPath:
-    '/var/tmp/mik-run3/L162/reviewer-54e84918/provider-runtime/dev-ar-coordination/tasks/agents-remember/hydrate-master/task.json',
   bodyRevision: '5075f96388212c76d8d64136ca7fd2c43352d2e4eb493d12b69c056a7ebb3d08',
   createdAt: '2026-01-01T00:00',
   ageSeconds: -0.023717164993286133,
@@ -31,7 +23,6 @@ const summary0: TaskDocNode = {
   decisions: [],
   openQuestions: [],
   references: [],
-  subTasks: [],
   discardedCount: 0,
   discardedSubTasks: [],
   sections: [],
@@ -39,7 +30,7 @@ const summary0: TaskDocNode = {
   seats: [],
   executionWaves: [],
 };
-const body0: TaskDocNode = {
+const body0: TaskSummary = {
   ...summary0,
   nonGoals: 'NATIVE_NON_GOALS hydrate-master',
   acceptance: 'NATIVE_ACCEPTANCE hydrate-master',
@@ -54,21 +45,13 @@ const body0: TaskDocNode = {
   ],
 };
 
-const summary1: TaskDocNode = {
-  id: 'hydrate-task',
-  repository: 'agents-remember',
-  title: 'hydrate-task',
-  status: 'planning',
+const summary1: TaskSummary = {
   kind: 'subTask',
   form: 'task',
   type: 'Code',
   statusNoteTruncated: false,
   headerNotes: [],
   headerNotesTotal: 0,
-  stepsDone: 0,
-  stepsTotal: 0,
-  docPath:
-    '/var/tmp/mik-run3/L162/reviewer-54e84918/provider-runtime/dev-ar-coordination/tasks/agents-remember/hydrate-task/hydrate-task.json',
   bodyRevision: '96b3824afd6a7a52ceb8574ff63774d6251ad02291b9ba016eeae0fa6088b54e',
   createdAt: '2026-01-01T00:00',
   ageSeconds: -0.025243282318115234,
@@ -79,13 +62,12 @@ const summary1: TaskDocNode = {
   decisions: [],
   openQuestions: [],
   references: [],
-  subTasks: [],
   sections: [],
   orchestrates: [],
   seats: [],
   executionWaves: [],
 };
-const body1: TaskDocNode = {
+const body1: TaskSummary = {
   ...summary1,
   nonGoals: 'NATIVE_NON_GOALS hydrate-task',
   acceptance: 'NATIVE_ACCEPTANCE hydrate-task',
@@ -103,30 +85,40 @@ const body1: TaskDocNode = {
 describe('native body hydration through mounted DetailPanel', () => {
   it.each(
     [
-      { summary: summary0, body: body0, skeleton: 'skeleton-master' },
-      { summary: summary1, body: body1, skeleton: 'skeleton-task' },
+      {
+        summary: summary0,
+        body: body0,
+        path: 'hydrate-master/task.json',
+        skeleton: 'skeleton-master',
+      },
+      {
+        summary: summary1,
+        body: body1,
+        path: 'hydrate-task/hydrate-task.json',
+        skeleton: 'skeleton-task',
+      },
     ].flatMap((pair) => (['nonGoals', 'acceptance'] as const).map((field) => ({ ...pair, field }))),
   )(
     'hydrates $field and preserves legacy access for $summary.kind',
-    async ({ summary, body, skeleton, field }) => {
+    async ({ summary, body, path, skeleton, field }) => {
       expect(summary.bodyRevision).toBe(body.bodyRevision);
       expect(summary.nonGoals).toBeUndefined();
       expect(summary.acceptance).toBeUndefined();
-      seedTaskDocuments([summary]);
+      seedTaskEntries([
+        taskEntry({ reference: taskReference(`agents-remember/${path}`), summary }),
+      ]);
       stubCounters();
       const ancillaryFetch = globalThis.fetch;
       const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).startsWith('/api/task-document?')) {
-          expect(new URL(String(input), 'http://localhost').searchParams.get('path')).toBe(
-            summary.docPath,
-          );
-          return { ok: true, status: 200, json: async () => body } as Response;
+          expect(new URL(String(input), 'http://localhost').searchParams.get('path')).toBe(`agents-remember/${path}`);
+          return new Response(JSON.stringify(body));
         }
         return ancillaryFetch(input, init);
       });
       vi.stubGlobal('fetch', fetch);
       vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
-      const view = render(<DetailPanel selectedId={`taskdoc:${summary.docPath}`} />);
+      const view = render(<DetailPanel selectedId={`taskdoc:agents-remember/${path}`} />);
       await waitFor(() => expect(view.getByText(body[field]!)).toBeTruthy());
       expect(view.getByText(body.nonGoals!)).toBeTruthy();
       expect(view.getByText(body.acceptance!)).toBeTruthy();

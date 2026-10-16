@@ -25,8 +25,6 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
-from agents_remember.observer.ambient import ambient
-from agents_remember.observer.ulid import new_ulid
 
 REPO = "repo-a"
 ADOPT_REPO = "adopt-repo"
@@ -270,12 +268,6 @@ def drive_census(world) -> dict[str, dict[str, Any]]:
             f"the census table is not the roster: missing={sorted(missing)} extra={sorted(extra)}"
         )
 
-    # The census measures refusals against an active ambient lifecycle: the process adopted
-    # the world's enclosure, the precondition the three navigation-carrying refusals below
-    # are measured against.
-    current = ambient()
-    if current is not None and current.current is None:
-        current.attach(new_ulid(), enclosure=world.contract.as_posix())
     results: dict[str, dict[str, Any]] = {}
     for tool in PUBLIC_TOOLS:
         kind, payload = world.call(tool, arguments[tool])

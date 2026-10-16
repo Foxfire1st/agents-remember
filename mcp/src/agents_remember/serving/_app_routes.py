@@ -13,9 +13,8 @@ from agents_remember.controlplane.attention_dismissals import (
 )
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
-from agents_remember.observer.projection import TaskDocNode
+from agents_remember.observer.projection import TaskSummary
 from agents_remember.serving._app_common import (
-    _if_none_match_matches,
     _projection_body_cache,
     _ServingRuntime,
     stream_events,
@@ -27,12 +26,12 @@ from agents_remember.serving.actions import (
     DismissalIntent,
     evaluate_action,
 )
+from agents_remember.serving.conditional_read import if_none_match_matches
 from agents_remember.serving.direct_execution_grants import (
     DeveloperGrantRequest,
     developer_grant_tool,
 )
 from agents_remember.serving.events import stream_raw_events
-from agents_remember.serving.projections.snapshots import read_task_document_body
 from agents_remember.serving.response_contract import (
     ACTION_RESPONSES,
     ActionAccepted,
@@ -58,7 +57,7 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
         raise HTTPException(status_code=503, detail="projection not ready")
     revision = runtime.projector.revision(seq)
     headers = {"ETag": f'W/"{revision}"', "Cache-Control": "no-cache"}
-    if _if_none_match_matches(if_none_match, revision):
+    if if_none_match_matches(if_none_match, revision):
         return Response(status_code=304, headers=headers)
     # The dump rides the per-instance memo; only the tail (the build stamp) is added per
     # request, on a copy. This body is therefore ASSEMBLED rather than dumped from one
@@ -76,19 +75,23 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
     return JSONResponse(content=body, headers=headers)
 
 
-def _task_document_response(runtime: _ServingRuntime, path: str) -> JSONResponse:
+def _task_document_response(
+    runtime: _ServingRuntime, path: str, if_none_match: str | None = None
+) -> Response:
     _, snapshot = runtime.projector.current()
     if snapshot is None:
         raise HTTPException(status_code=503, detail="projection not ready")
-    doc = read_task_document_body(
+    doc = runtime.task_bodies.read(
         runtime.config.coordination_root,
-        doc_path=path,
-        enclosures=snapshot.enclosures,
+        path,
         now=runtime.clock(),
     )
     if doc is None:
         raise HTTPException(status_code=404, detail="task document not found")
-    return JSONResponse(content=doc.model_dump(by_alias=True, exclude_none=True))
+    headers = {"ETag": f'W/"{doc.revision}"', "Cache-Control": "no-cache"}
+    if doc.generation.current() and if_none_match_matches(if_none_match, doc.revision):
+        return Response(status_code=304, headers=headers)
+    return Response(content=doc.body, media_type="application/json", headers=headers)
 
 
 def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
@@ -112,14 +115,17 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
 
     @app.get(
         "/api/task-document",
-        response_model=TaskDocNode,
+        response_model=TaskSummary,
         responses={
+            304: {"description": "Content revision unchanged; ETag only, no body"},
             404: {"model": HttpDetailRefusal, "description": "No such task document"},
             503: {"model": HttpDetailRefusal, "description": "Projection not ready"},
         },
     )
-    def api_task_document(path: Annotated[str, Query()]) -> JSONResponse:
-        return _task_document_response(runtime, path)
+    def api_task_document(
+        path: Annotated[str, Query()], if_none_match: Annotated[str | None, Header()] = None
+    ) -> Response:
+        return _task_document_response(runtime, path, if_none_match)
 
     # An SSE route: the declared model is what a ``snapshot`` frame's ``data`` carries. A
     # ``delta`` frame is one bare projection node -- that asymmetry is the contract, and the
@@ -185,24 +191,24 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
 def _dismissal_response(
     config: McpRuntimeConfig, outcome: ActionOutcome, intent: DismissalIntent
 ) -> Response:
-    """Apply one attention dismissal.
-
-    Dismissals are current acknowledgements, not history.
-
-    Every intent that arrives here is SCOPED, because whether a request carries a scope is settled
-    once, in the layer that validates requests: ``actions._dismiss_action_outcome`` refuses an
-    acknowledgement that names neither a lifecycle nor the repo-level ``actionable-drift`` signal
-    with 400 ``missing-lifecycle``.
-    """
-
-    AttentionDismissalStore(observer_root(config)).dismiss(
-        AttentionDismissalRecord(
-            itemId=intent.item_id,
-            dismissedAt=intent.dismissed_at,
-            kind=intent.kind,
-            lifecycleId=intent.lifecycle_id,
+    """Acknowledge only a successful durable write; a failure leaves the item visible."""
+    try:
+        AttentionDismissalStore(observer_root(config)).dismiss(
+            AttentionDismissalRecord(
+                itemId=intent.item_id,
+                dismissedAt=intent.dismissed_at,
+                kind=intent.kind,
+                actionableFingerprint=intent.actionable_fingerprint,
+            )
         )
-    )
+    except OSError:
+        return JSONResponse(
+            content={
+                "status": "dismissal-not-held",
+                "detail": "Dismissal did not hold; try again.",
+            },
+            status_code=503,
+        )
     return JSONResponse(content=outcome.body, status_code=outcome.status_code)
 
 

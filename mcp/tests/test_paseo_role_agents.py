@@ -11,10 +11,13 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from agents_remember.cli.paseo_role_tools import _publish_role_agent_for_plugin
+import pytest
+from agents_remember.cli.role_activity import publish_role_agent_for_plugin
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -25,6 +28,88 @@ from agents_remember.serving.paseo.paseo_plugin_files import (
 )
 from agents_remember.serving.paseo.paseo_settings import PaseoRuntimeSettings
 from paseo_runtime_test_support import write_shared_runtime
+
+
+@pytest.mark.parametrize("ended_count", [8, 256])
+def test_registration_reclaims_only_explicitly_ended_roles(
+    tmp_path: Path, ended_count: int
+) -> None:
+    home = tmp_path / "host"
+    record = {"role": "worker", "task": "repo/leaf.json", "reportPath": "/report.md"}
+    records = {f"ended-{index}": record for index in range(ended_count)}
+    records.update(parent=record, child=record)
+    path = role_agents_path(home)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"agents": records}))
+    path.with_name("host-activity.json").write_text(
+        json.dumps(
+            {
+                "bootId": "boot",
+                "complete": True,
+                "ignoredEvents": 0,
+                "agents": {
+                    **{f"ended-{index}": {"state": "ended"} for index in range(ended_count)},
+                    "parent": {"state": "idle"},
+                    "child": {"state": "in-turn"},
+                },
+            }
+        )
+    )
+    assert publish_role_agent(home, "next", record)
+    remaining = read_role_agents(home)
+    assert set(remaining) == {"parent", "child", "next"}
+    assert remaining["parent"] == remaining["child"] == record
+    assert {key: remaining["next"][key] for key in record} == record
+    assert path.stat().st_size < 768
+    # Revive registers the same ID after pruning its old ended occurrence.
+    assert publish_role_agent(home, "ended-0", record)
+    assert "ended-0" in read_role_agents(home)
+    # A registration is an event boundary, even when its identity facts are unchanged.
+    assert publish_role_agent(home, "ended-0", record)
+    # Other launches and unrelated publications cannot reuse the superseded end.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert all(
+            pool.map(lambda key: publish_role_agent(home, key, record), ["other-a", "other-b"])
+        )
+    assert "ended-0" in read_role_agents(home)
+    publication_path = path.with_name("host-activity.json")
+    publication = json.loads(publication_path.read_text())
+    publication["ignoredEvents"] += 1
+    publication_path.write_text(json.dumps(publication))
+    publish_role_agent(home, "next", record)
+    assert "ended-0" in read_role_agents(home)
+    assert path.stat().st_size < 2048
+    # A new close is authoritative; registration can supersede it once again.
+    registration = json.loads(read_role_agents(home)["ended-0"]["registration"])
+    publication["agents"]["ended-0"]["eventAt"] = (
+        datetime.fromisoformat(registration[1]) - timedelta(seconds=1)
+    ).isoformat()
+    publication_path.write_text(json.dumps(publication))
+    publish_role_agent(home, "next", record)
+    assert "ended-0" in read_role_agents(home)
+    publication["agents"]["ended-0"]["eventAt"] = (
+        datetime.fromisoformat(registration[1]) + timedelta(seconds=1)
+    ).isoformat()
+    publication_path.write_text(json.dumps(publication))
+    publish_role_agent(home, "next", record)
+    assert "ended-0" not in read_role_agents(home)
+    publish_role_agent(home, "ended-0", record)
+    assert "ended-0" in read_role_agents(home)
+    publication["bootId"] = "next-boot"
+    publication_path.write_text(json.dumps(publication))
+    publish_role_agent(home, "next", record)
+    assert "ended-0" not in read_role_agents(home)
+
+
+def test_concurrent_role_registrations_preserve_each_others_facts(tmp_path: Path) -> None:
+    home = tmp_path / "host"
+    record = {"role": "worker", "task": "repo/leaf.json", "reportPath": "/report.md"}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(
+            pool.map(lambda index: publish_role_agent(home, str(index), record), range(16))
+        )
+    assert all(results)
+    assert read_role_agents(home) == {str(index): record for index in range(16)}
 
 
 def runtime_config(root: Path, home: Path | None) -> McpRuntimeConfig:
@@ -128,7 +213,7 @@ class RoleStartPublishesForPluginTests(unittest.TestCase):
         with TemporaryDirectory() as raw:
             root = Path(raw)
             config = runtime_config(root, root / "paseo-home")
-            published = _publish_role_agent_for_plugin(
+            published = publish_role_agent_for_plugin(
                 config, dispatch_request(), "agent-1", "/notes/reports/worker/aaa/report.md"
             )
             self.assertTrue(published)
@@ -149,12 +234,12 @@ class RoleStartPublishesForPluginTests(unittest.TestCase):
             config = runtime_config(root, root / "paseo-home")
             request = dispatch_request()
             self.assertTrue(
-                _publish_role_agent_for_plugin(
+                publish_role_agent_for_plugin(
                     config, request, "agent-1", "/notes/reports/worker/aaa/report.md"
                 )
             )
             self.assertFalse(
-                _publish_role_agent_for_plugin(
+                publish_role_agent_for_plugin(
                     config, request, "agent-1", "/notes/reports/worker/aaa/report.md"
                 )
             )
@@ -164,13 +249,13 @@ class RoleStartPublishesForPluginTests(unittest.TestCase):
             root = Path(raw)
             bare = runtime_config(root, None)
             self.assertFalse(
-                _publish_role_agent_for_plugin(
+                publish_role_agent_for_plugin(
                     bare, dispatch_request(), "agent-1", "/notes/reports/worker/aaa/report.md"
                 )
             )
             homed = runtime_config(root, root / "paseo-home")
             self.assertFalse(
-                _publish_role_agent_for_plugin(homed, dispatch_request(), "agent-1", None)
+                publish_role_agent_for_plugin(homed, dispatch_request(), "agent-1", None)
             )
             self.assertEqual(read_role_agents(root / "paseo-home"), {})
 

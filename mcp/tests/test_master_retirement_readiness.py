@@ -13,6 +13,7 @@ by the dry run and written into the retirement record.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -23,8 +24,10 @@ from unittest.mock import patch
 
 import anyio
 import pytest
+from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.application.task_docs.task_doc_publication import run_task_doc_call
 from agents_remember.kernel.file_lock import lock_path_for
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees import task_retirement as readiness
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
@@ -446,7 +449,7 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
             and len(entry) == 4
             and entry[0] == "file"
             and isinstance(name, str)
-            and "/logs/ar-tools-" in name
+            and "/logs/mcp/ar-tools-" in name
         )
 
     assert _is_new_log_file(after_paths[added[0]], added[0]), after_paths[added[0]]
@@ -455,11 +458,13 @@ def test_a_real_paired_enclosures_named_tool_is_carried_out_then_retirement_is_r
     assert not _is_new_log_file(["symlink", "nowhere"], added[0])
     assert {
         **after,
-        "paths": {key: value for key, value in after_paths.items() if "/logs/ar-tools-" not in key},
+        "paths": {
+            key: value for key, value in after_paths.items() if "/logs/mcp/ar-tools-" not in key
+        },
     } == {
         **before,
         "paths": {
-            key: value for key, value in before_paths.items() if "/logs/ar-tools-" not in key
+            key: value for key, value in before_paths.items() if "/logs/mcp/ar-tools-" not in key
         },
     }
     abandon_arguments: dict[str, object] = {"contract_path": str(path)}
@@ -497,12 +502,28 @@ def test_abandon_dry_run_names_populated_logs_and_changes_nothing(
     group = child.worktree_group
     assert isinstance(group, Path)
     assert isinstance(child.code_worktree, Path) and isinstance(child.memory_worktree, Path)
+    # Only a hosted leaf caller logs in its enclosure. Starting it from an
+    # unbound client writes to the coordination transcript instead.
+    binding = AgentBinding(
+        agent_id="749194d9-22fb-49d0-a84e-ea8a59005c4b",
+        request_id="d6ac0151-fb68-4167-b0e0-3c4791b48bc8",
+        role="worker",
+        report_path=str(group / "reports" / "worker.md"),
+        sprint_ref=TaskDocumentRef(repository=REPO, path="sprint/task.json"),
+        master_ref=TaskDocumentRef(repository=REPO, path=f"{MASTER}/task.json"),
+        task_ref=TaskDocumentRef(repository=REPO, path=f"{MASTER}/leaf.json"),
+    )
+    with patch.dict(os.environ, binding.environment()):
+        observed = anyio.run(
+            world._call, "worktree_status", {"repo_id": REPO, "contract_path": str(path)}
+        )
+    assert not observed.isError, observed
     populated = [
         entry
         for entry in group.rglob("*")
         if entry.is_file() and "/logs/ar-tools-" in entry.as_posix()
     ]
-    assert populated, "the start call populates the enclosure logs"
+    assert populated, "the bound leaf call populates the enclosure logs"
     # Arrange the mid-flight state the real abandon passes through: worktrees
     # gone, logs remaining. The preview must plan the full removal from here.
     git(world.code, "worktree", "remove", "--force", str(child.code_worktree))

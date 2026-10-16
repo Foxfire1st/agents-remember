@@ -18,13 +18,13 @@ the repository's size rail.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from agents_remember.models.knowledge.review_intent_summary import ReviewIntentSummaryResult
+from agents_remember.serving.changeset_cache import ChangesetCache
+from agents_remember.serving.intent_summary_cache import IntentSummaryCache, ReviewIntentSummaryPort
 
 __all__ = [
     "KNOWLEDGE_REVIEW_SUMMARY_ROUTE",
@@ -33,8 +33,6 @@ __all__ = [
 ]
 
 KNOWLEDGE_REVIEW_SUMMARY_ROUTE = "/api/review/intent/summary"
-
-ReviewIntentSummaryPort = Callable[[str, str, str], ReviewIntentSummaryResult]
 
 # The route's own unwired answer: "this process cannot count" is a different fact from "nothing
 # changed", so a process composed without the port refuses by name rather than answering zero.
@@ -48,12 +46,17 @@ _UNWIRED_SUMMARY: dict[str, Any] = {
 }
 
 
-def register_review_summary_route(app: FastAPI, port: ReviewIntentSummaryPort | None) -> None:
+def register_review_summary_route(
+    app: FastAPI, port: ReviewIntentSummaryPort | None, cache: ChangesetCache
+) -> None:
     """Register the read-only summary route. Must be called BEFORE the greedy static mount."""
+    reader = None if port is None else IntentSummaryCache(port, cache)
 
-    @app.get(KNOWLEDGE_REVIEW_SUMMARY_ROUTE)
-    def api_review_intent_summary(repo: str, master: str, leaf: str) -> Response:
-        if port is None:
+    @app.get(
+        KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
+        responses={304: {"description": "Summary unchanged; ETag only, no body"}},
+    )
+    def api_review_intent_summary(request: Request, repo: str, master: str, leaf: str) -> Response:
+        if reader is None:
             return JSONResponse(_UNWIRED_SUMMARY, status_code=503)
-        result = port(repo, master, leaf)
-        return JSONResponse(result.model_dump(mode="json", exclude_none=True))
+        return reader.response(request, repo, master, leaf)

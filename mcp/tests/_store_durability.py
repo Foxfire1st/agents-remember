@@ -20,6 +20,7 @@ from typing import Any
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
+    AttentionObservation,
 )
 from agents_remember.controlplane.records import (
     GateRecord,
@@ -126,7 +127,6 @@ class AttentionAdapter(StoreAdapter):
     id_field = "itemId"
     # ``dismiss`` is a whole-file read-modify-write, not an append -- there is no ``"a"`` handle
     # to strand in an unlinked inode, so only the lost-update mechanism applies here.
-    LIVE_LIFECYCLE = "live-lifecycle"
 
     def open(self, root: Path) -> Any:
         return AttentionDismissalStore(root)
@@ -136,24 +136,24 @@ class AttentionAdapter(StoreAdapter):
             AttentionDismissalRecord(
                 itemId=record_id,
                 dismissedAt=_iso(_now()),
-                kind="stale-session",
-                lifecycleId=self.LIVE_LIFECYCLE,
+                kind="provider-down",
             )
         )
 
     def write_decoy(self, store: Any, tick: int) -> None:
-        # A dismissal for a lifecycle that is not in the live set: dropped by prune_lifecycles.
+        # A provider absent from this fixture's configuration is reclaimable.
         store.dismiss(
             AttentionDismissalRecord(
                 itemId=f"{DECOY_PREFIX}{os.getpid()}-{tick}",
                 dismissedAt=_iso(_now()),
-                kind="stale-session",
-                lifecycleId="retired-lifecycle",
+                kind="provider-down",
             )
         )
 
     def reclaim_now(self, store: Any) -> None:  # pragma: no cover
-        store.prune_lifecycles({self.LIVE_LIFECYCLE})
+        observed_before = _now()
+        existing = {key for key in store.current() if not key.startswith(DECOY_PREFIX)}
+        store.reconcile([AttentionObservation("provider-down", observed_before, existing=existing)])
 
 
 class ProviderStoreAdapter(StoreAdapter):

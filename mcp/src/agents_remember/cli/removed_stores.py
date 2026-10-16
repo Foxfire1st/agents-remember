@@ -3,7 +3,7 @@
     agents-remember removed-stores [--config <settings>] [--dry-run]
 
 The parts MIK-R113 removed wrote stores under the coordination root (the list is
-``install.runtime.REMOVED_PART_STORE_PATHS``), and the gate logs hold gates that no
+``install.removed_stores.REMOVED_PART_STORE_PATHS``), and the gate logs hold gates that no
 part of the product decides any more. The install names them once and never deletes
 them; only this explicit command removes data on disk, on the user's word.
 
@@ -26,9 +26,10 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
-from agents_remember.install.runtime import REMOVED_PART_STORE_PATHS, removed_part_stores
+from agents_remember.install.removed_stores import REMOVED_PART_STORE_PATHS, removed_part_stores
 from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
@@ -73,7 +74,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"removed-stores: cannot resolve configuration: {error}", file=sys.stderr)
         return 1
     unreadable: dict[str, str] = {}
-    stores = removed_part_stores(config.coordination_root, unreadable)
+    stores = removed_part_stores(config.coordination_root, unreadable, include_terminal_locks=True)
     unread = [f"{path}: {reason}" for path, reason in unreadable.items()]
     if unread:
         print("removed-stores: cannot read: " + "; ".join(unread), file=sys.stderr)
@@ -90,7 +91,7 @@ def run(args: argparse.Namespace) -> int:
     if args.dry_run:
         print(f"removed-stores: dry run, {len(stores)} stores ({len(files)} files) left alone.")
         return 1 if unread else 0
-    removed, freed, failed = _remove(config.coordination_root, files, unreadable)
+    removed, freed, failed = _remove(config.coordination_root, stores, unreadable)
     if failed:
         print("removed-stores: removal failed: " + "; ".join(failed), file=sys.stderr)
     if failed or unread:
@@ -104,7 +105,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _remove(
-    coordination_root: Path, files: list[Path], unreadable: dict[str, str]
+    coordination_root: Path, stores: list[dict[str, Any]], unreadable: dict[str, str]
 ) -> tuple[int, int, list[str]]:
     """Remove the stores' files, then the store folders they leave empty.
 
@@ -114,9 +115,13 @@ def _remove(
     """
 
     root_real = coordination_root.resolve()
+    files = [Path(name) for item in stores for name in item["files"]]
     removed, freed, failed = _remove_files(files, root_real)
-    for relative in REMOVED_PART_STORE_PATHS:
-        store = coordination_root / relative
+    folders = [coordination_root / relative for relative in REMOVED_PART_STORE_PATHS]
+    folders.extend(Path(str(item["path"])) for item in stores)
+    lifecycle_root = coordination_root / "logs/observer/lifecycles"
+    folders.extend(path.parent for path in files if path.parent.parent == lifecycle_root)
+    for store in dict.fromkeys(folders):
         if not any(Path(place).is_relative_to(store) for place in unreadable):
             failed.extend(_remove_emptied_folder(store, root_real))
     return removed, freed, failed

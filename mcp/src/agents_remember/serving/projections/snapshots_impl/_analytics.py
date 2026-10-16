@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane.attention_dismissals import AttentionObservation
 from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import LedgerError, LedgerRow, load_ledger
@@ -30,9 +31,10 @@ from agents_remember.observer.projection import (
     SidecarStaleNode,
     ToolReportNode,
 )
+from agents_remember.observer.reducer_impl._attention import observe_setup, observe_start
 from agents_remember.providers.setup_progress import progress_status, read_setup_progress
+from agents_remember.serving.projections.drift_snapshots import read_drift_snapshot
 from agents_remember.serving.projections.paths import (
-    DRIFT_SNAPSHOT_SCHEMA,
     drift_snapshot_dir,
 )
 from agents_remember.serving.projections.snapshots_impl._common import (
@@ -43,12 +45,13 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     _read_json,
     _report_label,
     _text_or_none,
+    surface_paths,
 )
 from agents_remember.worktrees.start_progress import read_start_progress
 
 
 def read_start_progress_entries(
-    coordination_root: Path, *, now: datetime
+    coordination_root: Path, *, now: datetime, observation: AttentionObservation | None = None
 ) -> list[dict[str, Any]]:  # pragma: no cover
     """Slice 5e §5.4: pre-contract worktree-start blocks (a start gated before its contract).
 
@@ -58,13 +61,14 @@ def read_start_progress_entries(
     contract-keyed enclosure surface cannot see.
     """
     root = coordination_root / "temp" / "worktree-start"
-    if not root.is_dir():
-        return []
     entries: list[dict[str, Any]] = []
-    for path in sorted(root.glob("*/*.json")):
+    for path in surface_paths(root, "*/*.json", observation):
         payload = read_start_progress(path)
         if payload is None:
+            if observation is not None:
+                observation.complete = False
             continue
+        observe_start(payload, observation)
         updated = payload.get("updatedAt")
         entries.append(
             {
@@ -76,19 +80,21 @@ def read_start_progress_entries(
     return entries
 
 
-def read_drift_snapshots(coordination_root: Path, *, now: datetime) -> list[DriftSnapshotNode]:
+def read_drift_snapshots(
+    coordination_root: Path, *, now: datetime, observation: AttentionObservation | None = None
+) -> list[DriftSnapshotNode]:
     """Surface 9 (b1): the persisted drift snapshots the memory_quality run writes.
 
     A cheap read with a staleness age -- the reducer never classifies drift itself
     (git-per-sidecar). A snapshot whose schema does not match is skipped.
     """
     directory = drift_snapshot_dir(coordination_root)
-    if not directory.is_dir():
-        return []
     nodes: list[DriftSnapshotNode] = []
-    for path in sorted(directory.glob("*.json")):
-        payload = _read_json(path)
-        if payload is None or payload.get("schema") != DRIFT_SNAPSHOT_SCHEMA:
+    for path in surface_paths(directory, "*.json", observation):
+        payload = read_drift_snapshot(path)
+        if payload is None:
+            if observation is not None:
+                observation.complete = False
             continue
         raw_counts = payload.get("counts")
         counts = (
@@ -97,21 +103,41 @@ def read_drift_snapshots(coordination_root: Path, *, now: datetime) -> list[Drif
             else {}
         )
         checked = payload.get("checkedAt")
-        nodes.append(
-            DriftSnapshotNode(
-                repository=str(payload.get("repository", "")),
-                branch=str(payload.get("branch", "")),
-                counts=counts,
-                actionableCount=_as_int(payload.get("actionableCount")),
-                checkedAt=checked if isinstance(checked, str) else None,
-                sourceRoot=_text_or_none(payload.get("sourceRoot")),
-                memoryRoot=_text_or_none(payload.get("memoryRoot")),
-                reportPath=_text_or_none(payload.get("reportPath")),
-                snapshotStaleSeconds=age_seconds(checked, now)
-                if isinstance(checked, str)
-                else None,
-            )
+        if (
+            observation is not None
+            and "actionableFingerprint" in payload
+            and not payload["actionableFingerprint"]
+        ):
+            observation.complete = False
+        node = DriftSnapshotNode(
+            repository=str(payload.get("repository", "")),
+            branch=str(payload.get("branch", "")),
+            counts=counts,
+            actionableCount=_as_int(payload.get("actionableCount")),
+            actionableFingerprint=_text_or_none(payload.get("actionableFingerprint")),
+            checkedAt=checked if isinstance(checked, str) else None,
+            sourceRoot=_text_or_none(payload.get("sourceRoot")),
+            memoryRoot=_text_or_none(payload.get("memoryRoot")),
+            reportPath=_text_or_none(payload.get("reportPath")),
+            snapshotStaleSeconds=age_seconds(checked, now) if isinstance(checked, str) else None,
         )
+        item_id = f"actionable-drift:{node.repository}:{node.branch}"
+        if observation is not None and observation.complete and item_id not in observation.existing:
+            # An unlink failure cannot republish an orphan whose branch is gone.
+            continue
+        nodes.append(node)
+        # Missing fingerprints are old/sampled snapshots. They cannot prove
+        # recovery or a changed occurrence, and do not invent a replacement.
+        if (
+            observation is not None
+            and item_id in observation.existing
+            and node.actionableFingerprint
+        ):
+            observation.observe(
+                item_id,
+                healthy=node.actionableCount == 0,
+                fingerprint=node.actionableFingerprint,
+            )
     return nodes
 
 
@@ -190,6 +216,7 @@ def read_setup_progress_nodes(  # pragma: no cover
     *,
     now: datetime,
     active_worktree_groups: set[str] | None = None,
+    observation: AttentionObservation | None = None,
 ) -> list[SetupProgressNode]:
     """Surface 3: each worktree group's live provider-setup progress.
 
@@ -197,28 +224,33 @@ def read_setup_progress_nodes(  # pragma: no cover
     whose heartbeat went stale reads ``stale`` -- the boot-sequence widget data.
     """
     worktrees_root = coordination_root / "worktrees"
-    if not worktrees_root.is_dir():
-        return []
     nodes: list[SetupProgressNode] = []
-    for path in sorted(worktrees_root.glob("*/*/provider-runtime/setup-progress.json")):
+    if observation is not None:
+        for group_path in surface_paths(worktrees_root, "*/*", observation):
+            if group_path.is_dir():
+                observation.observe(f"failed-setup:{group_path.name}")
+    for path in surface_paths(
+        worktrees_root, "*/*/provider-runtime/setup-progress.json", observation
+    ):
         group = path.parent.parent.name
-        if active_worktree_groups is not None and group not in active_worktree_groups:
-            continue
         progress = read_setup_progress(path)
         if progress is None:
+            if observation is not None:
+                observation.complete = False
             continue
         status = progress_status(progress, clock=lambda: now)
         completed = progress.get("completedPhases")
-        nodes.append(
-            SetupProgressNode(
-                group=group,
-                state=str(status.get("state", "unknown")),
-                currentPhase=_current_phase_text(status.get("currentPhase")),
-                heartbeatAgeSeconds=_as_float(status.get("heartbeatAgeSeconds")),
-                completedCount=len(completed) if isinstance(completed, list) else 0,
-                failedPhases=[str(line) for line in status.get("failedPhases", []) or []],
-            )
+        node = SetupProgressNode(
+            group=group,
+            state=str(status.get("state", "unknown")),
+            currentPhase=_current_phase_text(status.get("currentPhase")),
+            heartbeatAgeSeconds=_as_float(status.get("heartbeatAgeSeconds")),
+            completedCount=len(completed) if isinstance(completed, list) else 0,
+            failedPhases=[str(line) for line in status.get("failedPhases", []) or []],
         )
+        observe_setup(node, observation)
+        if active_worktree_groups is None or group in active_worktree_groups:
+            nodes.append(node)
     return nodes
 
 

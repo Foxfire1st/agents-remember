@@ -1,20 +1,6 @@
-import {
-  findLifecycleEnclosure,
-  groupEnclosuresByLifecycle,
-  taskDocumentLabel,
-  taskDocsForLifecycle,
-  taskLabel,
-} from "../data/taskIdentity";
-import type { Actor, ObserverEvent, Trust } from "../types/event";
-import type {
-  Analytics,
-  EnclosureNode,
-  LifecycleProjection,
-  Phase,
-  TaskDocNode,
-} from "../types/projection";
+import type { Actor, ObserverEvent, Trust } from '../types/event';
 
-export type EventVisibility = "normal" | "quiet" | "hidden";
+export type EventVisibility = 'normal' | 'quiet' | 'hidden';
 
 export interface EventSummary {
   label: string;
@@ -25,122 +11,55 @@ export interface EventSummary {
   visibility: EventVisibility;
 }
 
-export interface EventSummaryContext {
-  analytics: Analytics | null;
-  enclosures: Record<string, EnclosureNode>;
-  enclosuresByLifecycle: Map<string, EnclosureNode>;
-  lifecycles: Record<string, LifecycleProjection>;
-  taskDocsByLifecycle: Map<string, TaskDocNode[]>;
-}
-
-interface LifecycleContext {
-  label?: string;
-  lifecycleId?: string;
-  repoId?: string;
-  enclosure?: string;
-}
-
 const ACTOR_LABELS: Record<Actor, string> = {
-  developer: "developer",
-  model: "agent",
-  system: "system",
+  developer: 'developer',
+  model: 'agent',
+  system: 'system',
 };
 
 const TRUST_LABELS: Record<Trust, string> = {
-  approved: "approved",
-  declared: "declared",
-  inferred: "inferred",
-  observed: "observed",
-};
-
-const PHASE_LABELS: Record<Phase, string> = {
-  build: "Build",
-  close: "Close",
-  decide: "Decide",
-  "reframe-research": "Research",
-  request: "Request",
-  "trust-checkpoint": "Trust checkpoint",
+  approved: 'approved',
+  declared: 'declared',
+  inferred: 'inferred',
+  observed: 'observed',
 };
 
 const TOOL_LABELS: Record<string, string> = {
-  context_packet: "Checked workspace context",
-  memory_quality_check: "Checked memory quality",
-  read_ar_files: "Read source with onboarding",
-  role_message: "Sent message",
-  role_start: "Started agent",
-  route_index_refresh: "Checked route indexes",
-  task_doc: "Updated task document",
-  worktree_attach: "Attached to task",
-  worktree_cleanup: "Cleaned up task worktree",
-  worktree_integrate: "Integrated task branch",
-  worktree_start: "Started task worktree",
-  worktree_status: "Checked worktree status",
+  context_packet: 'Checked workspace context',
+  memory_quality_check: 'Checked memory quality',
+  read_ar_files: 'Read source with onboarding',
+  role_message: 'Sent message',
+  role_start: 'Started agent',
+  route_index_refresh: 'Checked route indexes',
+  task_doc: 'Updated task document',
+  worktree_attach: 'Attached to task',
+  worktree_cleanup: 'Cleaned up task worktree',
+  worktree_integrate: 'Integrated task branch',
+  worktree_start: 'Started task worktree',
+  worktree_status: 'Checked worktree status',
 };
 
 const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  hour: "2-digit",
+  hour: '2-digit',
   hour12: false,
-  minute: "2-digit",
-  second: "2-digit",
+  minute: '2-digit',
+  second: '2-digit',
 });
 
-export function buildEventSummaryContext(
-  lifecycles: Record<string, LifecycleProjection>,
-  enclosures: Record<string, EnclosureNode>,
-  analytics: Analytics | null,
-): EventSummaryContext {
-  return {
-    analytics,
-    enclosures,
-    enclosuresByLifecycle: groupEnclosuresByLifecycle(Object.values(enclosures)),
-    lifecycles,
-    taskDocsByLifecycle: groupTaskDocsByLifecycle(analytics?.taskDocuments ?? []),
-  };
-}
-
-const SUMMARIZERS: Record<
-  string,
-  (event: ObserverEvent, context: EventSummaryContext) => EventSummary
-> = {
-  "read.packet": summarizeReadPacket,
-  "tool.completed": summarizeToolCompleted,
-  "lifecycle.phase-changed": summarizePhaseChanged,
-  "lifecycle.started": (event, context) => summarizeLifecycleEvent(event, context, "Started lifecycle"),
-  "lifecycle.resumed": (event, context) => summarizeLifecycleEvent(event, context, "Resumed lifecycle"),
-  "lifecycle.paused": (event, context) => summarizeLifecycleEvent(event, context, "Paused lifecycle"),
-  "lifecycle.promoted": (event, context) => summarizeLifecycleEvent(event, context, "Saved task lifecycle"),
-  "lifecycle.ended": summarizeEnded,
-  "lifecycle.blocked": summarizeBlocked,
-  "lifecycle.heartbeat": summarizeHeartbeat,
+const SUMMARIZERS: Record<string, (event: ObserverEvent) => EventSummary> = {
+  'read.packet': summarizeReadPacket,
+  'tool.completed': summarizeToolCompleted,
 };
 
-export function summarizeEvent(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-): EventSummary {
+export function summarizeEvent(event: ObserverEvent): EventSummary {
   const summarizer = SUMMARIZERS[event.kind] ?? summarizeUnknown;
-  return summarizer(event, context);
-}
-
-export function eventSummaryContextReady(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-): boolean {
-  if (event.lifecycleId) {
-    if (context.lifecycles[event.lifecycleId]) return true;
-    if (event.enclosure && context.enclosures[event.enclosure]) return true;
-    return (context.taskDocsByLifecycle.get(event.lifecycleId) ?? []).length > 0;
-  }
-  if (event.enclosure) {
-    return Boolean(context.enclosures[event.enclosure]);
-  }
-  return true;
+  return summarizer(event);
 }
 
 export function formatEventTime(ts: string | undefined): string {
-  if (!ts) return "-";
+  if (!ts) return '-';
   const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return "-";
+  if (Number.isNaN(date.getTime())) return '-';
   return TIME_FORMATTER.format(date);
 }
 
@@ -152,42 +71,37 @@ export function trustLabel(trust: Trust): string {
   return TRUST_LABELS[trust] ?? trust;
 }
 
-function summarizeReadPacket(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-): EventSummary {
+function summarizeReadPacket(event: ObserverEvent): EventSummary {
   const data = event.data ?? {};
   const files = Array.isArray(data.files) ? (data.files as unknown[]) : [];
   const paths = files
-    .map((file) => (isRecord(file) && typeof file.path === "string" ? file.path : ""))
+    .map((file) => (isRecord(file) && typeof file.path === 'string' ? file.path : ''))
     .filter((path) => path.length > 0);
-  const repo = typeof data.repoId === "string" ? data.repoId : undefined;
-  const firstName = paths.length > 0 ? (paths[0].split("/").pop() ?? paths[0]) : "(no file)";
-  const label = paths.length > 1 ? `Read: ${firstName} +${paths.length - 1} more` : `Read: ${firstName}`;
+  const repo = typeof data.repoId === 'string' ? data.repoId : undefined;
+  const firstName = paths.length > 0 ? (paths[0].split('/').pop() ?? paths[0]) : '(no file)';
+  const label =
+    paths.length > 1 ? `Read: ${firstName} +${paths.length - 1} more` : `Read: ${firstName}`;
   return {
-    context: lifecycleContext(event, context).label ?? repo,
+    context: event.repoId ?? repo,
     diagnosticKind: event.kind,
     label,
     meta: compact([repo]),
-    title: paths.join("\n"),
-    visibility: "normal",
+    title: paths.join('\n'),
+    visibility: 'normal',
   };
 }
 
-function summarizeToolCompleted(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-): EventSummary {
+function summarizeToolCompleted(event: ObserverEvent): EventSummary {
   const data = event.data ?? {};
-  const tool = typeof data.tool === "string" ? data.tool : undefined;
-  const ok = typeof data.ok === "boolean" ? data.ok : undefined;
-  const tokens = typeof data.tokens === "number" ? data.tokens : undefined;
-  const label = `${toolLabel(tool)}${ok === false ? " failed" : ""}`;
+  const tool = typeof data.tool === 'string' ? data.tool : undefined;
+  const ok = typeof data.ok === 'boolean' ? data.ok : undefined;
+  const tokens = typeof data.tokens === 'number' ? data.tokens : undefined;
+  const label = `${toolLabel(tool)}${ok === false ? ' failed' : ''}`;
   // Earlier-kind rows carry no caller facts and keep their base outcome
   // labels (ok/failed); rows with caller facts use the host-path outcome.
-  const hasCallerFacts = stringField(data, "role") !== undefined;
+  const hasCallerFacts = stringField(data, 'role') !== undefined;
   return {
-    context: toolCallerContext(event) ?? lifecycleContext(event, context).label,
+    context: toolCallerContext(event) ?? event.repoId,
     diagnosticKind: event.kind,
     label,
     meta: compact([
@@ -196,28 +110,28 @@ function summarizeToolCompleted(
       tokenLabel(tokens),
     ]),
     title: rawDiagnosticTitle(event),
-    visibility: "normal",
+    visibility: 'normal',
   };
 }
 
 function legacyOutcome(ok: boolean | undefined): string | undefined {
   if (ok === undefined) return undefined;
-  return ok ? "ok" : "failed";
+  return ok ? 'ok' : 'failed';
 }
 
 // MIK-R114 rule 8: a row of a host-path tool event shows who called -- the
-// role and the task -- with the tool and its outcome. Lifecycle-owned rows of
-// the earlier kind carry no caller facts and keep their lifecycle context. A
-// role or a task the panel does not know is shown as it is: known roles keep
+// role and the task -- with the tool and its outcome. Rows without caller facts
+// keep the available event context. A role or a task the panel does not know
+// is shown as it is: known roles keep
 // their friendly labels, unknown role values are shown verbatim.
 const KNOWN_ROLES = new Set([
-  "architect",
-  "curator",
-  "manager",
-  "orchestrator",
-  "reviewer",
-  "system-specialist",
-  "worker",
+  'architect',
+  'curator',
+  'manager',
+  'orchestrator',
+  'reviewer',
+  'system-specialist',
+  'worker',
 ]);
 
 function roleLabel(value: string): string {
@@ -226,22 +140,22 @@ function roleLabel(value: string): string {
 
 function toolCallerContext(event: ObserverEvent): string | undefined {
   const data = event.data ?? {};
-  const role = stringField(data, "role");
+  const role = stringField(data, 'role');
   if (!role) return undefined;
-  if (role === "chat") return chatCallerContext(data);
+  if (role === 'chat') return chatCallerContext(data);
   const task = firstPresent([data.taskTitle, data.taskId, data.taskPath]);
   const who = roleLabel(role);
   return task ? `${who} · ${task}` : who;
 }
 
 function chatCallerContext(data: Record<string, unknown>): string {
-  const harness = stringField(data, "harness");
-  return harness ? `chat without a role · ${harness}` : "chat without a role";
+  const harness = stringField(data, 'harness');
+  return harness ? `chat without a role · ${harness}` : 'chat without a role';
 }
 
 function firstPresent(values: unknown[]): string | undefined {
   for (const value of values) {
-    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === 'string' && value.length > 0) return value;
   }
   return undefined;
 }
@@ -251,191 +165,35 @@ function firstPresent(values: unknown[]): string | undefined {
 function toolOutcome(data: Record<string, unknown>, ok: boolean | undefined): string | undefined {
   const outcome = baseOutcome(data, ok);
   if (outcome === undefined) return undefined;
-  const code = stringField(data, "code");
-  if (code && (outcome === "refused" || ok === false)) return `refused (${code})`;
+  const code = stringField(data, 'code');
+  if (code && (outcome === 'refused' || ok === false)) return `refused (${code})`;
   return outcome;
 }
 
 function baseOutcome(data: Record<string, unknown>, ok: boolean | undefined): string | undefined {
-  const state = stringField(data, "state");
+  const state = stringField(data, 'state');
   if (state) return state;
-  if (ok === true) return "done";
-  if (ok === false) return "refused";
+  if (ok === true) return 'done';
+  if (ok === false) return 'refused';
   return undefined;
 }
 
 // For role_start and role_message: the role of the agent started or addressed.
 // Known roles keep their friendly labels; an unknown value is shown verbatim.
 function toolTargetRole(data: Record<string, unknown>): string | undefined {
-  const target = typeof data.targetRole === "string" ? data.targetRole : undefined;
+  const target = typeof data.targetRole === 'string' ? data.targetRole : undefined;
   return target && target.length > 0 ? roleLabel(target) : undefined;
 }
 
-function summarizePhaseChanged(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-): EventSummary {
-  const phase = typeof event.data?.phase === "string" ? event.data.phase : undefined;
-  const label = isPhase(phase) ? `Moved to ${PHASE_LABELS[phase]}` : "Updated phase";
+function summarizeUnknown(event: ObserverEvent): EventSummary {
   return {
-    context: lifecycleContext(event, context).label,
-    diagnosticKind: event.kind,
-    label,
-    meta: compact([phase && !isPhase(phase) ? phase : undefined]),
-    title: rawDiagnosticTitle(event),
-    visibility: "normal",
-  };
-}
-
-function summarizeLifecycleEvent(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-  label: string,
-): EventSummary {
-  const data = event.data ?? {};
-  return {
-    context: lifecycleContext(event, context).label,
-    diagnosticKind: event.kind,
-    label,
-    meta: compact([stringField(data, "cause"), stringField(data, "scope")]),
-    title: rawDiagnosticTitle(event),
-    visibility: "normal",
-  };
-}
-
-function summarizeEnded(event: ObserverEvent, context: EventSummaryContext): EventSummary {
-  const outcome = stringField(event.data ?? {}, "outcome");
-  return {
-    context: lifecycleContext(event, context).label,
-    diagnosticKind: event.kind,
-    label: outcome === "completed" ? "Completed lifecycle" : outcome === "abandoned" ? "Abandoned lifecycle" : "Ended lifecycle",
-    meta: compact([outcome]),
-    title: rawDiagnosticTitle(event),
-    visibility: "normal",
-  };
-}
-
-function summarizeBlocked(event: ObserverEvent, context: EventSummaryContext): EventSummary {
-  const prompt = askPrompt(event.data?.ask) ?? stringField(event.data ?? {}, "prompt");
-  const askKind = askKindLabel(event.data?.ask);
-  return {
-    context: lifecycleContext(event, context).label,
-    diagnosticKind: event.kind,
-    label: prompt ? `Waiting: ${prompt}` : "Waiting for developer input",
-    meta: compact([askKind]),
-    title: rawDiagnosticTitle(event),
-    visibility: "normal",
-  };
-}
-
-function summarizeHeartbeat(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-): EventSummary {
-  const data = event.data ?? {};
-  return {
-    context: lifecycleContext(event, context).label,
-    diagnosticKind: event.kind,
-    label: "Heartbeat",
-    meta: compact([stringField(data, "state"), stringField(data, "phase")]),
-    title: rawDiagnosticTitle(event),
-    visibility: "hidden",
-  };
-}
-
-function summarizeUnknown(event: ObserverEvent, context: EventSummaryContext): EventSummary {
-  return {
-    context: lifecycleContext(event, context).label ?? event.enclosure ?? event.repoId ?? event.lifecycleId,
+    context: event.enclosure ?? event.repoId,
     diagnosticKind: event.kind,
     label: event.kind,
     meta: [],
     title: rawDiagnosticTitle(event),
-    visibility: "normal",
+    visibility: 'normal',
   };
-}
-
-function enclosureLabel(enclosure: EnclosureNode, fallback: string): string {
-  return enclosure.leafId || enclosure.taskName || fallback;
-}
-
-function lifecycleBranch(
-  context: EventSummaryContext,
-  lifecycle: LifecycleProjection,
-): LifecycleContext {
-  const directDocs = taskDocsForLifecycle(lifecycle, context.analytics?.taskDocuments ?? []);
-  const enclosure = findLifecycleEnclosure(
-    lifecycle,
-    context.enclosures,
-    context.enclosuresByLifecycle,
-  );
-  return {
-    enclosure: lifecycle.enclosure,
-    label: taskLabel(lifecycle, directDocs, enclosure),
-    lifecycleId: lifecycle.id,
-    repoId: lifecycle.repoId,
-  };
-}
-
-function enclosureBranch(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-): LifecycleContext {
-  const enclosure = context.enclosures[event.enclosure ?? ""];
-  if (!enclosure) {
-    return { enclosure: event.enclosure, repoId: event.repoId };
-  }
-  return {
-    enclosure: event.enclosure,
-    label: enclosureLabel(enclosure, event.enclosure ?? ""),
-    lifecycleId: event.lifecycleId ?? enclosure.lifecycleId,
-    repoId: enclosure.repoName,
-  };
-}
-
-function docsBranch(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-  lifecycleId: string,
-): LifecycleContext {
-  const directDocs = context.taskDocsByLifecycle.get(lifecycleId) ?? [];
-  return {
-    enclosure: event.enclosure,
-    label: taskDocumentLabel(directDocs, event.enclosure ?? lifecycleId),
-    lifecycleId,
-    repoId: event.repoId ?? directDocs[0]?.repository,
-  };
-}
-
-function lifecycleContext(
-  event: ObserverEvent,
-  context: EventSummaryContext,
-): LifecycleContext {
-  if (event.lifecycleId) {
-    const lifecycle = context.lifecycles[event.lifecycleId];
-    if (lifecycle) return lifecycleBranch(context, lifecycle);
-    if (event.enclosure && context.enclosures[event.enclosure]) {
-      return enclosureBranch(event, context);
-    }
-    return docsBranch(event, context, event.lifecycleId);
-  }
-  if (event.enclosure && context.enclosures[event.enclosure]) {
-    return enclosureBranch(event, context);
-  }
-  return { enclosure: event.enclosure, repoId: event.repoId };
-}
-
-function groupTaskDocsByLifecycle(taskDocuments: TaskDocNode[]): Map<string, TaskDocNode[]> {
-  const byLifecycle = new Map<string, TaskDocNode[]>();
-  for (const doc of taskDocuments) {
-    if (!doc.lifecycleId) continue;
-    const existing = byLifecycle.get(doc.lifecycleId);
-    if (existing) {
-      existing.push(doc);
-    } else {
-      byLifecycle.set(doc.lifecycleId, [doc]);
-    }
-  }
-  return byLifecycle;
 }
 
 function rawDiagnosticTitle(event: ObserverEvent): string {
@@ -443,16 +201,15 @@ function rawDiagnosticTitle(event: ObserverEvent): string {
     `kind: ${event.kind}`,
     `actor: ${event.actor}`,
     `trust: ${event.trust}`,
-    event.lifecycleId ? `lifecycle: ${event.lifecycleId}` : undefined,
     event.enclosure ? `enclosure: ${event.enclosure}` : undefined,
     event.repoId ? `repo: ${event.repoId}` : undefined,
     event.data ? `data: ${JSON.stringify(event.data, null, 2)}` : undefined,
   ];
-  return compact(details).join("\n");
+  return compact(details).join('\n');
 }
 
 function toolLabel(tool: string | undefined): string {
-  if (!tool) return "Completed tool call";
+  if (!tool) return 'Completed tool call';
   return TOOL_LABELS[tool] ?? humanizeIdentifier(tool);
 }
 
@@ -460,39 +217,24 @@ function tokenLabel(tokens: number | undefined): string | undefined {
   return tokens === undefined ? undefined : `${tokens.toLocaleString()} tokens`;
 }
 
-function askPrompt(ask: unknown): string | undefined {
-  if (!isRecord(ask)) return undefined;
-  return stringField(ask, "prompt") ?? stringField(ask, "question") ?? stringField(ask, "ask");
-}
-
-function askKindLabel(ask: unknown): string | undefined {
-  if (!isRecord(ask)) return undefined;
-  const kind = stringField(ask, "kind");
-  return kind ? `${humanizeIdentifier(kind)} request` : undefined;
-}
-
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isPhase(value: string | undefined): value is Phase {
-  return value !== undefined && value in PHASE_LABELS;
+  return typeof value === 'object' && value !== null;
 }
 
 function humanizeIdentifier(value: string): string {
   const words = value
-    .replace(/[-_.]+/g, " ")
+    .replace(/[-_.]+/g, ' ')
     .trim()
     .split(/\s+/)
     .filter(Boolean);
   if (words.length === 0) return value;
   const [first, ...rest] = words;
-  return [capitalize(first), ...rest].join(" ");
+  return [capitalize(first), ...rest].join(' ');
 }
 
 function capitalize(value: string): string {

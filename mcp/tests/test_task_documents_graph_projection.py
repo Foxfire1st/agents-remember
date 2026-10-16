@@ -8,10 +8,13 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from agents_remember.observer.host_activity import HostActivitySnapshot
 from agents_remember.observer.projection import TaskDocNode
+from agents_remember.observer.task_entries import build_task_entries
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
-    read_series_documents,
+    read_task_document_body,
     read_task_documents,
+    read_task_sources,
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
 from test_observer_projection import FRESH
@@ -132,7 +135,7 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
     def test_segmented_master_scenario_projects_titles_and_predecessors(self) -> None:
         self._segmented_scenario(atomic_status="planning")
 
-        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        nodes = read_task_documents(self.coord, now=FRESH)
         sprint = next(node for node in nodes if node.id == "SPRINT")
         view = sprint.executionGraphView
         self.assertIsNotNone(view)
@@ -155,7 +158,7 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
     def test_abandoned_master_reads_abandoned_and_stops_gating_its_successor(self) -> None:
         self._segmented_scenario(atomic_status="abandoned")
 
-        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        nodes = read_task_documents(self.coord, now=FRESH)
         sprint = next(node for node in nodes if node.id == "SPRINT")
         view = sprint.executionGraphView
         self.assertIsNotNone(view)
@@ -215,12 +218,82 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
             rows=[{"number": "L1", "name": "Title from B", "status": "planning"}],
         )
 
-        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        nodes = read_task_documents(self.coord, now=FRESH)
         sprint = next(node for node in nodes if node.id == "SPRINT")
         view = sprint.executionGraphView
         assert view is not None
         segment = next(node for node in view.nodes if node.kind == "segment")
         self.assertEqual(segment.leafTitles, ["Title from A"])
+
+    def test_document_stage_decides_master_and_sprint_frontiers(self) -> None:
+        folder = self.coord / "tasks" / REPO / "master-a"
+        write_task_doc(
+            folder,
+            _doc(
+                id="A",
+                kind="master",
+                executionNature="organizational",
+                subTasks=[
+                    {"number": "L1", "name": "One", "file": "one.md", "status": "Completed"},
+                    {"number": "L2", "name": "Two", "file": "two.md", "status": "planning"},
+                ],
+            ),
+        )
+        for slug, task_id, status, waits in (
+            ("one", "L1", "inProgress", []),
+            ("two", "L2", "planning", ["L1"]),
+        ):
+            write_task_doc(
+                folder,
+                _doc(
+                    id=task_id,
+                    slug=slug,
+                    kind="subTask",
+                    master="task.md",
+                    status=status,
+                    waitsFor=waits,
+                ),
+            )
+        self._master("master-b", status="planning", nature="atomic", rows=[])
+        reference = {"repository": REPO, "path": "master-a/task.json"}
+        successor = {"repository": REPO, "path": "master-b/task.json"}
+        write_task_doc(
+            self.coord / "tasks" / REPO / "sprint",
+            _doc(
+                id="SPRINT",
+                kind="master",
+                orchestrates=["master-a", "master-b"],
+                executionGraph={
+                    "nodes": [
+                        {"kind": "segment", "ref": reference, "leafIds": ["L1"]},
+                        {"ref": successor},
+                    ],
+                    "edges": [
+                        {
+                            "predecessor": {"ref": reference, "leafId": "L1"},
+                            "successor": {"ref": successor},
+                            "reason": "one gates B",
+                        }
+                    ],
+                },
+            ),
+        )
+        nodes = read_task_documents(self.coord, now=FRESH)
+        master = next(node for node in nodes if node.id == "A")
+        sprint = next(node for node in nodes if node.id == "SPRINT")
+        assert master.executionGraphView is not None and sprint.executionGraphView is not None
+        self.assertEqual(
+            [node.frontierState for node in master.executionGraphView.nodes],
+            ["in-flight", "waiting"],
+        )
+        self.assertEqual(
+            [node.frontierState for node in sprint.executionGraphView.nodes],
+            ["in-flight", "waiting"],
+        )
+        for summary in (master, sprint):
+            body = read_task_document_body(self.coord, doc_path=summary.docPath, now=FRESH)
+            assert body is not None
+            self.assertEqual(body.executionGraphView, summary.executionGraphView)
 
 
 def _index_doc(nodes: list[TaskDocNode], master_doc_path: str, file: str) -> TaskDocNode | None:
@@ -329,7 +402,7 @@ class SubTaskIndexReachabilityTests(unittest.TestCase):
         )
         self._write_master()
 
-        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        nodes = read_task_documents(self.coord, now=FRESH)
         master = next(node for node in nodes if node.kind == "master")
         resolved = {
             row.number: _index_doc(nodes, master.docPath, row.file) for row in master.subTasks
@@ -357,13 +430,24 @@ class SeriesProgressProjectionTests(unittest.TestCase):
         write_task_doc(
             self.coord / "tasks" / REPO / name,
             _doc(
-                id=name.upper(), slug=name, kind="master", status="inProgress", subTasks=list(rows)
+                id=name.upper(),
+                slug=name,
+                kind="master",
+                status="inProgress",
+                subTasks=[
+                    {**row, "file": row.get("file") or f"{row['number']}.md"} for row in rows
+                ],
             ),
         )
-        series = next(
-            node for node in read_series_documents(self.coord, now=FRESH) if node.seriesId == name
+        entries = build_task_entries(
+            read_task_sources(self.coord, now=FRESH), [], HostActivitySnapshot()
         )
-        return series.doneCount, series.totalCount, series.abandonedCount
+        counts = next(
+            task.counts
+            for task in entries.tasks
+            if task.reference is not None and task.reference.path == f"{name}/task.json"
+        )
+        return counts.completed, counts.planned + counts.started + counts.completed, counts.aborted
 
     def test_abandoned_and_retired_rows_are_left_out_of_the_figure_and_named(self) -> None:
         landed = [

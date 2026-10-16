@@ -545,8 +545,8 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             self.assertEqual(saved["replayRequest"]["agent"]["agentId"], saved["agentId"])
             self.assertEqual(payload.get("agentId", saved["agentId"]), saved["agentId"])
             self.assertTrue(stored)
-        # Beside receipts and message bindings a launch writes its artifact and nothing else: no
-        # harness configuration file, in the folders it uses or in the user's home.
+        # Beside receipts, message bindings and the role index a launch writes its artifact:
+        # no harness configuration file, in the folders it uses or in the user's home.
         # The task documents are the fixture's own (resolved_document writes them), and the
         # task-document copies are the launch's publication for the agent (L71): both are
         # enumerated exactly, so an unexpected file still fails this assertion.
@@ -566,6 +566,8 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             f"coordination/tasks/{REPO}/master/01_leaf.md",
             "enclosure-group/task-documents/INDEX.json",
             "enclosure-group/task-documents/master/01_leaf.md",
+            "home/agents-remember/role-agents.json",
+            "home/agents-remember/role-agents.json.lock",
         }
         self.assertEqual(
             nown,
@@ -734,10 +736,17 @@ class RolePreparationChildTests(PaseoLaunchTestCase):
             self.assertEqual(self.dispatch(self.request("reviewer"))[0], 200)
             self.assertEqual(len(calls), 1, "an existing enclosure is found, not started again")
 
-    def test_sequential_fresh_leaves_preserve_the_callers_persistent_lifecycle(self) -> None:
-        persistent = SimpleNamespace(current=SimpleNamespace(fleeting=False, id="caller-owned"))
+    def test_sequential_fresh_leaves_preserve_the_callers_binding(self) -> None:
+        binding = AgentBinding(
+            agent_id="57e1cf22-3aa2-4490-b90f-ac51cceca621",
+            request_id="47e5655e-843a-4fa8-9766-528be233ce34",
+            role="manager",
+            report_path=str(self.root / "caller.md"),
+            sprint_ref=SPRINT_REF,
+            master_ref=MASTER_REF,
+        )
         with (
-            patch("agents_remember.application.worktree_tools.ambient", return_value=persistent),
+            patch.dict(os.environ, binding.environment()),
             patch(
                 "agents_remember.application.worktree_tools.worktree_start_tool",
                 side_effect=AssertionError("must run in child"),
@@ -762,8 +771,10 @@ class RolePreparationChildTests(PaseoLaunchTestCase):
                 )
                 self.assertEqual(len(calls), 1)
                 self.assertEqual(calls[0][1]["leafId"], f"LEAF-{number}")
-                self.assertEqual(persistent.current.id, "caller-owned")
-                self.assertFalse(persistent.current.fleeting)
+                self.assertEqual(
+                    {name: os.environ.get(name) for name in binding.environment()},
+                    binding.environment(),
+                )
 
     def test_a_child_that_refuses_fails_or_does_not_end_refuses_the_launch(self) -> None:
         refusal = json.dumps(

@@ -19,7 +19,6 @@ from agents_remember.kernel.memory_attribution import render_memory_content_mess
 from agents_remember.kernel.memory_cache import prepare_memory_cache
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.server import create_server
-from agents_remember.observer.ambient import reset_ambient
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import observe_atomic_series
 from agents_remember.worktrees.integration.integration_branch_authority import require_parent_series
@@ -201,7 +200,6 @@ class PreviewFixture:
 
     def restart_session(self) -> None:
         """Start another ordinary MCP session against the same persisted fixture world."""
-        reset_ambient()
         self.server = create_server(self.config)
 
     def plan(self) -> StartContractPlan:
@@ -417,11 +415,7 @@ def test_public_apply_re_resolves_source_and_persisted_parent_preview_stays_read
     assert parent.memory_base_commit == git(world.memory, "rev-parse", "super")
     assert leaf.memory_worktree is not None and leaf.memory_worktree.is_dir()
     world.add_leaf("FRESH-L2")
-    # No ambient-lifecycle observation here: a started task binds the session's
-    # lifecycle, and a second start from the same session is refused
-    # (lifecycle-switch-required — MIK-R112 rule 5 retired switch_lifecycle, so a
-    # session carries one started task). The preview below runs from the new
-    # session, where its event goes to the workspace river.
+    # A second leaf's preview uses its own task address and reports to the workspace river.
     world.restart_session()
     mark = world.mark()
     before = capture_preview_state(world)
@@ -709,7 +703,8 @@ def test_public_partial_bootstrap_preview_is_read_only_then_apply_recovers_same_
             preview = world.start()
             assert not preview.isError, preview
             assert preview.structuredContent is not None and preview.structuredContent["ok"]
-            assert preview.structuredContent["memory"]["memorySourceBranch"] == {
+            whole = json.loads(Path(preview.structuredContent["log"]).read_text(encoding="utf-8"))
+            assert whole["memory"]["memorySourceBranch"] == {
                 "state": state,
                 "branch": f"ar/{MASTER}",
             }
@@ -841,13 +836,9 @@ def test_admitted_record_rejects_a_directory_touch_without_entry(tmp_path: Path)
 def test_observer_event_mode_change_is_rejected(tmp_path: Path) -> None:
     """L131-R1-F03: a mode change of the admitted observer event file fails; its append passes.
 
-    The admitted event file needs an ambient lifecycle to land in. A real start
-    adopts one (``switch_lifecycle`` used to mint one here, but it left the tool
-    list with MIK-R112 rule 5, and a session now carries one started task). The
-    preview of a second leaf from the same session is therefore refused
-    (lifecycle-switch-required) — and the refusal still appends its
-    tool.completed event to the adopted lifecycle's file, which is the append
-    this proof judges.
+    A real start seeds the workspace Event River. A second leaf's successful
+    preview appends its tool.completed event there without a session lifecycle.
+    The proof judges that real append and still rejects a later mode change.
     """
     world = PreviewFixture(tmp_path)
     started = world.start(dry_run=False)
@@ -858,16 +849,16 @@ def test_observer_event_mode_change_is_rejected(tmp_path: Path) -> None:
     observed = world.start(leaf_id="FRESH-L2", worktree_name="fresh-preview-l2")
     assert not observed.isError, observed
     assert observed.structuredContent is not None
-    assert observed.structuredContent["ok"] is False, observed
-    assert observed.structuredContent["state"] == "lifecycle-switch-required", observed
-    matches = sorted((world.coord / "logs" / "observer" / "lifecycles").rglob("events.jsonl"))
-    assert len(matches) == 1
-    event_path = matches[0].relative_to(world.root).as_posix()
+    assert observed.structuredContent["ok"] is True, observed
+    assert observed.structuredContent["state"] == "would-start", observed
+    river_file = world.coord / "logs" / "observer" / "workspace" / "events.jsonl"
+    assert river_file.is_file()
+    event_path = river_file.relative_to(world.root).as_posix()
     after = attach_record(world, world.snapshot())
-    # The refusal appended: the file grew, so the kind/mode proof below judges
+    # The preview appended: the file grew, so the kind/mode proof below judges
     # a real append, not a vacuous no-op.
     assert after.snapshot["paths"][event_path][3] != before.snapshot["paths"][event_path][3], (
-        "the refused preview must still append its tool.completed event"
+        "the successful preview must still append its tool.completed event"
     )
     _assert_observer_event_kept_kind_mode(
         before.snapshot["paths"], after.snapshot["paths"], event_path

@@ -2,10 +2,10 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import { seedTaskDocuments, stubNotes, taskDoc } from './test-utils';
+import { seedTaskEntries, stubNotes, taskEntry, taskSummary, taskReference } from './test-utils';
 
 describe('DetailPanel task notes (L126)', () => {
-  const leafPath = '/tasks/agents-remember/260703_agent-orchestration/09_notes-dashboard.json';
+  const leafPath = 'agents-remember/260703_agent-orchestration/09_notes-dashboard.json';
 
   it("shows the Notes line for the doc's OWN series and resolves a notes reference to a link", async () => {
     const fn = stubNotes(
@@ -20,19 +20,27 @@ describe('DetailPanel task notes (L126)', () => {
       ],
       'the **ledger** body',
     );
-    const doc = taskDoc({
+    const doc = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(leafPath),
       id: '260703-L9',
-      lifecycleId: undefined,
-      kind: 'subTask',
       title: 'Notes on the dashboard',
-      repository: 'agents-remember',
-      docPath: leafPath,
-      references: [
-        'notes/friction-ledger.md (F-M — the finding this leaf closes)',
-        'mcp/src/agents_remember/serving/files.py (the confinement idiom to reuse)',
-      ],
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        references: [
+          'notes/friction-ledger.md (F-M — the finding this leaf closes)',
+          'mcp/src/agents_remember/serving/files.py (the confinement idiom to reuse)',
+        ],
+      }),
     });
-    seedTaskDocuments([doc]);
+    seedTaskEntries([doc]);
     const onOpenNotes = vi.fn();
     const view = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenNotes={onOpenNotes} />,
@@ -65,17 +73,25 @@ describe('DetailPanel task notes (L126)', () => {
 
   it("shows the Notes line with the doc's own references on a master overview", async () => {
     stubNotes([{ name: 'design.md', path: 'design.md', size: 10, language: 'markdown' }]);
-    const master = taskDoc({
-      lifecycleId: undefined,
-      kind: 'master',
+    const master = taskEntry({
+      id: '1',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('agents-remember/260703_agent-orchestration/task.json'),
       title: 'Agent Orchestration',
-      repository: 'agents-remember',
-      docPath: '/tasks/agents-remember/260703_agent-orchestration/task.json',
-      objective: 'Master objective.',
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'master',
+        kind: 'master',
+        objective: 'Master objective.',
+      }),
     });
-    seedTaskDocuments([master]);
+    seedTaskEntries([master]);
     const view = render(
-      <DetailPanel selectedId="taskdoc:/tasks/agents-remember/260703_agent-orchestration/task.json" />,
+      <DetailPanel selectedId="taskdoc:agents-remember/260703_agent-orchestration/task.json" />,
     );
     expect((await view.findByTestId('notes-root-count')).textContent).toContain(
       '1 entry in the top folder',

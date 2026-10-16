@@ -85,8 +85,7 @@ the architect rules it and the orchestrator adopts the ruled plan into durable e
 ## What you must not do
 
 - **Design work never touches git.** No `git` mutation, no `worktree_*`, no `lifecycle_finalize_task`,
-  no `memory_*`, no closeout — those are the owning seat's machinery. A seat that never calls
-  `worktree_start` or `worktree_attach` has no lifecycle, and that is the designed shape, not a gap.
+  no `memory_*`, no closeout — those are the owning seat's machinery.
 - **Never invent execution authority:** not an approved plan, not an adopted topology, not a dispatch.
 - Do not hand a question straight to the developer: a truth gap goes into `openQuestions` for the architect.
 - Do not absorb another seat's work — a pasted brief for a different seat is refused and reported.

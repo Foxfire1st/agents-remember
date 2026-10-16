@@ -137,9 +137,9 @@
    "recordId": "INV-TRTY0AYM"
   }
  ],
- "log": "/world/worktrees/repo-a/w-ar/logs/ar-tools-2000-01-01/000000000000-knowledge_diff-00000000.json",
+ "log": "/world/logs/mcp/ar-tools-2000-01-01/000000000000-knowledge_diff-00000000.json",
  "memoryRoot": "/gen/memory",
  "ok": true,
- "report": "/world/worktrees/repo-a/w-ar/reports/000000000000-knowledge-diff-00000000.json",
+ "report": "/world/logs/mcp/ar-tools-2000-01-01/000000000000-knowledge-diff-00000000.json",
  "state": "compared"
 }

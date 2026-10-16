@@ -1,7 +1,7 @@
 """The observer event envelope: ``ar-observer-event/v1``.
 
 An event is an append-only, durable, replayable record of something that
-happened in (or to) a lifecycle. The envelope is a Pydantic model -- not because
+happened in the workspace. The envelope is a Pydantic model -- not because
 the write path is hot (it is IO-scale), but because events are a *persisted,
 versioned contract* that the projection layer, replay, and the dashboard parse
 back from disk. Read-side ``model_validate`` plus Literal-typed ``trust`` /
@@ -57,8 +57,7 @@ class Event(BaseModel):
     trust: Trust
     actor: Actor
     data: dict[str, Any] = Field(default_factory=dict)
-    lifecycleId: str | None = None
+    scopeKey: str | None = None
     enclosure: str | None = None
     repoId: str | None = None
-    sessionId: str | None = None
     spanId: str | None = None

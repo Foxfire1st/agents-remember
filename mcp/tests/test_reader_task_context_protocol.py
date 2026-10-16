@@ -25,7 +25,6 @@ from agents_remember.kernel.primitives.checkout_coordination import declare_test
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.mcp.server import create_server
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.observer.ambient import reset_ambient
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.services import reset_worktree_services
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -95,7 +94,6 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
         self.server = create_server(self.config)
 
     def tearDown(self) -> None:
-        reset_ambient()
         reset_worktree_services()
         self.temporary.cleanup()
 

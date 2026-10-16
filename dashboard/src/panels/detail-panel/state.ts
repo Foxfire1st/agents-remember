@@ -1,185 +1,50 @@
-import { useEffect, useState } from 'react';
-
+import { useEffect,useState } from 'react';
 import { useDashboard } from '../../data/store';
-import {
-  findLifecycleEnclosure,
-  groupEnclosuresByLifecycle,
-  parseTaskSelection,
-  qualifiedLeafKey,
-  taskDocumentRefForDoc,
-  type TaskSelection,
-} from '../../data/taskIdentity';
+import { qualifiedLeafKey } from '../../data/taskIdentity';
 import { useTaskDocumentBody } from '../../data/useTaskDocumentBody';
-import type {
-  Analytics,
-  EnclosureNode,
-  LifecycleProjection,
-  SeriesNode,
-  TaskDocNode,
-  TaskDocumentRef,
-} from '../../types/projection';
-import { displayedLeafDoc, displayedReaderDoc, docPathForTaskRef } from './model';
+import type { TaskDocumentRef,TaskEntry } from '../../types/projection';
 
 export interface DetailPanelProps {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
   onViewTask?: (context: ViewedTaskContext | undefined) => void;
 }
-
 export interface ViewedTaskContext {
   taskDocumentRef: TaskDocumentRef;
   leafKey?: string;
 }
 
-function resolveSelectedTaskDoc(
-  selection: TaskSelection | null,
-  allDocs: TaskDocNode[],
-): TaskDocNode | undefined {
-  if (selection?.kind !== 'taskdoc') return undefined;
-  return allDocs.find((doc) => doc.docPath === selection.docPath);
-}
-
-function resolveLifecycleId(
-  selection: TaskSelection | null,
-  selectedTaskDoc: TaskDocNode | undefined,
-): string | undefined {
-  if (selection?.kind === 'lifecycle') return selection.lifecycleId;
-  return selectedTaskDoc?.lifecycleId;
-}
-
-export function resolveDirectDocs(
-  lifecycle: LifecycleProjection | undefined,
-  selectedTaskDoc: TaskDocNode | undefined,
-  allDocs: TaskDocNode[],
-): TaskDocNode[] {
-  if (!lifecycle) return [];
-  if (selectedTaskDoc?.lifecycleId === lifecycle.id) return [selectedTaskDoc];
-  return allDocs.filter((doc) => doc.lifecycleId === lifecycle.id);
-}
-
-export function isRootTaskSelection(
-  selection: TaskSelection | null,
-  lifecycle: LifecycleProjection | undefined,
-  selectedEnclosure: EnclosureNode | undefined,
-): boolean {
-  return (
-    selection?.kind === 'lifecycle' &&
-    Boolean(lifecycle && selectedEnclosure) &&
-    (lifecycle?.id === selectedEnclosure?.taskId || lifecycle?.id === selectedEnclosure?.taskName)
-  );
-}
-
-export function resolveSelectedSeries(
-  selection: TaskSelection | null,
-  analytics: Analytics | null | undefined,
-  selectedIsRootTask: boolean,
-  selectedEnclosure: EnclosureNode | undefined,
-): SeriesNode | undefined {
-  if (!selection || !analytics) return undefined;
-  return analytics.series.find(
-    (item) =>
-      (selection.kind === 'series' && item.seriesId === selection.seriesId) ||
-      (selectedIsRootTask && item.seriesId === selectedEnclosure?.taskName),
-  );
-}
-
-export function resolveViewedLeafKey(viewedLeafDoc: TaskDocNode | undefined): string | undefined {
-  return viewedLeafDoc && viewedLeafDoc.kind !== 'master'
-    ? qualifiedLeafKey(viewedLeafDoc)
-    : undefined;
-}
-
-function useViewedTaskNotification(
-  viewedTaskDocumentRef: ReturnType<typeof taskDocumentRefForDoc> | undefined,
-  viewedLeafKey: string | undefined,
-  onViewTask: DetailPanelProps['onViewTask'],
-): void {
-  useEffect(() => {
-    onViewTask?.(
-      viewedTaskDocumentRef
-        ? {
-            taskDocumentRef: viewedTaskDocumentRef,
-            ...(viewedLeafKey ? { leafKey: viewedLeafKey } : {}),
-          }
-        : undefined,
-    );
-  }, [viewedLeafKey, viewedTaskDocumentRef, onViewTask]);
+export function resolveViewedLeafKey(entry: TaskEntry | undefined): string | undefined {
+  return entry && entry.summary?.kind !== 'master' ? qualifiedLeafKey(entry) : undefined;
 }
 
 export function useDetailPanelState({ selectedId, onOpenLifecycle, onViewTask }: DetailPanelProps) {
-  const jump = onOpenLifecycle ?? (() => {});
-  const lifecycles = useDashboard((s) => s.lifecycles);
-  const analytics = useDashboard((s) => s.analytics);
-  const enclosures = useDashboard((s) => s.enclosures);
-  const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
-  const providers = useDashboard((s) => s.providers);
-  const [openSlug, setOpenSlug] = useState<string | null>(null);
-  useEffect(() => setOpenSlug(null), [selectedId]);
-  const allDocs = analytics?.taskDocuments ?? [];
-  // Sprint → master drill-down (L14-R2): resolve a sub-task row's typed masterRef against the
-  // full projected pool. The row dispatches the result through `jump(taskDocSelectionKey(...))`,
-  // exactly how the parent-series crumb already opens a task document.
-  const docPathForRef = (ref: TaskDocumentRef): string | undefined =>
-    docPathForTaskRef(allDocs, ref);
-  const selection = parseTaskSelection(selectedId, lifecycles, analytics);
-  const selectedTaskDoc = resolveSelectedTaskDoc(selection, allDocs);
-  const lifecycleId = resolveLifecycleId(selection, selectedTaskDoc);
-  const lifecycle = lifecycleId ? lifecycles[lifecycleId] : undefined;
-  const selectedEnclosure = lifecycle
-    ? findLifecycleEnclosure(
-        lifecycle,
-        enclosures,
-        groupEnclosuresByLifecycle(Object.values(enclosures)),
-      )
-    : undefined;
-  const directDocs = resolveDirectDocs(lifecycle, selectedTaskDoc, allDocs);
-  const selectedIsRootTask = isRootTaskSelection(selection, lifecycle, selectedEnclosure);
-  const selectedSeries = resolveSelectedSeries(
-    selection,
-    analytics,
-    selectedIsRootTask,
-    selectedEnclosure,
-  );
-  const bodyTargetDoc = displayedReaderDoc({
-    allDocs,
-    selectedTaskDoc,
-    lifecycle,
-    selectedSeries,
-    openSlug,
-  });
-  const { documentFor: fullTaskDoc, state: taskDocumentBodyState } =
-    useTaskDocumentBody(bodyTargetDoc);
-  const viewedLeafDoc = displayedLeafDoc({
-    selection,
-    allDocs,
-    selectedTaskDoc,
-    lifecycle,
-    selectedSeries,
-    openSlug,
-  });
-  const viewedLeafKey = resolveViewedLeafKey(viewedLeafDoc);
-  const viewedTaskDocumentRef = bodyTargetDoc ? taskDocumentRefForDoc(bodyTargetDoc) : undefined;
-  useViewedTaskNotification(viewedTaskDocumentRef, viewedLeafKey, onViewTask);
-
+  const tasks = useDashboard((state) => state.tasks);
+  const providers = useDashboard((state) => state.providers);
+  const activeWorktreeGroups = useDashboard((state) => state.activeWorktreeGroups);
+  const [local, setLocal] = useState<{ source: string | null; key: string }>();
+  const key = local?.source === selectedId ? local.key : selectedId;
+  const entry = key?.startsWith('taskdoc:') ? tasks[key.slice('taskdoc:'.length)] : undefined;
+  const body = useTaskDocumentBody(entry);
+  const reference = entry?.reference;
+  const leafKey = resolveViewedLeafKey(entry);
+  useEffect(() => {
+    onViewTask?.(
+      reference ? { taskDocumentRef: reference, ...(leafKey ? { leafKey } : {}) } : undefined,
+    );
+  }, [reference, leafKey, onViewTask]);
+  const jump = (next: string): void => {
+    setLocal({ source: selectedId, key: next });
+    onOpenLifecycle?.(next);
+  };
   return {
+    entry,
+    tasks,
+    document: body.document,
+    taskDocumentBodyState: body.state,
     jump,
-    analytics,
-    enclosures,
-    activeWorktreeGroups,
     providers,
-    openSlug,
-    setOpenSlug,
-    allDocs,
-    docPathForRef,
-    selection,
-    selectedTaskDoc,
-    lifecycle,
-    selectedEnclosure,
-    directDocs,
-    selectedSeries,
-    fullTaskDoc,
-    taskDocumentBodyState,
-    viewedLeafKey,
-    viewedTaskDocumentRef,
+    activeWorktreeGroups,
+    parent: entry?.parent ? tasks[entry.parent] : undefined,
   };
 }

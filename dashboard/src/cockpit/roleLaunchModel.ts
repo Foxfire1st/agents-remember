@@ -1,27 +1,29 @@
-import {
-  isOrchestrationDoc,
-  masterCommandNames,
-  orchestratorParentKey,
-  taskDocParentKey,
-} from "../data/taskHierarchy";
-import { sameTaskDocumentRef, taskDocSelectionKey, taskDocumentRefForDoc } from "../data/taskIdentity";
-import type { SeriesNode, TaskDocNode, TaskDocumentRef } from "../types/projection";
+import { sameTaskDocumentRef } from '../data/taskIdentity';
+import type { TaskDocumentRef,TaskEntry } from '../types/projection';
 
-export type LauncherRole = "architect" | "investigator" | "system-specialist" | "orchestrator" | "manager" | "worker" | "reviewer" | "curator";
-export type RoleAction = "start" | "revive";
+export type LauncherRole =
+  | 'architect'
+  | 'investigator'
+  | 'system-specialist'
+  | 'orchestrator'
+  | 'manager'
+  | 'worker'
+  | 'reviewer'
+  | 'curator';
+export type RoleAction = 'start' | 'revive';
 
 export const LAUNCHER_ROLES: { id: LauncherRole; label: string }[] = [
-  { id: "architect", label: "Architect" },
-  { id: "investigator", label: "Investigator" },
-  { id: "orchestrator", label: "Orchestrator" },
-  { id: "manager", label: "Manager" },
-  { id: "worker", label: "Worker" },
-  { id: "reviewer", label: "Reviewer" },
-  { id: "curator", label: "Curator" },
+  { id: 'architect', label: 'Architect' },
+  { id: 'investigator', label: 'Investigator' },
+  { id: 'orchestrator', label: 'Orchestrator' },
+  { id: 'manager', label: 'Manager' },
+  { id: 'worker', label: 'Worker' },
+  { id: 'reviewer', label: 'Reviewer' },
+  { id: 'curator', label: 'Curator' },
 ];
 
 export interface RoleTaskOption {
-  doc: TaskDocNode;
+  entry: TaskEntry;
   ref: TaskDocumentRef;
 }
 
@@ -44,7 +46,7 @@ export interface RoleModelChoice {
 export interface RoleFeatureChoice {
   id: string;
   label: string;
-  type: "toggle" | "select";
+  type: 'toggle' | 'select';
   value?: boolean | string | null;
   options?: RoleEffortChoice[];
   permissionBearing: boolean;
@@ -69,7 +71,16 @@ export interface RoleDefaults {
   serviceTier?: string;
   mode?: string;
   featureValues?: Record<string, boolean | string>;
-  choices?: Record<string, { value?: unknown; source?: string; present?: boolean; baselineReplaced?: boolean; [key: string]: unknown }>;
+  choices?: Record<
+    string,
+    {
+      value?: unknown;
+      source?: string;
+      present?: boolean;
+      baselineReplaced?: boolean;
+      [key: string]: unknown;
+    }
+  >;
   /** False when the host's catalog does not offer this default; it is never replaced. */
   available?: boolean;
 }
@@ -149,91 +160,103 @@ export interface RoleTasklessActiveRequest {
 }
 
 export function isUncertainRoleExecution(execution: RoleScopedExecution): boolean {
-  return execution.canRetry === true || ["starting", "unknown"].includes(execution.status.toLowerCase());
+  return (
+    execution.canRetry === true || ['starting', 'unknown'].includes(execution.status.toLowerCase())
+  );
 }
 
 /** Projects follows its open request; selected tasks keep their exact saved request, including closed ones. */
 export function boundTasklessRequest(
-  executions: RoleExecutionReceipt[], current: RoleTasklessActiveRequest | undefined, selectedTask = false,
+  executions: RoleExecutionReceipt[],
+  current: RoleTasklessActiveRequest | undefined,
+  selectedTask = false,
 ): RoleTasklessActiveRequest | undefined {
   if (current && (current.pending || selectedTask)) return current;
-  const execution = selectedTask ? executions[0]
-    : executions.find((row) => ["accepted", "running", "starting", "unknown"].includes(row.status.toLowerCase()));
+  const execution = selectedTask
+    ? executions[0]
+    : executions.find((row) =>
+        ['accepted', 'running', 'starting', 'unknown'].includes(row.status.toLowerCase()),
+      );
   if (!execution?.requestId) return current;
-  return { requestId: execution.requestId,
+  return {
+    requestId: execution.requestId,
     ...(isUncertainRoleExecution(execution) ? { pending: true } : {}),
     ...(execution.retryPayload ? { retryPayload: execution.retryPayload } : {}),
   };
 }
 
-export function taskOptionsForDocs(docs: TaskDocNode[]): RoleTaskOption[] {
-  return docs.flatMap((doc) => {
-    const ref = taskDocumentRefForDoc(doc);
-    return ref ? [{ doc, ref }] : [];
-  });
+export function taskOptionsForEntries(entries: TaskEntry[]): RoleTaskOption[] {
+  return entries.flatMap((entry) =>
+    entry.reference && entry.summary ? [{ entry, ref: entry.reference }] : [],
+  );
 }
 
-export function sprintOptionsForDocs(taskDocuments: TaskDocNode[]): RoleTaskOption[] {
-  return taskOptionsForDocs(taskDocuments.filter(isOrchestrationDoc));
+export function sprintOptionsForEntries(entries: TaskEntry[]): RoleTaskOption[] {
+  return taskOptionsForEntries(entries.filter((entry) => entry.summary?.form === 'sprint'));
+}
+
+/** The server supplies ordered children; selectors resolve those references only. */
+function childOptions(entries: TaskEntry[], parent: TaskEntry | undefined): RoleTaskOption[] {
+  if (!parent) return [];
+  const byReference = new Map(entries.map((entry) => [entry.key, entry]));
+  return taskOptionsForEntries(
+    parent.children.flatMap((reference) => {
+      const child = byReference.get(reference);
+      return child ? [child] : [];
+    }),
+  );
 }
 
 export function masterOptionsForSprint(
-  taskDocuments: TaskDocNode[],
-  sprint: TaskDocNode | undefined,
+  entries: TaskEntry[],
+  sprint: TaskEntry | undefined,
 ): RoleTaskOption[] {
-  if (!sprint) return [];
-  const sprintSelection = taskDocSelectionKey(sprint.docPath);
-  const repositoryDocs = taskDocuments.filter((doc) => doc.repository === sprint.repository);
-  return taskOptionsForDocs(repositoryDocs.filter((doc) =>
-    doc.kind === "master" &&
-    !isOrchestrationDoc(doc) &&
-    orchestratorParentKey(masterCommandNames(doc), repositoryDocs, doc.docPath) === sprintSelection,
-  ));
+  return childOptions(entries, sprint).filter((option) => option.entry.summary?.form === 'master');
 }
 
 export function taskOptionsForMaster(
-  taskDocuments: TaskDocNode[],
-  series: SeriesNode[],
-  master: TaskDocNode | undefined,
+  entries: TaskEntry[],
+  master: TaskEntry | undefined,
 ): RoleTaskOption[] {
-  if (!master) return [];
-  const masterDocPaths = new Set(taskDocuments.filter((doc) => doc.kind === "master").map((doc) => doc.docPath));
-  const parentSelection = taskDocSelectionKey(master.docPath);
-  return taskOptionsForDocs(taskDocuments.filter((doc) =>
-    doc.kind !== "master" &&
-    taskDocParentKey(doc, series, masterDocPaths) === parentSelection,
-  ));
+  return childOptions(entries, master).filter((option) => option.entry.summary?.form === 'task');
 }
 
 export function optionIndex(options: RoleTaskOption[], ref: TaskDocumentRef | undefined): string {
   const index = ref ? options.findIndex((option) => sameTaskDocumentRef(option.ref, ref)) : -1;
-  return index < 0 ? "" : String(index);
+  return index < 0 ? '' : String(index);
 }
 
-export function refAtOptionIndex(options: RoleTaskOption[], value: string): TaskDocumentRef | undefined {
-  if (value === "") return undefined;
+export function refAtOptionIndex(
+  options: RoleTaskOption[],
+  value: string,
+): TaskDocumentRef | undefined {
+  if (value === '') return undefined;
   const index = Number(value);
   return Number.isInteger(index) ? options[index]?.ref : undefined;
 }
 
 export function taskRefIdentity(ref: TaskDocumentRef | undefined): string | undefined {
-  return ref ? ref.repository + "/" + ref.path : undefined;
+  return ref ? ref.repository + '/' + ref.path : undefined;
 }
 
 export function roleNeedsSprint(role: LauncherRole): boolean {
-  return role !== "architect" && role !== "investigator" && role !== "system-specialist";
+  return role !== 'architect' && role !== 'investigator' && role !== 'system-specialist';
 }
 
 export function isTasklessRole(selection: LauncherRole | RoleDocumentScope): boolean {
-  const scope = typeof selection === "string" ? { role: selection } : selection;
-  return scope.role === "architect" ||
-    ((scope.role === "investigator" || scope.role === "system-specialist") &&
-      !scope.sprintDocumentRef && !scope.masterDocumentRef && !scope.taskDocumentRef);
+  const scope = typeof selection === 'string' ? { role: selection } : selection;
+  return (
+    scope.role === 'architect' ||
+    ((scope.role === 'investigator' || scope.role === 'system-specialist') &&
+      !scope.sprintDocumentRef &&
+      !scope.masterDocumentRef &&
+      !scope.taskDocumentRef)
+  );
 }
 
 /** Investigator receipts are per request at both Projects and selected-task scope. */
 export function usesRequestReceipts(scope: RoleDocumentScope): boolean {
-  return isTasklessRole(scope) || canonicalLauncherRole(scope.role) === "investigator";
+  return isTasklessRole(scope) || canonicalLauncherRole(scope.role) === 'investigator';
 }
 
 export function roleRequestKey(scope: RoleDocumentScope): string {
@@ -242,17 +265,21 @@ export function roleRequestKey(scope: RoleDocumentScope): string {
 }
 
 export function roleRequestStorageKey(scope: RoleDocumentScope): string {
-  return isTasklessRole(scope) ? tasklessRequestStorageKey(canonicalLauncherRole(scope.role))
-    : "ar-role-request-v1:" + roleRequestKey(scope);
+  return isTasklessRole(scope)
+    ? tasklessRequestStorageKey(canonicalLauncherRole(scope.role))
+    : 'ar-role-request-v1:' + roleRequestKey(scope);
 }
 
-export function readSelectedRoleRequest(scope: RoleDocumentScope): RoleTasklessActiveRequest | undefined {
+export function readSelectedRoleRequest(
+  scope: RoleDocumentScope,
+): RoleTasklessActiveRequest | undefined {
   const stored = sessionStorage.getItem(roleRequestStorageKey(scope));
   if (!stored) return undefined;
   try {
     const request = JSON.parse(stored) as RoleTasklessActiveRequest;
-    if (typeof request.requestId !== "string" || !request.requestId) return undefined;
-    if (request.retryPayload && !sameRoleDocumentScope(request.retryPayload, scope)) return undefined;
+    if (typeof request.requestId !== 'string' || !request.requestId) return undefined;
+    if (request.retryPayload && !sameRoleDocumentScope(request.retryPayload, scope))
+      return undefined;
     return request;
   } catch {
     return undefined;
@@ -261,12 +288,14 @@ export function readSelectedRoleRequest(scope: RoleDocumentScope): RoleTasklessA
 
 export function tasklessRequestStorageKey(role: LauncherRole): string {
   // R98 preserves the old browser request slot: rename must not rewrite stored request identity.
-  return "ar-role-taskless-request-v1:" + (role === "investigator" ? "system-specialist" : role);
+  return 'ar-role-taskless-request-v1:' + (role === 'investigator' ? 'system-specialist' : role);
 }
 
-export function readTasklessActiveRequests(): Partial<Record<LauncherRole, RoleTasklessActiveRequest>> {
+export function readTasklessActiveRequests(): Partial<
+  Record<LauncherRole, RoleTasklessActiveRequest>
+> {
   const active: Partial<Record<LauncherRole, RoleTasklessActiveRequest>> = {};
-  for (const role of ["architect", "investigator"] as const) {
+  for (const role of ['architect', 'investigator'] as const) {
     const stored = sessionStorage.getItem(tasklessRequestStorageKey(role));
     if (!stored) continue;
     try {
@@ -275,7 +304,7 @@ export function readTasklessActiveRequests(): Partial<Record<LauncherRole, RoleT
         pending?: unknown;
         retryPayload?: unknown;
       };
-      if (typeof value.requestId !== "string" || !value.requestId) continue;
+      if (typeof value.requestId !== 'string' || !value.requestId) continue;
       const payload = value.retryPayload as RoleLaunchSelection | undefined;
       active[role] = {
         requestId: value.requestId,
@@ -297,15 +326,15 @@ export function readTasklessActiveRequests(): Partial<Record<LauncherRole, RoleT
 }
 
 export function roleNeedsMaster(role: LauncherRole): boolean {
-  return role === "manager" || role === "worker" || role === "reviewer" || role === "curator";
+  return role === 'manager' || role === 'worker' || role === 'reviewer' || role === 'curator';
 }
 
 export function roleNeedsTask(role: LauncherRole): boolean {
-  return role === "worker" || role === "reviewer" || role === "curator";
+  return role === 'worker' || role === 'reviewer' || role === 'curator';
 }
 
 export function roleDocumentScope(selection: RoleLaunchSelection): RoleDocumentScope {
-  const investigator = canonicalLauncherRole(selection.role) === "investigator";
+  const investigator = canonicalLauncherRole(selection.role) === 'investigator';
   return {
     role: selection.role,
     ...((investigator || roleNeedsSprint(selection.role)) && selection.sprintDocumentRef
@@ -328,14 +357,16 @@ export function roleOptionsScope(selection: RoleLaunchSelection): RoleOptionsSco
 }
 
 export function launchSelectionComplete(selection: RoleLaunchSelection): boolean {
-  return (!roleNeedsSprint(selection.role) || Boolean(selection.sprintDocumentRef)) &&
+  return (
+    (!roleNeedsSprint(selection.role) || Boolean(selection.sprintDocumentRef)) &&
     (!roleNeedsMaster(selection.role) || Boolean(selection.masterDocumentRef)) &&
-    (!roleNeedsTask(selection.role) || Boolean(selection.taskDocumentRef));
+    (!roleNeedsTask(selection.role) || Boolean(selection.taskDocumentRef))
+  );
 }
 
 export function roleDefaultsCacheKey(scope: RoleDocumentScope): string {
   const effectiveRef = scope.taskDocumentRef ?? scope.masterDocumentRef ?? scope.sprintDocumentRef;
-  return scope.role + "::" + (effectiveRef?.repository ?? "projects");
+  return scope.role + '::' + (effectiveRef?.repository ?? 'projects');
 }
 
 export function mergeRoleAgentInventory(
@@ -344,7 +375,7 @@ export function mergeRoleAgentInventory(
   selectedAgentId: string | undefined,
   refresh: boolean,
 ): RoleAgentInventory {
-  const catalogOrigin = options.catalogOrigin ?? previous?.catalogOrigin ?? "active-runtime";
+  const catalogOrigin = options.catalogOrigin ?? previous?.catalogOrigin ?? 'active-runtime';
   if (!previous || previous.catalogOrigin !== catalogOrigin || refresh) {
     return { catalogOrigin, agents: options.agents };
   }
@@ -353,9 +384,10 @@ export function mergeRoleAgentInventory(
     catalogOrigin,
     agents: options.agents.map((agent) => {
       const cached = previousById.get(agent.id);
-      const models = agent.id === selectedAgentId || agent.models.length > 0
-        ? agent.models
-        : cached?.models ?? [];
+      const models =
+        agent.id === selectedAgentId || agent.models.length > 0
+          ? agent.models
+          : (cached?.models ?? []);
       return { ...agent, models };
     }),
   };
@@ -369,28 +401,36 @@ export function sameOptionalTaskDocumentRef(
 }
 
 export function canonicalLauncherRole(role: LauncherRole): LauncherRole {
-  return role === "system-specialist" ? "investigator" : role;
+  return role === 'system-specialist' ? 'investigator' : role;
 }
 
 export function sameRoleDocumentScope(left: RoleDocumentScope, right: RoleDocumentScope): boolean {
-  return canonicalLauncherRole(left.role) === canonicalLauncherRole(right.role) &&
+  return (
+    canonicalLauncherRole(left.role) === canonicalLauncherRole(right.role) &&
     sameOptionalTaskDocumentRef(left.sprintDocumentRef, right.sprintDocumentRef) &&
     sameOptionalTaskDocumentRef(left.masterDocumentRef, right.masterDocumentRef) &&
-    sameOptionalTaskDocumentRef(left.taskDocumentRef, right.taskDocumentRef);
+    sameOptionalTaskDocumentRef(left.taskDocumentRef, right.taskDocumentRef)
+  );
 }
 
 export function sameRoleOptionsScope(left: RoleOptionsScope, right: RoleOptionsScope): boolean {
   return sameRoleDocumentScope(left, right) && left.agentId === right.agentId;
 }
 
-export function sameRoleLaunchSelection(left: RoleLaunchSelection, right: RoleLaunchSelection): boolean {
+export function sameRoleLaunchSelection(
+  left: RoleLaunchSelection,
+  right: RoleLaunchSelection,
+): boolean {
   const leftOverride = left.agentOverride ?? {};
   const rightOverride = right.agentOverride ?? {};
-  return sameRoleDocumentScope(roleDocumentScope(left), roleDocumentScope(right)) &&
+  return (
+    sameRoleDocumentScope(roleDocumentScope(left), roleDocumentScope(right)) &&
     leftOverride.agentId === rightOverride.agentId &&
     leftOverride.modelId === rightOverride.modelId &&
     leftOverride.effortId === rightOverride.effortId &&
-    JSON.stringify(Object.entries(leftOverride.featureValues ?? {}).sort()) === JSON.stringify(Object.entries(rightOverride.featureValues ?? {}).sort());
+    JSON.stringify(Object.entries(leftOverride.featureValues ?? {}).sort()) ===
+      JSON.stringify(Object.entries(rightOverride.featureValues ?? {}).sort())
+  );
 }
 
 /**
@@ -410,21 +450,45 @@ export function launchChoiceProblem(
   if (!agent) return unofferedAgent(agentId);
   const modelId = override.modelId || roleValue(agentId === defaults.agent, defaults.model);
   const onRoleModel = agentId === defaults.agent && modelId === roleValue(true, defaults.model);
-  return unofferedModelOrEffort(agent, modelId, override.effortId || roleValue(onRoleModel, defaults.effort)) ||
-    unofferedServiceTier(agent, modelId, typeof override.featureValues?.service_tier === "string" ? override.featureValues.service_tier : roleValue(agentId === defaults.agent, defaults.serviceTier));
+  return (
+    unofferedModelOrEffort(
+      agent,
+      modelId,
+      override.effortId || roleValue(onRoleModel, defaults.effort),
+    ) ||
+    unofferedServiceTier(
+      agent,
+      modelId,
+      typeof override.featureValues?.service_tier === 'string'
+        ? override.featureValues.service_tier
+        : roleValue(agentId === defaults.agent, defaults.serviceTier),
+    )
+  );
 }
 
 function unofferedAgent(agentId: string | undefined): string {
-  return "Agent " + (agentId ?? "unset") + " is not offered by the Paseo runtime.";
+  return 'Agent ' + (agentId ?? 'unset') + ' is not offered by the Paseo runtime.';
 }
 
-function unofferedServiceTier(agent: RoleAgentChoice, modelId: string | undefined, tier: string | undefined): string | null {
+function unofferedServiceTier(
+  agent: RoleAgentChoice,
+  modelId: string | undefined,
+  tier: string | undefined,
+): string | null {
   if (!tier) return null;
-  const model = modelId ? agent.models.find((row) => row.id === modelId) : agent.models.find((row) => row.isDefault);
-  const native = tier === "fast" ? "priority" : tier;
-  return model?.serviceTiers?.some((row) => row.id === native) ? null :
-    "Service tier " + tier + " is not offered for " + agent.label + "/" + (modelId ?? "native default") +
-    (model?.serviceTierError ? ": " + model.serviceTierError : ".");
+  const model = modelId
+    ? agent.models.find((row) => row.id === modelId)
+    : agent.models.find((row) => row.isDefault);
+  const native = tier === 'fast' ? 'priority' : tier;
+  return model?.serviceTiers?.some((row) => row.id === native)
+    ? null
+    : 'Service tier ' +
+        tier +
+        ' is not offered for ' +
+        agent.label +
+        '/' +
+        (modelId ?? 'native default') +
+        (model?.serviceTierError ? ': ' + model.serviceTierError : '.');
 }
 
 /** A role default that applies; the backend sends an unset default as null, read here as unset. */
@@ -434,10 +498,14 @@ function roleValue(applies: boolean, value: string | undefined): string | undefi
 
 function unofferedRoleDefault(defaults: RoleDefaults): string | null {
   if (defaults.available !== false) return null;
-  const configured = [defaults.agent, defaults.model, defaults.effort, defaults.serviceTier].filter(Boolean).join(" · ");
+  const configured = [defaults.agent, defaults.model, defaults.effort, defaults.serviceTier]
+    .filter(Boolean)
+    .join(' · ');
   return configured
-    ? "Role default " + configured + " is not offered by the Paseo runtime; pick an agent, model or effort it offers."
-    : "No agent is configured for this role; pick an agent the Paseo runtime offers.";
+    ? 'Role default ' +
+        configured +
+        ' is not offered by the Paseo runtime; pick an agent, model or effort it offers.'
+    : 'No agent is configured for this role; pick an agent the Paseo runtime offers.';
 }
 
 function unofferedModelOrEffort(
@@ -445,11 +513,14 @@ function unofferedModelOrEffort(
   modelId: string | undefined,
   effortId: string | undefined,
 ): string | null {
-  if (!modelId) return effortId ? "Effort " + effortId + " needs a model; pick a model." : null;
+  if (!modelId) return effortId ? 'Effort ' + effortId + ' needs a model; pick a model.' : null;
   const model = agent.models.find((choice) => choice.id === modelId);
-  if (!model) return "Model " + modelId + " is not offered for " + agent.label + "; pick a model it offers.";
+  if (!model)
+    return 'Model ' + modelId + ' is not offered for ' + agent.label + '; pick a model it offers.';
   if (effortId && !(model.efforts ?? []).some((choice) => choice.id === effortId)) {
-    return "Effort " + effortId + " is not offered for " + model.label + "; pick an effort it offers.";
+    return (
+      'Effort ' + effortId + ' is not offered for ' + model.label + '; pick an effort it offers.'
+    );
   }
   return null;
 }
@@ -459,7 +530,7 @@ export function roleAgentOverrideFor(
   modelId: string | undefined,
   effortId: string | undefined,
   defaults: RoleDefaults,
-  featureValues?: RoleAgentOverride["featureValues"],
+  featureValues?: RoleAgentOverride['featureValues'],
 ): RoleAgentOverride | undefined {
   if (!agentId) return undefined;
   const speedValues = Object.keys(featureValues ?? {}).length > 0;

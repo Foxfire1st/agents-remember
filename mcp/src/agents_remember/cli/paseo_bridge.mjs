@@ -29,6 +29,9 @@
 //            The server id of the configured daemon and nothing else. An answer means that the
 //            daemon is reachable and is the configured one; no runtime function is called.
 //
+//   host-activity-snapshot {} -> {serverId, publication: {bootId}}
+//            Reconciles the AR plugin publication with one whole host-agent listing.
+//
 //   role-profiles {} -> {profiles, readAt}: reads getDaemonConfig only, never writes profiles.
 //
 //   workspace-open  {cwd: string, masterProject?: {directory, key, name}, task?: {key, title}}
@@ -222,6 +225,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const COMMANDS = {
   catalog: readCatalog,
   'runtime-info': readRuntimeInfo,
+  'host-activity-snapshot': readHostActivitySnapshot,
   'workspace-open': openWorkspace,
   'agent-create': createAgent,
   'role-profiles': readRoleProfiles,
@@ -437,6 +441,11 @@ function tierOptions(features) {
 
 async function readRuntimeInfo({ daemon }) {
   return { serverId: serverIdOf(daemon) }
+}
+
+async function readHostActivitySnapshot({ daemon }) {
+  const publication = await daemon.invokePluginRpc('ar-plugin', 'ar.host-activity-snapshot', {})
+  return { serverId: serverIdOf(daemon), publication }
 }
 
 async function createAgent({ api, daemon }, input) {

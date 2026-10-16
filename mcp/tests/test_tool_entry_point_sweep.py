@@ -98,8 +98,6 @@ from agents_remember.mcp.tools.base import _tool_payload
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.tools.tool_response import finalize_tool_response
-from agents_remember.observer.ambient import ambient
-from agents_remember.observer.ulid import new_ulid
 from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import ValidationError
 from test_tool_answer_table import ROW_CASE_FRAMEWORK_KEYS
@@ -149,30 +147,6 @@ T34_REPAIRED_TOOLS: frozenset[str] = frozenset(
 # here deliberately, in the change that introduces it; the matrix case asserts the pin
 # equals what it observes, in both directions.
 # ---------------------------------------------------------------------------------------
-STATE_DEPENDENT_RAISERS: dict[str, tuple[str, ...]] = {}
-
-AMBIENT_STATES = ("none", "running")
-
-# The population the matrix is measured over, derived by RULE from the roster rather than from
-# the pin: every lifecycle-state tool. MIK-R112 removed all of them except
-# `lifecycle_finalize_task`, which answers in an envelope in every state and is therefore
-# not an entry; only a raising tool would be pinned.
-LIFECYCLE_STATE_POPULATION = tuple(
-    tool for tool in PUBLIC_TOOLS if tool.startswith("lifecycle_") or tool == "switch_lifecycle"
-)
-
-# ...and the population the rule above must produce, written out. The rule alone cannot be
-# checked by a subset assertion: `population == pin` satisfies "the pin is inside the
-# population", so a weakened predicate would silently stop measuring the three members that do
-# not raise. This constant is the second, visible edit a weakening requires, and the case
-# asserts the derived population EQUALS it and that the population is STRICTLY larger than the
-# pin.
-EXPECTED_LIFECYCLE_STATE_POPULATION = frozenset(
-    {
-        "lifecycle_finalize_task",
-    }
-)
-
 # What the sweep is allowed to add inside its own world's official memory repository. The
 # product's own `memory_init` repair writes these two scaffold files; everything else about
 # that repository — and everything about the code repository — must be byte-identical after
@@ -711,11 +685,6 @@ class EntryPointWorld:
             },
         )
         assert self.contract.exists(), f"the fixture enclosure is missing: {self.contract}"
-        # `worktree_start` starts the ambient lifecycle; the sweep arranges ambient state
-        # through the ambient API directly (MIK-R112 removed the lifecycle tools).
-        running = ambient()
-        if running is not None and running.current is not None:
-            running.end("completed")
         self.code_base = _git(self.code, "rev-parse", "HEAD")
 
     # -- benign arguments, and the states two tools need prepared ------------------------
@@ -887,14 +856,6 @@ class EntryPointWorld:
             },
         }
 
-    def ambient_state(self) -> str:
-        """The ambient lifecycle's state, or ``none`` when no lifecycle is active."""
-
-        current = ambient()
-        if current is None or current.current is None:
-            return "none"
-        return str(current.current.state)
-
     def prepare(self, tool: str) -> None:
         """No per-tool ambient arrangement: MIK-R112 removed the lifecycle-state tools.
 
@@ -932,7 +893,7 @@ class EntryPointWorld:
             )
             for tool in PUBLIC_TOOLS:
                 self.prepare(tool)
-                prepared = self.ambient_state()
+                prepared = "none"
                 outcome = self.call(tool, arguments[tool])
                 arm, detail = classify(tool, outcome)
                 results[tool] = {
@@ -941,40 +902,9 @@ class EntryPointWorld:
                     "outcome": outcome,
                     "payload": outcome[1],
                     "prepared_state": prepared,
-                    "state_after": self.ambient_state(),
+                    "state_after": "none",
                 }
         return results
-
-    def matrix(self) -> dict[str, list[str]]:
-        """Every tool that is a pure function of ambient state, in every ambient state.
-
-        The measurement behind ``STATE_DEPENDENT_RAISERS``: for each state, the ambient is
-        arranged and the tool is called with the same arguments the sweep uses.
-        """
-
-        arguments = self.benign()
-        observed: dict[str, list[str]] = {}
-        for state in AMBIENT_STATES:
-            for tool in LIFECYCLE_STATE_POPULATION:
-                self.arrange(state)
-                arm, _ = classify(tool, self.call(tool, arguments[tool]))
-                if arm == "error":
-                    observed.setdefault(tool, []).append(state)
-        self.arrange("none")
-        return observed
-
-    def arrange(self, state: str) -> None:
-        """Put the ambient lifecycle into one of ``AMBIENT_STATES`` through the product's API."""
-
-        current = ambient()
-        if state == "none":
-            if current is not None and current.current is not None:
-                current.end("completed")
-            return
-        if current is None:
-            raise AssertionError(f"could not place an ambient lifecycle for state {state!r}")
-        if current.current is None:
-            current.attach(new_ulid(), enclosure=self.contract.as_posix())
 
 
 class EntryPointCoverageTests(unittest.TestCase):
@@ -1127,43 +1057,6 @@ class EntryPointProbeTests(unittest.TestCase):
                 "memory_baseline_adopt",
                 {"ok": False, "operation": "memory_baseline_adopt"},
             )
-
-    def test_the_state_dependent_raisers_lose_the_envelope_when_unprepared(
-        self,
-    ) -> None:
-        """The second pin is measured, not declared -- and it is empty on purpose.
-
-        MIK-R112 removed every tool that was a pure function of ambient state, so the
-        matrix over the two states a process can hold observes no raiser. The case still measures the matrix over the
-        derived population and asserts it equals the empty pin in both directions, so a
-        tool that raises outside its envelope fails here by name.
-        """
-
-        allowed = set(LIFECYCLE_STATE_POPULATION)
-        self.assertEqual(
-            EXPECTED_LIFECYCLE_STATE_POPULATION,
-            allowed,
-            "the derivation rule no longer produces the population it is meant to: a weakened "
-            "rule would otherwise stop measuring the members that do not raise",
-        )
-        self.assertLessEqual(
-            set(STATE_DEPENDENT_RAISERS),
-            allowed,
-            "a pinned tool outside the measured population",
-        )
-        observed = self.world.matrix()
-        pinned = {tool: list(states) for tool, states in STATE_DEPENDENT_RAISERS.items()}
-        self.assertEqual(
-            pinned,
-            observed,
-            "the lifecycle state matrix moved: update STATE_DEPENDENT_RAISERS in the same "
-            "change (T34's family, owner L6)",
-        )
-        self.assertEqual(
-            {},
-            observed,
-            "a state-dependent raiser is on the swept surface again",
-        )
 
     def test_every_refusal_carries_a_machine_readable_identity(self) -> None:
         """Marks are read from the PAYLOAD, so a mislabelled arm cannot satisfy this case."""

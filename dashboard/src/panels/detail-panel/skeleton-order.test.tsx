@@ -2,15 +2,14 @@
 // has everything, and on a document that has only the required fields. The
 // objective follows the complete head and actual series line on every form
 // (MIK-R128 rule 15), before Now or Steps.
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
+import type { TaskEntry, TaskSummary } from '../../types/projection';
 import { DetailPanel } from './DetailPanel';
-import { seedTaskDocuments, taskDoc } from './test-utils';
+import { TaskReader } from './taskReader';
 import { block } from './pageStyles';
-import { TaskContent } from './taskReader';
-import { fireEvent } from '@testing-library/react';
-import { vi } from 'vitest';
+import { seedTaskEntries, taskEntry, taskSummary, taskReference, taskTree } from './test-utils';
 
 function blockOrder(container: HTMLElement, skeleton: string): string[] {
   const root = container.querySelector(`[data-testid="${skeleton}"]`);
@@ -20,94 +19,111 @@ function blockOrder(container: HTMLElement, skeleton: string): string[] {
   );
 }
 
-const LEAF = '/tasks/repo-a/m/01_leaf.json';
-const MASTER = '/tasks/repo-a/m/task.json';
+const LEAF = 'repo-a/m/01_leaf.json';
+const MASTER = 'repo-a/m/task.json';
 
 function leafFull() {
-  return taskDoc({
+  return taskEntry({
+    reference: taskReference(LEAF),
     id: 'L1',
-    kind: 'subTask',
-    docPath: LEAF,
     title: 'Leaf one',
-    status: 'inProgress',
-    type: 'SubTask (role instructions)',
-    statusNote: 'Leaf status note text.',
-    headerNotes: [
-      { label: 'Master', value: 'task.md' },
-      { label: 'Stage', value: 'Run 3' },
-    ],
-    requirements: ['Requirement one.', 'Requirement two.'],
-    steps: [
-      {
-        id: 'S1',
-        title: 'Done step',
-        status: 'done',
-        outcome: 'The deliverable.',
-        note: 'Done prose.',
-        substeps: [],
-        noteTruncated: false,
-        outcomeTruncated: false,
-      },
-      {
-        id: 'S2',
-        title: 'Open step',
-        status: 'pending',
-        substeps: [],
-        noteTruncated: false,
-        outcomeTruncated: false,
-      },
-    ],
+    stage: 'started',
+    activity: 'works',
     stepsDone: 1,
     stepsTotal: 2,
-    reviewState: {
-      round: 1,
-      pending: false,
-      additionalRounds: 0,
-      findings: [
-        { findingId: 'F1', description: 'Open finding.', open: true, descriptionTruncated: false },
+    summary: taskSummary({
+      createdAt: '2026-06-20T09:00:00+00:00',
+      form: 'task',
+      kind: 'subTask',
+      type: 'SubTask (role instructions)',
+      statusNote: 'Leaf status note text.',
+      headerNotes: [
+        { label: 'Master', value: 'task.md' },
+        { label: 'Stage', value: 'Run 3' },
       ],
-      totalFindings: 1,
-      openFindings: 1,
-    },
-    objective: 'Leaf objective.',
-    design: 'Leaf design.',
-    codeExamples: [
-      {
-        id: 'E1',
-        title: 'Example',
-        distinctChange: 'The change.',
-        why: 'The reason.',
-        language: 'tsx',
-        snippet: 'const example = true;',
+      requirements: ['Requirement one.', 'Requirement two.'],
+      steps: [
+        {
+          id: 'S1',
+          title: 'Done step',
+          status: 'done',
+          outcome: 'The deliverable.',
+          note: 'Done prose.',
+          substeps: [],
+          noteTruncated: false,
+          outcomeTruncated: false,
+        },
+        {
+          id: 'S2',
+          title: 'Open step',
+          status: 'pending',
+          substeps: [],
+          noteTruncated: false,
+          outcomeTruncated: false,
+        },
+      ],
+      reviewState: {
+        round: 1,
+        pending: false,
+        additionalRounds: 0,
+        findings: [
+          {
+            findingId: 'F1',
+            description: 'Open finding.',
+            open: true,
+            descriptionTruncated: false,
+          },
+        ],
+        totalFindings: 1,
+        openFindings: 1,
       },
-    ],
-    decisions: [
-      { at: '2026-10-01', decision: 'Decided.', rationale: 'Because.', product_record: false },
-    ],
-    openQuestions: ['A question?'],
-    references: ['notes/a.md'],
-    sections: [{ kind: 'freeform', heading: 'Extra', body: 'Extra body.' }],
+      objective: 'Leaf objective.',
+      design: 'Leaf design.',
+      codeExamples: [
+        {
+          id: 'E1',
+          title: 'Example',
+          distinctChange: 'The change.',
+          why: 'The reason.',
+          language: 'tsx',
+          snippet: 'const example = true;',
+        },
+      ],
+      decisions: [
+        { at: '2026-10-01', decision: 'Decided.', rationale: 'Because.', product_record: false },
+      ],
+      openQuestions: ['A question?'],
+      references: ['notes/a.md'],
+      sections: [{ kind: 'freeform', heading: 'Extra', body: 'Extra body.' }],
+    }),
   });
 }
 
 function masterDoc() {
-  return taskDoc({
+  return taskEntry({
+    stepsDone: 0,
+    stepsTotal: 0,
+    reference: taskReference(MASTER),
     id: 'M',
-    kind: 'master',
-    docPath: MASTER,
     title: 'Master',
-    status: 'inProgress',
-    form: 'master',
-    type: 'Feature',
-    executionNature: 'atomic',
-    statusNote: 'Master status note.',
-    headerNotes: [{ label: 'Authority', value: 'D1' }],
+    stage: 'started',
+    activity: 'works',
+    summary: taskSummary({
+      objective: '',
+      createdAt: '2026-06-20T09:00:00+00:00',
+      form: 'master',
+      kind: 'master',
+      type: 'Feature',
+      executionNature: 'atomic',
+      statusNote: 'Master status note.',
+      headerNotes: [{ label: 'Authority', value: 'D1' }],
+    }),
   });
 }
 
 describe('task skeleton order (rule 5)', () => {
   it('draws every block in the fixed order on a document that has everything', () => {
-    seedTaskDocuments([masterDoc(), leafFull()]);
+    seedTaskEntries([masterDoc(), leafFull()]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
 
     expect(getByTestId('doc-form').textContent).toBe('task');
@@ -125,7 +141,24 @@ describe('task skeleton order (rule 5)', () => {
   });
 
   it('draws only the head on a document with the required fields alone', () => {
-    seedTaskDocuments([taskDoc({ kind: 'subTask', docPath: LEAF, title: 'Bare leaf' })]);
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(LEAF),
+        title: 'Bare leaf',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+        }),
+      }),
+    ]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
 
     expect(getByTestId('doc-form').textContent).toBe('task');
@@ -135,107 +168,145 @@ describe('task skeleton order (rule 5)', () => {
 
 describe('master skeleton order (rule 4)', () => {
   function masterFull() {
-    return taskDoc({
+    return taskEntry({
+      stepsDone: 0,
+      stepsTotal: 0,
+      reference: taskReference(MASTER),
       id: 'M',
-      kind: 'master',
-      docPath: MASTER,
       title: 'Master',
-      status: 'inProgress',
-      form: 'master',
-      type: 'Feature',
-      executionNature: 'atomic',
-      statusNote: 'Master status note.',
-      headerNotes: [{ label: 'Authority', value: 'D1' }],
-      objective: 'Master objective.',
-      requirements: ['Master requirement.'],
-      decisions: [
-        { at: '2026-10-01', decision: 'Decided.', rationale: 'Because.', product_record: false },
-      ],
-      openQuestions: ['A question?'],
-      references: ['notes/m.md'],
-      sections: [
-        { kind: 'subTasks', heading: 'Sub-tasks', body: 'Tasks intro.' },
-        { kind: 'sharedDecisions', heading: 'Shared decisions', body: 'Decisions intro.' },
-        { kind: 'freeform', heading: 'Extra', body: 'Extra body.' },
-      ],
-      subTasks: [
-        { number: 'L1', name: 'Leaf one', file: '01_leaf.md', status: 'inProgress', scope: '' },
-        { number: 'L2', name: 'Leaf two', file: '02_leaf.md', status: 'planning', scope: '' },
-        { number: 'L3', name: 'Leaf three', file: '03_leaf.md', status: 'Completed', scope: '' },
-        { number: 'L4', name: 'Leaf four', file: '04_leaf.md', status: 'abandoned', scope: '' },
-      ],
-      discardedSubTasks: [
-        {
-          number: 'L5',
-          name: 'Never started',
-          file: '05_never_started.md',
-          scope: 'retired planning work',
-          disposition: 'discard-unstarted',
-          reason: 'No implementation was needed',
-          discardedAt: '2026-08-24T12:00:00+00:00',
-          proof: {
-            childJson: { state: 'missing' },
-            childMarkdown: { state: 'missing' },
-            version: 'task-unstarted-evidence/v1',
-            taskDocumentRef: { repository: 'repo-a', path: 'm/05_never_started.json' },
-            taskState: 'planning-unstarted',
-            enclosureState: 'absent',
-            locatorState: 'absent',
-            doorState: 'absent',
-            operationState: 'absent',
-            seatState: 'absent',
-            reviewState: 'absent',
-            commitState: 'absent',
-            fingerprint: 'a'.repeat(64),
+      stage: 'started',
+      activity: 'works',
+      summary: taskSummary({
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'master',
+        kind: 'master',
+        type: 'Feature',
+        executionNature: 'atomic',
+        statusNote: 'Master status note.',
+        headerNotes: [{ label: 'Authority', value: 'D1' }],
+        objective: 'Master objective.',
+        requirements: ['Master requirement.'],
+        decisions: [
+          { at: '2026-10-01', decision: 'Decided.', rationale: 'Because.', product_record: false },
+        ],
+        openQuestions: ['A question?'],
+        references: ['notes/m.md'],
+        sections: [
+          { kind: 'subTasks', heading: 'Sub-tasks', body: 'Tasks intro.' },
+          { kind: 'sharedDecisions', heading: 'Shared decisions', body: 'Decisions intro.' },
+          { kind: 'freeform', heading: 'Extra', body: 'Extra body.' },
+        ],
+        discardedSubTasks: [
+          {
+            number: 'L5',
+            name: 'Never started',
+            file: '05_never_started.md',
+            scope: 'retired planning work',
+            disposition: 'discard-unstarted',
+            reason: 'No implementation was needed',
+            discardedAt: '2026-08-24T12:00:00+00:00',
+            proof: {
+              childJson: { state: 'missing' },
+              childMarkdown: { state: 'missing' },
+              version: 'task-unstarted-evidence/v1',
+              taskDocumentRef: { repository: 'repo-a', path: 'm/05_never_started.json' },
+              taskState: 'planning-unstarted',
+              enclosureState: 'absent',
+              locatorState: 'absent',
+              doorState: 'absent',
+              operationState: 'absent',
+              seatState: 'absent',
+              reviewState: 'absent',
+              commitState: 'absent',
+              fingerprint: 'a'.repeat(64),
+            },
           },
-        },
-      ],
+        ],
+      }),
     });
   }
 
   function leafOne() {
-    return taskDoc({
+    return taskEntry({
+      reference: taskReference(LEAF),
       id: 'L1',
-      kind: 'subTask',
-      docPath: LEAF,
       title: 'Leaf one',
-      status: 'inProgress',
-      steps: [
-        {
-          id: 'S1',
-          title: 'Done',
-          status: 'done',
-          substeps: [],
-          noteTruncated: false,
-          outcomeTruncated: false,
-        },
-        {
-          id: 'S2',
-          title: 'Open',
-          status: 'pending',
-          substeps: [],
-          noteTruncated: false,
-          outcomeTruncated: false,
-        },
-      ],
+      stage: 'started',
+      activity: 'works',
       stepsDone: 1,
       stepsTotal: 2,
-      reviewState: {
-        round: 2,
-        pending: false,
-        additionalRounds: 0,
-        findings: [
-          { findingId: 'F1', description: 'Open.', open: true, descriptionTruncated: false },
-          { findingId: 'F2', description: 'Closed.', open: false, descriptionTruncated: false },
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        steps: [
+          {
+            id: 'S1',
+            title: 'Done',
+            status: 'done',
+            substeps: [],
+            noteTruncated: false,
+            outcomeTruncated: false,
+          },
+          {
+            id: 'S2',
+            title: 'Open',
+            status: 'pending',
+            substeps: [],
+            noteTruncated: false,
+            outcomeTruncated: false,
+          },
         ],
-        totalFindings: 2,
-        openFindings: 1,
-      },
+        reviewState: {
+          round: 2,
+          pending: false,
+          additionalRounds: 0,
+          findings: [
+            { findingId: 'F1', description: 'Open.', open: true, descriptionTruncated: false },
+            { findingId: 'F2', description: 'Closed.', open: false, descriptionTruncated: false },
+          ],
+          totalFindings: 2,
+          openFindings: 1,
+        },
+      }),
     });
   }
 
   it('draws every block in the fixed order on a document that has everything', () => {
-    seedTaskDocuments([masterFull(), leafOne()]);
+    seedTaskEntries(
+      taskTree(masterFull(), [
+        leafOne(),
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference('repo-a/m/02_leaf.json'),
+          id: 'L2',
+          title: 'Leaf two',
+          stage: 'planned',
+          summary: undefined,
+        }),
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference('repo-a/m/03_leaf.json'),
+          id: 'L3',
+          title: 'Leaf three',
+          stage: 'completed',
+          summary: undefined,
+        }),
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference('repo-a/m/04_leaf.json'),
+          id: 'L4',
+          title: 'Leaf four',
+          stage: 'aborted',
+          summary: undefined,
+        }),
+      ]),
+    );
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${MASTER}`} />);
 
     expect(getByTestId('doc-form').textContent).toBe('master');
@@ -249,14 +320,33 @@ describe('master skeleton order (rule 4)', () => {
       'further',
     ]);
     // the tasks in work stand under Now with their steps and review round
-    expect(getByTestId('now-split').textContent).toContain('1 in work');
+    expect(getByTestId('now-split').textContent).toContain('1 started');
     expect(getByTestId('now-steps-1').textContent).toBe('1/2');
     expect(getByTestId('now-review-1').textContent).toBe('round 2 · 1 of 2 findings open');
   });
 
   it('draws head alone on a bare document: empty Now and Tasks stay out', () => {
-    seedTaskDocuments([taskDoc({ kind: 'master', docPath: MASTER, title: 'Bare master' })]);
-    const { container, getByTestId, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${MASTER}`} />);
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(MASTER),
+        title: 'Bare master',
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+        }),
+      }),
+    ]);
+    const { container, getByTestId, queryByTestId } = render(
+      <DetailPanel selectedId={`taskdoc:${MASTER}`} />,
+    );
 
     expect(getByTestId('doc-form').textContent).toBe('master');
     expect(blockOrder(container, 'skeleton-master')).toEqual(['head']);
@@ -264,12 +354,23 @@ describe('master skeleton order (rule 4)', () => {
   });
 
   it('keeps Tasks with introducing prose but no rows', () => {
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        docPath: MASTER,
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(MASTER),
         title: 'Intro master',
-        sections: [{ kind: 'subTasks', heading: 'Tasks', body: 'How this master tracks work.' }],
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'master',
+          kind: 'master',
+          sections: [{ kind: 'subTasks', heading: 'Tasks', body: 'How this master tracks work.' }],
+        }),
       }),
     ]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${MASTER}`} />);
@@ -280,103 +381,94 @@ describe('master skeleton order (rule 4)', () => {
 });
 
 describe('sprint skeleton order (rule 3)', () => {
-  const SPRINT = '/tasks/repo-a/sprint/task.json';
+  const SPRINT = 'repo-a/sprint/task.json';
 
-  function commanded(id: string, folder: string, status: string, rows: number) {
-    return taskDoc({
-      id,
-      kind: 'master',
-      docPath: `/tasks/repo-a/${folder}/task.json`,
-      title: `Master ${id}`,
-      status,
-      form: 'master',
-      subTasks: Array.from({ length: rows }, (_, index) => ({
-        number: `L${index + 1}`,
-        name: `Leaf ${index + 1}`,
-        file: `0${index + 1}_leaf.md`,
-        status: index === 0 ? 'Completed' : 'inProgress',
-        scope: '',
-      })),
-    });
+  function commanded(id: string, folder: string, stage: TaskEntry['stage'], rows: number) {
+    return taskTree(
+      taskEntry({
+        stepsDone: 0,
+        stepsTotal: 0,
+        reference: taskReference(`repo-a/${folder}/task.json`),
+        id,
+        title: `Master ${id}`,
+        stage,
+        summary: taskSummary({ form: 'master', kind: 'master', objective: '' }),
+      }),
+      Array.from({ length: rows }, (_, index) =>
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference(`repo-a/${folder}/0${index + 1}_leaf.json`),
+          id: `L${index + 1}`,
+          title: `Leaf ${index + 1}`,
+          stage: index === 0 ? 'completed' : 'started',
+          activity: index === 0 ? undefined : 'works',
+          summary: undefined,
+        }),
+      ),
+    );
   }
 
   function sprintFull() {
-    return taskDoc({
+    return taskEntry({
+      stepsDone: 0,
+      stepsTotal: 0,
+      reference: taskReference(SPRINT),
       id: 'S',
-      kind: 'master',
-      docPath: SPRINT,
       title: 'Sprint',
-      status: 'inProgress',
-      form: 'sprint',
-      type: 'Orchestration',
-      integrationBranch: 'ar/sprint',
-      statusNote: 'Sprint status note.',
-      headerNotes: [{ label: 'Portfolio gate', value: 'Gate.' }],
-      objective: 'Sprint objective.',
-      requirements: ['The masters land in the order of the graph.'],
-      orchestrates: ['master-a', 'master-b', 'master-c'],
-      executionGraphView: {
-        nodes: [
-          {
-            nodeId: 'repo-a/master-a/task.json',
-            kind: 'lump',
-            masterRef: { repository: 'repo-a', path: 'master-a/task.json' },
-            masterTitle: 'Master A',
-            leafIds: [],
-            leafTitles: [],
-            waveIndex: 0,
-            frontierState: 'in-flight',
-            predecessors: [],
-          },
+      stage: 'started',
+      activity: 'works',
+      summary: taskSummary({
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'sprint',
+        kind: 'master',
+        type: 'Orchestration',
+        integrationBranch: 'ar/sprint',
+        statusNote: 'Sprint status note.',
+        headerNotes: [{ label: 'Portfolio gate', value: 'Gate.' }],
+        objective: 'Sprint objective.',
+        requirements: ['The masters land in the order of the graph.'],
+        orchestrates: ['master-a', 'master-b', 'master-c'],
+        executionGraphView: {
+          nodes: [
+            {
+              nodeId: 'repo-a/master-a/task.json',
+              kind: 'lump',
+              masterRef: { repository: 'repo-a', path: 'master-a/task.json' },
+              masterTitle: 'Master A',
+              leafIds: [],
+              leafTitles: [],
+              waveIndex: 0,
+              frontierState: 'in-flight',
+              predecessors: [],
+            },
+          ],
+        },
+        decisions: [
+          { at: '2026-10-01', decision: 'Decided.', rationale: 'Because.', product_record: false },
         ],
-      },
-      decisions: [
-        { at: '2026-10-01', decision: 'Decided.', rationale: 'Because.', product_record: false },
-      ],
-      references: ['notes/s.md'],
-      sections: [
-        {
-          kind: 'freeform',
-          heading: 'Judgment Register',
-          body: '| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |',
-        },
-        { kind: 'freeform', heading: 'Extra', body: 'Extra body.' },
-      ],
-      subTasks: [
-        {
-          number: 'M1',
-          name: 'Master A',
-          file: '',
-          status: 'planning',
-          scope: '',
-          masterRef: { repository: 'repo-a', path: 'master-a/task.json' },
-        },
-        {
-          number: 'M2',
-          name: 'Master B',
-          file: '',
-          status: 'planning',
-          scope: '',
-          masterRef: { repository: 'repo-a', path: 'master-b/task.json' },
-        },
-        {
-          number: 'M3',
-          name: 'Master C',
-          file: '',
-          status: 'planning',
-          scope: '',
-          masterRef: { repository: 'repo-a', path: 'master-c/task.json' },
-        },
-      ],
+        references: ['notes/s.md'],
+        sections: [
+          {
+            kind: 'freeform',
+            heading: 'Judgment Register',
+            body: '| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |',
+          },
+          { kind: 'freeform', heading: 'Extra', body: 'Extra body.' },
+        ],
+      }),
     });
   }
 
   it('draws every block in the fixed order on a document that has everything', () => {
-    seedTaskDocuments([
-      sprintFull(),
-      commanded('MA', 'master-a', 'inProgress', 2),
-      commanded('MB', 'master-b', 'planning', 1),
-      commanded('MC', 'master-c', 'Completed', 1),
+    const a = commanded('MA', 'master-a', 'started', 2);
+    const b = commanded('MB', 'master-b', 'planned', 1);
+    const c = commanded('MC', 'master-c', 'completed', 1);
+    seedTaskEntries([
+      ...taskTree(sprintFull(), [a[0], b[0], c[0]]),
+      ...a.slice(1),
+      ...b.slice(1),
+      ...c.slice(1),
     ]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${SPRINT}`} />);
 
@@ -393,21 +485,33 @@ describe('sprint skeleton order (rule 3)', () => {
       'further',
     ]);
     // the masters in work show how many of their tasks are completed
-    expect(getByTestId('now-split').textContent).toContain('1 in work');
+    expect(getByTestId('now-split').textContent).toContain('1 started');
     expect(getByTestId('now-progress-1').textContent).toBe('1/2');
   });
 
   it('draws head alone on a bare document: empty Now and Masters stay out', () => {
-    seedTaskDocuments([
-      taskDoc({
-        kind: 'master',
-        docPath: SPRINT,
+    seedTaskEntries([
+      taskEntry({
+        id: '1',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(SPRINT),
         title: 'Bare sprint',
-        form: 'sprint',
-        orchestrates: ['master-a'],
+        summary: taskSummary({
+          objective: '',
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'sprint',
+          kind: 'master',
+          orchestrates: ['master-a'],
+        }),
       }),
     ]);
-    const { container, getByTestId, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${SPRINT}`} />);
+    const { container, getByTestId, queryByTestId } = render(
+      <DetailPanel selectedId={`taskdoc:${SPRINT}`} />,
+    );
 
     expect(getByTestId('doc-form').textContent).toBe('sprint');
     expect(blockOrder(container, 'skeleton-sprint')).toEqual(['head']);
@@ -416,47 +520,63 @@ describe('sprint skeleton order (rule 3)', () => {
 });
 
 describe('objective after the rendered series line (MIK-R128 rule 15, evidence 12)', () => {
+  function pageFor(
+    form: 'sprint' | 'master' | 'task',
+    summary: Partial<TaskSummary>,
+    state: 'loading' | 'unavailable' = 'unavailable',
+    children = false,
+  ) {
+    const entry = taskEntry({
+      id: form === 'task' ? 'L1' : 'M',
+      reference: taskReference(form === 'task' ? LEAF : MASTER),
+      summary: taskSummary({ kind: form === 'task' ? 'subTask' : 'master', form, ...summary }),
+    });
+    const list = children
+      ? taskTree(entry, [
+          taskEntry({ reference: taskReference('repo-a/m/child.json'), stage: 'started' }),
+        ])
+      : [entry];
+    const tasks = Object.fromEntries(
+      list.map((item) => [`${item.key}`, item]),
+    );
+    return render(
+      <TaskReader
+        entry={list[0]}
+        doc={entry.summary!}
+        tasks={tasks}
+        bodyState={state}
+        onJump={vi.fn()}
+        onOpenChangeSet={vi.fn()}
+      />,
+    );
+  }
   it.each(['sprint', 'master', 'task'] as const)(
     'orders actual reader chrome before the objective on %s',
     (form) => {
-      const doc = taskDoc({
-        id: form === 'task' ? 'L1' : 'M',
-        kind: form === 'task' ? 'subTask' : 'master',
+      const view = pageFor(
         form,
-        docPath: form === 'task' ? LEAF : MASTER,
-        title: form,
-        status: 'inProgress',
-        objective: 'The objective.',
-        directGrant:
-          form === 'task'
-            ? { grantedBy: 'developer', grantedAt: '2026-10-01T10:00:00Z' }
-            : undefined,
-        steps:
-          form === 'task'
-            ? [
-                {
-                  id: 'S1',
-                  title: 'Work',
-                  status: 'pending',
-                  substeps: [],
-                  noteTruncated: false,
-                  outcomeTruncated: false,
-                },
-              ]
-            : [],
-        subTasks:
-          form !== 'task'
-            ? [{ number: 'L1', name: 'Work', file: '01_leaf.md', status: 'inProgress', scope: '' }]
-            : [],
-      });
-      const view = render(
-        <TaskContent
-          docs={[doc]}
-          bodyState="unavailable"
-          onOpen={vi.fn()}
-          onJump={vi.fn()}
-          onOpenChangeSet={vi.fn()}
-        />,
+        {
+          objective: 'The objective.',
+          directGrant:
+            form === 'task'
+              ? { grantedBy: 'developer', grantedAt: '2026-10-01T10:00:00Z' }
+              : undefined,
+          steps:
+            form === 'task'
+              ? [
+                  {
+                    id: 'S1',
+                    title: 'Work',
+                    status: 'pending',
+                    substeps: [],
+                    noteTruncated: false,
+                    outcomeTruncated: false,
+                  },
+                ]
+              : [],
+        },
+        'unavailable',
+        form !== 'task',
       );
       const objective = view.getByTestId('objective-lead');
       const seriesLine = view.getAllByTestId('open-changeset')[0];
@@ -481,19 +601,10 @@ describe('objective after the rendered series line (MIK-R128 rule 15, evidence 1
         expect(objective.classList.contains(className)).toBe(true);
     },
   );
-
   it.each(['sprint', 'master', 'task'] as const)(
     'uses the shared titled-block spacing when %s has no series line',
     (form) => {
-      const doc = taskDoc({
-        kind: form === 'task' ? 'subTask' : 'master',
-        form,
-        docPath: form === 'task' ? LEAF : MASTER,
-        objective: 'An objective.',
-      });
-      const view = render(
-        <TaskContent docs={[doc]} bodyState="loading" onOpen={vi.fn()} onJump={vi.fn()} />,
-      );
+      const view = pageFor(form, { objective: 'An objective.' }, 'loading');
       expect(view.queryByTestId('open-changeset')).toBeNull();
       const objective = view.getByTestId('objective-lead');
       expect(before(view.getByTestId('doc-head'), objective)).toBe(true);
@@ -501,14 +612,10 @@ describe('objective after the rendered series line (MIK-R128 rule 15, evidence 1
         expect(objective.classList.contains(className)).toBe(true);
     },
   );
-
   it.each(['master', 'task'] as const)(
     'places structured prose without replacing old notes on %s',
     (form) => {
-      const doc = taskDoc({
-        kind: form === 'task' ? 'subTask' : 'master',
-        form,
-        docPath: form === 'task' ? LEAF : MASTER,
+      const view = pageFor(form, {
         objective: 'An objective.',
         nonGoals: 'Not **in scope**.',
         design: 'A design.',
@@ -517,9 +624,6 @@ describe('objective after the rendered series line (MIK-R128 rule 15, evidence 1
           { kind: 'freeform', heading: 'Historic acceptance', body: 'Preserved old prose.' },
         ],
       });
-      const view = render(
-        <TaskContent docs={[doc]} bodyState="unavailable" onOpen={vi.fn()} onJump={vi.fn()} />,
-      );
       expect(blockOrder(view.container, `skeleton-${form}`)).toEqual([
         'head',
         'objective',
@@ -533,13 +637,9 @@ describe('objective after the rendered series line (MIK-R128 rule 15, evidence 1
       expect(view.getByText('Historic acceptance')).toBeTruthy();
     },
   );
-
   it('keeps long structured prose reachable without another reader route', () => {
     const text = Array.from({ length: 12 }, (_, index) => `Paragraph ${index}.`).join('\n\n');
-    const doc = taskDoc({ kind: 'subTask', docPath: LEAF, nonGoals: text, acceptance: text });
-    const view = render(
-      <TaskContent docs={[doc]} bodyState="unavailable" onOpen={vi.fn()} onJump={vi.fn()} />,
-    );
+    const view = pageFor('task', { nonGoals: text, acceptance: text });
     expect(view.queryAllByText('Paragraph 11.')).toHaveLength(0);
     fireEvent.click(view.getByTestId('nonGoals-toggle'));
     fireEvent.click(view.getByTestId('acceptance-toggle'));
@@ -558,29 +658,37 @@ describe('objective after the rendered series line (MIK-R128 rule 15, evidence 1
   // The last element of the head stands before the objective, the objective
   // before Now or Steps: read from the rendered page, one test per form.
   it('stands after the head and before Steps on a task page', () => {
-    seedTaskDocuments([
-      taskDoc({
+    seedTaskEntries([
+      taskEntry({
+        reference: taskReference(LEAF),
         id: 'L1',
-        kind: 'subTask',
-        docPath: LEAF,
         title: 'Leaf one',
-        status: 'inProgress',
-        statusNote: 'Leaf status note.',
-        headerNotes: [{ label: 'Stage', value: 'Run 3, a long enough line for a note of its own.' }],
-        objective: 'Leaf objective.',
-        steps: [
-          {
-            id: 'S1',
-            title: 'Done step',
-            status: 'done',
-            substeps: [],
-            noteTruncated: false,
-            outcomeTruncated: false,
-          },
-        ],
+        stage: 'started',
+        activity: 'works',
         stepsDone: 1,
         stepsTotal: 1,
-        requirements: ['Requirement one.'],
+        summary: taskSummary({
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'task',
+          kind: 'subTask',
+          statusNote: 'Leaf status note.',
+          headerNotes: [
+            { label: 'Stage', value: 'Run 3, a long enough line for a note of its own.' },
+          ],
+          objective: 'Leaf objective.',
+          steps: [
+            {
+              id: 'S1',
+              title: 'Done step',
+              status: 'done',
+              substeps: [],
+              noteTruncated: false,
+              outcomeTruncated: false,
+            },
+          ],
+          requirements: ['Requirement one.'],
+        }),
       }),
     ]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
@@ -601,23 +709,43 @@ describe('objective after the rendered series line (MIK-R128 rule 15, evidence 1
   });
 
   it('stands after the head and before Now on a master page', () => {
-    seedTaskDocuments([
-      taskDoc({
-        id: 'M',
-        kind: 'master',
-        docPath: MASTER,
-        title: 'Master',
-        status: 'inProgress',
-        form: 'master',
-        statusNote: 'Master status note.',
-        headerNotes: [{ label: 'Authority', value: 'D1, a long enough line for a note of its own.' }],
-        objective: 'Master objective.',
-        subTasks: [
-          { number: 'L1', name: 'Leaf one', file: '01_leaf.md', status: 'inProgress', scope: '' },
+    seedTaskEntries(
+      taskTree(
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference(MASTER),
+          id: 'M',
+          title: 'Master',
+          stage: 'started',
+          activity: 'works',
+          summary: taskSummary({
+            type: '',
+            createdAt: '2026-06-20T09:00:00+00:00',
+            form: 'master',
+            kind: 'master',
+            statusNote: 'Master status note.',
+            headerNotes: [
+              { label: 'Authority', value: 'D1, a long enough line for a note of its own.' },
+            ],
+            objective: 'Master objective.',
+            requirements: ['Master requirement.'],
+          }),
+        }),
+        [
+          taskEntry({
+            stepsDone: 0,
+            stepsTotal: 0,
+            reference: taskReference('repo-a/m/01_leaf.json'),
+            id: '1',
+            title: 'Leaf one',
+            stage: 'started',
+            activity: 'works',
+            summary: undefined,
+          }),
         ],
-        requirements: ['Master requirement.'],
-      }),
-    ]);
+      ),
+    );
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${MASTER}`} />);
 
     const head = getByTestId('doc-head');
@@ -637,32 +765,45 @@ describe('objective after the rendered series line (MIK-R128 rule 15, evidence 1
   });
 
   it('stands after the head and before Now on a sprint page', () => {
-    const sprintPath = '/tasks/repo-a/sprint/task.json';
-    seedTaskDocuments([
-      taskDoc({
-        id: 'S',
-        kind: 'master',
-        docPath: sprintPath,
-        title: 'Sprint',
-        status: 'inProgress',
-        form: 'sprint',
-        statusNote: 'Sprint status note.',
-        headerNotes: [{ label: 'Portfolio gate', value: 'Gate, a long enough line for a note of its own.' }],
-        objective: 'Sprint objective.',
-        orchestrates: ['master-a'],
-        subTasks: [
-          {
-            number: 'M1',
-            name: 'Master A',
-            file: '',
-            status: 'inProgress',
-            scope: '',
-            masterRef: { repository: 'repo-a', path: 'master-a/task.json' },
-          },
+    const sprintPath = 'repo-a/sprint/task.json';
+    seedTaskEntries(
+      taskTree(
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference(sprintPath),
+          id: 'S',
+          title: 'Sprint',
+          stage: 'started',
+          activity: 'works',
+          summary: taskSummary({
+            type: '',
+            createdAt: '2026-06-20T09:00:00+00:00',
+            form: 'sprint',
+            kind: 'master',
+            statusNote: 'Sprint status note.',
+            headerNotes: [
+              { label: 'Portfolio gate', value: 'Gate, a long enough line for a note of its own.' },
+            ],
+            objective: 'Sprint objective.',
+            orchestrates: ['master-a'],
+            requirements: ['Sprint requirement.'],
+          }),
+        }),
+        [
+          taskEntry({
+            stepsDone: 0,
+            stepsTotal: 0,
+            reference: taskReference('repo-a/master-a/task.json'),
+            id: '1',
+            title: 'Master A',
+            stage: 'started',
+            activity: 'works',
+            summary: undefined,
+          }),
         ],
-        requirements: ['Sprint requirement.'],
-      }),
-    ]);
+      ),
+    );
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${sprintPath}`} />);
 
     const head = getByTestId('doc-head');

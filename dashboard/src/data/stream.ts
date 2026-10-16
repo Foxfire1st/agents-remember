@@ -5,8 +5,9 @@ import { startStreamLivenessWatchdog } from "./streamLiveness";
 // into the store by key; the browser's EventSource auto-reconnects and the server
 // re-snapshots, so a reconnect simply replaces the store via the `snapshot` event again.
 const STATE_EVENTS = [
-  "lifecycle",
-  "lifecycle.removed",
+  "task",
+  "task.removed",
+  "taskCounts",
   "enclosure",
   "enclosure.removed",
   "provider",

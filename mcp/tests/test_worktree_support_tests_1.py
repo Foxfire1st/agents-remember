@@ -298,6 +298,10 @@ class WorktreeSupport1(WorktreeSupportTests):
             )
             leaf_document = read_task_doc(task_root / "15_leaf.json")
             self.assertEqual(leaf_document.lifecycleId, "LC-LEAF")
+            self.assertEqual(leaf_document.status, "inProgress")
+            self.assertEqual(
+                read_task_doc(task_root / "task.json").subTasks[0].status, "inProgress"
+            )
             self.assertEqual(
                 [ref.model_dump() for ref in leaf_document.enclosures],
                 [
@@ -371,6 +375,8 @@ class WorktreeSupport1(WorktreeSupportTests):
             )
             self.assertEqual(abandoned.returncode, 0, abandoned.payload)
             self.assertEqual(abandoned.payload["state"], "abandoned")
+            self.assertEqual(read_task_doc(task_root / "15_leaf.json").status, "abandoned")
+            self.assertEqual(read_task_doc(task_root / "task.json").subTasks[0].status, "abandoned")
             self.assertFalse(leaf_contract.code_worktree.exists())
             self.assertEqual(git(code_repo, "branch", "--list", "ar/15_leaf"), "")
             self.assertTrue(root_contract.contract_path.exists())

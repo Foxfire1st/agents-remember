@@ -45,12 +45,9 @@ def _require_no_reserved_decision_keys(value: object) -> None:
 
 
 class NextStep(StrictResponseModel):
-    """The single computed next move for the active lifecycle (task 27).
+    """Typed next-step guidance for a tool response.
 
-    Attached to every in-lifecycle tool response at the ``_tool_payload`` choke
-    point by the next-step engine (``application.next_step``). It mirrors the
-    worktree ``guidance.lifecycle_guidance`` shape, so the hint of a tool and the
-    hint of the worktree path share one vocabulary. Strict, so it is a real
+    Producers and contract guidance use this shape. Strict, so it is a real
     contract; all fields but ``summary`` are optional.
     """
 
@@ -68,13 +65,12 @@ class ResponseModel(StrictResponseModel):
     tokens: int = Field(default=0, ge=0)
     tokenizer: str = ""
     tokenCountExact: bool = False
-    # The lifecycle next-step hint (task 27): populated at the ``_tool_payload``
-    # choke point for every response emitted inside an active lifecycle. Optional
-    # (``exclude_none``) so lifecycle-less calls stay unchanged.
+    # The next-step hint supplied by a producer or resolved from a contract at
+    # the tool-answer boundary. Omitted when no guidance applies.
     nextStep: NextStep | None = None
-    # The lifecycle next move the answer carries (MIK-R108): the producers keep writing
+    # The next move the answer carries (MIK-R108): the producers keep writing
     # ``nextStep`` onto the validated response, and the choke point translates it onto the
-    # answer as ``next``. Optional (``exclude_none``) so calls outside a lifecycle stay
+    # answer as ``next``. Optional (``exclude_none``) so answers without guidance stay
     # unchanged.
     next: dict[str, Any] | None = None
     # The tool-log detail location (MIK-R108) and a one-sentence writer failure. The choke

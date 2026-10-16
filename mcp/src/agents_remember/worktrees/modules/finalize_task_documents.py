@@ -262,12 +262,20 @@ def _reconcile_task_documents(
     if contract.kind == "series" and targets.leaf_path is not None:
         return reconcile_series_documents(contract, targets, dry_run=dry_run)
     updates, documents = _completion_updates(targets, dry_run=dry_run)
+    candidates = tuple(
+        (path, doc)
+        for path, doc in (
+            (targets.leaf_path, targets.completed_leaf),
+            (targets.parent_path, targets.completed_parent),
+        )
+        if path is not None and doc is not None and doc in documents
+    )
     projection_effects: list[dict[str, object]] = []
     if dry_run and documents:
         _require_finalize_sources_current(targets)
         projection_effects = [
             effect.model_dump(by_alias=True)
-            for effect in preview_contract_task_facts(contract, tuple(documents))
+            for effect in preview_contract_task_facts(contract, candidates)
         ]
     elif documents:
         if targets.leaf_path is None:
@@ -276,7 +284,7 @@ def _reconcile_task_documents(
         published = publish_contract_task_facts(
             contract,
             lambda: write_task_docs(task_root, documents),
-            documents=tuple(documents),
+            documents=candidates,
             validate=lambda: _require_finalize_sources_current(targets),
         )
         projection_effects = [

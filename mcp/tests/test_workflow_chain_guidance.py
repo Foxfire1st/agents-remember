@@ -76,7 +76,6 @@ from agents_remember.mcp.server import create_server
 from agents_remember.models.base import NextStep
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
-from agents_remember.observer.ambient import ambient
 from agents_remember.worktrees.modules.guidance import lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -752,8 +751,7 @@ class WorkflowChainObservation:
         source, as_given = self._arguments(tool, source, dry_run, target)
         kind, payload, arm, missing = self._as_given_call(tool, as_given, target)
         payload = payload or {}
-        current = ambient()
-        raw = next_step_for(current, tool) if current is not None else None
+        raw = next_step_for(target, tool)
         contract = load_contract(Path(target))
         hop = Hop(
             tool=tool,
@@ -867,9 +865,6 @@ class WorkflowChainObservation:
         # walk hands its lifecycle back before the sibling takes one -- which is exactly the live
         # shape: two seats, two lifecycles, one process-global ambient slot.
         self.world.author_sibling_master()
-        current = ambient()
-        if current is not None and current.current is not None:
-            current.end("completed")
         kind, payload = self.world.start_leaf(LEAF_ID, SIBLING_WORKTREE, task_name=SIBLING_MASTER)
         assert kind == "RETURNED" and payload is not None, (kind, payload)
         assert payload.get("state") == "started", payload
@@ -888,8 +883,7 @@ class WorkflowChainObservation:
         args = {"contract_path": self.world.contract.as_posix(), "dry_run": True}
         kind, payload = self.world.call(tool, args)
         payload = payload or {}
-        current = ambient()
-        raw = next_step_for(current, tool) if current is not None else None
+        raw = next_step_for(self.world.contract.as_posix(), tool)
         self.sibling_hop = Hop(
             tool=tool,
             source="declared",
@@ -995,9 +989,6 @@ class WorkflowChainObservation:
         stale_contract = self.sibling_contract
         assert stale_contract is not None
         world = self.world
-        current = ambient()
-        if current is not None and current.current is not None:
-            current.end("completed")
 
         contract = load_contract(stale_contract)
         progress = setup_progress_path(contract.worktree_group)
@@ -1072,9 +1063,6 @@ class WorkflowChainObservation:
     def close(self) -> None:
         """End the ambient lifecycle this walk promoted, then remove the whole world."""
 
-        current = ambient()
-        if current is not None and current.current is not None:
-            current.end("completed")
         self.world.close()
 
 
@@ -1184,12 +1172,10 @@ class WorkflowChainTests(unittest.TestCase):
         )
 
     def test_a_concurrent_siblings_guidance_never_reaches_this_task(self) -> None:
-        """The normal case on this machine: another leaf's lifecycle holds the process.
+        """A sibling's addressed contract yields its own hint and cannot redirect this response.
 
-        The arrangement is asserted first -- the unguarded guidance derived from the ambient
-        lifecycle MUST name the sibling's enclosure -- so a green here cannot mean the guard was
-        never exercised. Then the property: no channel of this task's response names the sibling,
-        and the operational channel still names this task's next move.
+        First prove the sibling contract produced guidance, then check every channel of this
+        task's response stays bound to its own enclosure and next move.
         """
 
         hop = self.observation.sibling_hop
@@ -1197,17 +1183,7 @@ class WorkflowChainTests(unittest.TestCase):
         sibling = self.observation.sibling_contract
         assert sibling is not None
 
-        self.assertIsNotNone(hop.raw_next, "the ambient lifecycle produced no guidance to withhold")
-        raw_args = (hop.raw_next.nextArgs or {}) if hop.raw_next is not None else {}
-        self.assertTrue(
-            any(
-                _names_same_place(str(value), sibling)
-                for key, value in raw_args.items()
-                if key in ("contract_path", "enclosure_path")
-            ),
-            f"the ambient guidance did not name the sibling ({raw_args}); the arm tested nothing",
-        )
-
+        self.assertIsNotNone(hop.raw_next, "the addressed contract produced no landing hint")
         for channel, args in hop.channels:
             for key in ("contract_path", "enclosure_path", "contractPath", "enclosurePath"):
                 path = args.get(key)
@@ -1325,6 +1301,21 @@ class WorkflowChainTests(unittest.TestCase):
             classify_call("worktree_closeout_apply", "RAISED ToolError", {"detail": "boom"}),
             "raised",
         )
+
+    def test_both_previews_keep_their_argument_addressed_approval_stop(self) -> None:
+        previews = [
+            hop
+            for hop in self.observation.hops
+            if hop.tool == "worktree_closeout_preview"
+            or (hop.tool == "worktree_integrate" and hop.state == "would-integrate")
+        ]
+        self.assertEqual(len(previews), 2)
+        for hop in previews:
+            with self.subTest(tool=hop.tool):
+                self.assertIsNotNone(hop.emitted_next)
+                assert hop.emitted_next is not None
+                self.assertIsNone(hop.emitted_next.nextArgs)
+                self.assertIn("stop", hop.emitted_next.summary.lower())
 
     def test_the_guidance_that_could_not_be_validated_is_withheld_and_counted(self) -> None:
         """`T54`/`T82`: the withhold is real, counted, and explained in both directions.

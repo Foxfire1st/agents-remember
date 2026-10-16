@@ -45,14 +45,11 @@ stopped naming something rather than describing one.
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import anyio
 import pytest
-from agents_remember.application.worktree_tool_requests import TaskIdentity
-from agents_remember.application.worktree_tools import worktree_start_tool
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
@@ -60,14 +57,6 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.models.worktree import WorktreeStartResponse
-from agents_remember.observer import (
-    AmbientLifecycle,
-    EventStore,
-    install_ambient,
-    new_ulid,
-    observer_root,
-)
-from agents_remember.observer.ambient import reset_ambient
 from pydantic import ValidationError
 from test_tool_entry_point_sweep import T34_REPAIRED_TOOLS
 from tool_entry_point_world import EntryPointWorld
@@ -631,14 +620,10 @@ class FailurePathCensusTests:
 
 
 class FailurePathControlTests:
-    """MIK-R112 F12 as repaired under the Parent-bound ruling: refusal without a tool.
+    """Negative controls for refusal vocabulary and the three required refusal axes.
 
-    The lifecycle-switch-required refusal names no tool (no nextTool /
-    nextOperation / nextArgs at top level or in nextStep, whose summary carries
-    the same sentence) and validates against the narrowed vocabulary. The old
-    removed-tool guidance stays as a negative control: it still fails the same
-    model. No switch tool, model member, or backend is resurrected here, and
-    the emitter returns before any filesystem work, so the cases write nothing.
+    Historical removed-tool guidance must still fail the response model. Stripping identity,
+    reason or navigation from a real refusal must make the completeness predicate fail.
     """
 
     def _bound_config(self, coord: Path) -> McpRuntimeConfig:
@@ -649,29 +634,6 @@ class FailurePathControlTests:
             transcript_root=coord / "logs",
             repositories={"repo-a": RepositoryScope(repo_id="repo-a", path=coord)},
         )
-
-    def test_switch_refusal_names_no_tool_and_validates(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            coord = Path(tmp)
-            reset_ambient()
-            amb = AmbientLifecycle(EventStore(observer_root(self._bound_config(coord))))
-            install_ambient(amb)
-            amb.attach(new_ulid(), enclosure=str(coord / "contract.json"))
-            try:
-                refusal = worktree_start_tool(
-                    self._bound_config(coord),
-                    TaskIdentity(repo_id="repo-a", task_name="m", worktree_name="w"),
-                )
-            finally:
-                reset_ambient()
-            assert refusal["ok"] is False
-            assert "nextTool" not in refusal
-            assert "nextOperation" not in refusal
-            assert "nextArgs" not in refusal
-            assert set(refusal["nextStep"]) == {"summary"}
-            assert "new session" in refusal["nextStep"]["summary"]
-            assert "new session" in refusal["summary"]
-            WorktreeStartResponse.model_validate(refusal)
 
     def test_old_removed_tool_guidance_stays_a_negative_control(self) -> None:
         old_guidance = {

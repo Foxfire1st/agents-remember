@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -31,10 +31,13 @@ class WorktreeCaptureBaseline:
 _CAPTURE_BASELINES: ContextVar[dict[str, WorktreeCaptureBaseline] | None] = ContextVar(
     "worktree_capture_baselines", default=None
 )
+_CAPTURE_OBSERVER: ContextVar[Callable[[Path], None] | None] = ContextVar(
+    "worktree_capture_observer", default=None
+)
 
 
 @contextmanager
-def memo_capture_baselines() -> Iterator[None]:
+def memo_capture_baselines(*, on_capture: Callable[[Path], None] | None = None) -> Iterator[None]:
     """Within the block, one worktree's capture baseline is remembered for its recheck.
 
     The recheck a review runs before publication (ICR-R01) re-derives the candidate to prove the
@@ -45,14 +48,14 @@ def memo_capture_baselines() -> Iterator[None]:
     dies with the read; nothing outside it ever reads a baseline.
     """
 
-    if _CAPTURE_BASELINES.get() is not None:
-        yield
-        return
-    token = _CAPTURE_BASELINES.set({})
+    observer = _CAPTURE_OBSERVER.set(on_capture or _CAPTURE_OBSERVER.get())
+    token = _CAPTURE_BASELINES.set({}) if _CAPTURE_BASELINES.get() is None else None
     try:
         yield
     finally:
-        _CAPTURE_BASELINES.reset(token)
+        if token is not None:
+            _CAPTURE_BASELINES.reset(token)
+        _CAPTURE_OBSERVER.reset(observer)
 
 
 def begin_capture_baseline(repo: Path) -> WorktreeCaptureBaseline | None:
@@ -76,6 +79,9 @@ def note_capture_baseline(
     after = _snapshot_baseline(repo, tree="")
     if after == before:
         scope[repo.as_posix()] = replace(before, tree=tree, head=head)
+        observer = _CAPTURE_OBSERVER.get()
+        if observer is not None:
+            observer(repo)
 
 
 def capture_baseline_unchanged(repo: Path, *, tree: str) -> bool:

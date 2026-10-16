@@ -132,9 +132,7 @@ class TaskPageSkeletonProjectionTests(unittest.TestCase):
                 )
             ),
         )
-        self.nodes = {
-            node.id: node for node in read_task_documents(self.coord, enclosures=[], now=NOW)
-        }
+        self.nodes = {node.id: node for node in read_task_documents(self.coord, now=NOW)}
 
     def test_form_follows_the_model_rule(self) -> None:
         self.assertEqual(self.nodes["SPRINT"].form, "sprint")
@@ -253,7 +251,7 @@ class TaskPageSkeletonProjectionTests(unittest.TestCase):
                         )
                     ),
                 )
-        nodes = {node.id: node for node in read_task_documents(self.coord, enclosures=[], now=NOW)}
+        nodes = {node.id: node for node in read_task_documents(self.coord, now=NOW)}
         for count in (10, 100):
             with self.subTest(notes=count):
                 node = nodes[f"BIG-{count}"]
@@ -295,7 +293,7 @@ class TaskPageSkeletonProjectionTests(unittest.TestCase):
             ),
         )
         node = read_task_document_body(
-            self.coord, doc_path=f"tasks/{REPO}/bigbody/task.json", enclosures=[], now=NOW
+            self.coord, doc_path=f"tasks/{REPO}/bigbody/task.json", now=NOW
         )
         self.assertIsNotNone(node)
         assert node is not None
@@ -349,11 +347,11 @@ class TaskPageSkeletonProjectionTests(unittest.TestCase):
                 before = (root / "task.json").read_bytes()
                 summary = next(
                     node
-                    for node in read_task_documents(self.coord, enclosures=[], now=NOW)
+                    for node in read_task_documents(self.coord, now=NOW)
                     if node.id == "LEGACY-TIME"
                 )
                 body = read_task_document_body(
-                    self.coord, doc_path=str(root / "task.json"), enclosures=[], now=NOW
+                    self.coord, doc_path=str(root / "task.json"), now=NOW
                 )
                 self.assertIsNotNone(body)
                 assert body is not None

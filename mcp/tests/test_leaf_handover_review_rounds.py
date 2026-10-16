@@ -12,7 +12,6 @@ import pytest
 from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
 from agents_remember.mcp.server import create_server
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.observer.ambient import reset_ambient
 from agents_remember.worktrees.services import reset_worktree_services
 from mcp.shared.memory import create_connected_server_and_client_session
 from test_task_doc_review_public import _create
@@ -132,7 +131,6 @@ def test_reviewer_binding_opens_repairs_and_preserves_sealed_round_limits(
     try:
         asyncio.run(exercise())
     finally:
-        reset_ambient()
         reset_worktree_services()
     assert calls == [
         ("reviewer", operation)

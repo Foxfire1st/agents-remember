@@ -1,55 +1,48 @@
-import { fireEvent, render, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent,render,waitFor,within } from '@testing-library/react';
+import { describe,expect,it,vi } from 'vitest';
 
+import { taskEntrySelectionKey } from '../../data/taskReference';
 import { DetailPanel } from './DetailPanel';
-import { enclosure, seedTaskDocuments, taskDoc } from './test-utils';
+import { enclosure,seedTaskEntries,taskEntry,taskReference,taskSummary } from './test-utils';
 
 describe('DetailPanel on-demand task body (task 11)', () => {
   it('loads the complete task body before mounting reader ancillary requests', async () => {
-    const lifecycleId = 'LC-READER-PRIORITY';
-    const summary = taskDoc({
-      lifecycleId,
-      kind: 'subTask',
-      docPath: '/tasks/agents-remember/260712_reader-priority/01_reader.json',
+    const summary = taskEntry({
+      id: '1',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('agents-remember/260712_reader-priority/01_reader.json'),
       title: 'Reader priority',
-      objective: 'Summary objective.',
-      steps: [
-        {
-          id: 'S1',
-          title: 'Keep the summary visible',
-          status: 'inProgress',
-          substeps: [],
-          noteTruncated: false,
-          outcomeTruncated: false,
-        },
-      ],
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        objective: 'Summary objective.',
+        steps: [
+          {
+            id: 'S1',
+            title: 'Keep the summary visible',
+            status: 'inProgress',
+            substeps: [],
+            noteTruncated: false,
+            outcomeTruncated: false,
+          },
+        ],
+      }),
     });
-    seedTaskDocuments([summary], {
-      lifecycles: [
-        {
-          id: lifecycleId,
-          state: 'running',
-          phase: 'build',
-          fleeting: false,
-          enclosure: '/contracts/reader-priority',
-          repoId: 'agents-remember',
-          startedAt: '2026-07-12T08:00:00+00:00',
-          lastEventTs: '2026-07-12T08:00:01+00:00',
-          inferred: false,
-        },
-      ],
-      enclosures: [
-        enclosure({
-          enclosure: '/contracts/reader-priority',
-          lifecycleId,
-          leafId: summary.id,
-          taskId: 'READER-PRIORITY-MASTER',
-          taskName: '260712_reader-priority',
-          worktreeGroup: '/worktrees/reader-priority-ar',
-        }),
-      ],
-      activeWorktreeGroups: ['reader-priority-ar'],
-    });
+    summary.worktrees = [
+      enclosure({
+        enclosure: '/contracts/reader-priority',
+        leafId: summary.id,
+        taskId: 'READER-PRIORITY-MASTER',
+        taskName: '260712_reader-priority',
+        worktreeGroup: '/worktrees/reader-priority-ar',
+      }),
+    ];
+    seedTaskEntries([summary]);
     let resolveBody!: (response: Response) => void;
     const pendingBody = new Promise<Response>((resolve) => {
       resolveBody = resolve;
@@ -61,59 +54,65 @@ describe('DetailPanel on-demand task body (task 11)', () => {
         requested.push(url);
         if (url.startsWith('/api/task-document')) return pendingBody;
         if (url.startsWith('/api/notes/folder')) {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            json: async () => ({
-              repo: 'repo-a',
-              master: '260712_reader-priority',
-              path: '',
-              entries: [],
-              total: 0,
-              offset: 0,
-              limit: 200,
-              remaining: 0,
-              exists: true,
-              reason: null,
-            }),
-          } as unknown as Response);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                repo: 'repo-a',
+                master: '260712_reader-priority',
+                path: '',
+                entries: [],
+                total: 0,
+                offset: 0,
+                limit: 200,
+                remaining: 0,
+                exists: true,
+                reason: null,
+              }),
+              { status: 200 },
+            ),
+          );
         }
         if (url.startsWith('/api/notes/resolve')) {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            json: async () => ({ repo: 'repo-a', master: 'm', resolutions: [] }),
-          } as unknown as Response);
+          return Promise.resolve(
+            new Response(JSON.stringify({ repo: 'repo-a', master: 'm', resolutions: [] }), {
+              status: 200,
+            }),
+          );
         }
         if (url.startsWith('/api/role-launch/reports')) {
-          return Promise.resolve({
-            ok: true,
-            status: 200,
-            json: async () => ({
-              repo: 'repo-a',
-              master: 'm',
-              doc: '',
-              reports: [],
-              total: 0,
-              explorer: null,
-            }),
-          } as unknown as Response);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                repo: 'repo-a',
+                master: 'm',
+                doc: '',
+                reports: [],
+                total: 0,
+                explorer: null,
+              }),
+              { status: 200 },
+            ),
+          );
         }
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => ({
-            counters: {
-              code: { files: 0, insertions: 0, deletions: 0 },
-              memory: { files: 0, insertions: 0, deletions: 0 },
-            },
-          }),
-        } as unknown as Response);
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              counters: {
+                code: { files: 0, insertions: 0, deletions: 0 },
+                memory: { files: 0, insertions: 0, deletions: 0 },
+              },
+            }),
+            { status: 200 },
+          ),
+        );
       }),
     );
 
     const { getByText, queryByText } = render(
-      <DetailPanel selectedId={lifecycleId} onOpenChangeSet={vi.fn()} />,
+      <DetailPanel
+        selectedId="taskdoc:agents-remember/260712_reader-priority/01_reader.json"
+        onOpenChangeSet={vi.fn()}
+      />,
     );
 
     expect(getByText('Summary objective.')).toBeTruthy();
@@ -123,11 +122,11 @@ describe('DetailPanel on-demand task body (task 11)', () => {
     expect(requested.some((url) => url.startsWith('/api/changeset/'))).toBe(false);
     expect(requested.some((url) => url.startsWith('/api/notes/folder'))).toBe(false);
 
-    resolveBody({
-      ok: true,
-      status: 200,
-      json: async () => ({ ...summary, objective: 'Complete objective.' }),
-    } as unknown as Response);
+    resolveBody(
+      new Response(JSON.stringify({ ...summary.summary, objective: 'Complete objective.' }), {
+        status: 200,
+      }),
+    );
 
     await waitFor(() => expect(getByText('Complete objective.')).toBeTruthy());
     expect(queryByText('Loading complete task document…')).toBeNull();
@@ -138,25 +137,35 @@ describe('DetailPanel on-demand task body (task 11)', () => {
   });
 
   it('renders the complete on-demand task-document body while retaining its summary', async () => {
-    const summary = taskDoc({
-      kind: 'subTask',
-      docPath: '/tasks/agents-remember/260628_operations-integration/16_reader.json',
+    const summary = taskEntry({
+      id: '1',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('agents-remember/260628_operations-integration/16_reader.json'),
       title: 'Reader residual',
-      objective: 'Summary objective.',
-      steps: [
-        {
-          id: 'S1',
-          title: 'Render once',
-          status: 'inProgress',
-          substeps: [],
-          noteTruncated: false,
-          outcomeTruncated: false,
-        },
-      ],
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        objective: 'Summary objective.',
+        steps: [
+          {
+            id: 'S1',
+            title: 'Render once',
+            status: 'inProgress',
+            substeps: [],
+            noteTruncated: false,
+            outcomeTruncated: false,
+          },
+        ],
+      }),
     });
-    seedTaskDocuments([summary]);
+    seedTaskEntries([summary]);
     const body = {
-      ...summary,
+      ...summary.summary,
       objective: 'Complete objective.',
       requirements: ['Show the complete body.'],
       design: 'Hydrate the visible reader first.',
@@ -175,6 +184,7 @@ describe('DetailPanel on-demand task body (task 11)', () => {
           at: '2026-07-10',
           decision: 'Use the on-demand body.',
           rationale: 'It is authoritative.',
+          product_record: false,
         },
       ],
       openQuestions: ['Does every reader entry path share this state?'],
@@ -185,23 +195,22 @@ describe('DetailPanel on-demand task body (task 11)', () => {
       'fetch',
       vi.fn(async (url: string) => {
         if (url.startsWith('/api/task-document')) {
-          return { ok: true, status: 200, json: async () => body } as unknown as Response;
+          return new Response(JSON.stringify(body), { status: 200 });
         }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return new Response(
+          JSON.stringify({
             counters: {
               code: { files: 0, insertions: 0, deletions: 0 },
               memory: { files: 0, insertions: 0, deletions: 0 },
             },
           }),
-        } as unknown as Response;
+          { status: 200 },
+        );
       }),
     );
 
     const { container, getByTestId, getByText, getAllByText } = render(
-      <DetailPanel selectedId={`taskdoc:${summary.docPath}`} />,
+      <DetailPanel selectedId={taskEntrySelectionKey(summary.key)} />,
     );
     expect(getByText('Summary objective.')).toBeTruthy();
     await waitFor(() => expect(getByText('Complete objective.')).toBeTruthy());
@@ -224,23 +233,34 @@ describe('DetailPanel on-demand task body (task 11)', () => {
   });
 
   it('shows the available summary when the on-demand task-document body is absent', async () => {
-    const doc = taskDoc({
-      kind: 'subTask',
-      docPath: '/tasks/agents-remember/260628_operations-integration/17_reader.json',
-      objective: 'Available summary objective.',
+    const doc = taskEntry({
+      id: '1',
+      title: 'doc',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('agents-remember/260628_operations-integration/17_reader.json'),
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        objective: 'Available summary objective.',
+      }),
     });
-    seedTaskDocuments([doc]);
+    seedTaskEntries([doc]);
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
         if (url.startsWith('/api/task-document')) {
-          return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+          return new Response(JSON.stringify({}), { status: 404 });
         }
-        return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+        return new Response(JSON.stringify({}), { status: 200 });
       }),
     );
 
-    const { getByText } = render(<DetailPanel selectedId={`taskdoc:${doc.docPath}`} />);
+    const { getByText } = render(<DetailPanel selectedId={taskEntrySelectionKey(doc.key)} />);
     await waitFor(() =>
       expect(
         getByText('Full task document details are unavailable; showing the available summary.'),
@@ -250,44 +270,51 @@ describe('DetailPanel on-demand task body (task 11)', () => {
   });
 
   it('reuses an unchanged task body and refetches when its revision changes', async () => {
-    const summary = taskDoc({
-      kind: 'subTask',
-      docPath: '/tasks/agents-remember/260712_reader-priority/02_cache.json',
-      bodyRevision: 'revision-1',
-      objective: 'Summary objective.',
+    const summary = taskEntry({
+      id: '1',
+      title: 'doc',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('agents-remember/260712_reader-priority/02_cache.json'),
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        bodyRevision: 'revision-1',
+        objective: 'Summary objective.',
+      }),
     });
-    seedTaskDocuments([summary]);
+    seedTaskEntries([summary]);
     const fetchMock = vi.fn(async (url: string) => {
       if (url.startsWith('/api/task-document')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ objective: 'Complete objective.' }),
-        } as unknown as Response;
+        return new Response(
+          JSON.stringify({ ...summary.summary, objective: 'Complete objective.' }),
+          { status: 200 },
+        );
       }
       if (url.includes('/api/role-launch/reports')) {
         // The server contract names the report rows; the generic catch-all
         // below is not a well-formed reports payload.
-        return {
-          ok: true,
+        return new Response(JSON.stringify({ reports: [], total: 0, explorer: null }), {
           status: 200,
-          json: async () => ({ reports: [], total: 0, explorer: null }),
-        } as unknown as Response;
+        });
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
+      return new Response(
+        JSON.stringify({
           repo: 'repo-a',
           master: '260712_reader-priority',
           notes: [],
           truncated: false,
         }),
-      } as unknown as Response;
+        { status: 200 },
+      );
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const selection = `taskdoc:${summary.docPath}`;
+    const selection = taskEntrySelectionKey(summary.key);
     const { getByText, rerender } = render(<DetailPanel selectedId={selection} />);
     await waitFor(() => expect(getByText('Complete objective.')).toBeTruthy());
     rerender(<DetailPanel selectedId={selection} />);
@@ -295,7 +322,9 @@ describe('DetailPanel on-demand task body (task 11)', () => {
       fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/task-document')),
     ).toHaveLength(1);
 
-    seedTaskDocuments([{ ...summary, bodyRevision: 'revision-2' }]);
+    seedTaskEntries([
+      { ...summary, summary: taskSummary({ ...summary.summary, bodyRevision: 'revision-2' }) },
+    ]);
     rerender(<DetailPanel selectedId={selection} />);
     await waitFor(() =>
       expect(

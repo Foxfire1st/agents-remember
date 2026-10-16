@@ -16,7 +16,8 @@ from fastapi.responses import JSONResponse
 
 from agents_remember.application.role_launch_context import LEAF_ROLES
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
-from agents_remember.cli.paseo_status import AgentReading, read_agent, resume_agent, status_row
+from agents_remember.cli.paseo_status import AgentReading, read_agent, status_row
+from agents_remember.cli.role_activity import resume_role_agent
 from agents_remember.cli.role_held_messages import (
     end_waiting_as,
     record_lines,
@@ -385,7 +386,7 @@ def _revive_agent(
             status_code=409,
             detail=f"This execution cannot be revived: {status.get('detail')}.",
         )
-    outcome = resume_agent(config, agent_id)
+    outcome = resume_role_agent(config, receipt)
     if not outcome.reading.reachable:
         # The read above was answered and its row is written; whether the runtime resumed the
         # session is not known.

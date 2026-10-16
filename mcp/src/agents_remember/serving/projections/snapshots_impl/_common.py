@@ -11,12 +11,14 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterable
-from dataclasses import dataclass
 from datetime import datetime
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from agents_remember.controlplane.attention_dismissals import AttentionObservation
 from agents_remember.observer.task_document_cache import TaskDocumentPayloadCache
+from agents_remember.serving.projections.task_body_generation import body_input
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA
 from agents_remember.worktrees.task_resolver import ARCHIVE_DIR, ENCLOSURES_DIR
 
@@ -31,14 +33,6 @@ _task_doc_cache = TaskDocumentPayloadCache()
 # tick so it cannot grow unbounded. Keyed by enclosure-contract path.
 STATUS_PAYLOAD_TTL_SECONDS = 8.0
 _status_payload_cache: dict[str, tuple[datetime, dict[str, Any] | None]] = {}
-
-
-@dataclass(frozen=True)
-class _TaskDocumentLifecycleMaps:
-    lifecycle_by_enclosure: dict[str, str]
-    lifecycle_by_dir: dict[Path, str]
-    lifecycle_by_root_doc: dict[Path, str]
-    lifecycle_by_leaf_doc: dict[tuple[Path, str], str]
 
 
 def _iter_task_document_payloads(
@@ -132,7 +126,7 @@ def _outside_archive_and_enclosures(path: Path) -> bool:
 
 def _walked_directories(directory: Path) -> list[Path]:
     try:
-        with os.scandir(directory) as entries:
+        with body_input(directory), os.scandir(directory) as entries:
             return [
                 directory / entry.name for entry in entries if entry.is_dir(follow_symlinks=False)
             ]
@@ -143,7 +137,7 @@ def _walked_directories(directory: Path) -> list[Path]:
 def _json_entries(directory: Path) -> list[Path]:
     """Every entry named ``*.json``, of any type; the reader accepts or refuses it."""
     try:
-        with os.scandir(directory) as entries:
+        with body_input(directory), os.scandir(directory) as entries:
             return [directory / entry.name for entry in entries if entry.name.endswith(".json")]
     except OSError:
         return []
@@ -151,7 +145,8 @@ def _json_entries(directory: Path) -> list[Path]:
 
 def _read_json(path: Path) -> dict[str, object] | None:  # pragma: no cover
     try:
-        text = path.read_text(encoding="utf-8")
+        with body_input(path):
+            text = path.read_text(encoding="utf-8")
     except OSError:
         return None
     try:
@@ -197,3 +192,30 @@ def _current_phase_text(current: Any) -> str | None:  # pragma: no cover
     if provider and action:
         return f"{provider} {action}"
     return str(provider or action) if (provider or action) else None
+
+
+def surface_paths(root: Path, pattern: str, observation: AttentionObservation | None) -> list[Path]:
+    """Enumerate fixed source levels; a failed listing cannot prove a source gone."""
+    parts = pattern.split("/")
+
+    def descend(directory: Path, index: int) -> list[Path]:
+        try:
+            with os.scandir(directory) as entries:
+                result: list[Path] = []
+                for entry in entries:
+                    if not fnmatchcase(entry.name, parts[index]):
+                        continue
+                    path = directory / entry.name
+                    if index == len(parts) - 1:
+                        result.append(path)
+                    elif entry.is_dir(follow_symlinks=False):
+                        result.extend(descend(path, index + 1))
+                return result
+        except FileNotFoundError:
+            return []
+        except OSError:
+            if observation is not None:
+                observation.complete = False
+            return []
+
+    return sorted(descend(root, 0))

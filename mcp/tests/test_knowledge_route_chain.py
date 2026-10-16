@@ -35,15 +35,6 @@ from agents_remember.models.knowledge_files.documents import (
 )
 from agents_remember.models.tokens import count_response_tokens
 from agents_remember.models.tools.tool_answer import bound_for
-from agents_remember.observer import (
-    AmbientLifecycle,
-    EventStore,
-    install_ambient,
-    new_ulid,
-    observer_root,
-    reset_ambient,
-)
-from agents_remember.observer.ambient import AmbientTiming
 from knowledge_index_test_support import commit_all, init_repository, write_document
 from test_knowledge_leaf_read import (
     SEED,
@@ -520,12 +511,6 @@ def lifecycle(tmp_path: Path) -> Any:
         coordination_root=config.coordination_root,
         storage_mode="external",
     )
-    reset_ambient()
-    ambient = AmbientLifecycle(
-        EventStore(observer_root(config)), timing=AmbientTiming(heartbeat_seconds=3600)
-    )
-    ambient.attach(new_ulid(), enclosure=str(tmp_path / "contract.json"))
-    install_ambient(ambient)
 
     def read(paths: list[str]) -> dict[str, Any]:
         return read_ar_files_tool(
@@ -536,7 +521,6 @@ def lifecycle(tmp_path: Path) -> Any:
         )
 
     yield root, read
-    reset_ambient()
 
 
 def _served(rows: list[dict[str, Any]]) -> list[tuple[str, str]]:

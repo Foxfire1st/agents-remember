@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,18 +32,20 @@ class OrderFields:
 def _reference(master: TaskDocument, path: Path, task: MasterOrderTask) -> TaskDocumentRef:
     return TaskDocumentRef(
         repository=master.repo,
-        path=f"{path.parent.name}/{Path(task.file).with_suffix('.json').name}"
+        path=posixpath.normpath(
+            f"{path.parent.name}/{Path(task.file).with_suffix('.json').as_posix()}"
+        )
         if task.file
         else f"{path.parent.name}/{path.name}",
     )
 
 
-def _dependency(path: Path, task: MasterOrderTask) -> TaskDependencyNode:
+def _dependency(master: TaskDocument, path: Path, task: MasterOrderTask) -> TaskDependencyNode:
     return TaskDependencyNode(
         id=task.id,
         title=task.title,
-        status="gone" if task.status == "abandoned" else task.status,
-        docPath=str(path.parent / Path(task.file).with_suffix(".json")) if task.file else None,
+        reference=_reference(master, path, task) if task.file else None,
+        gone=task.status == "gone",
     )
 
 
@@ -96,7 +99,9 @@ def build_order_fields(documents: Mapping[Path, TaskDocument]) -> dict[Path, Ord
         if master.kind != "master" or master.is_sprint:
             continue
         listed = {
-            path.parent / Path(row.file).with_suffix(".json") for row in master.subTasks if row.file
+            Path(posixpath.normpath(str(path.parent / Path(row.file).with_suffix(".json"))))
+            for row in master.subTasks
+            if row.file
         }
         children = {
             child.id: child
@@ -114,9 +119,17 @@ def build_order_fields(documents: Mapping[Path, TaskDocument]) -> dict[Path, Ord
                 successors[dependency].append(task)
         for task in order.tasks:
             if task.file:
-                result[path.parent / Path(task.file).with_suffix(".json")] = OrderFields(
-                    waits_for=tuple(_dependency(path, tasks[ref]) for ref in task.waits_for),
-                    needed_by=tuple(_dependency(path, item) for item in successors[task.id]),
+                result[
+                    Path(
+                        posixpath.normpath(str(path.parent / Path(task.file).with_suffix(".json")))
+                    )
+                ] = OrderFields(
+                    waits_for=tuple(
+                        _dependency(master, path, tasks[ref]) for ref in task.waits_for
+                    ),
+                    needed_by=tuple(
+                        _dependency(master, path, item) for item in successors[task.id]
+                    ),
                 )
     return result
 
@@ -126,7 +139,11 @@ def read_order_fields(path: Path, doc: TaskDocument) -> dict[Path, OrderFields]:
     master_path = (
         path
         if doc.kind == "master"
-        else (path.parent / Path(doc.master or "task.md").with_suffix(".json"))
+        else Path(
+            posixpath.normpath(
+                str(path.parent / Path(doc.master or "task.md").with_suffix(".json"))
+            )
+        )
     )
     documents = {path: doc}
     if master_path != path:
@@ -144,7 +161,11 @@ def read_order_fields(path: Path, doc: TaskDocument) -> dict[Path, OrderFields]:
     if master.kind != "master" or master.is_sprint:
         return {}
     for row in master.subTasks:
-        child_path = master_path.parent / Path(row.file).with_suffix(".json") if row.file else None
+        child_path = (
+            Path(posixpath.normpath(str(master_path.parent / Path(row.file).with_suffix(".json"))))
+            if row.file
+            else None
+        )
         if child_path is None or child_path in documents:
             continue
         payload = _read_json(child_path)

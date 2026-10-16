@@ -1,59 +1,29 @@
+import { taskReferenceKey } from "../data/taskReference";
 // DEV-only: made-up task documents rich enough to draw every block of the three task-page
 // skeletons (MIK-R127 rule 10) — a sprint with masters in every state, a master with tasks in
 // work, waiting, completed and abandoned, and a task with steps, a review round, decisions,
 // references and a report. All text is invented; nothing here is read from a real task.
 import type {
   TaskDecisionNode,
-  TaskDocNode,
+  TaskEntry,
+  TaskSummary,
   TaskExecutionNodeView,
   TaskReviewStateNode,
   TaskStepNode,
-  TaskSubTaskRefNode,
 } from '../types/projection';
+import { taskEntry, taskSummary } from '../test/fixtures/wire';
 
 export const RICH_REPO = 'sandbox-app';
 const SPRINT_DIR = 'sbx-sprint';
 const MASTER_DIR = 'sbx-text-helpers';
 
-const docPath = (dir: string, file: string): string => `/tasks/${RICH_REPO}/${dir}/${file}.json`;
+const docPath = (dir: string, file: string): string => `${dir}/${file}.json`;
 
 export const RICH_DOC_PATHS = {
   sprint: docPath(SPRINT_DIR, 'task'),
   master: docPath(MASTER_DIR, 'task'),
   task: docPath(MASTER_DIR, '01_slugify'),
 };
-
-function base(
-  over: Partial<TaskDocNode> & Pick<TaskDocNode, 'id' | 'title' | 'docPath'>,
-): TaskDocNode {
-  return {
-    bodyRevision: 'rich-1',
-    codeExamples: [],
-    createdAt: '2026-10-02T00:00:00+02:00',
-    decisions: [],
-    executionWaves: [],
-    form: 'task',
-    headerNotes: [],
-    headerNotesTotal: over.headerNotes?.length ?? 0,
-    kind: 'subTask',
-    objective: '',
-    openQuestions: [],
-    orchestrates: [],
-    references: [],
-    repository: RICH_REPO,
-    requirements: [],
-    seats: [],
-    sections: [],
-    status: 'planning',
-    statusNoteTruncated: false,
-    steps: [],
-    stepsDone: 0,
-    stepsTotal: 0,
-    subTasks: [],
-    type: 'SubTask (sandbox fixture)',
-    ...over,
-  };
-}
 
 function step(
   id: string,
@@ -99,7 +69,7 @@ interface LeafSpec {
   number: string;
   slug: string;
   title: string;
-  status: string;
+  stage: TaskEntry['stage'];
   requirement: string;
   steps: TaskStepNode[];
   reviewState?: TaskReviewStateNode;
@@ -119,7 +89,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L1',
     slug: '01_slugify',
     title: 'Add slugify() and its test',
-    status: 'inProgress',
+    stage: 'started',
     requirement: 'SBX-R01',
     steps: [
       step('S1', 'Write `textkit/slug.py` with `slugify(text: str) -> str`', 'done', {
@@ -185,7 +155,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L2',
     slug: '02_word-count',
     title: 'Add word_count() and its test',
-    status: 'inProgress',
+    stage: 'started',
     requirement: 'SBX-R02',
     steps: plainSteps(5, 1),
     reviewState: review({ round: 1, pending: true }),
@@ -194,7 +164,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L3',
     slug: '03_truncate',
     title: 'Add truncate() with an ellipsis and its test',
-    status: 'inProgress',
+    stage: 'started',
     requirement: 'SBX-R03',
     steps: plainSteps(4, 0),
   },
@@ -202,7 +172,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L4',
     slug: '04_wrap',
     title: 'Add wrap() for fixed-width lines',
-    status: 'planning',
+    stage: 'planned',
     requirement: 'SBX-R04',
     steps: plainSteps(5, 0),
   },
@@ -210,7 +180,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L5',
     slug: '05_dedent',
     title: 'Add dedent() that keeps relative indentation',
-    status: 'planning',
+    stage: 'planned',
     requirement: 'SBX-R05',
     steps: plainSteps(4, 0),
   },
@@ -218,7 +188,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L6',
     slug: '06_squeeze',
     title: 'Add squeeze() for repeated blank lines',
-    status: 'planning',
+    stage: 'planned',
     requirement: 'SBX-R06',
     steps: plainSteps(3, 0),
   },
@@ -226,7 +196,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L7',
     slug: '07_title-case',
     title: 'Keep title_case() stable under the new helpers',
-    status: 'Completed',
+    stage: 'completed',
     requirement: 'SBX-R07',
     steps: plainSteps(3, 3),
   },
@@ -234,7 +204,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L8',
     slug: '08_strip-accents',
     title: 'Add strip_accents() for Latin letters',
-    status: 'Completed',
+    stage: 'completed',
     requirement: 'SBX-R08',
     steps: plainSteps(4, 4),
   },
@@ -242,7 +212,7 @@ const LEAVES: LeafSpec[] = [
     number: 'L9',
     slug: '09_initials',
     title: 'Add initials() of a name',
-    status: 'Completed',
+    stage: 'completed',
     requirement: 'SBX-R09',
     steps: plainSteps(3, 3),
   },
@@ -250,191 +220,209 @@ const LEAVES: LeafSpec[] = [
     number: 'L10',
     slug: '10_pig-latin',
     title: 'Add pig_latin() as a demonstration',
-    status: 'abandoned',
+    stage: 'aborted',
     requirement: 'SBX-R10',
     steps: plainSteps(3, 0),
   },
 ];
 
-function leafDoc(leaf: LeafSpec): TaskDocNode {
+function leafDoc(leaf: LeafSpec): TaskEntry {
   // As the projection counts: major steps only; nested detail remains on its step.
   const declared = leaf.steps;
   const done = declared.filter((entry) => entry.status === 'done').length;
   const packet = `requirements/${leaf.requirement}-v1.md`;
-  return base({
+  return taskEntry({
     id: `SBX-M1-${leaf.number}`,
     title: leaf.title,
-    docPath: docPath(MASTER_DIR, leaf.slug),
-    status: leaf.status,
-    completedAt: leaf.status === 'Completed'
-      ? `2026-10-${leaf.number.slice(1).padStart(2, '0')}T12:00:00Z` : undefined,
-    steps: leaf.steps,
+    reference: { repository: RICH_REPO, path: docPath(MASTER_DIR, leaf.slug) },
+    stage: leaf.stage,
+    parent: taskReferenceKey(masterRef(MASTER_DIR)),
+    children: [],
     stepsDone: done,
     stepsTotal: declared.length,
-    reviewState: leaf.reviewState,
-    objective: `Made-up objective of ${leaf.title.toLowerCase()}.`,
-    requirements: [`[${leaf.requirement}@v1](${packet}) — sole owned primary.`],
-    headerNotes: [
-      { label: 'Master', value: '[SBX-M1](task.md)' },
-      { label: 'Primary requirement', value: `[${leaf.requirement}@v1](${packet})` },
-    ],
+    summary: taskSummary({
+      bodyRevision: 'rich-1',
+      createdAt: '2026-10-02T00:00:00+02:00',
+      type: 'SubTask (sandbox fixture)',
+      completedAt: leaf.stage === 'completed'
+        ? `2026-10-${leaf.number.slice(1).padStart(2, '0')}T12:00:00Z` : undefined,
+      steps: leaf.steps,
+      reviewState: leaf.reviewState,
+      objective: `Made-up objective of ${leaf.title.toLowerCase()}.`,
+      requirements: [`[${leaf.requirement}@v1](${packet}) — sole owned primary.`],
+      headerNotes: [
+        { label: 'Master', value: '[SBX-M1](task.md)' },
+        { label: 'Primary requirement', value: `[${leaf.requirement}@v1](${packet})` },
+      ],
+    }),
   });
 }
 
-function richTask(): TaskDocNode {
+function richTask(): TaskEntry {
   const leaf = LEAVES[0];
   const doc = leafDoc(leaf);
   return {
     ...doc,
-    statusNote:
-      'In work since 2026-10-05. Review round 4 runs under the raised limit; two findings of the sealed list remain open and both concern the boundary cases of the packet. The leaf waits for nothing and lands before L4.',
-    headerNotes: [
-      ...doc.headerNotes,
-      {
-        label: 'Dependencies',
-        value:
-          'Waits for nothing. L4 (wrap) and L5 (dedent) change the same package: either order, the later one keeps the other change.',
-      },
-      { label: 'Stage', value: 'Sandbox run, first wave' },
-      {
-        label: 'Authority',
-        value:
-          '[Sandbox direction](notes/SANDBOX-DIRECTION.md) S1, S2; the architect of the sandbox run, as recorded in notes/STATE.md of this made-up master',
-      },
-    ],
-    headerNotesTotal: 5,
-    objective: [
-      '- `textkit/slug.py` provides `slugify(text: str) -> str`.',
-      '- It lowercases the text and replaces every run of characters other than ASCII letters and digits with one hyphen.',
-      '- Leading and trailing hyphens are removed, so a text of punctuation alone gives an empty string.',
-      '- An argument that is not a string raises `TypeError`; nothing is coerced.',
-      '- `tests/test_slug.py` covers the conforming, the non-conforming and the boundary example of the packet.',
-    ].join('\n'),
-    requirements: [
-      '[SBX-R01@v1](requirements/SBX-R01-v1.md) — sole owned primary.',
-      'The existing helper `title_case()` and its tests stay unchanged (preservation boundary of the packet).',
-    ],
-    design:
-      'One pure function and no state. The text is lowercased first, then one regular expression replaces every run of other characters.\n\nThe hyphens at both ends are stripped last, which also settles the empty and the punctuation-only text.',
-    codeExamples: [
-      {
-        id: 'E1',
-        title: 'The one expression',
-        distinctChange: 'collapses a run instead of replacing each character',
-        why: 'two hyphens in a row are the non-conforming example of the packet',
-        language: 'python',
-        snippet: 'return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")',
-      },
-      {
-        id: 'E2',
-        title: 'The type guard',
-        distinctChange: 'raises instead of coercing',
-        why: 'the failure rule of the packet',
-        language: 'python',
-        snippet: 'if not isinstance(text, str):\n    raise TypeError("text must be a string")',
-      },
-    ],
-    decisions: decisions(7, 'slugify'),
-    openQuestions: ['Does a digit-only text keep its leading zeros? The packet gives no example.'],
-    references: [
-      '[Primary packet](requirements/SBX-R01-v1.md)',
-      '[Sandbox direction](notes/SANDBOX-DIRECTION.md)',
-      '[Master](task.md)',
-      'The standard library documentation of `re.sub`, read on 2026-10-04',
-    ],
-    sections: [
-      {
-        kind: 'freeform',
-        heading: 'Notes on the boundary cases',
-        body: 'An empty text and a text of punctuation alone both give an empty string.\n\n| Input | Output |\n| --- | --- |\n| `""` | `""` |\n| `"!!!"` | `""` |\n| `" A  b "` | `"a-b"` |',
-      },
-      {
-        kind: 'freeform',
-        heading: 'What the review asked',
-        body: 'Round 1 asked for the punctuation-only case. Round 2 asked for the type guard. Both are repaired in the candidate of round 4.',
-      },
-    ],
+    summary: taskSummary({
+      ...doc.summary,
+      statusNote:
+        'In work since 2026-10-05. Review round 4 runs under the raised limit; two findings of the sealed list remain open and both concern the boundary cases of the packet. The leaf waits for nothing and lands before L4.',
+      headerNotes: [
+        ...(doc.summary?.headerNotes ?? []),
+        {
+          label: 'Dependencies',
+          value:
+            'Waits for nothing. L4 (wrap) and L5 (dedent) change the same package: either order, the later one keeps the other change.',
+        },
+        { label: 'Stage', value: 'Sandbox run, first wave' },
+        {
+          label: 'Authority',
+          value:
+            '[Sandbox direction](notes/SANDBOX-DIRECTION.md) S1, S2; the architect of the sandbox run, as recorded in notes/STATE.md of this made-up master',
+        },
+      ],
+      headerNotesTotal: 5,
+      objective: [
+        '- `textkit/slug.py` provides `slugify(text: str) -> str`.',
+        '- It lowercases the text and replaces every run of characters other than ASCII letters and digits with one hyphen.',
+        '- Leading and trailing hyphens are removed, so a text of punctuation alone gives an empty string.',
+        '- An argument that is not a string raises `TypeError`; nothing is coerced.',
+        '- `tests/test_slug.py` covers the conforming, the non-conforming and the boundary example of the packet.',
+      ].join('\n'),
+      requirements: [
+        '[SBX-R01@v1](requirements/SBX-R01-v1.md) — sole owned primary.',
+        'The existing helper `title_case()` and its tests stay unchanged (preservation boundary of the packet).',
+      ],
+      design:
+        'One pure function and no state. The text is lowercased first, then one regular expression replaces every run of other characters.\n\nThe hyphens at both ends are stripped last, which also settles the empty and the punctuation-only text.',
+      codeExamples: [
+        {
+          id: 'E1',
+          title: 'The one expression',
+          distinctChange: 'collapses a run instead of replacing each character',
+          why: 'two hyphens in a row are the non-conforming example of the packet',
+          language: 'python',
+          snippet: 'return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")',
+        },
+        {
+          id: 'E2',
+          title: 'The type guard',
+          distinctChange: 'raises instead of coercing',
+          why: 'the failure rule of the packet',
+          language: 'python',
+          snippet: 'if not isinstance(text, str):\n    raise TypeError("text must be a string")',
+        },
+      ],
+      decisions: decisions(7, 'slugify'),
+      openQuestions: [
+        'Does a digit-only text keep its leading zeros? The packet gives no example.',
+      ],
+      references: [
+        '[Primary packet](requirements/SBX-R01-v1.md)',
+        '[Sandbox direction](notes/SANDBOX-DIRECTION.md)',
+        '[Master](task.md)',
+        'The standard library documentation of `re.sub`, read on 2026-10-04',
+      ],
+      sections: [
+        {
+          kind: 'freeform',
+          heading: 'Notes on the boundary cases',
+          body: 'An empty text and a text of punctuation alone both give an empty string.\n\n| Input | Output |\n| --- | --- |\n| `""` | `""` |\n| `"!!!"` | `""` |\n| `" A  b "` | `"a-b"` |',
+        },
+        {
+          kind: 'freeform',
+          heading: 'What the review asked',
+          body: 'Round 1 asked for the punctuation-only case. Round 2 asked for the type guard. Both are repaired in the candidate of round 4.',
+        },
+      ],
+    }),
   };
 }
 
 // --------------------------------------------------------------------------- the master
 
-function richMaster(): TaskDocNode {
-  const rows: TaskSubTaskRefNode[] = LEAVES.map((leaf) => ({
-    number: `SBX-M1-${leaf.number}`,
-    name: leaf.title,
-    file: `${leaf.slug}.md`,
-    status: leaf.status,
-    scope: `${leaf.requirement}@v1`,
-  }));
-  return base({
+const MASTER_PRODUCT_RECORD: TaskDecisionNode = {
+  at: '2026-10-10T12:00:00Z',
+  decision: 'Finalize task lifecycle.',
+  rationale: 'Made-up retained product record for the sandbox only.',
+  product_record: true,
+};
+
+function richMaster(): TaskEntry {
+  return taskEntry({
     id: 'SBX-M1',
     title: 'Sandbox master: text helpers for the sandbox app',
-    docPath: RICH_DOC_PATHS.master,
-    kind: 'master',
-    form: 'master',
-    status: 'inProgress',
-    type: 'Master (text helpers)',
-    executionNature: 'organizational',
-    subTasks: rows,
-    statusNote:
-      'In work, first wave. Three leaves are open at once because they touch different modules; the fourth waits for the review of L1, whose boundary rules the later helpers reuse. Nothing of this master is deferred to another one.',
-    headerNotes: [
-      { label: 'Parent portfolio', value: '[SBX-SPRINT](../sbx-sprint/task.md)' },
-      { label: 'Source intake', value: 'Sandbox fixture of 2026-10-02' },
-      {
-        label: 'Authoring authority',
-        value: '[Sandbox direction](notes/SANDBOX-DIRECTION.md) S1–S4',
-      },
-      {
-        label: 'Execution boundary',
-        value:
-          'Implementation go given for the first wave. Each leaf owns one requirement and one module; a leaf that needs a second module asks the manager of the sandbox run before it edits it, and the answer is written into its decision log.',
-      },
-    ],
-    headerNotesTotal: 4,
-    objective: [
-      '- Add small, independent text helpers to the sandbox app, one per leaf.',
-      '- Every helper is a pure function with its own test module.',
-      '- The work is disposable: it exists so that role agents started from the sandbox have a real task.',
-    ].join('\n'),
-    requirements: [
-      '[SBX-R01@v1](requirements/SBX-R01-v1.md) — slugify, owned by L1.',
-      '[SBX-R02@v1](requirements/SBX-R02-v1.md) — word_count, owned by L2.',
-      'Every further helper has its own packet under `requirements/`, registered in `requirements/README.md`.',
-    ],
-    decisions: [
-      ...decisions(7, 'text helpers'),
-      { at: '2026-10-10T12:00:00Z', decision: 'Finalize task lifecycle.',
-        rationale: 'Made-up retained product record for the sandbox only.', product_record: true },
-    ],
-    references: [
-      '[Sandbox direction](notes/SANDBOX-DIRECTION.md)',
-      '[State of the run](notes/STATE.md)',
-    ],
-    sections: [
-      {
-        kind: 'subTasks',
-        heading: 'Leaves',
-        body: 'One leaf per helper. A leaf lands on its focused tests; the whole suite runs once when the master ends.',
-      },
-      {
-        kind: 'sharedDecisions',
-        heading: 'Shared decisions',
-        body: 'Decisions that bind more than one leaf are recorded here and not in a leaf.',
-      },
-      {
-        kind: 'freeform',
-        heading: 'Execution order',
-        body: '1. L1, L2 and L3 in the first wave.\n2. L4 after the review of L1.\n3. L5 and L6 last.',
-      },
-      {
-        kind: 'freeform',
-        heading: 'Risks',
-        body: '| Risk | Answer |\n| --- | --- |\n| Two helpers edit `textkit/__init__.py` | the later leaf keeps both lines |\n| A helper grows a dependency | refused by the packet |',
-      },
-    ],
-    discardedCount: 0,
+    reference: { repository: RICH_REPO, path: RICH_DOC_PATHS.master },
+    stage: 'started',
+    parent: taskReferenceKey(masterRef(SPRINT_DIR)),
+    children: LEAVES.map((leaf) => ({
+      repository: RICH_REPO,
+      path: docPath(MASTER_DIR, leaf.slug),
+    })).map(taskReferenceKey),
+    stepsDone: 0,
+    stepsTotal: 0,
+    summary: taskSummary({
+      bodyRevision: 'rich-1',
+      createdAt: '2026-10-02T00:00:00+02:00',
+      kind: 'master',
+      form: 'master',
+      type: 'Master (text helpers)',
+      executionNature: 'organizational',
+      statusNote:
+        'In work, first wave. Three leaves are open at once because they touch different modules; the fourth waits for the review of L1, whose boundary rules the later helpers reuse. Nothing of this master is deferred to another one.',
+      headerNotes: [
+        { label: 'Parent portfolio', value: '[SBX-SPRINT](../sbx-sprint/task.md)' },
+        { label: 'Source intake', value: 'Sandbox fixture of 2026-10-02' },
+        {
+          label: 'Authoring authority',
+          value: '[Sandbox direction](notes/SANDBOX-DIRECTION.md) S1–S4',
+        },
+        {
+          label: 'Execution boundary',
+          value:
+            'Implementation go given for the first wave. Each leaf owns one requirement and one module; a leaf that needs a second module asks the manager of the sandbox run before it edits it, and the answer is written into its decision log.',
+        },
+      ],
+      headerNotesTotal: 4,
+      objective: [
+        '- Add small, independent text helpers to the sandbox app, one per leaf.',
+        '- Every helper is a pure function with its own test module.',
+        '- The work is disposable: it exists so that role agents started from the sandbox have a real task.',
+      ].join('\n'),
+      requirements: [
+        '[SBX-R01@v1](requirements/SBX-R01-v1.md) — slugify, owned by L1.',
+        '[SBX-R02@v1](requirements/SBX-R02-v1.md) — word_count, owned by L2.',
+        'Every further helper has its own packet under `requirements/`, registered in `requirements/README.md`.',
+      ],
+      decisions: [...decisions(7, 'text helpers'), MASTER_PRODUCT_RECORD],
+      references: [
+        '[Sandbox direction](notes/SANDBOX-DIRECTION.md)',
+        '[State of the run](notes/STATE.md)',
+      ],
+      sections: [
+        {
+          kind: 'subTasks',
+          heading: 'Leaves',
+          body: 'One leaf per helper. A leaf lands on its focused tests; the whole suite runs once when the master ends.',
+        },
+        {
+          kind: 'sharedDecisions',
+          heading: 'Shared decisions',
+          body: 'Decisions that bind more than one leaf are recorded here and not in a leaf.',
+        },
+        {
+          kind: 'freeform',
+          heading: 'Execution order',
+          body: '1. L1, L2 and L3 in the first wave.\n2. L4 after the review of L1.\n3. L5 and L6 last.',
+        },
+        {
+          kind: 'freeform',
+          heading: 'Risks',
+          body: '| Risk | Answer |\n| --- | --- |\n| Two helpers edit `textkit/__init__.py` | the later leaf keeps both lines |\n| A helper grows a dependency | refused by the packet |',
+        },
+      ],
+      discardedCount: 0,
+    }),
   });
 }
 
@@ -444,9 +432,9 @@ interface MasterSpec {
   dir: string;
   id: string;
   title: string;
-  status: string;
+  stage: TaskEntry['stage'];
   nature: 'organizational' | 'atomic';
-  tasks: string[];
+  tasks: TaskEntry['stage'][];
 }
 
 const OTHER_MASTERS: MasterSpec[] = [
@@ -454,70 +442,86 @@ const OTHER_MASTERS: MasterSpec[] = [
     dir: 'sbx-date-helpers',
     id: 'SBX-M2',
     title: 'Sandbox master: date helpers',
-    status: 'inProgress',
+    stage: 'started',
     nature: 'atomic',
-    tasks: ['Completed', 'Completed', 'inProgress', 'planning'],
+    tasks: ['completed', 'completed', 'started', 'planned'],
   },
   {
     dir: 'sbx-path-helpers',
     id: 'SBX-M3',
     title: 'Sandbox master: path helpers for the sandbox app',
-    status: 'inProgress',
+    stage: 'started',
     nature: 'organizational',
-    tasks: ['inProgress', 'planning', 'planning', 'planning', 'planning'],
+    tasks: ['started', 'planned', 'planned', 'planned', 'planned'],
   },
   {
     dir: 'sbx-cli',
     id: 'SBX-M4',
     title: 'Sandbox master: a command line for the helpers',
-    status: 'planning',
+    stage: 'planned',
     nature: 'organizational',
-    tasks: ['planning', 'planning', 'planning'],
+    tasks: ['planned', 'planned', 'planned'],
   },
   {
     dir: 'sbx-docs',
     id: 'SBX-M5',
     title: 'Sandbox master: the handbook of the sandbox app',
-    status: 'planning',
+    stage: 'planned',
     nature: 'atomic',
-    tasks: ['planning', 'planning'],
+    tasks: ['planned', 'planned'],
   },
   {
     dir: 'sbx-bootstrap',
     id: 'SBX-M6',
     title: 'Sandbox master: repository bootstrap',
-    status: 'Completed',
+    stage: 'completed',
     nature: 'atomic',
-    tasks: ['Completed', 'Completed', 'Completed'],
+    tasks: ['completed', 'completed', 'completed'],
   },
   {
     dir: 'sbx-ci',
     id: 'SBX-M7',
     title: 'Sandbox master: the test command',
-    status: 'Completed',
+    stage: 'completed',
     nature: 'atomic',
-    tasks: ['Completed', 'Completed'],
+    tasks: ['completed', 'completed'],
   },
 ];
 
-function otherMaster(spec: MasterSpec): TaskDocNode {
-  return base({
+function otherLeaves(spec: MasterSpec): TaskEntry[] {
+  return spec.tasks.map((stage, index) =>
+    taskEntry({
+      id: `${spec.id}-L${index + 1}`,
+      title: `Made-up task ${index + 1}`,
+      reference: {
+        repository: RICH_REPO,
+        path: docPath(spec.dir, `${String(index + 1).padStart(2, '0')}_task`),
+      },
+      parent: taskReferenceKey(masterRef(spec.dir)),
+      stage,
+    }),
+  );
+}
+
+function otherMaster(spec: MasterSpec): TaskEntry {
+  return taskEntry({
     id: spec.id,
     title: spec.title,
-    docPath: docPath(spec.dir, 'task'),
-    kind: 'master',
-    form: 'master',
-    status: spec.status,
-    type: 'Master',
-    executionNature: spec.nature,
-    objective: `Made-up objective of ${spec.title.toLowerCase()}.`,
-    subTasks: spec.tasks.map((status, index) => ({
-      number: `${spec.id}-L${index + 1}`,
-      name: `Made-up task ${index + 1}`,
-      file: `${String(index + 1).padStart(2, '0')}_task.md`,
-      status,
-      scope: '',
-    })),
+    reference: { repository: RICH_REPO, path: docPath(spec.dir, 'task') },
+    stage: spec.stage,
+    parent: taskReferenceKey(masterRef(SPRINT_DIR)),
+    children: otherLeaves(spec).map((entry) => entry.key),
+    stepsDone: 0,
+    stepsTotal: 0,
+    summary: taskSummary({
+      bodyRevision: 'rich-1',
+      createdAt: '2026-10-02T00:00:00+02:00',
+      kind: 'master',
+      form: 'master',
+      type: 'Master',
+      executionNature: spec.nature,
+      objective: `Made-up objective of ${spec.title.toLowerCase()}.`,
+    }),
   });
 }
 
@@ -597,7 +601,7 @@ ${registerRows(7, (n) => [
   `2026-10-0${(n % 8) + 1}`,
 ])}`;
 
-const SPRINT_SECTIONS: TaskDocNode['sections'] = [
+const SPRINT_SECTIONS: TaskSummary['sections'] = [
   { kind: 'subTasks', heading: 'Commanded masters', body: '' },
   {
     kind: 'freeform',
@@ -621,7 +625,7 @@ const SPRINT_SECTIONS: TaskDocNode['sections'] = [
   },
 ];
 
-const SPRINT_HEADER_NOTES: TaskDocNode['headerNotes'] = [
+const SPRINT_HEADER_NOTES: TaskSummary['headerNotes'] = [
   {
     label: 'Portfolio gate',
     value:
@@ -639,7 +643,6 @@ interface SprintMaster {
   dir: string;
   id: string;
   title: string;
-  status: string;
 }
 
 const sprintMasters = (): SprintMaster[] => [
@@ -647,90 +650,94 @@ const sprintMasters = (): SprintMaster[] => [
     dir: MASTER_DIR,
     id: 'SBX-M1',
     title: 'Text helpers for the sandbox app',
-    status: 'inProgress',
   },
   ...OTHER_MASTERS.map((spec) => ({
     dir: spec.dir,
     id: spec.id,
     title: spec.title.replace('Sandbox master: ', ''),
-    status: spec.status,
   })),
 ];
 
-// The rows of the sprint: its own architect seat, then one row per commanded master.
-const sprintRows = (masters: SprintMaster[]): TaskSubTaskRefNode[] => [
-  {
-    number: 'SBX-SPRINT-A0',
-    name: 'Architect seat of the sandbox sprint',
-    file: '00_architect-seat.md',
-    status: 'inProgress',
-    scope: '',
-  },
-  ...masters.map((entry) => ({
-    number: entry.id,
-    name: entry.title,
-    file: '',
-    // One row says something else than the master's own document (open truth gap 3).
-    status: entry.id === 'SBX-M3' ? 'planning' : entry.status,
-    scope: `Made-up scope of ${entry.title.toLowerCase()}.`,
-    masterRef: masterRef(entry.dir),
-  })),
-];
-
-function richSprint(): TaskDocNode {
+function richSprint(): TaskEntry {
   const masters = sprintMasters();
-  return base({
+  return taskEntry({
     id: 'SBX-SPRINT',
     title: 'Sandbox sprint: helpers, a command line and a handbook for the sandbox app',
-    docPath: RICH_DOC_PATHS.sprint,
-    kind: 'master',
-    form: 'sprint',
-    status: 'inProgress',
-    type: 'Orchestration Sprint',
-    integrationBranch: 'sandbox-sprint',
-    orchestrates: masters.map((entry) => entry.dir),
-    subTasks: sprintRows(masters),
-    statusNote:
-      'Master membership is recorded in the list of commanded masters and in the execution graph. Three masters are in work; the command line waits for the text and the path helpers, and the handbook waits for the command line. Nothing is released beyond the first wave.',
-    headerNotes: SPRINT_HEADER_NOTES,
-    headerNotesTotal: SPRINT_HEADER_NOTES.length,
-    objective:
-      'Give the sandbox app a small set of helpers, a command line that calls them and a handbook that documents both. The sprint exists so that every form of the task page has a document that shows all of its blocks.',
-    requirements: [
-      'The repository bootstrap and the test command land before any helper.',
-      '[SBX-R01@v1](requirements/SBX-R01-v1.md) — the first helper, owned by the text helpers.',
-      'The command line calls only helpers that have landed; the handbook documents only what exists.',
-    ],
-    executionGraphView: { nodes: SPRINT_GRAPH },
-    decisions: decisions(7, 'sandbox sprint'),
-    references: [
-      '[Sandbox direction](notes/SANDBOX-DIRECTION.md)',
-      '[SBX-R01@v1](requirements/SBX-R01-v1.md)',
-      'The README of the sandbox app',
-    ],
-    sections: SPRINT_SECTIONS,
+    reference: { repository: RICH_REPO, path: RICH_DOC_PATHS.sprint },
+    stage: 'started',
+    children: [taskReferenceKey({ repository: RICH_REPO, path: docPath(SPRINT_DIR, '00_architect-seat') }), ...masters.map((entry) => taskReferenceKey(masterRef(entry.dir)))],
+    stepsDone: 0,
+    stepsTotal: 0,
+    summary: taskSummary({
+      bodyRevision: 'rich-1',
+      createdAt: '2026-10-02T00:00:00+02:00',
+      kind: 'master',
+      form: 'sprint',
+      type: 'Orchestration Sprint',
+      integrationBranch: 'sandbox-sprint',
+      orchestrates: masters.map((entry) => entry.dir),
+      statusNote:
+        'Master membership is recorded in the list of commanded masters and in the execution graph. Three masters are in work; the command line waits for the text and the path helpers, and the handbook waits for the command line. Nothing is released beyond the first wave.',
+      headerNotes: SPRINT_HEADER_NOTES,
+      headerNotesTotal: SPRINT_HEADER_NOTES.length,
+      objective:
+        'Give the sandbox app a small set of helpers, a command line that calls them and a handbook that documents both. The sprint exists so that every form of the task page has a document that shows all of its blocks.',
+      requirements: [
+        'The repository bootstrap and the test command land before any helper.',
+        '[SBX-R01@v1](requirements/SBX-R01-v1.md) — the first helper, owned by the text helpers.',
+        'The command line calls only helpers that have landed; the handbook documents only what exists.',
+      ],
+      executionGraphView: { nodes: SPRINT_GRAPH },
+      decisions: decisions(7, 'sandbox sprint'),
+      references: [
+        '[Sandbox direction](notes/SANDBOX-DIRECTION.md)',
+        '[SBX-R01@v1](requirements/SBX-R01-v1.md)',
+        'The README of the sandbox app',
+      ],
+      sections: SPRINT_SECTIONS,
+    }),
   });
 }
 
-// Every made-up document, as the snapshot's `taskDocuments` list.
-export function richTaskDocuments(): TaskDocNode[] {
+// The same entry collection served to the dashboard.
+export function richTaskEntries(): TaskEntry[] {
   const task = richTask();
-  return [
+  const entries = [
     richSprint(),
     richMaster(),
     task,
     ...LEAVES.slice(1).map(leafDoc),
-    ...OTHER_MASTERS.map(otherMaster),
+    ...OTHER_MASTERS.flatMap((spec) => [otherMaster(spec), ...otherLeaves(spec)]),
+    taskEntry({
+      id: 'SBX-SPRINT-A0',
+      title: 'Architect seat of the sandbox sprint',
+      reference: { repository: RICH_REPO, path: docPath(SPRINT_DIR, '00_architect-seat') },
+      parent: taskReferenceKey(masterRef(SPRINT_DIR)),
+      stage: 'started',
+    }),
   ];
+  for (const entry of entries) entry.counts = { ...entry.counts };
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+  for (const entry of entries) {
+    for (const child of entry.children) {
+      const childEntry = byKey.get(child);
+      if (childEntry) entry.counts[childEntry.stage] += 1;
+    }
+  }
+  return entries;
 }
 
 // What the page asks beside the snapshot, answered with made-up data: the notes folder
 // count, the resolution of the references, the requirement packets and one role report.
+function richTaskBody(url: string): TaskSummary | undefined {
+  const path = new URL(url, 'http://dev.invalid').searchParams.get('path');
+  return richTaskEntries().find(
+    (entry) => entry.key === path,
+  )?.summary;
+}
+
 export function richApiAnswer(url: string, body: string | undefined): unknown {
-  if (url.includes('/api/task-document?')) {
-    const path = new URL(url, 'http://dev.invalid').searchParams.get('path');
-    return richTaskDocuments().find((doc) => doc.docPath === path);
-  }
+  if (url.includes('/api/task-document?')) return richTaskBody(url);
   if (url.includes('/api/notes/folder')) {
     return {
       repo: RICH_REPO,

@@ -12,19 +12,24 @@ reason, leaving nothing partial behind.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.agent_binding import AgentBinding
 from agents_remember.mcp.tools.knowledge import DiffToolRequest, knowledge_diff_payload
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
+from agents_remember.worktrees.worktree_contract import load_contract
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -650,26 +655,40 @@ class ReportResourceTests(unittest.TestCase):
 
         world = EntryPointWorld()
         try:
-            world.build(keep_lifecycle=True)
+            world.build()
+            binding = AgentBinding(
+                agent_id="ecae6be8-2346-4aa7-8c40-053f7283e25b",
+                request_id="19fb8e0c-b72c-4160-a01f-c68ba12db619",
+                role="worker",
+                report_path=str(world.enclosure / "reports" / "worker.md"),
+                sprint_ref=TaskDocumentRef.model_validate(world.task_ref),
+                master_ref=TaskDocumentRef.model_validate(world.task_ref),
+                task_ref=TaskDocumentRef.model_validate(world.leaf_ref),
+            )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 repo = self._corpus(Path(tmp_dir), 3)
-                outcome, out = world.call(
-                    "knowledge_diff",
-                    {
-                        "memoryRoot": str(repo),
-                        "before": "HEAD~1",
-                        "after": "HEAD",
-                    },
-                )
+                with mock.patch.dict(os.environ, binding.environment()):
+                    outcome, out = world.call(
+                        "knowledge_diff",
+                        {
+                            "memoryRoot": str(repo),
+                            "before": "HEAD~1",
+                            "after": "HEAD",
+                        },
+                    )
                 self.assertEqual(outcome, "RETURNED", out)
                 assert isinstance(out, dict)
                 self.assertEqual(out["state"], "compared", out)
                 report = Path(str(out["report"]))
-                # The live-enclosure policy: ambient leaf calls write the
+                # The live-enclosure policy: bound leaf calls write the
                 # caller-readable report under the enclosure reports,
                 # whole and parseable.
                 self.assertTrue(report.is_file(), out)
                 self.assertIn("reports", report.parts, out)
+                self.assertTrue(
+                    report.is_relative_to(load_contract(world.contract).worktree_group / "reports"),
+                    out,
+                )
                 parsed = json.loads(report.read_text(encoding="utf-8"))
                 self.assertEqual(parsed["operation"], "knowledge_diff")
         finally:

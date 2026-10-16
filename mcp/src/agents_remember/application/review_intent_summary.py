@@ -38,7 +38,7 @@ resolved trees in the same request: the entry asks for it exactly when it asks f
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -125,7 +125,12 @@ class _SideIntent:
 
 
 def read_review_intent_summary(
-    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
+    config: McpRuntimeConfig,
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    *,
+    observe: Callable[[ReviewCandidateResolution], None] | None = None,
 ) -> ReviewIntentSummaryResult:
     """Resolve the comparison the task context names and summarize its changed intent.
 
@@ -137,6 +142,8 @@ def read_review_intent_summary(
         resolved = resolve_review_candidate(config, repository_id, master, leaf_id)
         if isinstance(resolved, ReviewRefusal):
             return _unavailable(repository_id, master, leaf_id, resolved)
+        if observe is not None:
+            observe(resolved)
         summary = intent_summary_of(resolved, master)
         if resolved.trees is None:
             return summary

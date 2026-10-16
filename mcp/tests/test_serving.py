@@ -38,13 +38,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
-from agents_remember.observer.lifecycle_state import State
-from agents_remember.observer.projection import (
-    EnclosureNode,
-    LifecycleProjection,
-    ProviderNode,
-    WorkspaceProjection,
-)
+from agents_remember.observer.projection import EnclosureNode, ProviderNode, WorkspaceProjection
 from agents_remember.serving import change_watcher as watcher_module
 from agents_remember.serving import projector as projector_module
 from agents_remember.serving._app_common import stream_events
@@ -81,20 +75,12 @@ def _config(tmp: Path) -> McpRuntimeConfig:
     )
 
 
-def _lifecycle(ident: str, *, state: State = "running") -> LifecycleProjection:
-    return LifecycleProjection(
-        id=ident,
-        state=state,
-        phase="build",
-        fleeting=False,
-        startedAt=_TS,
-        lastEventTs=_TS,
-    )
+def _provider(ident: str, *, state: str = "running") -> ProviderNode:
+    return ProviderNode(id=ident, state=state)
 
 
 def _projection(
     *,
-    lifecycles: tuple[LifecycleProjection, ...] = (),
     providers: tuple[ProviderNode, ...] = (),
     enclosures: tuple[EnclosureNode, ...] = (),
     active_worktree_groups: tuple[str, ...] = (),
@@ -106,7 +92,6 @@ def _projection(
     """
     return WorkspaceProjection(
         generatedAt=_TS,
-        lifecycles=list(lifecycles),
         providers=list(providers),
         enclosures=list(enclosures),
         activeWorktreeGroups=list(active_worktree_groups),
@@ -132,13 +117,13 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         _, initial = projector.current()
         assert initial is not None
         projector._publish_projection(
-            initial.model_copy(update={"lifecycles": [_lifecycle("handoff")]})
+            initial.model_copy(update={"providers": [_provider("handoff")]})
         )
 
         second = await asyncio.wait_for(gen.__anext__(), timeout=HANG_GUARD_SECONDS)
-        self.assertEqual(second.event, "lifecycle")
+        self.assertEqual(second.event, "provider")
         self.assertEqual(
-            second.data, _lifecycle("handoff").model_dump(by_alias=True, exclude_none=True)
+            second.data, _provider("handoff").model_dump(by_alias=True, exclude_none=True)
         )
         await gen.aclose()
         self.assertEqual(len(projector._subscribers), 0)
@@ -196,7 +181,7 @@ class StateEtagTests(unittest.TestCase):
             time.sleep(0.02)
 
     def test_etag_304_cycle_then_new_etag_on_content_change(self) -> None:
-        held = [_projection(lifecycles=(_lifecycle("L1"),))]
+        held = [_projection(providers=(_provider("L1"),))]
         with self._client_with_held_projection(held) as client:
             first = client.get("/api/state")
             self.assertEqual(first.status_code, 200)
@@ -211,7 +196,7 @@ class StateEtagTests(unittest.TestCase):
 
             # Volatile-only movement (ages advance every tick) must NOT mint a new revision.
             held[0] = _projection(
-                lifecycles=(_lifecycle("L1").model_copy(update={"staleSeconds": 77.0}),)
+                providers=(_provider("L1").model_copy(update={"snapshotStaleSeconds": 77.0}),)
             )
             wait_until(
                 lambda: (
@@ -224,15 +209,82 @@ class StateEtagTests(unittest.TestCase):
             self.assertEqual(still.headers["etag"], etag)
 
             # A real content change mints a new revision: 200 with a fresh ETag + fresh body.
-            held[0] = _projection(lifecycles=(_lifecycle("L1", state="paused"),))
+            held[0] = _projection(providers=(_provider("L1", state="paused"),))
             changed = self._get_until(client, etag=etag, want_status=200)
             self.assertEqual(changed.status_code, 200)
             self.assertNotEqual(changed.headers["etag"], etag)
             body = changed.json()
-            self.assertEqual(body["lifecycles"][0]["state"], "paused")
+            self.assertEqual(body["providers"][0]["state"], "paused")
 
 
 class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_task_and_host_changes_get_one_early_pass_per_original_rest(self) -> None:
+        for domain in (ProjectionDomain.TASKS, ProjectionDomain.HOST_ACTIVITY):
+            with self.subTest(domain=domain):
+                clock = [0.0]
+                with mock.patch.object(
+                    watcher_module, "time", SimpleNamespace(monotonic=lambda clock=clock: clock[0])
+                ):
+                    pacer = ChangePacer(interval=1)
+                    pacer.set_watcher_healthy(True)
+                    pacer.projection_completed(10)
+                    clock[0] = 0.25
+                    pacer.notify_change(frozenset({domain}))
+                    self.assertEqual(pacer._next_deadline(), (1.25, "change"))
+                    clock[0] = 1.25
+                    wake = await pacer.wait()
+                    self.assertEqual(wake.domains, frozenset({domain}))
+                    pacer.acknowledge(wake)
+                    clock[0] = 1.3
+                    pacer.projection_completed(0.05)
+                    clock[0] = 1.4
+                    pacer.notify_change(frozenset({domain}))
+                    self.assertEqual(pacer._next_deadline(), (3, "change"))
+                    clock[0] = 3
+                    wake = await pacer.wait()
+                    self.assertEqual(wake.domains, frozenset({domain}))
+                    pacer.acknowledge(wake)
+                    pacer.projection_completed(10)
+                    clock[0] = 3.25
+                    pacer.notify_change(frozenset({domain}))
+                    self.assertEqual(pacer._next_deadline(), (4.25, "change"))
+
+    async def test_other_domains_keep_rest_without_spending_the_task_exception(self) -> None:
+        clock = [0.0]
+        with mock.patch.object(watcher_module, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+            pacer = ChangePacer(interval=1)
+            pacer.set_watcher_healthy(True)
+            pacer.projection_completed(10)
+            clock[0] = 0.2
+            pacer.notify_change(frozenset({ProjectionDomain.DRIFT}))
+            self.assertEqual(pacer._next_deadline(), (3, "change"))
+            clock[0] = 0.4
+            pacer.notify_change(frozenset({ProjectionDomain.TASKS}))
+            self.assertEqual(pacer._next_deadline(), (1.4, "change"))
+            clock[0] = 1.4
+            wake = await pacer.wait()
+            self.assertEqual(
+                wake.domains, frozenset({ProjectionDomain.TASKS, ProjectionDomain.DRIFT})
+            )
+            pacer.acknowledge(wake)
+            pacer.projection_completed(0.1)
+            pacer.notify_change(frozenset({ProjectionDomain.DRIFT}))
+            self.assertEqual(pacer._next_deadline(), (3, "change"))
+            clock[0] = 3
+            pacer.acknowledge(await pacer.wait())
+            pacer.projection_completed(0.1)
+            self.assertEqual(pacer._next_deadline(), (18, "heartbeat"))
+
+    async def test_task_exception_never_delays_an_earlier_normal_deadline(self) -> None:
+        clock = [0.0]
+        with mock.patch.object(watcher_module, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+            pacer = ChangePacer(interval=1)
+            pacer.set_watcher_healthy(True)
+            pacer.projection_completed(10)
+            clock[0] = 2.5
+            pacer.notify_change(frozenset({ProjectionDomain.TASKS}))
+            self.assertEqual(pacer._next_deadline(), (3, "change"))
+
     async def test_native_watcher_observes_nested_atomic_writes_without_wsl_polling(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -277,7 +329,7 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(watcher_module, "time", SimpleNamespace(monotonic=lambda: clock[0])):
             pacer = ChangePacer(interval=1)
             pacer.set_watcher_healthy(True)
-            pacer.notify_change(frozenset({ProjectionDomain.LIFECYCLES}))
+            pacer.notify_change(frozenset({ProjectionDomain.WORKSPACE}))
             clock[0] = 1
             wake = await pacer.wait()
             self.assertEqual(wake.reason, "change")
@@ -299,7 +351,7 @@ class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):
             pacer.acknowledge(wake)
             for duration, rest in ((0.2, 1), (2, 2), (30, 3)):
                 pacer.projection_completed(duration)
-                pacer.notify_change(frozenset({ProjectionDomain.TASKS}))
+                pacer.notify_change(frozenset({ProjectionDomain.DRIFT}))
                 self.assertEqual(pacer._next_deadline(), (9 + rest, "change"))
             pacer.set_watcher_healthy(False)
             self.assertEqual(pacer._next_deadline(), (12, "interval"))

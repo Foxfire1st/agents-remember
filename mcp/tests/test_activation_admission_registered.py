@@ -422,7 +422,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
             return {}
 
         with patch(
-            "agents_remember.worktrees.modules.startup.start_contract.fetch_source_upstreams",
+            "agents_remember.worktrees.modules.startup.series_contract_activation.fetch_source_upstreams",
             side_effect=drift_after_fetch,
         ):
             result = anyio.run(

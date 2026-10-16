@@ -5,47 +5,64 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import { seedTaskDocuments, taskDoc } from './test-utils';
+import { seedTaskEntries, taskEntry, taskSummary, taskReference } from './test-utils';
 
-const DOC = '/tasks/repo-a/m/01_bounds.json';
+const DOC = 'repo-a/m/01_bounds.json';
 
 function wholeDoc() {
   // Whole values: nothing is cut, and the totals equal what is shown.
-  return taskDoc({
-    kind: 'subTask',
-    docPath: DOC,
-    statusNote: `Whole status note ${'with enough words to pass the clip bound. '.repeat(6)}`,
-    headerNotes: [
-      { label: 'Gate', value: 'green' },
-      { label: 'Owner', value: 'team' },
-    ],
-    steps: [
-      {
-        id: 'S1',
-        title: 'Step',
-        status: 'pending',
-        note: 'Whole step note',
-        substeps: [],
-        noteTruncated: false,
-        outcomeTruncated: false,
-      },
-    ],
-    reviewState: {
-      round: 1,
-      pending: false,
-      additionalRounds: 0,
-      totalFindings: 1,
-      openFindings: 1,
-      findings: [
-        { findingId: 'F1', description: 'Whole finding', open: true, descriptionTruncated: false },
+  return taskEntry({
+    id: '1',
+    title: 'doc',
+    stage: 'started',
+    stepsDone: 0,
+    stepsTotal: 0,
+    activity: 'works',
+    reference: taskReference(DOC),
+    summary: taskSummary({
+      objective: '',
+      type: '',
+      createdAt: '2026-06-20T09:00:00+00:00',
+      form: 'task',
+      kind: 'subTask',
+      statusNote: `Whole status note ${'with enough words to pass the clip bound. '.repeat(6)}`,
+      headerNotes: [
+        { label: 'Gate', value: 'green' },
+        { label: 'Owner', value: 'team' },
       ],
-    },
+      steps: [
+        {
+          id: 'S1',
+          title: 'Step',
+          status: 'pending',
+          note: 'Whole step note',
+          substeps: [],
+          noteTruncated: false,
+          outcomeTruncated: false,
+        },
+      ],
+      reviewState: {
+        round: 1,
+        pending: false,
+        additionalRounds: 0,
+        totalFindings: 1,
+        openFindings: 1,
+        findings: [
+          {
+            findingId: 'F1',
+            description: 'Whole finding',
+            open: true,
+            descriptionTruncated: false,
+          },
+        ],
+      },
+    }),
   });
 }
 
 describe('projection bounds on the page (L127-C-F06)', () => {
   it('reads whole values with shown-length totals and names no preview', () => {
-    seedTaskDocuments([wholeDoc()]);
+    seedTaskEntries([wholeDoc()]);
     const { getByTestId, queryByTestId, queryByText } = render(
       <DetailPanel selectedId={`taskdoc:${DOC}`} />,
     );
@@ -60,29 +77,53 @@ describe('projection bounds on the page (L127-C-F06)', () => {
   });
 
   it('counts header notes from the whole total, not the shown length', () => {
-    const doc = taskDoc({
-      kind: 'subTask',
-      docPath: DOC,
-      headerNotes: [
-        { label: 'Gate', value: 'green' },
-        { label: 'Owner', value: 'team' },
-      ],
-      headerNotesTotal: 10,
+    const doc = taskEntry({
+      id: '1',
+      title: 'doc',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(DOC),
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        headerNotes: [
+          { label: 'Gate', value: 'green' },
+          { label: 'Owner', value: 'team' },
+        ],
+        headerNotesTotal: 10,
+      }),
     });
-    seedTaskDocuments([doc]);
+    seedTaskEntries([doc]);
     const { getByTestId } = render(<DetailPanel selectedId={`taskdoc:${DOC}`} />);
 
     expect(getByTestId('header-notes-all-link').textContent).toContain('all 10 header notes');
   });
 
   it('marks a truncated status note as a preview when opened', () => {
-    const doc = taskDoc({
-      kind: 'subTask',
-      docPath: DOC,
-      statusNote: 'x'.repeat(400),
-      statusNoteTruncated: true,
+    const doc = taskEntry({
+      id: '1',
+      title: 'doc',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(DOC),
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        statusNote: 'x'.repeat(400),
+        statusNoteTruncated: true,
+      }),
     });
-    seedTaskDocuments([doc]);
+    seedTaskEntries([doc]);
     const { getByTestId, getByText } = render(<DetailPanel selectedId={`taskdoc:${DOC}`} />);
 
     fireEvent.click(getByTestId('status-note-toggle'));
@@ -90,24 +131,36 @@ describe('projection bounds on the page (L127-C-F06)', () => {
   });
 
   it('bounds the inline open findings with the whole round one link away', () => {
-    const doc = taskDoc({
-      kind: 'subTask',
-      docPath: DOC,
-      reviewState: {
-        round: 3,
-        pending: false,
-        additionalRounds: 0,
-        totalFindings: 10,
-        openFindings: 10,
-        findings: Array.from({ length: 10 }, (_, i) => ({
-          findingId: `F${i + 1}`,
-          description: `Finding ${i + 1}`,
-          open: true,
-          descriptionTruncated: false,
-        })),
-      },
+    const doc = taskEntry({
+      id: '1',
+      title: 'doc',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(DOC),
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        reviewState: {
+          round: 3,
+          pending: false,
+          additionalRounds: 0,
+          totalFindings: 10,
+          openFindings: 10,
+          findings: Array.from({ length: 10 }, (_, i) => ({
+            findingId: `F${i + 1}`,
+            description: `Finding ${i + 1}`,
+            open: true,
+            descriptionTruncated: false,
+          })),
+        },
+      }),
     });
-    seedTaskDocuments([doc]);
+    seedTaskEntries([doc]);
     const { container, getByTestId } = render(<DetailPanel selectedId={`taskdoc:${DOC}`} />);
 
     const open = container.querySelector('[data-testid="review-open-findings"]');

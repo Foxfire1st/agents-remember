@@ -17,7 +17,6 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.document_field_effects import classify_task_document_mutation
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
-from agents_remember.tasks.store import json_path_for
 from agents_remember.worktrees.queue.closeout_projection import (
     now_iso,
 )
@@ -71,7 +70,7 @@ def publish_task_fact_mutation[T](
 
 def contract_projection_scopes(
     contract: WorktreeContract,
-    documents: tuple[TaskDocument, ...] = (),
+    documents: tuple[tuple[Path, TaskDocument], ...] = (),
 ) -> tuple[TaskDocumentRef, ...]:
     """Resolve every current sprint whose projection consumes this contract's task root."""
 
@@ -105,7 +104,7 @@ def publish_contract_task_facts[T](
     contract: WorktreeContract,
     publication: Callable[[], T],
     *,
-    documents: tuple[TaskDocument, ...] = (),
+    documents: tuple[tuple[Path, TaskDocument], ...] = (),
     validate: Callable[[], None] = lambda: None,
 ) -> TaskFactPublicationResult[T]:
     return publish_task_fact_mutation(
@@ -118,7 +117,7 @@ def publish_contract_task_facts[T](
 
 def preview_contract_task_facts(
     contract: WorktreeContract,
-    documents: tuple[TaskDocument, ...],
+    documents: tuple[tuple[Path, TaskDocument], ...],
 ) -> tuple[TaskDocProjectionEffect, ...]:
     """Project a lifecycle-owned task batch without publishing task or projection bytes."""
 
@@ -136,15 +135,15 @@ def preview_contract_task_facts(
 
 def _contract_task_overrides(
     contract: WorktreeContract,
-    documents: tuple[TaskDocument, ...],
+    documents: tuple[tuple[Path, TaskDocument], ...],
     topology: TaskDocumentTopology,
 ) -> dict[TaskDocumentRef, TaskDocument]:
     return {
         topology.canonical_ref(
             contract.repo_name,
-            json_path_for(contract.task_root, document),
+            path,
         ): document
-        for document in documents
+        for path, document in documents
     }
 
 

@@ -15,9 +15,9 @@ from unittest import mock
 
 from agents_remember.serving import change_watcher as watcher_module
 from agents_remember.serving import projector as projector_module
-from agents_remember.serving.change_watcher import ALL_PROJECTION_DOMAINS
 from agents_remember.serving.delta import stable_projection_state
 from agents_remember.serving.projections.projection_inputs import (
+    HEALING_PROJECTION_DOMAINS,
     ProjectionDomain,
     ProjectionInputState,
     ProjectionRefresh,
@@ -29,7 +29,6 @@ from agents_remember.serving.projections.projection_store import (
 from agents_remember.serving.projector import ProjectionRefreshers, Projector
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, async_wait_until
 from test_projection_incremental import DOC, _config
-from test_projection_path_directed import _event
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=UTC)
 
@@ -43,9 +42,9 @@ def _world(root: Path, count: int) -> Path:
 
 
 def _lost_marker(root: Path, name: str) -> None:
-    events = root / "logs" / "observer" / "lifecycles" / name / "events.jsonl"
-    events.parent.mkdir(parents=True)
-    events.write_text(_event(f"event-{name}", name) + "\n")
+    doc = root / "tasks" / "r" / name / "task.json"
+    doc.parent.mkdir(parents=True)
+    doc.write_text(json.dumps({**DOC, "id": name, "slug": name}))
 
 
 class ProjectionReaderRetryTests(unittest.TestCase):
@@ -53,7 +52,6 @@ class ProjectionReaderRetryTests(unittest.TestCase):
         for count in (1, 9):
             for method in (
                 "_reproject_task_documents",
-                "_refresh_lifecycles",
                 "_refresh_providers",
                 "_refresh_engine_facts",
                 "_refresh_drift",
@@ -101,9 +99,7 @@ class ProjectionReaderRetryTests(unittest.TestCase):
                         self.assertEqual(
                             stable_projection_state(retried), stable_projection_state(reference)
                         )
-                        self.assertIn(
-                            "edited", [node.title for node in retried.analytics.taskDocuments]
-                        )
+                        self.assertIn("edited", [node.title for node in retried.tasks])
 
 
 class ProjectionHealAndDrainTests(unittest.IsolatedAsyncioTestCase):
@@ -141,7 +137,7 @@ class ProjectionHealAndDrainTests(unittest.IsolatedAsyncioTestCase):
                             wake = await asyncio.wait_for(pacer.wait(), HANG_GUARD_SECONDS)
                             self.assertEqual(wake.reason, "change")
                             current = await projector._tick(NOW, projector._next_refresh(wake))
-                            self.assertNotIn(name, [node.id for node in current.lifecycles])
+                            self.assertNotIn(name, [node.id for node in current.tasks])
                             self.assertTrue(projector._publish_wake(wake, current))
                         clock[0] = start + 300
                         wake = await asyncio.wait_for(pacer.wait(), HANG_GUARD_SECONDS)
@@ -150,7 +146,7 @@ class ProjectionHealAndDrainTests(unittest.IsolatedAsyncioTestCase):
                         assert state is not None
                         with (
                             mock.patch.object(
-                                state, "_refresh_lifecycles", side_effect=OSError("heal failed")
+                                state, "_refresh_tasks_full", side_effect=OSError("heal failed")
                             ),
                             self.assertRaisesRegex(OSError, "heal failed"),
                         ):
@@ -162,10 +158,10 @@ class ProjectionHealAndDrainTests(unittest.IsolatedAsyncioTestCase):
                         )
                         clock[0] += 3
                         retry = await asyncio.wait_for(pacer.wait(), HANG_GUARD_SECONDS)
-                        self.assertEqual(retry.domains, ALL_PROJECTION_DOMAINS)
+                        self.assertEqual(retry.domains, HEALING_PROJECTION_DOMAINS)
                         self.assertFalse(retry.paths_complete)
                         current = await projector._tick(NOW, projector._next_refresh(retry))
-                        self.assertIn(name, [node.id for node in current.lifecycles])
+                        self.assertIn(name, [node.id for node in current.tasks])
                         with mock.patch.object(
                             projector, "_publish_projection", side_effect=OSError("publish failed")
                         ):
@@ -208,7 +204,7 @@ class ProjectionHealAndDrainTests(unittest.IsolatedAsyncioTestCase):
                 task = asyncio.create_task(projector._tick(NOW, projector._next_refresh(wake)))
                 try:
                     await async_wait_until(entered.is_set, "projection worker entered")
-                    pacer.notify_change(frozenset({ProjectionDomain.LIFECYCLES}))
+                    pacer.notify_change(frozenset({ProjectionDomain.DRIFT}))
                     task.cancel()
                     await asyncio.sleep(0)
                     task.cancel()
@@ -222,7 +218,7 @@ class ProjectionHealAndDrainTests(unittest.IsolatedAsyncioTestCase):
                     retry = await asyncio.wait_for(pacer.wait(), HANG_GUARD_SECONDS)
                     self.assertEqual(
                         retry.domains,
-                        frozenset({ProjectionDomain.TASKS, ProjectionDomain.LIFECYCLES}),
+                        frozenset({ProjectionDomain.TASKS, ProjectionDomain.DRIFT}),
                     )
                 finally:
                     release.set()

@@ -8,9 +8,12 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from agents_remember.models.task_document_ref import TaskDocumentRef
+
 from .document import DocStatus, SubTaskRef, TaskDocument
 from .readiness import completion_blockers
 from .retired_rows import refuse_retired_row
+from .sprint_rows import master_rows, sprint_census
 from .store import TaskDocSourceSnapshot, capture_task_doc_source, markdown_path_for
 
 MasterSyncStatus = Literal["none", "created", "updated", "unchanged"]
@@ -34,7 +37,9 @@ class MasterSyncPlan:
 
 
 def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
-    """Return the master document update implied by a leaf document, if any."""
+    """Mirror a task's stage into its one authored parent row, if any."""
+    if leaf.kind == "master":
+        return _plan_sprint_sync(task_root, leaf)
     if leaf.kind != "subTask":
         return MasterSyncPlan(status="none")
     master_json_path = _master_json_path(task_root, leaf)
@@ -96,6 +101,60 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
     )
 
 
+def _plan_sprint_sync(task_root: Path, master: TaskDocument) -> MasterSyncPlan:
+    """Use the native commanding-sprint census and typed/legacy row correlation."""
+    path = markdown_path_for(task_root, master).with_suffix(".json")
+    reference = TaskDocumentRef(
+        repository=task_root.parent.name, path=f"{task_root.name}/{path.name}"
+    )
+    census = sprint_census(task_root.parent, path, reference, master)
+    if census.unreadable_naming:
+        raise MasterSyncError(
+            f"cannot read possible commanding sprint: {census.unreadable_naming[0]}; "
+            "repair that task document and retry"
+        )
+    if len(census.commanding) > 1:
+        raise MasterSyncError(
+            f"master {reference.key} has several commanding sprints; keep one and retry"
+        )
+    if not census.commanding:
+        return MasterSyncPlan(status="none")
+    sprint_path = census.commanding[0]
+    source = capture_task_doc_source(sprint_path)
+    try:
+        if source.json_bytes is None:
+            raise FileNotFoundError(sprint_path)
+        sprint = TaskDocument.model_validate_json(source.json_bytes)
+    except (OSError, ValueError) as error:
+        raise MasterSyncError(f"cannot read commanding sprint: {sprint_path}") from error
+    rows = master_rows(sprint, sprint_path.parent, reference)
+    row = rows.row
+    if row is None:
+        if rows.typed or rows.legacy:
+            raise MasterSyncError(
+                f"sprint {sprint_path} has ambiguous rows for {reference.key}; keep one and retry"
+            )
+        return MasterSyncPlan(status="none")
+    refuse_retired_row(sprint, row.number, "the stage sync of this master", MasterSyncError)
+    if row.status == master.status:
+        return MasterSyncPlan(status="unchanged")
+    data = sprint.model_dump(by_alias=True)
+    data["subTasks"] = [
+        {**item.model_dump(), "status": master.status}
+        if item.number == row.number
+        else item.model_dump()
+        for item in sprint.subTasks
+    ]
+    updated = demote_completed_master_if_unresolved(TaskDocument.model_validate(data))
+    return MasterSyncPlan(
+        status="updated",
+        master=updated,
+        master_json_path=sprint_path,
+        subtask_number=row.number,
+        source_snapshot=source,
+    )
+
+
 def subtask_ref_from_leaf(
     task_root: Path, leaf: TaskDocument, *, existing: SubTaskRef | None = None
 ) -> SubTaskRef:
@@ -110,37 +169,11 @@ def subtask_ref_from_leaf(
 
 
 def derived_master_status(leaf: TaskDocument) -> DocStatus:
-    """Collapse leaf state to the master's strict status vocabulary.
+    """Mirror the document's stage; worktree tools and corrections own that stage.
 
-    A ROW IS ``Completed`` WHEN THE WORK LANDED, NOT WHEN ITS STEPS WERE MARKED. The only
-    writer that sets a leaf document's ``status`` to ``Completed`` is the task finalizer
-    (``worktrees/modules/finalize.py``), and it does so only after proving the task commit is
-    reachable from the contract's target branch and cleanup completed. Marking the last step
-    ``done`` writes no such proof, so a step-state-derived ``Completed`` published a row for
-    work still sitting uncommitted on a task branch -- recorded defect D42 of
-    ``260915_role-capsules-and-native-eve``, where a row flipped before any closeout or
-    integration had run.
-
-    The three inputs therefore keep their own meaning and none is substituted for another:
-    ``abandoned`` is a decision and stays terminal on its own; a ``Completed`` leaf document is
-    the landing the finalizer proved; and step state distinguishes "started" from "untouched".
-    A leaf whose steps are all done but whose document has not landed projects ``inProgress``,
-    which is the true state of that row and is what the finalizer overwrites when it lands.
+    Step completion is progress, not a second stage authority. Finalize still proves landing
+    before publishing Completed; start/abandon publish their own stages (MIK-R167 rule 13).
     """
-    if leaf.status == "abandoned":
-        # A leaf whose work was deliberately not taken projects that terminal row directly.
-        # Without this the partially-done check below would collapse it back to ``inProgress``,
-        # and a later master sync would silently reopen a row abandoned on purpose.
-        return "abandoned"
-    statuses = [step.status for step in leaf.steps]
-    statuses.extend(sub.status for step in leaf.steps for sub in step.substeps)
-    if leaf.status == "Completed" and statuses and not completion_blockers(leaf):
-        return "Completed"
-    if any(status in {"done", "inProgress", "blocked"} for status in statuses):
-        return "inProgress"
-    if statuses and leaf.status == "Completed":
-        # An old inconsistent leaf remains readable, but cannot project a terminal parent row.
-        return "inProgress"
     return leaf.status
 
 

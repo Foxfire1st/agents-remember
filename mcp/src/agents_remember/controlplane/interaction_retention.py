@@ -79,29 +79,11 @@ these two that is exactly right, and for ``applied`` it is the replay:
   about how long a human might take before retrying a closeout and this leaf exists because such a
   guess (30 seconds, then zero) was already wrong twice.
 
-NO TTL IS NOT UNBOUNDED, AND THE OUTER BOUND IS SOMEONE ELSE'S. These records do not live forever;
-they live exactly as long as the lifecycle they belong to. ``gates.jsonl`` sits inside the
-lifecycle's own directory, and ``observer/event_retention.py::prune_expired_lifecycle_event_logs``
-reclaims that directory WHOLESALE (``shutil.rmtree``) once the lifecycle is dormant past its
-inactivity TTL -- ``FLEETING_INACTIVE_TTL_SECONDS`` or ``ENCLOSURE_INACTIVE_GRACE_SECONDS``
-depending on the kind. So the retention rule here is "keep for the life of the lifecycle", not
-"keep forever", and the thing that finally removes an authority record is the disappearance of the
-subject it was an authority about -- which is the only expiry that cannot be wrong.
-
-ONE EXEMPTION, and it is the case worth knowing: a lifecycle named by
-``series_retained_lifecycle_ids`` -- part of a LIVE MASTER SERIES -- is exempt from inactivity
-pruning regardless of age (``prune_expired_lifecycle_event_logs``'s ``protected_lifecycle_ids``).
-For those the bound is the series, not the TTL. That is still bounded, and the magnitude is small
-(one record per approval a human granted and a tool consumed, so a handful per leaf), but a
-long-running master holds them all until it finishes. If that ever stops being small, the fix is a
-cap on retained authority records per lifecycle, NOT a TTL.
-
-BOUNDARY, because this reclamation path and the durable-store contract meet here badly:
-``shutil.rmtree`` removes the whole directory, which includes ``gates.jsonl.lock``. A process
-holding that lock has its lockfile unlinked underneath it, and the next ``exclusive_access``
-creates a lockfile at a DIFFERENT INODE -- so two processes stop excluding each other. The window
-is narrow (dormant, unprotected lifecycles only) and no known caller hits it, but the contract does
-not cover it and a future reclaimer that runs against live lifecycles would."""
+These authority records have no automatic age-based reclamation. Only the user's
+explicit ``removed-stores`` command removes stored gate logs. Lock-only lifecycle
+directories are separately eligible only when a complete native contract census
+proves every contract naming the subject terminal. A directory carrying approval
+history is never treated as lock-only residue, and the file-lock primitive is unchanged."""
 
 
 def gate_keep_ids(

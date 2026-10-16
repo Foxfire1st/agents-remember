@@ -46,6 +46,7 @@ def snapshot_tool_caller(
         task_title=task_title,
         task_path=task_path,
         task_repository=reference.repository,
+        scope_key=reference.key,
         harness=harness,
     )
 

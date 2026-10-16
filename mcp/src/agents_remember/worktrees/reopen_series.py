@@ -16,6 +16,7 @@ from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.tasks import ReviewState
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.store import (
+    json_path_for,
     read_task_doc,
     write_task_docs,
 )
@@ -616,7 +617,13 @@ class _SeriesReopenPublication:
         self.recuts = replanned.recuts
 
     def projection_scopes(self) -> tuple:
-        return contract_projection_scopes(self.plan.contract, self.prepared_documents())
+        return contract_projection_scopes(
+            self.plan.contract,
+            tuple(
+                (json_path_for(self.plan.contract.task_root, doc), doc)
+                for doc in self.prepared_documents()
+            ),
+        )
 
     def publish(self) -> tuple[_SeriesRefRecut, ...]:
         if self.recuts is None:

@@ -1,36 +1,36 @@
-import { useCallback, useRef, useState } from "react";
-import type { SeriesNode, TaskDocNode } from "../types/projection";
+import { useCallback, useRef, useState } from 'react';
+import type { TaskEntry } from '../types/projection';
 
-import type { RoleReportContent } from "../data/roleReport";
-import { useRoleChatControls } from "./roleChatControls";
-import { useRoleChatScopes } from "./roleChatScopes";
-import { useLaunchReread, useRoleChatOptionsLoader } from "./roleChatOptionsLoader";
-import { resolveSelectionComplete } from "./roleChatExecutionView";
-import { RoleChatsView } from "./RoleChatsView";
+import type { RoleReportContent } from '../data/roleReport';
+import { useRoleChatControls } from './roleChatControls';
+import { useRoleChatScopes } from './roleChatScopes';
+import { useLaunchReread, useRoleChatOptionsLoader } from './roleChatOptionsLoader';
+import { resolveSelectionComplete } from './roleChatExecutionView';
+import { RoleChatsView } from './RoleChatsView';
 import type {
   LauncherRole,
   RoleDocumentScope,
   RoleExecutionReceipt,
   RoleLaunchSelection,
-} from "./roleLaunchModel";
+} from './roleLaunchModel';
 
 export function RoleChatsPane({
   active,
-  taskDocuments,
-  series,
+  tasks,
   boundSelection,
   boundRoles,
   onExecution,
 }: {
   active: boolean;
-  taskDocuments: TaskDocNode[];
-  series: SeriesNode[];
+  tasks: TaskEntry[];
   boundSelection?: RoleLaunchSelection;
   boundRoles?: LauncherRole[];
   onExecution?: (receipt: RoleExecutionReceipt, scope: RoleDocumentScope) => void;
 }) {
   const [report, setReport] = useState<RoleReportContent | null>(null);
-  const [selection, setSelection] = useState<RoleLaunchSelection>(() => boundSelection ?? { role: "architect" });
+  const [selection, setSelection] = useState<RoleLaunchSelection>(
+    () => boundSelection ?? { role: 'architect' },
+  );
   const [optionsRefresh, setOptionsRefresh] = useState(0);
   const [catalogRefresh, setCatalogRefresh] = useState(0);
   const requestOptionsRefresh = useCallback(() => setOptionsRefresh((current) => current + 1), []);
@@ -74,8 +74,7 @@ export function RoleChatsPane({
   return (
     <RoleChatsView
       active={active}
-      taskDocuments={taskDocuments}
-      series={series}
+      tasks={tasks}
       boundSelection={boundSelection}
       boundRoles={boundRoles}
       selection={selection}

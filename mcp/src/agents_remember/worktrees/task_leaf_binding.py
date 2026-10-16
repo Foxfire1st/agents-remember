@@ -194,12 +194,17 @@ def plan_current_leaf_enclosure_registration(  # noqa: PLR0913
         leaf_id,
         task_name=task_name,
     )
-    return plan_leaf_doc_enclosure_registration(
-        document_path,
-        leaf_id,
-        enclosure_path,
-        lifecycle_id=lifecycle_id,
-    )
+    try:
+        return plan_leaf_doc_enclosure_registration(
+            document_path,
+            leaf_id,
+            enclosure_path,
+            lifecycle_id=lifecycle_id,
+        )
+    except TaskLeafBindingError:
+        raise
+    except ValueError as error:
+        raise TaskLeafBindingError(str(error)) from error
 
 
 def require_current_leaf_enclosure_binding(  # noqa: PLR0913

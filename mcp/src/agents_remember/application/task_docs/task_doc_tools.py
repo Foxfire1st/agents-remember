@@ -514,7 +514,7 @@ def _publish_task_doc_candidate(
         result["masterSync"] = {"status": "failed", "error": failure}
         result["nextAction"] = "Repair the parent master document, then retry the write."
         return result
-    docs: list[TaskDocument] = [doc]
+    docs: list[tuple[Path, TaskDocument]] = [(task_root, doc)]
     source_snapshots = [context.selected_snapshot]
     if master_sync.source_snapshot is not None:
         source_snapshots.append(master_sync.source_snapshot)
@@ -530,7 +530,8 @@ def _publish_task_doc_candidate(
             require_task_document_in_place(
                 master_sync.master_json_path, master_sync.master, TaskDocError
             )
-        docs.append(master_sync.master)
+        assert master_sync.master_json_path is not None
+        docs.append((master_sync.master_json_path.parent, master_sync.master))
     if dry_run:
         preview_context = TaskDocPublication(
             config,
@@ -547,7 +548,7 @@ def _publish_task_doc_candidate(
             doc,
             task_root,
             master_sync=master_sync,
-            overrides={json_path_for(task_root, candidate): candidate for candidate in docs},
+            overrides={json_path_for(root, candidate): candidate for root, candidate in docs},
         )
         result["updated"] = _updated_phrase(operation, context.edit, result)
         result["projectionEffects"] = [
@@ -1083,7 +1084,7 @@ def _remove_subtask(
             context.task_root,
             doc,
             updated,
-            [updated],
+            [(context.task_root, updated)],
             tuple(source_snapshots),
         )
         validate_task_doc_transaction(task_doc_publication_transaction(preview_context))
@@ -1118,7 +1119,7 @@ def _remove_subtask(
             context.task_root,
             doc,
             updated,
-            [updated],
+            [(context.task_root, updated)],
             tuple(source_snapshots),
             publisher=publication,
         )

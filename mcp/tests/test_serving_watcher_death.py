@@ -25,6 +25,7 @@ from agents_remember.serving.change_watcher import (
 )
 from agents_remember.serving.projections.projection_inputs import (
     ALL_PROJECTION_DOMAINS,
+    HEALING_PROJECTION_DOMAINS,
     ProjectionDomain,
 )
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, async_wait_until
@@ -150,7 +151,12 @@ class _CommonFailureMatrix:
         self.pacer.notify_change(frozenset({watcher_module.ProjectionDomain.TASKS}))
         wake = await self.pacer.wait()
         self.case.assertEqual(wake.reason, "interval")
-        self.case.assertEqual(wake.domains, ALL_PROJECTION_DOMAINS)
+        expected = (
+            ALL_PROJECTION_DOMAINS
+            if self.fault in {"refresh", "cancel", "return"}
+            else HEALING_PROJECTION_DOMAINS
+        )
+        self.case.assertEqual(wake.domains, expected)
         self.case.assertIn(watcher_module.ProjectionDomain.TASKS, self.pacer._pending_domains)
         if len(self.retry_stamps) == 2:
             self.new_root.mkdir(parents=True)

@@ -1,87 +1,23 @@
 // MIK-R127 skeleton model: form, groups, tables, further notes, chain.
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 
-import type { SeriesNode, SubTaskRow, TaskDocNode } from '../../types/projection';
+import { taskEntrySelectionKey } from '../../data/taskReference';
+import { chatLeaf,chatMaster,chatSprint } from '../../test/fixtures/documentChat';
 import {
-  docChain,
-  docForm,
-  firstOpenStepId,
-  furtherSections,
-  groupSubTaskRows,
-  masterTaskCounts,
-  parseMarkdownTable,
-  registerTables,
-  reviewSummary,
-  sectionIntro,
-  sprintRowStatus,
+docChain,
+docForm,
+firstOpenStepId,
+furtherSections,
+parseMarkdownTable,
+registerTables,
+reviewSummary,
+sectionIntro,
 } from './model';
-import { taskDoc } from './test-utils';
-
-function row(over: Partial<SubTaskRow> & Pick<SubTaskRow, 'number' | 'name'>): SubTaskRow {
-  return { file: '', status: 'planning', scope: '', ...over };
-}
+import { taskSummary } from './test-utils';
 
 describe('docForm (rule 1)', () => {
-  it("shows the projection's own word when it carries one", () => {
-    expect(docForm(taskDoc({ kind: 'master', docPath: '/t/s/task.json', form: 'sprint' }))).toBe(
-      'sprint',
-    );
-    expect(docForm(taskDoc({ kind: 'master', docPath: '/t/m/task.json', form: 'master' }))).toBe(
-      'master',
-    );
-    expect(docForm(taskDoc({ kind: 'subTask', docPath: '/t/m/01_a.json', form: 'task' }))).toBe(
-      'task',
-    );
-  });
-
-  it("derives the form by the model's rule when an older cache lacks it", () => {
-    const aged = (doc: TaskDocNode): { kind: string; orchestrates: string[] } => ({
-      kind: doc.kind,
-      orchestrates: doc.orchestrates,
-    });
-    expect(
-      docForm({
-        ...aged(taskDoc({ kind: 'master', docPath: '/t/s/task.json' })),
-        orchestrates: ['m'],
-      }),
-    ).toBe('sprint');
-    expect(docForm(aged(taskDoc({ kind: 'master', docPath: '/t/m/task.json' })))).toBe('master');
-    expect(docForm(aged(taskDoc({ kind: 'subTask', docPath: '/t/m/01_a.json' })))).toBe('task');
-    expect(docForm(aged(taskDoc({ kind: 'light', docPath: '/t/l.json' })))).toBe('task');
-  });
-});
-
-describe('groupSubTaskRows', () => {
-  it('groups by declared status and never hides an unknown one', () => {
-    const groups = groupSubTaskRows([
-      row({ number: '1', name: 'work', status: 'inProgress' }),
-      row({ number: '2', name: 'wait', status: 'planning' }),
-      row({ number: '3', name: 'done', status: 'Completed' }),
-      row({ number: '4', name: 'gone', status: 'abandoned' }),
-      row({ number: '5', name: 'strange', status: 'mystery' }),
-    ]);
-    expect(groups.work.map((entry) => entry.number)).toEqual(['1']);
-    expect(groups.waiting.map((entry) => entry.number)).toEqual(['2', '5']);
-    expect(groups.done.map((entry) => entry.number)).toEqual(['3']);
-    expect(groups.gone.map((entry) => entry.number)).toEqual(['4']);
-  });
-});
-
-describe('masterTaskCounts', () => {
-  it('counts completed over live rows, excluding abandoned', () => {
-    expect(
-      masterTaskCounts(
-        taskDoc({
-          kind: 'master',
-          docPath: '/t/m/task.json',
-          subTasks: [
-            row({ number: '1', name: 'a', status: 'Completed' }),
-            row({ number: '2', name: 'b', status: 'inProgress' }),
-            row({ number: '3', name: 'c', status: 'abandoned' }),
-          ],
-        }),
-      ),
-    ).toEqual({ done: 1, total: 2 });
+  it.each(['sprint', 'master', 'task'] as const)("shows the projection's %s form", (form) => {
+    expect(docForm(taskSummary({ form }))).toBe(form);
   });
 });
 
@@ -200,9 +136,8 @@ describe('parseMarkdownTable and registerTables', () => {
 
 describe('furtherSections (rules 7-8)', () => {
   it('lists every free-form section except blocks, registers and objective repeats', () => {
-    const doc = taskDoc({
+    const doc = taskSummary({
       kind: 'master',
-      docPath: '/t/m/task.json',
       objective: 'Same text.',
       sections: [
         { kind: 'subTasks', heading: 'Sub-tasks', body: 'Intro.' },
@@ -222,79 +157,43 @@ describe('furtherSections (rules 7-8)', () => {
 });
 
 describe('docChain (rule 2)', () => {
-  const sprint = taskDoc({
-    id: 'SPRINT',
-    kind: 'master',
-    docPath: '/tasks/repo-a/sprint/task.json',
-    title: 'Sprint',
-    orchestrates: ['master-a'],
-    form: 'sprint',
-  });
-  const master = taskDoc({
-    id: 'MASTER-A',
-    kind: 'master',
-    docPath: '/tasks/repo-a/master-a/task.json',
-    title: 'Master A',
-    form: 'master',
-  });
-  const leaf = taskDoc({
-    id: 'L1',
-    kind: 'subTask',
-    docPath: '/tasks/repo-a/master-a/01_leaf.json',
-    title: 'Leaf',
-  });
-  const series: SeriesNode[] = [];
-
-  it('chains a task through its master to the commanding sprint', () => {
-    expect(docChain(leaf, [sprint, master, leaf], series)).toEqual([
+  const tasks = Object.fromEntries(
+    [chatSprint, chatMaster, chatLeaf].map((entry) => [entry.key, entry]),
+  );
+  it('follows served parents through master to sprint', () => {
+    expect(docChain(chatLeaf, tasks)).toEqual([
       {
         form: 'sprint',
-        text: 'SPRINT',
-        title: 'Sprint',
-        targetKey: 'taskdoc:/tasks/repo-a/sprint/task.json',
+        text: chatSprint.id,
+        title: chatSprint.title,
+        targetKey: taskEntrySelectionKey(chatSprint.key),
       },
       {
         form: 'master',
-        text: 'MASTER-A',
-        title: 'Master A',
-        targetKey: 'taskdoc:/tasks/repo-a/master-a/task.json',
+        text: chatMaster.id,
+        title: chatMaster.title,
+        targetKey: taskEntrySelectionKey(chatMaster.key),
       },
     ]);
-  });
-
-  it('chains a master to its sprint and leaves a sprint alone', () => {
-    expect(docChain(master, [sprint, master], series)).toEqual([
+    expect(docChain(chatMaster, tasks)).toEqual([
       {
         form: 'sprint',
-        text: 'SPRINT',
-        title: 'Sprint',
-        targetKey: 'taskdoc:/tasks/repo-a/sprint/task.json',
+        text: chatSprint.id,
+        title: chatSprint.title,
+        targetKey: taskEntrySelectionKey(chatSprint.key),
       },
     ]);
-    expect(docChain(sprint, [sprint], series)).toEqual([]);
-    expect(docChain(master, [master], series)).toEqual([]);
+    expect(docChain(chatSprint, tasks)).toEqual([]);
   });
-
-  it('falls back to the series link when no master document resolves', () => {
-    const orphan = taskDoc({
-      id: 'L9',
-      kind: 'subTask',
-      docPath: '/tasks/repo-a/nodoc/09_leaf.json',
-      title: 'Orphan',
-    });
-    expect(docChain(orphan, [orphan], series)).toEqual([]);
-  });
-});
-
-describe('sprintRowStatus (open truth gap 3)', () => {
-  it("prefers the commanded master's own document over the row as written", () => {
-    const ref = row({ number: '1', name: 'Master', status: 'planning' });
-    expect(sprintRowStatus(ref, undefined)).toBe('planning');
-    expect(
-      sprintRowStatus(
-        ref,
-        taskDoc({ kind: 'master', docPath: '/t/m/task.json', status: 'inProgress' }),
-      ),
-    ).toBe('inProgress');
+  it('stops at an absent parent and at a repeated reference', () => {
+    expect(docChain(chatLeaf, {})).toEqual([]);
+    expect(docChain({ ...chatMaster, parent: chatLeaf.key }, tasks)).toEqual([
+      {
+        form: 'master',
+        text: chatLeaf.id,
+        title: chatLeaf.title,
+        targetKey: taskEntrySelectionKey(chatLeaf.key),
+      },
+    ]);
   });
 });

@@ -75,7 +75,6 @@ from agents_remember.memory_quality.reference_state import (
 )
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.memory import MemoryQualitySyncRequest
-from agents_remember.observer import reset_ambient
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -124,7 +123,6 @@ def test_read_ar_files_names_the_converted_records_without_carrying_them(
         coordination_root=config.coordination_root,
         storage_mode="external",
     )
-    reset_ambient()
 
     _convert_in_place(memory, code)
 
@@ -1065,7 +1063,7 @@ def test_two_tables_with_no_blank_line_between_them_are_refused_by_name(
 
 @pytest.fixture(autouse=True)
 def _ambient() -> None:
-    reset_ambient()
+    pass
 
 
 def _convert_worktree(memory_worktree: Path, code_worktree: Path) -> None:

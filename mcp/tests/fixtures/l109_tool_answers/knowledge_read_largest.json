@@ -87,7 +87,7 @@
   "unverifiableReason": "no code tree was requested"
  },
  "indexComplete": true,
- "log": "/world/worktrees/repo-a/w-ar/logs/ar-tools-2000-01-01/000000000000-knowledge_read-00000000.json",
+ "log": "/world/logs/mcp/ar-tools-2000-01-01/000000000000-knowledge_read-00000000.json",
  "memoryCommit": "c915dfba0d95465e300b5b9e8e464a61932d167c",
  "memoryDirty": false,
  "memoryTree": {

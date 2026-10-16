@@ -75,7 +75,7 @@ class _World:
         stack.enter_context(mock.patch.object(serving, "_warmup_tracker", self.tracker))
         stack.enter_context(
             mock.patch.object(
-                serving, "resume_agent", lambda _cfg, agent: self.workers.block(agent)
+                serving, "resume_agent", lambda _cfg, agent, _receipt: self.workers.block(agent)
             )
         )
         stack.enter_context(
@@ -98,9 +98,12 @@ class _World:
                 intake, "require_bridge_runtime", return_value=SimpleNamespace(home=self.home)
             )
         )
-        stack.enter_context(
-            mock.patch.object(intake, "tree_agent_ids", return_value=["a1", "a2", "a3"])
-        )
+
+        def candidates(_config, _live, *, receipts):
+            receipts.update({agent: {} for agent in ("a1", "a2", "a3")})
+            return ["a1", "a2", "a3"]
+
+        stack.enter_context(mock.patch.object(intake, "tree_agent_ids", side_effect=candidates))
         return stack
 
     async def step(self):

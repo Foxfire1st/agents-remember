@@ -1,8 +1,7 @@
 """MIK-R81 rule 2 (F09): path-directed incremental projection, no full-bore refresh.
 
 A one-keystroke draft (a documentary task change: same contracts, same enclosures)
-refreshes only the affected domain inputs -- the downstream cascade (lifecycles,
-engine facts, drift) stays put. Only a structural task change flips it. Repo
+refreshes only the affected domain inputs -- engine facts and drift stay put. Only a structural task change flips it. Repo
 surfaces (no watch root names them) refresh on full passes and when their TTL
 lapses; every other pass -- change ticks and heartbeats alike -- retains them
 without reaching a surface reader.
@@ -15,8 +14,10 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.serving.projections import projection_inputs as inputs_module
 from agents_remember.serving.projections.projection_inputs import (
     ProjectionDomain,
     ProjectionInputState,
@@ -48,8 +49,15 @@ def _config(root: Path) -> McpRuntimeConfig:
 
 class ProjectionIncrementalTests(unittest.TestCase):
     def test_documentary_draft_skips_the_downstream_cascade(self) -> None:
-        """A title keystroke updates the retained docs; lifecycles/engine/drift stay put."""
-        with tempfile.TemporaryDirectory() as tmp:
+        """A title keystroke updates the retained docs; engine/drift stay put."""
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(
+                inputs_module,
+                "prune_orphaned_drift_snapshots",
+                wraps=inputs_module.prune_orphaned_drift_snapshots,
+            ) as drift,
+        ):
             root = Path(tmp)
             doc = root / "tasks" / "r" / "t1" / "task.json"
             doc.parent.mkdir(parents=True)
@@ -58,18 +66,13 @@ class ProjectionIncrementalTests(unittest.TestCase):
             (observer / "workspace").mkdir(parents=True)
             (observer / "workspace" / "operator-inbox.jsonl").write_text("", encoding="utf-8")
             config = _config(root)
-            calls = {"lifecycle": 0, "surfaces": 0}
-
-            def count_lifecycle(path: Path) -> list:
-                calls["lifecycle"] += 1
-                return []
+            calls = {"surfaces": 0}
 
             def count_surfaces(cfg: McpRuntimeConfig, moment: datetime) -> tuple:
                 calls["surfaces"] += 1
                 return ([], [], [])
 
             readers = ProjectionReaders(
-                lifecycle=count_lifecycle,
                 repo_surfaces=count_surfaces,
                 landing_state=None,
             )
@@ -82,8 +85,9 @@ class ProjectionIncrementalTests(unittest.TestCase):
                 observer_root=observer,
                 pass_=RefreshPass(now=now, refresh=ProjectionRefresh.full()),
             )
-            self.assertEqual(first.task_documents[0].title, "one")
-            self.assertEqual(calls, {"lifecycle": 1, "surfaces": 1})
+            self.assertEqual(first.task_sources[0].summary.title, "one")
+            self.assertEqual(calls, {"surfaces": 1})
+            self.assertEqual(drift.call_count, 1)
 
             # One keystroke in the draft: same structure, new projected title.
             doc.write_text(json.dumps({**DOC, "title": "one edited"}), encoding="utf-8")
@@ -96,16 +100,24 @@ class ProjectionIncrementalTests(unittest.TestCase):
                     refresh=ProjectionRefresh.change(frozenset({ProjectionDomain.TASKS})),
                 ),
             )
-            self.assertEqual(second.task_documents[0].title, "one edited")
+            self.assertEqual(second.task_sources[0].summary.title, "one edited")
             self.assertEqual(
                 calls,
-                {"lifecycle": 1, "surfaces": 1},
+                {"surfaces": 1},
                 "documentary change refreshes only the TASKS inputs",
             )
+            self.assertEqual(drift.call_count, 1)
 
     def test_structural_task_change_flips_the_cascade(self) -> None:
-        """A new (even unparseable) contract moves the skipped set: lifecycles re-read."""
-        with tempfile.TemporaryDirectory() as tmp:
+        """A new invalid contract moves the skipped set and triggers the drift census."""
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(
+                inputs_module,
+                "prune_orphaned_drift_snapshots",
+                wraps=inputs_module.prune_orphaned_drift_snapshots,
+            ) as drift,
+        ):
             root = Path(tmp)
             doc = root / "tasks" / "r" / "t1" / "task.json"
             doc.parent.mkdir(parents=True)
@@ -114,14 +126,8 @@ class ProjectionIncrementalTests(unittest.TestCase):
             (observer / "workspace").mkdir(parents=True)
             (observer / "workspace" / "operator-inbox.jsonl").write_text("", encoding="utf-8")
             config = _config(root)
-            calls = {"lifecycle": 0}
-
-            def count_lifecycle(path: Path) -> list:
-                calls["lifecycle"] += 1
-                return []
 
             readers = ProjectionReaders(
-                lifecycle=count_lifecycle,
                 repo_surfaces=lambda cfg, moment: ([], [], []),
                 landing_state=None,
             )
@@ -133,7 +139,7 @@ class ProjectionIncrementalTests(unittest.TestCase):
                 observer_root=observer,
                 pass_=RefreshPass(now=now, refresh=ProjectionRefresh.full()),
             )
-            self.assertEqual(calls["lifecycle"], 1)
+            self.assertEqual(drift.call_count, 1)
 
             contract = root / "tasks" / "enclosures" / "l1" / "series-contract.md"
             contract.parent.mkdir(parents=True)
@@ -148,7 +154,7 @@ class ProjectionIncrementalTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(
-                calls["lifecycle"],
+                drift.call_count,
                 2,
                 "a moved contract/enclosure set re-reads the cascade",
             )
@@ -170,7 +176,6 @@ class ProjectionIncrementalTests(unittest.TestCase):
                 return ([], [], [])
 
             readers = ProjectionReaders(
-                lifecycle=lambda path: [],
                 repo_surfaces=count_surfaces,
                 landing_state=None,
             )

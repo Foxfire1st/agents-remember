@@ -124,6 +124,25 @@ def test_append_keeps_history_and_current_folds_last_wins(tmp_path: Path) -> Non
     assert store.current(LIFECYCLE)["01H"].state == "approved"
 
 
+def test_gateless_claim_leaves_no_lock_and_existing_approval_is_spent_once(tmp_path: Path) -> None:
+    store = GateStore(tmp_path / "observer")
+    for size in (8, 64):
+        for index in range(size):
+            guard = store.claim_approval(f"absent-{size}-{index}", kind="closeout-approval", now=T1)
+            assert guard.permitted and guard.gate_id is None
+    assert not store.root.exists()
+
+    approved = decide_gate(
+        _open_gate("closeout-approval"),
+        GateVerdict(decision="approve", by="developer", via="dashboard", note=None),
+        now=T2,
+    )
+    store.append(approved)
+    assert store.claim_approval(LIFECYCLE, kind="closeout-approval", now=T3).permitted
+    assert not store.claim_approval(LIFECYCLE, kind="closeout-approval", now=T3).permitted
+    assert store.current(LIFECYCLE)[approved.id].state == "applied"
+
+
 def _contract(root: Path) -> Any:
     return SimpleNamespace(
         coordination_root=root,

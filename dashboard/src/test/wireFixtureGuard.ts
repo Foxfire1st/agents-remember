@@ -7,7 +7,7 @@
 // leak is that a fixture can OPT OUT, and every opt-out is one token long:
 //
 //   `as EngineProcessEdge`          — an assertion skips excess-property checking entirely
-//   `as unknown as LifecycleProjection` — and skips assignability as well
+//   `as unknown as TaskEntry` — and skips assignability as well
 //   `as never` / `as any`           — assignable to the wire slot without naming a wire type at all
 //   `// @ts-expect-error`           — the error is raised and then swallowed
 //   `const raw = {…}; use(raw)`     — a literal loses FRESHNESS when it lands in a variable, and
@@ -49,7 +49,7 @@
 //
 //   2. A GENERIC HELPER DEFEATS RULES 1 AND 4 TOGETHER. `function make<T>(shape: object): T { return
 //      shape as T; }` names no wire type at the assertion (rule 1 sees a type PARAMETER, not
-//      vocabulary), and `make<LifecycleProjection>({ … })` answers the wire type exactly, so rule 4
+//      vocabulary), and `make<TaskEntry>({ … })` answers the wire type exactly, so rule 4
 //      has no undeclared property to weigh. One helper re-opens every evasion the five rules close.
 //
 //   3. A NEW UNMARKED MIRROR MODULE IS INVISIBLE. The vocabulary is discovered from the house
@@ -61,13 +61,13 @@
 //      rejected).
 //
 //   4. TYPE PREDICATES AND ASSERTION FUNCTIONS NARROW WITH NO `as` ANYWHERE. `function isNode(v:
-//      unknown): v is LifecycleProjection { return true; }` and `function assertNode(v: unknown):
-//      asserts v is LifecycleProjection {}` both put an arbitrary value into a wire slot carrying a
+//      unknown): v is TaskEntry { return true; }` and `function assertNode(v: unknown):
+//      asserts v is TaskEntry {}` both put an arbitrary value into a wire slot carrying a
 //      wire type, with nothing syntactic to ban and nothing structural to compare.
 //
 //   5. A VALUE, NOT A NAME. Every rule here measures property NAMES. An override whose names are
 //      all correct and whose VALUE is `undefined` on a field the server always sends is invisible
-//      to all five — `lifecycle({ state: undefined })` asserts nothing, suppresses
+//      to all five — `taskEntry({ stage: undefined })` asserts nothing, suppresses
 //      nothing and declares nothing undeclared. `exactOptionalPropertyTypes` is the general answer
 //      and is NOT set on this project (measured: 381 errors across 107 files); the builders carry
 //      the constraint themselves instead. See `fixtures/overrides.ts` and `fixtureOverrides.test.ts`.
@@ -279,7 +279,7 @@ class WireVocabulary {
   /**
    * The wire type a written type ANNOTATION reaches, following import aliases and local
    * `type X = …` indirection, and descending into arrays, unions, type arguments and members —
-   * so `Partial<TaskDocNode>`, `LifecycleProjection[]`, `Record<string, Analytics>` and a local
+   * so `Partial<TaskDocNode>`, `TaskEntry[]`, `Record<string, Analytics>` and a local
    * alias of any of them all answer the same way. Returns `UNRESOLVED` for a name the checker
    * cannot bind, which the caller reports rather than ignores.
    */
@@ -360,11 +360,9 @@ class WireVocabulary {
    *
    * A UNION answers with EVERY member rather than with nothing. That is the point: TypeScript's
    * excess-property check against a non-discriminated union only requires each property to exist
-   * in SOME member, so `SubTaskRow = TaskSubTaskRefNode | SeriesSubTaskNode` accepts a row bearing
-   * `linkedLifecycleId` (only the first declares it) AND `createdAt` (only the second does) — a
-   * blend of two `extra="forbid"` server models that neither one could ever send. That pair is the
-   * mirror's own worked example: `types/projection.ts` carries the comment explaining that the two
-   * models were once collapsed into one interface, and this is the shape of the defect it caused.
+   * in SOME member, so `TaskEntry | TaskSummary` admits both `key` (only the entry
+   * declares it) and `objective` (only the summary declares it), a blend that neither
+   * extra-forbid server model could send. Each admitted member must be checked separately.
    *
    * Still conservative in the other direction: one member the guard cannot name (an anonymous
    * literal in a discriminated union, say) abandons the whole slot rather than measuring a value

@@ -7,6 +7,7 @@
 
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { dashboardStore } from "../../data/store";
 
 import type {
   ReviewChangedFile,
@@ -174,24 +175,16 @@ function reviewed(
     const url = new URL(String(input), "http://localhost");
     if (url.pathname === "/api/changeset/task") {
       if (listed.state === "unavailable") {
-        return {
-          ok: false,
-          status: 404,
-          json: async () => ({ status: "not-found", path: listed.detail }),
-        } as Response;
+        return new Response(JSON.stringify(({ status: "not-found", path: listed.detail })), { status: 404 });
       }
-      return { ok: true, status: 200, json: async () => changeset } as Response;
+      return new Response(JSON.stringify(changeset), { status: 200 });
     }
     if (url.pathname !== "/api/changeset/file-diff") throw new Error(`unexpected read ${url}`);
     const path = url.searchParams.get("path") ?? "";
     const result = expansions[path];
     if (!result) throw new Error(`no stubbed file diff for ${path}`);
     if (result.state === "refused") {
-      return {
-        ok: false,
-        status: 404,
-        json: async () => ({ status: "not-found", path: result.refusal?.detail }),
-      } as Response;
+      return new Response(JSON.stringify(({ status: "not-found", path: result.refusal?.detail })), { status: 404 });
     }
     const opened = result.expansion!;
     const diff: FileDiff = {
@@ -202,7 +195,7 @@ function reviewed(
       before: opened.before.text === undefined ? null : { content: opened.before.text },
       after: opened.after.text === undefined ? null : { content: opened.after.text },
     };
-    return { ok: true, status: 200, json: async () => diff } as Response;
+    return new Response(JSON.stringify(diff), { status: 200 });
   });
   vi.stubGlobal("fetch", fetchFn);
   const view = render(
@@ -235,7 +228,7 @@ function fullFile(
     const path = url.searchParams.get("path") ?? "";
     const result = expansions[path];
     if (!result) throw new Error(`no stubbed full file for ${path}`);
-    return { ok: true, status: 200, json: async () => result } as Response;
+    return new Response(JSON.stringify(result), { status: 200 });
   });
   vi.stubGlobal("fetch", fetchFn);
   const view = render(
@@ -260,6 +253,7 @@ async function open(view: ReturnType<typeof render>, path: string) {
 
 afterEach(() => {
   cleanup();
+  dashboardStore.getState().reset();
   vi.unstubAllGlobals();
   localStorage.clear();
 });

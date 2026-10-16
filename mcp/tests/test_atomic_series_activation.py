@@ -13,7 +13,7 @@ from agents_remember.models.structural.atomic_series_activation import (
     AtomicSeriesActivationRecord,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import (
     activation_path,
     activation_waiting_reason,
@@ -121,6 +121,48 @@ class AtomicSeriesActivationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_invalid_sprint_stage_refuses_before_series_bootstrap(self) -> None:
+        fixture = self.fixture
+        folder = fixture.tasks / "sprint"
+        sprint = read_task_doc(folder / "task.json")
+        data = sprint.model_dump(by_alias=True)
+        data["subTasks"] = [
+            {
+                "number": number,
+                "name": "master-a",
+                "file": "",
+                "status": "planning",
+                "masterRef": MASTER_A.model_dump(),
+            }
+            for number in ("1", "2")
+        ]
+        write_task_doc(folder, TaskDocument.model_validate(data))
+        before = {path: path.read_bytes() for path in fixture.tasks.rglob("*.json")}
+        code_refs = git(fixture.code, "show-ref")
+        memory_refs = git(fixture.memory, "show-ref")
+        spec = MasterSeriesContractSpec(
+            coordination_root=fixture.coord,
+            repo_name=REPO,
+            code_repo=fixture.code,
+            memory_root=fixture.memory,
+            task_root=fixture.tasks / "master-a",
+            task_name="master-a",
+            parent_task_name="sprint",
+            protected_branch="super",
+        )
+        for dry_run in (True, False):
+            result = ensure_master_series_contract(spec, dry_run=dry_run)
+            self.assertIsInstance(result, WorktreeCommandResult)
+            assert isinstance(result, WorktreeCommandResult)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.payload["status"], "task-leaf-binding-invalid")
+            self.assertIsInstance(result.payload["detail"], str)
+            self.assertIn("ambiguous rows", str(result.payload["detail"]))
+            self.assertEqual(git(fixture.code, "show-ref"), code_refs)
+            self.assertEqual(git(fixture.memory, "show-ref"), memory_refs)
+            self.assertFalse((spec.task_root / "series-contract.md").exists())
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_contracts_sharing_one_source_pair_hold_independent_selection(self) -> None:
         contract_a = self.fixture.contract("master-a")

@@ -21,7 +21,9 @@ import uvicorn
 
 import agents_remember
 from agents_remember.application.worktree_services import build_default_worktree_services
+from agents_remember.cli.dashboard_review_summary import review_intent_summary_port
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
+from agents_remember.cli.paseo_bridge import bridge_call
 from agents_remember.cli.role_launch_archive import LeafAgentArchive
 from agents_remember.cli.role_launch_routes import register_role_launch_routes
 from agents_remember.controlplane.durable_store import declare_process_role
@@ -83,9 +85,6 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         list_knowledge_review_entries,
         read_complete_knowledge_review,
     )
-    from agents_remember.application.review_intent_summary import (  # noqa: PLC0415 - composition
-        read_review_intent_summary,
-    )
     from agents_remember.application.review_source_content import (  # noqa: PLC0415 - composition
         read_review_source_content,
     )
@@ -137,15 +136,6 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return read_review_source_content(config, request)
 
-    def review_intent_summary_port(repository_id, master, leaf_id):
-        """Count the changed intent of the comparison the task entry opens, before it is opened.
-
-        Same resolution as the two ports above, so the numbers beside the entry describe the review
-        it opens; no subject catalogue is read to produce them.
-        """
-
-        return read_review_intent_summary(config, repository_id, master, leaf_id)
-
     def review_trees_port(query):
         """The tree view of the same resolution (MIK-R25): four trees, knowledge diff, worklist."""
 
@@ -157,10 +147,11 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         return read_knowledge_reader(config, query)
 
     return ServingCollaborators(
+        host_activity_reconcile=lambda runtime: bridge_call(runtime, "host-activity-snapshot", {}),
         knowledge_review=review_port,
         knowledge_review_entries=review_entries_port,
         review_source_content=review_source_content_port,
-        review_intent_summary=review_intent_summary_port,
+        review_intent_summary=review_intent_summary_port(config),
         review_trees=review_trees_port,
         review_trees_shutdown=worklist_processes.shutdown,
         knowledge_reader=knowledge_reader_port,

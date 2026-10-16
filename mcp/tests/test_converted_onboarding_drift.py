@@ -427,6 +427,42 @@ def test_report_and_snapshot_come_from_the_same_result(tmp_path: Path) -> None:
     assert payload["actionableCount"] == 1, payload
 
 
+def test_complete_drift_fingerprint_changes_beyond_equal_counts_and_sample(tmp_path: Path) -> None:
+    """R166 amendment 3: the producer fingerprints findings before the detail limit."""
+    code = _code_tree(tmp_path)
+    memory = _converted_memory(tmp_path)
+    _write_card(memory, "pkg/alpha.py", [_stale_anchor()])
+    _write_card(memory, "pkg/beta.py", [_stale_anchor()])
+    _commit(memory)
+    context = _context(memory, tmp_path)
+    snapshot = drift_snapshot_path(context.coordination_root, repository=code.name, branch="main")
+    _summarize(code_repository_root=code, context=context, detail_limit=1)
+    first = json.loads(snapshot.read_text())
+    _summarize(code_repository_root=code, context=context, detail_limit=1)
+    again = json.loads(snapshot.read_text())
+    assert first["actionableFingerprint"] == again["actionableFingerprint"]
+    # Move beta's authored reference slot beyond alpha's unchanged sample.
+    # Its stale target and every count stay the same; the finding's field changes.
+    sidecar = memory / "onboarding/pkg/beta.py.json"
+    document = json.loads(sidecar.read_text())
+    document["references"]["2"] = document["references"].pop("1")
+    sidecar.write_text(canonical_text(document))
+    (memory / "onboarding/pkg/beta.py.md").write_text("# pkg/beta.py\n\nSee [2].\n")
+    _summarize(code_repository_root=code, context=context, detail_limit=1)
+    changed = json.loads(snapshot.read_text())
+    assert first["counts"] == changed["counts"]
+    assert first["actionableCount"] == changed["actionableCount"] == 2
+    assert first["rows"] == changed["rows"]
+    assert first["actionableFingerprint"] != changed["actionableFingerprint"]
+    _summarize(code_repository_root=code, context=context, detail_limit=0)
+    unsampled = json.loads(snapshot.read_text())
+    assert unsampled["rows"] == []
+    assert changed["actionableFingerprint"] == unsampled["actionableFingerprint"]
+    (memory / "onboarding/pkg/beta.py.json").write_text("{")
+    _summarize(code_repository_root=code, context=context, detail_limit=1)
+    assert json.loads(snapshot.read_text())["actionableFingerprint"] is None
+
+
 def test_baseline_states_for_converted_trees(tmp_path: Path) -> None:
     """Rule 7: status reports blocked-invalid, blocked-drift and unavailable distinctly."""
 

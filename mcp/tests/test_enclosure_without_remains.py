@@ -15,8 +15,11 @@ import dataclasses
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
+from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.worktrees import abandon_task_publication
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     inspect_lifecycle_operation_locator,
 )
@@ -26,7 +29,11 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.terminal_inventory import (
     terminal_without_remains_reason,
 )
-from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    load_contract,
+    write_contract,
+)
 from lifecycle_enclosure_test_support import byte_tree, enclosure_contract
 from read_boundary_oracle_test_support import _snapshot
 from test_worktree_support import init_repo
@@ -116,6 +123,65 @@ def test_abandon_real_run_finishes_and_records(worktree_services: None, tmp_path
     )
     assert repeated.returncode == 0, repeated.payload
     assert repeated.payload["state"] == "abandoned"
+    assert load_contract(contract_path).cleanup == "abandoned"
+
+
+def test_abandon_restores_task_and_master_if_contract_publication_fails(
+    worktree_services: None, tmp_path: Path
+) -> None:
+    contract_path = _leafless_enclosure(tmp_path, integrated=False)
+    contract = load_contract(contract_path)
+    root = contract.task_root
+    for payload in (
+        {
+            "id": contract.task_name,
+            "slug": "task",
+            "kind": "master",
+            "subTasks": [
+                {
+                    "number": contract.leaf_id,
+                    "name": "Leaf",
+                    "file": "leaf.md",
+                    "status": "inProgress",
+                }
+            ],
+        },
+        {"id": contract.leaf_id, "slug": "leaf", "kind": "subTask", "master": "task.md"},
+    ):
+        write_task_doc(
+            root,
+            TaskDocument.model_validate(
+                {
+                    "repo": contract.repo_name,
+                    "title": "Fixture",
+                    "createdAt": "2026-10-15T00:00:00Z",
+                    "status": "inProgress",
+                    **payload,
+                }
+            ),
+        )
+    paths = [root / name for name in ("task.json", "task.md", "leaf.json", "leaf.md")]
+    before = {path: path.read_bytes() for path in paths}
+    native_write = abandon_task_publication.write_contract
+
+    def fail_terminal(path: Path, candidate: WorktreeContract) -> None:
+        if candidate.cleanup == "abandoned":
+            raise OSError("injected terminal publication failure")
+        native_write(path, candidate)
+
+    with patch.object(abandon_task_publication, "write_contract", side_effect=fail_terminal):
+        result = abandon_module.abandon_result(
+            WorktreeArgs(contract_path=contract_path, approved=True)
+        )
+    assert result.returncode == 2
+    assert load_contract(contract_path).cleanup == "pending"
+    assert {path: path.read_bytes() for path in paths} == before
+    retried = abandon_module.abandon_result(
+        WorktreeArgs(contract_path=contract_path, approved=True)
+    )
+    assert retried.returncode == 0, retried.payload
+    assert read_task_doc(root / "leaf.json").status == "abandoned"
+    assert read_task_doc(root / "task.json").subTasks[0].status == "abandoned"
     assert load_contract(contract_path).cleanup == "abandoned"
 
 
@@ -395,3 +461,45 @@ def test_series_abandon_preview_leaves_populated_logs_and_apply_removes_them(
     applied = abandon_module._abandon_directories(contract, dry_run=False, force=False)
     assert set(applied) == {"reports", "lifecycle"}
     assert not (contract.worktree_group / "logs").exists()
+
+
+def test_invalid_parent_refuses_remains_free_abandon_without_publication(
+    worktree_services: None,
+    tmp_path: Path,
+) -> None:
+    contract_path = _leafless_enclosure(tmp_path, integrated=False)
+    contract = load_contract(contract_path)
+    root = contract.task_root
+    row = {"number": contract.leaf_id, "name": "Leaf", "file": "leaf.md", "status": "inProgress"}
+    for payload in (
+        {"id": contract.task_name, "slug": "task", "kind": "master", "subTasks": [row, dict(row)]},
+        {"id": contract.leaf_id, "slug": "leaf", "kind": "subTask", "master": "task.md"},
+    ):
+        write_task_doc(
+            root,
+            TaskDocument.model_validate(
+                {
+                    "repo": contract.repo_name,
+                    "title": "Fixture",
+                    "createdAt": "2026-10-15T00:00:00Z",
+                    "status": "inProgress",
+                    **payload,
+                }
+            ),
+        )
+    before = contract_path.read_bytes()
+    for dry_run in (True, False):
+        result = abandon_module.abandon_result(
+            WorktreeArgs(
+                contract_path=contract_path,
+                approved=True,
+                dry_run=dry_run,
+            )
+        )
+        assert result.returncode == 2
+        assert result.payload["code"] == "task-stage-invalid"
+        next_step = result.payload["nextStep"]
+        assert isinstance(next_step, dict)
+        assert "Repair" in next_step["summary"]
+        assert contract_path.read_bytes() == before
+        assert load_contract(contract_path).cleanup == "pending"

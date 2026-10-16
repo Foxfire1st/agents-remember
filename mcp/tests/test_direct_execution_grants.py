@@ -62,7 +62,6 @@ from agents_remember.serving.direct_execution_grants import (
     revoke_grant_developer,
 )
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
-    read_series_documents,
     read_task_documents,
 )
 from agents_remember.tasks import (
@@ -1540,18 +1539,22 @@ class DirectExecutionGrantTest(unittest.TestCase):
         )
         self.assertEqual(require_grant(other.coordination_root, self.leaf_ref), change.grant)
 
-    def test_series_projection_shows_grant_and_giver_per_leaf(self) -> None:
+    def test_task_projection_shows_grant_and_giver_per_leaf(self) -> None:
 
         now = datetime(2026, 10, 6, tzinfo=UTC)
-        nodes = read_series_documents(self.coord, now=now)
+        nodes = [
+            node for node in read_task_documents(self.coord, now=now) if node.kind == "subTask"
+        ]
         self.assertEqual(len(nodes), 1)
-        self.assertIsNone(nodes[0].subTasks[0].directGrant)
+        self.assertIsNone(nodes[0].directGrant)
         change = give_grant(
             self.config, self.leaf_ref, granted_by=ARCHITECT_GRANTER, granter_agent_id="a1"
         )
         assert change.grant is not None
-        nodes = read_series_documents(self.coord, now=now)
-        grant = nodes[0].subTasks[0].directGrant
+        nodes = [
+            node for node in read_task_documents(self.coord, now=now) if node.kind == "subTask"
+        ]
+        grant = nodes[0].directGrant
         self.assertIsNotNone(grant)
         assert grant is not None
         self.assertEqual(grant.grantedBy, "architect a1")
@@ -1559,8 +1562,10 @@ class DirectExecutionGrantTest(unittest.TestCase):
         # A second leaf without a grant projects no grant node.
         second = self._second_leaf()
         give_grant(self.config, second, granted_by=DEVELOPER_GRANTER)
-        nodes = read_series_documents(self.coord, now=now)
-        by_number = {sub.number: sub for sub in nodes[0].subTasks}
+        nodes = [
+            node for node in read_task_documents(self.coord, now=now) if node.kind == "subTask"
+        ]
+        by_number = {sub.id: sub for sub in nodes}
         first_grant = by_number[LEAF_ID].directGrant
         assert first_grant is not None
         self.assertEqual(first_grant.grantedBy, "architect a1")
@@ -1590,10 +1595,12 @@ class DirectExecutionGrantTest(unittest.TestCase):
             "{not json", encoding="utf-8"
         )
         now = datetime(2026, 10, 6, tzinfo=UTC)
-        series = read_series_documents(self.coord, now=now)
+        series = [
+            node for node in read_task_documents(self.coord, now=now) if node.kind == "subTask"
+        ]
         self.assertEqual(len(series), 1)
-        self.assertIsNotNone(series[0].subTasks[0].directGrant)
-        nodes = read_task_documents(self.coord, enclosures=[], now=now)
+        self.assertIsNotNone(series[0].directGrant)
+        nodes = read_task_documents(self.coord, now=now)
         self.assertTrue(nodes)
         # The valid sibling grant still projects; gate reads refuse mismatch.
         other = TaskDocumentRef(repository="repo-a", path=f"{MASTER_NAME}/other.json")
@@ -1616,11 +1623,11 @@ class DirectExecutionGrantTest(unittest.TestCase):
     def test_task_document_projection_carries_leaf_grant(self) -> None:
 
         now = datetime(2026, 10, 6, tzinfo=UTC)
-        nodes = read_task_documents(self.coord, enclosures=[], now=now)
+        nodes = read_task_documents(self.coord, now=now)
         by_id = {node.id: node for node in nodes}
         self.assertIsNone(by_id[LEAF_ID].directGrant)
         give_grant(self.config, self.leaf_ref, granted_by=DEVELOPER_GRANTER)
-        nodes = read_task_documents(self.coord, enclosures=[], now=now)
+        nodes = read_task_documents(self.coord, now=now)
         by_id = {node.id: node for node in nodes}
         self.assertIsNotNone(by_id[LEAF_ID].directGrant)
         grant = by_id[LEAF_ID].directGrant

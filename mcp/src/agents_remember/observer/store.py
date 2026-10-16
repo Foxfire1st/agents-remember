@@ -1,17 +1,4 @@
-"""Append-only event store for the observer substrate.
-
-Per-lifecycle truth lives in ``lifecycles/<lifecycle-id>/events.jsonl``;
-lifecycle-less events (provider/watcher activity) go to
-``workspace/events.jsonl``. Each lifecycle file has exactly one writer at a time
-because a lifecycle is adopted by exactly one live session, so appends need no
-cross-process lock.
-
-The single-writer invariant is total: the *only* events written to a lifecycle
-file are written by that lifecycle's live owner. A dormant fleeting lifecycle
-past its TTL is never terminated by a written event (which would be a non-owner
-append) -- readers project ``abandoned`` from its log and the sweep prunes the
-directory. So nothing ever appends to a lifecycle file it does not own.
-"""
+"""The bounded workspace Event River and its shared append/read lock."""
 
 from __future__ import annotations
 
@@ -21,7 +8,6 @@ import json
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -32,8 +18,6 @@ from agents_remember.observer.events import Event
 WORKSPACE_SOURCE = "workspace"
 WORKSPACE_CURSOR_FILE = "events.cursor.json"
 WORKSPACE_LOCK_FILE = "events.lock"
-HEARTBEAT_KIND = "lifecycle.heartbeat"
-HEARTBEAT_SIDECAR_FILE = "heartbeat.json"
 
 
 @contextmanager
@@ -141,25 +125,8 @@ def workspace_logical_size(root: Path) -> int:
     return workspace_base_offset(root) + size
 
 
-def heartbeat_sidecar_path(root: Path, lifecycle_id: str) -> Path:
-    return root / "lifecycles" / lifecycle_id / HEARTBEAT_SIDECAR_FILE
-
-
-def read_heartbeat_sidecar(root: Path, lifecycle_id: str) -> Event | None:
-    path = heartbeat_sidecar_path(root, lifecycle_id)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        event = Event.model_validate_json(text)
-    except ValidationError:
-        return None
-    return event if event.kind == HEARTBEAT_KIND else None
-
-
 class EventStore:
-    """Resolve per-lifecycle / workspace log paths and append events as JSONL."""
+    """Append to and read the workspace Event River."""
 
     def __init__(self, observer_root: Path) -> None:
         self._root = observer_root
@@ -168,63 +135,24 @@ class EventStore:
     def root(self) -> Path:
         return self._root
 
-    def log_path(self, lifecycle_id: str | None) -> Path:
-        """The JSONL log a given event routes to (workspace when lifecycle-less)."""
-        if lifecycle_id:
-            return self._root / "lifecycles" / lifecycle_id / "events.jsonl"
+    def log_path(self) -> Path:
         return self._root / WORKSPACE_SOURCE / "events.jsonl"
 
     def append(self, event: Event, *, lock_timeout: float | None = None) -> None:
-        """Append one event to its log, creating parent dirs on first write.
+        """Admit an event under the shared size bound and lock."""
+        from agents_remember.observer import event_retention  # noqa: PLC0415
 
-        ``lock_timeout`` bounds the workspace-river lock wait (``None`` waits as
-        long as it takes); a lifecycle log never takes the lock either way.
-
-        A lifecycle-less event goes to the shared workspace river through the
-        same admission every writer obeys (MIK-R114 rule 5): over the ceiling
-        the oldest rows are cut first, under the same lock. A row that cannot
-        fit even after the cut is not written -- the bound holds; the
-        lifecycle-specific append and heartbeat branches are unchanged.
-        """
-        if event.lifecycleId and event.kind == HEARTBEAT_KIND:
-            self._write_heartbeat_sidecar(event)
-            return
-        path = self.log_path(event.lifecycleId)
+        path = self.log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        line = event.model_dump_json(by_alias=True, exclude_none=True)
-        if event.lifecycleId is None:
-            # Deferred: event_retention imports this module for the river lock,
-            # so a top-level import would be circular.
-            from agents_remember.observer import event_retention  # noqa: PLC0415
+        event_retention.admit_workspace_river_row(
+            self._root,
+            event.model_dump_json(by_alias=True, exclude_none=True).encode("utf-8"),
+            timeout=lock_timeout,
+        )
 
-            event_retention.admit_workspace_river_row(
-                self._root,
-                line.encode("utf-8"),
-                timeout=lock_timeout,
-            )
-            return
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
-
-    def read(self, lifecycle_id: str | None) -> list[Event]:
-        """Read a log back as validated events (empty when the log is absent).
-
-        Corrupt/legacy/version-skew lines are skipped rather than raised (CS-6 D3,
-        260707-HFX2-L12): this read feeds the shared projection tick
-        (``project_and_write`` -> ``read_lifecycle_logs``), so one torn append line
-        must not freeze the whole projection fleet-wide -- it costs at most the one
-        unparseable row, mirroring ``ProviderMetricsStore.read_recent`` tolerance.
-        """
-        events = self.read_log(lifecycle_id)
-        if lifecycle_id is not None:
-            heartbeat = read_heartbeat_sidecar(self._root, lifecycle_id)
-            if heartbeat is not None and (not events or not _event_before(heartbeat, events[-1])):
-                events.append(heartbeat)
-        return events
-
-    def read_log(self, lifecycle_id: str | None) -> list[Event]:
-        """Read only the JSONL file, excluding any coalesced heartbeat sidecar."""
-        path = self.log_path(lifecycle_id)
+    def read(self) -> list[Event]:
+        """Read valid rows; a torn or malformed row cannot stop the River."""
+        path = self.log_path()
         if not path.exists():
             return []
         events: list[Event] = []
@@ -236,29 +164,3 @@ class EventStore:
             except ValidationError:
                 continue
         return events
-
-    def read_heartbeat(self, lifecycle_id: str) -> Event | None:
-        """Read the coalesced heartbeat sidecar for one lifecycle."""
-        return read_heartbeat_sidecar(self._root, lifecycle_id)
-
-    def _write_heartbeat_sidecar(self, event: Event) -> None:
-        path = heartbeat_sidecar_path(self._root, event.lifecycleId or "")
-        atomic_write_text(path, event.model_dump_json(by_alias=True, exclude_none=True) + "\n")
-
-
-def _event_before(left: Event, right: Event) -> bool:
-    left_ts = _event_time(left)
-    right_ts = _event_time(right)
-    if left_ts is None or right_ts is None:
-        return left.ts < right.ts
-    return left_ts < right_ts
-
-
-def _event_time(event: Event) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(event.ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)

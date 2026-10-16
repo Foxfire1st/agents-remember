@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach,describe,expect,it } from 'vitest';
 
-import type { CloseoutQueueNode, WorkspaceProjection } from "../types/projection";
-import { asServedProjection } from "../test/servedProjection";
-import { reparsed } from "../test/fixtures/wire";
-import { dashboardStore } from "./store";
-import snapshot from "../fixtures/snapshot.json";
+import snapshot from '../fixtures/snapshot.json';
+import { reparsed } from '../test/fixtures/wire';
+import { asServedProjection } from '../test/servedProjection';
+import type { CloseoutQueueNode,WorkspaceProjection } from '../types/projection';
+import { dashboardStore } from './store';
 
 // `asServedProjection`, not `snapshot as unknown as WorkspaceProjection`. The double cast turned
 // off assignability for this file too: the fixture could drop a field the store reads and nothing
@@ -13,95 +13,85 @@ import snapshot from "../fixtures/snapshot.json";
 // `resolveJsonModule` erased (see `test/servedProjection.ts`).
 const projection = asServedProjection(snapshot);
 
-// The fixture's lifecycle count, read from the fixture rather than repeated as a literal in each
-// assertion below. It grew from 2 to 6 when `contract.test.ts` started requiring every member of
-// every closed vocabulary to be exercised — six states need six lifecycles — and a hard-coded 2
-// is exactly the kind of hand-kept second copy this leaf is about.
-const FIXTURE_LIFECYCLES = projection.lifecycles.length;
+const FIXTURE_TASKS = projection.tasks.length;
+const FIRST_KEY = projection.tasks[0].key;
+const SECOND_KEY = projection.tasks[1].key;
 
 const RESET_QUEUE: CloseoutQueueNode = {
-  sprintRef: { repository: "repo-reset", path: "scenario-a/task.json" },
+  sprintRef: { repository: 'repo-reset', path: 'scenario-a/task.json' },
   revision: 37,
-  serviceCondition: "valid-built",
-  sourceClassification: "active",
-  sourceFingerprint: "ab".repeat(32),
+  serviceCondition: 'valid-built',
+  sourceClassification: 'active',
+  sourceFingerprint: 'ab'.repeat(32),
   sourceProblems: [],
   members: [
     {
-      generationId: "cd".repeat(32),
-      taskDocumentRef: { repository: "repo-reset", path: "scenario-a/stale-leaf.json" },
-      owningMaster: { repository: "repo-reset", path: "scenario-a/task.json" },
-      classification: "ready",
-      priority: "normal",
+      generationId: 'cd'.repeat(32),
+      taskDocumentRef: { repository: 'repo-reset', path: 'scenario-a/stale-leaf.json' },
+      owningMaster: { repository: 'repo-reset', path: 'scenario-a/task.json' },
+      classification: 'ready',
+      priority: 'normal',
       order: 0,
       reasons: [],
     },
   ],
 };
 
-beforeEach(() => {
-  dashboardStore.setState({
-    conn: "connecting",
-    generatedAt: null,
-    lifecycles: {},
-    enclosures: {},
-    providers: {},
-    metrics: null,
-    analytics: null,
-    servingBuild: null,
-  });
-});
+beforeEach(() => dashboardStore.getState().reset());
 
-describe("dashboard store", () => {
-  it("slides the event window so the buffer never grows without bound", () => {
+describe('dashboard store', () => {
+  it('slides the event window so the buffer never grows without bound', () => {
     dashboardStore.setState({ events: [], eventsHydrated: false });
     const total = 2100;
     for (let i = 0; i < total; i += 1) {
       dashboardStore
         .getState()
-        .pushEvent(JSON.stringify({ id: `e-${i}`, kind: "tool.completed", data: {} }));
+        .pushEvent(JSON.stringify({ id: `e-${i}`, kind: 'tool.completed', data: {} }));
     }
     const { events, eventsHydrated } = dashboardStore.getState();
     expect(eventsHydrated).toBe(true);
     expect(events.length).toBe(2000); // bounded sliding window, not unbounded growth
-    expect(events[events.length - 1].id).toBe("e-2099"); // newest retained
-    expect(events[0].id).toBe("e-100"); // oldest beyond the window slid off
+    expect(events[events.length - 1].id).toBe('e-2099'); // newest retained
+    expect(events[0].id).toBe('e-100'); // oldest beyond the window slid off
   });
 
-  it("folds a snapshot into id-keyed maps and goes live", () => {
+  it('folds a snapshot into id-keyed maps and goes live', () => {
     dashboardStore.getState().applySnapshot(projection);
     const state = dashboardStore.getState();
-    expect(state.conn).toBe("live");
-    expect(Object.keys(state.lifecycles)).toContain("sim-replay-lifecycle");
-    expect(Object.keys(state.enclosures)).toContain("sim-enclosure");
-    expect(state.metrics?.lifecycleCount).toBe(FIXTURE_LIFECYCLES);
+    expect(state.conn).toBe('live');
+    expect(Object.keys(state.tasks)).toContain(FIRST_KEY);
+    expect(Object.keys(state.enclosures)).toContain('sim-enclosure');
+    expect(Object.keys(state.tasks)).toHaveLength(FIXTURE_TASKS);
+    expect(state.taskCounts).toEqual(projection.taskCounts);
   });
 
-  it("upserts a lifecycle delta by id", () => {
+  it('upserts a task delta by qualified reference', () => {
     dashboardStore.getState().applySnapshot(projection);
-    const one = dashboardStore.getState().lifecycles["sim-replay-lifecycle"];
-    dashboardStore.getState().applyDelta("lifecycle", { ...one, phase: "close" });
-    expect(dashboardStore.getState().lifecycles["sim-replay-lifecycle"].phase).toBe("close");
+    const one = dashboardStore.getState().tasks[FIRST_KEY];
+    dashboardStore.getState().applyDelta('task', { ...one, stage: 'completed' });
+    expect(dashboardStore.getState().tasks[FIRST_KEY].stage).toBe('completed');
   });
 
-  it("drops a lifecycle on the removed marker", () => {
+  it('drops a task on the removed marker', () => {
     dashboardStore.getState().applySnapshot(projection);
-    dashboardStore.getState().applyDelta("lifecycle.removed", { id: "fleeting-001" });
-    expect(dashboardStore.getState().lifecycles["fleeting-001"]).toBeUndefined();
+    dashboardStore.getState().applyDelta('task.removed', { key: SECOND_KEY });
+    expect(dashboardStore.getState().tasks[SECOND_KEY]).toBeUndefined();
   });
 
-  it("replaces metrics / analytics wholesale", () => {
+  it('replaces metrics / analytics wholesale', () => {
     dashboardStore.getState().applySnapshot(projection);
-    dashboardStore.getState().applyDelta("metrics", { ...projection.metrics, lifecycleCount: 9999 });
-    expect(dashboardStore.getState().metrics?.lifecycleCount).toBe(9999);
+    dashboardStore
+      .getState()
+      .applyDelta('metrics', { ...projection.metrics, ignoredHostAgents: 9999 });
+    expect(dashboardStore.getState().metrics?.ignoredHostAgents).toBe(9999);
   });
 
-  it("marks the connection signal-lost", () => {
-    dashboardStore.getState().setConn("signal-lost");
-    expect(dashboardStore.getState().conn).toBe("signal-lost");
+  it('marks the connection signal-lost', () => {
+    dashboardStore.getState().setConn('signal-lost');
+    expect(dashboardStore.getState().conn).toBe('signal-lost');
   });
 
-  it("clears a seeded closeout queue and increments generation exactly once on reset", () => {
+  it('clears a seeded closeout queue and increments generation exactly once on reset', () => {
     dashboardStore.setState({ closeoutQueues: [RESET_QUEUE] });
     const generationBeforeReset = dashboardStore.getState().gen;
     expect(dashboardStore.getState().closeoutQueues).toEqual([RESET_QUEUE]);
@@ -123,15 +113,13 @@ describe("dashboard store", () => {
  *  helper hand the store a shape the server could never send. */
 function volatileBump(source: WorkspaceProjection, tick: number): WorkspaceProjection {
   const copy = reparsed(source);
-  copy.generatedAt = `2026-07-07T05:00:${String(tick % 60).padStart(2, "0")}+00:00`;
-  for (const lifecycle of copy.lifecycles) lifecycle.staleSeconds = 10 + tick;
-  for (const doc of copy.analytics?.taskDocuments ?? []) doc.ageSeconds = 100 + tick;
+  copy.generatedAt = `2026-07-07T05:00:${String(tick % 60).padStart(2, '0')}+00:00`;
   for (const item of copy.analytics?.attentionQueue ?? []) item.waitSeconds = 5 + tick;
   return copy;
 }
 
-describe("dashboard store change gate (260703-L15)", () => {
-  it("applies N idle re-snapshots with zero store writes and stable identity", () => {
+describe('dashboard store change gate (260703-L15)', () => {
+  it('applies N idle re-snapshots with zero store writes and stable identity', () => {
     dashboardStore.getState().applySnapshot(volatileBump(projection, 0));
     const before = dashboardStore.getState();
     let notifications = 0;
@@ -145,61 +133,59 @@ describe("dashboard store change gate (260703-L15)", () => {
     const after = dashboardStore.getState();
     expect(notifications).toBe(0); // zero store writes — set() was never called
     expect(after).toBe(before); // the state OBJECT is untouched
-    expect(after.lifecycles).toBe(before.lifecycles);
+    expect(after.tasks).toBe(before.tasks);
     expect(after.analytics).toBe(before.analytics);
     expect(after.generatedAt).toBe(before.generatedAt); // ages/stamp coherence: no new content, no new stamp
   });
 
-  it("skips a redundant delta (volatile-only node) without a store write", () => {
+  it('skips a content-equal reparsed task delta without a store write', () => {
     dashboardStore.getState().applySnapshot(projection);
     const before = dashboardStore.getState();
-    const node = JSON.parse(JSON.stringify(before.lifecycles["sim-replay-lifecycle"]));
-    node.staleSeconds = 12345;
-    dashboardStore.getState().applyDelta("lifecycle", node);
+    const node = structuredClone(before.tasks[FIRST_KEY]);
+    dashboardStore.getState().applyDelta('task', node);
     expect(dashboardStore.getState()).toBe(before);
-    expect(dashboardStore.getState().lifecycles).toBe(before.lifecycles);
+    expect(dashboardStore.getState().tasks).toBe(before.tasks);
   });
 
-  it("skips a removed-marker for an absent node without a store write", () => {
+  it('skips a removed-marker for an absent node without a store write', () => {
     dashboardStore.getState().applySnapshot(projection);
     const before = dashboardStore.getState();
-    dashboardStore.getState().applyDelta("lifecycle.removed", { id: "no-such-lifecycle" });
+    dashboardStore.getState().applyDelta('task.removed', { key: 'repo/no-such-task.json' });
     expect(dashboardStore.getState()).toBe(before);
   });
 
-  it("still applies a real delta exactly as before", () => {
+  it('still applies a real delta exactly as before', () => {
     dashboardStore.getState().applySnapshot(projection);
     const before = dashboardStore.getState();
-    const node = JSON.parse(JSON.stringify(before.lifecycles["sim-replay-lifecycle"]));
-    node.lastEventTs = "2026-06-14T09:09:09+00:00";
-    node.staleSeconds = 1; // fresh ages ride along with real changes
-    dashboardStore.getState().applyDelta("lifecycle", node);
+    const node = structuredClone(before.tasks[FIRST_KEY]);
+    node.eventAt = '2026-06-14T09:09:09+00:00';
+    dashboardStore.getState().applyDelta('task', node);
     const after = dashboardStore.getState();
     expect(after).not.toBe(before);
-    expect(after.lifecycles["sim-replay-lifecycle"].lastEventTs).toBe("2026-06-14T09:09:09+00:00");
+    expect(after.tasks[FIRST_KEY].eventAt).toBe('2026-06-14T09:09:09+00:00');
   });
 
-  it("reuses unchanged nodes by identity when a snapshot carries one real change", () => {
+  it('reuses unchanged nodes by identity when a snapshot carries one real change', () => {
     dashboardStore.getState().applySnapshot(projection);
-    const untouched = dashboardStore.getState().lifecycles["fleeting-001"];
+    const untouched = dashboardStore.getState().tasks[SECOND_KEY];
     const next = volatileBump(projection, 7);
-    const changed = next.lifecycles.find((x) => x.id === "sim-replay-lifecycle");
-    if (!changed) throw new Error("fixture lifecycle missing");
-    changed.lastEventTs = "2026-06-14T09:09:09+00:00";
+    const changed = next.tasks.find((x) => x.key === FIRST_KEY);
+    if (!changed) throw new Error('fixture lifecycle missing');
+    changed.eventAt = '2026-06-14T09:09:09+00:00';
     dashboardStore.getState().applySnapshot(next);
     const state = dashboardStore.getState();
-    expect(state.lifecycles["sim-replay-lifecycle"].lastEventTs).toBe("2026-06-14T09:09:09+00:00");
-    expect(state.lifecycles["fleeting-001"]).toBe(untouched); // identity preserved
+    expect(state.tasks[FIRST_KEY].eventAt).toBe('2026-06-14T09:09:09+00:00');
+    expect(state.tasks[SECOND_KEY]).toBe(untouched); // identity preserved
   });
 
-  it("carries the serving-build stamp and keeps its identity across snapshots", () => {
-    const build = { version: "9.9.9", commit: "abc1234", bootedAt: "2026-07-07T05:00:00Z" };
+  it('carries the serving-build stamp and keeps its identity across snapshots', () => {
+    const build = { version: '9.9.9', commit: 'abc1234', bootedAt: '2026-07-07T05:00:00Z' };
     dashboardStore.getState().applySnapshot({ ...projection, servingBuild: build });
     const first = dashboardStore.getState().servingBuild;
     expect(first).toEqual(build);
     const next = volatileBump({ ...projection, servingBuild: { ...build } }, 3);
-    const changed = next.lifecycles[0];
-    changed.lastEventTs = "2026-06-14T09:09:09+00:00"; // force a real apply
+    const changed = next.tasks[0];
+    changed.eventAt = '2026-06-14T09:09:09+00:00'; // force a real apply
     dashboardStore.getState().applySnapshot(next);
     expect(dashboardStore.getState().servingBuild).toBe(first); // equal stamp -> same object
   });
@@ -209,24 +195,24 @@ describe("dashboard store change gate (260703-L15)", () => {
 // A working day of ticks must not grow the store: identical polls keep identity, the event
 // window stays bounded, and no collection accumulates.
 
-describe("long-session guard", () => {
-  it("stays flat across 500 simulated idle ticks with event traffic", () => {
+describe('long-session guard', () => {
+  it('stays flat across 500 simulated idle ticks with event traffic', () => {
     dashboardStore.setState({ events: [], eventsHydrated: false });
     dashboardStore.getState().applySnapshot(volatileBump(projection, 0));
-    const lifecyclesRef = dashboardStore.getState().lifecycles;
+    const tasksRef = dashboardStore.getState().tasks;
     const analyticsRef = dashboardStore.getState().analytics;
     for (let tick = 1; tick <= 500; tick += 1) {
       dashboardStore.getState().applySnapshot(volatileBump(projection, tick));
       for (let i = 0; i < 5; i += 1) {
         dashboardStore
           .getState()
-          .pushEvent(JSON.stringify({ id: `t${tick}-${i}`, kind: "tool.completed", data: {} }));
+          .pushEvent(JSON.stringify({ id: `t${tick}-${i}`, kind: 'tool.completed', data: {} }));
       }
     }
     const state = dashboardStore.getState();
-    expect(state.lifecycles).toBe(lifecyclesRef); // no per-tick object churn
+    expect(state.tasks).toBe(tasksRef); // no per-tick object churn
     expect(state.analytics).toBe(analyticsRef);
     expect(state.events.length).toBeLessThanOrEqual(2000); // the sliding window bound
-    expect(Object.keys(state.lifecycles).length).toBe(FIXTURE_LIFECYCLES); // nothing accumulates
+    expect(Object.keys(state.tasks).length).toBe(FIXTURE_TASKS); // nothing accumulates
   });
 });

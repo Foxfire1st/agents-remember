@@ -63,6 +63,7 @@ from agents_remember.models.role_agents import (
 )
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.serving.paseo.paseo_plugin_files import read_role_agents
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentRefError
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 from fastapi import FastAPI
@@ -555,10 +556,19 @@ class RoleStartTests(RoleToolsTestCase):
     def test_a_start_runs_the_launchers_path_with_the_caller_as_parent(self) -> None:
         request_id = uuid.uuid4()
         locked: list[bool] = []
+
         # The tool takes the backend's launch lock around preparation and launch, as the route does.
-        self.runtime.observer = lambda _command, _payload: locked.append(
-            role_launch_routes._DISPATCH_LOCK.locked()
-        )
+        def observe(command, payload):
+            locked.append(role_launch_routes._DISPATCH_LOCK.locked())
+            if command == "agent-create":
+                runtime = self.config.paseo_runtime
+                assert runtime is not None
+                facts = read_role_agents(runtime.home)[payload["agentId"]]
+                self.assertEqual(facts["role"], "worker")
+                self.assertEqual(facts["task"], LEAF_REF.key)
+                self.assertTrue(Path(facts["reportPath"]).name)
+
+        self.runtime.observer = observe
 
         result = self.start(
             self.architect, "worker", request_id=request_id, agent="codex", model="gpt-a"

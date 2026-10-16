@@ -55,9 +55,9 @@ def test_the_protected_read_roster_names_every_route_with_its_outcome(
     app = FastAPI()
     register_requirements_routes(app, config)
     register_files_routes(app, config)
-    register_changeset_routes(app, config)
+    changeset_cache = register_changeset_routes(app, config)
     register_review_routes(app, config, port=None, entries_port=None, source_content_port=None)
-    register_review_summary_route(app, None)
+    register_review_summary_route(app, None, changeset_cache)
     register_review_trees_route(app, None)
     client = TestClient(app)
     roots = {"enclosure": tmp_path / "roster"}

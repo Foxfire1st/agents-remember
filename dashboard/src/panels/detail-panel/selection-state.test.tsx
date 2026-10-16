@@ -7,8 +7,8 @@ import { fireEvent, render, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import type { TaskDocNode } from '../../types/projection';
-import { seedTaskDocuments, stubNotes, taskDoc } from './test-utils';
+import type { TaskEntry, TaskSummary } from '../../types/projection';
+import { seedTaskEntries, stubNotes, taskEntry, taskSummary, taskReference } from './test-utils';
 
 const REPO = 'agents-remember';
 const LONG_NOTE =
@@ -22,38 +22,53 @@ type Form = 'task' | 'master' | 'sprint';
 
 const pathOf = (form: Form, name: string): string =>
   form === 'task'
-    ? `/tasks/${REPO}/select-master/0${name === 'first' ? 1 : 2}_${name}.json`
-    : `/tasks/${REPO}/select-${form}-${name}/task.json`;
+    ? `${REPO}/select-master/0${name === 'first' ? 1 : 2}_${name}.json`
+    : `${REPO}/select-${form}-${name}/task.json`;
 
-function docOf(form: Form, name: string, over: Partial<TaskDocNode> = {}): TaskDocNode {
-  return taskDoc({
+function docOf(form: Form, name: string, over: Partial<TaskSummary> = {}): TaskEntry {
+  return taskEntry({
+    stage: 'started',
+    stepsDone: 0,
+    stepsTotal: 0,
+    activity: 'works',
+    reference: taskReference(pathOf(form, name)),
     id: `SEL-${form}-${name}`,
-    lifecycleId: undefined,
-    kind: form === 'task' ? 'subTask' : 'master',
-    form,
-    repository: REPO,
-    docPath: pathOf(form, name),
     title: `The ${name} document`,
-    objective: objective(name),
-    orchestrates: form === 'sprint' ? ['select-master'] : [],
-    ...over,
+    summary: taskSummary({
+      type: '',
+      createdAt: '2026-06-20T09:00:00+00:00',
+      form: form,
+      kind: form === 'task' ? 'subTask' : 'master',
+      objective: objective(name),
+      orchestrates: form === 'sprint' ? ['select-master'] : [],
+      ...over,
+    }),
   });
 }
 
-function seedPair(form: Form, over: Partial<TaskDocNode> = {}): void {
+function seedPair(form: Form, over: Partial<TaskSummary> = {}): void {
   const parent =
     form === 'task'
       ? [
-          taskDoc({
+          taskEntry({
+            title: 'doc',
+            stage: 'started',
+            stepsDone: 0,
+            stepsTotal: 0,
+            activity: 'works',
+            reference: taskReference(`${REPO}/select-master/task.json`),
             id: 'SEL-M',
-            lifecycleId: undefined,
-            kind: 'master',
-            repository: REPO,
-            docPath: `/tasks/${REPO}/select-master/task.json`,
+            summary: taskSummary({
+              objective: '',
+              type: '',
+              createdAt: '2026-06-20T09:00:00+00:00',
+              form: 'master',
+              kind: 'master',
+            }),
           }),
         ]
       : [];
-  seedTaskDocuments([...parent, docOf(form, 'first', over), docOf(form, 'second', over)]);
+  seedTaskEntries([...parent, docOf(form, 'first', over), docOf(form, 'second', over)]);
   stubNotes([], '');
 }
 
@@ -110,9 +125,9 @@ describe('what is open belongs to the selected document', () => {
     fireEvent.click(view.getByTestId('objective-toggle'));
 
     // the same document, read anew: another object with another status
-    seedPair('task', { status: 'inProgress' });
+    seedPair('task', { statusNote: 'Updated document facts' });
     view.rerender(<DetailPanel selectedId={select('task', 'first')} />);
-    expect(view.getByTestId('doc-status').textContent).toContain('in work');
+    expect(view.getByTestId('status-note').textContent).toContain('Updated document facts');
     expect(view.getByTestId('objective-text').getAttribute('data-open')).toBe('true');
   });
 });

@@ -51,13 +51,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.mcp.tools import role_agents
 from agents_remember.models.role_agents import RoleMessageCall
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.observer import (
-    AmbientLifecycle,
-    EventStore,
-    install_ambient,
-    new_ulid,
-    reset_ambient,
-)
+from agents_remember.observer import EventStore
 from agents_remember.observer import event_retention as retention_module
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_MAX_BYTES,
@@ -65,7 +59,6 @@ from agents_remember.observer.event_retention import (
     RiverSizeBound,
     admit_workspace_river_row,
     compact_workspace_river,
-    prune_expired_lifecycle_event_logs,
 )
 from agents_remember.observer.events import Event
 from agents_remember.observer.store import workspace_base_offset
@@ -129,7 +122,6 @@ class ToolEventRiverTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         reset_tool_writer()
-        reset_ambient()
         call_target_role.set(None)
         self._dir.cleanup()
 
@@ -176,6 +168,11 @@ class ToolEventRiverTests(unittest.TestCase):
         self.assertEqual("tool.completed", event["kind"])
         self.assertEqual("observed", event["trust"])
         self.assertEqual("ar-observer-event/v1", event["schema"])
+        task_ref = _leaf_binding().task_ref
+        assert task_ref is not None
+        self.assertEqual(task_ref.key, event["scopeKey"])
+        self.assertNotIn("lifecycleId", event)
+        self.assertNotIn("sessionId", event)
         data = event["data"]
         self.assertEqual("server_info", data["tool"])
         self.assertTrue(data["ok"])
@@ -320,19 +317,6 @@ class ToolEventRiverTests(unittest.TestCase):
         self.assertEqual(["worker", "reviewer"], [row["data"]["targetRole"] for row in rows])
 
     # -- rule 1 second half: one event, never two --------------------------------
-
-    def test_active_lifecycle_writes_its_event_as_today_and_no_second_one(self) -> None:
-        self._install(ToolCaller(role="worker", agent_id="agent-1"))
-        ambient = AmbientLifecycle(self.store)
-        install_ambient(ambient)
-        current = ambient.attach(new_ulid(), enclosure=str(self.root / "contract.json"))
-
-        complete_tool_response("server_info", _server_info_payload())
-
-        lifecycle_rows = self.store.read(current.id)
-        tool_rows = [row for row in lifecycle_rows if row.kind == "tool.completed"]
-        self.assertEqual(1, len(tool_rows))
-        self.assertFalse((self.root / "workspace" / "events.jsonl").exists())
 
     # -- rule 6: a failed write is counted, never breaking -----------------------
 
@@ -620,22 +604,6 @@ class ToolEventRiverTests(unittest.TestCase):
         self.assertEqual("sibling-row", rows[-1]["id"])
         self.assertEqual("seat.example", rows[-1]["kind"])
 
-    def test_sibling_lifecycle_and_heartbeat_branches_are_unchanged(self) -> None:
-        store = EventStore(self.root)
-        event = Event(
-            id="lc-row",
-            ts=datetime.now(UTC).isoformat(),
-            kind="tool.completed",
-            trust="observed",
-            actor="model",
-            lifecycleId="lc-1",
-            data={"tool": "server_info", "ok": True},
-        )
-        store.append(event)
-        lifecycle_path = self.root / "lifecycles" / "lc-1" / "events.jsonl"
-        self.assertTrue(lifecycle_path.is_file())
-        self.assertEqual(1, len(store.read("lc-1")))
-
     # -- R1-F03: id-addressed messages carry the resolved role -------------------
 
     def _role_message_config(self) -> McpRuntimeConfig:
@@ -801,35 +769,6 @@ class ToolEventRiverTests(unittest.TestCase):
             if path.is_file()
         }
         self.assertEqual(before, after)
-
-    def test_protected_lifecycle_survives_past_the_former_cleanup_interval(self) -> None:
-        old_ts = "2020-01-01T00:00:00+00:00"
-        now = datetime(2020, 1, 1, 3, 0, 0, tzinfo=UTC)
-        for lifecycle_id in ("lc-keep", "lc-drop"):
-            lifecycle_dir = self.root / "lifecycles" / lifecycle_id
-            lifecycle_dir.mkdir(parents=True)
-            (lifecycle_dir / "events.jsonl").write_text(
-                json.dumps(
-                    {
-                        "schema": "ar-observer-event/v1",
-                        "id": f"e-{lifecycle_id}",
-                        "ts": old_ts,
-                        "kind": "lifecycle.started",
-                        "trust": "declared",
-                        "actor": "model",
-                        "lifecycleId": lifecycle_id,
-                        "data": {},
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-        removed = prune_expired_lifecycle_event_logs(
-            self.root, now=now, protected_lifecycle_ids=frozenset({"lc-keep"})
-        )
-        self.assertTrue((self.root / "lifecycles" / "lc-keep" / "events.jsonl").is_file())
-        self.assertFalse((self.root / "lifecycles" / "lc-drop").exists())
-        self.assertEqual(1, len(removed))
 
     # -- R1-F08: the registered startup path and a fresh process -------------------
 

@@ -63,7 +63,8 @@ from agents_remember.cli.paseo_bridge import (
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
-from agents_remember.cli.paseo_status import read_agent, resume_agent
+from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.role_activity import resume_role_agent
 from agents_remember.cli.role_held_messages import (
     MAX_HELD_PER_RECIPIENT,
     HeldMessage,
@@ -131,7 +132,6 @@ from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_ro
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.tool_events import call_target_role
-from agents_remember.serving.paseo.paseo_plugin_files import publish_role_agent
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.role_reports import (
     RoleReportCollectionError,
@@ -725,46 +725,7 @@ def _started(config: McpRuntimeConfig, request: RoleDispatchRequest) -> dict[str
         **({"warning": receipt["warning"]} if receipt.get("warning") else {}),
         **({"nextAction": next_action} if next_action else {}),
     }
-    if launch == "running" and isinstance(agent_id, str):
-        _publish_role_agent_for_plugin(config, request, agent_id, result.get("reportPath"))
     return result
-
-
-def _publish_role_agent_for_plugin(
-    config: McpRuntimeConfig,
-    request: RoleDispatchRequest,
-    agent_id: str,
-    report_path: str | None,
-) -> bool:
-    """Publish the started agent's facts for the rule-11 plugin (MIK-R117).
-
-    Best-effort: without a configured runtime home, without a report path,
-    or on any filesystem trouble the start still succeeds and the agent is
-    simply silent to the plugin. A repeat start republishes the same record.
-    """
-    if not report_path:
-        return False
-    try:
-        runtime = config.paseo_runtime
-    except Exception:
-        return False
-    if runtime is None:
-        return False
-    reference = (
-        request.task_document_ref or request.master_document_ref or request.sprint_document_ref
-    )
-    try:
-        return publish_role_agent(
-            runtime.home,
-            agent_id,
-            {
-                "role": request.role,
-                "task": reference.key if reference is not None else "Projects",
-                "reportPath": report_path,
-            },
-        )
-    except Exception:
-        return False
 
 
 def _refuse_agent_that_is_gone(config: McpRuntimeConfig, agent_id: str, execution: str) -> None:
@@ -1832,7 +1793,7 @@ def _resume(config: McpRuntimeConfig, recipient: _Recipient) -> None:
                 "in your own chat.",
                 recipientAgentId=recipient.agent_id,
             ) from error
-    outcome = resume_agent(config, recipient.agent_id)
+    outcome = resume_role_agent(config, receipt)
     reading = outcome.reading
     if not reading.reachable:
         raise _host_unreachable(str(reading.unreachable_reason))

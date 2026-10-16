@@ -4,7 +4,7 @@
 deliberately -- the GIL would serialise the very window it forces. This file is the other axis of
 the same contract, the one that harness cannot see: two THREADS of one process, which is what the
 dashboard actually is. ``AttentionDismissalStore.dismiss`` is reached from the HTTP dismiss route
-(``serving/app.py``) and ``prune_lifecycles`` from the projection sweep; both are whole-file
+(``serving/app.py``) and ``reconcile`` from the projection sweep; both are whole-file
 read-modify-writes over the same log, and attention-dismissals is both the store that measured the
 worst loss at the base commit (31.45%) and the one wired to a button a person presses.
 
@@ -42,6 +42,7 @@ from agents_remember.controlplane import attention_dismissals as attention_modul
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
+    AttentionObservation,
 )
 from agents_remember.controlplane.durable_store import (
     GATE_OWNERSHIP,
@@ -89,7 +90,7 @@ class _TempRoot(unittest.TestCase):
 
 
 def _drift(item_id: str) -> AttentionDismissalRecord:
-    """A dismissal the prune keeps: no lifecycle, and ``actionable-drift`` survives on its own."""
+    """A dismissal the prune keeps: the drift source is not read by this provider-only pass."""
     return AttentionDismissalRecord(
         itemId=item_id,
         kind="actionable-drift",
@@ -97,12 +98,11 @@ def _drift(item_id: str) -> AttentionDismissalRecord:
     )
 
 
-def _stale(item_id: str, lifecycle_id: str) -> AttentionDismissalRecord:
-    """A dismissal the prune drops once its lifecycle is no longer live."""
+def _gone_provider(item_id: str) -> AttentionDismissalRecord:
+    """A source census proves this provider is no longer configured."""
     return AttentionDismissalRecord(
         itemId=item_id,
-        kind="stale-session",
-        lifecycleId=lifecycle_id,
+        kind="provider-down",
         dismissedAt="2026-06-14T10:00:00Z",
     )
 
@@ -278,7 +278,7 @@ class InProcessExclusivityTests(_TempRoot):
         """
         store = AttentionDismissalStore(self.root)
         store.dismiss(_drift("actionable-drift:keep"))
-        store.dismiss(_stale("stale-session:L-dead", "L-dead"))
+        store.dismiss(_gone_provider("provider-down:removed"))
 
         parked = threading.Event()
         release = threading.Event()
@@ -305,7 +305,7 @@ class InProcessExclusivityTests(_TempRoot):
 
         def sweep() -> None:
             try:
-                store.prune_lifecycles(set())
+                store.reconcile([AttentionObservation("provider-down", datetime.now(UTC))])
             except BaseException as error:  # reported to the main thread, never swallowed
                 failures.append(error)
 
@@ -345,7 +345,7 @@ class InProcessExclusivityTests(_TempRoot):
 
         self.assertEqual(failures, [])
         self.assertEqual([sweeper.is_alive(), dismisser.is_alive()], [False, False])
-        # The sweep's work AND the dismissal both survive: the dead lifecycle's row is gone, the
+        # The sweep's work AND the dismissal both survive: the removed provider's row is gone, the
         # row it was told to keep is still there, and the click that raced it was not discarded.
         self.assertEqual(
             sorted(store.current()),

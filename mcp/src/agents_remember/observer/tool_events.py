@@ -1,15 +1,8 @@
 """Every tool call of an agent, written to the Event River (MIK-R114 rule 1).
 
-The river was silent on the host path: only a session lifecycle wrote events, and
-an agent started through the host never holds one. So the tool server itself now
-writes one ``tool.completed`` event per call, at the place where the answer is
-completed, for a binding it snapshotted once at start:
-
-* a process that holds an active lifecycle of the earlier kind keeps writing its
-  event as it does today (``AmbientLifecycle.emit_tool``) and writes no second
-  one -- that case ends when MIK-R113 removes the lifecycle;
-* every other call goes to the river of the workspace (``workspace/events.jsonl``),
-  under that river's lock, needing no active lifecycle and no call before it.
+The tool server writes one ``tool.completed`` event per completed call to
+``workspace/events.jsonl``, under the River's lock. Its caller comes from the
+launch binding snapshotted once at start; no active session is required.
 
 The event holds facts and no content: the tool, ``ok``, ``code`` when refused,
 ``state`` when the answer has one, the answer's token count, the caller (role,
@@ -79,6 +72,7 @@ class ToolCaller:
     task_title: str | None = None
     task_path: str | None = None
     task_repository: str | None = None
+    scope_key: str | None = None
     harness: str | None = None
 
 
@@ -187,6 +181,7 @@ def build_tool_event(
         trust="observed",
         actor="model",
         repoId=caller.task_repository,
+        scopeKey=caller.scope_key,
         data=data,
     )
 

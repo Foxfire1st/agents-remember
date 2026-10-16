@@ -159,10 +159,6 @@ class TaskSubTaskRefNode(BaseModel):
     file: str = ""
     status: str
     scope: str = ""
-    # When `file` points at another master (a parallel/external series), the contract-paired lifecycle
-    # it links to — the dashboard renders such a row as a "→" cross-series jump (slice 6g). Null for an
-    # in-series slice row.
-    linkedLifecycleId: str | None = None
     # The typed master link (L14-R1): on an orchestration sprint, the exact commanded master document
     # this row tracks — the dashboard opens that document directly (sprint → master drill-down). Null
     # for an ordinary master's leaf rows and for legacy slug-only membership rows.
@@ -298,26 +294,20 @@ class TaskDependencyNode(BaseModel):
 
     id: str
     title: str
-    status: str
-    docPath: str | None = None
+    reference: TaskDocumentRef | None = None
+    gone: bool = False
 
 
-class TaskDocNode(BaseModel):
+class TaskSummary(BaseModel):
     """A task document's progress and reader content (slice 3c, surface 7).
 
     Read from the JSON-primary ``ar-task-document/v1`` document, so the dashboard
-    can show what a task is doing without opening files on disk. ``lifecycleId``
-    is runtime attachment, not the admission ticket: planning documents can be
-    projected before an enclosure or lifecycle exists.
+    can show authored task facts without opening files on disk. Planning documents
+    are projected before an enclosure exists.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str
-    lifecycleId: str | None = None
-    repository: str
-    title: str
-    status: str
     kind: str
     # The document's form by the model's own rule (MIK-R127 rule 1): a master that
     # commands masters is a sprint, any other master is a master, anything else a
@@ -344,10 +334,7 @@ class TaskDocNode(BaseModel):
     # The recorded review round (MIK-R127 rule 9): the Review block and the master
     # Now block read it from the always-on summary, never from a body fetch.
     reviewState: TaskReviewStateNode | None = None
-    stepsDone: int = 0
-    stepsTotal: int = 0
     currentStep: str | None = None
-    docPath: str
     # Hash of the reader body fields omitted from the always-on summary. Dashboard readers use it
     # to refetch an already-open task document only when the on-demand body changed.
     bodyRevision: str = ""
@@ -371,7 +358,6 @@ class TaskDocNode(BaseModel):
     references: list[str] = Field(default_factory=list)
     # Master docs use these for the series index + ordered render plan; non-master task docs may
     # carry freeform sections. Empty when the document has no authored sections.
-    subTasks: list[TaskSubTaskRefNode] = Field(default_factory=list)
     # Only master documents own discard-unstarted audit history. ``None`` distinguishes a
     # non-master task from a master whose typed history is present and empty.
     discardedCount: int | None = None
@@ -380,9 +366,6 @@ class TaskDocNode(BaseModel):
         max_length=256,
     )
     sections: list[TaskSectionNode] = Field(default_factory=list)
-    # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
-    # a master in another series (a different lifecycle) -- drives a "↑ parent series" breadcrumb (6g).
-    masterLifecycleId: str | None = None
     # The orchestration-command relation (260703-L14): non-empty only on a ``master`` doc that IS an
     # orchestration task -- the master task names it commands. The dashboard derives the
     # orchestration > master > leaf hierarchy from it; docs without the field render as before.
@@ -404,6 +387,19 @@ class TaskDocNode(BaseModel):
     directGrant: DirectGrantNode | None = None
 
 
+class TaskDocNode(TaskSummary):
+    """The complete on-demand document, including its authored identity and membership."""
+
+    id: str
+    repository: str
+    title: str
+    status: str
+    stepsDone: int = 0
+    stepsTotal: int = 0
+    docPath: str
+    subTasks: list[TaskSubTaskRefNode] = Field(default_factory=list)
+
+
 class DirectGrantNode(BaseModel):
     """A leaf's direct-execution grant as the dashboard shows it (MIK-R94 rule 4).
 
@@ -415,66 +411,3 @@ class DirectGrantNode(BaseModel):
 
     grantedBy: str
     grantedAt: str
-
-
-class SeriesSubTaskNode(BaseModel):
-    """One subtask of a series master -- a single checkbox.
-
-    ``status`` is the lever: ``planning`` -> ⬜, ``inProgress`` -> 🔨, ``Completed`` -> ✅.
-    ``createdAt`` is resolved from the referenced leaf task document when present; the dashboard
-    uses it for creation-order display without parsing file-name prefixes.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    number: str
-    name: str
-    file: str = ""
-    status: str
-    scope: str = ""
-    createdAt: str | None = None
-    # The leaf's direct-execution grant with who gave it (MIK-R94 rule 4); None
-    # when the leaf has no grant. Read from the one record at projection time.
-    directGrant: DirectGrantNode | None = None
-
-
-class SeriesSectionNode(BaseModel):
-    """One ordered render section of a series master (freeform prose or a structured block)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: str
-    heading: str
-    body: str = ""
-
-
-class SeriesNode(BaseModel):
-    """A series master's progress, keyed by its task FOLDER (R1 -- never a lifecycle).
-
-    The master is also projected as a :class:`TaskDocNode` for direct document selection.
-    ``SeriesNode`` is the folder-keyed aggregation/compatibility surface: the master
-    checklist where each subtask that will run is one checkbox and ``doneCount`` counts the
-    *declared* ``Completed`` subtasks, authoritative over a slice's own internal steps.
-    Abandoned rows are neither done nor part of ``totalCount``; ``abandonedCount`` names them
-    beside the figure ("5/5, 1 abandoned"). Carries the full master render (subTasks +
-    sections + decisions) so older clients can still render the series reader.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    seriesId: str
-    repository: str
-    title: str
-    status: str
-    createdAt: str = ""
-    objective: str = ""
-    subTasks: list[SeriesSubTaskNode] = Field(default_factory=list)
-    discardedCount: int = 0
-    discardedSubTasks: list[DiscardedSubTaskNode] = Field(default_factory=list, max_length=256)
-    doneCount: int = 0
-    totalCount: int = 0
-    abandonedCount: int = 0
-    sections: list[SeriesSectionNode] = Field(default_factory=list)
-    decisions: list[TaskDecisionNode] = Field(default_factory=list)
-    docPath: str
-    ageSeconds: float | None = None

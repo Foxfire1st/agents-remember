@@ -20,6 +20,7 @@ import { shownPayload } from './ReviewOutcome';
 import { ReviewSurface } from './ReviewSurface';
 import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
+import { dashboardStore } from '../../data/store';
 
 // These are complete HTTP bodies captured from the public authorship + real review route, following the
 // published cursors at page size 4 as test_review_family_context_population.py::walk_responses does. No
@@ -52,41 +53,62 @@ const target = {
 };
 const family = (payload: ReviewPayload) =>
   payload.family_context!.entries.find((entry) => entry.family_id === capture.family_id)!;
-const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 const cursorOf = (body: Body) => body.payload.page!.continued_from!;
 
 // Test-only catalogue projection of the retained capture's identities: the replaced sidebar
 // no longer discovers members from roster disclosures. Review payloads/cursors remain exact bytes.
 function capturedOutline(): ReviewOutline {
   const families = first.payload.family_context!.entries;
-  const members = [...new Map(families.flatMap((entry) =>
-    [...entry.before.members, ...entry.after.members].map((member) => [member.invariant_id, member] as const),
-  )).values()];
+  const members = [
+    ...new Map(
+      families.flatMap((entry) =>
+        [...entry.before.members, ...entry.after.members].map(
+          (member) => [member.invariant_id, member] as const,
+        ),
+      ),
+    ).values(),
+  ];
   return {
-    state: 'outlined', detail: 'Captured family/member identities for the mounted legacy test.',
+    state: 'outlined',
+    detail: 'Captured family/member identities for the mounted legacy test.',
     families: families.map((entry) => ({
-      selector_id: entry.family_id, id: entry.family_id, title: entry.display_label ?? entry.family_id,
+      selector_id: entry.family_id,
+      id: entry.family_id,
+      title: entry.display_label ?? entry.family_id,
       change: 'unchanged',
-      members: [...new Set([...entry.before.members, ...entry.after.members].map((m) => m.invariant_id))]
-        .map((id) => ({ selector_id: id!, id: id!, membership: 'both' })),
+      members: [
+        ...new Set([...entry.before.members, ...entry.after.members].map((m) => m.invariant_id)),
+      ].map((id) => ({ selector_id: id!, id: id!, membership: 'both' })),
     })),
     invariants: members.map((member) => ({
-      selector_id: member.invariant_id!, id: member.invariant_id!,
-      summary: member.statement ?? member.display_label ?? member.invariant_id!, change: 'changed',
+      selector_id: member.invariant_id!,
+      id: member.invariant_id!,
+      summary: member.statement ?? member.display_label ?? member.invariant_id!,
+      change: 'changed',
     })),
   };
 }
 vi.mock('../../data/useReviewCatalogue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../data/useReviewCatalogue')>();
-  return { ...actual, useReviewCatalogue: () => ({
-    loading: false, entries: [], empty: true, stale: false, facts: 'test',
-    outline: capturedOutline(), refresh: () => undefined,
-  }) };
+  return {
+    ...actual,
+    useReviewCatalogue: () => ({
+      loading: false,
+      entries: [],
+      empty: true,
+      stale: false,
+      facts: 'test',
+      outline: capturedOutline(),
+      refresh: () => undefined,
+    }),
+  };
 });
 
 afterEach(() => {
   resetCardCachesForTests();
   cleanup();
+  dashboardStore.getState().reset();
   vi.unstubAllGlobals();
 });
 
@@ -94,32 +116,58 @@ afterEach(() => {
 // list projects the same six captured inventory entries; it makes no HTTP/recorded-range claim.
 async function expectCompleteInventory(view: ReturnType<typeof render>) {
   const inventory = first.payload.source.inventory;
-  expect(view.getByTestId('review-scope-record').textContent)
-    .toContain(`${inventory.listed_total} changed files`);
+  expect(view.getByTestId('review-scope-record').textContent).toContain(
+    `${inventory.listed_total} changed files`,
+  );
   const priorFetch = globalThis.fetch;
   const files = inventory.entries.map((entry) => ({
-    path: entry.path, status: entry.status, insertions: 0, deletions: 0,
+    path: entry.path,
+    status: entry.status,
+    insertions: 0,
+    deletions: 0,
   }));
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-    const url = new URL(String(input), 'http://review.test');
-    if (url.pathname === '/api/changeset/task') return response({
-      scope: 'captured-family-inventory', code: files, memory: [],
-      counters: { code: { files: files.length, insertions: 0, deletions: 0 },
-        memory: { files: 0, insertions: 0, deletions: 0 } },
-    });
-    if (url.pathname === '/api/changeset/file-diff') return response({
-      scope: 'captured-family-inventory', kind: 'code', path: url.searchParams.get('path'),
-      language: 'text', before: null, after: null,
-    });
-    return await priorFetch(input);
-  }));
-  const page = render(<ChangeSetViewer repo={target.repo} scope="captured-family-inventory" onBack={vi.fn()} />);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://review.test');
+      if (url.pathname === '/api/changeset/task')
+        return response({
+          scope: 'captured-family-inventory',
+          code: files,
+          memory: [],
+          counters: {
+            code: { files: files.length, insertions: 0, deletions: 0 },
+            memory: { files: 0, insertions: 0, deletions: 0 },
+          },
+        });
+      if (url.pathname === '/api/changeset/file-diff')
+        return response({
+          scope: 'captured-family-inventory',
+          kind: 'code',
+          path: url.searchParams.get('path'),
+          language: 'text',
+          before: null,
+          after: null,
+        });
+      return await priorFetch(input);
+    }),
+  );
+  const page = render(
+    <ChangeSetViewer repo={target.repo} scope="captured-family-inventory" onBack={vi.fn()} />,
+  );
   try {
-    await waitFor(() => expect(page.container.querySelectorAll('[data-active]'))
-      .toHaveLength(inventory.listed_total));
-    expect([...page.container.querySelectorAll<HTMLElement>('[data-active]')]
-      .map((row) => row.querySelector('button')!.children[1].textContent)).toEqual(inventory.entries.map((entry) => entry.path));
-  } finally { page.unmount(); vi.stubGlobal('fetch', priorFetch); }
+    await waitFor(() =>
+      expect(page.container.querySelectorAll('[data-active]')).toHaveLength(inventory.listed_total),
+    );
+    expect(
+      [...page.container.querySelectorAll<HTMLElement>('[data-active]')].map(
+        (row) => row.querySelector('button')!.children[1].textContent,
+      ),
+    ).toEqual(inventory.entries.map((entry) => entry.path));
+  } finally {
+    page.unmount();
+    vi.stubGlobal('fetch', priorFetch);
+  }
 }
 
 function mountCycle() {
@@ -352,9 +400,7 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
     await waitFor(() =>
       expect(view.getByTestId('review-page-bounds').textContent).toContain('returned 8'),
     );
-    const selected = view
-      .getByTestId('review-center-member-changed')
-      .textContent;
+    const selected = view.getByTestId('review-center-member-changed').textContent;
     const evidence = view.getByTestId('review-center-evidence').textContent;
     const members = view.getAllByTestId('review-family-member').map((row) => row.textContent);
     fireEvent.click(next(capture.before[2]));
@@ -363,9 +409,7 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
       fault === 'page refusal' ? 'comparison_page_reset' : 'comparison_page_unreadable',
     );
     expect(view.getByTestId('review-retained-generation')).toBeTruthy();
-    expect(view.getByTestId('review-center-member-changed').textContent).toBe(
-      selected,
-    );
+    expect(view.getByTestId('review-center-member-changed').textContent).toBe(selected);
     expect(view.getByTestId('review-center-evidence').textContent).toBe(evidence);
     expect(view.getAllByTestId('review-family-member').map((row) => row.textContent)).toEqual(
       members,
@@ -604,7 +648,9 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
       layout.focus();
     } else if (openedPath !== null) {
       continuedWithOpen += 1;
-      expect(view.getByTestId('review-display-state').textContent).toContain(`expanded: ${openedPath}`);
+      expect(view.getByTestId('review-display-state').textContent).toContain(
+        `expanded: ${openedPath}`,
+      );
       expect(view.getByTestId('review-center-full-file').getAttribute('aria-pressed')).toBe('true');
       expect(layout.value).toBe('inline');
     }

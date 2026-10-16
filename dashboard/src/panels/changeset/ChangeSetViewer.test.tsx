@@ -1,9 +1,11 @@
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act,cleanup,fireEvent,render } from '@testing-library/react';
+import { afterEach,describe,expect,it,vi } from 'vitest';
 
 import { CockpitShell } from '../../cockpit/Cockpit';
 import { dashboardStore } from '../../data/store';
+import { taskEntrySelectionKey } from '../../data/taskReference';
 import { GALLERY } from '../../dev/fixtures';
+import { projection,taskEntry,taskSummary } from '../../test/fixtures/wire';
 import { DetailPanel } from '../detail-panel/DetailPanel';
 import { ChangeSetViewer } from './ChangeSetViewer';
 
@@ -66,13 +68,14 @@ function stubChangeset() {
           : url.includes('/api/changeset/task')
             ? TASK_CHANGESET
             : {};
-      return { ok: true, status: 200, json: async () => body } as unknown as Response;
+      return new Response(JSON.stringify(body), { status: 200 });
     }),
   );
 }
 
 afterEach(() => {
   cleanup();
+  dashboardStore.getState().reset();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -93,11 +96,7 @@ describe('ChangeSetViewer screen', () => {
       <ChangeSetViewer repo="agents-remember" scope="wt-a" onBack={vi.fn()} />,
     );
     expect(getByTestId('pane-placeholder').textContent).toContain('Loading change-set');
-    resolveFetch({
-      ok: true,
-      status: 200,
-      json: async () => TASK_CHANGESET,
-    } as unknown as Response);
+    resolveFetch(new Response(JSON.stringify(TASK_CHANGESET), { status: 200 }));
     await findByTestId('changeset-counters');
   });
 
@@ -106,12 +105,7 @@ describe('ChangeSetViewer screen', () => {
       'fetch',
       vi.fn(
         async () =>
-          ({
-            ok: false,
-            status: 404,
-            statusText: 'Not Found',
-            json: async () => ({ status: 'not-found' }),
-          }) as unknown as Response,
+          new Response(JSON.stringify(({ status: 'not-found' })), { status: 404, statusText: 'Not Found' }),
       ),
     );
     const { findByText } = render(
@@ -190,7 +184,7 @@ describe('ChangeSetViewer screen', () => {
     vi.useFakeTimers();
     const fetchFn = vi.fn(
       async () =>
-        ({ ok: true, status: 200, json: async () => TASK_CHANGESET }) as unknown as Response,
+        new Response(JSON.stringify(TASK_CHANGESET), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetchFn);
     const countOf = (frag: string) =>
@@ -233,11 +227,7 @@ describe('ChangeSetViewer screen', () => {
     let defer = false;
     const pending: { url: string; resolve: (response: Response) => void }[] = [];
     const responseFor = (url: string) =>
-      ({
-        ok: true,
-        status: 200,
-        json: async () => (url.includes('/api/changeset/file-diff') ? FILE_DIFF : TASK_CHANGESET),
-      }) as unknown as Response;
+      new Response(JSON.stringify((url.includes('/api/changeset/file-diff') ? FILE_DIFF : TASK_CHANGESET)), { status: 200 });
     const fetchFn = vi.fn((url: string) => {
       if (!defer) return Promise.resolve(responseFor(url));
       return new Promise<Response>((resolve) => pending.push({ url, resolve }));
@@ -313,7 +303,7 @@ describe('ChangeSetViewer screen', () => {
       const body = url.includes('/api/changeset/file-diff')
         ? FILE_DIFF
         : { ...MASTER_CHANGESET, generation, currentness: 'current', scope: 'integrated' };
-      return { ok: true, status: 200, json: async () => body } as unknown as Response;
+      return new Response(JSON.stringify(body), { status: 200 });
     });
     vi.stubGlobal('fetch', fetchFn);
     const { findByTestId, getByText, getByTestId } = render(
@@ -380,12 +370,7 @@ describe('ChangeSetViewer screen', () => {
       'fetch',
       vi.fn(
         async () =>
-          ({
-            ok: status < 400,
-            status,
-            statusText: status === 200 ? 'OK' : 'Not Found',
-            json: async () => body,
-          }) as unknown as Response,
+          new Response(JSON.stringify(body), { status, statusText: status === 200 ? 'OK' : 'Not Found' }),
       ),
     );
   }
@@ -514,16 +499,21 @@ describe('ChangeSetViewer screen', () => {
 });
 
 describe('DetailPanel change-set entry (L4)', () => {
-  it('renders a series change-set button for an enclosure-backed lifecycle and opens the target', async () => {
+  it('renders a series change-set button for the native task entry and opens its target', async () => {
     stubChangeset();
-    dashboardStore.getState().applySnapshot(GALLERY.find((g) => g.name === 'full')!.projection);
+    const master = taskEntry({
+      reference: { repository: 'agents-remember', path: 'browser-dashboard/task.json' },
+      summary: taskSummary({ kind: 'master', form: 'master' }),
+      worktrees: GALLERY.find((g) => g.name === 'full')!.projection.enclosures,
+    });
+    dashboardStore.getState().applySnapshot(projection({ tasks: [master] }));
     const onOpenChangeSet = vi.fn();
     const { findByTestId } = render(
-      <DetailPanel selectedId="lifecycle:build-001" onOpenChangeSet={onOpenChangeSet} />,
+      <DetailPanel selectedId={taskEntrySelectionKey(master.key)} onOpenChangeSet={onOpenChangeSet} />,
     );
     const button = await findByTestId('open-changeset');
     fireEvent.click(button);
-    // "full" has no activeWorktreeGroups, so only the series (master) button shows -> wt-a's taskName.
+    // The master entry opens the same series target without a session lookup.
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: 'agents-remember',
       master: 'browser-dashboard',
@@ -547,14 +537,9 @@ it('clears the selected diff when a comparison filter contains no file (explicit
     'fetch',
     vi.fn(
       async (address: string) =>
-        ({
-          ok: true,
-          status: 200,
-          json: async () =>
-            address.includes('/file-diff')
+        new Response(JSON.stringify(address.includes('/file-diff')
               ? { ...FILE_DIFF, path: TASK_CHANGESET.code[0].path }
-              : TASK_CHANGESET,
-        }) as Response,
+              : TASK_CHANGESET), { status: 200 }),
     ),
   );
   const empty = { files: [], bucket_files: 0, attributed_files: 0, hunks: 0, non_text: 0 };

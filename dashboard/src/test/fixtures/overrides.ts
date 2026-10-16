@@ -2,9 +2,9 @@
 //
 // THE DEFECT. `tsconfig.app.json` does not set `exactOptionalPropertyTypes`, so every optional slot
 // of a `Partial<T>` also accepts an EXPLICIT `undefined` — and the builders' trailing `...over`
-// writes it. `lifecycle({ state: undefined })` therefore compiles, and answers a lifecycle
-// whose REQUIRED `state` is `undefined`: a fixture stating that a required field is absent, with
-// no cast at all. `provider({ state: undefined })`, `taskDoc({ steps: undefined })` and
+// writes it. `taskEntry({ stage: undefined })` therefore compiles, and answers a task entry
+// whose REQUIRED `stage` is `undefined`: a fixture stating that a required field is absent, with
+// no cast at all. `provider({ state: undefined })`, `taskSummary({ steps: undefined })` and
 // `projection({ enclosures: undefined })` are the same move. Nothing in `wireFixtureGuard.ts` sees
 // any of them: there is no assertion for rule 1, no suppression for rule 5, and rule 4 measures
 // property NAMES, which are all present and correct.
@@ -23,10 +23,10 @@
 //
 //   * The override has to be a FRESH literal at the call site. Widen it through a variable first —
 //
-//         const over: Partial<LifecycleProjection> = { state: undefined };
-//         lifecycle(over);
+//         const over: Partial<TaskEntry> = { stage: undefined };
+//         taskEntry(over);
 //
-//     — and `O` infers `Partial<LifecycleProjection>`, every slot admits `undefined` again, and this
+//     — and `O` infers `Partial<TaskEntry>`, every slot admits `undefined` again, and this
 //     compiles. `fixtureOverrides.test.ts` asserts that case as a KNOWN pass rather than leaving it
 //     to be discovered. Only `exactOptionalPropertyTypes` closes it.
 //

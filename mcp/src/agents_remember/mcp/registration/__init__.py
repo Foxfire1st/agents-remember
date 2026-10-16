@@ -1,6 +1,6 @@
 """The MCP tool surface, one module per tool family.
 
-``create_server`` owns process wiring -- the compact-content shim, the ambient lifecycle, the
+``create_server`` owns process wiring -- the compact-content shim, application services, the
 ``FastMCP`` instance -- and nothing else; every ``@server.tool()`` definition lives here. Each
 module exposes one ``register_*_tools(server, config)`` that declares its family against the
 server it is handed, and ``TOOL_REGISTRARS`` lists them in the order the server advertises

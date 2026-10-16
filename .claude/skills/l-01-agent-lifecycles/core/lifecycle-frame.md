@@ -1,26 +1,21 @@
 # Core — The Minimal Lifecycle Frame
 
-The only machinery every session shares. The worktree tools record where a task is, so
-work is observable and resumable across chat deaths. Lifecycle correlation is server-side and
-anchored in the worktree contract; it is not model state. Nothing else begins, blocks or hands
-over a lifecycle.
+The worktree tools record where a task is, so work is observable and resumable across chat
+deaths. The landing chain keeps its own lifecycle in the worktree contract.
 
 | When | Effect |
 | --- | --- |
-| `worktree_start` | adopts the lifecycle of the new contract, anchored in the contract |
-| Resuming an existing task | `worktree_attach` re-adopts the contract's lifecycle (contract-resolved) |
-| Close | the terminal record (`completed`\|`abandoned`) |
+| `worktree_start` | creates the task's worktree and records its location in the contract |
+| Resuming an existing task | `worktree_attach` resolves the contract and reports its worktree |
+| Close | the landing chain records completion or abandonment in the contract |
 
 Rules:
 
-- A tool call outside any lifecycle is **dropped, never misattributed**. `paused` is system-owned.
-- A role that never calls `worktree_start` or `worktree_attach` has no lifecycle — that
-  is correct, not a violation. A started role never adopts its starter's.
-- The seat binding is made when `role_start` starts the agent (canonical task document plus role), not
-  by lifecycle adoption. The architect is started without a document; the other sprint roles bind
+- The seat binding is made when `role_start` starts the agent (canonical task document plus role).
+  The architect is started without a document; the other sprint roles bind
   to the sprint document, managers to master documents, workers/curators to leaf documents, and
   reviewers bind to the exact leaf, master, or sprint document whose review seam they adjudicate.
-- A holder of one lifecycle never advances another seat's. Owning seats own the machinery their own
+- Owning seats own the machinery their own
   role file names, and no other agent calls `task_doc`, `role_start`, or closeout on
   their behalf.
 

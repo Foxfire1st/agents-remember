@@ -8,7 +8,7 @@ describe('DetailPanel promoted lifecycle identity', () => {
   it('renders the leaf task document without falling back to the master task documents', () => {
     seedPromotedLeaf();
     const { getAllByText, getByTestId, getByText, queryByText } = render(
-      <DetailPanel selectedId="01KVW2FE8MQK6QCQQP0J4SEK3C" />,
+      <DetailPanel selectedId="taskdoc:agents-remember/260610_browser-dashboard/16_engine-room-stack-entry-height.json" />,
     );
 
     expect(getAllByText('16_engine-room-stack-entry-height').length).toBeGreaterThan(0);
@@ -28,7 +28,11 @@ describe('DetailPanel promoted lifecycle identity', () => {
     expect(queryByText('Close out the lifecycle finalizer.')).toBeNull();
     expect(queryByText('Series Contract')).toBeNull();
     expect(queryByText('schema: ar-series-contract/v1')).toBeNull();
-    expect(queryByText('01KVW2FE8MQK6QCQQP0J4SEK3C')).toBeNull();
+    expect(
+      queryByText(
+        'taskdoc:agents-remember/260610_browser-dashboard/16_engine-room-stack-entry-height.json',
+      ),
+    ).toBeNull();
     expect(queryByText('No task document bound to this task.')).toBeNull();
   });
 
@@ -36,13 +40,16 @@ describe('DetailPanel promoted lifecycle identity', () => {
     seedPromotedLeaf();
     const onOpenLifecycle = vi.fn();
     const { getByTestId } = render(
-      <DetailPanel selectedId="01KVW2FE8MQK6QCQQP0J4SEK3C" onOpenLifecycle={onOpenLifecycle} />,
+      <DetailPanel
+        selectedId="taskdoc:agents-remember/260610_browser-dashboard/16_engine-room-stack-entry-height.json"
+        onOpenLifecycle={onOpenLifecycle}
+      />,
     );
 
     expect(getByTestId('master-parent-link').textContent).toContain('Browser Dashboard Series');
     fireEvent.click(getByTestId('master-parent-link'));
     expect(onOpenLifecycle).toHaveBeenCalledWith(
-      'taskdoc:/tasks/260610_browser-dashboard/task.json',
+      'taskdoc:agents-remember/260610_browser-dashboard/task.json',
     );
   });
 });

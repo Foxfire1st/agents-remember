@@ -6,9 +6,11 @@ from typing import Any
 from agents_remember.application.review_source_inventory import is_text_path
 from agents_remember.application.review_tree_comparison import comparison_records
 from agents_remember.errors import AuthorityError
-from agents_remember.kernel.git_command import PARSED_DIFF_OPTIONS, run_git
+from agents_remember.kernel.git_command import PARSED_DIFF_OPTIONS
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 from agents_remember.models.knowledge_files.shapes import require_repository_path
+from agents_remember.serving.changeset_reads import change_counters
+from agents_remember.serving.changeset_reads import read_git as run_git
 from agents_remember.serving.scope import language_for
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -62,14 +64,6 @@ def _files(root: Path, base: str, tip: str, *, memory: bool) -> list[dict[str, A
     return sorted(files, key=lambda file: file["path"])
 
 
-def _counts(files: list[dict[str, Any]]) -> dict[str, int]:
-    return {
-        "files": len(files),
-        "insertions": sum(f["insertions"] or 0 for f in files),
-        "deletions": sum(f["deletions"] or 0 for f in files),
-    }
-
-
 def _paired_sidecars(record: ReviewTreeComparisonRecord, code: list[dict[str, Any]]) -> set[str]:
     """Pair against the two recorded trees, including an unchanged or removed sidecar."""
     paths = [f"onboarding/{file['path']}.md" for file in code]
@@ -115,7 +109,7 @@ def comparison_changeset(contract: WorktreeContract, number: int) -> dict[str, A
         },
         "code": code,
         "memory": memory,
-        "counters": {"code": _counts(code), "memory": _counts(memory)},
+        "counters": {"code": change_counters(code), "memory": change_counters(memory)},
     }
 
 

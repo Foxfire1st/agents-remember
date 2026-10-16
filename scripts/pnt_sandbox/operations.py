@@ -260,7 +260,23 @@ class Operations:
         (self.layout.run_dir / "host-install-receipt.json").write_text(
             json.dumps(payload, indent=2) + "\n"
         )
-        return payload
+        return self._install_host(payload, log)
+
+    def _install_host(self, payload: dict[str, Any], log: Path) -> dict[str, Any]:
+        """Read the host omitted from a compact answer; keep the answer's outcome."""
+        report_path = payload.get("reportPath")
+        if "host" in payload or not isinstance(report_path, str):
+            return payload
+        try:
+            path = Path(report_path).resolve()
+            if not path.is_relative_to(self.layout.root):
+                raise ValueError("the named report is outside the sandbox")
+            report = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(report, dict):
+                raise ValueError("the named report is not an object")
+        except (OSError, ValueError) as error:
+            self._refuse_install(f"unreadable host install report {report_path}: {error}", log)
+        return {**payload, "host": report.get("host")}
 
     def _refuse_install(self, message: str, log: Path) -> NoReturn:
         receipt = self.layout.run_dir / "host-install-receipt.json"

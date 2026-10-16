@@ -42,22 +42,22 @@
 // `exactOptionalPropertyTypes` is off. (`wireFixtureGuard.ts` covers the residual case TypeScript
 // will not — an override that has been through a variable and so lost its literal freshness.)
 
-import { metricsFor } from '../../types/projection';
 import type {
   ActionAvailability,
   Analytics,
   AttentionItem,
   EnclosureNode,
   EngineProcessNode,
-  LifecycleProjection,
   ProviderNode,
-  TaskDocNode,
+  TaskEntry,
+  TaskSummary,
   WorkspaceProjection,
 } from '../../types/projection';
 import type { ObserverEvent } from '../../types/event';
 import { asServedProjection } from '../servedProjection';
 import type { NoOverrides, Overrides } from './overrides';
 import snapshot from '../../fixtures/snapshot.json';
+import { taskReferenceKey } from '../../data/taskReference';
 
 /** The sampled payload, read as the projection the server would have sent. */
 export const SERVED: WorkspaceProjection = asServedProjection(snapshot);
@@ -71,13 +71,12 @@ function demandServed<Node>(row: Node | undefined, what: string): Node {
   if (row === undefined) throw new Error(`snapshot.json no longer carries ${what}`);
   return row;
 }
-
-const SERVED_LIFECYCLE = demandServed(SERVED.lifecycles[0], 'lifecycles[0]');
 const SERVED_ENCLOSURE = demandServed(SERVED.enclosures[0], 'enclosures[0]');
 const SERVED_PROVIDER = demandServed(SERVED.providers[0], 'providers[0]');
-const SERVED_TASK_DOC = demandServed(
-  SERVED.analytics.taskDocuments[0],
-  'analytics.taskDocuments[0]',
+const SERVED_TASK_ENTRY = demandServed(SERVED.tasks[0], 'tasks[0]');
+const SERVED_TASK_SUMMARY = demandServed(
+  SERVED.tasks.find((entry) => entry.summary?.form === 'task')?.summary,
+  'an authored task summary',
 );
 const SERVED_ENGINE_PROCESS = demandServed(
   SERVED.analytics.engineProcesses[0],
@@ -87,18 +86,6 @@ const SERVED_ATTENTION = demandServed(
   SERVED.analytics.attentionQueue[0],
   'analytics.attentionQueue[0]',
 );
-
-// ── the bases: required fields only, every value taken from the served payload ──
-
-const BASE_LIFECYCLE: LifecycleProjection = {
-  id: SERVED_LIFECYCLE.id,
-  state: SERVED_LIFECYCLE.state,
-  phase: SERVED_LIFECYCLE.phase,
-  fleeting: SERVED_LIFECYCLE.fleeting,
-  startedAt: SERVED_LIFECYCLE.startedAt,
-  lastEventTs: SERVED_LIFECYCLE.lastEventTs,
-  inferred: SERVED_LIFECYCLE.inferred,
-};
 
 const BASE_ENCLOSURE: EnclosureNode = {
   enclosure: SERVED_ENCLOSURE.enclosure,
@@ -127,38 +114,38 @@ const BASE_PROVIDER: ProviderNode = {
   scope: SERVED_PROVIDER.scope,
 };
 
-const BASE_TASK_DOC: TaskDocNode = {
-  id: SERVED_TASK_DOC.id,
-  repository: SERVED_TASK_DOC.repository,
-  title: SERVED_TASK_DOC.title,
-  status: SERVED_TASK_DOC.status,
-  kind: SERVED_TASK_DOC.kind,
-  form:
-    SERVED_TASK_DOC.kind === 'master'
-      ? SERVED_TASK_DOC.orchestrates.length > 0
-        ? 'sprint'
-        : 'master'
-      : 'task',
-  type: '',
+const BASE_TASK_SUMMARY: TaskSummary = {
+  bodyRevision: SERVED_TASK_SUMMARY.bodyRevision,
+  kind: SERVED_TASK_SUMMARY.kind,
+  form: SERVED_TASK_SUMMARY.form,
+  type: SERVED_TASK_SUMMARY.type,
   headerNotes: [],
   statusNoteTruncated: false,
-  stepsDone: SERVED_TASK_DOC.stepsDone,
-  stepsTotal: SERVED_TASK_DOC.stepsTotal,
-  docPath: SERVED_TASK_DOC.docPath,
-  bodyRevision: SERVED_TASK_DOC.bodyRevision,
-  createdAt: SERVED_TASK_DOC.createdAt,
+  createdAt: SERVED_TASK_SUMMARY.createdAt,
   steps: [],
-  objective: SERVED_TASK_DOC.objective,
+  objective: SERVED_TASK_SUMMARY.objective,
   requirements: [],
   codeExamples: [],
   decisions: [],
   openQuestions: [],
   references: [],
-  subTasks: [],
   sections: [],
   orchestrates: [],
   seats: [],
   executionWaves: [],
+};
+
+const BASE_TASK_ENTRY: TaskEntry = {
+  key: SERVED_TASK_ENTRY.key,
+  id: SERVED_TASK_ENTRY.id,
+  title: SERVED_TASK_ENTRY.title,
+  reference: SERVED_TASK_ENTRY.reference,
+  stage: 'planned',
+  stepsDone: SERVED_TASK_ENTRY.stepsDone,
+  stepsTotal: SERVED_TASK_ENTRY.stepsTotal,
+  children: [],
+  counts: { planned: 0, started: 0, completed: 0, aborted: 0, works: 0, paused: 0, unknown: 0 },
+  worktrees: [],
 };
 
 const BASE_ENGINE_PROCESS: EngineProcessNode = {
@@ -213,20 +200,9 @@ export const EMPTY_ANALYTICS: Analytics = {
   routeCoverage: [],
   toolReports: [],
   ledgers: [],
-  taskDocuments: [],
-  series: [],
   attentionQueue: [],
   engineProcesses: [],
 };
-
-// ── the builders ─────────────────────────────────────────────────────────────
-
-export function lifecycle<O extends Partial<LifecycleProjection> = NoOverrides>(
-  overrides?: Overrides<O, LifecycleProjection>,
-): LifecycleProjection {
-  const over: Partial<LifecycleProjection> = overrides ?? {};
-  return { ...BASE_LIFECYCLE, ...over };
-}
 
 export function enclosure<O extends Partial<EnclosureNode> = NoOverrides>(
   overrides?: Overrides<O, EnclosureNode>,
@@ -242,11 +218,22 @@ export function provider<O extends Partial<ProviderNode> = NoOverrides>(
   return { ...BASE_PROVIDER, ...over };
 }
 
-export function taskDoc<O extends Partial<TaskDocNode> = NoOverrides>(
-  overrides?: Overrides<O, TaskDocNode>,
-): TaskDocNode {
-  const over: Partial<TaskDocNode> = overrides ?? {};
-  return { ...BASE_TASK_DOC, ...over };
+export function taskSummary<O extends Partial<TaskSummary> = NoOverrides>(
+  overrides?: Overrides<O, TaskSummary>,
+): TaskSummary {
+  const over: Partial<TaskSummary> = overrides ?? {};
+  return { ...BASE_TASK_SUMMARY, ...over };
+}
+
+export function taskEntry<O extends Partial<TaskEntry> = NoOverrides>(
+  overrides?: Overrides<O, TaskEntry>,
+): TaskEntry {
+  const over: Partial<TaskEntry> = overrides ?? {};
+  return {
+    ...BASE_TASK_ENTRY,
+    ...over,
+    key: over.key ?? (over.reference ? taskReferenceKey(over.reference) : BASE_TASK_ENTRY.key),
+  };
 }
 
 export function engineProcess<O extends Partial<EngineProcessNode> = NoOverrides>(
@@ -277,25 +264,30 @@ export function analytics<O extends Partial<Analytics> = NoOverrides>(
   return { ...EMPTY_ANALYTICS, ...over };
 }
 
-/**
- * A whole projection. `metrics` is DERIVED from the lifecycles by the mirror's own rollup rather
- * than restated beside them — the hand-kept bucket lists are where the `awaiting-developer` gap
- * kept reappearing, on both sides of the wire.
- */
+/** A whole native projection; tests state served task counts explicitly. */
 export function projection<O extends Partial<WorkspaceProjection> = NoOverrides>(
   overrides?: Overrides<O, WorkspaceProjection>,
 ): WorkspaceProjection {
   const over: Partial<WorkspaceProjection> = overrides ?? {};
-  const { lifecycles = [], analytics: analyticsOver, metrics, ...rest } = over;
+  const { analytics: analyticsOver, metrics, ...rest } = over;
   return {
     version: SERVED.version,
     generatedAt: SERVED.generatedAt,
     enclosures: [],
+    tasks: [],
+    taskCounts: {
+      planned: 0,
+      started: 0,
+      completed: 0,
+      aborted: 0,
+      works: 0,
+      paused: 0,
+      unknown: 0,
+    },
     providers: [],
     activeWorktreeGroups: [],
     ...rest,
-    lifecycles,
-    metrics: metrics ?? metricsFor(lifecycles),
+    metrics: metrics ?? { ignoredHostAgents: 0, stalenessHistogram: {} },
     analytics: analytics(analyticsOver),
   };
 }

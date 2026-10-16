@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect,useState } from 'react';
 
 import { dashboardStore } from '../data/store';
+import type { TaskArtifactReaderTarget } from '../data/taskArtifacts';
+import { taskEntrySelectionKey } from '../data/taskReference';
+import snapshot from '../fixtures/snapshot.json';
 import { DetailPanel } from '../panels/detail-panel/DetailPanel';
 import { NotesReaderViewer } from '../panels/notes-reader/NotesReaderViewer';
-import type { TaskArtifactReaderTarget } from '../data/taskArtifacts';
-import snapshot from '../fixtures/snapshot.json';
 import { asServedProjection } from '../test/servedProjection';
-import { RICH_DOC_PATHS, richApiAnswer, richTaskDocuments } from './taskSkeletonDocs';
+import { richApiAnswer,richTaskEntries } from './taskSkeletonDocs';
 
 // A deterministic mounted-UI surface for the task-page skeletons (MIK-R127
 // evidence): the real task page (the Operations DetailPanel) opened against
@@ -27,15 +28,11 @@ function lengthen(text: string, prefix: string): string {
   return `${text}\n${lines.join('\n')}`;
 }
 
-const FORM_DOC_PATH: Record<string, string> = {
-  sprint: '/tasks/agents-remember/sim-sprint/task.json',
-  master: '/tasks/agents-remember/sim-master-a/task.json',
-  task: '/tasks/sim/01.md',
-};
-
 function longProjection(): typeof FULL_PROJECTION {
   const projection = structuredClone(FULL_PROJECTION);
-  for (const doc of projection.analytics.taskDocuments) {
+  for (const entry of projection.tasks) {
+    const doc = entry.summary;
+    if (!doc) continue;
     doc.objective = lengthen(doc.objective, 'Objective');
     doc.design = lengthen(doc.design ?? '', 'Design');
     for (let i = 0; i < 9; i += 1) {
@@ -53,9 +50,7 @@ function longProjection(): typeof FULL_PROJECTION {
 
 function richProjection(): typeof FULL_PROJECTION {
   const projection = structuredClone(FULL_PROJECTION);
-  projection.analytics.taskDocuments = richTaskDocuments();
-  projection.analytics.series = [];
-  projection.lifecycles = [];
+  projection.tasks = richTaskEntries();
   projection.closeoutQueues = [];
   return projection;
 }
@@ -94,11 +89,17 @@ export function TaskSkeletonPage() {
     return restore;
   }, [long, rich]);
   if (!ready) return null;
-  const formPaths: Record<string, string> = rich ? RICH_DOC_PATHS : FORM_DOC_PATH;
-  const selected = formPaths[form] ?? formPaths.task;
-  // Existing sandbox only: render the real whole-log pane; no product route or store.
-  const panel = artifact
-    ? <NotesReaderViewer {...artifact} onSelectNote={() => {}} onBack={() => setArtifact(null)} />
-    : <DetailPanel selectedId={`taskdoc:${selected}`} onOpenNotes={setArtifact} onOpenChangeSet={() => {}} />;
+  const selected = Object.values(dashboardStore.getState().tasks).find(
+    (entry) => entry.summary?.form === form,
+  );
+  const panel = artifact ? (
+    <NotesReaderViewer {...artifact} onSelectNote={() => {}} onBack={() => setArtifact(null)} />
+  ) : (
+    <DetailPanel
+      selectedId={selected ? taskEntrySelectionKey(selected.key) : null}
+      onOpenNotes={setArtifact}
+      onOpenChangeSet={() => {}}
+    />
+  );
   return width > 0 ? <div style={{ width: `${width}px`, margin: '0 auto' }}>{panel}</div> : panel;
 }

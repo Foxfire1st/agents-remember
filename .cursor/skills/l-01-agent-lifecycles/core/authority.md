@@ -24,11 +24,9 @@ name is its address, and AR — not a prompt or a chat claim — records which a
 | Portfolio artifact | none — a notes draft only | strategist's draft before adoption |
 
 - A seat is bound when `role_start` starts its agent: **canonical task document
-  plus role**. It is not lifecycle adoption. The architect is the exception of the first row: its
+  plus role**. The architect is the exception of the first row: its
   start names no document, and a start that names one is refused. Different roles may coexist on
   one document; only a second live occupant of the same `(task document, role)` seat collides.
-- A started role never adopts its starter's lifecycle. A role that never calls `worktree_start` or
-  `worktree_attach` has no lifecycle — that is the designed shape, not a gap.
 - A started agent's parent is the agent that called `role_start` for it; a role started from the
   dashboard or by a chat without a role has none.
 - **A seat that WEARS a hat runs that hat's file as its own.** Hat-collapse is sanctioned only for

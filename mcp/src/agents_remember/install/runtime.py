@@ -38,6 +38,7 @@ from agents_remember.install.provider_watchers import (
     provider_watcher_lifecycle_ok,
     stop_provider_watchers_before_refresh,
 )
+from agents_remember.install.removed_stores import removed_part_stores, removed_part_stores_report
 from agents_remember.kernel.agentic_settings import (
     AgenticSettingsError,
     agentic_settings_path,
@@ -237,36 +238,6 @@ def _tree_bytes(root: Path) -> int:
     return total
 
 
-# Stores the parts MIK-R113 removed wrote under the coordination root, relative to it
-# (rule 5). The writers are gone; the files and folders stay until the user says otherwise.
-REMOVED_PART_STORE_PATHS = (
-    "logs/dashboard/terminal-sessions.json",
-    "logs/observer/workspace/operator-inbox.jsonl",
-    "logs/observer/workspace/expectation-rows.jsonl",
-    "logs/observer/workspace/orchestration-nudges.jsonl",
-    "logs/observer/workspace/supervisor-signals.jsonl",
-    "logs/observer/workspace/supervisor-heartbeat.json",
-    "logs/observer/workspace/agent-notifier-death-watch.json",
-    "logs/observer/workspace/terminal-observer-health.json",
-    "runtime/harness-control",
-    "runtime/structural-seat-locks",
-    "runtime/eve-carriers",
-    "runtime/eve-agent",
-)
-# The gate logs. The landing chain still reads them, and no part of the product decides a
-# gate any more: removing them is the way out of a refusal by a stored gate.
-STORED_GATE_LOG_PATTERNS = (
-    "logs/observer/workspace/gates.jsonl",
-    "logs/observer/lifecycles/*/gates.jsonl",
-)
-# What an install's report says beside the count of such stores: where the list is and that
-# only the user's command removes them.
-REMOVED_STORES_NOTICE = (
-    "The install deleted none of them: `agents-remember removed-stores --dry-run` lists "
-    "them, and without `--dry-run` the command removes them on your word"
-)
-
-
 def leftover_provider_folders(coordination_root: Path) -> list[dict[str, Any]]:
     """Provider runtime folders the install preserves, with sizes (MIK-R112 rule 3).
 
@@ -279,151 +250,6 @@ def leftover_provider_folders(coordination_root: Path) -> list[dict[str, Any]]:
         if path.is_dir() and not path.is_symlink():
             found.append({"path": path.as_posix(), "bytes": _tree_bytes(path)})
     return found
-
-
-def _own_mode(path: Path, unreadable: dict[str, str]) -> int | None:
-    """The mode of ``path`` itself, never of what a link points to; none when it is absent.
-
-    A path that is there and cannot be examined goes into ``unreadable`` with the reason:
-    a store may lie there, so it is not taken for absent.
-    """
-    try:
-        return path.lstat().st_mode
-    except (FileNotFoundError, NotADirectoryError):
-        return None
-    except OSError as error:
-        unreadable[path.as_posix()] = str(error)
-        return None
-
-
-def _entries(folder: Path, unreadable: dict[str, str]) -> list[Path]:
-    """A folder's entries in order; none for an absent folder, a reason for an unreadable one."""
-    try:
-        return sorted(folder.iterdir())
-    except (FileNotFoundError, NotADirectoryError):
-        return []
-    except OSError as error:
-        unreadable[folder.as_posix()] = str(error)
-        return []
-
-
-def _is_plain_file(path: Path, unreadable: dict[str, str]) -> bool:
-    mode = _own_mode(path, unreadable)
-    return mode is not None and stat.S_ISREG(mode)
-
-
-def _folder_files(folder: Path, unreadable: dict[str, str]) -> list[Path]:
-    """A store folder's whole content: its files, and its links as the links themselves."""
-    files: list[Path] = []
-    for path in _entries(folder, unreadable):
-        mode = _own_mode(path, unreadable)
-        if mode is None:
-            continue
-        if stat.S_ISDIR(mode):
-            files.extend(_folder_files(path, unreadable))
-        elif stat.S_ISLNK(mode) or stat.S_ISREG(mode):
-            files.append(path)
-    return files
-
-
-def _store_files(store: Path, unreadable: dict[str, str]) -> list[Path]:
-    """One store's files: a folder's whole content, or the file with what stands beside it.
-
-    Beside a store file stand its lock (``<name>.lock``, ``.<name>.lock``, ``<stem>.lock``) and
-    any copy an earlier repair left (``<name>.<anything>``). They are the store's files also
-    when the store file itself is gone. Nothing follows a symbolic link: a link inside a store
-    folder is one of the store's files as the link itself, and a store that is a link is none.
-    A folder that cannot be listed and a path that cannot be examined go into ``unreadable``.
-    """
-    mode = _own_mode(store, unreadable)
-    if mode is not None and stat.S_ISLNK(mode):
-        return []
-    if mode is not None and stat.S_ISDIR(mode):
-        return sorted(_folder_files(store, unreadable))
-    names = {f".{store.name}.lock", f"{store.name.split('.')[0]}.lock"}
-    beside = [
-        path
-        for path in _entries(store.parent, unreadable)
-        if path.name in names or path.name.startswith(f"{store.name}.")
-    ]
-    return [path for path in (store, *beside) if _is_plain_file(path, unreadable)]
-
-
-def _gate_logs(coordination_root: Path, unreadable: dict[str, str]) -> list[Path]:
-    """The gate logs the patterns name; a ``*`` stands for every entry of the folder before it."""
-    found: list[Path] = []
-    for pattern in STORED_GATE_LOG_PATTERNS:
-        folder, star, name = pattern.partition("*/")
-        candidates = (
-            [entry / name for entry in _entries(coordination_root / folder, unreadable)]
-            if star
-            else [coordination_root / pattern]
-        )
-        found.extend(path for path in candidates if _is_plain_file(path, unreadable))
-    return found
-
-
-def _files_bytes(files: list[Path]) -> int:
-    total = 0
-    for path in files:
-        try:
-            total += path.lstat().st_size
-        except OSError:
-            continue
-    return total
-
-
-def removed_part_stores(
-    coordination_root: Path, unreadable: dict[str, str] | None = None
-) -> list[dict[str, Any]]:
-    """Stores of removed parts that the install preserves, with sizes (MIK-R113 rule 5).
-
-    The install never deletes these; only the explicit ``removed-stores``
-    command does. Reporting them here is the once-per-install notice. ``files`` are the
-    files that command removes for the store; a gate log is removed without its lock,
-    which the landing chain still takes.
-
-    ``unreadable``, when given, receives every place that is there and could not be read,
-    as path and reason. A store may lie in such a place, so the command names it instead
-    of reporting that nothing remains.
-    """
-    unreadable = {} if unreadable is None else unreadable
-    found: list[dict[str, Any]] = []
-    for relative in REMOVED_PART_STORE_PATHS:
-        store = coordination_root / relative
-        files = _store_files(store, unreadable)
-        if files:
-            found.append(_store_entry(store, files, gate_log=False))
-    for store in _gate_logs(coordination_root, unreadable):
-        found.append(_store_entry(store, [store], gate_log=True))
-    return found
-
-
-def _store_entry(store: Path, files: list[Path], *, gate_log: bool) -> dict[str, Any]:
-    return {
-        "path": store.as_posix(),
-        "bytes": _files_bytes(files),
-        "files": [path.as_posix() for path in files],
-        "gateLog": gate_log,
-    }
-
-
-def removed_part_stores_report(stores: list[dict[str, Any]]) -> dict[str, Any]:
-    """The part of an install's report on the stores of removed parts (MIK-R113 rule 5).
-
-    ``stores`` names every store with its path, size and files; it is what the filed report
-    keeps and the tool's answer leaves out. The count, the size and the sentence that names
-    the command ride in both, and the way out of a stored gate when a gate log is among them.
-    """
-    report: dict[str, Any] = {
-        "count": len(stores),
-        "bytes": sum(item["bytes"] for item in stores),
-        "notice": REMOVED_STORES_NOTICE,
-        "stores": stores,
-    }
-    if any(item["gateLog"] for item in stores):
-        report["storedGates"] = STORED_GATE_WAY_OUT
-    return report
 
 
 def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:

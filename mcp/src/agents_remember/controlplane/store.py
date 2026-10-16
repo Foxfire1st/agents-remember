@@ -1,7 +1,7 @@
 """Append-only gate store, co-located with the observer event substrate.
 
-Gate snapshots live in ``<observer_root>/lifecycles/<lifecycle-id>/gates.jsonl``
-beside that lifecycle's ``events.jsonl``; lifecycle-less gates go to
+Gate snapshots live in ``<observer_root>/lifecycles/<lifecycle-id>/gates.jsonl``;
+lifecycle-less gates go to
 ``<observer_root>/workspace/gates.jsonl``. Append-only and history-preserving:
 :meth:`current` folds the log by gate id (last snapshot wins) into the live gate
 set, so a gate's whole history stays on disk and the current state is a pure
@@ -235,7 +235,14 @@ class GateStore:
 
         ``now`` is the caller's stamp, so the append stays a pure function of what was read.
         """
-        with exclusive_access(self.log_path(lifecycle_id), GATE_OWNERSHIP):
+        path = self.log_path(lifecycle_id)
+        # No product surface authors new gates. An absent log has no approval to
+        # claim and must not leave a lock-only lifecycle directory behind.
+        try:
+            path.stat()
+        except FileNotFoundError:
+            return evaluate_gate({}, kind=kind, policy=policy, operation_key=operation_key)
+        with exclusive_access(path, GATE_OWNERSHIP):
             gates = self.current(lifecycle_id)
             guard = evaluate_gate(gates, kind=kind, policy=policy, operation_key=operation_key)
             if not guard.permitted or guard.gate_id is None:

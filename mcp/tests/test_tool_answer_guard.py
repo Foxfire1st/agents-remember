@@ -45,8 +45,7 @@ from agents_remember.models.tools.tool_answer import (
     short_form,
     truncate_lists,
 )
-from agents_remember.observer.ambient import reset_ambient
-from tool_answer_l110_rows import _big_blob, _install_ambient, _server_info_case, _stub_config
+from tool_answer_l110_rows import _big_blob, _server_info_case, _stub_config
 
 
 class ToolAnswerGuardTests(unittest.TestCase):
@@ -411,16 +410,15 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
     ) -> tuple[dict[str, Any], list[Any]]:
         reset_log_budgets()
         cfg = _stub_config(coord)
-        amb = _install_ambient(coord)
         seen: list[Any] = []
-        original = amb.emit_tool
-        amb.emit_tool = lambda *args, **kwargs: seen.append((args, kwargs))  # type: ignore[method-assign]
-        try:
-            with tool_call_context(tool, {}, config=cfg):
-                answer = complete_tool_response(tool, dict(whole), config=cfg)
-        finally:
-            amb.emit_tool = original  # type: ignore[method-assign]
-            reset_ambient()
+        with (
+            mock.patch(
+                "agents_remember.application.tool_response.record_tool_completed",
+                side_effect=lambda *args, **kwargs: seen.append((args, kwargs)),
+            ),
+            tool_call_context(tool, {}, config=cfg),
+        ):
+            answer = complete_tool_response(tool, dict(whole), config=cfg)
         return answer, seen
 
     def _read_line(self, coord: Path) -> dict[str, Any]:
@@ -445,7 +443,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
             self.assertTrue(line["guardCut"])
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_ordinary_answer_observer_matches_delivered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -456,7 +454,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             self.assertNotIn("code", answer)
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_two_late_failures_keep_first_error_and_recount(self) -> None:
         real_write = tool_log_module.os.write
@@ -494,7 +492,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
                 answer.get("logError"),
                 "the tool call was not recorded: the log file cannot be written.",
             )
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_ordinary_exact_edge_with_line_failure_is_reguarded(self) -> None:
         real_write = tool_log_module.os.write
@@ -540,7 +538,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
             self.assertTrue(line["guardCut"])
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_full_short_form_fits_including_bookkeeping(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -560,7 +558,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             self.assertEqual(answer.get("droppedFields", 0) + len(kept_scalars), 500)
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_cut_answer_late_failure_reguards_at_the_short_ceiling(self) -> None:
         real_write = tool_log_module.os.write
@@ -591,7 +589,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
             self.assertTrue(line["guardCut"])
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
     def test_line_failure_overflow_stays_in_bound_and_counts_agree(self) -> None:
         real_write = os.write
@@ -617,7 +615,7 @@ class ToolAnswerFinalMeasureTests(unittest.TestCase):
             self.assertIsNotNone(answer.get("logError"))
             (line,) = [self._read_line(coord)]
             self.assertEqual(line["answerTokens"], delivered)
-            self.assertEqual(seen[-1][1]["answer_tokens"], delivered)
+            self.assertEqual(seen[-1][1]["delivered_tokens"], delivered)
 
 
 class ToolPartialWriteTests(unittest.TestCase):

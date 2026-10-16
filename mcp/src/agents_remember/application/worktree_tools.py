@@ -37,10 +37,8 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationProjection,
 )
-from agents_remember.models.lifecycles.responses import TerminalState
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionInput
-from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 from agents_remember.providers.settings import write_lifecycle_settings
@@ -207,35 +205,7 @@ def worktree_start_tool(
     direct_refusal = _direct_leaf_start_refusal(config, identity)
     if direct_refusal is not None:
         return direct_refusal
-    amb = ambient()
-    if amb is not None and amb.current is not None:
-        return {
-            "ok": False,
-            "state": "lifecycle-switch-required",
-            # The condition this actually tests, measured at D-17: a *real* start or attach
-            # binds this process's lifecycle to an enclosure, so the next start refuses. It has
-            # no knowledge of other leaves, enclosures or
-            # sessions -- the old sentence ("refuses to repoint the active persistent lifecycle")
-            # read as if one enclosure could block another, which is not the case and cost this
-            # master five extra calls plus a misleading line in its own record.
-            "summary": (
-                "worktree_start binds the session's current lifecycle to the new enclosure, and this "
-                "session's current lifecycle is already bound to another one; a session carries one "
-                "started task, so start this task from a new session, then retry "
-                "worktree_start. No other leaf, enclosure or session can block this start"
-            ),
-            "eligibility": dict(_START_ELIGIBILITY),
-            "nextStep": {
-                "summary": (
-                    "worktree_start binds the session's current lifecycle to the new enclosure, and this "
-                    "session's current lifecycle is already bound to another one; a session carries one "
-                    "started task, so start this task from a new session, then retry "
-                    "worktree_start. No other leaf, enclosure or session can block this start"
-                ),
-            },
-        }
-    # Mint the anchor so the contract always carries one; a clean start adopts it
-    # as this process's lifecycle (design §1.3).
+    # Stable contract/event scope identity; no session owns a worktree.
     lifecycle_id = new_ulid()
     # Containment R1 (260707-HFX-L1): the on-disk authority file — not the boot
     # snapshot — decides whether provider setup may launch. An empty (or
@@ -301,7 +271,6 @@ def worktree_start_tool(
                 veto["error"] = authority.error
             result["providersAuthority"] = veto
         result["eligibility"] = dict(_START_ELIGIBILITY)
-        _attribute_start(amb, result, identity.repo_id)
         return result
     finally:
         if settings_path is not None and not _settings_owned_by_background(result):
@@ -329,42 +298,9 @@ def summarized_worktree_start_tool(
     )
 
 
-def _attribute_start(amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str) -> None:
-    """Adopt the freshly started worktree's lifecycle (design §1.3).
-
-    Only a clean ``started`` result attributes: the contract now anchors the
-    lifecycle, and the minted contract id is adopted as this process's lifecycle.
-    Re-attaching to an existing contract is ``worktree_attach``'s job, not start's.
-    """
-    if amb is None or result.get("state") != "started":
-        return
-    enclosure = result.get("enclosure_path") or result.get("contract_path")
-    if not isinstance(enclosure, str):
-        return
-    lifecycle_id = result.get("lifecycle_id")
-    if isinstance(lifecycle_id, str) and lifecycle_id:
-        amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id)
-
-
-def _attribute_attach(amb: AmbientLifecycle | None, result: dict[str, Any], repo_id: str) -> None:
-    """Resume the contract's lifecycle on ``worktree_attach`` (design §1.3 table).
-
-    ``attach`` adopts when none is active, no-ops on the same id and pauses another
-    current lifecycle (the read-only attach already returned).
-    """
-    if amb is None or result.get("state") != "attached":
-        return
-    lifecycle_id = result.get("lifecycle_id")
-    enclosure = result.get("enclosure_path") or result.get("contract_path")
-    if not isinstance(lifecycle_id, str) or not lifecycle_id or not isinstance(enclosure, str):
-        return
-    amb.attach(lifecycle_id, enclosure=enclosure, repo_id=repo_id)
-
-
 def worktree_attach_tool(config: McpRuntimeConfig, task: TaskRef) -> dict[str, Any]:
     args = _task_ref_namespace(config, task)
     result = _worktree_result("worktree_attach", git_worktree_manager.attach_result(args))
-    _attribute_attach(ambient(), result, task.repo_id)
     return result
 
 
@@ -893,25 +829,7 @@ def worktree_abandon_tool(
         force=force,
     )
     result = _worktree_result("worktree_abandon", git_worktree_manager.abandon_result(args))
-    # End the ambient lifecycle when it anchors the abandoned worktree — the owner-written
-    # lifecycle.ended (L11). A lifecycle whose owner is gone (e.g. the server restarted) is
-    # terminalized by the reader instead: the reducer projects `abandoned` from the
-    # contract's cleanup field, honoring the store's single-writer invariant.
-    if not dry_run and result.get("state") == "abandoned":
-        end_ambient_lifecycle_if_anchored(
-            str(result.get("lifecycle_id") or ""), outcome="abandoned"
-        )
     return result
-
-
-def end_ambient_lifecycle_if_anchored(lifecycle_id: str, *, outcome: TerminalState) -> None:
-    """End the process-owned ambient when one task transition retires its anchor."""
-    amb = ambient()
-    if not lifecycle_id or amb is None:
-        return
-    current = amb.current
-    if current is not None and current.id == lifecycle_id:
-        amb.end(outcome)
 
 
 def lifecycle_finalize_task_tool(

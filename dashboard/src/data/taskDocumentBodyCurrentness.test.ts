@@ -3,20 +3,21 @@
 // sealed counterexample shape (same revision, fetched old body, newer summary)
 // and asserts the merged document carries the newer fact.
 import { renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { taskDoc } from '../panels/detail-panel/test-utils';
-import type { TaskDocNode } from '../types/projection';
+import { taskEntry, taskSummary } from '../test/fixtures/wire';
+import { dashboardStore } from './store';
+import type { TaskSummary } from '../types/projection';
 import { useTaskDocumentBody } from './useTaskDocumentBody';
 
-const leafPath = '/tasks/repo-a/m/01_leaf.json';
+beforeEach(() => dashboardStore.getState().reset());
 
-type LeafOver = Partial<TaskDocNode>;
+const reference = { repository: 'repo-a', path: 'm/01_leaf.json' };
+
+type LeafOver = Partial<TaskSummary>;
 
 function leaf(over: LeafOver = {}) {
-  return taskDoc({
-    id: 'LEAF',
-    title: 'Leaf',
+  return taskSummary({
     bodyRevision: 'same-revision',
     statusNote: 'OLD-STATUS',
     headerNotes: [{ label: 'Gate', value: 'OLD-VALUE' }],
@@ -42,22 +43,30 @@ function leaf(over: LeafOver = {}) {
     },
     ...over,
     kind: 'subTask',
-    docPath: leafPath,
   });
 }
 
-async function mergedWith(oldDoc: ReturnType<typeof taskDoc>, newDoc: ReturnType<typeof taskDoc>) {
+async function mergedWith(
+  oldDoc: ReturnType<typeof taskSummary>,
+  newDoc: ReturnType<typeof taskSummary>,
+) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => ({ ok: true, status: 200, json: async () => oldDoc })),
+    vi.fn(async () => new Response(JSON.stringify(oldDoc))),
   );
+  dashboardStore.getState().reset();
   try {
-    const { result, rerender } = renderHook(({ doc }) => useTaskDocumentBody(doc), {
-      initialProps: { doc: oldDoc },
-    });
+    const { result, rerender } = renderHook(
+      ({ doc }) => useTaskDocumentBody(taskEntry({ reference, summary: doc })),
+      {
+        initialProps: { doc: oldDoc },
+      },
+    );
     await waitFor(() => expect(result.current.state).toBe('available'));
     rerender({ doc: newDoc });
-    return result.current.documentFor(newDoc);
+    const document = result.current.document;
+    if (!document) throw new Error('expected an authored document');
+    return document;
   } finally {
     vi.unstubAllGlobals();
   }
@@ -125,14 +134,19 @@ describe('open-reader summary currentness (L127-C-F01)', () => {
     const fetched = { ...oldDoc, objective: 'fetched objective', requirements: ['r1'] };
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => fetched })),
+      vi.fn(async () => new Response(JSON.stringify(fetched))),
     );
     try {
-      const { result } = renderHook((doc: ReturnType<typeof taskDoc>) => useTaskDocumentBody(doc), {
-        initialProps: oldDoc,
-      });
+      const { result } = renderHook(
+        (doc: ReturnType<typeof taskSummary>) =>
+          useTaskDocumentBody(taskEntry({ reference, summary: doc })),
+        {
+          initialProps: oldDoc,
+        },
+      );
       await waitFor(() => expect(result.current.state).toBe('available'));
-      const merged = result.current.documentFor(oldDoc);
+      const merged = result.current.document;
+      if (!merged) throw new Error('expected an authored document');
       expect(merged.objective).toBe('fetched objective');
       expect(merged.requirements).toEqual(['r1']);
     } finally {
@@ -218,14 +232,19 @@ describe('current-body full restoration (L127-C-F06)', () => {
     const body = whole();
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => body })),
+      vi.fn(async () => new Response(JSON.stringify(body))),
     );
     try {
-      const { result } = renderHook((doc: ReturnType<typeof taskDoc>) => useTaskDocumentBody(doc), {
-        initialProps: summary,
-      });
+      const { result } = renderHook(
+        (doc: ReturnType<typeof taskSummary>) =>
+          useTaskDocumentBody(taskEntry({ reference, summary: doc })),
+        {
+          initialProps: summary,
+        },
+      );
       await waitFor(() => expect(result.current.state).toBe('available'));
-      const merged = result.current.documentFor(summary);
+      const merged = result.current.document;
+      if (!merged) throw new Error('expected an authored document');
       expect(merged.statusNote).toBe(longStatus);
       expect(merged.statusNoteTruncated).toBe(false);
       expect(merged.headerNotes).toHaveLength(10);
@@ -245,18 +264,22 @@ describe('current-body full restoration (L127-C-F06)', () => {
     const fetched = { ...oldDoc };
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => fetched })),
+      vi.fn(async () => new Response(JSON.stringify(fetched))),
     );
     try {
-      const { result, rerender } = renderHook(({ doc }) => useTaskDocumentBody(doc), {
-        initialProps: { doc: oldDoc },
-      });
+      const { result, rerender } = renderHook(
+        ({ doc }) => useTaskDocumentBody(taskEntry({ reference, summary: doc })),
+        {
+          initialProps: { doc: oldDoc },
+        },
+      );
       await waitFor(() => expect(result.current.state).toBe('available'));
       // A newer revision arrives while the old body is cached: the summary
       // owns every fact until the refetch lands.
       const newer = { ...oldDoc, bodyRevision: 'new-revision', statusNote: 'NEW-STATUS' };
       rerender({ doc: newer });
-      const merged = result.current.documentFor(newer);
+      const merged = result.current.document;
+      if (!merged) throw new Error('expected an authored document');
       expect(merged.statusNote).toBe('NEW-STATUS');
     } finally {
       vi.unstubAllGlobals();

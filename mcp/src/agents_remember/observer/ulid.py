@@ -1,17 +1,16 @@
-"""Local ULID minting for observer event and lifecycle ids.
+"""Local ULID minting for observer event ids.
 
 A ULID is 48 bits of millisecond timestamp + 80 bits of randomness, rendered as
 26 Crockford Base32 characters. Because the timestamp is the high-order prefix,
 lexicographic string order equals creation-time order -- which is what lets the
-event substrate merge per-lifecycle logs chronologically.
+event substrate merge recorded events chronologically.
 
 We only ever mint and string-compare ids (never parse foreign ULIDs or extract
 their timestamps), so this stays a tiny, dependency-free generator. It is also
-deliberately *stateless*: `new_ulid` is called from both the request thread and
-the lifecycle heartbeat thread, and `os.urandom` / `time.time_ns` are
-thread-safe, so no lock is needed. Within a single millisecond two ids share no
-ordering guarantee, which is fine: order *within* one lifecycle is the JSONL
-append order, and the id is only the cross-lifecycle merge/unique key.
+deliberately *stateless*: request threads may call `new_ulid` concurrently.
+`os.urandom` and `time.time_ns` are thread-safe, so no lock is needed. Within a
+single millisecond two ids share no ordering guarantee; a JSONL feed keeps
+append order, and the id provides the merge/unique key.
 
 Keep this ULID format stable when the Python runtime is upgraded.
 """

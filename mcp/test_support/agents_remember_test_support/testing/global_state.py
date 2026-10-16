@@ -54,17 +54,6 @@ def _clear_binding(module: ModuleType, attribute: str) -> None:
     module.reset_worktree_services()
 
 
-def _reset_ambient(module: ModuleType, attribute: str) -> None:
-    del attribute
-    current = module.ambient()
-    ticker = current._ticker if current is not None else None
-    module.reset_ambient()
-    if ticker is not None:
-        ticker.join(timeout=HANG_GUARD_SECONDS)
-        if ticker.is_alive():
-            raise RuntimeError("ambient lifecycle heartbeat did not stop during module reset")
-
-
 def _stop_spawned(module: ModuleType, attribute: str) -> None:
     processes = getattr(module, attribute)
     for process in tuple(processes):
@@ -265,12 +254,6 @@ PROCESS_MUTABLE_STATES = (
         _clear_cache,
     ),
     _row(
-        "observer.ambient",
-        "_AmbientRegistry.instance",
-        "Stop and join the heartbeat before clearing the ambient singleton.",
-        _reset_ambient,
-    ),
-    _row(
         "observer.tool_events",
         "_ToolEventRegistry.instance",
         "Clear the installed tool-event writer between test modules.",
@@ -297,11 +280,6 @@ PROCESS_MUTABLE_STATES = (
         "serving.projections.projection_store",
         "_last_task_payload_warn",
         "A preceding module cannot suppress a task-payload warning.",
-    ),
-    _row(
-        "serving.projections.snapshots_impl._lifecycle_logs",
-        "_lifecycle_log_cache",
-        "Forget lifecycle filesystem memoization between test modules.",
     ),
     _row(
         "serving.projections.snapshots_impl._closeout_queue",

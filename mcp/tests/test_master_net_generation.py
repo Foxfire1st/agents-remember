@@ -52,10 +52,10 @@ from agents_remember.serving.master_net_generation import (
     select_master_net,
 )
 from agents_remember.worktrees.modules.git import (
-    changed_files_with_counts,
     changed_worktree_paths,
     committed_changed_paths,
 )
+from agents_remember.worktrees.modules.git_changes import changed_files_with_counts
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,

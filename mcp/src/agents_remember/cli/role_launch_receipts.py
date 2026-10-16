@@ -32,6 +32,7 @@ from agents_remember.cli.investigator_receipts import (
     matches_selection,
 )
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
+from agents_remember.cli.role_activity import publish_receipt_role_agent
 from agents_remember.cli.role_handover_artifacts import restore_handover_artifact
 from agents_remember.cli.role_instructions import instruction_metadata, launch_choice_metadata
 from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
@@ -103,6 +104,7 @@ def _execute_prepared_launch(
     predecessor = current.get("predecessorReports")
     if isinstance(predecessor, dict):
         collect_execution_reports(predecessor)
+    publish_receipt_role_agent(config, current)
     if current.get("role") in LEAF_ROLES:
         outcome = run_launch_call(
             config, launch_call, before_create=lambda: _leaf_before_create(path, current)

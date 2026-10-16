@@ -32,7 +32,6 @@ from agents_remember.models.tools.tool_answer import (
     truncate_lists,
 )
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
-from agents_remember.observer.ambient import ambient
 from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import ValidationError
 
@@ -590,14 +589,8 @@ class EntryPointWorld:
             "census": self.census(repo),
         }
 
-    def build(self, *, keep_lifecycle: bool = False) -> None:
-        """Author the master + leaf and open one real leaf enclosure, through the tools.
-
-        ``keep_lifecycle`` leaves the lifecycle that ``worktree_start`` adopted open: the
-        state of a call made inside the leaf's lifecycle, where the answer's log and report
-        land under the enclosure (the cases MIK-R109 pins are measured there).
-        """
-
+    def build(self) -> None:
+        """Author the master and leaf, and open their real enclosure through the tools."""
         self.created = self.call(
             "task_doc",
             {
@@ -660,11 +653,9 @@ class EntryPointWorld:
                 "skip_provider_setup": True,
             },
         )
-        assert self.contract.exists(), f"the fixture enclosure is missing: {self.contract}"
-        # `worktree_start` adopts the enclosure's lifecycle; the sweep starts without one.
-        running = ambient()
-        if not keep_lifecycle and running is not None and running.current is not None:
-            running.end("completed")
+        assert self.contract.exists(), (
+            f"the fixture enclosure is missing: {self.contract}; start: {self.started}"
+        )
         self.code_base = _git(self.code, "rev-parse", "HEAD")
 
     # -- benign arguments, and the states two tools need prepared ------------------------
@@ -835,14 +826,6 @@ class EntryPointWorld:
             },
         }
 
-    def ambient_state(self) -> str:
-        """The ambient lifecycle's state, or ``none`` when no lifecycle is active."""
-
-        current = ambient()
-        if current is None or current.current is None:
-            return "none"
-        return str(current.current.state)
-
     def prepare(self, tool: str) -> None:
         """No per-tool ambient arrangement: no tool is a function of the ambient state alone.
 
@@ -870,10 +853,10 @@ class EntryPointWorld:
             raise AssertionError(f"roster tools with no case: {uncased}")
         results: dict[str, dict[str, Any]] = {}
         for tool in PUBLIC_TOOLS:
-            prepared = self.ambient_state()
+            prepared = "none"
             try:
                 self.prepare(tool)
-                prepared = self.ambient_state()
+                prepared = "none"
                 outcome = self.call(tool, arguments[tool])
             except _ToolCallTimeout as timed_out:
                 # MIK-R130 rule 6: one tool's deadline never keeps the tools
@@ -885,7 +868,7 @@ class EntryPointWorld:
                     "outcome": ("TIMEOUT", None),
                     "payload": None,
                     "prepared_state": prepared,
-                    "state_after": self.ambient_state(),
+                    "state_after": "none",
                 }
                 continue
             arm, detail = classify(tool, outcome)
@@ -895,6 +878,6 @@ class EntryPointWorld:
                 "outcome": outcome,
                 "payload": outcome[1],
                 "prepared_state": prepared,
-                "state_after": self.ambient_state(),
+                "state_after": "none",
             }
         return results

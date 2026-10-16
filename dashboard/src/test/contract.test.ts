@@ -1,23 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  ACTIVE_STATES,
   ATTENTION_LANES,
   ATTENTION_SEVERITIES,
-  LIFECYCLE_STATES,
-  PHASES,
   PROCESS_FACT_STATES,
   PROCESS_HEALTHS,
-  metricsFor,
-  stateCountField,
 } from '../types/projection';
-import type {
-  EngineProcessEdge,
-  LifecycleProjection,
-  SeriesSubTaskNode,
-  TaskSubTaskRefNode,
-  WorkspaceProjection,
-} from '../types/projection';
+import type { EngineProcessEdge, WorkspaceProjection } from '../types/projection';
 import { asServedProjection } from './servedProjection';
 import snapshot from '../fixtures/snapshot.json';
 
@@ -97,10 +86,12 @@ type ServedOnlyPaths<Served, Mirror, Path extends string> = Served extends JsonS
     ? NonNullable<Mirror> extends readonly (infer MirrorItem)[]
       ? ServedOnlyPaths<ServedItem, MirrorItem, `${Path}[]`>
       : never
-    : NonNullable<Mirror> extends object
-      ? | UndeclaredPaths<Served, NonNullable<Mirror>, Path>
-        | SharedFieldPaths<Served, NonNullable<Mirror>, Path>
-      : never;
+    : Absorbs<NonNullable<Mirror>> extends true
+      ? never
+      : NonNullable<Mirror> extends object
+        ? | UndeclaredPaths<Served, NonNullable<Mirror>, Path>
+          | SharedFieldPaths<Served, NonNullable<Mirror>, Path>
+        : never;
 
 type UndeclaredKeys<Served, Mirror> = Exclude<Keys<Served>, keyof Mirror>;
 
@@ -138,7 +129,7 @@ function mirrorMustDeclare<ServedOnly extends never>(...undeclaredPaths: ServedO
 // A path is reported once, at the highest level that is missing: deleting an enclosure's
 // `lifecycleOperation` reports `projection.enclosures[].lifecycleOperation`, not its children;
 // emptying `toolReports` reports `projection.analytics.toolReports[]`. Arrays are keyed by TYPE,
-// not by element, so one lifecycle carrying `staleSeconds` samples it for all of them — the
+// not by element, so one sidecar carrying `ageSeconds` samples it for all of them — the
 // fixture does not have to be uniform, it has to be COMPLETE between them.
 // The scalar test comes FIRST and the empty-array test second, in that order on purpose: an empty
 // array of strings samples nothing and hides nothing (there is no structure inside a string to
@@ -161,7 +152,7 @@ type MirrorOnlyPaths<Mirror, Served, Path extends string> = [NonNullable<Mirror>
           : never;
 
 // The keys any member of the sampled union carries, and the values only those members contribute.
-// Distributive on purpose: `lifecycles` is a union of two element shapes and a field present in
+// Distributive on purpose: the sample is a union of two element shapes and a field present in
 // either one is sampled.
 type SampledKeys<Served> = Served extends unknown ? Keys<Served> : never;
 type SampledValue<Served, K extends string> = Served extends Record<K, infer Value> ? Value : never;
@@ -222,19 +213,21 @@ const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, 'project
   'projection.analytics.engineProcesses[].retryArgs': "the retry call's own kwargs",
   'projection.analytics.engineProcesses[].sourceLineage.recoveries[].args':
     "the contract-addressed worktree_sync call's own kwargs",
-  'projection.analytics.series[].discardedSubTasks[].proof.childJson':
-    'the accepted JSON source digest is preserved as an opaque proof record',
-  'projection.analytics.series[].discardedSubTasks[].proof.childMarkdown':
-    'the accepted Markdown source digest is preserved as an opaque proof record',
-  'projection.analytics.taskDocuments[].discardedSubTasks[].proof.childJson':
+  'projection.tasks[].summary.discardedSubTasks[].proof.childJson':
     'the task projection preserves the opaque JSON source proof',
-  'projection.analytics.taskDocuments[].discardedSubTasks[].proof.childMarkdown':
+  'projection.tasks[].summary.discardedSubTasks[].proof.childMarkdown':
     'the task projection preserves the opaque Markdown source proof',
   'projection.enclosures[].lifecycleOperation.result':
     'the lifecycle operation result is the underlying closeout or integration payload',
   'projection.enclosures[].lifecycleOperation.legalControls[]':
     'each advertised operation control is an opaque tool invocation payload',
   'projection.enclosures[].lifecycleOperation.recommendedAction.arguments':
+    "the recommended action's task-addressed invocation arguments",
+  'projection.tasks[].worktrees[].lifecycleOperation.result':
+    'the lifecycle operation result is the underlying closeout or integration payload',
+  'projection.tasks[].worktrees[].lifecycleOperation.legalControls[]':
+    'each advertised operation control is an opaque tool invocation payload',
+  'projection.tasks[].worktrees[].lifecycleOperation.recommendedAction.arguments':
     "the recommended action's task-addressed invocation arguments",
 };
 
@@ -280,8 +273,8 @@ const VOCABULARIES: Record<
   ClosedUnionPaths<WorkspaceProjection, 'projection'>,
   readonly string[]
 > = {
-  'projection.lifecycles[].state': LIFECYCLE_STATES,
-  'projection.lifecycles[].phase': PHASES,
+  'projection.tasks[].stage': ['planned', 'started', 'aborted', 'completed'],
+  'projection.tasks[].activity': ['works', 'paused', 'unknown'],
   'projection.analytics.attentionQueue[].severity': ATTENTION_SEVERITIES,
   'projection.analytics.attentionQueue[].lane': ATTENTION_LANES,
   'projection.analytics.engineProcesses[].health': PROCESS_HEALTHS,
@@ -309,16 +302,14 @@ const VOCABULARIES: Record<
     'super-to-leaf',
   ],
   'projection.analytics.engineProcesses[].sourceLineage.recoveries[].tool': ['worktree_sync'],
-  'projection.analytics.taskDocuments[].steps[].disposition.kind': ['intentionalSkip'],
-  'projection.analytics.taskDocuments[].steps[].disposition.recordedVia': ['task_doc.skip_step'],
-  'projection.analytics.taskDocuments[].steps[].substeps[].disposition.kind': ['intentionalSkip'],
-  'projection.analytics.taskDocuments[].steps[].substeps[].disposition.recordedVia': [
-    'task_doc.skip_step',
-  ],
-  'projection.analytics.taskDocuments[].executionNature': ['organizational', 'atomic'],
-  'projection.analytics.taskDocuments[].form': ['sprint', 'master', 'task'],
-  'projection.analytics.taskDocuments[].executionGraphView.nodes[].kind': ['lump', 'segment'],
-  'projection.analytics.taskDocuments[].executionGraphView.nodes[].frontierState': [
+  'projection.tasks[].summary.steps[].disposition.kind': ['intentionalSkip'],
+  'projection.tasks[].summary.steps[].disposition.recordedVia': ['task_doc.skip_step'],
+  'projection.tasks[].summary.steps[].substeps[].disposition.kind': ['intentionalSkip'],
+  'projection.tasks[].summary.steps[].substeps[].disposition.recordedVia': ['task_doc.skip_step'],
+  'projection.tasks[].summary.executionNature': ['organizational', 'atomic'],
+  'projection.tasks[].summary.form': ['sprint', 'master', 'task'],
+  'projection.tasks[].summary.executionGraphView.nodes[].kind': ['lump', 'segment'],
+  'projection.tasks[].summary.executionGraphView.nodes[].frontierState': [
     'landed',
     'ready',
     'waiting',
@@ -418,6 +409,90 @@ const VOCABULARIES: Record<
     'unreadable',
     'invalid',
   ],
+  'projection.tasks[].worktrees[].lifecycleOperation.kind': [
+    'closeout',
+    'integrate',
+    'direct-landing',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.schemaVersion': [
+    'lifecycle-operation-projection/v1',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.stateMatrixVersion': [
+    'lifecycle-operation-state-matrix/v1',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.status': [
+    'queued',
+    'running',
+    'input-required',
+    'termination-required',
+    'completed',
+    'failed',
+    'cancelled',
+    'unreadable',
+    'incoherent',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.identity.operationKind': [
+    'closeout',
+    'integrate',
+    'direct-landing',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.worker.state': [
+    'live',
+    'termination-requested',
+    'termination-required',
+    'exited',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.approval.state': ['claimed', 'unclaimed'],
+  'projection.tasks[].worktrees[].lifecycleOperation.phase': [
+    'queued',
+    'preflight',
+    'memory-preflight',
+    'quality',
+    'approval-claim',
+    'recovering-after-claim',
+    'code-commit',
+    'memory-refresh',
+    'memory-commit',
+    'integration-replay',
+    'integration-quality',
+    'source-merge',
+    'contract-finalization',
+    'door-publication',
+    'termination-required',
+    'direct-preflight',
+    'direct-memory-commit',
+    'direct-terminal-publication',
+    'completed',
+    'failed',
+    'cancelled',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.taskIntent.schema': ['task-intent/v1'],
+  'projection.tasks[].worktrees[].lifecycleOperation.projectionEffects[].invalidation.outcome': [
+    'persisted-empty',
+    'already-empty',
+    'recovered-malformed',
+    'would-recover-malformed',
+    'would-persist-empty',
+    'failed',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.projectionEffects[].invalidation.diagnostic.kind':
+    ['task', 'door', 'series', 'projection'],
+  'projection.tasks[].worktrees[].lifecycleOperation.projectionEffects[].invalidation.diagnostic.state':
+    ['missing', 'unreadable', 'invalid'],
+  'projection.tasks[].worktrees[].lifecycleOperation.projectionEffects[].rebuild.outcome': [
+    'published',
+    'already-current',
+    'source-changed',
+    'source-unreadable',
+    'would-publish',
+    'not-attempted',
+  ],
+  'projection.tasks[].worktrees[].lifecycleOperation.projectionEffects[].rebuild.sourceClassification':
+    ['active', 'terminal'],
+  'projection.tasks[].worktrees[].lifecycleOperation.projectionEffects[].rebuild.sourceProblems[].kind':
+    ['task', 'door', 'series', 'projection'],
+  'projection.tasks[].worktrees[].lifecycleOperation.projectionEffects[].rebuild.sourceProblems[].state':
+    ['missing', 'unreadable', 'invalid'],
 };
 
 // Reads every value the payload carries at one of the registry's dotted paths. `[]` fans out over
@@ -446,20 +521,14 @@ describe('the mirror declares everything the server sends', () => {
   });
 
   it('carries exactly the metrics fields the mirror models, and no others', () => {
-    // The type-level walk above, restated at runtime for the one node whose fields ARE derived
-    // from a vocabulary — so it can be checked without a hand-written list on either side.
-    // `metricsFor([])` produces precisely the mirror's `Metrics` keys, so this is "the served
-    // rollup and the modelled rollup have the same fields" with no third copy to drift.
-    // A bucket only the server has (`awaitingReviewCount`) fails here; so does a bucket only the
-    // mirror has, which is what a seventh state in `LIFECYCLE_STATES` produces.
-    expect(new Set(Object.keys(served.metrics))).toEqual(new Set(Object.keys(metricsFor([]))));
+    expect(Object.keys(served.metrics).sort()).toEqual(['ignoredHostAgents', 'stalenessHistogram']);
   });
 });
 
 describe('the fixture samples everything the mirror declares', () => {
   it('reaches every declared path except the named residue', () => {
     // Fails `tsc -b` naming the path, e.g.
-    // `Type '"projection.lifecycles[].staleSeconds"' does not satisfy the constraint 'never'.`
+    // `Type '"projection.tasks[].summary.ageSeconds"' does not satisfy the constraint 'never'.`
     fixtureMustSample<Exclude<UnsampledMirrorPaths, KnownUnsampled>>();
   });
 
@@ -497,7 +566,8 @@ describe('projection contract fixture', () => {
   it('has the top-level projection shape', () => {
     expect(typeof served.version).toBe('number');
     expect(typeof served.generatedAt).toBe('string');
-    expect(Array.isArray(served.lifecycles)).toBe(true);
+    expect(Array.isArray(served.tasks)).toBe(true);
+    expect(served.taskCounts).toBeTypeOf('object');
     expect(Array.isArray(served.enclosures)).toBe(true);
     expect(Array.isArray(served.providers)).toBe(true);
     expect(Array.isArray(served.activeWorktreeGroups)).toBe(true);
@@ -505,75 +575,33 @@ describe('projection contract fixture', () => {
     expect(served.analytics).toBeTypeOf('object');
   });
 
-  it('lifecycles carry required fields', () => {
-    // The vocabularies themselves are checked above, generically and for every closed union in
-    // the mirror; what is left here is the per-row shape a JSON import cannot state.
-    expect(served.lifecycles.length).toBeGreaterThan(0);
-    for (const lifecycle of served.lifecycles) {
-      expect(typeof lifecycle.id).toBe('string');
-      expect(typeof lifecycle.fleeting).toBe('boolean');
-    }
-  });
-});
-
-// The bucket rollup: `Metrics` counted three states while the vocabulary declared six, so an
-// `awaiting-developer` lifecycle was inside `lifecycleCount` and inside no
-// bucket — the rollup could not show it at all. Every assertion reads `ACTIVE_STATES`, so it
-// measures the vocabulary rather than a seventh copy of the bucket list.
-describe('metrics bucket every live lifecycle state', () => {
-  it('the served payload carries a bucket per live state', () => {
-    const servedFields = Object.keys(served.metrics);
-    for (const state of ACTIVE_STATES) {
-      expect(servedFields).toContain(stateCountField(state));
-    }
-  });
-
-  it('counts a lifecycle in each live state into its own bucket', () => {
-    // One lifecycle per live state, so a state that shares (or misses) a bucket shows up as a
-    // count of 2 (or 0) rather than passing on a fixture that happens to hold none of it.
-    const lifecycles = ACTIVE_STATES.map((state): LifecycleProjection => ({
-      id: `LC-${state}`,
-      state,
-      phase: 'build',
-      fleeting: false,
-      startedAt: '2026-06-14T09:00:00+00:00',
-      lastEventTs: '2026-06-14T09:00:00+00:00',
-      inferred: false,
-    }));
-    const metrics = metricsFor(lifecycles) as unknown as Record<string, number>;
-    for (const state of ACTIVE_STATES) {
-      expect(metrics[stateCountField(state)]).toBe(1);
-    }
-    expect(metrics.lifecycleCount).toBe(ACTIVE_STATES.length);
-  });
-
-  it('gives each live state a bucket of its own', () => {
-    // `stateCountField` is not injective — `a-b` and `aB` both bucket into `aBCount`. A
-    // collision does not announce itself: `Metrics` is keyed by field, so the later count
-    // silently OVERWRITES the earlier and the rollup under-reports with no field looking wrong.
-    // The server refuses the collision where it builds the map (`state_count_fields`); the
-    // mirror cannot refuse at runtime (the vocabulary is frozen at build time), so it fails here.
-    const buckets = ACTIVE_STATES.map(stateCountField);
-    expect(new Set(buckets).size).toBe(buckets.length);
-  });
-
-  it('spells a bucket field the way the server spells it', () => {
-    // Two copies of one rule are only safe while they are the same rule. The server used
-    // `str.capitalize()`, which lower-cases the tail; this side upper-cases the first character
-    // and leaves the tail alone. Identical on every lowercase state — which is every state today
-    // — and divergent the moment one is not, so the disagreement could sit here indefinitely
-    // and then produce a bucket nothing fills. Settled in favour of leaving the tail alone
-    // (`projection.py::state_count_field`), because `Capitalize<>` cannot lower-case a tail at
-    // the type level and because lower-casing merges states that differ only in tail case.
-    const camel = (state: string): string => {
-      const [head, ...rest] = state.split('-');
-      return `${head}${rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join('')}Count`;
-    };
-    expect(camel('awaiting-DEVELOPER')).toBe('awaitingDEVELOPERCount');
-    expect(camel('awaiting-developer')).toBe('awaitingDeveloperCount');
-    expect(camel('a-b-c')).toBe('aBCCount'); // multi-hyphen: both sides already agreed
-    for (const state of ACTIVE_STATES) {
-      expect(stateCountField(state)).toBe(camel(state));
+  it('carries identity and status once per task entry, with reader content separate', () => {
+    expect(served.tasks.length).toBeGreaterThan(0);
+    for (const entry of served.tasks) {
+      expect(entry.key).toBeTypeOf('string');
+      if (entry.reference) {
+        expect(entry.reference.repository).toBeTypeOf('string');
+        expect(entry.reference.path).toMatch(/\.json$/);
+        expect(entry.key).toBe(`${entry.reference.repository}/${entry.reference.path}`);
+      } else {
+        expect(entry.summary).toBeUndefined();
+      }
+      expect(entry.id).toBeTypeOf('string');
+      expect(entry.title).toBeTypeOf('string');
+      if (entry.summary) {
+        for (const duplicate of [
+          'id',
+          'title',
+          'repository',
+          'docPath',
+          'status',
+          'subTasks',
+          'stepsDone',
+          'stepsTotal',
+        ]) {
+          expect(duplicate in entry.summary).toBe(false);
+        }
+      }
     }
   });
 });
@@ -584,38 +612,6 @@ describe('metrics bucket every live lifecycle state', () => {
 // (the typecheck gate) the moment a field comes back, because an UNUSED `@ts-expect-error` is
 // itself a compile error.
 describe('mirror does not invent fields the server cannot send', () => {
-  it('keeps the master and series sub-task row models distinct', () => {
-    // Two separate server models — `projection.py::TaskSubTaskRefNode` (has `linkedLifecycleId`,
-    // no `createdAt`) and `::SeriesSubTaskNode` (has `createdAt`, no `linkedLifecycleId`). One TS
-    // interface carrying both is what made the series index's creation sort a no-op and the
-    // cross-series jump unreachable from a series.
-    //
-    // NB `SeriesSectionNode` is the same situation one model over. The mirror now declares it
-    // separately, but it CANNOT be pinned here: it and `TaskSectionNode` have the same three
-    // fields, so there is no `@ts-expect-error` to write and no payload that separates them.
-    // See the header note (3) — the separate declaration is a slot, not a check.
-    const masterRow: TaskSubTaskRefNode = {
-      number: '1',
-      name: 'slice',
-      file: '01.md',
-      status: 'planning',
-      scope: '',
-    };
-    const seriesRow: SeriesSubTaskNode = {
-      number: '1',
-      name: 'slice',
-      file: '01.md',
-      status: 'planning',
-      scope: '',
-    };
-    // @ts-expect-error a master's index row is never stamped with a creation time
-    void masterRow.createdAt;
-    // @ts-expect-error a series row never carries a cross-series lifecycle link
-    void seriesRow.linkedLifecycleId;
-    expect(masterRow.linkedLifecycleId).toBeUndefined();
-    expect(seriesRow.createdAt).toBeUndefined();
-  });
-
   it('keeps engine-process edges free of a carried refusal polarity', () => {
     // `refusedPolarity` existed on no Python model. Its renderer branch was gated on the edge
     // state `refused`, which the reducer never produces either (`_materialize_edge_state`,

@@ -1,30 +1,44 @@
-import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act,fireEvent,render,waitFor,within } from '@testing-library/react';
+import { describe,expect,it,vi } from 'vitest';
 
 import { dashboardStore } from '../../data/store';
 import { DocChangeSetBar } from './changeSetBar';
 import { DetailPanel } from './DetailPanel';
-import { enclosure, seedProjection, seedTaskDocuments, stubCounters, taskDoc } from './test-utils';
+import {
+enclosure,
+seedProjection,
+seedTaskEntries,
+stubCounters,
+taskEntry,
+taskReference,
+taskSummary,
+} from './test-utils';
 
 describe('DetailPanel doc-reader change-set bar (L4a)', () => {
-  const leafPath =
-    '/tasks/agents-remember/260628_operations-integration/04a_changeset-everywhere.json';
+  const leafPath = 'agents-remember/260628_operations-integration/04a_changeset-everywhere.json';
 
   // The closed leaf's own entry set: committed (its landed delta) plus the Intent review, which is
   // read from the leaf's recorded comparison because there is no live candidate to read (ICR-R12).
   // The WORKING change-set is absent -- there is no uncommitted delta once the enclosure is closed --
   // so liveness still selects one of the three buttons and is no longer the gate on the review entry.
   const closedLeaf = () => {
-    const doc = taskDoc({
+    const doc = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(leafPath),
       id: '260628-L4a',
-      lifecycleId: undefined,
-      kind: 'subTask',
       title: 'Change-set everywhere',
-      repository: 'agents-remember',
-      docPath: leafPath,
-      objective: 'Leaf objective.',
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+        objective: 'Leaf objective.',
+      }),
     });
-    seedTaskDocuments([doc]);
+    seedTaskEntries([doc]);
     return doc;
   };
 
@@ -126,19 +140,27 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
 
   it('shows a series button on a master doc reader', async () => {
     stubCounters();
-    const master = taskDoc({
-      lifecycleId: undefined,
-      kind: 'master',
+    const master = taskEntry({
+      id: '1',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('agents-remember/260628_operations-integration/task.json'),
       title: 'Operations Integration',
-      repository: 'agents-remember',
-      docPath: '/tasks/agents-remember/260628_operations-integration/task.json',
-      objective: 'Master objective.',
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'master',
+        kind: 'master',
+        objective: 'Master objective.',
+      }),
     });
-    seedTaskDocuments([master]);
+    seedTaskEntries([master]);
     const onOpenChangeSet = vi.fn();
     const { findAllByTestId } = render(
       <DetailPanel
-        selectedId="taskdoc:/tasks/agents-remember/260628_operations-integration/task.json"
+        selectedId="taskdoc:agents-remember/260628_operations-integration/task.json"
         onOpenChangeSet={onOpenChangeSet}
       />,
     );
@@ -163,16 +185,29 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
           const params = new URLSearchParams(url.split('?', 2)[1] ?? '');
           const docPath = params.get('path') ?? '';
           const doc =
-            dashboardStore
-              .getState()
-              .analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
-            taskDoc({ kind: docPath.endsWith('/task.json') ? 'master' : 'subTask', docPath });
-          return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+            Object.values(dashboardStore.getState().tasks).find(
+              (item) => item.key === docPath,
+            )?.summary ??
+            taskEntry({
+              id: '1',
+              title: 'doc',
+              stage: 'started',
+              stepsDone: 0,
+              stepsTotal: 0,
+              activity: 'works',
+              reference: taskReference(docPath),
+              summary: taskSummary({
+                objective: '',
+                type: '',
+                createdAt: '2026-06-20T09:00:00+00:00',
+                form: 'task',
+                kind: docPath.endsWith('/task.json') ? 'master' : 'subTask',
+              }),
+            });
+          return new Response(JSON.stringify(doc), { status: 200 });
         }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return new Response(
+          JSON.stringify({
             leaves: [
               {
                 leafId: '260921-ICR-L1',
@@ -196,21 +231,30 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
               memory: { files: 21, insertions: 1330, deletions: 406 },
             },
           }),
-        } as unknown as Response;
+          { status: 200 },
+        );
       }),
     );
-    const master = taskDoc({
-      lifecycleId: undefined,
-      kind: 'master',
+    const master = taskEntry({
+      id: '1',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('agents-remember/260921_complete-code-and-intent-review/task.json'),
       title: 'Complete code and intent review',
-      repository: 'agents-remember',
-      docPath: '/tasks/agents-remember/260921_complete-code-and-intent-review/task.json',
-      objective: 'Master objective.',
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'master',
+        kind: 'master',
+        objective: 'Master objective.',
+      }),
     });
-    seedTaskDocuments([master]);
+    seedTaskEntries([master]);
     const { findAllByTestId } = render(
       <DetailPanel
-        selectedId="taskdoc:/tasks/agents-remember/260921_complete-code-and-intent-review/task.json"
+        selectedId="taskdoc:agents-remember/260921_complete-code-and-intent-review/task.json"
         onOpenChangeSet={vi.fn()}
       />,
     );
@@ -246,16 +290,29 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
           const params = new URLSearchParams(url.split('?', 2)[1] ?? '');
           const docPath = params.get('path') ?? '';
           const doc =
-            dashboardStore
-              .getState()
-              .analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
-            taskDoc({ kind: docPath.endsWith('/task.json') ? 'master' : 'subTask', docPath });
-          return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+            Object.values(dashboardStore.getState().tasks).find(
+              (item) => item.key === docPath,
+            )?.summary ??
+            taskEntry({
+              id: '1',
+              title: 'doc',
+              stage: 'started',
+              stepsDone: 0,
+              stepsTotal: 0,
+              activity: 'works',
+              reference: taskReference(docPath),
+              summary: taskSummary({
+                objective: '',
+                type: '',
+                createdAt: '2026-06-20T09:00:00+00:00',
+                form: 'task',
+                kind: docPath.endsWith('/task.json') ? 'master' : 'subTask',
+              }),
+            });
+          return new Response(JSON.stringify(doc), { status: 200 });
         }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
+        return new Response(
+          JSON.stringify({
             counters: {
               code: { files: 0, insertions: 0, deletions: 0 },
               memory: { files: 0, insertions: 0, deletions: 0 },
@@ -264,22 +321,31 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
             currentness: 'current',
             scope: 'integrated',
           }),
-        } as unknown as Response;
+          { status: 200 },
+        );
       }),
     );
-    const master = taskDoc({
-      lifecycleId: undefined,
-      kind: 'master',
+    const master = taskEntry({
+      id: '1',
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('agents-remember/260628_operations-integration/task.json'),
       title: 'Operations Integration',
-      repository: 'agents-remember',
-      docPath: '/tasks/agents-remember/260628_operations-integration/task.json',
-      objective: 'Master objective.',
+      summary: taskSummary({
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'master',
+        kind: 'master',
+        objective: 'Master objective.',
+      }),
     });
-    seedTaskDocuments([master]);
+    seedTaskEntries([master]);
     const onOpenChangeSet = vi.fn();
     const { findAllByTestId } = render(
       <DetailPanel
-        selectedId="taskdoc:/tasks/agents-remember/260628_operations-integration/task.json"
+        selectedId="taskdoc:agents-remember/260628_operations-integration/task.json"
         onOpenChangeSet={onOpenChangeSet}
       />,
     );
@@ -295,46 +361,40 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
         codeTip: 't2',
         memoryBase: '',
         memoryTip: '',
+        digest: 'ab'.repeat(32),
       },
     });
   });
 
   it("adds a working button when the leaf's enclosure is live", async () => {
     stubCounters();
-    const doc = taskDoc({
+    const doc = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(leafPath),
       id: '260628-l4a',
-      lifecycleId: undefined,
-      kind: 'subTask',
       title: 'Change-set everywhere',
-      repository: 'agents-remember',
-      docPath: leafPath,
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+      }),
     });
-    seedProjection({
-      enclosures: [
-        enclosure({
-          enclosure: '/contracts/l4a',
-          lifecycleId: 'X',
-          leafId: '260628-l4a',
-          repoName: 'agents-remember',
-          taskName: '260628_operations-integration',
-          worktreeGroup: '/worktrees/changeset-everywhere-ar',
-        }),
-      ],
-      activeWorktreeGroups: ['changeset-everywhere-ar'],
-      analytics: {
-        driftSnapshots: [],
-        stalestSidecars: [],
-        setupSummaries: [],
-        setupProgress: [],
-        routeCoverage: [],
-        toolReports: [],
-        ledgers: [],
-        taskDocuments: [doc],
-        series: [],
-        attentionQueue: [],
-        engineProcesses: [],
-      },
-    });
+    doc.worktrees = [
+      enclosure({
+        enclosure: '/contracts/l4a',
+        lifecycleId: 'X',
+        leafId: '260628-l4a',
+        repoName: 'agents-remember',
+        taskName: '260628_operations-integration',
+        worktreeGroup: '/worktrees/changeset-everywhere-ar',
+      }),
+    ];
+    seedTaskEntries([doc], { activeWorktreeGroups: ['changeset-everywhere-ar'] });
     const onOpenChangeSet = vi.fn();
     const { findAllByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
@@ -349,40 +409,33 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
   // The entry is the task context: a live leaf opens its source review whatever the summary answers,
   // and the reviewer -- not the entry -- chooses the subject once it has read its own catalogue.
   const liveLeaf = () => {
-    const doc = taskDoc({
+    const doc = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(leafPath),
       id: '260628-l4a',
-      lifecycleId: undefined,
-      kind: 'subTask',
       title: 'Change-set everywhere',
-      repository: 'agents-remember',
-      docPath: leafPath,
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+      }),
     });
-    seedProjection({
-      enclosures: [
-        enclosure({
-          enclosure: '/contracts/l4a',
-          lifecycleId: 'X',
-          leafId: '260628-l4a',
-          repoName: 'agents-remember',
-          taskName: '260628_operations-integration',
-          worktreeGroup: '/worktrees/changeset-everywhere-ar',
-        }),
-      ],
-      activeWorktreeGroups: ['changeset-everywhere-ar'],
-      analytics: {
-        driftSnapshots: [],
-        stalestSidecars: [],
-        setupSummaries: [],
-        setupProgress: [],
-        routeCoverage: [],
-        toolReports: [],
-        ledgers: [],
-        taskDocuments: [doc],
-        series: [],
-        attentionQueue: [],
-        engineProcesses: [],
-      },
-    });
+    doc.worktrees = [
+      enclosure({
+        enclosure: '/contracts/l4a',
+        lifecycleId: 'X',
+        leafId: '260628-l4a',
+        repoName: 'agents-remember',
+        taskName: '260628_operations-integration',
+        worktreeGroup: '/worktrees/changeset-everywhere-ar',
+      }),
+    ];
+    seedTaskEntries([doc], { activeWorktreeGroups: ['changeset-everywhere-ar'] });
   };
 
   it('opens the task-context review; the reviewer chooses the subject', async () => {
@@ -440,15 +493,23 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
 
   it('omits the bar entirely when no onOpenChangeSet handler is wired', () => {
     stubCounters();
-    const doc = taskDoc({
+    const doc = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(leafPath),
       id: '260628-L4a',
-      lifecycleId: undefined,
-      kind: 'subTask',
       title: 'Change-set everywhere',
-      repository: 'agents-remember',
-      docPath: leafPath,
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'task',
+        kind: 'subTask',
+      }),
     });
-    seedTaskDocuments([doc]);
+    seedTaskEntries([doc]);
     const { queryAllByTestId } = render(<DetailPanel selectedId={`taskdoc:${leafPath}`} />);
     expect(queryAllByTestId('open-changeset')).toHaveLength(0);
   });
@@ -488,13 +549,25 @@ const MEASURED_COUNTERS = {
 };
 
 // One stubbed response in the shape the route answers with.
-const routeAnswer = (ok: boolean, status: number, statusText: string, body: unknown) =>
-  ({ ok, status, statusText, json: async () => body }) as unknown as Response;
+const routeAnswer = (status: number, statusText: string, body: unknown) =>
+  new Response(JSON.stringify(body), { status, statusText });
 
 const masterBar = (master: string) => {
   const onOpen = vi.fn();
   const view = render(
-    <DocChangeSetBar kind="master" repo="agents-remember" master={master} onOpen={onOpen} />,
+    <DocChangeSetBar
+      kind="master"
+      entry={taskEntry({
+        id: '1',
+        title: 'doc',
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: { repository: 'agents-remember', path: `${master}/task.json` },
+      })}
+      onOpen={onOpen}
+    />,
   );
   return { view, onOpen };
 };
@@ -511,12 +584,13 @@ describe("the counter read's refusal (L32/D01)", () => {
     const pending = masterBar(MASTER_NET);
     const pendingText = (await pending.view.findByTestId('open-changeset')).textContent ?? '';
     pending.view.unmount();
+    dashboardStore.getState().reset();
 
     // REFUSED: the route's own 404 idiom, with the reason in the body of the response.
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        routeAnswer(false, 404, 'Not Found', { status: 'not-found', path: MASTER_NET_REASON }),
+        routeAnswer(404, 'Not Found', { status: 'not-found', path: MASTER_NET_REASON }),
       ),
     );
     const refused = masterBar(MASTER_NET);
@@ -550,7 +624,7 @@ describe("the counter read's refusal (L32/D01)", () => {
     // previous read earned is gone rather than left standing over a delta that was measured.
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => routeAnswer(true, 200, 'OK', MEASURED_COUNTERS)),
+      vi.fn(async () => routeAnswer(200, 'OK', MEASURED_COUNTERS)),
     );
     const answered = masterBar(MASTER_NET);
     const answeredButton = await answered.view.findByTestId('open-changeset');
@@ -596,14 +670,14 @@ describe("the counter read's refusal (L32/D01)", () => {
           return await new Promise<Response>((resolve) => {
             releaseFirst = () =>
               resolve(
-                routeAnswer(false, 404, 'Not Found', {
+                routeAnswer(404, 'Not Found', {
                   status: 'not-found',
                   path: MASTER_NET_REASON,
                 }),
               );
           });
         }
-        return routeAnswer(true, 200, 'OK', MEASURED_COUNTERS);
+        return routeAnswer(200, 'OK', MEASURED_COUNTERS);
       }),
     );
 
@@ -611,8 +685,15 @@ describe("the counter read's refusal (L32/D01)", () => {
     view.rerender(
       <DocChangeSetBar
         kind="master"
-        repo="agents-remember"
-        master={OTHER_MASTER}
+        entry={taskEntry({
+          id: '1',
+          title: 'doc',
+          stage: 'started',
+          stepsDone: 0,
+          stepsTotal: 0,
+          activity: 'works',
+          reference: { repository: 'agents-remember', path: `${OTHER_MASTER}/task.json` },
+        })}
         onOpen={onOpen}
       />,
     );

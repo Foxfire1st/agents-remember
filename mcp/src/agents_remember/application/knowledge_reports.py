@@ -54,8 +54,8 @@ def resolve_reports_dir(
 ) -> Path | None:
     """Where one call's caller-readable report goes, or ``None``.
 
-    The enclosure's ``reports/`` directory when the ambient lifecycle binds
-    the caller to an enclosure that still exists, else the day's detail
+    The enclosure's ``reports/`` directory when the caller's bound contract
+    resolves an enclosure that still exists, else the day's detail
     folder under the resolved log root. When no configured root is known,
     ``coordination_root`` stands in with the default log layout beneath it
     (a test server without dispatch configuration). ``None`` when no root is

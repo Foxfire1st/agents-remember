@@ -20,13 +20,13 @@ from agents_remember.serving.projections.snapshots_impl._common import (
     _iter_task_json,
 )
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
-    _master_docs_by_ref,
     _projected_document,
     _task_doc_node,
-    _task_document_lifecycle_maps,
     _TaskDocProjectionOptions,
+    _validated_task_documents,
     read_task_document_body,
 )
+from agents_remember.serving.projections.snapshots_impl._task_graph_view import documents_by_ref
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA, TaskDocument
 from agents_remember.tasks.master_order import MasterOrder
 from agents_remember.worktrees.task_resolver import ARCHIVE_DIR, ENCLOSURES_DIR
@@ -129,9 +129,10 @@ def _corpus_wide_body(root: Path, path: Path) -> str:
     node = _task_doc_node(
         doc,
         path,
-        _task_document_lifecycle_maps([]),
         FRESH,
-        _TaskDocProjectionOptions(include_body=True, master_docs=_master_docs_by_ref(docs)),
+        _TaskDocProjectionOptions(
+            include_body=True, master_docs=documents_by_ref(_validated_task_documents(docs))
+        ),
     )
     return node.model_dump_json(by_alias=True, exclude_none=True)
 
@@ -142,21 +143,17 @@ def test_every_document_kind_projects_the_same_body_as_the_corpus_wide_join(
     paths = _corpus(tmp_path, unrelated=3)
 
     for name, path in paths.items():
-        node = read_task_document_body(tmp_path, doc_path=str(path), enclosures=[], now=FRESH)
+        node = read_task_document_body(tmp_path, doc_path=str(path), now=FRESH)
         assert node is not None, name
         assert node.model_dump_json(by_alias=True, exclude_none=True) == _corpus_wide_body(
             tmp_path, path.resolve()
         ), name
 
-    sprint = read_task_document_body(
-        tmp_path, doc_path=str(paths["sprint"]), enclosures=[], now=FRESH
-    )
+    sprint = read_task_document_body(tmp_path, doc_path=str(paths["sprint"]), now=FRESH)
     assert sprint is not None and sprint.executionGraphView is not None
     titles = sorted(node.masterTitle for node in sprint.executionGraphView.nodes)
     assert titles == ["Master A", "Master B", f"{REPO}/missing/task.json"]
-    absent = read_task_document_body(
-        tmp_path, doc_path="repo-a/absent/task.json", enclosures=[], now=FRESH
-    )
+    absent = read_task_document_body(tmp_path, doc_path="repo-a/absent/task.json", now=FRESH)
     assert absent is None
 
 
@@ -199,7 +196,7 @@ def test_one_body_read_touches_the_same_files_whatever_the_corpus_size(
         path = _corpus(root, unrelated=unrelated)[document]
         touches.listed.clear()
         touches.read.clear()
-        assert read_task_document_body(root, doc_path=str(path), enclosures=[], now=FRESH)
+        assert read_task_document_body(root, doc_path=str(path), now=FRESH)
         observed.append(
             (
                 [item.relative_to(root.resolve()).as_posix() for item in touches.read],
@@ -295,14 +292,14 @@ def test_named_order_reads_preserve_raw_corpus_admission(
     target.write_text(json.dumps(payload), encoding="utf-8")
     before = {path: path.read_bytes() for path in (master, leaf, gate, unrelated)}
 
-    body = read_task_document_body(tmp_path, doc_path=str(leaf), enclosures=[], now=FRESH)
+    body = read_task_document_body(tmp_path, doc_path=str(leaf), now=FRESH)
     assert body is not None
     expected_reads = [leaf, master]
     if boundary != "owner" or schema == TASK_DOCUMENT_SCHEMA:
         expected_reads += [gate, series / "03_missing.json"]
     assert touches.read == expected_reads
     assert touches.listed == []
-    corpus = _task_documents.read_task_documents(tmp_path, enclosures=[], now=FRESH)
+    corpus = _task_documents.read_task_documents(tmp_path, now=FRESH)
     summary = next(node for node in corpus if node.id == "L1")
     assert (body.waitsForTasks, body.neededByTasks, body.executionGraphView) == (
         summary.waitsForTasks,
@@ -339,9 +336,9 @@ def test_ready_membership_is_indexed_once_per_native_call(
 
     def read() -> list[str]:
         nodes = (
-            [read_task_document_body(tmp_path, doc_path=str(master), enclosures=[], now=FRESH)]
+            [read_task_document_body(tmp_path, doc_path=str(master), now=FRESH)]
             if entry == "body"
-            else _task_documents.read_task_documents(tmp_path, enclosures=[], now=FRESH)
+            else _task_documents.read_task_documents(tmp_path, now=FRESH)
         )
         assert all(node is not None for node in nodes)
         return [node.model_dump_json(by_alias=True, exclude_none=True) for node in nodes if node]

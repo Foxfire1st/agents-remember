@@ -307,9 +307,9 @@ def _ensure_leaf_enclosure(
 def _start_leaf_enclosure(config: McpRuntimeConfig, identity: TaskIdentity) -> dict[str, Any]:
     """Use the existing preparation child for both role-start entry points.
 
-    Its lifecycle belongs to this one operation, so preparing a leaf neither depends on nor
-    changes the calling agent's persistent lifecycle. The child retains its root checks, writer
-    admission and cut-off policy; the public worktree_start tool keeps its caller semantics.
+    Preparation runs only for this operation in the existing checked child.
+    The child retains its root checks, writer admission and cut-off policy;
+    the public worktree_start tool keeps its caller semantics.
     """
     return start_leaf_enclosure_in_child(config, identity)
 

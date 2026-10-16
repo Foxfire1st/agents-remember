@@ -11,10 +11,17 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.file_lock import exclusive_file_lock
+from agents_remember.observer.host_activity import (
+    HOST_ACTIVITY_FILE,
+    PublishedAgentActivity,
+    read_host_activity_publication,
+)
 
 PLUGIN_ID = "ar-plugin"
 AR_HOME_DIRECTORY = "agents-remember"
@@ -107,7 +114,26 @@ def read_role_agents(home: Path) -> dict[str, dict[str, str]]:
                 "task": record["task"],
                 "reportPath": record["reportPath"],
             }
+            if isinstance(record.get("registration"), str):
+                facts[str(agent_id)]["registration"] = record["registration"]
     return facts
+
+
+def _registration_survives_end(
+    record: dict[str, str], boot_id: str, end: PublishedAgentActivity
+) -> bool:
+    try:
+        boundary = json.loads(record.get("registration", "null"))
+        if not isinstance(boundary, list) or len(boundary) != 2 or boundary[0] != boot_id:
+            return False
+        registered_at = datetime.fromisoformat(boundary[1])
+    except (TypeError, ValueError):
+        return False
+    # A boot's initial listing has no close time: it describes the session that
+    # existed before this registration. Later native end events carry their time.
+    return registered_at.tzinfo is not None and (
+        end.eventAt is None or end.eventAt <= registered_at
+    )
 
 
 def publish_role_agent(home: Path, agent_id: str, record: dict[str, str]) -> bool:
@@ -117,17 +143,31 @@ def publish_role_agent(home: Path, agent_id: str, record: dict[str, str]) -> boo
     is simply silent, and the next start rewrites the file.
     """
     try:
-        document = _read_json(role_agents_path(home))
-        agents: dict[str, Any] = {}
-        if isinstance(document, dict):
-            raw = document.get("agents")
-            if isinstance(raw, dict):
-                agents = {str(key): value for key, value in raw.items()}
-        if agents.get(agent_id) == record:
-            return False
-        merged = {**agents, agent_id: record}
-        atomic_write_text(role_agents_path(home), json.dumps({"agents": merged}, indent=2) + "\n")
-        return True
+        path = role_agents_path(home)
+        with exclusive_file_lock(path, "Paseo role-agent facts"):
+            agents = read_role_agents(home)
+            publication = read_host_activity_publication(path.with_name(HOST_ACTIVITY_FILE))
+            merged = dict(agents)
+            if publication is not None:
+                merged = {
+                    key: value
+                    for key, value in agents.items()
+                    if key not in publication.agents
+                    or publication.agents[key].state != "ended"
+                    or _registration_survives_end(
+                        value, publication.bootId, publication.agents[key]
+                    )
+                }
+            registered = dict(record)
+            if publication is not None:
+                registered["registration"] = json.dumps(
+                    [publication.bootId, datetime.now(UTC).isoformat()]
+                )
+            merged[agent_id] = registered
+            if merged == agents:
+                return False
+            atomic_write_text(path, json.dumps({"agents": merged}, indent=2) + "\n")
+            return True
     except OSError:
         return False
 

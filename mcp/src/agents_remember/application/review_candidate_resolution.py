@@ -173,14 +173,9 @@ def resolve_review_candidate(
     a resolution rather than a refusal so the same comparison stays openable after cleanup.
     """
 
-    for segment, value in (("repository", repository_id), ("master", master), ("leaf", leaf_id)):
-        if not value or "/" in value or "\\" in value or value.startswith("."):
-            return refusal(
-                "candidate_unresolved",
-                f"the {segment} selector is not a single path segment",
-                next_action="name the canonical task context: repository, master and leaf id",
-                offending_input=value,
-            )
+    invalid = review_context_refusal(repository_id, master, leaf_id)
+    if invalid is not None:
+        return invalid
     contract = recorded_leaf_contract(config, repository_id, master, leaf_id)
     if contract is None:
         return refusal(
@@ -218,6 +213,19 @@ def resolve_review_candidate(
     if isinstance(captured, ReviewRefusal):
         return captured
     return _live_resolution(config, repository_id, contract, captured)
+
+
+def review_context_refusal(repository_id: str, master: str, leaf_id: str) -> ReviewRefusal | None:
+    """The native address check, shared with the serving input observation."""
+    for segment, value in (("repository", repository_id), ("master", master), ("leaf", leaf_id)):
+        if not value or "/" in value or "\\" in value or value.startswith("."):
+            return refusal(
+                "candidate_unresolved",
+                f"the {segment} selector is not a single path segment",
+                next_action="name the canonical task context: repository, master and leaf id",
+                offending_input=value,
+            )
+    return None
 
 
 def _live_resolution(

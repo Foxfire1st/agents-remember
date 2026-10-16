@@ -5,7 +5,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from agents_remember.kernel.primitives.identity import stable_provider_id
 from agents_remember.observer.projection import ProviderNode
+
+
+def workspace_repository_id(provider_id: str, repo_id: str) -> str:
+    """Match the identity written by each workspace provider."""
+    return stable_provider_id(repo_id) if _is_cgc_provider(provider_id) else repo_id
 
 
 def provider_role(provider_id: str) -> str:

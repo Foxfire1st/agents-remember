@@ -48,7 +48,7 @@ class StartIdentityTests(unittest.TestCase):
             tracker = WarmupTracker()
             flaky = {"fail": True}
 
-            def intake(config: Any, live: Any = None) -> list[str]:
+            def intake(config: Any, live: Any = None, **_kwargs: Any) -> list[str]:
                 if flaky["fail"]:
                     raise PaseoBridgeFailure("daemon_unreachable", "host flaked mid-intake")
                 return ["a1"]

@@ -49,7 +49,6 @@ from agents_remember.models.tools.tool_answer import (
     LOG_ERROR_LINE_UNSERIALIZABLE,
     LOG_ERROR_LINE_UNWRITABLE,
 )
-from agents_remember.observer.ambient import ambient
 
 # Made with the enclosure. It lies outside both worktrees and outside Git.
 ENCLOSURE_LOGS_DIRNAME = "logs"
@@ -175,11 +174,10 @@ class ToolCaller:
     agent_id: str | None = None
     role: str | None = None
     task: str | None = None
-    lifecycle_id: str | None = None
 
 
 def read_tool_caller() -> ToolCaller:
-    """Read the caller from the agent binding and the ambient lifecycle."""
+    """Read the caller from the hosted agent binding."""
     agent_id: str | None = None
     role: str | None = None
     task: str | None = None
@@ -195,28 +193,26 @@ def read_tool_caller() -> ToolCaller:
             if binding.task_ref is not None
             else (binding.master_ref.path if binding.master_ref is not None else None)
         )
-    lifecycle_id: str | None = None
-    try:
-        amb = ambient()
-        current = amb.current if amb is not None else None
-        lifecycle_id = current.id if current is not None else None
-    except Exception:
-        lifecycle_id = None
-    return ToolCaller(agent_id=agent_id, role=role, task=task, lifecycle_id=lifecycle_id)
+    return ToolCaller(agent_id=agent_id, role=role, task=task)
 
 
-def _ambient_enclosure_contract() -> Path | None:
-    """Return the ambient lifecycle's enclosure contract path, if any."""
+def _bound_enclosure_contract(config: Any | None) -> Path | None:
+    """Read the canonical enclosure binding of the caller's task, without a session."""
+    if config is None:
+        return None
     try:
-        amb = ambient()
-        current = amb.current if amb is not None else None
-        enclosure = current.enclosure if current is not None else None
+        from agents_remember.tasks.document_refs import TaskDocumentTopology  # noqa: PLC0415
+
+        binding = read_agent_binding()
+        if binding is None or binding.task_ref is None:
+            return None
+        resolved = TaskDocumentTopology(Path(config.coordination_root)).resolve(binding.task_ref)
+        enclosures = resolved.document.enclosures
+        if len(enclosures) != 1 or enclosures[0].leafId != resolved.document.id:
+            return None
+        return Path(enclosures[0].enclosurePath)
     except Exception:
         return None
-    if not enclosure:
-        return None
-    path = Path(enclosure)
-    return path if path.is_absolute() else None
 
 
 @dataclass(frozen=True)
@@ -269,7 +265,7 @@ def reset_log_budgets() -> None:
 # Rule 3: a call that removes an enclosure or ends its task (cleanup,
 # abandon, finalize) never writes into that enclosure, whoever makes it.
 # These operations always log to the coordination root, even when the
-# ambient lifecycle still names a live enclosure.
+# caller still names a live enclosure.
 TERMINATING_TOOL_NAMES = frozenset(
     {"worktree_cleanup", "worktree_abandon", "lifecycle_finalize_task"}
 )
@@ -278,7 +274,7 @@ TERMINATING_TOOL_NAMES = frozenset(
 def resolve_log_roots(config: Any | None, tool_name: str | None = None) -> ResolvedLogDestination:
     """Resolve where one call's log line goes, and under which limits.
 
-    The enclosure directory is returned only when the ambient lifecycle names
+    The enclosure directory is returned only when the caller binding names
     a contract path whose file still exists and whose worktree group still
     exists: a leaf agent before its enclosure exists or after it was removed
     logs to the coordination root like every other caller. A terminating
@@ -308,7 +304,7 @@ def resolve_log_roots(config: Any | None, tool_name: str | None = None) -> Resol
             getattr(tool_log, "enclosure_max_bytes", TOOL_LOG_ENCLOSURE_MAX_BYTES_DEFAULT)
         )
     enclosure_dir: Path | None = None
-    contract_path = _ambient_enclosure_contract()
+    contract_path = _bound_enclosure_contract(config)
     if (
         tool_name not in TERMINATING_TOOL_NAMES
         and contract_path is not None
@@ -1021,7 +1017,6 @@ def _call_line_dict(
             "agentId": record.caller.agent_id,
             "role": record.caller.role,
             "task": record.caller.task,
-            "lifecycleId": record.caller.lifecycle_id,
         },
         "ok": record.ok,
         "code": record.code,

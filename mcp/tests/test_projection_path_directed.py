@@ -1,10 +1,8 @@
 """MIK-R81 rule 2 (F09): one-change reads ignore unrelated corpus size.
 
-A documentary task change, an append, a delete, a cross-document subtask edit and a
-lifecycle append each re-read only the inputs they touch: content reads under
-tasks/ and lifecycles/ stay flat when the corpus grows by eight unrelated documents
-and eight unrelated lifecycles, and every refreshed surface is byte-equal to a full
-reference read at the same clock.
+Documentary edits, appends, deletes and declared-row changes re-read only the
+inputs they touch. Reads stay flat as unrelated documents grow; canonical task
+entries are byte-equal to a full reference at the same clock.
 """
 
 from __future__ import annotations
@@ -30,12 +28,10 @@ from agents_remember.serving.projections.projection_inputs import (
 )
 from agents_remember.serving.projections.projection_store import (
     project_and_write,
-    read_lifecycle_logs,
 )
 from agents_remember.serving.projections.snapshots_impl import _task_document_closure
 
 NOW = datetime(2026, 10, 13, 12, 0, 0, tzinfo=UTC)
-NOW_TS = "2026-10-13T12:00:00+00:00"
 
 DOC = {
     "schema": "ar-task-document/v1",
@@ -65,6 +61,7 @@ SUBTASK = {
     "slug": "s1",
     "title": "sub one",
     "kind": "subTask",
+    "master": "master.json",
     "status": "planning",
 }
 
@@ -75,20 +72,6 @@ def _config(root: Path) -> McpRuntimeConfig:
         coordination_root=root,
         workspace_root=root,
         transcript_root=root / "logs" / "mcp",
-    )
-
-
-def _event(event_id: str, lifecycle_id: str) -> str:
-    return json.dumps(
-        {
-            "schema": "ar-observer-event/v1",
-            "id": event_id,
-            "ts": NOW_TS,
-            "kind": "lifecycle.started",
-            "trust": "declared",
-            "actor": "model",
-            "lifecycleId": lifecycle_id,
-        }
     )
 
 
@@ -182,13 +165,6 @@ class PathDirectedRefreshTests(unittest.TestCase):
                 encoding="utf-8",
             )
         observer = root / "logs" / "observer"
-        lifecycles = observer / "lifecycles"
-        for lifecycle_id in ["lc-a", "lc-b", *(f"lx{index}" for index in range(extra))]:
-            lifecycle_dir = lifecycles / lifecycle_id
-            lifecycle_dir.mkdir(parents=True)
-            (lifecycle_dir / "events.jsonl").write_text(
-                _event(f"e-{lifecycle_id}", lifecycle_id) + "\n", encoding="utf-8"
-            )
         (observer / "workspace").mkdir(parents=True)
         return _World(root, observer, _config(root))
 
@@ -198,7 +174,6 @@ class PathDirectedRefreshTests(unittest.TestCase):
             return ([], [], [])
 
         return ProjectionReaders(
-            lifecycle=read_lifecycle_logs,
             repo_surfaces=count_surfaces,
             landing_state=None,
         )
@@ -251,13 +226,10 @@ class PathDirectedRefreshTests(unittest.TestCase):
             "projectionBytes": json.dumps(
                 asdict(stable_projection_state(projection)), sort_keys=True, separators=(",", ":")
             ),
-            "task_documents": [
-                node.model_dump(mode="json", by_alias=True) for node in inputs.task_documents
-            ],
-            "series": [node.model_dump(mode="json", by_alias=True) for node in inputs.series],
-            "lifecycle_logs": [
-                [event.model_dump(mode="json", by_alias=True) for event in log]
-                for log in inputs.lifecycle_logs
+            "tasks": [node.model_dump(mode="json", by_alias=True) for node in projection.tasks],
+            "task_sources": [
+                source.summary.model_dump(mode="json", by_alias=True)
+                for source in inputs.task_sources
             ],
             "closeout_queues": [
                 node.model_dump(mode="json", by_alias=True) for node in inputs.closeout_queues
@@ -278,7 +250,7 @@ class PathDirectedRefreshTests(unittest.TestCase):
             mutate(root, observer)
             with _ReadCounter([root / "tasks", observer]) as counter:
                 incremental = self._change(state, world, changed(root), domain)
-            with _ReadCounter([root / "tasks", observer / "lifecycles"]):
+            with _ReadCounter([root / "tasks", observer]):
                 reference = self._full_reference(world)
             return self._dump(incremental, world), self._dump(reference, world), set(counter.reads)
 
@@ -337,7 +309,7 @@ class PathDirectedRefreshTests(unittest.TestCase):
                     actual = self._change(state, world, changed, ProjectionDomain.TASKS)
                 reference = self._full_reference(world)
                 self.assertEqual(self._dump(actual, world), self._dump(reference, world))
-                nodes = {node.id: node for node in actual.task_documents}
+                nodes = {source.summary.id: source.summary for source in actual.task_sources}
                 self.assertEqual(nodes["s1"].neededByTasks, [])
                 self.assertEqual(nodes["s2"].waitsForTasks, [])
                 graph = nodes["m1"].executionGraphView
@@ -375,7 +347,7 @@ class PathDirectedRefreshTests(unittest.TestCase):
             mutate_delete(root, observer)
             self._change(state, world, root / new_rel, ProjectionDomain.TASKS)
             (root / new_rel).unlink()
-            with _ReadCounter([root / "tasks", observer / "lifecycles"]):
+            with _ReadCounter([root / "tasks", observer]):
                 incremental = self._change(state, world, root / new_rel, ProjectionDomain.TASKS)
             reference = self._full_reference(world)
             self.assertEqual(self._dump(incremental, world), self._dump(reference, world))
@@ -391,59 +363,29 @@ class PathDirectedRefreshTests(unittest.TestCase):
             0, mutate_cross, lambda root: root / sub_rel, ProjectionDomain.TASKS
         )
         self.assertEqual(incremental, reference)
-        series = incremental["series"]
-        assert isinstance(series, list)
-        master_series = [node for node in series if node["docPath"].endswith("t1/master.json")]
-        self.assertEqual(len(master_series), 1)
-        self.assertTrue(
-            any(
-                sub.get("createdAt") == "2026-10-13T01:00:00+00:00"
-                for sub in master_series[0]["subTasks"]
-            ),
-            "the folder master's series re-renders the subtask edit",
-        )
-
-    def test_lifecycle_append_is_path_local_and_byte_equal(self) -> None:
-        """One lifecycle event re-reads its log, not every log (F09)."""
-        log_rel = Path("logs/observer") / "lifecycles" / "lc-a" / "events.jsonl"
-
-        def mutate(root: Path, observer: Path) -> None:
-            with (observer / log_rel.relative_to("logs/observer")).open(
-                "a", encoding="utf-8"
-            ) as handle:
-                handle.write(_event("e-lc-a-2", "lc-a") + "\n")
-
-        small = self._one_change_case(
-            0, mutate, lambda root: root / log_rel, ProjectionDomain.LIFECYCLES
-        )
-        big = self._one_change_case(
-            8, mutate, lambda root: root / log_rel, ProjectionDomain.LIFECYCLES
-        )
-        for incremental, reference, _reads in (small, big):
-            self.assertEqual(incremental, reference)
-        self.assertGreater(len(small[2]), 0, "the changed log is actually read")
-        self.assertGreater(len(big[2]), 0, "the changed log is actually read")
+        sources = incremental["task_sources"]
+        assert isinstance(sources, list)
+        child = next(node for node in sources if node["id"] == "s1")
+        self.assertEqual(child["createdAt"], "2026-10-13T01:00:00+00:00")
+        # Reciprocal membership chooses one parent; the child's own entry owns its facts.
+        tasks = incremental["tasks"]
+        assert isinstance(tasks, list)
+        parents = [node for node in tasks if node["id"] in {"m1", "m2"}]
+        self.assertEqual(len(parents), 2)
+        self.assertEqual(sum(len(parent["children"]) for parent in parents), 1)
+        child_entry = next(node for node in tasks if node["id"] == "s1")
         self.assertEqual(
-            {Path(read).name for read in small[2]},
-            {Path(read).name for read in big[2]},
-            "one-change reads ignore unrelated lifecycle count",
+            child_entry["parent"], next(node["key"] for node in parents if node["id"] == "m1")
         )
-        self.assertLessEqual(len(big[2]), 4, f"unexpected reads: {sorted(big[2])}")
+        owner = next(parent for parent in parents if parent["children"])
+        entry = next(node for node in tasks if node["id"] == "s1")
+        self.assertEqual(entry["parent"], owner["key"])
+        self.assertEqual(owner["children"], [entry["key"]])
 
     def test_atomic_rewrites_and_deletes_at_both_sizes(self) -> None:
         cases = (
             ("task-rewrite", Path("tasks/r/t1/task.json"), ProjectionDomain.TASKS),
             ("task-delete", Path("tasks/r/t1/task.json"), ProjectionDomain.TASKS),
-            (
-                "event-rewrite",
-                Path("logs/observer/lifecycles/lc-a/events.jsonl"),
-                ProjectionDomain.LIFECYCLES,
-            ),
-            (
-                "event-delete",
-                Path("logs/observer/lifecycles/lc-a/events.jsonl"),
-                ProjectionDomain.LIFECYCLES,
-            ),
         )
         for name, relative, domain in cases:
             read_counts = []
@@ -455,10 +397,7 @@ class PathDirectedRefreshTests(unittest.TestCase):
                     if name.endswith("delete"):
                         target.unlink()
                     else:
-                        if name.startswith("task"):
-                            content = json.dumps({**DOC, "title": "atomic replacement"})
-                        else:
-                            content = _event("replaced-event", "lc-a") + "\n"
+                        content = json.dumps({**DOC, "title": "atomic replacement"})
                         replacement = target.with_suffix(".replacement")
                         replacement.write_text(content)
                         replacement.replace(target)
@@ -498,12 +437,16 @@ class PathDirectedRefreshTests(unittest.TestCase):
                 self.assertEqual(
                     self._dump(actual, world), self._dump(self._full_reference(world), world)
                 )
+                child = next(source for source in actual.task_sources if source.summary.id == "s1")
+                self.assertEqual(child.summary.createdAt, "2026-10-13T01:00:00+00:00")
                 consumers = [
-                    series for series in actual.series if series.docPath.endswith("master.json")
+                    source for source in actual.task_sources if source.summary.kind == "master"
                 ]
                 self.assertEqual(len(consumers), 2)
                 for consumer in consumers:
-                    self.assertEqual(consumer.subTasks[0].createdAt, "2026-10-13T01:00:00+00:00")
+                    self.assertEqual(len(consumer.children), 1)
+                    assert consumer.children[0].reference is not None
+                    self.assertEqual(consumer.children[0].reference.path, "t1/s1.json")
         self.assertGreater(counts[0], 0)
         self.assertEqual(counts[0], counts[1])
 

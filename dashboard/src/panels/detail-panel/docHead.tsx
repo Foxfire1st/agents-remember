@@ -3,47 +3,45 @@
 // and the header notes as labelled lines that open in place. The objective is no
 // longer drawn here: the skeletons place it below the complete head and
 // series line (MIK-R128 rule 15).
-import { Fragment, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Fragment,useLayoutEffect,useRef,useState,type ReactNode,type RefObject } from 'react';
 
 import { cx } from '../../../styled-system/css';
+import { useDashboard } from '../../data/store';
+import { taskEntrySelectionKey,taskReferenceKey } from '../../data/taskReference';
 import { Markdown } from '../../grammar/Markdown';
-import { taskDocSelectionKey } from '../../data/taskIdentity';
-import type { TaskDocNode, TaskHeaderNoteNode } from '../../types/projection';
+import type { TaskEntry,TaskHeaderNoteNode,TaskSummary } from '../../types/projection';
 import {
-  boundedText,
-  docForm,
-  primaryRequirement,
-  shortDocId,
-  type ChainLink,
-  type DocForm,
-  type PrimaryRequirement,
+boundedText,
+docForm,
+primaryRequirement,
+shortDocId,
+type ChainLink,
+type DocForm,
+type PrimaryRequirement,
 } from './model';
-import { Clip, MoreLink, StatusWord, type DocView } from './pageParts';
+import { Clip,MoreLink,TaskStatusWord,type DocView } from './pageParts';
 import {
-  arrow,
-  block,
-  blockLabel,
-  dim,
-  docId,
-  docTitle,
-  fact,
-  factLabel,
-  facts,
-  factValue,
-  formBadge,
-  headNotes,
-  headTop,
-  lead,
-  leadText,
-  leadTools,
-  link,
+arrow,
+block,
+blockLabel,
+dim,
+docId,
+docTitle,
+fact,
+factLabel,
+facts,
+factValue,
+formBadge,
+headNotes,
+headTop,
+lead,
+leadText,
+leadTools,
+link,
 } from './pageStyles';
 
 export type HeadDoc = Pick<
-  TaskDocNode,
-  | 'id'
-  | 'title'
-  | 'status'
+  TaskSummary,
   | 'kind'
   | 'orchestrates'
   | 'form'
@@ -79,12 +77,14 @@ const LEAD_LINES = 4;
 const LEAD_CHARS = 320;
 
 export function DocHead({
+  entry,
   doc,
   chain,
   onJump,
   openView,
   counts = [],
 }: {
+  entry: TaskEntry;
   doc: HeadDoc;
   chain: ChainLink[];
   onJump: (id: string) => void;
@@ -101,15 +101,15 @@ export function DocHead({
           {form}
         </span>
         <span className={docId} data-testid="doc-id">
-          {doc.id}
+          {entry.id}
         </span>
-        <StatusWord status={doc.status} testid="doc-status" />
+        <TaskStatusWord task={entry} testid="doc-status" />
       </div>
       <h2 className={docTitle} data-testid="doc-title">
-        {doc.title}
+        {entry.title}
       </h2>
       <div className={facts} data-testid="doc-facts">
-        <ChainFact doc={doc} form={form} chain={chain} onJump={onJump} />
+        <ChainFact entry={entry} form={form} chain={chain} onJump={onJump} />
         <PrimaryFact primary={primary} />
         <DependencyFact
           label="Waits for"
@@ -259,7 +259,13 @@ function LeadTools({
 // from the start. Its bound, its link and what a reader opened stay as they are
 // (MIK-R127 rules 2 and 6): only the place changed. The skeletons draw it, not
 // the head.
-export function ObjectiveLead({ text, openView }: { text: string; openView: (view: DocView) => void }) {
+export function ObjectiveLead({
+  text,
+  openView,
+}: {
+  text: string;
+  openView: (view: DocView) => void;
+}) {
   const bounded = boundedText(text);
   const ref = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -308,8 +314,8 @@ function Fact({
   );
 }
 
-// Both dependency directions use the projected references; a missing document
-// remains visible with its served state, but cannot navigate to an invented path.
+// Both dependency directions keep the projected id/title visible; a gone reference shows "gone".
+// Only a resolved canonical entry on a non-gone reference supplies a task word and navigation.
 function DependencyFact({
   label,
   testid,
@@ -321,35 +327,46 @@ function DependencyFact({
   tasks: HeadDoc['waitsForTasks'];
   onJump: (id: string) => void;
 }) {
+  const entries = useDashboard((state) => state.tasks);
   if (!tasks?.length) return null;
   return (
     <Fact label={label} testid={testid}>
-      {tasks.map((task) => (
-        <span key={task.id}>
-          <button
-            type="button"
-            className={link}
-            disabled={!task.docPath}
-            onClick={() => task.docPath && onJump(taskDocSelectionKey(task.docPath))}
-            title={task.title}
-          >
-            {task.id} · {task.title}
-          </button>
-          <span className={dim}> · {task.status}</span>
-        </span>
-      ))}
+      {tasks.map((task) => {
+        const entry = task.reference ? entries[taskReferenceKey(task.reference)] : undefined;
+        return (
+          <span key={task.id}>
+            <button
+              type="button"
+              className={link}
+              disabled={task.gone || !entry}
+              onClick={() => entry && !task.gone && onJump(taskEntrySelectionKey(entry.key))}
+              title={task.title}
+            >
+              {task.id} · {task.title}
+            </button>
+            {task.gone ? (
+              <span className={dim}> · gone</span>
+            ) : entry ? (
+              <>
+                {' '}
+                · <TaskStatusWord task={entry} />
+              </>
+            ) : null}
+          </span>
+        );
+      })}
     </Fact>
   );
 }
 
 // The chain of parents as links, ending in the document itself: where it stands.
 function ChainFact({
-  doc,
+  entry,
   form,
   chain,
   onJump,
 }: {
-  doc: HeadDoc;
+  entry: TaskEntry;
   form: DocForm;
   chain: ChainLink[];
   onJump: (id: string) => void;
@@ -375,7 +392,7 @@ function ChainFact({
         </Fragment>
       ))}
       <span className={dim}>{form}</span>
-      <span data-testid="doc-chain-self">{shortDocId(doc.id, parentId)}</span>
+      <span data-testid="doc-chain-self">{shortDocId(entry.id, parentId)}</span>
     </Fact>
   );
 }

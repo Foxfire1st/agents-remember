@@ -162,7 +162,7 @@ ATTENTION_DISMISSAL_OWNERSHIP = StoreOwnership(
         "on the projection pass (observer/projection_store.py); nothing in the MCP process "
         "touches this log. This store has no plain append -- both of its writes are whole-file "
         "rewrites -- so check_declared_writer is called from BOTH of them (dismiss and "
-        "prune_lifecycles) rather than from a single append, which is what keeps the "
+        "reconcile) rather than from a single append, which is what keeps the "
         "single-writer claim checkable inside the daemons. "
         "Locked all the same -- a dismissal is a whole-file read-modify-write, so the "
         "HTTP dismiss route and the projection sweep are themselves a lost-update pair, and a "

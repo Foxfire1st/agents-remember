@@ -7,8 +7,9 @@
 import { Markdown } from '../../grammar/Markdown';
 import { TaskNotesReferencesSection, useTaskNotesData } from '../TaskNotes';
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from '../../data/taskArtifacts';
-import type { TaskDocNode } from '../../types/projection';
-import { dirName, type MasterDocView } from './model';
+import type { TaskSummary } from '../../types/projection';
+import type { DocumentTaskEntry } from '../../data/taskReference';
+import { dirName } from './model';
 import {
   DocViewShell,
   FindingsViewBody,
@@ -25,13 +26,15 @@ export interface DocContentHandlers {
 
 // A projected document or a series-derived master view: every content view
 // reads only the shared reader fields.
-export type ContentDoc = TaskDocNode | MasterDocView;
+export type ContentDoc = TaskSummary;
 
 function ReferencesView({
+  entry,
   doc,
   onOpenNotes,
   onBack,
 }: {
+  entry: DocumentTaskEntry;
   doc: ContentDoc;
   onOpenNotes?: (target: NotesReaderTarget) => void;
   onBack: () => void;
@@ -39,8 +42,8 @@ function ReferencesView({
   // Resolved on open: the same server-resolved affordance as the page's own
   // reference previews (MIK-R127 rule 5), never inert text.
   const data = useTaskNotesData(
-    doc.repository,
-    dirName(doc.docPath),
+    entry.reference.repository,
+    dirName(entry.reference.path),
     undefined,
     doc.references,
     onOpenNotes,
@@ -53,12 +56,14 @@ function ReferencesView({
 }
 
 function TextViews({
+  entry,
   view,
   doc,
   onBack,
   onOpenNotes,
 }: {
   view: DocView;
+  entry: DocumentTaskEntry;
   doc: ContentDoc;
   onBack: () => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
@@ -71,7 +76,7 @@ function TextViews({
     );
   }
   if (view.kind === 'references') {
-    return <ReferencesView doc={doc} onOpenNotes={onOpenNotes} onBack={onBack} />;
+    return <ReferencesView entry={entry} doc={doc} onOpenNotes={onOpenNotes} onBack={onBack} />;
   }
   if (view.kind === 'headerNotes') {
     return (
@@ -137,12 +142,14 @@ function RecordViews({
 }
 
 export function DocContentView({
+  entry,
   view,
   doc,
   handlers,
   scope,
 }: {
   view: DocView;
+  entry: DocumentTaskEntry;
   doc: ContentDoc;
   handlers: DocContentHandlers;
   scope: 'sprint' | 'master' | 'task';
@@ -159,6 +166,7 @@ export function DocContentView({
   ) {
     return (
       <TextViews
+        entry={entry}
         view={view}
         doc={doc}
         onBack={handlers.onBack}

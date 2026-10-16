@@ -13,7 +13,8 @@ import type {
   DiscardedSubTaskNode,
   TaskCodeExampleNode,
   TaskDecisionNode,
-  TaskDocNode,
+  TaskSummary,
+  TaskEntry,
   TaskSectionNode,
 } from '../../types/projection';
 import {
@@ -21,7 +22,6 @@ import {
   dirName,
   labelWithId,
   orderDecisionsNewestFirst,
-  registerTables,
   sectionIntro,
   shortWhen,
   type ChainLink,
@@ -76,7 +76,13 @@ import type { TaskDocumentBodyState } from '../../data/useTaskDocumentBody';
 
 export type { DocForm, DocView };
 export { Block, Clip };
-export { DocHead, HeaderNotesViewBody, ObjectiveLead, type HeadCount, type HeadDoc } from './docHead';
+export {
+  DocHead,
+  HeaderNotesViewBody,
+  ObjectiveLead,
+  type HeadCount,
+  type HeadDoc,
+} from './docHead';
 export { FindingsViewBody, ReviewBlock, SkippedDisposition, StepsBlock } from './taskBlocks';
 
 type ScrollOwner = { kind: 'window' } | { kind: 'element'; el: Element };
@@ -443,20 +449,19 @@ export function FixedMarkdownBlock({
 // where the document records any. The introducing text of a `sharedDecisions`
 // section stands with the block (rule 7), never as a second list.
 export function DecisionsBlock({
+  entry,
   doc,
   onOpenNotes,
 }: {
-  doc: Pick<
-    TaskDocNode,
-    'decisions' | 'openQuestions' | 'repository' | 'docPath' | 'title' | 'sections'
-  >;
+  entry: TaskEntry;
+  doc: Pick<TaskSummary, 'decisions' | 'openQuestions' | 'sections'>;
   onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
   const intro = sectionIntro(doc.sections, 'sharedDecisions');
   // A block without content is absent — unless it carries introducing prose:
   // an intro-only shared-decisions section keeps its text, never a bare
   // heading, and never vanishes.
-  if (doc.decisions.length === 0 && doc.openQuestions.length === 0 && !intro) return null;
+  if (!entry.reference || (doc.decisions.length === 0 && doc.openQuestions.length === 0 && !intro)) return null;
   const authored = doc.decisions.filter((item) => !item.product_record).length;
   return (
     <Block
@@ -472,9 +477,9 @@ export function DecisionsBlock({
       {doc.decisions.length > 0 ? (
         <DecisionPreview
           items={doc.decisions}
-          repo={doc.repository}
-          master={dirName(doc.docPath)}
-          title={doc.title}
+          repo={entry.reference.repository}
+          master={dirName(entry.reference.path)}
+          title={entry.title}
           onOpenNotes={onOpenNotes}
         />
       ) : (
@@ -630,13 +635,12 @@ export function newestRegisterRows(register: RegisterTable): string[][] {
 }
 
 export function RegistersBlock({
-  sections,
+  registers,
   openView,
 }: {
-  sections: TaskSectionNode[];
+  registers: RegisterTable[];
   openView: (view: DocView) => void;
 }) {
-  const registers = registerTables(sections);
   if (registers.length === 0) return null;
   return (
     <Block title="Registers" block="registers">
@@ -709,37 +713,20 @@ export function CodeTitlesBlock({
 // ---------------------------------------------------------------------------
 
 export function ReaderHead({
-  doc,
+  entry,
   bodyState,
   kind,
-  leaf,
   onOpenChangeSet,
 }: {
-  doc: Pick<TaskDocNode, 'repository' | 'docPath' | 'id'>;
+  entry: TaskEntry;
   bodyState: TaskDocumentBodyState | undefined;
   kind: 'master' | 'leaf';
-  leaf?: string;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
 }) {
   if (bodyState === 'loading') return null;
   return (
     <div className={headTools}>
-      {kind === 'leaf' ? (
-        <DocChangeSetBar
-          kind="leaf"
-          repo={doc.repository}
-          master={dirName(doc.docPath)}
-          leaf={leaf ?? doc.id}
-          onOpen={onOpenChangeSet}
-        />
-      ) : (
-        <DocChangeSetBar
-          kind="master"
-          repo={doc.repository}
-          master={dirName(doc.docPath)}
-          onOpen={onOpenChangeSet}
-        />
-      )}
+      <DocChangeSetBar kind={kind} entry={entry} onOpen={onOpenChangeSet} />
     </div>
   );
 }

@@ -2,10 +2,14 @@
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ReviewSurface } from './ReviewSurface';
+import { dashboardStore } from '../../data/store';
 import { captured, serve, target } from './l86.test-utils';
 import type { ReviewUnexplainedLane } from '../../data/reviewLane';
 import { treeViewStore } from './triageViewPreference';
-beforeEach(() => treeViewStore.getState().setView('changed'));
+beforeEach(() => {
+  dashboardStore.getState().reset();
+  treeViewStore.getState().setView('changed');
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

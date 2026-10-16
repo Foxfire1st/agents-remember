@@ -1,19 +1,10 @@
-// DetailPanel style tokens (Panda recipes): the phase stepper, the lifecycle body, spine
-// lanes, the change-set bar and the code example of a task document. One recipe per semantic
-// axis. The task page's own look lives in pageStyles.ts.
+// DetailPanel style tokens: step marks, worktree lanes, the change-set bar and task code.
+// The task page's own look lives in pageStyles.ts.
 import { css, cva } from '../../../styled-system/css';
 
 export const sizing = css({ flex: '1' });
 export const where = css({ fontSize: '0.76rem', color: 'muted', marginBottom: '0.4rem' });
 
-export const stepper = css({
-  listStyle: 'none',
-  margin: '0.4rem 0',
-  padding: '0',
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: '0.3rem',
-});
 export const step = cva({
   base: {
     fontSize: '0.72rem',
@@ -51,7 +42,6 @@ export const badge = css({
 });
 
 export const series = css({ margin: '0.5rem 0' });
-export const taskHead = css({ fontSize: '0.82rem' });
 export const slices = css({
   listStyle: 'none',
   margin: '0.3rem 0 0',
@@ -59,7 +49,6 @@ export const slices = css({
   display: 'grid',
   gap: '0.15rem',
 });
-export const sliceMeta = css({ color: 'muted', fontSize: '0.72rem' });
 // One switch on the task's own page for the direct-execution grant (MIK-R150
 // rules 9 to 13): a label, a track with a knob, and the served words. The track
 // carries the position through its alignment, off at the left and on at the
@@ -95,27 +84,7 @@ export const directKnob = css({
 });
 export const directGiven = css({ color: 'muted', fontSize: '0.74rem' });
 export const directNote = css({ color: 'amber', fontSize: '0.74rem' });
-// A clickable sub-task row (drill-in) and the breadcrumb back from a slice to the series.
-export const sliceButton = css({
-  display: 'flex',
-  justifyContent: 'space-between',
-  gap: '0.5rem',
-  width: '100%',
-  textAlign: 'left',
-  font: 'inherit',
-  fontSize: '0.78rem',
-  paddingInline: '0.4rem',
-  paddingBlock: '0.2rem',
-  background: 'bg',
-  border: '0',
-  borderLeftWidth: '2px',
-  borderLeftStyle: 'solid',
-  borderLeftColor: 'cyan',
-  color: 'ink',
-  cursor: 'pointer',
-  _hover: { background: 'oklch(0.7 0.1 200 / 0.12)', borderLeftColor: 'amber' },
-  _focusVisible: { outline: '1px solid token(colors.amber)', outlineOffset: '1px' },
-});
+// The breadcrumb back from a slice to the series.
 export const crumb = css({
   font: 'inherit',
   fontSize: '0.76rem',

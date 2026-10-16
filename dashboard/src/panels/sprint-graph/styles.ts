@@ -41,7 +41,7 @@ export const boxTitle = css({
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 });
-export const frontier = cva({
+export const dependency = cva({
   base: {
     flexShrink: '0',
     fontSize: '0.62rem',
@@ -55,13 +55,9 @@ export const frontier = cva({
   },
   variants: {
     state: {
-      landed: { color: 'mint', borderColor: 'mint' },
       ready: { color: 'cyan', borderColor: 'cyan' },
       waiting: { color: 'amber', borderColor: 'amber' },
-      'in-flight': { color: 'alarm', borderColor: 'alarm' },
-      // The projection carries a fifth frontier state. An abandoned node is over without
-      // finishing, which is the dormant tone everywhere else in the dashboard.
-      abandoned: { color: 'dormant', borderColor: 'dormant' },
+      cycle: { color: 'alarm', borderColor: 'alarm' },
     },
   },
 });

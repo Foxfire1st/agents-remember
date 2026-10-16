@@ -13,7 +13,6 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 from agents_remember.application import worktree_tools
@@ -22,21 +21,6 @@ from agents_remember.kernel.primitives.runtime_config import (
     ProviderScope,
     RepositoryScope,
 )
-from agents_remember.observer.lifecycle_state import LifecycleState
-
-
-def _bound_lifecycle() -> LifecycleState:
-    """The session lifecycle a real start leaves behind: bound, and no longer fleeting."""
-
-    return LifecycleState(
-        id="01J000000000000000000000AB",
-        state="running",
-        phase="build",
-        fleeting=False,
-        started_at="2026-09-18T00:00:00+00:00",
-        enclosure="/tmp/coordination/enclosures/other/contract.md",
-        repo_id="repo",
-    )
 
 
 def _armed_boot_config(tmp: Path, *, disk_providers: dict) -> McpRuntimeConfig:
@@ -99,25 +83,6 @@ class WorktreeStartGateTruthfulnessTests(unittest.TestCase):
     ``would-start`` while a requirement its packet requires was unlanded. Both facts now travel with
     the response instead of living in a session's memory.
     """
-
-    def test_the_refusal_states_the_session_binding_rather_than_a_protected_lifecycle(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(Path(tmp), disk_providers={})
-            amb = SimpleNamespace(current=_bound_lifecycle())
-            with mock.patch.object(worktree_tools, "ambient", return_value=amb):
-                result = worktree_tools.worktree_start_tool(
-                    config,
-                    worktree_tools.TaskIdentity(repo_id="repo", task_name="t", worktree_name="w"),
-                )
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["state"], "lifecycle-switch-required")
-        self.assertIn("already bound to another one", str(result["summary"]))
-        self.assertIn(
-            "No other leaf, enclosure or session can block this start", str(result["summary"])
-        )
-        # The mis-stated claim is gone, not paraphrased into the same meaning.
-        self.assertNotIn("persistent lifecycle", str(result["summary"]))
 
     def test_a_start_result_reports_that_the_declared_dependencies_were_not_checked(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

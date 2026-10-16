@@ -16,9 +16,11 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import _with_terminal_archive
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.modules.state_refusals import task_stage_refusal
 from agents_remember.worktrees.modules.terminal_agents import archive_terminal_agents
 from agents_remember.worktrees.modules.terminal_validation import TerminalPreflight
 from agents_remember.worktrees.services import TerminalGuard
+from agents_remember.worktrees.task_stage import plan_task_stage
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 
@@ -28,6 +30,10 @@ def _abandon_with_guard(
     preflight: TerminalPreflight,
     guard: TerminalGuard,
 ) -> WorktreeCommandResult:
+    try:
+        plan_task_stage(contract, "abandoned")
+    except ValueError as error:
+        return task_stage_refusal(contract, error)
     try:
         terminal_archive = terminal_archive_required_result(
             contract,
@@ -55,6 +61,7 @@ def _abandon_with_guard(
                 if terminal is None:
                     raise RuntimeError("abandon lost terminal archive authority before mutation")
                 current = terminal.archived_contract
+            plan_task_stage(current, "abandoned")
             agents = archive_terminal_agents(current, dry_run=args.dry_run)
             outputs = abandon._abandon_terminal_outputs(
                 args,

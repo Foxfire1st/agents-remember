@@ -72,16 +72,16 @@
       "budget_words": 2888
     },
     "manager/review": {
-      "size_words": 2628,
-      "budget_words": 2891
+      "size_words": 2664,
+      "budget_words": 2931
     },
     "manager/curation": {
       "size_words": 5340,
       "budget_words": 5874
     },
     "manager/coordination": {
-      "size_words": 3432,
-      "budget_words": 3776
+      "size_words": 3468,
+      "budget_words": 3815
     },
     "manager/authorized-closeout": {
       "size_words": 1877,
@@ -92,8 +92,8 @@
       "budget_words": 2167
     },
     "worker/orientation": {
-      "size_words": 2059,
-      "budget_words": 2265
+      "size_words": 2269,
+      "budget_words": 2496
     },
     "worker/implementation": {
       "size_words": 1949,
@@ -2244,5 +2244,7 @@
       "investigator/recovery": "Registry size/budget 948/1043; tip 1105; final 1105/1216. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/roles/investigator.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 983\u21921105 (+122). L54: None: final equals tip.",
       "launcher/coordination": "Registry size/budget 1821/2004; tip 2192; final 2192/2412. Landed: cfc2f235 (L117), skills/l-01-agent-lifecycles/operations/coordination.md: adds Messages wake; files carry, file-backed evidence and role-addressed returns; native capsule grows 1961\u21922192 (+231). L54: None: final equals tip."
     }
-  }
+  },
+  "decision_L168": "Parent-wake line (amendment 9): manager/review and manager/coordination each record exactly +36 words; budgets follow the unchanged ceil(size_words * 11 / 10) formula.",
+  "decision_L168_worker_orientation": "D229: re-record worker/orientation with the native compiler (2269 words); landed L111 follow-up commit cd2eefebed80d19e29b785fdc36f8d1bf79f6a64 corrected task-document and knowledge-read instructions in roles/worker.md (+35 words, 2234 -> 2269), exceeding the old 2265 budget; budget follows unchanged ceil(size_words * 11 / 10)."
 }

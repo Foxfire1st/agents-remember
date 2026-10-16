@@ -18,14 +18,13 @@ import {
   type MasterChangeset,
   type MasterNetPins,
   type TaskChangeset,
-  comparisonChangeset,
   comparisonFileDiff,
   fileDiff,
   leafChangeset,
+  loadChangeSet,
+  peekChangeSet,
   leafFileDiff,
-  masterChangeset,
   masterFileDiff,
-  taskChangeset,
 } from '../../data/changeset';
 import { type ReviewFailure, reviewProblemFromCause } from '../../data/review';
 import { EmptyStateBackdrop } from '../EmptyStateBackdrop';
@@ -259,19 +258,7 @@ function changesetListRequest(
   generation: MasterNetPins | undefined,
   comparison?: number,
 ): Promise<TaskChangeset | MasterChangeset> {
-  if (comparison !== undefined)
-    return comparisonChangeset(repo, master ?? '', leaf ?? '', comparison);
-  return leaf
-    ? leafChangeset(repo, master ?? '', leaf, mode ?? 'committed')
-    : master
-      ? // The master net's own attribution (R33.2): the route already answers with one row per
-        // leaf, and asking for it is what makes the net reviewable leaf by leaf instead of as a
-        // single total nobody can attribute.
-        masterChangeset(repo, master, {
-          includeLeaves: true,
-          ...(generation ? { pins: generation } : {}),
-        })
-      : taskChangeset(repo, scope ?? '');
+  return loadChangeSet({ repo, scope, master, leaf, mode, generation, comparison });
 }
 
 function diffRequestFor(
@@ -513,7 +500,7 @@ function useChangesetLoad(
 ): void {
   useEffect(() => {
     let live = true;
-    setData(null);
+    setData(peekChangeSet({ repo, scope, master, leaf, mode, generation, comparison }) ?? null);
     setError(null);
     setActive(null);
     setDiff(null);
@@ -548,17 +535,19 @@ function useChangesetLoad(
 }
 
 function useWorkingChangesetPoll(
-  mode: LeafMode | undefined,
-  leaf: string | undefined,
-  repo: string,
-  master: string | undefined,
+  target: Pick<ChangeSetTarget, 'mode' | 'leaf' | 'repo' | 'master' | 'comparison'>,
   active: { kind: 'code' | 'memory'; path: string; hasSidecar?: boolean } | null,
-  hasData: boolean,
-  setData: (data: TaskChangeset | MasterChangeset | null) => void,
-  setDiff: (diff: FileDiff | null) => void,
+  setters: {
+    setData: (data: TaskChangeset | MasterChangeset | null) => void;
+    setDiff: (diff: FileDiff | null) => void;
+    setError: (error: ReviewFailure | null) => void;
+    setDiffError: (error: ReviewFailure | null) => void;
+  },
 ): void {
+  const { mode, leaf, repo, master, comparison } = target;
+  const { setData, setDiff, setError, setDiffError } = setters;
   useEffect(() => {
-    if (mode !== 'working' || !leaf || !hasData) return;
+    if (mode !== 'working' || !leaf || comparison !== undefined) return;
     let live = true;
     const m = master ?? '';
     let timer: number | undefined;
@@ -569,8 +558,8 @@ function useWorkingChangesetPoll(
         : Promise.resolve(null);
       const [listResult, diffResult] = await Promise.allSettled([listRequest, diffRequest]);
       if (!live) return;
-      if (listResult.status === 'fulfilled') setData(listResult.value);
-      if (diffResult.status === 'fulfilled' && diffResult.value) setDiff(diffResult.value);
+      applyWorkingRead(listResult, setData, setError);
+      applyWorkingRead<FileDiff | null>(diffResult, setDiff, setDiffError);
       timer = window.setTimeout(refresh, 2500);
     };
     timer = window.setTimeout(refresh, 2500);
@@ -578,7 +567,21 @@ function useWorkingChangesetPoll(
       live = false;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [mode, leaf, repo, master, active, hasData, setData, setDiff]);
+  }, [mode, leaf, repo, master, comparison, active, setData, setDiff, setError, setDiffError]);
+}
+
+function applyWorkingRead<T>(
+  result: PromiseSettledResult<T>,
+  setValue: (value: T | null) => void,
+  setProblem: (problem: ReviewFailure | null) => void,
+): void {
+  if (result.status === 'fulfilled') {
+    setValue(result.value);
+    setProblem(null);
+  } else {
+    setValue(null);
+    setProblem(reviewProblemFromCause(result.reason));
+  }
 }
 
 // WHAT COULD NOT BE SHOWN, NAMED (R33.3). A refused read says which read it was (the owner's own code,
@@ -784,7 +787,6 @@ function useChangesetState({
   // Selection precedence leaf > master > scope: a `leaf` is one leaf's committed/working delta
   // (qualified by `master`); `master` alone is the series net; otherwise an enclosure `scope`.
   const isSeries = Boolean(master) && !leaf;
-  const hasData = data !== null;
   const seriesMeta = seriesListMeta(isSeries, data);
   const leaves = seriesLeaves(isSeries, data);
   const boundGeneration = boundSeriesGeneration(isSeries, data, generation);
@@ -813,7 +815,12 @@ function useChangesetState({
   // one edited, which is exactly when you want it to. Only `working` polls — committed/series/scope
   // are immutable snapshots of committed state. (A server push would need a worktree watcher + SSE; a
   // settle-then-schedule loop is self-contained and enough on localhost.)
-  useWorkingChangesetPoll(mode, leaf, repo, master, active, hasData, setData, setDiff);
+  useWorkingChangesetPoll({ mode, leaf, repo, master, comparison }, active, {
+    setData,
+    setDiff,
+    setError,
+    setDiffError,
+  });
 
   // Each selector diffs its own range, all into the same MergeView: a leaf its committed/working
   // range, `master` the NET series range between the bound generation's endpoints, an enclosure

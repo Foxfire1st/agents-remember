@@ -8,9 +8,12 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { IntentReviewEntry } from './intentReviewEntry';
+import { dashboardStore } from '../../data/store';
+
+beforeEach(() => dashboardStore.getState().reset());
 
 const summary = JSON.parse(
   readFileSync(
@@ -33,7 +36,7 @@ function serve(body: unknown): URL[] {
     'fetch',
     vi.fn(async (address: string) => {
       urls.push(new URL(address, 'http://localhost'));
-      return { ok: true, status: 200, json: async () => body } as Response;
+      return new Response(JSON.stringify(body), { status: 200 });
     }),
   );
   return urls;

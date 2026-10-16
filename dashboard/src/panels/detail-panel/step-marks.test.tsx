@@ -2,22 +2,15 @@
 import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MasterNowBlock } from './task-groups';
+import { TaskNowBlock } from './task-groups';
 import { StepsBlock } from './taskBlocks';
 import { LifecycleList } from '../lifecycle-list/LifecycleList';
-import {
-  EMPTY_ANALYTICS,
-  enclosure,
-  lifecycle,
-  projection,
-  seed,
-} from '../lifecycle-list/test-utils';
-import { taskDoc } from './test-utils';
+import { seedTaskEntries, taskEntry, taskSummary, taskTree, taskReference } from './test-utils';
 import { stepMarkStates } from './model';
 import type { TaskStepNode } from '../../types/projection';
 
-const MASTER = '/tasks/repo-a/dots/task.json';
-const LEAF = '/tasks/repo-a/dots/01_leaf.json';
+const MASTER = 'repo-a/dots/task.json';
+const LEAF = 'repo-a/dots/01_leaf.json';
 function fiveSteps(): TaskStepNode[] {
   return Array.from({ length: 5 }, (_, i) => ({
     id: `S${i + 1}`,
@@ -33,31 +26,32 @@ function fiveSteps(): TaskStepNode[] {
   }));
 }
 function docs() {
-  return [
-    taskDoc({
-      kind: 'master',
-      docPath: MASTER,
+  return taskTree(
+    taskEntry({
+      reference: taskReference(MASTER),
       id: 'M',
       title: 'Master',
-      subTasks: [
-        { number: 'L1', name: 'Leaf', file: '01_leaf.md', status: 'inProgress', scope: '' },
-      ],
+      summary: taskSummary({ kind: 'master', form: 'master' }),
     }),
-    taskDoc({
-      kind: 'subTask',
-      docPath: LEAF,
-      id: 'M-L1',
-      title: 'Leaf',
-      lifecycleId: 'DOT-LC',
-      steps: fiveSteps(),
-      stepsDone: 1,
-      stepsTotal: 5,
-    }),
-  ];
+    [
+      taskEntry({
+        reference: taskReference(LEAF),
+        id: 'M-L1',
+        title: 'Leaf',
+        stage: 'started',
+        stepsDone: 1,
+        stepsTotal: 5,
+        summary: taskSummary({ steps: fiveSteps() }),
+      }),
+    ],
+  );
 }
 function MasterLine() {
   const data = docs();
-  return <MasterNowBlock doc={data[0]} sliceDocs={[data[1]]} onOpen={() => {}} onJump={() => {}} />;
+  const tasks = Object.fromEntries(
+    data.map((item) => [`${item.key}`, item]),
+  );
+  return <TaskNowBlock entry={data[0]} tasks={tasks} onJump={() => {}} />;
 }
 function TaskLine() {
   return <StepsBlock steps={fiveSteps()} done={1} total={5} />;
@@ -86,20 +80,7 @@ describe('major step marks', () => {
       leaf.getByTestId('steps-list').querySelectorAll('[data-testid^="substep-"]'),
     ).toHaveLength(8);
     leaf.unmount();
-    seed(
-      projection({
-        lifecycles: [lifecycle({ id: 'DOT-LC' })],
-        enclosures: [
-          enclosure({
-            enclosure: '/contracts/dots',
-            lifecycleId: 'DOT-LC',
-            taskRoot: '/tasks/repo-a/dots',
-            leafId: '01_leaf',
-          }),
-        ],
-        analytics: { ...EMPTY_ANALYTICS, taskDocuments: data },
-      }),
-    );
+    seedTaskEntries(data);
     const sidebar = render(<LifecycleList selectedId={null} onSelect={() => {}} />);
     const row = sidebar.getByText('Leaf').closest<HTMLElement>('[role="option"]')!;
     expect(marks(row)).toHaveLength(5);

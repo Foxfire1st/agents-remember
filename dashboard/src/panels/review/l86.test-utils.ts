@@ -39,7 +39,7 @@ export function serve(entries = catalogue, hold?: 'lane' | 'worklist') {
       const url = new URL(address, 'http://localhost');
       asked.push(url);
       const body = replyFor(url, entries);
-      const response = { ok: true, status: 200, json: async () => body } as Response;
+      const response = new Response(JSON.stringify(body), { status: 200 });
       if (isHeld(url, hold))
         return await new Promise<Response>((resolve) => {
           release = () => resolve(response);

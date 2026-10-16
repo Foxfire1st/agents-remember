@@ -3,22 +3,59 @@
 import { act, fireEvent, render, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { TaskSummary } from '../../types/projection';
 import { DetailPanel } from './DetailPanel';
-import { cells, seedTaskDocuments, taskDoc } from './test-utils';
+import {
+  cells,
+  taskTree,
+  seedTaskEntries,
+  taskEntry,
+  taskSummary,
+  taskReference,
+} from './test-utils';
 
-const LEAF = '/tasks/repo-a/m/01_leaf.json';
-const MASTER = '/tasks/repo-a/m/task.json';
+const LEAF = 'repo-a/m/01_leaf.json';
+const MASTER = 'repo-a/m/task.json';
 
-function seedLeaf(over: Omit<Parameters<typeof taskDoc>[0], 'kind' | 'docPath'>) {
-  const leaf = taskDoc({
+function seedLeaf(
+  over: Partial<TaskSummary>,
+  counts: { stepsDone: number; stepsTotal: number } = { stepsDone: 0, stepsTotal: 0 },
+) {
+  const leaf = taskEntry({
+    reference: taskReference(LEAF),
+    ...counts,
     id: 'L1',
-    kind: 'subTask',
-    docPath: LEAF,
     title: 'Leaf one',
-    status: 'inProgress',
-    ...over,
+    stage: 'started',
+    activity: 'works',
+    summary: taskSummary({
+      objective: '',
+      type: '',
+      createdAt: '2026-06-20T09:00:00+00:00',
+      form: 'task',
+      kind: 'subTask',
+      ...over,
+    }),
   });
-  seedTaskDocuments([taskDoc({ id: 'M', kind: 'master', docPath: MASTER, title: 'Master' }), leaf]);
+  seedTaskEntries([
+    taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(MASTER),
+      id: 'M',
+      title: 'Master',
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'master',
+        kind: 'master',
+      }),
+    }),
+    leaf,
+  ]);
   return leaf;
 }
 
@@ -63,7 +100,7 @@ describe('requirement bound (rule 6)', () => {
 });
 
 describe('register bound (rules 3 and 6)', () => {
-  const SPRINT = '/tasks/repo-a/sprint/task.json';
+  const SPRINT = 'repo-a/sprint/task.json';
   const body = [
     '| A | B | C | D | E |',
     '| --- | --- | --- | --- | --- |',
@@ -71,17 +108,24 @@ describe('register bound (rules 3 and 6)', () => {
   ].join('\n');
 
   function seedSprint() {
-    seedTaskDocuments([
-      taskDoc({
+    seedTaskEntries([
+      taskEntry({
+        stage: 'started',
+        stepsDone: 0,
+        stepsTotal: 0,
+        activity: 'works',
+        reference: taskReference(SPRINT),
         id: 'S',
-        kind: 'master',
-        docPath: SPRINT,
         title: 'Sprint',
-        form: 'sprint',
-        orchestrates: ['master-a'],
-        objective: 'Sprint objective.',
-        sections: [{ kind: 'freeform', heading: 'Judgment Register', body }],
-        subTasks: [],
+        summary: taskSummary({
+          type: '',
+          createdAt: '2026-06-20T09:00:00+00:00',
+          form: 'sprint',
+          kind: 'master',
+          orchestrates: ['master-a'],
+          objective: 'Sprint objective.',
+          sections: [{ kind: 'freeform', heading: 'Judgment Register', body }],
+        }),
       }),
     ]);
   }
@@ -189,19 +233,50 @@ describe('further-notes lines (rule 7)', () => {
 
 describe('completed group view (rules 3-4)', () => {
   it('counts completed tasks behind a link and lists them in the view', () => {
-    const master = taskDoc({
+    const master = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference(MASTER),
       id: 'M',
-      kind: 'master',
-      docPath: MASTER,
       title: 'Master',
-      form: 'master',
-      subTasks: [
-        { number: 'L1', name: 'Done one', file: '01_one.md', status: 'Completed', scope: '' },
-        { number: 'L2', name: 'Done two', file: '02_two.md', status: 'Completed', scope: '' },
-        { number: 'L3', name: 'Waiting', file: '03_three.md', status: 'planning', scope: '' },
-      ],
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'master',
+        kind: 'master',
+      }),
     });
-    seedTaskDocuments([master]);
+    seedTaskEntries(
+      taskTree(master, [
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference('repo-a/m/01_one.json'),
+          id: 'L1',
+          title: 'Done one',
+          stage: 'completed',
+        }),
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference('repo-a/m/02_two.json'),
+          id: 'L2',
+          title: 'Done two',
+          stage: 'completed',
+        }),
+        taskEntry({
+          stepsDone: 0,
+          stepsTotal: 0,
+          reference: taskReference('repo-a/m/03_three.json'),
+          id: 'L3',
+          title: 'Waiting',
+          stage: 'planned',
+        }),
+      ]),
+    );
     const { getByTestId, getByText, queryByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${MASTER}`} />,
     );
@@ -256,30 +331,31 @@ describe('review findings (rule 5)', () => {
 
 describe('step notes and the next mark (rule 5)', () => {
   it('marks the first step that is not done and opens its note in place', () => {
-    seedLeaf({
-      steps: [
-        {
-          id: 'S1',
-          title: 'Done step',
-          status: 'done',
-          outcome: 'The deliverable.',
-          substeps: [],
-          noteTruncated: false,
-          outcomeTruncated: false,
-        },
-        {
-          id: 'S2',
-          title: 'Open step',
-          status: 'pending',
-          note: 'A long note about the open step that opens in place when asked by the reader.',
-          substeps: [],
-          noteTruncated: false,
-          outcomeTruncated: false,
-        },
-      ],
-      stepsDone: 1,
-      stepsTotal: 2,
-    });
+    seedLeaf(
+      {
+        steps: [
+          {
+            id: 'S1',
+            title: 'Done step',
+            status: 'done',
+            outcome: 'The deliverable.',
+            substeps: [],
+            noteTruncated: false,
+            outcomeTruncated: false,
+          },
+          {
+            id: 'S2',
+            title: 'Open step',
+            status: 'pending',
+            note: 'A long note about the open step that opens in place when asked by the reader.',
+            substeps: [],
+            noteTruncated: false,
+            outcomeTruncated: false,
+          },
+        ],
+      },
+      { stepsDone: 1, stepsTotal: 2 },
+    );
     const { getByTestId, queryByTestId } = renderLeaf();
 
     expect(queryByTestId('step-next-S1')).toBeNull();

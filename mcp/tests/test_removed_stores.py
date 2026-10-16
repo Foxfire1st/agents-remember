@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -20,15 +21,22 @@ import pytest
 from agents_remember.cli import removed_stores
 from agents_remember.install import provider_watchers as install_provider_watchers
 from agents_remember.install import runtime as install_runtime
-from agents_remember.install.runtime import (
+from agents_remember.install.removed_stores import (
     REMOVED_PART_STORE_PATHS,
     REMOVED_STORES_NOTICE,
     STORED_GATE_LOG_PATTERNS,
-    InstallSummary,
     removed_part_stores,
 )
+from agents_remember.install.runtime import InstallSummary
 from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT
 from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
 from test_config import settings_payload
 from test_install_runtime import call_registered_tool, create_runtime_source, watcher_result
 
@@ -87,7 +95,91 @@ def _populate(root: Path) -> dict[str, Path]:
     }
 
 
-STAYING = ("workspace_gates_lock", "events", "dismissals", "lifecycle_events")
+STAYING = ("workspace_gates_lock", "events", "dismissals")
+
+
+def _lifecycle_contract(root: Path, name: str, lifecycle_id: str, *, terminal: bool) -> Path:
+    contract = default_contract(
+        ContractTask(
+            name=name,
+            repo_name="repo",
+            coordination_root=root,
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name=name, lifecycle_id=lifecycle_id),
+        code=RepoBranchPlan(
+            repo_path=root / "repo",
+            source_branch="main",
+            work_branch=f"ar/{name}",
+            base_commit="0" * 40,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=root / "memory",
+            source_branch="main",
+            work_branch=f"ar/{name}-memory",
+            base_commit="1" * 40,
+        ),
+    )
+    if terminal:
+        contract = replace(contract, cleanup="completed")
+    contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+    write_contract(contract.contract_path, contract)
+    return contract.contract_path
+
+
+def test_explicit_command_reclaims_terminal_lock_only_subjects_at_two_sizes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for size in (8, 64):
+        base = tmp_path / str(size)
+        base.mkdir()
+        settings, root = _coordination_root(base)
+        lifecycles = root / "logs/observer/lifecycles"
+        for index in range(size):
+            subject = f"terminal-{index}"
+            _lifecycle_contract(root, subject, subject, terminal=True)
+            _write(lifecycles / subject / "gates.jsonl.lock", "")
+        # One terminal contract cannot overrule another live contract naming the subject.
+        _lifecycle_contract(root, "shared-terminal", "shared", terminal=True)
+        _lifecycle_contract(root, "shared-active", "shared", terminal=False)
+        _lifecycle_contract(root, "history", "history", terminal=True)
+        _lifecycle_contract(root, "other-file", "other-file", terminal=True)
+        kept = [
+            _write(lifecycles / subject / "gates.jsonl.lock", "")
+            for subject in ("shared", "unknown", "history", "other-file")
+        ]
+        _write(lifecycles / "history/gates.jsonl", '{"state":"applied"}\n')
+        other = _write(lifecycles / "other-file/owned.json", "kept")
+        obsolete = [
+            _write(lifecycles / "old" / name, "old")
+            for name in ("events.jsonl", "heartbeat.json.lock", "served.jsonl.repair")
+        ]
+        assert not any(item["path"].endswith("terminal-0") for item in removed_part_stores(root))
+        assert removed_stores.run(_args(settings, dry_run=True)) == 0
+        assert all(path.exists() for path in (*kept, *obsolete))
+        assert (lifecycles / "terminal-0/gates.jsonl.lock").exists()
+        assert removed_stores.run(_args(settings)) == 0
+        assert all(not (lifecycles / f"terminal-{index}").exists() for index in range(size))
+        assert all(path.exists() for path in kept)
+        assert other.read_text() == "kept"
+        assert all(not path.exists() for path in obsolete)
+        # Explicit gate-log removal retains its lock this pass; history was not
+        # admitted as a lock-only directory in the same inventory.
+        assert not (lifecycles / "history/gates.jsonl").exists()
+        capsys.readouterr()
+
+
+def test_an_incomplete_contract_census_preserves_terminal_locks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings, root = _coordination_root(tmp_path)
+    _lifecycle_contract(root, "terminal", "terminal", terminal=True)
+    lock = _write(root / "logs/observer/lifecycles/terminal/gates.jsonl.lock", "")
+    broken = _write(root / "tasks/repo/broken/series-contract.md", "unreadable contract")
+    assert removed_stores.run(_args(settings)) == 1
+    assert lock.exists()
+    assert str(broken) in capsys.readouterr().err
 
 
 def test_every_listed_store_lies_under_the_observer_dashboard_or_runtime_folders() -> None:
@@ -122,6 +214,7 @@ def test_a_store_is_named_with_what_stands_beside_it_and_a_gate_log_without_its_
 
     assert sorted(found) == [
         "logs/dashboard/terminal-sessions.json",
+        "logs/observer/lifecycles/L1/events.jsonl",
         "logs/observer/lifecycles/L1/gates.jsonl",
         f"{WORKSPACE}/gates.jsonl",
         f"{WORKSPACE}/operator-inbox.jsonl",
@@ -209,8 +302,8 @@ def test_the_registered_install_files_the_stores_and_answers_their_count(tmp_pat
     the report is filed whole either way, and the answer the caller reads carries the count.
     """
     digest = {
-        "count": 6,
-        "bytes": 75,
+        "count": 7,
+        "bytes": 78,
         "notice": REMOVED_STORES_NOTICE,
         "storedGates": STORED_GATE_WAY_OUT,
     }
@@ -246,6 +339,7 @@ def test_the_registered_install_files_the_stores_and_answers_their_count(tmp_pat
             "runtime/structural-seat-locks": (2, False),
             f"{WORKSPACE}/gates.jsonl": (17, True),
             "logs/observer/lifecycles/L1/gates.jsonl": (3, True),
+            "logs/observer/lifecycles/L1/events.jsonl": (3, False),
         }
         assert filed["stores"] == removed_part_stores(root)
         whole = _answer_whole(answer)
@@ -267,7 +361,7 @@ def test_a_dry_run_lists_the_stores_and_changes_nothing(
     out = capsys.readouterr().out
     assert f"would remove {files['nudges'].as_posix()} (13 bytes)" in out
     assert f"removed-stores: {STORED_GATE_WAY_OUT}." in out
-    assert "dry run, 6 stores (8 files) left alone." in out
+    assert "dry run, 7 stores (9 files) left alone." in out
 
 
 def test_the_command_removes_the_stores_and_leaves_what_other_parts_own(
@@ -284,7 +378,7 @@ def test_the_command_removes_the_stores_and_leaves_what_other_parts_own(
     assert not (root / "runtime/structural-seat-locks").exists()
     assert (root / "runtime").is_dir()
     out = capsys.readouterr().out
-    assert "removed 6 stores, freed" in out
+    assert "removed 7 stores, freed" in out
     assert f"removed-stores: {STORED_GATE_WAY_OUT}." in out
     assert removed_part_stores(root) == []
     assert removed_stores.run(_args(settings)) == 0

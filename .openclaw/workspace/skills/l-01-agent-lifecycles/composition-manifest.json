@@ -138,7 +138,7 @@
     },
     "lifecycle-frame": {
       "source": "core/lifecycle-frame.md",
-      "purpose": "The minimal lifecycle frame: the lifecycle the worktree tools adopt, the trust checkpoint, provider-degradation handling."
+      "purpose": "The minimal lifecycle frame: task worktree records, the landing chain's lifecycle, the trust checkpoint, provider-degradation handling."
     },
     "loop": {
       "source": "core/loop.md",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import suppress
 from dataclasses import dataclass
@@ -196,7 +197,17 @@ def _run_converted_summary(
     )
     if output.write_report:
         _write_converted_report(packet, report_path)
-        _write_converted_snapshot(code_repository_root, context, packet, report_path=report_path)
+        _write_converted_snapshot(
+            code_repository_root,
+            context,
+            packet,
+            actionable_fingerprint=(
+                _actionable_fingerprint(stale_findings)
+                if not result["unreadableSidecars"]
+                else None
+            ),
+            report_path=report_path,
+        )
         packet["reportPath"] = report_path.as_posix()
     if output.include_rows:
         packet["rows"] = [*stale_findings, *refusals]
@@ -253,6 +264,7 @@ def _write_converted_snapshot(
     context: Any,
     packet: DriftSummaryPacket,
     *,
+    actionable_fingerprint: str | None,
     report_path: Path | None = None,
 ) -> None:
     """Persist the converted drift result as the observer snapshot, from the same result.
@@ -278,6 +290,7 @@ def _write_converted_snapshot(
             "violation": packet.get("violationCount", 0),
         },
         "actionableCount": packet.get("actionableCount", 0),
+        "actionableFingerprint": actionable_fingerprint,
         "rows": [
             *packet.get("actionableSample", []),
             *packet.get("violationSample", []),
@@ -342,6 +355,7 @@ def _write_drift_snapshot(
     """
     branch = drift.current_branch_name(code_repository_root)
     classification_counts = drift.counts(rows)
+    serialized_rows = [_row_to_dict(row, context.onboarding_root) for row in rows]
     payload = {
         "schema": DRIFT_SNAPSHOT_SCHEMA,
         "repository": code_repository_root.name,
@@ -356,7 +370,10 @@ def _write_drift_snapshot(
             for name, count in classification_counts.items()
             if name in ACTIONABLE_CLASSIFICATIONS
         ),
-        "rows": [_row_to_dict(row, context.onboarding_root) for row in rows],
+        "actionableFingerprint": _actionable_fingerprint(
+            [row for row in serialized_rows if row["classification"] in ACTIONABLE_CLASSIFICATIONS]
+        ),
+        "rows": serialized_rows,
     }
     snapshot_path = drift_snapshot_path(
         context.coordination_root,
@@ -367,3 +384,12 @@ def _write_drift_snapshot(
     # that produced it.
     with suppress(OSError):
         atomic_write_text(snapshot_path, json.dumps(payload, indent=2, default=str) + "\n")
+
+
+def _actionable_fingerprint(findings: list[dict[str, Any]]) -> str:
+    """One order-independent identity of complete findings, never a sampled view or clock."""
+    canonical_rows = sorted(
+        json.dumps(finding, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        for finding in findings
+    )
+    return hashlib.sha256(("[" + ",".join(canonical_rows) + "]").encode()).hexdigest()

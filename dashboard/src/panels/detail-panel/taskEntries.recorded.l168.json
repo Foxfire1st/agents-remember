@@ -1,0 +1,659 @@
+{
+  "recordedFrom": {
+    "sourceRecording": "taskDocument.recorded.mik-r127.json",
+    "sourceSHA256": "d8902933946e912061a88e55ea6ad145fd827c0b102898812008c45717135c55",
+    "producer": "read_task_sources + build_task_entries + read_task_document_body; optionalAbsent explicitly omits reviewState, statusNote, headerNotes and step note/outcome in input documents"
+  },
+  "optionalAbsent": {
+    "tasks": [
+      {
+        "stage": "started",
+        "activity": "paused",
+        "key": "sandbox-app/recorded-master/01_slugify.json",
+        "reference": {
+          "repository": "sandbox-app",
+          "path": "recorded-master/01_slugify.json"
+        },
+        "id": "REC-M1-L1",
+        "scope": "",
+        "title": "Add slugify() and its test",
+        "stepsDone": 1,
+        "stepsTotal": 3,
+        "summary": {
+          "kind": "subTask",
+          "form": "task",
+          "type": "SubTask (recorded payload)",
+          "statusNoteTruncated": false,
+          "headerNotes": [],
+          "headerNotesTotal": 0,
+          "currentStep": "S2 \u2014 Write its test",
+          "bodyRevision": "3799c367f57c38cd68126ef2149132ecdc70a4ed136fe197cfc19c7567f65836",
+          "createdAt": "2026-10-01T00:00:00+00:00",
+          "ageSeconds": -30566.170135736465,
+          "steps": [
+            {
+              "id": "S1",
+              "title": "Write the function",
+              "status": "done",
+              "substeps": [],
+              "outcomeTruncated": false,
+              "noteTruncated": false
+            },
+            {
+              "id": "S2",
+              "title": "Write its test",
+              "status": "inProgress",
+              "substeps": [],
+              "outcomeTruncated": false,
+              "noteTruncated": false
+            },
+            {
+              "id": "S3",
+              "title": "Hand the task over",
+              "status": "pending",
+              "substeps": [],
+              "outcomeTruncated": false,
+              "noteTruncated": false
+            }
+          ],
+          "objective": "",
+          "requirements": [],
+          "codeExamples": [],
+          "decisions": [],
+          "openQuestions": [],
+          "references": [],
+          "sections": [],
+          "orchestrates": [],
+          "seats": [],
+          "executionWaves": []
+        },
+        "parent": "sandbox-app/recorded-master/task.json",
+        "worktrees": [],
+        "children": [],
+        "counts": {
+          "planned": 0,
+          "started": 0,
+          "aborted": 0,
+          "completed": 0,
+          "works": 0,
+          "paused": 0,
+          "unknown": 0
+        }
+      },
+      {
+        "stage": "started",
+        "activity": "paused",
+        "key": "sandbox-app/recorded-master/task.json",
+        "reference": {
+          "repository": "sandbox-app",
+          "path": "recorded-master/task.json"
+        },
+        "id": "REC-M1",
+        "title": "Recorded master: text helpers",
+        "stepsDone": 0,
+        "stepsTotal": 0,
+        "summary": {
+          "kind": "master",
+          "form": "master",
+          "type": "Feature",
+          "statusNoteTruncated": false,
+          "headerNotes": [],
+          "headerNotesTotal": 0,
+          "bodyRevision": "5320f7615dc1e2f3fbc3a3b93582c93757b1e026da75b32143f32e20a8d4f805",
+          "createdAt": "2026-10-01T00:00:00+00:00",
+          "ageSeconds": -30566.170321941376,
+          "steps": [],
+          "objective": "",
+          "requirements": [],
+          "codeExamples": [],
+          "decisions": [],
+          "openQuestions": [],
+          "references": [],
+          "discardedCount": 0,
+          "discardedSubTasks": [],
+          "sections": [],
+          "orchestrates": [],
+          "seats": [],
+          "executionNature": "organizational",
+          "executionWaves": []
+        },
+        "worktrees": [],
+        "children": ["sandbox-app/recorded-master/01_slugify.json"],
+        "counts": {
+          "planned": 0,
+          "started": 1,
+          "aborted": 0,
+          "completed": 0,
+          "works": 0,
+          "paused": 1,
+          "unknown": 0
+        }
+      }
+    ],
+    "taskCounts": {
+      "planned": 0,
+      "started": 2,
+      "aborted": 0,
+      "completed": 0,
+      "works": 0,
+      "paused": 2,
+      "unknown": 0
+    },
+    "bodies": {
+      "01_slugify.json": {
+        "kind": "subTask",
+        "form": "task",
+        "type": "SubTask (recorded payload)",
+        "statusNoteTruncated": false,
+        "headerNotes": [],
+        "headerNotesTotal": 0,
+        "currentStep": "S2 \u2014 Write its test",
+        "bodyRevision": "3799c367f57c38cd68126ef2149132ecdc70a4ed136fe197cfc19c7567f65836",
+        "createdAt": "2026-10-01T00:00:00+00:00",
+        "ageSeconds": -30566.170135736465,
+        "steps": [
+          {
+            "id": "S1",
+            "title": "Write the function",
+            "status": "done",
+            "substeps": [],
+            "outcomeTruncated": false,
+            "noteTruncated": false
+          },
+          {
+            "id": "S2",
+            "title": "Write its test",
+            "status": "inProgress",
+            "substeps": [],
+            "outcomeTruncated": false,
+            "noteTruncated": false
+          },
+          {
+            "id": "S3",
+            "title": "Hand the task over",
+            "status": "pending",
+            "substeps": [],
+            "outcomeTruncated": false,
+            "noteTruncated": false
+          }
+        ],
+        "objective": "- `slugify(text)` lowercases its text.\n- Every run of other characters becomes one hyphen.",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "sections": [],
+        "orchestrates": [],
+        "seats": [],
+        "executionWaves": []
+      },
+      "task.json": {
+        "kind": "master",
+        "form": "master",
+        "type": "Feature",
+        "statusNoteTruncated": false,
+        "headerNotes": [],
+        "headerNotesTotal": 0,
+        "bodyRevision": "5320f7615dc1e2f3fbc3a3b93582c93757b1e026da75b32143f32e20a8d4f805",
+        "createdAt": "2026-10-01T00:00:00+00:00",
+        "ageSeconds": -30566.170321941376,
+        "steps": [],
+        "objective": "A made-up master that holds one task with a review round.",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "discardedCount": 0,
+        "discardedSubTasks": [],
+        "sections": [],
+        "orchestrates": [],
+        "seats": [],
+        "executionNature": "organizational",
+        "executionWaves": []
+      }
+    },
+    "documents": {
+      "01_slugify.json": {
+        "createdAt": "2026-10-01T00:00:00+00:00",
+        "id": "REC-M1-L1",
+        "kind": "subTask",
+        "objective": "- `slugify(text)` lowercases its text.\n- Every run of other characters becomes one hyphen.",
+        "repo": "sandbox-app",
+        "schema": "ar-task-document/v1",
+        "slug": "01_slugify",
+        "status": "inProgress",
+        "steps": [
+          {
+            "id": "S1",
+            "status": "done",
+            "title": "Write the function"
+          },
+          {
+            "id": "S2",
+            "status": "inProgress",
+            "title": "Write its test"
+          },
+          {
+            "id": "S3",
+            "status": "pending",
+            "title": "Hand the task over"
+          }
+        ],
+        "title": "Add slugify() and its test",
+        "type": "SubTask (recorded payload)"
+      },
+      "task.json": {
+        "createdAt": "2026-10-01T00:00:00+00:00",
+        "executionNature": "organizational",
+        "id": "REC-M1",
+        "kind": "master",
+        "objective": "A made-up master that holds one task with a review round.",
+        "repo": "sandbox-app",
+        "schema": "ar-task-document/v1",
+        "slug": "task",
+        "status": "inProgress",
+        "subTasks": [
+          {
+            "file": "01_slugify.md",
+            "name": "Add slugify() and its test",
+            "number": "L1",
+            "status": "inProgress"
+          }
+        ],
+        "title": "Recorded master: text helpers",
+        "type": "Feature"
+      }
+    }
+  },
+  "reviewPresent": {
+    "tasks": [
+      {
+        "stage": "started",
+        "activity": "paused",
+        "key": "sandbox-app/recorded-master/01_slugify.json",
+        "reference": {
+          "repository": "sandbox-app",
+          "path": "recorded-master/01_slugify.json"
+        },
+        "id": "REC-M1-L1",
+        "scope": "",
+        "title": "Add slugify() and its test",
+        "stepsDone": 1,
+        "stepsTotal": 3,
+        "summary": {
+          "kind": "subTask",
+          "form": "task",
+          "type": "SubTask (recorded payload)",
+          "statusNote": "Review round 2 is recorded: one of three findings is still open.",
+          "statusNoteTruncated": false,
+          "headerNotes": [
+            {
+              "label": "Master",
+              "value": "task.md"
+            },
+            {
+              "label": "Stage",
+              "value": "review"
+            }
+          ],
+          "headerNotesTotal": 2,
+          "reviewState": {
+            "round": 2,
+            "pending": false,
+            "additionalRounds": 0,
+            "findings": [
+              {
+                "findingId": "F1",
+                "description": "`slugify(None)` returns the text `none`.",
+                "open": false,
+                "descriptionTruncated": false
+              },
+              {
+                "findingId": "F2",
+                "description": "A run of digits and punctuation has no test.",
+                "open": true,
+                "descriptionTruncated": false
+              },
+              {
+                "findingId": "F3",
+                "description": "The test imports from the package root.",
+                "open": false,
+                "descriptionTruncated": false
+              }
+            ],
+            "totalFindings": 3,
+            "openFindings": 1
+          },
+          "currentStep": "S2 \u2014 Write its test",
+          "bodyRevision": "41dea8f73537f3d2e1b2ef9e7c57534f7be57d09372ae0d800379f1ae88f00ca",
+          "createdAt": "2026-10-01T00:00:00+00:00",
+          "ageSeconds": -30566.179736614227,
+          "steps": [
+            {
+              "id": "S1",
+              "title": "Write the function",
+              "status": "done",
+              "substeps": [],
+              "note": "One function, no module state.",
+              "outcomeTruncated": false,
+              "noteTruncated": false
+            },
+            {
+              "id": "S2",
+              "title": "Write its test",
+              "status": "inProgress",
+              "substeps": [],
+              "outcomeTruncated": false,
+              "noteTruncated": false
+            },
+            {
+              "id": "S3",
+              "title": "Hand the task over",
+              "status": "pending",
+              "substeps": [],
+              "outcomeTruncated": false,
+              "noteTruncated": false
+            }
+          ],
+          "objective": "",
+          "requirements": [],
+          "codeExamples": [],
+          "decisions": [],
+          "openQuestions": [],
+          "references": [],
+          "sections": [],
+          "orchestrates": [],
+          "seats": [],
+          "executionWaves": []
+        },
+        "parent": "sandbox-app/recorded-master/task.json",
+        "worktrees": [],
+        "children": [],
+        "counts": {
+          "planned": 0,
+          "started": 0,
+          "aborted": 0,
+          "completed": 0,
+          "works": 0,
+          "paused": 0,
+          "unknown": 0
+        }
+      },
+      {
+        "stage": "started",
+        "activity": "paused",
+        "key": "sandbox-app/recorded-master/task.json",
+        "reference": {
+          "repository": "sandbox-app",
+          "path": "recorded-master/task.json"
+        },
+        "id": "REC-M1",
+        "title": "Recorded master: text helpers",
+        "stepsDone": 0,
+        "stepsTotal": 0,
+        "summary": {
+          "kind": "master",
+          "form": "master",
+          "type": "Feature",
+          "statusNote": "One task is in work and stands in review.",
+          "statusNoteTruncated": false,
+          "headerNotes": [
+            {
+              "label": "Authority",
+              "value": "made up for a recorded payload"
+            }
+          ],
+          "headerNotesTotal": 1,
+          "bodyRevision": "c244248c1685a7b4cadba9dd90a5dd2fdbc91b542475bfc2fbc3ab819ce99b99",
+          "createdAt": "2026-10-01T00:00:00+00:00",
+          "ageSeconds": -30566.179825544357,
+          "steps": [],
+          "objective": "",
+          "requirements": [],
+          "codeExamples": [],
+          "decisions": [],
+          "openQuestions": [],
+          "references": [],
+          "discardedCount": 0,
+          "discardedSubTasks": [],
+          "sections": [],
+          "orchestrates": [],
+          "seats": [],
+          "executionNature": "organizational",
+          "executionWaves": []
+        },
+        "worktrees": [],
+        "children": ["sandbox-app/recorded-master/01_slugify.json"],
+        "counts": {
+          "planned": 0,
+          "started": 1,
+          "aborted": 0,
+          "completed": 0,
+          "works": 0,
+          "paused": 1,
+          "unknown": 0
+        }
+      }
+    ],
+    "taskCounts": {
+      "planned": 0,
+      "started": 2,
+      "aborted": 0,
+      "completed": 0,
+      "works": 0,
+      "paused": 2,
+      "unknown": 0
+    },
+    "bodies": {
+      "01_slugify.json": {
+        "kind": "subTask",
+        "form": "task",
+        "type": "SubTask (recorded payload)",
+        "statusNote": "Review round 2 is recorded: one of three findings is still open.",
+        "statusNoteTruncated": false,
+        "headerNotes": [
+          {
+            "label": "Master",
+            "value": "task.md"
+          },
+          {
+            "label": "Stage",
+            "value": "review"
+          }
+        ],
+        "headerNotesTotal": 2,
+        "reviewState": {
+          "round": 2,
+          "pending": false,
+          "additionalRounds": 0,
+          "findings": [
+            {
+              "findingId": "F1",
+              "description": "`slugify(None)` returns the text `none`.",
+              "open": false,
+              "descriptionTruncated": false
+            },
+            {
+              "findingId": "F2",
+              "description": "A run of digits and punctuation has no test.",
+              "open": true,
+              "descriptionTruncated": false
+            },
+            {
+              "findingId": "F3",
+              "description": "The test imports from the package root.",
+              "open": false,
+              "descriptionTruncated": false
+            }
+          ],
+          "totalFindings": 3,
+          "openFindings": 1
+        },
+        "currentStep": "S2 \u2014 Write its test",
+        "bodyRevision": "41dea8f73537f3d2e1b2ef9e7c57534f7be57d09372ae0d800379f1ae88f00ca",
+        "createdAt": "2026-10-01T00:00:00+00:00",
+        "ageSeconds": -30566.179736614227,
+        "steps": [
+          {
+            "id": "S1",
+            "title": "Write the function",
+            "status": "done",
+            "substeps": [],
+            "note": "One function, no module state.",
+            "outcomeTruncated": false,
+            "noteTruncated": false
+          },
+          {
+            "id": "S2",
+            "title": "Write its test",
+            "status": "inProgress",
+            "substeps": [],
+            "outcomeTruncated": false,
+            "noteTruncated": false
+          },
+          {
+            "id": "S3",
+            "title": "Hand the task over",
+            "status": "pending",
+            "substeps": [],
+            "outcomeTruncated": false,
+            "noteTruncated": false
+          }
+        ],
+        "objective": "- `slugify(text)` lowercases its text.\n- Every run of other characters becomes one hyphen.",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "sections": [],
+        "orchestrates": [],
+        "seats": [],
+        "executionWaves": []
+      },
+      "task.json": {
+        "kind": "master",
+        "form": "master",
+        "type": "Feature",
+        "statusNote": "One task is in work and stands in review.",
+        "statusNoteTruncated": false,
+        "headerNotes": [
+          {
+            "label": "Authority",
+            "value": "made up for a recorded payload"
+          }
+        ],
+        "headerNotesTotal": 1,
+        "bodyRevision": "c244248c1685a7b4cadba9dd90a5dd2fdbc91b542475bfc2fbc3ab819ce99b99",
+        "createdAt": "2026-10-01T00:00:00+00:00",
+        "ageSeconds": -30566.179825544357,
+        "steps": [],
+        "objective": "A made-up master that holds one task with a review round.",
+        "requirements": [],
+        "codeExamples": [],
+        "decisions": [],
+        "openQuestions": [],
+        "references": [],
+        "discardedCount": 0,
+        "discardedSubTasks": [],
+        "sections": [],
+        "orchestrates": [],
+        "seats": [],
+        "executionNature": "organizational",
+        "executionWaves": []
+      }
+    },
+    "documents": {
+      "01_slugify.json": {
+        "createdAt": "2026-10-01T00:00:00+00:00",
+        "headerNotes": [
+          {
+            "label": "Master",
+            "value": "task.md"
+          },
+          {
+            "label": "Stage",
+            "value": "review"
+          }
+        ],
+        "id": "REC-M1-L1",
+        "kind": "subTask",
+        "objective": "- `slugify(text)` lowercases its text.\n- Every run of other characters becomes one hyphen.",
+        "repo": "sandbox-app",
+        "reviewState": {
+          "baselineFindings": [
+            {
+              "description": "`slugify(None)` returns the text `none`.",
+              "findingId": "F1"
+            },
+            {
+              "description": "A run of digits and punctuation has no test.",
+              "findingId": "F2"
+            },
+            {
+              "description": "The test imports from the package root.",
+              "findingId": "F3"
+            }
+          ],
+          "pending": false,
+          "remainingFindingIds": ["F2"],
+          "round": 2
+        },
+        "schema": "ar-task-document/v1",
+        "slug": "01_slugify",
+        "status": "inProgress",
+        "statusNote": "Review round 2 is recorded: one of three findings is still open.",
+        "steps": [
+          {
+            "id": "S1",
+            "note": "One function, no module state.",
+            "status": "done",
+            "title": "Write the function"
+          },
+          {
+            "id": "S2",
+            "status": "inProgress",
+            "title": "Write its test"
+          },
+          {
+            "id": "S3",
+            "status": "pending",
+            "title": "Hand the task over"
+          }
+        ],
+        "title": "Add slugify() and its test",
+        "type": "SubTask (recorded payload)"
+      },
+      "task.json": {
+        "createdAt": "2026-10-01T00:00:00+00:00",
+        "executionNature": "organizational",
+        "headerNotes": [
+          {
+            "label": "Authority",
+            "value": "made up for a recorded payload"
+          }
+        ],
+        "id": "REC-M1",
+        "kind": "master",
+        "objective": "A made-up master that holds one task with a review round.",
+        "repo": "sandbox-app",
+        "schema": "ar-task-document/v1",
+        "slug": "task",
+        "status": "inProgress",
+        "statusNote": "One task is in work and stands in review.",
+        "subTasks": [
+          {
+            "file": "01_slugify.md",
+            "name": "Add slugify() and its test",
+            "number": "L1",
+            "status": "inProgress"
+          }
+        ],
+        "title": "Recorded master: text helpers",
+        "type": "Feature"
+      }
+    }
+  }
+}

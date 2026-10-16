@@ -12,7 +12,6 @@ import os
 import shutil
 import tempfile
 import unittest
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -46,12 +45,11 @@ from agents_remember.kernel.primitives.runtime_config import (
 from agents_remember.models.tools.tool_answer import (
     strip_envelope,
 )
-from agents_remember.observer.ambient import reset_ambient
 from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules.closeout import closeout_changed_paths
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.worktree_contract import load_contract
-from tool_answer_l110_rows import _install_ambient, _server_info_case, _stub_config
+from tool_answer_l110_rows import _server_info_case, _stub_config
 from tool_entry_point_world import EntryPointWorld
 
 
@@ -92,7 +90,7 @@ class ToolAnswerLogTests(unittest.TestCase):
                 tool_name="ping",
                 operation="ping",
                 arguments=arguments or {},
-                caller=ToolCaller(agent_id="a1", role="worker", task="t", lifecycle_id="l1"),
+                caller=ToolCaller(agent_id="a1", role="worker", task="t"),
                 ok=ok,
                 code=code,
                 duration_ms=1.5,
@@ -531,7 +529,6 @@ class ToolRaisedCallLoggingTests(unittest.TestCase):
             self.assertTrue(line["detail"].endswith(".json"))
         finally:
             world.close()
-            reset_ambient()
 
     def test_strict_argument_refusal_is_logged(self) -> None:
         world = EntryPointWorld()
@@ -545,7 +542,6 @@ class ToolRaisedCallLoggingTests(unittest.TestCase):
             self.assertTrue(line["detail"].endswith(".json"))
         finally:
             world.close()
-            reset_ambient()
 
 
 class ToolTerminatingRouteTests(unittest.TestCase):
@@ -559,17 +555,13 @@ class ToolTerminatingRouteTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.world.close()
-        reset_ambient()
 
     def _resolve(self, tool: str) -> Any:
-        amb = _install_ambient(self.world.coord)
-        state = amb.current
-        assert state is not None
-        amb.current = replace(state, enclosure=str(self.world.contract))
-        try:
+        with mock.patch(
+            "agents_remember.application.tool_answer_log._bound_enclosure_contract",
+            return_value=self.world.contract,
+        ):
             return resolve_log_roots(_stub_config(self.world.coord), tool)
-        finally:
-            reset_ambient()
 
     def test_terminating_operations_log_to_the_root(self) -> None:
         for tool in ("worktree_cleanup", "worktree_abandon", "lifecycle_finalize_task"):
@@ -584,14 +576,11 @@ class ToolTerminatingRouteTests(unittest.TestCase):
         self.assertTrue(Path(str(dest.enclosure_dir)).is_dir())
 
     def test_removed_group_falls_back_to_the_root(self) -> None:
-        amb = _install_ambient(self.world.coord)
-        state = amb.current
-        assert state is not None
-        amb.current = replace(state, enclosure=str(self.world.coord / "no-such-contract.md"))
-        try:
+        with mock.patch(
+            "agents_remember.application.tool_answer_log._bound_enclosure_contract",
+            return_value=self.world.coord / "no-such-contract.md",
+        ):
             dest = resolve_log_roots(_stub_config(self.world.coord), "ping")
-        finally:
-            reset_ambient()
         self.assertIsNone(dest.enclosure_dir)
         self.assertIsNotNone(dest.coord_log_dir)
 
@@ -716,7 +705,6 @@ class ToolAnswerEnclosureTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.world.close()
-        reset_ambient()
 
     def test_logs_made_with_the_enclosure(self) -> None:
         contract = load_contract(self.world.contract)

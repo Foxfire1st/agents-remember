@@ -7,13 +7,21 @@ import { fireEvent, render, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
-import type { TaskDocNode, TaskStepNode } from '../../types/projection';
-import { cells, seedTaskDocuments, stubNotes, taskDoc } from './test-utils';
+import type { TaskEntry, TaskSummary, TaskStepNode } from '../../types/projection';
+import {
+  cells,
+  seedTaskEntries,
+  stubNotes,
+  taskEntry,
+  taskTree,
+  taskSummary,
+  taskReference,
+} from './test-utils';
 
 const REPO = 'agents-remember';
-const SPRINT = `/tasks/${REPO}/look-sprint/task.json`;
-const MASTER = `/tasks/${REPO}/look-master/task.json`;
-const LEAF = `/tasks/${REPO}/look-master/01_helper.json`;
+const SPRINT = `${REPO}/look-sprint/task.json`;
+const MASTER = `${REPO}/look-master/task.json`;
+const LEAF = `${REPO}/look-master/01_helper.json`;
 const PACKET = 'LOOK-R01-v1.md';
 const REQUIREMENT_TEXT = 'The helper returns an empty string for a text of punctuation alone.';
 const LONG_NOTE =
@@ -31,28 +39,44 @@ function step(id: string, title: string, status: string, over: Partial<TaskStepN
   };
 }
 
-function leaf(over: Partial<TaskDocNode> = {}): TaskDocNode {
-  return taskDoc({
+function leaf(summary: Partial<TaskSummary> = {}, entry: Partial<TaskEntry> = {}): TaskEntry {
+  return taskEntry({
+    reference: taskReference(LEAF),
     id: 'LOOK-M1-L1',
-    lifecycleId: undefined,
-    kind: 'subTask',
-    repository: REPO,
-    docPath: LEAF,
     title: 'Add the helper',
-    objective: 'One pure helper with its test.',
-    ...over,
+    stage: 'started',
+    activity: 'paused',
+    stepsDone: 0,
+    stepsTotal: 0,
+    ...entry,
+    summary: taskSummary({
+      form: 'task',
+      kind: 'subTask',
+      objective: 'One pure helper with its test.',
+      type: '',
+      createdAt: '2026-06-20T09:00:00+00:00',
+      ...summary,
+    }),
   });
 }
-
-function master(over: Partial<TaskDocNode> = {}): TaskDocNode {
-  return taskDoc({
+function master(summary: Partial<TaskSummary> = {}, entry: Partial<TaskEntry> = {}): TaskEntry {
+  return taskEntry({
+    reference: taskReference(MASTER),
     id: 'LOOK-M1',
-    lifecycleId: undefined,
-    kind: 'master',
-    repository: REPO,
-    docPath: MASTER,
     title: 'Helpers',
-    ...over,
+    stage: 'started',
+    activity: 'paused',
+    stepsDone: 0,
+    stepsTotal: 0,
+    ...entry,
+    summary: taskSummary({
+      form: 'master',
+      kind: 'master',
+      objective: '',
+      type: '',
+      createdAt: '2026-06-20T09:00:00+00:00',
+      ...summary,
+    }),
   });
 }
 
@@ -63,14 +87,18 @@ function before(first: Element, second: Element): boolean {
 
 describe('the head (rule 2, with MIK-R150 rule 14)', () => {
   it('leads with the title, then the labelled facts, then the notes, then the objective below the head', () => {
-    seedTaskDocuments([
-      master(),
-      leaf({
-        statusNote: 'In work.',
-        type: 'SubTask (made up)',
-        headerNotes: [{ label: 'Execution boundary', value: LONG_NOTE }],
-      }),
-    ]);
+    seedTaskEntries(
+      taskTree(master(), [
+        leaf(
+          {
+            statusNote: 'In work.',
+            type: 'SubTask (made up)',
+            headerNotes: [{ label: 'Execution boundary', value: LONG_NOTE }],
+          },
+          {},
+        ),
+      ]),
+    );
     const { container, getByTestId, getAllByText } = render(
       <DetailPanel selectedId={`taskdoc:${LEAF}`} />,
     );
@@ -96,10 +124,14 @@ describe('the head (rule 2, with MIK-R150 rule 14)', () => {
 
   it('draws the primary requirement as its link and its text once, under Requirements', async () => {
     const line = `[LOOK-R01@v1](requirements/${PACKET}) — ${REQUIREMENT_TEXT}`;
-    seedTaskDocuments([
-      master(),
-      leaf({ headerNotes: [{ label: 'Primary requirement', value: line }], requirements: [line] }),
-    ]);
+    seedTaskEntries(
+      taskTree(master(), [
+        leaf(
+          { headerNotes: [{ label: 'Primary requirement', value: line }], requirements: [line] },
+          {},
+        ),
+      ]),
+    );
     stubNotes([], 'note body', [
       { name: PACKET, path: PACKET, address: `requirements/${PACKET}`, size: 1, sha256: 'a' },
     ]);
@@ -115,16 +147,20 @@ describe('the head (rule 2, with MIK-R150 rule 14)', () => {
   });
 
   it('keeps a short note in the strip and opens a long one in place', () => {
-    seedTaskDocuments([
-      master(),
-      leaf({
-        statusNote: LONG_NOTE,
-        headerNotes: [
-          { label: 'Stage', value: 'First wave' },
-          { label: 'Execution boundary', value: LONG_NOTE },
-        ],
-      }),
-    ]);
+    seedTaskEntries(
+      taskTree(master(), [
+        leaf(
+          {
+            statusNote: LONG_NOTE,
+            headerNotes: [
+              { label: 'Stage', value: 'First wave' },
+              { label: 'Execution boundary', value: LONG_NOTE },
+            ],
+          },
+          {},
+        ),
+      ]),
+    );
     const { getByTestId, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
 
     expect(cells(within(getByTestId('doc-facts')).getByTestId('header-note-Stage'))).toEqual([
@@ -147,7 +183,7 @@ describe('the head (rule 2, with MIK-R150 rule 14)', () => {
 
   it('holds a long objective to its first lines and opens it in place', () => {
     const objective = Array.from({ length: 6 }, (_, i) => `- Point ${i + 1} of the objective.`);
-    seedTaskDocuments([master(), leaf({ objective: objective.join('\n') })]);
+    seedTaskEntries(taskTree(master(), [leaf({ objective: objective.join('\n') }, {})]));
     const { getByTestId, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
 
     expect(getByTestId('objective-text').getAttribute('data-open')).toBe('false');
@@ -160,7 +196,7 @@ describe('the head (rule 2, with MIK-R150 rule 14)', () => {
   });
 
   it('draws a short objective whole without a control', () => {
-    seedTaskDocuments([master(), leaf()]);
+    seedTaskEntries(taskTree(master(), [leaf()]));
     const { getByTestId, queryByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
 
     expect(getByTestId('objective-text').getAttribute('data-open')).toBe('true');
@@ -170,24 +206,26 @@ describe('the head (rule 2, with MIK-R150 rule 14)', () => {
 
 describe('the steps table (rule 5)', () => {
   it('draws mark, number, title and state per step, with the progress in the heading', () => {
-    seedTaskDocuments([
-      master(),
-      leaf({
-        stepsDone: 1,
-        stepsTotal: 4,
-        steps: [
-          step('S1', 'Write `slug.py`', 'done', { note: 'Lowercases first.' }),
-          step('S2', 'Run the tests', 'inProgress', {
-            substeps: [
-              { id: 'S2.1', title: 'On a clean tree', status: 'done' },
-              { id: 'S2.2', title: 'Attach the output', status: 'pending' },
+    seedTaskEntries(
+      taskTree(master(), [
+        leaf(
+          {
+            steps: [
+              step('S1', 'Write `slug.py`', 'done', { note: 'Lowercases first.' }),
+              step('S2', 'Run the tests', 'inProgress', {
+                substeps: [
+                  { id: 'S2.1', title: 'On a clean tree', status: 'done' },
+                  { id: 'S2.2', title: 'Attach the output', status: 'pending' },
+                ],
+              }),
+              step('S3', 'Review', 'blocked'),
+              step('S4', 'Land', 'pending'),
             ],
-          }),
-          step('S3', 'Review', 'blocked'),
-          step('S4', 'Land', 'pending'),
-        ],
-      }),
-    ]);
+          },
+          { stepsDone: 1, stepsTotal: 4 },
+        ),
+      ]),
+    );
     const { getByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
 
     expect(cells(getByTestId('step-S1')).slice(0, 4)).toEqual(['', 'S1', 'Write slug.py', 'done']);
@@ -210,18 +248,20 @@ describe('the steps table (rule 5)', () => {
   });
 
   it('marks the first step that is not done as the next one', () => {
-    seedTaskDocuments([
-      master(),
-      leaf({
-        stepsDone: 1,
-        stepsTotal: 3,
-        steps: [
-          step('S1', 'One', 'done'),
-          step('S2', 'Two', 'pending'),
-          step('S3', 'Three', 'pending'),
-        ],
-      }),
-    ]);
+    seedTaskEntries(
+      taskTree(master(), [
+        leaf(
+          {
+            steps: [
+              step('S1', 'One', 'done'),
+              step('S2', 'Two', 'pending'),
+              step('S3', 'Three', 'pending'),
+            ],
+          },
+          { stepsDone: 1, stepsTotal: 3 },
+        ),
+      ]),
+    );
     const { getByTestId } = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
 
     expect(getByTestId('step-next-S2').textContent).toBe('next');
@@ -231,71 +271,71 @@ describe('the steps table (rule 5)', () => {
 
 describe('the tables of work in progress (rules 3-4)', () => {
   function seedMasterInWork() {
-    const second = `/tasks/${REPO}/look-master/02_second.json`;
-    seedTaskDocuments([
-      master({
-        subTasks: [
+    const second = `${REPO}/look-master/02_second.json`;
+    seedTaskEntries(
+      taskTree(master({}, {}), [
+        leaf(
           {
-            number: '1',
-            name: 'Add the helper',
-            file: '01_helper.md',
-            status: 'inProgress',
-            scope: '',
+            steps: [step('S1', 'Write it', 'done'), step('S2', 'Run the `tests`', 'inProgress')],
+            reviewState: {
+              round: 2,
+              pending: false,
+              additionalRounds: 0,
+              totalFindings: 3,
+              openFindings: 1,
+              findings: [
+                {
+                  findingId: 'F1',
+                  description: 'Open one',
+                  open: true,
+                  descriptionTruncated: false,
+                },
+                {
+                  findingId: 'F2',
+                  description: 'Closed one',
+                  open: false,
+                  descriptionTruncated: false,
+                },
+                {
+                  findingId: 'F3',
+                  description: 'Closed two',
+                  open: false,
+                  descriptionTruncated: false,
+                },
+              ],
+            },
+          },
+          { stepsDone: 1, stepsTotal: 2 },
+        ),
+        leaf(
+          {
+            steps: [step('S1', 'Write it', 'pending')],
+            reviewState: {
+              round: 1,
+              pending: true,
+              additionalRounds: 0,
+              totalFindings: 0,
+              openFindings: 0,
+              findings: [],
+            },
           },
           {
-            number: '2',
-            name: 'Second helper',
-            file: '02_second.md',
-            status: 'inProgress',
-            scope: '',
+            id: 'LOOK-M1-L2',
+            reference: taskReference(second),
+            title: 'Second helper',
+            stepsDone: 0,
+            stepsTotal: 1,
           },
-          { number: '3', name: 'Third helper', file: '03_third.md', status: 'planning', scope: '' },
-        ],
-      }),
-      leaf({
-        stepsDone: 1,
-        stepsTotal: 2,
-        steps: [step('S1', 'Write it', 'done'), step('S2', 'Run the `tests`', 'inProgress')],
-        reviewState: {
-          round: 2,
-          pending: false,
-          additionalRounds: 0,
-          totalFindings: 3,
-          openFindings: 1,
-          findings: [
-            { findingId: 'F1', description: 'Open one', open: true, descriptionTruncated: false },
-            {
-              findingId: 'F2',
-              description: 'Closed one',
-              open: false,
-              descriptionTruncated: false,
-            },
-            {
-              findingId: 'F3',
-              description: 'Closed two',
-              open: false,
-              descriptionTruncated: false,
-            },
-          ],
-        },
-      }),
-      leaf({
-        id: 'LOOK-M1-L2',
-        docPath: second,
-        title: 'Second helper',
-        stepsDone: 0,
-        stepsTotal: 1,
-        steps: [step('S1', 'Write it', 'pending')],
-        reviewState: {
-          round: 1,
-          pending: true,
-          additionalRounds: 0,
-          totalFindings: 0,
-          openFindings: 0,
-          findings: [],
-        },
-      }),
-    ]);
+        ),
+        taskEntry({
+          reference: taskReference(`${REPO}/look-master/03_third.json`),
+          id: 'LOOK-M1-L3',
+          title: 'Third helper',
+          stage: 'planned',
+          summary: undefined,
+        }),
+      ]),
+    );
   }
 
   it('lists a master’s tasks in work with steps done, standing step and review', () => {
@@ -328,35 +368,28 @@ describe('the tables of work in progress (rules 3-4)', () => {
   it('counts the open findings of the whole round where the row carries only the first', () => {
     // A round of 26 findings with the last one open: the summary a master's row reads
     // carries the first 25, all closed, and the projection's count of the round.
-    seedTaskDocuments([
-      master({
-        subTasks: [
+    seedTaskEntries(
+      taskTree(master({}, {}), [
+        leaf(
           {
-            number: '1',
-            name: 'Add the helper',
-            file: '01_helper.md',
-            status: 'inProgress',
-            scope: '',
+            reviewState: {
+              round: 2,
+              pending: false,
+              additionalRounds: 0,
+              totalFindings: 26,
+              openFindings: 1,
+              findings: Array.from({ length: 25 }, (_, index) => ({
+                findingId: `F${index + 1}`,
+                description: `Closed finding ${index + 1}`,
+                open: false,
+                descriptionTruncated: false,
+              })),
+            },
           },
-        ],
-      }),
-      leaf({
-        status: 'inProgress',
-        reviewState: {
-          round: 2,
-          pending: false,
-          additionalRounds: 0,
-          totalFindings: 26,
-          openFindings: 1,
-          findings: Array.from({ length: 25 }, (_, index) => ({
-            findingId: `F${index + 1}`,
-            description: `Closed finding ${index + 1}`,
-            open: false,
-            descriptionTruncated: false,
-          })),
-        },
-      }),
-    ]);
+          { stage: 'started' },
+        ),
+      ]),
+    );
     stubNotes([], '');
     const now = render(<DetailPanel selectedId={`taskdoc:${MASTER}`} />);
     expect(now.getByTestId('now-review-1').textContent).toBe('round 2 · 1 of 26 findings open');
@@ -368,57 +401,63 @@ describe('the tables of work in progress (rules 3-4)', () => {
     expect(task.getByTestId('findings-all-link').textContent).toContain('all 26 findings');
   });
 
-  it('lists a sprint’s masters in work with their tasks completed and in work', () => {
-    seedTaskDocuments([
-      taskDoc({
-        id: 'LOOK-SPRINT',
-        lifecycleId: undefined,
-        kind: 'master',
-        form: 'sprint',
-        repository: REPO,
-        docPath: SPRINT,
-        title: 'Look sprint',
-        orchestrates: ['look-master'],
-        subTasks: [
-          {
-            number: '1',
-            name: 'Helpers',
-            file: '',
-            status: 'inProgress',
-            scope: '',
-            masterRef: { repository: REPO, path: 'look-master/task.json' },
-          },
-        ],
+  it('lists a sprint’s masters with completed tasks and served activity counts', () => {
+    const helpers = taskTree(master(), [
+      taskEntry({
+        reference: taskReference(`${REPO}/look-master/01_one.json`),
+        id: 'L1',
+        title: 'One',
+        stage: 'completed',
+        summary: undefined,
       }),
-      master({
-        subTasks: [
-          { number: '1', name: 'One', file: '01_one.md', status: 'Completed', scope: '' },
-          { number: '2', name: 'Two', file: '02_two.md', status: 'inProgress', scope: '' },
-          { number: '3', name: 'Three', file: '03_three.md', status: 'planning', scope: '' },
-        ],
+      taskEntry({
+        reference: taskReference(`${REPO}/look-master/02_two.json`),
+        id: 'L2',
+        title: 'Two',
+        stage: 'started',
+        activity: 'works',
+        summary: undefined,
+      }),
+      taskEntry({
+        reference: taskReference(`${REPO}/look-master/03_three.json`),
+        id: 'L3',
+        title: 'Three',
+        stage: 'planned',
+        summary: undefined,
       }),
     ]);
+    const sprint = taskEntry({
+      reference: taskReference(SPRINT),
+      id: 'LOOK-SPRINT',
+      title: 'Look sprint',
+      stage: 'started',
+      activity: 'works',
+      stepsDone: 0,
+      stepsTotal: 0,
+      summary: taskSummary({ form: 'sprint', kind: 'master', objective: '' }),
+    });
+    seedTaskEntries([...taskTree(sprint, [helpers[0]]), ...helpers.slice(1)]);
     const { getByTestId } = render(<DetailPanel selectedId={`taskdoc:${SPRINT}`} />);
 
     expect(cells(getByTestId('now-table').firstElementChild)).toEqual([
       'master',
       'tasks completed',
-      'in work',
+      'activity',
     ]);
-    expect(cells(getByTestId('now-row-1'))).toEqual(['LOOK-M1Helpers', '1/3', '1']);
+    expect(cells(getByTestId('now-row-1'))).toEqual([
+      'LOOK-M1Helpers',
+      '1/3',
+      '1 works · 0 paused paused',
+    ]);
     expect(getByTestId('subtask-open-master-1').tagName.toLowerCase()).toBe('button');
   });
 });
 
 describe('the reports of a task (rule 5)', () => {
-  it('asks for them by the path inside the task root when the document carries a file path', async () => {
-    const root = '/srv/coordination/tasks/agents-remember/look-master';
-    seedTaskDocuments([
-      master({ docPath: `${root}/task.json` }),
-      leaf({ docPath: `${root}/01_helper.json` }),
-    ]);
+  it('asks for them by the path inside the canonical qualified task reference', async () => {
+    seedTaskEntries(taskTree(master(), [leaf()]));
     const fetched = stubNotes([], '');
-    const view = render(<DetailPanel selectedId={`taskdoc:${root}/01_helper.json`} />);
+    const view = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
 
     await view.findByTestId('task-reports-empty');
     const asked = fetched.mock.calls
@@ -432,19 +471,18 @@ describe('the reports of a task (rule 5)', () => {
 
 describe('links (rule 10)', () => {
   function seedSprintWithRegister(choice: string, evidence: string, scope = '') {
-    seedTaskDocuments([
-      taskDoc({
-        id: 'LOOK-SPRINT',
-        lifecycleId: undefined,
-        kind: 'master',
+    const sprint = taskEntry({
+      reference: taskReference(SPRINT),
+      id: 'LOOK-SPRINT',
+      title: 'Look sprint',
+      stage: 'started',
+      activity: 'paused',
+      stepsDone: 0,
+      stepsTotal: 0,
+      summary: taskSummary({
         form: 'sprint',
-        repository: REPO,
-        docPath: SPRINT,
-        title: 'Look sprint',
-        orchestrates: ['look-master'],
-        subTasks: [
-          { number: '1', name: 'Helpers', file: 'look-master', status: 'inProgress', scope },
-        ],
+        kind: 'master',
+        objective: '',
         sections: [
           {
             kind: 'freeform',
@@ -457,7 +495,8 @@ describe('links (rule 10)', () => {
           },
         ],
       }),
-    ]);
+    });
+    seedTaskEntries(taskTree(sprint, [master({}, { scope })]));
     stubNotes([], '');
   }
 
@@ -513,19 +552,21 @@ describe('links (rule 10)', () => {
       recordedVia: 'task_doc.skip_step' as const,
       reason: 'See [Direction](https://example.org/direction)',
     };
-    seedTaskDocuments([
-      master(),
-      leaf({
-        stepsDone: 1,
-        stepsTotal: 1,
-        steps: [
-          step('S1', 'Parent', 'done', {
-            disposition,
-            substeps: [{ id: 'S1.1', title: 'Child', status: 'done', disposition }],
-          }),
-        ],
-      }),
-    ]);
+    seedTaskEntries(
+      taskTree(master(), [
+        leaf(
+          {
+            steps: [
+              step('S1', 'Parent', 'done', {
+                disposition,
+                substeps: [{ id: 'S1.1', title: 'Child', status: 'done', disposition }],
+              }),
+            ],
+          },
+          { stepsDone: 1, stepsTotal: 1 },
+        ),
+      ]),
+    );
     stubNotes([], '');
     const view = render(<DetailPanel selectedId={`taskdoc:${LEAF}`} />);
     const own = within(view.getByTestId('skipped-disposition'));
@@ -540,17 +581,21 @@ describe('links (rule 10)', () => {
   });
 
   it('draws a Markdown link as a link and a reference as its words and its place', async () => {
-    seedTaskDocuments([
-      master(),
-      leaf({
-        headerNotes: [{ label: 'Authority', value: '[Direction](notes/direction.md) S1' }],
-        references: [
-          `[Primary packet](requirements/${PACKET})`,
-          '[Direction](notes/direction.md)',
-          'A plain line without a target',
-        ],
-      }),
-    ]);
+    seedTaskEntries(
+      taskTree(master(), [
+        leaf(
+          {
+            headerNotes: [{ label: 'Authority', value: '[Direction](notes/direction.md) S1' }],
+            references: [
+              `[Primary packet](requirements/${PACKET})`,
+              '[Direction](notes/direction.md)',
+              'A plain line without a target',
+            ],
+          },
+          {},
+        ),
+      ]),
+    );
     stubNotes([{ name: 'direction.md', path: 'direction.md', size: 1, language: 'markdown' }], '', [
       { name: PACKET, path: PACKET, address: `requirements/${PACKET}`, size: 1, sha256: 'a' },
     ]);

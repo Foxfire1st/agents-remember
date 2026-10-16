@@ -66,11 +66,13 @@ from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.changeset import register_changeset_routes
+from agents_remember.serving.changeset_cache import ChangesetCache
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.review import register_review_routes
 from agents_remember.serving.review_summary import (
     KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
+    ReviewIntentSummaryPort,
     register_review_summary_route,
 )
 from agents_remember.worktrees.modules import closeout_external, integration_gate
@@ -317,7 +319,13 @@ def test_review_get_routes_read_without_writing(tmp_path: Path, worktree_service
     )
     register_review_summary_route(
         app,
-        lambda _repo, master, _leaf: intent_summary_of(summary_resolution, master),
+        ReviewIntentSummaryPort(
+            inputs=lambda *_: (),
+            read=lambda _repo, master, _leaf, _observe: intent_summary_of(
+                summary_resolution, master
+            ),
+        ),
+        ChangesetCache(),
     )
     client = TestClient(app)
 

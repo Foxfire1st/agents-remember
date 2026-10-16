@@ -15,8 +15,8 @@ from unittest import mock
 
 from agents_remember.serving import change_watcher as watcher_module
 from agents_remember.serving.change_watcher import (
-    ALL_PROJECTION_DOMAINS,
     FULL_REFRESH_SECONDS,
+    HEALING_PROJECTION_DOMAINS,
     ChangePacer,
     ProjectionDomain,
 )
@@ -42,7 +42,7 @@ class PacerHealingTests(unittest.IsolatedAsyncioTestCase):
             pacer.notify_change(frozenset({ProjectionDomain.TASKS}))
             wake = await pacer.wait()
             self.assertEqual(wake.reason, "full")
-            self.assertEqual(wake.domains, ALL_PROJECTION_DOMAINS)
+            self.assertEqual(wake.domains, HEALING_PROJECTION_DOMAINS)
             pacer.acknowledge(wake)
             pacer.confirm_full_published()
             clock[0] += 16
@@ -79,7 +79,7 @@ class PacerHealingTests(unittest.IsolatedAsyncioTestCase):
             clock[0] += 2
             retry = await pacer.wait()
             self.assertEqual(retry.reason, "full")
-            self.assertEqual(retry.domains, ALL_PROJECTION_DOMAINS)
+            self.assertEqual(retry.domains, HEALING_PROJECTION_DOMAINS)
 
     async def test_failed_change_tick_keeps_its_domains(self) -> None:
         """A change wake whose tick fails stays outstanding for the next cycle (F06)."""
@@ -131,7 +131,7 @@ class PacerHealingTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(watcher_module, "time", SimpleNamespace(monotonic=lambda: clock[0])):
             pacer = ChangePacer(interval=1)
             pacer.set_watcher_healthy(True)
-            pacer.notify_change(frozenset({ProjectionDomain.LIFECYCLES}))
+            pacer.notify_change(frozenset({ProjectionDomain.DRIFT}))
             clock[0] = 1
 
             async def cancelled_wait() -> None:
@@ -142,7 +142,7 @@ class PacerHealingTests(unittest.IsolatedAsyncioTestCase):
                 await cancelled_wait()
             clock[0] = 3
             retry = await pacer.wait()
-            self.assertEqual(retry.domains, frozenset({ProjectionDomain.LIFECYCLES}))
+            self.assertEqual(retry.domains, frozenset({ProjectionDomain.DRIFT}))
 
     async def test_two_corpus_sizes_keep_one_change_independent(self) -> None:
         """The ack contract holds at two pending-path volumes (F05/F06 sizing)."""

@@ -14,26 +14,19 @@ from pathlib import Path
 
 from agents_remember.observer import projection as projection_module
 from agents_remember.observer import reducer as reducer_module
-from agents_remember.observer.projection import (
-    LifecycleProjection,
-    Metrics,
-    SeriesNode,
-    WorkspaceProjection,
-)
-from agents_remember.observer.reducer import project_lifecycle, project_workspace
+from agents_remember.observer.projection import Metrics, TaskEntry, WorkspaceProjection
+from agents_remember.observer.reducer import project_workspace
 from agents_remember.observer.reducer_impl._types import WorkspaceStructure
 from agents_remember.serving.projections.projection_store import write_projection
-from test_observer_projection import FRESH, _event, _started
+from test_observer_projection import FRESH
 
 
 class NoComputedCounterTests(unittest.TestCase):
     """The removed fields stay removed; event tokens stay on the event."""
 
     def test_projection_models_carry_no_token_fields(self) -> None:
-        self.assertNotIn("tokens", LifecycleProjection.model_fields)
-        self.assertNotIn("tokenSeries", LifecycleProjection.model_fields)
         self.assertNotIn("totalTokens", Metrics.model_fields)
-        self.assertNotIn("seriesTokenTotal", SeriesNode.model_fields)
+        self.assertNotIn("seriesTokenTotal", TaskEntry.model_fields)
         self.assertNotIn("TokenSample", dir(projection_module))
         self.assertNotIn("token_series", dir(reducer_module))
 
@@ -43,18 +36,6 @@ class NoComputedCounterTests(unittest.TestCase):
         blob = str(schema)
         for name in names:
             self.assertNotIn(name, blob)
-
-    def test_tool_completed_tokens_do_not_fold_into_the_lifecycle(self) -> None:
-        events = [
-            _started(),
-            _event("tool.completed", tokens=1200),
-            _event("tool.completed", tokens=800),
-        ]
-        proj = project_lifecycle(events, now=FRESH)
-        self.assertNotIn("tokens", proj.model_dump())
-        self.assertNotIn("tokenSeries", proj.model_dump())
-        # The event keeps its tokens: the size of that one answer.
-        self.assertEqual(events[1].data["tokens"], 1200)
 
     def test_store_write_over_old_field_file_reads_back_clean(self) -> None:
         # Expected Evidence 2(a) (MIK-R115): a stored projection with the old fields
@@ -75,9 +56,7 @@ class NoComputedCounterTests(unittest.TestCase):
                 ],
             }
             (root / "latest-state.json").write_text(json.dumps(old))
-            logs = [[_started(lifecycle_id="LC1"), _event("tool.completed", tokens=1200)]]
             proj = project_workspace(
-                logs,
                 structure=WorkspaceStructure(enclosures=[], providers=[]),
                 now=FRESH,
             )
@@ -86,21 +65,14 @@ class NoComputedCounterTests(unittest.TestCase):
             read = json.loads(blob)
             for name in ("tokens", "tokenSeries", "totalTokens", "seriesTokenTotal"):
                 self.assertNotIn(name, blob)
-            self.assertEqual(read["lifecycles"][0]["id"], "LC1")
+            self.assertNotIn("lifecycles", read)
 
     def test_workspace_metrics_carry_no_token_total(self) -> None:
-        logs = [
-            [_started(lifecycle_id="LC1"), _event("tool.completed", tokens=1200)],
-            [_started(lifecycle_id="LC2"), _event("tool.completed", tokens=300)],
-        ]
         proj = project_workspace(
-            logs,
             structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
         )
         self.assertNotIn("totalTokens", proj.metrics.model_dump())
-        for lifecycle in proj.lifecycles:
-            self.assertNotIn("tokens", lifecycle.model_dump())
 
 
 if __name__ == "__main__":

@@ -1,11 +1,33 @@
-import type { SeriesNode } from "../../types/projection";
-import { taskDoc } from "./wire";
+import { taskReferenceKey } from "../../data/taskReference";
+import { taskEntry, taskSummary } from './wire';
 
-export const chatSprint = taskDoc({ repository: "repo", docPath: "/tasks/repo/sprint/task.json", kind: "master", orchestrates: ["master"] });
-export const chatMaster = taskDoc({ repository: "repo", docPath: "/tasks/repo/master/task.json", kind: "master", orchestrates: [] });
-export const chatLeaf = taskDoc({ repository: "repo", docPath: "/tasks/repo/master/leaf.json", kind: "subTask", orchestrates: [] });
-export const chatSeries: SeriesNode[] = [{
-  repository: "repo", docPath: "/tasks/repo/master/task.json", createdAt: "2026-01-01", seriesId: "master", title: "Master", status: "inProgress",
-  decisions: [], discardedCount: 0, discardedSubTasks: [], doneCount: 0, objective: "", sections: [], totalCount: 1, abandonedCount: 0,
-  subTasks: [{ file: "leaf.json", number: "1", name: "Leaf", scope: "", status: "inProgress" }],
-}];
+const sprintRef = { repository: 'repo', path: 'sprint/task.json' };
+const masterRef = { repository: 'repo', path: 'master/task.json' };
+const leafRef = { repository: 'repo', path: 'master/leaf.json' };
+export const chatSprint = taskEntry({
+  reference: sprintRef,
+  id: 'SPRINT',
+  title: 'Sprint',
+  summary: taskSummary({ kind: 'master', form: 'sprint', orchestrates: ['master'] }),
+  parent: undefined,
+  children: [taskReferenceKey(masterRef)],
+  worktrees: [],
+});
+export const chatMaster = taskEntry({
+  reference: masterRef,
+  id: 'MASTER',
+  title: 'Master',
+  summary: taskSummary({ kind: 'master', form: 'master', orchestrates: [] }),
+  parent: taskReferenceKey(sprintRef),
+  children: [taskReferenceKey(leafRef)],
+  worktrees: [],
+});
+export const chatLeaf = taskEntry({
+  reference: leafRef,
+  id: 'LEAF',
+  title: 'Leaf',
+  summary: taskSummary({ kind: 'subTask', form: 'task', orchestrates: [] }),
+  parent: taskReferenceKey(masterRef),
+  children: [],
+  worktrees: [],
+});

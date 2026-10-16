@@ -4,7 +4,7 @@ Endpoints:
 
 * ``GET  /api/state``           -- the current projection once (curl-friendly, no streaming).
 * ``GET  /api/stream``          -- one EventSource: an ``event: snapshot`` with the full
-  projection on connect, then per-entity ``state`` deltas (``lifecycle`` / ``enclosure`` /
+  projection on connect, then per-entity ``state`` deltas (``task`` / ``enclosure`` /
   ``provider`` / ``metrics`` / ``analytics`` and their ``*.removed`` markers) fanned out from
   the shared :class:`Projector`.
 * ``GET  /api/events``          -- the raw ``ar-observer-event/v1`` log, tailed with exact
@@ -110,6 +110,7 @@ def _build_serving_runtime(
             change_watcher=ProjectionInputWatcher(config, ledger=ledger)
             if enabled.change_watch
             else None,
+            host_activity_reconcile=collaborators.host_activity_reconcile,
         ),
         ledger=ledger,
     )
@@ -166,7 +167,7 @@ def create_app(
     _register_projection_routes(app, runtime)
     _register_action_routes(app, runtime)
     register_files_routes(app, config)
-    register_changeset_routes(app, config)
+    changeset_cache = register_changeset_routes(app, config)
     register_notes_routes(app, config)
     register_requirements_routes(app, config)
     register_review_routes(
@@ -176,7 +177,7 @@ def create_app(
         collaborators.knowledge_review_entries,
         collaborators.review_source_content,
     )
-    register_review_summary_route(app, collaborators.review_intent_summary)
+    register_review_summary_route(app, collaborators.review_intent_summary, changeset_cache)
     register_review_trees_route(app, collaborators.review_trees)
     register_knowledge_reader_route(app, collaborators.knowledge_reader)
     if collaborators.extra_api_routes is not None:

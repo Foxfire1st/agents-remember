@@ -6,6 +6,7 @@ import type { ReviewTreesResult } from '../../data/reviewTrees';
 import type { TaskChangeset, FileDiff } from '../../data/changeset';
 import { ReviewSurface } from './ReviewSurface';
 import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
+import { dashboardStore } from '../../data/store';
 import { captured, catalogue, selectedMemberId, target, serve } from './l86.test-utils';
 import { treeViewStore } from './triageViewPreference';
 beforeEach(() => {
@@ -14,6 +15,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  dashboardStore.getState().reset();
   vi.unstubAllGlobals();
 });
 const family = captured<ReviewResult>('l86.family.captured.json');
@@ -24,7 +26,7 @@ const lane = captured<{ state: string; comparison: { number: number }; lane: unk
 );
 const changes = captured<TaskChangeset>('l86.changeset.captured.json');
 const diffs = captured<Record<string, FileDiff>>('l86.file-diffs.captured.json');
-const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
 it('F05 main attribution uses the held destination counts and states pending without another read', async () => {
   const { release, asked } = serve(undefined, 'lane');

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { dashboardStore } from '../../data/store';
 import type { CloseoutQueueNode, TaskExecutionGraphView } from '../../types/projection';
 import { DetailPanel } from '../detail-panel/DetailPanel';
-import { seedTaskDocuments, taskDoc } from '../detail-panel/test-utils';
+import { seedTaskEntries, taskEntry, taskReference, taskSummary } from '../detail-panel/test-utils';
 
 const SPRINT_REF = { repository: 'repo-a', path: 'sprint/task.json' };
 
@@ -57,18 +57,28 @@ function queue(over: Partial<CloseoutQueueNode> = {}): CloseoutQueueNode {
 // order as rows of masters by wave, and the wave grid stands whole one link away.
 describe('sprint page shell (L12-R5)', () => {
   it('reaches the graph view from the sprint page and mounts the closeout queue', () => {
-    const sprint = taskDoc({
+    const sprint = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('repo-a/sprint/task.json'),
       id: 'SPRINT',
-      kind: 'master',
       title: 'Sprint',
-      orchestrates: ['master-a'],
-      docPath: '/tasks/repo-a/sprint/task.json',
-      executionGraphView: sprintGraph(),
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'sprint',
+        kind: 'master',
+        orchestrates: ['master-a'],
+        executionGraphView: sprintGraph(),
+      }),
     });
-    seedTaskDocuments([sprint]);
+    seedTaskEntries([sprint]);
     dashboardStore.setState({ closeoutQueues: [queue()] });
 
-    render(<DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />);
+    render(<DetailPanel selectedId="taskdoc:repo-a/sprint/task.json" />);
 
     // the order of the masters is drawn on the page
     expect(screen.getByTestId('order-wave-1').textContent).toContain('Master A');
@@ -82,15 +92,25 @@ describe('sprint page shell (L12-R5)', () => {
   });
 
   it('scopes the queue to the viewed sprint when another sprint has a queue', () => {
-    const sprint = taskDoc({
+    const sprint = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('repo-a/sprint/task.json'),
       id: 'SPRINT',
-      kind: 'master',
       title: 'Sprint',
-      orchestrates: ['master-a'],
-      docPath: '/tasks/repo-a/sprint/task.json',
-      executionGraphView: sprintGraph(),
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'sprint',
+        kind: 'master',
+        orchestrates: ['master-a'],
+        executionGraphView: sprintGraph(),
+      }),
     });
-    seedTaskDocuments([sprint]);
+    seedTaskEntries([sprint]);
     dashboardStore.setState({
       closeoutQueues: [
         queue(),
@@ -101,7 +121,7 @@ describe('sprint page shell (L12-R5)', () => {
       ],
     });
 
-    render(<DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />);
+    render(<DetailPanel selectedId="taskdoc:repo-a/sprint/task.json" />);
 
     expect(screen.getByTestId('closeout-queue')).toBeTruthy();
     expect(screen.getByText('rev 3 · valid-built · active')).toBeTruthy();
@@ -109,18 +129,28 @@ describe('sprint page shell (L12-R5)', () => {
   });
 
   it('keeps a graphless atomic-sequential sprint queue reachable', () => {
-    const sprint = taskDoc({
+    const sprint = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('repo-a/sprint/task.json'),
       id: 'SPRINT',
-      kind: 'master',
       title: 'Graphless sprint',
-      orchestrates: ['master-a'],
-      docPath: '/tasks/repo-a/sprint/task.json',
-      executionGraphView: undefined,
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'sprint',
+        kind: 'master',
+        orchestrates: ['master-a'],
+        executionGraphView: undefined,
+      }),
     });
-    seedTaskDocuments([sprint]);
+    seedTaskEntries([sprint]);
     dashboardStore.setState({ closeoutQueues: [queue()] });
 
-    render(<DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />);
+    render(<DetailPanel selectedId="taskdoc:repo-a/sprint/task.json" />);
 
     expect(screen.queryByTestId('order-rows')).toBeNull();
     expect(screen.queryByTestId('order-graph-link')).toBeNull();
@@ -131,15 +161,25 @@ describe('sprint page shell (L12-R5)', () => {
   it('removes a seeded queue and its mounted sprint view through the canonical reset', () => {
     const staleCandidatePath = 'scenario-a/stale-closeout-candidate.json';
     const staleQueueMetadata = 'rev 731 · valid-built · scenario-a-stale-source';
-    const sprint = taskDoc({
+    const sprint = taskEntry({
+      stage: 'started',
+      stepsDone: 0,
+      stepsTotal: 0,
+      activity: 'works',
+      reference: taskReference('repo-a/sprint/task.json'),
       id: 'SPRINT',
-      kind: 'master',
       title: 'Scenario reset sprint',
-      orchestrates: ['master-a'],
-      docPath: '/tasks/repo-a/sprint/task.json',
-      executionGraphView: sprintGraph(),
+      summary: taskSummary({
+        objective: '',
+        type: '',
+        createdAt: '2026-06-20T09:00:00+00:00',
+        form: 'sprint',
+        kind: 'master',
+        orchestrates: ['master-a'],
+        executionGraphView: sprintGraph(),
+      }),
     });
-    seedTaskDocuments([sprint]);
+    seedTaskEntries([sprint]);
     dashboardStore.setState({
       closeoutQueues: [
         queue({
@@ -160,7 +200,7 @@ describe('sprint page shell (L12-R5)', () => {
       ],
     });
 
-    render(<DetailPanel selectedId="taskdoc:/tasks/repo-a/sprint/task.json" />);
+    render(<DetailPanel selectedId="taskdoc:repo-a/sprint/task.json" />);
 
     expect(dashboardStore.getState().closeoutQueues).toHaveLength(1);
     expect(screen.getByTestId('closeout-queue')).toBeTruthy();

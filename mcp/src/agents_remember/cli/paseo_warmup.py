@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -42,6 +43,7 @@ from agents_remember.cli.paseo_warmup_state import (
     find_warmup_record,
     read_warmup_record,
 )
+from agents_remember.cli.role_activity import publish_receipt_role_agent
 from agents_remember.cli.role_document_chat_tree import _RequestReads, _selection_records
 from agents_remember.cli.role_document_chats import _hosted_agent_id
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -59,13 +61,14 @@ from agents_remember.tasks.document_refs import (
 WARMUP_POLL_SECONDS = 60.0
 
 
-def resume_agent(config: McpRuntimeConfig, agent_id: str) -> None:
+def resume_agent(config: McpRuntimeConfig, agent_id: str, receipt: dict[str, Any]) -> None:
     """Load one agent through the timeline read that is the runtime's resume.
 
     Exactly one bridge command reaches the host: ``"agent-resume"``, which
     refetches one timeline entry and nothing else. A refusal or a resume the
     runtime declines raises with the host's own words for the run to note.
     """
+    publish_receipt_role_agent(config, {**receipt, "agentId": agent_id})
     try:
         reply = bridge_call(config, "agent-resume", {"agentId": agent_id})
     except PaseoBridgeFailure as error:
@@ -163,7 +166,12 @@ def tree_memory_readable(coordination_root: Path) -> bool:
     return True
 
 
-def tree_agent_ids(config: McpRuntimeConfig, live: LiveAgents | None = None) -> list[str]:
+def tree_agent_ids(
+    config: McpRuntimeConfig,
+    live: LiveAgents | None = None,
+    *,
+    receipts: dict[str, dict[str, Any]],
+) -> list[str]:
     """The hosted agent ids of the tree's documents, in tree order, each once.
 
     The same bounded reads the tree route uses: each launch record once within
@@ -185,6 +193,7 @@ def tree_agent_ids(config: McpRuntimeConfig, live: LiveAgents | None = None) -> 
             agent_id = _hosted_agent_id(record)
             if agent_id is not None and agent_id not in agent_ids and agent_id in live.agent_ids:
                 agent_ids.append(agent_id)
+                receipts[agent_id] = record
     return agent_ids
 
 
@@ -305,8 +314,9 @@ def check_host_once(
         _consume_foreign_record(tracker, home, live)
         return None
     try:
+        receipts: dict[str, dict[str, Any]] = {}
         candidates, skipped = collect_warmup_candidates(
-            tree_agent_ids(config, live),
+            tree_agent_ids(config, live, receipts=receipts),
             live.agent_ids,
         )
     except (PaseoBridgeFailure, TaskDocumentRefError, OSError) as error:
@@ -316,17 +326,18 @@ def check_host_once(
             claim.close()
         tracker.note_intake_failure(f"the intake failed and releases its claim: {error}")
         return None
-    return _admit_run(tracker, live, claim, candidates, skipped)
+    run = WarmupRun(server_id=live.server_id, agent_ids=candidates)
+    run.role_receipts = receipts
+    return _admit_run(tracker, live, claim, run, skipped)
 
 
 def _admit_run(
     tracker: WarmupTracker,
     live: LiveAgents,
     claim: WarmupClaim,
-    candidates: list[str],
+    run: WarmupRun,
     skipped: dict[str, str],
 ) -> tuple[WarmupRun, WarmupClaim] | None:
-    run = WarmupRun(server_id=live.server_id, agent_ids=candidates)
     run.skipped.update(skipped)
     run.retain_completed(claim.previous)
     tracker.run = run

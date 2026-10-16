@@ -159,7 +159,11 @@ def _kept_part(data: bytes) -> dict[str, Any] | None:
         return None
     if not isinstance(receipt, dict) or receipt.get("schema") != RECEIPT_SCHEMA:
         return None
-    return _chat_record(receipt)
+    record = _chat_record(receipt)
+    report = receipt.get("report")
+    if record is not None and isinstance(report, dict) and isinstance(report.get("path"), str):
+        record["report"] = {"path": report["path"]}
+    return record
 
 
 def _selection_records(

@@ -472,9 +472,9 @@ def assert_preview_read_only(
 
     `expected_tools` names the tool of each call made between the two states,
     one entry per call; `expected_river_tools` names the tool of each
-    *completed* call (a call that raised has its line but no river event, and
-    a call under an ambient lifecycle has its event in that lifecycle's file,
-    proved separately) and defaults to `expected_tools`. Paths in
+    *completed* call (a call that raised has its line but no river event).
+    The river's completed-call tools are checked separately from log tools;
+    `expected_river_tools` defaults to `expected_tools`. Paths in
     `unchanged_except` are the caller's proved append carve-out (F03: the
     caller asserts their kind and mode itself and proves the byte-append
     separately; the skip then covers only the necessary mtime and digest move

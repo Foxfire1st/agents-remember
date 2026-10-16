@@ -95,9 +95,9 @@ public retry `nextArgs`; execute those bytes rather than reconstructing a call. 
 different argument value refuses. Omission/default replay is not a recovery fallback. This terminal
 retry is not a `worktree_operation_control` action.
 
-`worktree_start` adopts the lifecycle of the new contract and records the
-binding in the configured contract. `worktree_attach` resumes that lifecycle through the proven
-address chain, so the model never passes a lifecycle or operation id.
+`worktree_start` creates the task's worktree and records its location in the configured contract.
+`worktree_attach` resolves that contract through the proven address chain and reports its worktree.
+The landing chain keeps its own lifecycle in the contract.
 
 ## Pre-Worktree Intake
 
