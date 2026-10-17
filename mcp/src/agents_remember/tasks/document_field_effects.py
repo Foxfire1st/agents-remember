@@ -249,6 +249,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
     },
     RouteReviewRecord: {
         "candidateTree": EVIDENCE,
+        "baseCommit": EVIDENCE,
         "verdict": EVIDENCE,
         "verdictRef": EVIDENCE,
         "reviewedAt": EVIDENCE,

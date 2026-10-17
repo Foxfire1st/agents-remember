@@ -576,7 +576,12 @@ R125_ADDRESSED_PARAGRAPHS = (
         "identity), report/verdict path, and the whole next stretch. Use the sibling role and "
         "exact leaf task references from the handover; product-supplied IDs stay whole and "
         "unchanged. A Worker's factual hand-over gives no review instructions, and the Reviewer "
-        "does not read the Worker's chat.",
+        "does not read the Worker's chat. A cleanly synced leaf sends no new freeze to you and "
+        "opens no round: where no path was changed on both sides, the Worker runs its focused "
+        "tests once more and the Manager's closeout preview decides. Where a path was changed "
+        "on both sides, or a focused test fails, the Worker sends exactly that repair for one "
+        "look. When a freeze arrives, check every finding against its entry in the Worker's "
+        "freeze report and return a freeze that lacks the entries, with no round counted.",
     ),
     (
         "review",
@@ -605,10 +610,10 @@ R125_ADDRESSED_PARAGRAPHS = (
 R125_OPERATION_SHA256 = {
     "orientation": "e532ec7587048c7e6b53cf2fe0fa3b78212f5c6fc2431d57e807c1d2296587da",
     "planning": "d6a1c6458d3a67ed54c0bbf0b399066022d8ac094110e5fae4673c5d0bd36f63",
-    "review": "b6f88d3195695321b41c9182d1c837378fb680523f732d21c670ba9f10b95594",
+    "review": "c7ddda94f04ea23c555296fbf8108037598098a17d22cad26613be65de64c317",
     "coordination": "4d0e8fe886c1806091a9355cad05d3d28199bf7b5bd9d1f5d4283c0ee015b2be",
     "recovery": "ae7583596bc9f30d49b5d675e48b5076da2aabca5cf3d992ab97ce438e7607b1",
-    "implementation": "031dcb463d498b130a83c3171f643221a0f3bd58715a3d05b421cb0f007c8047",
+    "implementation": "c3a028dec741ee1edc277bc6ef2841d7e04fe1af529e491ec52bb486abe10b02",
     "bootstrap": "e1235cd05d77c8684df3f9028ade5ac361d725097082a3604ae658b7ae1589bf",
 }
 R125_CLOSEOUT_SHA256 = "baea8d9c29a19b55b3bd58cb8c81382965f4ad5f2d665e42839f2843ef3411f0"

@@ -25,6 +25,7 @@ from agents_remember.worktrees.queue.closeout_queue_errors import (
 from agents_remember.worktrees.queue.closeout_queue_evidence import curator_evidence
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
+    clean_sync_keeps_route_review,
     code_candidate_tree,
     code_change_present,
     require_current_route_review_task_intent,
@@ -224,10 +225,13 @@ def _review_provenance(
             "closeout-door-route-review-blocked",
             f"independent route review blocks this candidate; see {review.verdictRef}",
         )
-    if review.candidateTree != candidate_tree:
+    if review.candidateTree != candidate_tree and not clean_sync_keeps_route_review(
+        contract, review, candidate_tree
+    ):
         raise CloseoutQueueError(
             "closeout-door-route-review-stale",
-            "the canonical route-review record does not match the current candidate tree",
+            "the canonical route-review record covers neither the current candidate tree "
+            "nor a clean sync of it onto that tree",
         )
     try:
         require_current_route_review_task_intent(contract, candidate)

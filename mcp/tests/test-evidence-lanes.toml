@@ -311,6 +311,7 @@ unit-regression = [
   "mcp/tests/test_role_start_set.py",
   "mcp/tests/test_role_step_up.py",
   "mcp/tests/test_route_index_memory_scope.py",
+  "mcp/tests/test_route_review_clean_sync_door.py",
   "mcp/tests/test_semantic_topology_refusals.py",
   "mcp/tests/test_series_refusal_texts.py",
   "mcp/tests/test_serving_owner_accounting.py",

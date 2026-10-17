@@ -565,6 +565,78 @@ class InstructionFileWordingTests(unittest.TestCase):
             with self.subTest(role="architect", sentence=sentence[:40]):
                 self.assertIn(sentence, architect)
 
+    def test_a_clean_sync_keeps_the_review_and_a_repair_stays_visible(self) -> None:
+        """MIK-R170 rules 9, 11, 12 and 13 reach the worker, manager and reviewer capsules."""
+
+        manifest_bytes = (CANONICAL / LIFECYCLE / "composition-manifest.json").read_bytes()
+        manifest = json.loads(manifest_bytes)
+
+        def capsule(role: str, operation: str) -> str:
+            binding = CapsuleBinding(
+                operation=operation,  # type: ignore[arg-type]
+                admitted=CapsuleAdmittedFacts(
+                    task_reference="agents-remember/tasks/demo/task.json",
+                    task_document_digest=compute_content_digest(b'{"id": "demo"}'),
+                    seat=CapsuleRoleSeat(role=role, altitude=manifest["roles"][role]["altitude"]),  # type: ignore[arg-type]
+                    repository_id="agents-remember",
+                    work_branch="fixture",
+                    tool_policy=CapsuleToolPolicy(granted=frozenset(PUBLIC_TOOLS)),
+                ),
+            )
+            outcome = compile_admitted_capsule(
+                binding,
+                routed_admission_for(
+                    CANONICAL / LIFECYCLE,
+                    "composition-manifest.json",
+                    manifest_bytes,
+                    CapsuleSeatAddress(role=role, operation=operation),  # type: ignore[arg-type]
+                ),
+            )
+            self.assertTrue(outcome.ok, outcome.render_explanation())
+            assert outcome.result is not None
+            return " ".join(outcome.result.render_instructions().split())
+
+        required = {
+            ("worker", "implementation"): [
+                # Rule 9: a clean sync keeps the review and opens no round.
+                "When no path was changed on both sides, your focused tests run once more",
+                "no new freeze goes to the Reviewer and no round is begun",
+                # Rule 12: the repair goes ahead of any plan or approval.
+                "no plan, account, census or approval goes ahead of the repair",
+                "the Manager gives no go-ahead for it",
+                # Rule 13: the repair is visible in the freeze.
+                "The freeze report holds one entry per repaired finding",
+                "the test that fails before and passes after",
+            ],
+            ("manager", "coordination"): [
+                # Rule 11: a precedent is settled where it falls.
+                "A matter that an earlier ruling of the same kind settles, you settle by that "
+                "ruling and name it in your record; only a question that no ruling covers goes up",
+                # Rule 9: the Manager decides from the closeout preview, not a new round.
+                "no new freeze goes to the Reviewer and no round is begun",
+                # Rule 12: the Manager gives no go-ahead for a repair.
+                "needs no plan, account or go-ahead from you",
+            ],
+            ("reviewer", "review"): [
+                # Rule 13: each finding is checked against its entry, with no round counted.
+                "check every finding against its entry in the Worker's freeze report",
+                "with no round counted",
+                # Rule 9: a cleanly synced leaf is not sent back for a new freeze.
+                "A cleanly synced leaf sends no new freeze to you and opens no round",
+            ],
+        }
+        for (role, operation), clauses in required.items():
+            text = capsule(role, operation)
+            for clause in clauses:
+                with self.subTest(role=role, clause=clause):
+                    self.assertIn(clause, text)
+            with self.subTest(role=role, told="no cleanly synced freeze is re-sent"):
+                self.assertNotIn("send the new freeze directly to the Reviewer", text)
+                self.assertNotIn("hand the new freeze to the Reviewer", text)
+        brief = " ".join(read(LIFECYCLE / "templates" / "worker-brief.md").split())
+        self.assertIn("no new freeze goes to the Reviewer and no round is begun", brief)
+        self.assertNotIn("hand the new freeze to the Reviewer", brief)
+
     def test_the_workers_report_names_its_agent_id(self) -> None:
         # Where the report of the previous host named the execution, it names the agent.
         implementation = " ".join(read(LIFECYCLE / "operations" / "implementation.md").split())

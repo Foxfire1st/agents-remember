@@ -209,6 +209,10 @@ class RouteReviewRecord(_RouteReviewDoc):
     """Plane-stamped review evidence bound to one exact Git candidate tree."""
 
     candidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    # MIK-R170 rule 10: the code base the plane stamped when this review was recorded.
+    # ``None`` says the record predates the stamp (or is not a leaf record checked at the
+    # door); such a record is admitted exactly as before, by the candidate tree alone.
+    baseCommit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     verdict: RouteReviewVerdict
     verdictRef: str
     reviewedAt: str

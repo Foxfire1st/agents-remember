@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 from agents_remember.application.knowledge_worklist import ExplicitSides, worklist_for_sides
-from agents_remember.application.knowledge_writer import WriteRequest
+from agents_remember.application.knowledge_writer import Owner, WriteRequest
+from agents_remember.application.knowledge_writer import write_knowledge as native_write_knowledge
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.history import InvariantRow
@@ -285,6 +286,97 @@ def test_reached_family_guarantee_change_needs_changed_row(
     assert "name the `changed` row again" in report.render()
 
 
+def _other_leaf_write(world: World, document: dict[str, Any]):
+    return native_write_knowledge(
+        prepare_worklist(
+            WriteRequest(
+                world.memory,
+                world.code,
+                Owner(task=OWNER.task, kind="leaf", id="260928-MIK-L98"),
+                "notes/other-leaf.json",
+                document,
+                commit=True,
+            )
+        )
+    )
+
+
+def test_existing_own_leaf_row_renews_after_anchor_moves_without_worklist_item(
+    tmp_path: Path,
+) -> None:
+    world = build_world(tmp_path)
+    authored = run(
+        world,
+        [entry("A1", scope=SCOPE, admission=ADMISSION, target=[target("Helper.check")])],
+    )
+    assert authored.state == "written", authored.render()
+    subject = authored.records[0].id
+    realization = authored.entries[0].id
+    eligible = prepare_worklist(
+        WriteRequest(world.memory, world.code, OWNER, "notes/handoff.json", {})
+    ).worklist
+    assert eligible is not None
+    first = run(
+        world,
+        {
+            "history": [
+                {
+                    "subject": subject,
+                    "disposition": "extended",
+                    "reason": "The new realization is recorded.",
+                    "covers": [{"handoff": "A1"}],
+                }
+            ]
+        },
+        worklist=eligible,
+    )
+    assert first.state == "written", first.render()
+    history_path = first.rows[0].history
+    original_history = (world.memory / history_path).read_bytes()
+    original_row = next(
+        row for row in read_json(world.memory, history_path)["rows"] if row["subject"] == subject
+    )
+    commit_all(world.memory, "paired base already holds the own-leaf row")
+    write(world.code, {CODE_FILE: "# shifted by the incoming code\n" + CODE})
+    carried = _other_leaf_write(world, {})
+    assert carried.state == "written", carried.render()
+    assert "R09-history-rows" in carried.render()
+    assert (world.memory / history_path).read_bytes() == original_history
+    current = CodeSnapshot.capture(world.code).resolve(
+        CODE_FILE, {"kind": "symbol", "name": "Helper.check"}
+    )
+    expected_after = {**current.to_document(), "path": CODE_FILE}
+    assert original_row["covers"][0]["after"] != expected_after
+    persisted = prepare_worklist(
+        WriteRequest(world.memory, world.code, OWNER, "notes/handoff.json", {})
+    ).worklist
+    assert persisted is not None
+    assert all(
+        item.get("subject") not in {subject, f"membership:{subject}"} for item in persisted["items"]
+    )
+    renewal = {
+        "history": [
+            {
+                "subject": subject,
+                "disposition": "moved",
+                "reason": "Renew the same row at the current after anchor.",
+                "covers": [realization],
+            }
+        ]
+    }
+    renewed = run(world, renewal, worklist=persisted)
+    assert renewed.state == "written", renewed.render()
+    assert renewed.rows[0].id == first.rows[0].id
+    history = read_json(world.memory, history_path)
+    (row,) = [row for row in history["rows"] if row["subject"] == subject]
+    assert row["id"] == original_row["id"]
+    assert row["covers"][0]["after"] == expected_after
+    assert "R09-history-rows" not in renewed.render()
+    written = tree_bytes(world.memory)
+    assert run(world, renewal, worklist=persisted).state == "written"
+    assert tree_bytes(world.memory) == written
+
+
 @pytest.mark.parametrize("subject", ["literal", "handoff:A1", "A1"])
 def test_record_first_authored_in_leaf_needs_no_itemless_row(tmp_path: Path, subject: str) -> None:
     world = build_world(tmp_path)
@@ -301,6 +393,21 @@ def test_record_first_authored_in_leaf_needs_no_itemless_row(tmp_path: Path, sub
             "reason": "Judged.",
         }
     ]
+    foreign = _other_leaf_write(
+        world,
+        {
+            "history": [
+                {
+                    "subject": authored.records[0].id,
+                    "disposition": "no_impact",
+                    "reason": "Another leaf's history cannot authorize a new own-leaf row.",
+                }
+            ]
+        },
+    )
+    assert foreign.state == "written", foreign.render()
+    assert foreign.rows[0].subject == authored.records[0].id
+    assert not (world.memory / f"knowledge/history/{LEAF_ID}.json").exists()
     before = tree_bytes(world.memory)
     for entries in ([], [entry("A1", scope=SCOPE, admission=ADMISSION)]):
         report = run(world, {"entries": entries, "history": history}, worklist=held)

@@ -39,7 +39,7 @@ The Manager handles ownership or authority, agent starts or replacements, beyond
 
 Count a hand-over as taken and handle provider, seat and busy refusals as `../operations/implementation.md` §Boundaries states.
 
-When the master line moves, run the supported sync of your own leaf as `../operations/implementation.md` §Boundaries states; request that step alone from the Manager and do not take its closeout, integration, status or acceptance writes.
+When the master line moves, run the supported sync of your own leaf as `../operations/implementation.md` §Boundaries states; request that step alone from the Manager and do not take its closeout, integration, status or acceptance writes. A sealed finding in this task's own files is repaired directly in your worktree: no plan, account, census or approval goes ahead of the repair, and the Manager gives no go-ahead for it. The freeze report carries one entry per repaired finding, with its failing-before and passing-after test, as `../operations/implementation.md` §Outputs states.
 
 ## Where your stage ends
 

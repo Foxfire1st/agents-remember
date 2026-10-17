@@ -224,21 +224,40 @@ def run_git(
     """
 
     settings = options or GitRunnerOptions()
+    return _run_git(repo_root, args, _git_run(settings, repo_root))
+
+
+def run_git_bytes(
+    repo_root: Path,
+    args: list[str],
+    options: GitRunnerOptions | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run ``git args`` and return Git's exact output bytes, never a decoded string.
+
+    A read that compares Git's own bytes -- a ``-z`` pathname enumeration above all -- must not
+    pass through the text transport: ``text=True`` decodes with universal newlines, so a pathname
+    holding CR is rewritten to LF and two distinct pathnames become one. This form keeps every
+    byte the child wrote, so a NUL-delimited record's path is the identity Git gave it.
+    """
+
+    settings = options or GitRunnerOptions()
+    return _run_git(repo_root, args, _git_run(settings, repo_root), raw_output=True)
+
+
+def _git_run(settings: GitRunnerOptions, repo_root: Path) -> _GitRun:
+    """How one observed command runs: its sanitized environment, identity and aim."""
+
     environment = git_environment()
     for name, value in (settings.identity or {}).items():
         if name in GIT_REPOSITORY_SELECTOR_ENV:
             raise ValueError(f"{name} is a Git repository selector and cannot be set as identity")
         environment[name] = value
-    return _run_git(
-        repo_root,
-        args,
-        _GitRun(
-            work_dir=repo_root if settings.work_dir is None else settings.work_dir,
-            input_text=settings.input_text,
-            timeout=settings.timeout,
-            environment=environment,
-            new_session=settings.new_session,
-        ),
+    return _GitRun(
+        work_dir=repo_root if settings.work_dir is None else settings.work_dir,
+        input_text=settings.input_text,
+        timeout=settings.timeout,
+        environment=environment,
+        new_session=settings.new_session,
     )
 
 

@@ -79,10 +79,22 @@ def _require_detail_target(receipt: dict[str, Any], reference: dict[str, Any], p
         not isinstance(report.get(key), str) or not report[key] for key in ("path", "canonicalPath")
     ):
         raise _detail_refusal(reference, "the saved report has no path and canonical target")
+    artifact = receipt.get("handoverArtifact")
+    if not isinstance(artifact, dict) or any(
+        not isinstance(artifact.get(key), str) or not artifact[key]
+        for key in ("path", "canonicalPath")
+    ):
+        raise _detail_refusal(reference, "the saved handover has no path and canonical target")
     source_hash = hashlib.sha256(reference["sourcePath"].encode("utf-8")).hexdigest()
     given_report = Path(report["path"])
+    given_artifact = given_report.with_suffix(".handover.txt")
+    if (
+        Path(artifact["path"]) != given_artifact
+        or Path(artifact["canonicalPath"]).name != given_artifact.name
+    ):
+        raise _detail_refusal(reference, "the saved handover is not beside its report")
     name = f"{given_report.stem}.detail-{source_hash}.md"
-    expected = Path(report["canonicalPath"]).with_name(name)
+    expected = Path(artifact["canonicalPath"]).with_name(name)
     if path != given_report.with_name(name) or path.parent.resolve() / path.name != expected:
         raise _detail_refusal(
             reference, f"the path no longer names its canonical target {expected}"

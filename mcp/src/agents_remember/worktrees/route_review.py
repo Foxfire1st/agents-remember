@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from agents_remember.errors import TaskIntentError
+from agents_remember.kernel.git_command import run_git_bytes
 from agents_remember.models.lifecycles.evidence_dependencies import (
     EVIDENCE_DEPENDENCY_VALIDATOR,
     EvidenceDependencyError,
@@ -29,7 +30,7 @@ from agents_remember.tasks.task_intent import (
     require_current_task_intent,
     task_intent_identity,
 )
-from agents_remember.worktrees.modules.git import require_git, worktree_candidate_tree
+from agents_remember.worktrees.modules.git import is_ancestor, require_git, worktree_candidate_tree
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -299,6 +300,67 @@ def code_change_present(contract: WorktreeContract) -> bool:
     return candidate != base_tree
 
 
+def clean_sync_keeps_route_review(
+    contract: WorktreeContract,
+    review: RouteReviewRecord,
+    candidate_tree: str,
+) -> bool:
+    """Whether a recorded review still covers the candidate after a clean sync (MIK-R170 r10).
+
+    The three conditions are the rule's own: the base the review was recorded on is an
+    ancestor of the current base; no path the review changed was changed by the incoming
+    line; and the current tree is the current base with exactly the reviewed change on it,
+    path for path and with the same blobs and modes. Anything else -- including a record
+    written before the base stamp existed -- is no admission from this helper.
+    """
+
+    recorded_base = review.baseCommit
+    current_base = contract.code_base_commit
+    if recorded_base is None or not current_base:
+        return False
+    repository = contract.code_repo_path
+    if not is_ancestor(repository, recorded_base, current_base):
+        return False
+    reviewed = _tree_change_after_images(repository, recorded_base, review.candidateTree)
+    incoming = _tree_change_after_images(repository, recorded_base, current_base)
+    if set(reviewed) & set(incoming):
+        return False
+    current = _tree_change_after_images(repository, current_base, candidate_tree)
+    return current == reviewed
+
+
+def _tree_change_after_images(
+    repository: Path, before: str, after: str
+) -> dict[bytes, tuple[str, str]]:
+    """Each changed path of one exact tree read, keyed by its exact Git pathname bytes.
+
+    The record is read with :func:`run_git_bytes`: a text transport decodes with universal
+    newlines, so a pathname holding CR would arrive as LF and two distinct paths would share
+    one key (MIK-R170 rule 10 requires the exact pathname).
+    """
+
+    result = run_git_bytes(
+        repository,
+        ["diff-tree", "-r", "-z", "--no-commit-id", "--no-renames", before, after],
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip() or (
+            f"git diff-tree {before} {after} failed"
+        )
+        raise RuntimeError(detail)
+    records = [record for record in result.stdout.split(b"\0") if record]
+    if len(records) % 2:
+        raise RuntimeError(f"git diff-tree {before} {after} returned a partial record")
+    changes: dict[bytes, tuple[str, str]] = {}
+    for index in range(0, len(records), 2):
+        header, path = records[index], records[index + 1]
+        fields = header.removeprefix(b":").split(b" ")
+        if len(fields) != 5:
+            raise RuntimeError(f"git diff-tree returned an unexpected record for {path!r}")
+        changes[path] = (fields[1].decode("ascii"), fields[3].decode("ascii"))
+    return changes
+
+
 def build_route_review(
     contract: WorktreeContract,
     candidate: ResolvedTaskDocument,
@@ -345,6 +407,10 @@ def build_route_review(
             "taskIntent": intent.model_dump(mode="json", by_alias=True),
             "dependencies": dependencies.model_dump(mode="json"),
         }
+        if contract.kind == "leaf" and contract.code_base_commit:
+            # MIK-R170 rule 10: the plane records the base this leaf review was made on,
+            # so the closeout door can tell a clean sync from a changed candidate later.
+            record_payload["baseCommit"] = contract.code_base_commit
         record_payload["recordDigest"] = canonical_sha256(record_payload)
         record = RouteReviewRecord.model_validate(record_payload)
     except (EvidenceDependencyError, TaskIntentError, ValidationError) as exc:

@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from agents_remember.models.knowledge_files.canonical import CanonicalFormatError
+from agents_remember.models.knowledge_files.documents import (
+    owner_history_attempt,
+    parse_history_document,
+)
 from agents_remember.models.knowledge_files.history import (
     FamilyRow,
     InvariantRow,
@@ -122,19 +127,39 @@ def _subject_problems(
                     f"{subject}: it answers no item of the leaf's worklist; {RECOMPUTE}",
                 )
             )
+    prior_subjects = _prior_own_subjects(operation)
     for row in operation.rows:
         subject = row.subject
         if row.disposition == "raise":
             continue
         found = operation.state.record(subject)
         origin = found[2].get("origin", {}) if found else {}
-        if origin.get("leaf") == operation.owner.id and subject not in subjects:
+        if (
+            origin.get("leaf") == operation.owner.id
+            and subject not in subjects
+            and subject not in prior_subjects
+        ):
             problems.append(
                 Problem(
                     subject, "a record first authored in this leaf needs no row (MIK-R07 rule 6)"
                 )
             )
     return problems
+
+
+def _prior_own_subjects(operation: Authoring) -> set[str]:
+    """Subjects already held before authoring, never rows just added by this operation."""
+    subjects: set[str] = set()
+    for path, raw in operation.state.files.items():
+        if owner_history_attempt(path, operation.owner.id) is None:
+            continue
+        try:
+            history = parse_history_document(path, raw.decode("utf-8"))
+        except (UnicodeDecodeError, CanonicalFormatError, ValueError):
+            continue  # malformed history grants no admission; normal validation reports it
+        if history.owner_kind == "leaf" and history.owner_id == operation.owner.id:
+            subjects.update(row.subject for row in history.rows)
+    return subjects
 
 
 def _judgment_problems(operation: Authoring, items: list[Any]) -> list[Problem]:

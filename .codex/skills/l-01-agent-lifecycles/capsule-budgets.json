@@ -68,40 +68,40 @@
       "budget_words": 1975
     },
     "manager/orientation": {
-      "size_words": 2809,
-      "budget_words": 3090
+      "size_words": 2972,
+      "budget_words": 3270
     },
     "manager/review": {
-      "size_words": 2430,
-      "budget_words": 2673
+      "size_words": 2593,
+      "budget_words": 2853
     },
     "manager/curation": {
-      "size_words": 2760,
-      "budget_words": 3036
+      "size_words": 2923,
+      "budget_words": 3216
     },
     "manager/coordination": {
-      "size_words": 3476,
+      "size_words": 3639,
       "budget_words": 3700
     },
     "manager/authorized-closeout": {
-      "size_words": 2043,
-      "budget_words": 2248
+      "size_words": 2206,
+      "budget_words": 2427
     },
     "manager/recovery": {
-      "size_words": 2136,
-      "budget_words": 2350
+      "size_words": 2299,
+      "budget_words": 2529
     },
     "worker/orientation": {
-      "size_words": 2366,
-      "budget_words": 2603
+      "size_words": 2418,
+      "budget_words": 2660
     },
     "worker/implementation": {
-      "size_words": 2081,
-      "budget_words": 2290
+      "size_words": 2285,
+      "budget_words": 2514
     },
     "worker/recovery": {
-      "size_words": 1693,
-      "budget_words": 1863
+      "size_words": 1745,
+      "budget_words": 1920
     },
     "curator/orientation": {
       "size_words": 3132,
@@ -120,7 +120,7 @@
       "budget_words": 3700
     },
     "reviewer/review": {
-      "size_words": 3562,
+      "size_words": 3647,
       "budget_words": 3700
     },
     "reviewer/recovery": {
@@ -542,6 +542,54 @@
           "size_words": 2135,
           "budget_words": 2349
         }
+      }
+    }
+  },
+  "decisions_L170": {
+    "authority": "MIK-R170 rules 9, 11, 12, 13 and 14; MIK-R125 capped eleven-tenths rule",
+    "capsule_ceiling": 3700,
+    "measurement": "post-edit sizes compiled from canonical texts with the shipped compiler (compiled_size in test_role_capsule_budgets.py); task data and seals excluded",
+    "reason": "The clean sync keeps the review, a precedent is settled where it falls, a Worker repairs a finding at once, and the repair stays visible to the Reviewer and the Curator. Every measured capsule remains within the 3700-word ceiling.",
+    "changes": {
+      "manager/orientation": {
+        "size_words": 2972,
+        "budget_words": 3270
+      },
+      "manager/review": {
+        "size_words": 2593,
+        "budget_words": 2853
+      },
+      "manager/curation": {
+        "size_words": 2923,
+        "budget_words": 3216
+      },
+      "manager/coordination": {
+        "size_words": 3639,
+        "budget_words": 3700
+      },
+      "manager/authorized-closeout": {
+        "size_words": 2206,
+        "budget_words": 2427
+      },
+      "manager/recovery": {
+        "size_words": 2299,
+        "budget_words": 2529
+      },
+      "worker/orientation": {
+        "size_words": 2418,
+        "budget_words": 2660
+      },
+      "worker/implementation": {
+        "size_words": 2285,
+        "budget_words": 2514
+      },
+      "worker/recovery": {
+        "size_words": 1745,
+        "budget_words": 1920
+      },
+      "reviewer/review": {
+        "size_words": 3647,
+        "budget_words": 3700
       }
     }
   }

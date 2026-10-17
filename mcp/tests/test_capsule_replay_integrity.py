@@ -7,11 +7,18 @@ import os
 import shutil
 import uuid
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
-from agents_remember.cli import role_held_messages, role_instruction_details, role_launch_receipts
+import test_role_instruction_wording as wording
+from agents_remember.cli import (
+    role_held_messages,
+    role_instruction_details,
+    role_launch_preparation,
+    role_launch_receipts,
+)
 from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.types import (
@@ -19,6 +26,101 @@ from agents_remember.models.role_capsules.types import (
     compute_content_digest,
 )
 from agents_remember.serving.capsule_delivery import CapsuleBindingIdentity, CapsuleDelivery
+from agents_remember.tasks import write_task_doc
+
+
+@pytest.fixture
+def leaf_preparation(monkeypatch: pytest.MonkeyPatch):
+    entry_compiler = role_launch_preparation.compile_launch_capsule
+    fixture = wording.HandoverTextWordingTests()
+    fixture.setUp()
+
+    def capsule_with_worker_detail(config, request, *, operation):
+        capsule = fixture.role_capsule(config, request, operation=operation)
+        if request.role != "worker":
+            return capsule
+        # The shipped implementation capsule has no details; supply one at the compiler seam
+        # so preparation and replay also protect a Worker capsule when it does carry details.
+        detail = CapsuleDetailReference(
+            "reference/worker-fixture.md",
+            compute_content_digest(b"Frozen Worker detail.\n"),
+            b"Frozen Worker detail.\n",
+            "when building",
+        )
+        delivery = capsule.delivery
+        assert delivery is not None
+        return replace(
+            capsule,
+            delivery=replace(
+                delivery,
+                trusted_instructions=delivery.trusted_instructions
+                + "\nRead {{detail:reference/worker-fixture.md}}.",
+                semantic_digest=compute_content_digest(detail.content),
+                detail_references=(*delivery.detail_references, detail),
+            ),
+        )
+
+    try:
+        # Unwind these overrides before the unittest fixture restores its own patches.
+        with monkeypatch.context() as overrides:
+            overrides.setattr(role_launch_preparation, "_role_defaults", lambda *_: ({}, ()))
+            overrides.setattr(
+                role_launch_preparation, "resolve_agent_selection", lambda *_: ("fixture", {})
+            )
+            overrides.setattr(
+                role_launch_preparation, "provider_accepts_tool_servers", lambda *_: True
+            )
+            overrides.setattr(
+                role_launch_preparation, "compile_launch_capsule", capsule_with_worker_detail
+            )
+            yield fixture
+    finally:
+        fixture.doCleanups()
+        assert role_launch_preparation.compile_launch_capsule is entry_compiler
+
+
+@pytest.mark.parametrize("role", ["worker", "reviewer", "curator"])
+def test_real_leaf_preparation_restores_details_beside_local_handover(
+    leaf_preparation, monkeypatch: pytest.MonkeyPatch, role: str
+) -> None:
+    context, workspace = leaf_preparation.launch_of(role)
+    assert context.task is not None
+    write_task_doc(context.task.path.parent, context.task.document)
+    monkeypatch.setattr(role_launch_preparation, "_resolve_workspace", lambda *_: workspace)
+    request_id = uuid.uuid4()
+    prepared = role_launch_preparation.prepare_role_handover(
+        leaf_preparation.config, context, agent_override=None, request_id=request_id
+    )
+    compiled = prepared.handover
+    report = compiled["taskReportPath"]
+    artifact = write_handover_artifact(report, compiled["prompt"])
+    opening = first_message(artifact, compiled["prompt"])
+    receipt = {
+        "instructionComposition": compiled["instructionComposition"],
+        "report": {"path": report, "canonicalPath": compiled["canonicalTaskReportPath"]},
+        "handoverArtifact": artifact,
+        "workspace": prepared.workspace,
+    }
+    access = Path(workspace["path"]) / "role-reports"
+    assert access.is_dir() and not access.is_symlink()
+    assert Path(artifact["canonicalPath"]).parent == Path(report).parent.resolve()
+    assert Path(report).parent.resolve() != Path(receipt["report"]["canonicalPath"]).parent
+    references = receipt["instructionComposition"]["detailReferences"]
+    assert references, f"The {role} capsule must actually exercise frozen details"
+    frozen = {reference["path"]: Path(reference["path"]).read_bytes() for reference in references}
+    for reference in references:
+        assert Path(reference["path"]).parent == Path(report).parent
+        assert reference["path"] in compiled["prompt"]
+    receipt_path = Path(workspace["scratchRoot"]) / "receipt.json"
+    _validate(receipt)
+    Path(artifact["path"]).unlink()
+    role_launch_receipts._restore_launch_handover(
+        receipt_path, receipt, {"agent": {"prompt": opening}}
+    )
+    assert Path(artifact["path"]).read_text() == compiled["prompt"]
+    assert {path: Path(path).read_bytes() for path in frozen} == frozen
+    held = {**receipt, "heldSeat": True, "heldOpeningPrompt": opening}
+    role_launch_receipts._restore_launch_handover(receipt_path, held, {})
 
 
 def _frozen_receipt(report: Path) -> dict[str, Any]:
@@ -40,6 +142,7 @@ def _frozen_receipt(report: Path) -> dict[str, Any]:
     return {
         "instructionComposition": record,
         "report": {"path": str(report), "canonicalPath": str(report.resolve())},
+        "handoverArtifact": write_handover_artifact(str(report), instructions),
         "savedInstructions": instructions,
     }
 
@@ -93,7 +196,7 @@ def test_replay_refuses_a_rebound_report_folder_even_when_detail_bytes_are_uncha
 ) -> None:
     original = tmp_path / "original-reports"
     original.mkdir()
-    access = tmp_path / "report-access"
+    access = tmp_path / role_launch_receipts.REPORT_ACCESS_LINK
     access.symlink_to(original, target_is_directory=True)
     receipt = _frozen_receipt(access / "request.md")
     _validate(receipt)
@@ -106,6 +209,18 @@ def test_replay_refuses_a_rebound_report_folder_even_when_detail_bytes_are_uncha
     access.unlink()
     access.symlink_to(original, target_is_directory=True)
     _validate(receipt)
+    receipt["workspace"] = {
+        "path": str(tmp_path),
+        "taskReportAccessRoot": str(access),
+        "taskReportRoot": str(original),
+    }
+    opening = first_message(receipt["handoverArtifact"], receipt["savedInstructions"])
+    access.unlink()
+    role_launch_receipts._restore_launch_handover(
+        tmp_path / "receipt.json", receipt, {"agent": {"prompt": opening}}
+    )
+    assert access.is_symlink() and access.resolve() == original
+    _validate(receipt)
 
 
 def test_replay_refuses_incomplete_detail_references_instead_of_skipping_them(
@@ -117,6 +232,23 @@ def test_replay_refuses_incomplete_detail_references_instead_of_skipping_them(
         damaged = deepcopy(receipt)
         damaged["instructionComposition"]["detailReferences"] = malformed
         with pytest.raises(ValueError, match="frozen instruction detail"):
+            _validate(damaged)
+    for changed in (
+        {"sourcePath": "reference/different.md"},
+        {"path": str(tmp_path / "copied-detail.md")},
+    ):
+        damaged = deepcopy(receipt)
+        damaged["instructionComposition"]["detailReferences"] = [{**valid, **changed}]
+        with pytest.raises(ValueError, match="canonical target"):
+            _validate(damaged)
+    for artifact in (
+        None,
+        {},
+        {**receipt["handoverArtifact"], "path": str(tmp_path / "other.txt")},
+        {**receipt["handoverArtifact"], "canonicalPath": str(tmp_path / "other.txt")},
+    ):
+        damaged = {**receipt, "handoverArtifact": artifact}
+        with pytest.raises(ValueError, match="saved handover"):
             _validate(damaged)
     _validate({})
     _validate({"instructionComposition": {}})

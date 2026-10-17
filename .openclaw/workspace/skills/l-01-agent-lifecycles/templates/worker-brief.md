@@ -35,8 +35,11 @@ You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Yo
 - Read-only AR retrieval: `read_ar_files` (names the governing cards in the repositories of
   your scope — the leaf worktrees under task scope, the official checkouts otherwise;
   final verification uses native reads), `context_packet`.
-- When the master line moves, run the supported `worktree_sync` for your own leaf and hand the new
-  freeze to the Reviewer. Send memory conflicts directly to the Curator; ask the Manager only for a
+- When the master line moves, run the supported `worktree_sync` for your own leaf. Where no path was
+  changed on both sides, run the leaf's focused tests once more and tell the Manager; no new freeze
+  goes to the Reviewer and no round is begun. Where a path was changed on both sides, or a focused
+  test fails, repair exactly that and send the same Reviewer one look at the repair. Send memory
+  conflicts directly to the Curator; ask the Manager only for a
   step the sync contract reserves to it. For a native memory-file conflict, the Curator repairs content; the Manager captures, verifies and stages it, then the Worker continues `worktree_sync` on `agents-remember-task` with the exact contract and `resolution_action="continue"`. No other `worktree_*`, `lifecycle_finalize_task`, `task_doc`,
   `memory_*`, or `route_index_refresh` —
   generated route indexes are regenerated with a local `build_route_indexes(...)` from the memory
