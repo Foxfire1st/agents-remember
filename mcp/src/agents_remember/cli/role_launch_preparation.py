@@ -751,10 +751,9 @@ def _compile_handover(
                     "running turn's own; detail says which. Do not wait on an agent that may be "
                     "waiting on you: two agents that wait on each other both stand still until "
                     "one wait runs out. A message another agent sent you begins with a line "
-                    '"From <role> · <task> · agent <agent id>": your reply in that turn, in '
-                    "your own chat, is what the sender receives, so answer the message there; "
-                    f"send {ROLE_MESSAGE_TOOL} to that agent id only for a message of your own. "
-                    "A refusal names its "
+                    '"From <role> · <task> · agent <agent id>": your reply in that turn '
+                    "reaches the sender only when it waits on its own call; otherwise answer "
+                    f"with {ROLE_MESSAGE_TOOL} to that agent id. A refusal names its "
                     "reason: act on that reason, never guess a recipient, and never start a "
                     "second agent for an uncertain result. Do not create or message role agents "
                     "with any other tool: an agent created another way has no capsule and no "

@@ -131,7 +131,7 @@ STAGE_PARTS = {
         "the report is with the Reviewer",
         "you repair, and you go on",
         "Your report names what you repaired",
-        "says in its last line what it waits for and from whom",
+        "sends what it waits for, and from whom, to its parent with `role_message`",
         "the same Reviewer checks it on the round it last recorded, with no new round",
         *STOPS,
     ),
@@ -140,7 +140,7 @@ STAGE_PARTS = {
         "with its findings and its coverage",
         "you repair, and you go on",
         "Your verdict names what you repaired",
-        "says in its last line what it waits for and from whom",
+        "sends what it waits for, and from whom, to its parent with `role_message`",
         "check the repaired record on the round you last recorded",
         "byte for byte",
         *STOPS,
@@ -150,7 +150,7 @@ STAGE_PARTS = {
         "the quality check is clean",
         "you repair, and you go on",
         "Your report names what you repaired",
-        "says in its last line what it waits for and from whom",
+        "sends what it waits for, and from whom, to its parent with `role_message`",
         *STOPS,
     ),
     "manager": (
@@ -158,7 +158,7 @@ STAGE_PARTS = {
         "the sync to the master's line",
         "you repair, and you go on",
         "Your report names what you repaired",
-        "says in its last line what it waits for and from whom",
+        "sends what it waits for, and from whom, to its parent with `role_message`",
         *STOPS,
     ),
 }
@@ -168,7 +168,7 @@ REVIEWER_STAGE_EQUIVALENTS = {
     "Your stage ends when a verdict over the whole requirement": "Your stage ends at a recorded verdict covering the whole requirement",
     "with its findings and its coverage": "its findings and coverage",
     "you repair, and you go on": "Repair faults from your work or instrument and continue",
-    "says in its last line what it waits for and from whom": "If your stage is unfinished at turn end, state what and whom you await in your last line",
+    "sends what it waits for, and from whom, to its parent with `role_message`": "send what and whom you await to your parent with `role_message`",
     "You stop for an open permission prompt": "Stop for open permission prompts",
     "a refusal by a product guard": "product-guard/AR-tool refusals with correct input or naming unowned state",
     "a question about what the requirement means": "requirement-meaning questions",
@@ -177,9 +177,9 @@ REVIEWER_STAGE_EQUIVALENTS = {
 
 
 CURATOR_STAGE_EQUIVALENTS = {
-    "you repair, and you go on": "Repair faults your work or instrument causes, then continue",
+    "you repair, and you go on": "Repair faults your work or instrument causes:",
     "Your report names what you repaired": "Report your repairs.",
-    "says in its last line what it waits for and from whom": "If unfinished, end your turn with the awaited thing and its owner.",
+    "sends what it waits for, and from whom, to its parent with `role_message`": "send what you await and from whom to your parent with `role_message`",
     "a refusal by a product guard": "a product-guard or AR-tool refusal with correct input or unowned state",
     "a question about what the requirement means": "a requirement-meaning question",
     "an effect outside your own worktree": "effects outside your worktree, scratch folder and task",

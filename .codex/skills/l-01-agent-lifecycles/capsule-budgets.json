@@ -4,8 +4,8 @@
   "how": "budget = min(ceil(size_words * 11 / 10), ceiling); ceilings = 3700 capsule / 2500 step file; capsule size = whitespace-split words of render_instructions(), task data and seals excluded; step size = complete declared source",
   "capsules": {
     "architect/orientation": {
-      "size_words": 2833,
-      "budget_words": 3117
+      "size_words": 2844,
+      "budget_words": 3129
     },
     "architect/planning": {
       "size_words": 2195,
@@ -28,8 +28,8 @@
       "budget_words": 2376
     },
     "orchestrator/orientation": {
-      "size_words": 2213,
-      "budget_words": 2435
+      "size_words": 2224,
+      "budget_words": 2447
     },
     "orchestrator/planning": {
       "size_words": 1542,
@@ -52,92 +52,92 @@
       "budget_words": 1694
     },
     "designer/orientation": {
-      "size_words": 2288,
-      "budget_words": 2517
+      "size_words": 2299,
+      "budget_words": 2529
     },
     "designer/planning": {
       "size_words": 1617,
       "budget_words": 1779
     },
     "strategist/orientation": {
-      "size_words": 2466,
-      "budget_words": 2713
+      "size_words": 2477,
+      "budget_words": 2725
     },
     "strategist/planning": {
       "size_words": 1795,
       "budget_words": 1975
     },
     "manager/orientation": {
-      "size_words": 2972,
-      "budget_words": 3270
+      "size_words": 2986,
+      "budget_words": 3285
     },
     "manager/review": {
-      "size_words": 2593,
-      "budget_words": 2853
+      "size_words": 2596,
+      "budget_words": 2856
     },
     "manager/curation": {
-      "size_words": 2923,
-      "budget_words": 3216
+      "size_words": 2926,
+      "budget_words": 3219
     },
     "manager/coordination": {
-      "size_words": 3639,
+      "size_words": 3642,
       "budget_words": 3700
     },
     "manager/authorized-closeout": {
-      "size_words": 2206,
-      "budget_words": 2427
+      "size_words": 2209,
+      "budget_words": 2430
     },
     "manager/recovery": {
-      "size_words": 2299,
-      "budget_words": 2529
+      "size_words": 2302,
+      "budget_words": 2533
     },
     "worker/orientation": {
-      "size_words": 2418,
-      "budget_words": 2660
+      "size_words": 2432,
+      "budget_words": 2676
     },
     "worker/implementation": {
-      "size_words": 2285,
-      "budget_words": 2514
+      "size_words": 2288,
+      "budget_words": 2517
     },
     "worker/recovery": {
-      "size_words": 1745,
-      "budget_words": 1920
+      "size_words": 1748,
+      "budget_words": 1923
     },
     "curator/orientation": {
-      "size_words": 3132,
-      "budget_words": 3446
+      "size_words": 3142,
+      "budget_words": 3457
     },
     "curator/curation": {
-      "size_words": 3699,
+      "size_words": 3698,
       "budget_words": 3700
     },
     "curator/recovery": {
-      "size_words": 2459,
-      "budget_words": 2705
+      "size_words": 2458,
+      "budget_words": 2704
     },
     "reviewer/orientation": {
-      "size_words": 3682,
+      "size_words": 3696,
       "budget_words": 3700
     },
     "reviewer/review": {
-      "size_words": 3647,
+      "size_words": 3650,
       "budget_words": 3700
     },
     "reviewer/recovery": {
-      "size_words": 3009,
-      "budget_words": 3310
+      "size_words": 3012,
+      "budget_words": 3314
     },
     "investigator/orientation": {
-      "size_words": 1778,
-      "budget_words": 1956
+      "size_words": 1794,
+      "budget_words": 1974
     },
     "investigator/recovery": {
-      "size_words": 1105,
-      "budget_words": 1216
+      "size_words": 1110,
+      "budget_words": 1221
     },
     "bootstrap/orientation": {
-      "size_words": 2359,
-      "budget_words": 2595
+      "size_words": 2370,
+      "budget_words": 2607
     },
     "bootstrap/recovery": {
       "size_words": 1686,
@@ -590,6 +590,102 @@
       "reviewer/review": {
         "size_words": 3647,
         "budget_words": 3700
+      }
+    }
+  },
+  "decisions_L172": {
+    "authority": "MIK-R172 rules 1 and 2; MIK-R125 capped eleven-tenths rule",
+    "capsule_ceiling": 3700,
+    "measurement": "post-edit sizes compiled from the canonical texts with the shipped compiler (compiled_size in test_role_capsule_budgets.py); task data and seals excluded",
+    "reason": "The role and operation texts send what is handed over, and what is waited for, with role_message instead of pointing at the agent's own chat, and the artifact home says a file wakes no one. Curator/curation replaces text and adds none; every measured capsule stays within the 3700-word ceiling.",
+    "changes": {
+      "architect/orientation": {
+        "size_words": 2844,
+        "budget_words": 3129
+      },
+      "bootstrap/orientation": {
+        "size_words": 2370,
+        "budget_words": 2607
+      },
+      "curator/curation": {
+        "size_words": 3698,
+        "budget_words": 3700
+      },
+      "curator/orientation": {
+        "size_words": 3142,
+        "budget_words": 3457
+      },
+      "curator/recovery": {
+        "size_words": 2458,
+        "budget_words": 2704
+      },
+      "designer/orientation": {
+        "size_words": 2299,
+        "budget_words": 2529
+      },
+      "investigator/orientation": {
+        "size_words": 1794,
+        "budget_words": 1974
+      },
+      "investigator/recovery": {
+        "size_words": 1110,
+        "budget_words": 1221
+      },
+      "manager/authorized-closeout": {
+        "size_words": 2209,
+        "budget_words": 2430
+      },
+      "manager/coordination": {
+        "size_words": 3642,
+        "budget_words": 3700
+      },
+      "manager/curation": {
+        "size_words": 2926,
+        "budget_words": 3219
+      },
+      "manager/orientation": {
+        "size_words": 2986,
+        "budget_words": 3285
+      },
+      "manager/recovery": {
+        "size_words": 2302,
+        "budget_words": 2533
+      },
+      "manager/review": {
+        "size_words": 2596,
+        "budget_words": 2856
+      },
+      "orchestrator/orientation": {
+        "size_words": 2224,
+        "budget_words": 2447
+      },
+      "reviewer/orientation": {
+        "size_words": 3696,
+        "budget_words": 3700
+      },
+      "reviewer/recovery": {
+        "size_words": 3012,
+        "budget_words": 3314
+      },
+      "reviewer/review": {
+        "size_words": 3650,
+        "budget_words": 3700
+      },
+      "strategist/orientation": {
+        "size_words": 2477,
+        "budget_words": 2725
+      },
+      "worker/implementation": {
+        "size_words": 2288,
+        "budget_words": 2517
+      },
+      "worker/orientation": {
+        "size_words": 2432,
+        "budget_words": 2676
+      },
+      "worker/recovery": {
+        "size_words": 1748,
+        "budget_words": 1923
       }
     }
   }

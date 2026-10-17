@@ -461,8 +461,8 @@ class InstructionFileWordingTests(unittest.TestCase):
             "wait a few seconds and look once more before you report it missing",
             # What a recipient does with another agent's message.
             "A message another agent sent you begins with a line `From <role> · <task> · agent "
-            "<agent ID>`: your reply in that turn, in your own chat, is what the sender "
-            "receives, so answer the message there.",
+            "<agent ID>`: your reply in that turn reaches the sender only when it waits on "
+            "its own call; otherwise send it with `role_message` on `agents-remember-task`.",
             "With a parent named in `host.parent`, send every question requiring the developer's decision to that parent with `role_message` on `agents-remember-task`, addressed to its agent ID.",
             "A role started from the dashboard has no parent agent and needs none.",
             "an agent created outside `role_start` on `agents-remember-task` has no capsule and no binding",
@@ -487,7 +487,8 @@ class InstructionFileWordingTests(unittest.TestCase):
             "of its tools: it belongs to another installation.",
             "wait a few seconds and look once more before you report it missing",
             "A message another agent sent you begins with a `From` line: your reply in that "
-            "turn is what the sender receives, so answer it there.",
+            "turn reaches the sender only when it waits on its own call; otherwise send it "
+            "with `role_message` on `agents-remember-task`.",
         ):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, orientation)
@@ -636,6 +637,105 @@ class InstructionFileWordingTests(unittest.TestCase):
         brief = " ".join(read(LIFECYCLE / "templates" / "worker-brief.md").split())
         self.assertIn("no new freeze goes to the Reviewer and no round is begun", brief)
         self.assertNotIn("hand the new freeze to the Reviewer", brief)
+
+    def test_the_capsules_send_a_return_and_never_point_at_the_agent_chat(self) -> None:
+        """MIK-R172 rule 1: what is handed over, and awaited, travels by `role_message`.
+
+        The four stage-owning capsules carry the sending rule and the statement that a
+        file hands itself over to nobody; no capsule of a launcher role still names the
+        agent's own chat as the place of an answer or a report.
+        """
+
+        manifest_bytes = (CANONICAL / LIFECYCLE / "composition-manifest.json").read_bytes()
+        manifest = json.loads(manifest_bytes)
+
+        def capsule(role: str, operation: str) -> str:
+            binding = CapsuleBinding(
+                operation=operation,  # type: ignore[arg-type]
+                admitted=CapsuleAdmittedFacts(
+                    task_reference="agents-remember/tasks/demo/task.json",
+                    task_document_digest=compute_content_digest(b'{"id": "demo"}'),
+                    seat=CapsuleRoleSeat(role=role, altitude=manifest["roles"][role]["altitude"]),  # type: ignore[arg-type]
+                    repository_id="agents-remember",
+                    work_branch="fixture",
+                    tool_policy=CapsuleToolPolicy(granted=frozenset(PUBLIC_TOOLS)),
+                ),
+            )
+            outcome = compile_admitted_capsule(
+                binding,
+                routed_admission_for(
+                    CANONICAL / LIFECYCLE,
+                    "composition-manifest.json",
+                    manifest_bytes,
+                    CapsuleSeatAddress(role=role, operation=operation),  # type: ignore[arg-type]
+                ),
+            )
+            self.assertTrue(outcome.ok, outcome.render_explanation())
+            assert outcome.result is not None
+            return " ".join(outcome.result.render_instructions().split())
+
+        stage_sentence = {
+            ("worker", "implementation"): (
+                "sends what it waits for, and from whom, to its parent with `role_message`"
+            ),
+            ("manager", "coordination"): (
+                "sends what it waits for, and from whom, to its parent with `role_message`"
+            ),
+            (
+                "reviewer",
+                "review",
+            ): "send what and whom you await to your parent with `role_message`",
+            (
+                "curator",
+                "curation",
+            ): "send what you await and from whom to your parent with `role_message`",
+        }
+        banned = (
+            "in your own chat, is what the sender receives",
+            "so answer the message there",
+            "answer the message there",
+            "end your turn with the awaited thing",
+            "state what and whom you await in your last line",
+            "says in its last line what it waits for",
+            "needs no second model-authored completion post",
+        )
+        # MIK-R172 rule 1 in the doctrine home: the artifact does not hand itself over,
+        # and the relay's line carries the agent's last line.
+        acceptance = " ".join(
+            (CANONICAL / LIFECYCLE / "core" / "acceptance.md").read_text(encoding="utf-8").split()
+        )
+        self.assertIn("A file on record wakes no one", acceptance)
+        self.assertIn("a file hands itself over to nobody", acceptance)
+        self.assertIn(
+            "one line to the agent that waits, carrying the ended agent's last line", acceptance
+        )
+        self.assertNotIn("needs no second model-authored completion post", acceptance)
+        for (role, operation), clause in stage_sentence.items():
+            text = capsule(role, operation)
+            with self.subTest(role=role, told="an unfinished turn sends what it waits for"):
+                self.assertIn(clause, text)
+                self.assertIn("agents-remember-task", text)
+            with self.subTest(role=role, told="a chat reply reaches a sender only on its wait"):
+                self.assertIn(
+                    "your reply in that turn reaches the sender only when it waits on its own call",
+                    capsule(role, "orientation"),
+                )
+        for role in ("worker", "reviewer", "curator", "manager"):
+            for operation in (
+                "orientation",
+                "implementation",
+                "review",
+                "curation",
+                "coordination",
+            ):
+                if role not in manifest["operations"].get(operation, {}).get(
+                    "applies_to_roles", []
+                ):
+                    continue
+                text = capsule(role, operation)
+                for phrase in banned:
+                    with self.subTest(role=role, operation=operation, phrase=phrase):
+                        self.assertNotIn(phrase, text)
 
     def test_the_workers_report_names_its_agent_id(self) -> None:
         # Where the report of the previous host named the execution, it names the agent.
@@ -1129,9 +1229,8 @@ class HandoverTextWordingTests(unittest.TestCase):
             "other both stand still until one wait runs out.",
             # What a recipient does with a message: its chat reply is the answer.
             'A message another agent sent you begins with a line "From <role> · <task> · agent '
-            '<agent id>": your reply in that turn, in your own chat, is what the sender '
-            "receives, so answer the message there; send role_message to that agent id only "
-            "for a message of your own.",
+            '<agent id>": your reply in that turn reaches the sender only when it waits on '
+            "its own call; otherwise answer with role_message to that agent id.",
         ):
             with self.subTest(said=said):
                 self.assertIn(said, usage)

@@ -17,7 +17,7 @@ Run checks in your scratch folder or in a sandbox built with the repository's sa
 
 Write the report before changing provider or system state. Remediate only after an explicit authorized order from the developer or from the parent agent named in the assignment. If the active alert forbids starts, continue valid read-only investigation and do not start or restart providers.
 
-Return the report in your own chat; send developer questions to your parent, or ask in your own chat without one. When a parent agent started you, also tell it the report is written, naming its path, with `role_message` on `agents-remember-task`, addressed to the parent's role with its task references. An Investigator starts no role and, started from the dashboard, needs no parent. Do not assume a sprint owner or fabricate an event. No taskless launch requires a fake task document.
+Send developer questions to your parent, or ask in your own chat without one. When a parent agent started you, also tell it the report is written, naming its path, with `role_message` on `agents-remember-task`, addressed to the parent's role with its task references; without a parent, the developer reads the report in your own chat. An Investigator starts no role and, started from the dashboard, needs no parent. Do not assume a sprint owner or fabricate an event. No taskless launch requires a fake task document.
 
 ## Boundaries
 

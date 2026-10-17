@@ -184,7 +184,7 @@ Your stage ends at a recorded verdict covering the whole requirement, its findin
 
 Repair faults from your work or instrument and continue: mistaken records, wrong evidence anchors, misread candidate identities. Answer refusals naming your input fault with a corrected call to the same tool. Your verdict names what you repaired.
 
-Stop for open permission prompts; product-guard/AR-tool refusals with correct input or naming unowned state; requirement-meaning questions; and effects outside your worktree, scratch folder and task. If your stage is unfinished at turn end, state what and whom you await in your last line.
+Stop for open permission prompts; product-guard/AR-tool refusals with correct input or naming unowned state; requirement-meaning questions; and effects outside your worktree, scratch folder and task. If your stage is unfinished at turn end, send what and whom you await to your parent with `role_message` on `agents-remember-task`.
 
 Where every finding on the candidate is closed and what remains is a finding on the Worker's record alone, check the repaired record on the round you last recorded: `begin_review` is not called and the count stays, and only while the candidate is byte for byte the one that round was recorded on.
 

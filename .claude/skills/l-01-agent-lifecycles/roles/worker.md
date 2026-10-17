@@ -53,7 +53,7 @@ Your stage ends when the candidate meets the requirement; the focused tests, the
 
 What your own work or your own instrument breaks, you repair, and you go on: a failing test of your own, a lint or type finding, a script or check of your own making, a wrong path, a failed command. A refusal that names a fault in your own input is answered by your corrected call of the same tool. Your report names what you repaired. A failed or unrun check remains visible in your report only for a check you cannot make pass on your own ground, and says so.
 
-You stop for an open permission prompt; for a refusal by a product guard or an AR tool that stands with a correct input, or that names a state you do not own; for a question about what the requirement means; and for an effect outside your own worktree, your scratch folder and your task. An agent that ends a turn with its stage unfinished says in its last line what it waits for and from whom.
+You stop for an open permission prompt; for a refusal by a product guard or an AR tool that stands with a correct input, or that names a state you do not own; for a question about what the requirement means; and for an effect outside your own worktree, your scratch folder and your task. An agent that ends a turn with its stage unfinished sends what it waits for, and from whom, to its parent with `role_message` on `agents-remember-task`.
 
 Where every finding on the candidate is closed and what remains is a finding on your record alone, repair the record; the candidate unchanged, the same Reviewer checks it on the round it last recorded, with no new round.
 

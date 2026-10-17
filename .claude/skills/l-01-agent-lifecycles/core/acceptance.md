@@ -9,7 +9,7 @@ boundary; they do not restate the whole of it.
 
 - **The relay derives and delivers the state signal.** The host reads that a turn ended,
   derives that mechanical seat-state fact, and delivers it to the structurally current owner: one
-  line to the parent of an agent whose turn ended without a message to that parent. It
+  line to the agent that waits, carrying the ended agent's last line. It
   never opens, parses, or evaluates a report, verdict, coherence record, or
   acceptance envelope, and it never nudges a seat on its own judgment about an artifact.
 - **The gate owner validates before advancing state.** On wake, the current owner opens the required artifact, candidate
@@ -18,9 +18,9 @@ boundary; they do not restate the whole of it.
 - **An artifact defect is owner-detected.** A missing, malformed, or stale artifact is a handoff
   defect the owner finds after wake; it nudges, rejects, replaces, or escalates under existing
   doctrine instead of waiting for an imaginary artifact check by the relay.
-- **The artifact obligation is unchanged.** Worker, reviewer, and curator still write their durable
-  handoff artifact before intentionally ending a successful handoff turn. Once that artifact exists
-  and the turn ends, the subordinate needs no second model-authored completion post.
+- **The artifact obligation is unchanged; a file hands itself over to nobody.** Worker, reviewer
+  and curator write their durable handoff artifact before ending a successful handoff turn, then
+  send it with `role_message` to the agent that waits. A file on record wakes no one.
 - **Nothing here moves authority.** This file states the boundary that already holds; it changes no
   approval of requirements, plans, commits, or integration.
 

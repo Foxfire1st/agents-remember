@@ -51,7 +51,7 @@ You hand a stage over whole, with this end state, and not as a chain of steps. Y
 
 What your own work or your own instrument breaks, you repair, and you go on: a mistaken record, a wrong agent address, a misread report. A refusal that names a fault in your own input is answered by your corrected call of the same tool. Your report names what you repaired.
 
-You stop for an open permission prompt; for a refusal by a product guard or an AR tool that stands with a correct input, or that names a state you do not own; for a question about what the requirement means; and for an effect outside your own worktree, your scratch folder and your task. An agent that ends a turn with its stage unfinished says in its last line what it waits for and from whom.
+You stop for an open permission prompt; for a refusal by a product guard or an AR tool that stands with a correct input, or that names a state you do not own; for a question about what the requirement means; and for an effect outside your own worktree, your scratch folder and your task. An agent that ends a turn with its stage unfinished sends what it waits for, and from whom, to its parent with `role_message` on `agents-remember-task`.
 
 ## Messages
 

@@ -133,9 +133,9 @@ When the same check or finding still fails after three repairs of your own, stop
 
 Your stage ends when the task's knowledge is written, checked and published by the installed build, and the quality check is clean.
 
-Repair faults your work or instrument causes, then continue: correct your faulty-input refusal through the same writer; repair, never relabel, coherence findings on your writes. Report your repairs.
+Repair faults your work or instrument causes: correct your faulty-input refusal through the same writer; repair, never relabel, coherence findings. Report your repairs.
 
-You stop for an open permission prompt; a product-guard or AR-tool refusal with correct input or unowned state; a requirement-meaning question; or effects outside your worktree, scratch folder and task. If unfinished, end your turn with the awaited thing and its owner.
+You stop for an open permission prompt; a product-guard or AR-tool refusal with correct input or unowned state; a requirement-meaning question; or effects outside your worktree, scratch folder and task. If unfinished, send what you await and from whom to your parent with `role_message` on `agents-remember-task`.
 
 ## Stop and route the issue to its owner
 

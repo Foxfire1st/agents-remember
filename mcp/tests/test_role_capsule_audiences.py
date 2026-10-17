@@ -607,8 +607,10 @@ R125_ADDRESSED_PARAGRAPHS = (
 # pins the D301 candidate wording and named-step move, not unchanged-base prose;
 # its sentence ledger still needs independent meaning review. These pins bind
 # the expected delivery corpus without reading markers as an ownership oracle.
+# The orientation pin was renewed for MIK-R172 rule 1: the sentence that made the
+# agent's own chat reply the answer now sends the answer with `role_message`.
 R125_OPERATION_SHA256 = {
-    "orientation": "e532ec7587048c7e6b53cf2fe0fa3b78212f5c6fc2431d57e807c1d2296587da",
+    "orientation": "cb21c41525efc28773e5497b396701ef0f9b246833958c3d7b3448c57a5b11f1",
     "planning": "d6a1c6458d3a67ed54c0bbf0b399066022d8ac094110e5fae4673c5d0bd36f63",
     "review": "c7ddda94f04ea23c555296fbf8108037598098a17d22cad26613be65de64c317",
     "coordination": "4d0e8fe886c1806091a9355cad05d3d28199bf7b5bd9d1f5d4283c0ee015b2be",

@@ -472,7 +472,9 @@ OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
         "or acceptance envelope",
         "before advancing lifecycle state",
         "nudges, rejects, replaces, or escalates",
-        "needs no second model-authored completion post",
+        "a file hands itself over to nobody",
+        "send it with `role_message` to the agent that waits",
+        "A file on record wakes no one",
     ),
     "skills/l-01-agent-lifecycles/roles/strategist.md": (
         "Terminal/finalizer truth then attests only that this turn ended",
