@@ -199,6 +199,7 @@ unit-regression = [
   "mcp/tests/test_memory_quality_runs.py",
   "mcp/tests/test_memory_review_lane.py",
   "mcp/tests/test_memory_scope_task_derivation.py",
+  "mcp/tests/test_mik_r173_card_row_binds_every_copy.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_onboarding_gate.py",
   "mcp/tests/test_mik_r53_report_only_rules.py",

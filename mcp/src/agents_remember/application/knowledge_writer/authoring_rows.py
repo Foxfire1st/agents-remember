@@ -407,11 +407,14 @@ class HistoryRowAuthoring:
 
         Disposition ``updated`` or ``no_impact``; it carries nothing an invariant, family or
         planned row carries. The writer fills ``sources`` from the code candidate: one
-        ``{path, blob}`` per covered source file, ``absent`` for a deleted file. A file card's
-        path comes from its subject; a route overview's from the leaf's persisted worklist item.
-        An ``updated`` row whose card has no counted change between the memory base and the
-        produced candidate is refused. Marker lines a crossing sync moved into an existing row
-        (MIK-R24 rule 8 step 1) are kept.
+        ``{path, blob}`` per covered source file, ``absent`` for a deleted file. A card row's
+        sources are the sources of the leaf's persisted worklist item of its subject -- a file
+        card's and a route overview's alike -- so a card whose item covers a group of identical
+        copies binds every copy of it, and a card its item names only by its own path binds that
+        path; a card no item names binds its own path (MIK-R173). An overview no worklist item
+        covers is refused. An ``updated`` row whose card has no counted change between the
+        memory base and the produced candidate is refused. Marker lines a crossing sync moved
+        into an existing row (MIK-R24 rule 8 step 1) are kept.
         """
 
         extra = [
@@ -433,17 +436,9 @@ class HistoryRowAuthoring:
         if paths is None:
             self.problem(where, f"the subject {request.subject!r} names no card or overview")
             return None
-        if request.subject.endswith("/overview") or request.subject == "onboarding:overview":
-            sources = self.onboarding_sources.get(request.subject)
-            if sources is None:
-                self.problem(
-                    where,
-                    f"no worklist item covers {request.subject}; recompute the leaf's worklist "
-                    "and name the row again once an item needs it",
-                )
-                return None
-        else:
-            sources = (request.subject.removeprefix("onboarding:"),)
+        sources = self._row_sources(request.subject, where)
+        if sources is None:
+            return None
         markdown, sidecar = paths
         if request.disposition == "updated" and not self._row_counted_change(
             request.subject, markdown, sidecar, where
@@ -473,6 +468,28 @@ class HistoryRowAuthoring:
             self.problem(where, _first_error(error))
             return None
         return row
+
+    def _row_sources(self, subject: str, where: str) -> tuple[str, ...] | None:
+        """The sources a card row binds: its worklist item's, else the card's own path (MIK-R173).
+
+        The leaf's worklist item of the subject covers every source of its item -- a file card's
+        group of identical copies as much as a route overview's governed files -- and the gate
+        asks for exactly that group (`row_sources_current`, MIK-R53 rule 3), so the row binds it
+        whole. A card no item names binds its own path, as before. An overview no item covers has
+        no source to name: the row is refused.
+        """
+
+        sources = self.onboarding_sources.get(subject)
+        if sources is not None:
+            return sources
+        if subject.endswith("/overview") or subject == "onboarding:overview":
+            self.problem(
+                where,
+                f"no worklist item covers {subject}; recompute the leaf's worklist "
+                "and name the row again once an item needs it",
+            )
+            return None
+        return (subject.removeprefix("onboarding:"),)
 
     def _row_counted_change(self, subject: str, markdown: str, sidecar: str, where: str) -> bool:
         """The card comparison, failing closed when the leaf's paired base cannot be read."""
