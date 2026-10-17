@@ -298,7 +298,7 @@ describe('Operations click-to-detail body hydration', () => {
 });
 
 describe('workspace rollup reads the native task counts', () => {
-  it('shows works, paused and unknown exactly as published', () => {
+  it('shows the published counts, and once that host activity is unavailable', () => {
     dashboardStore.getState().applySnapshot(
       wireProjection({
         taskCounts: {
@@ -319,15 +319,16 @@ describe('workspace rollup reads the native task counts', () => {
       '9 started',
       '8 completed',
       '6 aborted',
-      '3 works',
-      '2 paused',
-      '4 started · host state unknown',
+      'host activity unavailable',
     ])
       expect(text).toContain(word);
-    expect(text).not.toMatch(/running|blocked|awaiting/);
+    // Unknown activity means the whole host observation is unknown: works and paused are not
+    // known then, and nothing per task repeats it.
+    expect(text).not.toMatch(/works|paused|unknown|running|blocked|awaiting/);
+    expect(text.match(/host activity unavailable/g)).toHaveLength(1);
   });
 
-  it('shows unknown only while that published bucket holds a task', () => {
+  it('says host activity is unavailable only while an unknown activity is published', () => {
     dashboardStore.getState().applySnapshot(
       wireProjection({
         taskCounts: {
@@ -345,15 +346,16 @@ describe('workspace rollup reads the native task counts', () => {
     const text = view.getByTestId('task-counts').textContent ?? '';
     expect(text).toContain('1 works');
     expect(text).toContain('0 paused');
-    expect(text).not.toContain('host state unknown');
+    expect(text).not.toContain('host activity unavailable');
     act(() => dashboardStore.setState({ taskCounts: {
       ...dashboardStore.getState().taskCounts, unknown: 1,
     } }));
-    expect(view.getByTestId('task-counts').textContent).toContain('1 started · host state unknown');
+    expect(view.getByTestId('task-counts').textContent).toContain('host activity unavailable');
+    expect(view.getByTestId('task-counts').textContent).not.toContain('works');
     act(() => dashboardStore.setState({ taskCounts: {
       ...dashboardStore.getState().taskCounts, unknown: 0,
     } }));
-    expect(view.getByTestId('task-counts').textContent).not.toContain('host state unknown');
+    expect(view.getByTestId('task-counts').textContent).not.toContain('host activity unavailable');
   });
 });
 

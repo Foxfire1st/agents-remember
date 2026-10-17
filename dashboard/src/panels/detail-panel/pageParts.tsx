@@ -71,7 +71,9 @@ const STATUS_WORDS: Record<TaskStatusKey, [StatusTone, string]> = {
   started: ['wait', 'started'],
   works: ['work', 'works'],
   paused: ['wait', 'paused'],
-  unknown: ['wait', 'started · host state unknown'],
+  // Host activity unknown: the row says the task's state only; the header says once that host
+  // activity is unavailable.
+  unknown: ['wait', 'started'],
   completed: ['done', 'completed'],
   aborted: ['gone', 'aborted'],
 };

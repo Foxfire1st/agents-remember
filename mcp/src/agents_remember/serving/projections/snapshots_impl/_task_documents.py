@@ -126,6 +126,7 @@ def project_task_sources(
                 ),
                 children=tuple(children),
                 declared_parent=relative_task_reference(reference, doc.master),
+                master_literal=doc.master,
             )
         )
     return nodes

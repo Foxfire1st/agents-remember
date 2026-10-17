@@ -153,13 +153,16 @@ describe('the order of a sprint (rules 3 and 10)', () => {
     expect(textNodes).toHaveLength(1);
     expect(row.contains(textNodes[0])).toBe(true);
     // a projected master shows its id and how many of its tasks are completed
-    const word = activity === 'unknown' ? 'started · host state unknown' : activity;
+    const word = activity === 'unknown' ? 'started' : activity;
     expect(cells(unitOf(container, 'text'))).toEqual(['TEXT', 'Text helpers', word, '1/2']);
     expect(unitOf(container, 'text').querySelector('[data-status]')?.getAttribute('data-status')).toBe(activity);
-    expect(getByTestId('order-read').textContent).not.toContain('in work');
+    // A started task wears the golden border in every activity, and the legend names it.
+    expect(unitOf(container, 'text').getAttribute('data-tone')).toBe('work');
+    expect(getByTestId('order-read').textContent).toContain('in work');
     // within a wave, what waits for nothing unfinished stands first
     const wave = [...getByTestId('order-wave-2').querySelectorAll('[data-testid="order-node"]')];
     expect(wave.map((node) => node.getAttribute('data-readiness'))).toEqual(['ready', 'waiting']);
+    expect(wave.map((node) => node.getAttribute('data-tone'))).toEqual(['ready', 'waits']);
     expect(cells(getByTestId('order-wave-3').firstElementChild)).toEqual(['wave 3', '1']);
     // A completed entry is not drawn; the graph remains available separately.
     expect(unitOf(container, 'seed')).toBeNull();

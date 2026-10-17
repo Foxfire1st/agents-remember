@@ -275,6 +275,12 @@ const VOCABULARIES: Record<
 > = {
   'projection.tasks[].stage': ['planned', 'started', 'aborted', 'completed'],
   'projection.tasks[].activity': ['works', 'paused', 'unknown'],
+  'projection.tasks[].disagreements[].kind': [
+    'names-another-master',
+    'not-listed',
+    'listed-twice',
+    'unresolvable-master',
+  ],
   'projection.analytics.attentionQueue[].severity': ATTENTION_SEVERITIES,
   'projection.analytics.attentionQueue[].lane': ATTENTION_LANES,
   'projection.analytics.engineProcesses[].health': PROCESS_HEALTHS,

@@ -11,7 +11,8 @@ import {
 import { Header, ListBox, ListBoxItem, ListBoxSection } from 'react-aria-components';
 
 import { cx } from '../../../styled-system/css';
-import { dashboardStore } from '../../data/store';
+import { selectHostActivityUnknown } from '../../data/selectors';
+import { dashboardStore, useDashboard } from '../../data/store';
 import { taskEntrySelectionKey } from '../../data/taskReference';
 import { Panel } from '../../grammar/Panel';
 import type { TaskEntry } from '../../types/projection';
@@ -62,7 +63,11 @@ import { docProgress } from './docProgress';
 // columnLook.ts for how they are written.
 // The lines of completed ones the developer opened. Not remembered: the column opens with all of
 // them closed, and a line that holds the chosen document is open by itself.
-function useOpenFolds(): { openFolds: ReadonlySet<string>; toggleFold: (key: string) => void } {
+function useOpenFolds(): {
+  openFolds: ReadonlySet<string>;
+  toggleFold: (key: string) => void;
+  closeFold: (key: string) => void;
+} {
   const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(() => new Set());
   const toggleFold = useCallback((key: string) => {
     setOpenFolds((current) => {
@@ -71,7 +76,67 @@ function useOpenFolds(): { openFolds: ReadonlySet<string>; toggleFold: (key: str
       return next;
     });
   }, []);
-  return { openFolds, toggleFold };
+  const closeFold = useCallback((key: string) => {
+    setOpenFolds((current) => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+  return { openFolds, toggleFold, closeFold };
+}
+
+// The tree's open and closed parents and folds, and the toggles that change them. A held parent
+// or fold is drawn open, so its toggle closes it and ends its hold.
+function useTreeToggles(selectedKey: string | null) {
+  const { collapsedKeys, toggleCollapsed, collapse } = useCollapsedTaskGroups();
+  const { openFolds, toggleFold: flipFold, closeFold } = useOpenFolds();
+  const { released, release } = useReleasedHolds(selectedKey);
+  const toggleRow = useCallback(
+    (key: string, held: boolean) => {
+      if (!held) return toggleCollapsed(key);
+      release(key);
+      collapse(key);
+    },
+    [collapse, release, toggleCollapsed],
+  );
+  const toggleFold = useCallback(
+    (key: string, held: boolean) => {
+      if (!held) return flipFold(key);
+      release(key);
+      closeFold(key);
+    },
+    [closeFold, flipFold, release],
+  );
+  return { view: { collapsedKeys, openFolds, selectedKey, released }, toggleRow, toggleFold };
+}
+
+const NO_KEYS: ReadonlySet<string> = new Set();
+
+// A click on any toggle opens or closes it (D309). A parent or fold that holds the chosen
+// document stands open over it (MIK-R144 rule 5) until its own toggle is used; the release lasts
+// while that document stays chosen, and the next chosen document is held open again.
+function useReleasedHolds(selectedKey: string | null): {
+  released: ReadonlySet<string>;
+  release: (key: string) => void;
+} {
+  const [state, setState] = useState<{ selection: string | null; keys: ReadonlySet<string> }>(
+    () => ({ selection: selectedKey, keys: NO_KEYS }),
+  );
+  // Every change of the chosen document ends the releases of the one before, in the render that
+  // sees it, so returning to an earlier document (A→B→A, A→none→A) brings none back
+  // (L168-R14-F01). The list renders each change of the chosen document, also while hidden.
+  if (state.selection !== selectedKey) setState({ selection: selectedKey, keys: NO_KEYS });
+  const release = useCallback(
+    (key: string) =>
+      setState((current) => ({
+        selection: selectedKey,
+        keys: new Set([...(current.selection === selectedKey ? current.keys : []), key]),
+      })),
+    [selectedKey],
+  );
+  return { released: state.selection === selectedKey ? state.keys : NO_KEYS, release };
 }
 
 // Reveal each selected task once, including a selection made by the page's drill-down.
@@ -113,8 +178,8 @@ function useRevealChosen(
 
 // → opens and ← closes the parent row that has the keyboard's focus: the one addition to what
 // the column does (MIK-R144 rule 5). A vertical list gives these two keys no other meaning. A
-// parent that the chosen document holds open does not close.
-function treeKey(event: KeyboardEvent, toggleCollapsed: (key: string) => void): void {
+// parent that the chosen document holds open closes as well (D309).
+function treeKey(event: KeyboardEvent, toggleRow: (key: string, held: boolean) => void): void {
   const arrow = plainArrow(event);
   if (!arrow) return;
   const row =
@@ -124,7 +189,7 @@ function treeKey(event: KeyboardEvent, toggleCollapsed: (key: string) => void): 
   event.preventDefault();
   event.stopPropagation();
   const open = row.dataset.expanded === 'true';
-  if (row.dataset.held === undefined && open !== (arrow === 'open')) toggleCollapsed(key);
+  if (open !== (arrow === 'open')) toggleRow(key, row.dataset.held !== undefined);
 }
 
 // What an arrow key asks of a parent row. With a modifier the two keys are the browser's (back,
@@ -137,14 +202,14 @@ function plainArrow(event: KeyboardEvent): 'open' | 'close' | null {
 
 // Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
 // switch with unchanged props, and the memo gate skips this subtree then; the list's own store
-// subscriptions still drive its updates.
+// subscriptions still drive its updates. A hidden list still renders a change of the chosen
+// document: that ends the released holds (useReleasedHolds), and none may pass unseen.
 export const LifecycleList = memo(
   LifecycleListImpl,
   (previous, next) =>
-    (previous.active === false && next.active === false) ||
-    (previous.active === next.active &&
-      previous.selectedId === next.selectedId &&
-      previous.onSelect === next.onSelect),
+    previous.selectedId === next.selectedId &&
+    ((previous.active === false && next.active === false) ||
+      (previous.active === next.active && previous.onSelect === next.onSelect)),
 );
 
 const taskSnapshot = () => dashboardStore.getState().tasks;
@@ -171,24 +236,22 @@ function LifecycleListImpl({
   );
   const tasks = useSyncExternalStore(subscribe, taskSnapshot);
   const [pivot, setPivot] = useState<Pivot>('repo');
-  const { collapsedKeys, toggleCollapsed } = useCollapsedTaskGroups();
-  const { openFolds, toggleFold } = useOpenFolds();
+  const { view, toggleRow, toggleFold } = useTreeToggles(selectedId);
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const list = listRef.current;
     if (!list || !active) return;
-    const handle = (event: KeyboardEvent): void => treeKey(event, toggleCollapsed);
+    const handle = (event: KeyboardEvent): void => treeKey(event, toggleRow);
     list.addEventListener('keydown', handle);
     return () => list.removeEventListener('keydown', handle);
-  }, [active, toggleCollapsed]);
-  const view = { collapsedKeys, openFolds, selectedKey: selectedId };
+  }, [active, toggleRow]);
   const groups = groupRows(tasks, pivot, view);
   const present = groups.some((group) =>
     group.items.some((item) => item.kind === 'row' && item.row.key === selectedId),
   );
   useRevealChosen(listRef, selectedId, present);
   const select = (key: string): void => {
-    if (isFoldKey(key)) toggleFold(key);
+    if (isFoldKey(key)) toggleFold(key, heldFold(groups, key));
     else onSelect(key);
   };
   return (
@@ -217,7 +280,7 @@ function LifecycleListImpl({
                 flat={pivot === 'phase'}
                 showRepo={pivot === 'phase'}
                 tasks={tasks}
-                onToggleCollapsed={toggleCollapsed}
+                onToggleRow={toggleRow}
               />
             ))}
           </ListBox>
@@ -232,13 +295,13 @@ function TaskGroupSection({
   flat,
   showRepo,
   tasks,
-  onToggleCollapsed,
+  onToggleRow,
 }: {
   group: OperationGroup;
   flat: boolean;
   showRepo: boolean;
   tasks: Record<string, TaskEntry>;
-  onToggleCollapsed: (key: string) => void;
+  onToggleRow: (key: string, held: boolean) => void;
 }) {
   return (
     <ListBoxSection className={section}>
@@ -256,7 +319,7 @@ function TaskGroupSection({
             flat={flat}
             showRepo={showRepo}
             tasks={tasks}
-            onToggleCollapsed={onToggleCollapsed}
+            onToggleRow={onToggleRow}
           />
         ),
       )}
@@ -272,11 +335,11 @@ type FoldItem = Extract<TreeItem, { kind: 'fold' }>;
 function RowCaret({
   item,
   flat,
-  onToggleCollapsed,
+  onToggleRow,
 }: {
   item: RowItem;
   flat: boolean;
-  onToggleCollapsed: (key: string) => void;
+  onToggleRow: (key: string, held: boolean) => void;
 }) {
   if (flat) return null;
   if (!item.hasChildren) return <span className={caretCell} aria-hidden="true" />;
@@ -284,8 +347,7 @@ function RowCaret({
     <TaskGroupDisclosure
       label={item.row.entry.title}
       collapsed={item.collapsed}
-      held={item.held}
-      onToggle={() => onToggleCollapsed(item.row.key)}
+      onToggle={() => onToggleRow(item.row.key, item.held)}
     />
   );
 }
@@ -308,13 +370,13 @@ function TaskRow({
   flat,
   showRepo,
   tasks,
-  onToggleCollapsed,
+  onToggleRow,
 }: {
   item: RowItem;
   flat: boolean;
   showRepo: boolean;
   tasks: Record<string, TaskEntry>;
-  onToggleCollapsed: (key: string) => void;
+  onToggleRow: (key: string, held: boolean) => void;
 }) {
   const row = item.row;
   const entry = row.entry;
@@ -339,7 +401,7 @@ function TaskRow({
         form={form}
         flat={flat}
         showRepo={showRepo}
-        onToggleCollapsed={onToggleCollapsed}
+        onToggleRow={onToggleRow}
       />
     </ListBoxItem>
   );
@@ -375,20 +437,20 @@ function TaskRowLine({
   form,
   flat,
   showRepo,
-  onToggleCollapsed,
+  onToggleRow,
 }: {
   item: RowItem;
   id: string;
   form: string;
   flat: boolean;
   showRepo: boolean;
-  onToggleCollapsed: (key: string) => void;
+  onToggleRow: (key: string, held: boolean) => void;
 }) {
   const row = item.row;
   const entry = row.entry;
   return (
     <div className={rowLine} style={indent(row.depth)} title={rowHover(entry)}>
-      <RowCaret item={item} flat={flat} onToggleCollapsed={onToggleCollapsed} />
+      <RowCaret item={item} flat={flat} onToggleRow={onToggleRow} />
       <RowMark entry={entry} />
       {id ? <span className={rowIdCell({ long: flat })}>{id}</span> : null}
       <span
@@ -407,6 +469,7 @@ function TaskRowLine({
 }
 
 function RowFigure({ entry, form }: { entry: TaskEntry; form: string }) {
+  const hostUnknown = useDashboard(selectHostActivityUnknown);
   return (
     <span className={cx(rowFigure, dim)} title={docProgress(entry).progressNoun}>
       {form === 'task' ? (
@@ -415,10 +478,9 @@ function RowFigure({ entry, form }: { entry: TaskEntry; form: string }) {
           steps={entry.summary?.steps}
         />
       ) : null}
-      {form === 'task' ? null : (
+      {form === 'task' || hostUnknown ? null : (
         <span data-testid="child-activity">
-          {entry.counts.works} works · {entry.counts.paused} paused
-          {entry.counts.unknown > 0 ? ` · ${entry.counts.unknown} unknown` : ''} ·{' '}
+          {entry.counts.works} works · {entry.counts.paused} paused ·{' '}
         </span>
       )}
       {progressFigure(entry)}
@@ -433,9 +495,14 @@ function foldText(item: FoldItem): string {
 }
 
 function foldHover(item: FoldItem): string {
-  return item.held
-    ? 'Stays open: the chosen document is inside'
-    : `${item.open ? 'Hide' : 'Show'} ${foldText(item)}`;
+  return `${item.open ? 'Hide' : 'Show'} ${foldText(item)}`;
+}
+
+// A fold that holds the chosen document is drawn open, so its toggle closes it (D309).
+function heldFold(groups: OperationGroup[], key: string): boolean {
+  return groups.some((group) =>
+    group.items.some((item) => item.kind === 'fold' && item.key === key && item.held),
+  );
 }
 
 function FoldRow({ item }: { item: FoldItem }) {

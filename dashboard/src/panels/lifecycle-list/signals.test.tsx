@@ -150,7 +150,7 @@ it('keeps the paused activity mark apart from an aborted task in the same mounte
 it.each([
   { stage: 'started' as const, activity: 'works' as const, word: 'works' },
   { stage: 'started' as const, activity: 'paused' as const, word: 'paused' },
-  { stage: 'started' as const, activity: 'unknown' as const, word: 'started · host state unknown' },
+  { stage: 'started' as const, activity: 'unknown' as const, word: 'started' },
   { stage: 'planned' as const, activity: undefined, word: 'planned' },
   { stage: 'completed' as const, activity: undefined, word: 'completed' },
   { stage: 'aborted' as const, activity: undefined, word: 'aborted' },
@@ -191,7 +191,7 @@ it.each([
     fireEvent.click(ui.getByTestId('attention-bell'));
     await waitFor(() => expect(ui.getByTestId('attention-queue')).toBeTruthy());
     const attention = ui.getByTestId('attention-queue').textContent;
-    expect(attention).not.toMatch(/works|paused|planned|completed|aborted|host state unknown/);
+    expect(attention).not.toMatch(/works|paused|planned|completed|aborted|host activity/);
     act(() =>
       dashboardStore.getState().applyDelta('task', {
         ...entry,

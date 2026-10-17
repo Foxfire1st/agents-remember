@@ -7,6 +7,7 @@ const view = (over: Partial<TreeView> = {}): TreeView => ({
   collapsedKeys: new Set(),
   openFolds: new Set(),
   selectedKey: null,
+  released: new Set(),
   scope: 'repo',
   ...over,
 });
@@ -31,6 +32,29 @@ it('keeps a completed master folded despite an active child, then opens down to 
     'M',
     'M-L1',
   ]);
+  // D309: once a click has ended the holds, the closed parent and the fold close over the chosen
+  // child as well.
+  const released = treeItems(
+    tasks,
+    [sprint.key],
+    view({
+      selectedKey: taskEntrySelectionKey(leaf.key),
+      collapsedKeys: new Set(),
+      released: new Set([foldKey('repo', taskEntrySelectionKey(sprint.key))]),
+    }),
+  );
+  expect(released.map((item) => item.kind)).toEqual(['row', 'fold']);
+  expect(released[1]).toMatchObject({ open: false, held: false });
+  const closedParent = treeItems(
+    tasks,
+    [sprint.key],
+    view({
+      selectedKey: taskEntrySelectionKey(leaf.key),
+      collapsedKeys: new Set([taskEntrySelectionKey(sprint.key)]),
+      released: new Set([taskEntrySelectionKey(sprint.key)]),
+    }),
+  );
+  expect(closedParent).toMatchObject([{ kind: 'row', collapsed: true, held: false }]);
 });
 it('constructs no terminal child rows at two long-history sizes and preserves authored order', () => {
   for (const size of [109, 300]) {

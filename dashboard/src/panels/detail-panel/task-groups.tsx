@@ -1,9 +1,12 @@
 // Task rows use the server's ordered membership, status and counts.
 import { cx } from '../../../styled-system/css';
+import { selectHostActivityUnknown } from '../../data/selectors';
+import { useDashboard } from '../../data/store';
 import { taskEntrySelectionKey,taskReferenceKey } from '../../data/taskReference';
 import { Markdown } from '../../grammar/Markdown';
 import type { TaskEntry,TaskSummary } from '../../types/projection';
 import { CompletedTaskList } from './CompletedTaskList';
+import { ListDisagreements } from './listDisagreements';
 import { completedEntries } from './completedTasksModel';
 import { ChildProgress,resolveRowTarget,type TaskIndexProps } from './indexRows';
 import {
@@ -136,14 +139,16 @@ function ReviewWord({ review }: { review: TaskSummary['reviewState'] }) {
 }
 
 function MasterNowCells({ entry, position }: { entry: TaskEntry; position: number }) {
+  const hostUnknown = useDashboard(selectHostActivityUnknown);
   return (
     <>
       <span className={cell({ at: 'belowUntilMid' })} data-testid={`now-progress-${position}`}>
         <ChildProgress entry={entry} />
       </span>
       <span className={cell({ at: 'mid' })}>
-        {entry.counts.works} works · {entry.counts.paused} paused
-        {entry.counts.unknown > 0 ? ` · ${entry.counts.unknown} unknown` : ''}{' '}
+        {hostUnknown
+          ? ''
+          : `${entry.counts.works} works · ${entry.counts.paused} paused `}
         <TaskStatusWord task={entry} testid={`task-row-status-${position}`} />
       </span>
     </>
@@ -300,6 +305,16 @@ export function TaskNowBlock(props: TaskIndexProps) {
   );
 }
 
+// The Tasks block shows when the master lists, introduces, discarded or disagrees with anything.
+function hasTaskContent(entry: TaskEntry, intro: string | undefined, discarded: number): boolean {
+  return (
+    entry.children.length > 0 ||
+    Boolean(intro) ||
+    discarded > 0 ||
+    (entry.disagreements?.length ?? 0) > 0
+  );
+}
+
 export function TaskChildrenBlock({
   doc,
   openView,
@@ -312,7 +327,7 @@ export function TaskChildrenBlock({
   const sprint = doc.form === 'sprint';
   const intro = sectionIntro(doc.sections, 'subTasks');
   const discarded = doc.discardedSubTasks ?? [];
-  if (!entry.children.length && !intro && !discarded.length) return null;
+  if (!hasTaskContent(entry, intro, discarded.length)) return null;
   return (
     <Block
       title={sprint ? 'Masters' : 'Tasks'}
@@ -331,6 +346,7 @@ export function TaskChildrenBlock({
         noun={sprint ? 'masters' : 'tasks'}
         openView={openView}
       />
+      <ListDisagreements entry={entry} tasks={props.tasks} onJump={props.onJump} />
       <SeatRowsLink doc={doc} hasChildren={entry.children.length > 0} openView={openView} />
     </Block>
   );

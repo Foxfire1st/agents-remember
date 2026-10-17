@@ -507,6 +507,7 @@ export interface TaskEntry {
   activity?: "works" | "paused" | "unknown";
   children: string[];
   counts: TaskCounts;
+  disagreements?: TaskListDisagreement[];
   eventAt?: string;
   id: string;
   key: string;
@@ -578,6 +579,15 @@ export interface TaskIntentIdentity {
   /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
   digest: string;
   schema: "task-intent/v1";
+}
+
+export interface TaskListDisagreement {
+  kind: "names-another-master" | "not-listed" | "listed-twice" | "unresolvable-master";
+  masterLiteral?: string;
+  parent?: string;
+  record: TaskDocumentRef;
+  recordMaster?: TaskDocumentRef;
+  row?: string;
 }
 
 export interface TaskReviewFindingNode {

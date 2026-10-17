@@ -559,6 +559,26 @@ class TaskCounts(BaseModel):
     unknown: int = 0
 
 
+class TaskListDisagreement(BaseModel):
+    """One task record that a master's sub-task list and the record's own master place apart.
+
+    ``names-another-master``: this master lists the record, the record names ``recordMaster``.
+    ``not-listed``: the record names this master (or, naming none, lies in its folder) and no
+    master lists it. ``listed-twice``: this master lists a record that ``parent`` holds already.
+    ``unresolvable-master``: the record's ``master`` text, served as ``masterLiteral``, names no
+    task document; this master lists the record (``row``) or holds its folder.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["names-another-master", "not-listed", "listed-twice", "unresolvable-master"]
+    record: TaskDocumentRef
+    row: str | None = None
+    recordMaster: TaskDocumentRef | None = None
+    masterLiteral: str | None = None
+    parent: str | None = None
+
+
 class TaskEntry(TaskState):
     """One qualified task, its authored summary, runtime facts and ordered children."""
 
@@ -574,6 +594,9 @@ class TaskEntry(TaskState):
     worktrees: list[EnclosureNode] = Field(default_factory=list)
     children: list[str] = Field(default_factory=list)
     counts: TaskCounts = Field(default_factory=TaskCounts)
+    # Served only on a master where a record and a list disagree; at most one per listed row
+    # and one per record that no list holds, so the corpus bounds it.
+    disagreements: list[TaskListDisagreement] | None = None
 
 
 class Analytics(BaseModel):

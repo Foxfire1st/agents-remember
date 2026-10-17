@@ -25,6 +25,9 @@ export interface TreeView {
   collapsedKeys: ReadonlySet<string>;
   openFolds: ReadonlySet<string>;
   selectedKey: string | null;
+  // The parents and folds whose hold a click has ended while this document stays chosen (D309):
+  // a held parent stands open over the chosen document only until its own toggle is used.
+  released: ReadonlySet<string>;
   scope: string;
 }
 
@@ -40,7 +43,7 @@ function terminalFold(
   view: TreeView,
 ): Extract<TreeItem, { kind: 'fold' }> {
   const key = foldKey(view.scope, parent ? taskEntrySelectionKey(parent.key) : '');
-  const held = entries.some((entry) => chosenAncestors.has(entry.key));
+  const held = !view.released.has(key) && entries.some((entry) => chosenAncestors.has(entry.key));
   return { kind: 'fold', key, depth, entries, counts, open: held || view.openFolds.has(key), held };
 }
 
@@ -65,7 +68,7 @@ export function treeItems(
     const key = taskEntrySelectionKey(entry.key);
     if (seen.has(key)) return;
     seen.add(key);
-    const held = entry.children.some((ref) => chosenAncestors.has(ref));
+    const held = !view.released.has(key) && entry.children.some((ref) => chosenAncestors.has(ref));
     const hasChildren = entry.children.length > 0;
     const collapsed = hasChildren && view.collapsedKeys.has(key) && !held;
     items.push({

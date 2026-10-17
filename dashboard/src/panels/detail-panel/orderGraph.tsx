@@ -119,6 +119,14 @@ function nodeMeta(node: TaskExecutionNodeView, master: TaskEntry | undefined): s
 }
 
 type NodeMark = 'none' | 'self' | 'related' | 'other';
+type NodeTone = 'work' | 'ready' | 'waits';
+
+// A started task is in work and wears the golden border; the graph's readiness tells the
+// others apart.
+function toneOf(node: TaskExecutionNodeView, master: TaskEntry | undefined): NodeTone {
+  if (master?.stage === 'started') return 'work';
+  return node.frontierState === 'ready' ? 'ready' : 'waits';
+}
 
 function OrderNode({
   node,
@@ -134,13 +142,15 @@ function OrderNode({
   const master = masterOf(node, handlers);
   const status = master ? taskStatusKey(master) : undefined;
   const meta = nodeMeta(node, master);
+  const tone = toneOf(node, master);
   return (
     <button
       type="button"
-      className={orderNode({ ready: node.frontierState === 'ready', mark, fade })}
+      className={orderNode({ state: tone, mark, fade })}
       data-testid="order-node"
       data-node={node.nodeId}
       data-readiness={node.frontierState}
+      data-tone={tone}
       data-mark={mark}
       data-fade={fade ? 'true' : 'false'}
       title={`${node.masterTitle} — ${status ? statusLabel(status) : 'task unavailable'}`}
@@ -148,10 +158,10 @@ function OrderNode({
       aria-disabled={master ? undefined : true}
       onClick={() => master && handlers.onJump(taskEntrySelectionKey(master.key))}
     >
-      {master ? <span className={orderNodeId}>{master.id}</span> : null}
+      {master ? <span className={orderNodeId({ state: tone })}>{master.id}</span> : null}
       <span className={orderNodeTitle}>{node.masterTitle}</span>
       {status ? <StatusWord status={status} /> : null}
-      {meta ? <span className={orderNodeMeta}>{meta}</span> : null}
+      {meta ? <span className={orderNodeMeta({ state: tone })}>{meta}</span> : null}
     </button>
   );
 }
@@ -169,7 +179,8 @@ function OrderRead({
   if (!relations) {
     return (
       <div className={orderRead} data-testid="order-read">
-        <span className={orderKey}>ready: waits for nothing unfinished</span>
+        <span className={orderKey({ state: 'work' })}>in work</span>
+        <span className={orderKey({ state: 'ready' })}>ready: waits for nothing unfinished</span>
         <span className={dim}>
           Rest the pointer on a {unit}: what it waits for and what waits for it light up.
         </span>

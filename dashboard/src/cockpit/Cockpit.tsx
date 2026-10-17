@@ -16,7 +16,7 @@ import { RoleChatsPane } from './RoleChats';
 import { clientMatchesServingBuild, servingCommitLabel } from '../data/buildIdentity';
 import { humanizeDuration } from '../data/conversation/format';
 import { startScreenWakeLock } from '../data/screenWakeLock';
-import { selectQueue } from '../data/selectors';
+import { selectHostActivityUnknown, selectQueue } from '../data/selectors';
 import type { ConnState } from '../data/store';
 import { dashboardStore, useDashboard } from '../data/store';
 import { connectEvents, connectState } from '../data/stream';
@@ -929,6 +929,9 @@ const TopBar = memo(function TopBar() {
   const generatedAt = useDashboard((s) => s.generatedAt);
   const queue = useDashboard(selectQueue);
   const topSeverity = queue[0]?.severity ?? 'clear'; // queue is severity-sorted server-side
+  // With the host observation unknown, works and paused are not known: this line is the one
+  // place that says so.
+  const hostUnknown = useDashboard(selectHostActivityUnknown);
   const counts: Array<[TaskStatusKey, number]> = [
     ['planned', taskCounts.planned],
     ['started', taskCounts.started],
@@ -936,16 +939,20 @@ const TopBar = memo(function TopBar() {
     ['aborted', taskCounts.aborted],
     ['works', taskCounts.works],
     ['paused', taskCounts.paused],
-    ['unknown', taskCounts.unknown],
   ];
+  const shown = hostUnknown
+    ? counts.filter(([key]) => key !== 'works' && key !== 'paused')
+    : counts;
 
   return (
     <header className={topbar}>
       <h1 className={title}>AGENTS REMEMBER · MISSION CONTROL</h1>
       <div className={statusRow}>
         <span className={dim} data-testid="task-counts">
-          {counts.filter(([key, value]) => key !== 'unknown' || value > 0)
-            .map(([key, value]) => `${value} ${statusLabel(key)}`).join(' · ')}
+          {[
+            ...shown.map(([key, value]) => `${value} ${statusLabel(key)}`),
+            ...(hostUnknown ? ['host activity unavailable'] : []),
+          ].join(' · ')}
         </span>
         {/* A reassurance zero wearing an alarm glyph is a lie: render the waiting chip only
             when something actually waits. An empty queue simply shows nothing (absence = clear). */}

@@ -15,6 +15,7 @@ from agents_remember.observer.projection import (
     TaskCounts,
     TaskDocNode,
     TaskEntry,
+    TaskListDisagreement,
     TaskState,
     TaskSummary,
 )
@@ -42,6 +43,16 @@ class TaskDocumentSource:
     summary: TaskDocNode
     children: tuple[DeclaredTaskSource, ...] = ()
     declared_parent: TaskDocumentRef | None = None
+    # The record's own `master` text as written: `declared_parent` is None both when the field
+    # is absent and when its text resolves to no task document.
+    master_literal: str | None = None
+
+    @property
+    def unresolvable_master(self) -> str | None:
+        """The `master` text of a record whose binding is present but names no task document."""
+        if self.master_literal is None or self.declared_parent is not None:
+            return None
+        return self.master_literal
 
     @property
     def reference(self) -> TaskDocumentRef:
@@ -139,6 +150,7 @@ def build_task_entries(
     )
     authored = {source.reference.key: source for source in sources}
     membership = _Membership(by_key)
+    listed: set[str] = set()
     for source in masters:
         parent = by_key[source.reference.key]
         for row in source.children:
@@ -151,19 +163,89 @@ def build_task_entries(
                     **state.model_dump(), key=key, reference=ref, id=row.id, title=row.title
                 )
                 by_key[key] = child
-            document = authored.get(key)
-            if (
-                document is not None
-                and document.summary.kind == "subTask"
-                and document.declared_parent != parent.reference
-            ):
-                continue
-            if membership.link(parent, child):
-                child.scope = row.scope
+            _place_listed_child(parent, child, row, authored.get(key), membership)
+            listed.add(key)
         _link_commanded_masters(source, masters, parent, by_key, membership)
         parent.counts = task_counts(by_key[key] for key in parent.children)
+    _report_unlisted_records(sources, listed, by_key, membership)
     tasks = list(by_key.values())
     return TaskEntries(tasks, task_counts(tasks), unbound)
+
+
+def _place_listed_child(
+    parent: TaskEntry,
+    child: TaskEntry,
+    row: DeclaredTaskSource,
+    document: TaskDocumentSource | None,
+    membership: _Membership,
+) -> None:
+    """Bind one listed row; a record that names no master belongs to the master listing it.
+
+    A record that names another master, or whose master text names no task, stays out of this
+    list. That disagreement, and a row whose record another list holds already, is reported on
+    this master, never dropped.
+    """
+    leaf = document if document is not None and document.summary.kind == "subTask" else None
+    if leaf is not None and leaf.unresolvable_master is not None:
+        membership.report(
+            parent,
+            TaskListDisagreement(
+                kind="unresolvable-master",
+                record=leaf.reference,
+                row=row.id,
+                masterLiteral=leaf.unresolvable_master,
+            ),
+        )
+        return
+    if leaf is not None and leaf.declared_parent not in (None, parent.reference):
+        membership.report(
+            parent,
+            TaskListDisagreement(
+                kind="names-another-master",
+                record=leaf.reference,
+                row=row.id,
+                recordMaster=leaf.declared_parent,
+            ),
+        )
+        return
+    if membership.link(parent, child):
+        child.scope = row.scope
+    elif leaf is not None and child.parent not in (None, parent.key):
+        membership.report(
+            parent,
+            TaskListDisagreement(
+                kind="listed-twice", record=leaf.reference, row=row.id, parent=child.parent
+            ),
+        )
+
+
+def _report_unlisted_records(
+    sources: list[TaskDocumentSource],
+    listed: set[str],
+    by_key: dict[str, TaskEntry],
+    membership: _Membership,
+) -> None:
+    """A task record that no list holds is reported on the master it names, else its folder's."""
+    for source in sources:
+        if source.summary.kind != "subTask" or source.reference.key in listed:
+            continue
+        home = source.declared_parent or TaskDocumentRef(
+            repository=source.reference.repository,
+            path=f"{source.path.parent.name}/task.json",
+        )
+        master = by_key.get(home.key)
+        if master is None or master.summary is None or master.summary.kind != "master":
+            continue
+        literal = source.unresolvable_master
+        membership.report(
+            master,
+            TaskListDisagreement(
+                kind="not-listed" if literal is None else "unresolvable-master",
+                record=source.reference,
+                recordMaster=source.declared_parent,
+                masterLiteral=literal,
+            ),
+        )
 
 
 def _bind_worktrees(
@@ -201,11 +283,25 @@ def _link_commanded_masters(
 
 
 class _Membership:
-    """One deterministic parent per child and an acyclic, wholly reachable forest."""
+    """One deterministic parent per child and an acyclic, wholly reachable forest.
+
+    It also keeps each master's disagreements once: a list that repeats a conflicting row
+    reports one disagreement, and a dispute that differs in any field stays its own.
+    """
 
     def __init__(self, entries: dict[str, TaskEntry]) -> None:
         self._roots = {key: key for key in entries}
         self._ranks: dict[str, int] = {}
+        self._reported: set[tuple[str, str]] = set()
+
+    def report(self, master: TaskEntry, disagreement: TaskListDisagreement) -> None:
+        seen = (master.key, disagreement.model_dump_json())
+        if seen in self._reported:
+            return
+        self._reported.add(seen)
+        if master.disagreements is None:
+            master.disagreements = []
+        master.disagreements.append(disagreement)
 
     def _root(self, key: str) -> str:
         self._roots.setdefault(key, key)

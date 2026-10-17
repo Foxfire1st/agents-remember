@@ -149,7 +149,7 @@ describe('SprintGraphView (L12-R2/R6/R7)', () => {
     const cases: Array<[TaskEntry['stage'], TaskEntry['activity'], string, 'work' | 'wait' | 'done' | 'gone']> = [
       ['started', 'works', 'works', 'work'],
       ['started', 'paused', 'paused', 'wait'],
-      ['started', 'unknown', 'started · host state unknown', 'wait'],
+      ['started', 'unknown', 'started', 'wait'],
       ['planned', undefined, 'planned', 'wait'],
       ['completed', undefined, 'completed', 'done'],
       ['aborted', undefined, 'aborted', 'gone'],

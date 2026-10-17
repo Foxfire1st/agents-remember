@@ -1,6 +1,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
+import { dashboardStore } from '../../data/store';
 import { taskEntrySelectionKey } from '../../data/taskReference';
 import { LifecycleList } from './LifecycleList';
 import {
@@ -41,17 +42,21 @@ it('orders the tasks of a master by need and keeps the completed behind one line
   seed(needEntries());
   const onSelect = vi.fn();
   const ui = render(<LifecycleList selectedId={null} onSelect={onSelect} />);
-  const rows = () => [...ui.container.querySelectorAll('[role="option"]')]
-    .map((row) => row.textContent);
+  const rows = () =>
+    [...ui.container.querySelectorAll('[role="option"]')].map((row) => row.textContent);
   expect(rows()).toEqual([
-    '▾Need Masterworks1 works · 1 paused · 1/4', 'L3Third worksworks',
-    'L5Fifth is pausedpaused', 'L1First waitsplanned',
+    '▾Need Masterworks1 works · 1 paused · 1/4',
+    'L3Third worksworks',
+    'L5Fifth is pausedpaused',
+    'L1First waitsplanned',
     '▸1 completed, 1 aborted',
   ]);
   expect(ui.getByText('Tasks · 6')).toBeTruthy();
   fireEvent.click(ui.getByText('1 completed, 1 aborted'));
   expect(rows().slice(4)).toEqual([
-    '▾1 completed, 1 aborted', 'L2Second is donecompleted', 'L4Fourth was droppedaborted',
+    '▾1 completed, 1 aborted',
+    'L2Second is donecompleted',
+    'L4Fourth was droppedaborted',
   ]);
   expect(onSelect).not.toHaveBeenCalled();
 });
@@ -64,14 +69,25 @@ it('groups BY PHASE in the order of the work, with plain words and whole ids', (
   const ui = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
   fireEvent.click(ui.getByText('BY PHASE'));
   expect([...ui.container.querySelectorAll('header')].map((node) => node.textContent)).toEqual([
-    'works2', 'paused2', 'started · host state unknown1', 'planned1', 'completed1', 'aborted1',
+    'works2',
+    'paused2',
+    'started1',
+    'planned1',
+    'completed1',
+    'aborted1',
   ]);
-  const rows = [...ui.container.querySelectorAll('[role="option"]')].map((node) => node.textContent);
+  const rows = [...ui.container.querySelectorAll('[role="option"]')].map(
+    (node) => node.textContent,
+  );
   expect(rows).toEqual([
-    'NEED-L3Third worksrepoworks', 'Need Masterrepoworks1 works · 1 paused · 1/4',
-    'NEED-L5Fifth is pausedrepopaused', 'PAUSEDPAUSEDrepopaused',
-    'UNKNOWNUNKNOWNrepostarted · host state unknown', 'NEED-L1First waitsrepoplanned',
-    'NEED-L2Second is donerepocompleted', 'NEED-L4Fourth was droppedrepoaborted',
+    'NEED-L3Third worksrepoworks',
+    'Need Masterrepoworks1 works · 1 paused · 1/4',
+    'NEED-L5Fifth is pausedrepopaused',
+    'PAUSEDPAUSEDrepopaused',
+    'UNKNOWNUNKNOWNrepostarted',
+    'NEED-L1First waitsrepoplanned',
+    'NEED-L2Second is donerepocompleted',
+    'NEED-L4Fourth was droppedrepoaborted',
   ]);
 });
 
@@ -81,10 +97,12 @@ it('orders BY REPO groups by name independently of arrival and activity', () => 
     task('A', { activity: 'paused', reference: { repository: 'alpha', path: 'm/a.json' } }),
   ]);
   const ui = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
-  expect([...ui.container.querySelectorAll('header')].map((node) => node.textContent))
-    .toEqual(['alpha1', 'zeta1']);
+  expect([...ui.container.querySelectorAll('header')].map((node) => node.textContent)).toEqual([
+    'alpha1',
+    'zeta1',
+  ]);
 });
-it('uses served hierarchy and remembers closed parents; a chosen descendant holds its ancestors open', async () => {
+it('uses served hierarchy and remembers closed parents; a chosen descendant holds its ancestors open until a click', async () => {
   const { sprint, master, leaf, entries } = hierarchy();
   const onSelect = vi.fn();
   seed(entries);
@@ -114,9 +132,42 @@ it('uses served hierarchy and remembers closed parents; a chosen descendant hold
   fireEvent.click(ui.getByRole('button', { name: `Collapse ${sprint.title} tasks` }));
   expect(ui.queryByText(leaf.title)).toBeNull();
   expect(onSelect).not.toHaveBeenCalled();
-  ui.rerender(<LifecycleList selectedId={taskEntrySelectionKey(leaf.key)} onSelect={vi.fn()} />);
+  const choose = vi.fn();
+  ui.rerender(<LifecycleList selectedId={taskEntrySelectionKey(leaf.key)} onSelect={choose} />);
   await waitFor(() => expect(ui.getByText(leaf.title)).toBeTruthy());
   expect(rowOf(ui.getByText(sprint.title)).dataset.held).toBe('');
+  // D309: the hold ends at a click. The held parent closes over the chosen leaf and opens again.
+  fireEvent.click(ui.getByRole('button', { name: `Collapse ${sprint.title} tasks` }));
+  expect(ui.queryByText(leaf.title)).toBeNull();
+  expect(rowOf(ui.getByText(sprint.title)).dataset.held).toBeUndefined();
+  fireEvent.click(ui.getByRole('button', { name: `Expand ${sprint.title} tasks` }));
+  expect(ui.getByText(leaf.title)).toBeTruthy();
+  expect(choose).not.toHaveBeenCalled();
+  // A release belongs to one chosen document (L168-R14-F01). After A→B→A, A→null→A, and a change
+  // made while the panel is hidden, the returning leaf is held open again, with no toggle between.
+  const close = () =>
+    fireEvent.click(ui.getByRole('button', { name: `Collapse ${sprint.title} tasks` }));
+  const view = (id: string | null, active = true) =>
+    ui.rerender(<LifecycleList selectedId={id} onSelect={choose} active={active} />);
+  const leafId = taskEntrySelectionKey(leaf.key);
+  for (const between of [taskEntrySelectionKey(master.key), null]) {
+    close();
+    expect(ui.queryByText(leaf.title)).toBeNull();
+    // Within one chosen document, a delta and a whole snapshot leave the release in place.
+    act(() => dashboardStore.getState().applyDelta('task', { ...leaf, title: leaf.title }));
+    act(() => seed(entries));
+    expect(ui.queryByText(leaf.title)).toBeNull();
+    view(between);
+    view(leafId);
+    await waitFor(() => expect(ui.getByText(leaf.title)).toBeTruthy());
+    expect(rowOf(ui.getByText(sprint.title)).dataset.held).toBe('');
+  }
+  close();
+  view(leafId, false);
+  view(null, false);
+  view(leafId, false);
+  view(leafId, true);
+  await waitFor(() => expect(ui.getByText(leaf.title)).toBeTruthy());
 });
 it('puts a completed master behind its fold regardless of a working descendant and opens the fold in place', () => {
   const { sprint, master, entries } = hierarchy();
@@ -148,7 +199,11 @@ it('opens and closes the focused parent with plain arrows and leaves modified ar
   fireEvent.keyDown(row, { key: 'ArrowRight' });
   expect(ui.getByText(leaf.title)).toBeTruthy();
   ui.rerender(<LifecycleList selectedId={taskEntrySelectionKey(leaf.key)} onSelect={vi.fn()} />);
+  expect(row.dataset.held).toBe('');
+  // D309: ← closes a parent that holds the chosen leaf as well.
   fireEvent.keyDown(row, { key: 'ArrowLeft' });
+  expect(ui.queryByText(leaf.title)).toBeNull();
+  fireEvent.keyDown(row, { key: 'ArrowRight' });
   expect(ui.getByText(leaf.title)).toBeTruthy();
 });
 
@@ -303,11 +358,21 @@ it('shows the served child activity counts in a master row', () => {
     aborted: 1,
     works: 6,
     paused: 2,
-    unknown: 1,
+    unknown: 0,
   };
   seed(entries);
   const ui = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
-  expect(
-    rowOf(ui.getByText(master.title)).querySelector('[data-testid="child-activity"]')?.textContent,
-  ).toBe('6 works · 2 paused · 1 unknown · ');
+  const figure = () =>
+    rowOf(ui.getByText(master.title)).querySelector('[data-testid="child-activity"]')?.textContent;
+  expect(figure()).toBe('6 works · 2 paused · ');
+  // Host activity unknown: no row shows a works or paused figure, also one whose own counts hold
+  // no unknown activity; the header says it once.
+  act(() => {
+    dashboardStore.getState().applyDelta('taskCounts', {
+      ...dashboardStore.getState().taskCounts,
+      started: 9,
+      unknown: 9,
+    });
+  });
+  expect(figure()).toBeUndefined();
 });

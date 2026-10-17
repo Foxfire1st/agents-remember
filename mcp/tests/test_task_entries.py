@@ -223,6 +223,113 @@ def test_only_declared_reciprocal_membership_sets_parent_and_all_tasks_are_reach
     assert task_counts(reached) == result.counts
 
 
+def test_a_record_naming_no_master_belongs_to_the_listing_master_and_disagreements_are_served(
+    tmp_path: Path,
+) -> None:
+    def document(folder: str, slug: str, id: str, **fields) -> None:
+        write_task_doc(
+            tmp_path / "tasks" / "repo" / folder,
+            TaskDocument.model_validate(
+                {
+                    "id": id,
+                    "slug": slug,
+                    "kind": "master" if slug == "task" else "subTask",
+                    "repo": "repo",
+                    "title": id,
+                    "createdAt": NOW.isoformat(),
+                    "status": "Completed",
+                    **fields,
+                }
+            ),
+        )
+
+    def row(name: str, file: str, number: str | None = None) -> dict[str, str]:
+        return {"number": number or name, "name": name, "file": file, "status": "Completed"}
+
+    elsewhere = row("elsewhere", "03_elsewhere.md")
+    rows = [row("old", "01_old.md"), row("named", "02_named.md"), elsewhere, elsewhere]
+    rows += [row("absolute", "06_absolute.md"), row("escaping", "07_escaping.md")]
+    old_twice = row("old", "../m/01_old.md")
+    document("m", "task", "M", subTasks=rows)
+    document(
+        "other", "task", "OTHER", subTasks=[old_twice, old_twice, {**old_twice, "number": "o2"}]
+    )
+    document("m", "01_old", "old")
+    document("m", "02_named", "named", master="task.md")
+    document("m", "03_elsewhere", "elsewhere", master="../other/task.md")
+    document("m", "04_stray", "stray")
+    document("m", "05_unlisted", "unlisted", master="task.md")
+    # A master that is present but resolves to no task is not an absent one (L168-R14-F02).
+    document("m", "06_absolute", "absolute", master="/other/task.md")
+    document("m", "07_escaping", "escaping", master="../../other/task.md")
+    document("m", "08_unlisted_escaping", "unlisted-escaping", master="../../m/task.md")
+    result = build_task_entries(read_task_sources(tmp_path, now=NOW), [], HostActivitySnapshot())
+    by_id = {task.id: task for task in result.tasks}
+    master = by_id["M"]
+    assert master.children == [by_id["old"].key, by_id["named"].key]
+    assert by_id["old"].parent == by_id["named"].parent == master.key
+    assert by_id["elsewhere"].parent is by_id["stray"].parent is by_id["unlisted"].parent is None
+    assert by_id["absolute"].parent is by_id["escaping"].parent is None
+    assert master.counts.completed == 2
+
+    def served(entry):
+        return [
+            (
+                item.kind,
+                item.row,
+                item.record.key,
+                item.recordMaster and item.recordMaster.key,
+                item.masterLiteral,
+                item.parent,
+            )
+            for item in entry.disagreements or []
+        ]
+
+    # A list that repeats a conflicting row reports the conflict once (L168-R14-F03); another
+    # row of the same record is another dispute and stays.
+    assert served(master) == [
+        (
+            "names-another-master",
+            "elsewhere",
+            "repo/m/03_elsewhere.json",
+            "repo/other/task.json",
+            None,
+            None,
+        ),
+        (
+            "unresolvable-master",
+            "absolute",
+            "repo/m/06_absolute.json",
+            None,
+            "/other/task.md",
+            None,
+        ),
+        (
+            "unresolvable-master",
+            "escaping",
+            "repo/m/07_escaping.json",
+            None,
+            "../../other/task.md",
+            None,
+        ),
+        ("not-listed", None, "repo/m/04_stray.json", None, None, None),
+        ("not-listed", None, "repo/m/05_unlisted.json", "repo/m/task.json", None, None),
+        (
+            "unresolvable-master",
+            None,
+            "repo/m/08_unlisted_escaping.json",
+            None,
+            "../../m/task.md",
+            None,
+        ),
+    ]
+    assert served(by_id["OTHER"]) == [
+        ("listed-twice", "old", "repo/m/01_old.json", None, None, master.key),
+        ("listed-twice", "o2", "repo/m/01_old.json", None, None, master.key),
+    ]
+    assert "disagreements" not in by_id["old"].model_dump(exclude_none=True)
+
+
 def test_addressless_declared_row_has_one_opaque_identity_and_no_document(tmp_path: Path) -> None:
     root = tmp_path / "tasks" / "repo" / "master"
     write_task_doc(
@@ -323,10 +430,26 @@ def test_conflicting_membership_is_deterministic_reciprocal_and_reachable(
     assert set(reached) == tasks.keys()
     assert task_counts(tasks[key] for key in reached) == result.counts
     assert sum(len(task.children) for task in result.tasks) == (
-        0 if relation in {"no-parent", "unlisted-parent"} else 1
+        0 if relation == "unlisted-parent" else 1
     )
+    by_id = {task.id: task for task in result.tasks}
+    reported = {
+        task.id: [(item.kind, item.parent) for item in task.disagreements or []]
+        for task in result.tasks
+        if task.disagreements
+    }
     if relation == "two-parents":
-        leaf = next(task for task in result.tasks if task.id == "leaf")
-        parent = next(task for task in result.tasks if task.id == "b")
-        assert leaf.parent == parent.key
-        assert parent.children == [leaf.key]
+        assert by_id["leaf"].parent == by_id["b"].key
+        assert by_id["b"].children == [by_id["leaf"].key]
+        assert reported == {"a": [("names-another-master", None)]}
+    if relation == "no-parent":
+        # Naming no master, the leaf belongs to the first list; the second list says so.
+        assert by_id["leaf"].parent == by_id["a"].key
+        assert reported == {"b": [("listed-twice", by_id["a"].key)]}
+    if relation == "cycle":
+        assert reported == {}
+    if relation == "unlisted-parent":
+        assert reported == {
+            "a": [("names-another-master", None)],
+            "b": [("names-another-master", None)],
+        }

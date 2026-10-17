@@ -2117,6 +2117,38 @@
         "paused": 0,
         "unknown": 0
       },
+      "disagreements": [
+        {
+          "kind": "names-another-master",
+          "record": {
+            "repository": "agents-remember",
+            "path": "sim/09_moved.json"
+          },
+          "row": "SIM-L9",
+          "recordMaster": {
+            "repository": "agents-remember",
+            "path": "sim-master-a/task.json"
+          }
+        },
+        {
+          "kind": "listed-twice",
+          "record": {
+            "repository": "agents-remember",
+            "path": "sim/10_twice.json"
+          },
+          "row": "SIM-L10",
+          "parent": "agents-remember/sim-master-b/task.json"
+        },
+        {
+          "kind": "unresolvable-master",
+          "record": {
+            "repository": "agents-remember",
+            "path": "sim/11_lost.json"
+          },
+          "row": "SIM-L11",
+          "masterLiteral": "../../elsewhere/task.md"
+        }
+      ],
       "key": "agents-remember/sim/task.json"
     },
     {

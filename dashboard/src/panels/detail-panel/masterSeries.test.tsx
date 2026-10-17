@@ -1,5 +1,5 @@
 import { fireEvent, render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
 import {
@@ -161,6 +161,83 @@ describe('DetailPanel native task navigation (6g)', () => {
     expect(discarded?.textContent).toContain('proof ' + 'a'.repeat(64));
     fireEvent.click(getByTestId('doc-view-back'));
     expect(getByTestId('subtask-open-1')).toBeTruthy();
+  });
+
+  it('shows once on the master’s page the records its list and their own master place apart', () => {
+    const master = taskEntry({
+      reference: taskReference('repo-a/planning/task.json'),
+      id: 'MASTER',
+      title: 'Planning Master',
+      summary: taskSummary({ form: 'master', kind: 'master', objective: 'Master plan objective.' }),
+      disagreements: [
+        { kind: 'not-listed', record: taskReference('repo-a/planning/03_stray.json') },
+        {
+          kind: 'names-another-master',
+          record: taskReference('repo-a/planning/04_moved.json'),
+          row: '4',
+          recordMaster: taskReference('repo-a/other/task.json'),
+        },
+        {
+          kind: 'unresolvable-master',
+          record: taskReference('repo-a/planning/05_lost.json'),
+          row: '5',
+          masterLiteral: '../../elsewhere/task.md',
+        },
+        // Two disputes that differ in one field only stay two rows, each with its own key.
+        {
+          kind: 'listed-twice',
+          record: taskReference('repo-a/planning/01_live.json'),
+          row: '1',
+          parent: 'repo-a/other/task.json',
+        },
+        {
+          kind: 'listed-twice',
+          record: taskReference('repo-a/planning/01_live.json'),
+          row: '1',
+          parent: 'repo-a/third/task.json',
+        },
+      ],
+    });
+    const listed = taskEntry({
+      reference: taskReference('repo-a/planning/01_live.json'),
+      id: '1',
+      title: 'Live planning leaf',
+      stage: 'planned',
+      summary: undefined,
+    });
+    const other = taskEntry({
+      reference: taskReference('repo-a/other/task.json'),
+      id: 'OTHER',
+      title: 'Other master',
+      summary: taskSummary({ form: 'master', kind: 'master' }),
+    });
+    const stray = taskEntry({
+      reference: taskReference('repo-a/planning/03_stray.json'),
+      id: '3',
+      title: 'Stray leaf',
+      stage: 'planned',
+      summary: undefined,
+    });
+    seedTaskEntries([...taskTree(master, [listed]), other, stray]);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const ui = render(<DetailPanel selectedId="taskdoc:repo-a/planning/task.json" />);
+    const keyWarnings = errors.mock.calls.filter((call) => String(call[0]).includes('same key'));
+    errors.mockRestore();
+    expect(keyWarnings).toEqual([]);
+
+    expect(ui.getAllByText('Records and list disagree')).toHaveLength(1);
+    expect(cells(ui.getByTestId('subtask-open-1'))).toEqual(['1', 'Live planning leaf']);
+    const first = ui.getByTestId('list-disagreement-1');
+    expect(first.textContent).toBe('3Stray leafnames no master; in no list');
+    expect(ui.getByTestId('list-disagreement-2').textContent).toBe(
+      'planning/04_moved.jsonlisted as 4; names Other master',
+    );
+    expect(ui.getByTestId('list-disagreement-3').textContent).toBe(
+      'planning/05_lost.jsonlisted as 5; names master “../../elsewhere/task.md”, which is no task',
+    );
+    expect(ui.getAllByTestId(/^list-disagreement-\d+$/)).toHaveLength(5);
+    fireEvent.click(first.querySelector('button') as HTMLElement);
+    expect(ui.getByText(/not authored yet/i)).toBeTruthy();
   });
 
   it('opens the native child of a master with a bound worktree', () => {

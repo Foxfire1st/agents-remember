@@ -764,7 +764,20 @@ export const orderNode = cva({
     _focusVisible: { outlineColor: 'amber' },
   },
   variants: {
-    ready: { true: { borderLeftColor: 'cyan' } },
+    // A started task is in work and wears the golden border; one that waits for nothing
+    // unfinished is ready; the rest wait.
+    state: {
+      work: {
+        paddingBlock: '0.3rem',
+        fontSize: '0.8rem',
+        color: 'ink',
+        borderColor: 'oklch(0.82 0.16 75 / 0.75)',
+        borderLeftColor: 'amber',
+        background: 'oklch(0.82 0.16 75 / 0.09)',
+      },
+      ready: { color: 'ink', borderLeftColor: 'cyan' },
+      waits: {},
+    },
     // The mark of rule 11: it fades in and out, unless the reader asks for calm.
     fade: {
       true: {
@@ -779,9 +792,12 @@ export const orderNode = cva({
       other: { opacity: '0.3' },
     },
   },
-  defaultVariants: { mark: 'none' },
+  defaultVariants: { state: 'waits', mark: 'none' },
 });
-export const orderNodeId = css({ flex: 'none', color: 'oklch(0.6 0.02 250)' });
+export const orderNodeId = cva({
+  base: { flex: 'none', color: 'oklch(0.6 0.02 250)' },
+  variants: { state: { work: { color: 'amber' }, ready: { color: 'cyan' }, waits: {} } },
+});
 export const orderNodeTitle = css({
   flex: '1',
   minWidth: '0',
@@ -789,10 +805,9 @@ export const orderNodeTitle = css({
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 });
-export const orderNodeMeta = css({
-  flex: 'none',
-  fontSize: '0.68rem',
-  color: 'oklch(0.6 0.02 250)',
+export const orderNodeMeta = cva({
+  base: { flex: 'none', fontSize: '0.68rem', color: 'oklch(0.6 0.02 250)' },
+  variants: { state: { work: { color: 'muted' }, ready: {}, waits: {} } },
 });
 // The rows of the order stand under one line, as every list of the page does.
 export const orderList = css({ borderTop: '1px solid token(colors.grid)' });
@@ -807,20 +822,27 @@ export const orderRead = css({
   fontSize: '0.74rem',
   color: 'muted',
 });
-export const orderKey = css({
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '0.35rem',
-  _before: {
-    content: '""',
-    width: '0.75rem',
-    height: '0.6rem',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'grid',
-    borderLeftColor: 'cyan',
-    borderLeftWidth: '3px',
-    borderRadius: '2px',
+export const orderKey = cva({
+  base: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.35rem',
+    _before: {
+      content: '""',
+      width: '0.75rem',
+      height: '0.6rem',
+      borderWidth: '1px',
+      borderStyle: 'solid',
+      borderColor: 'grid',
+      borderLeftWidth: '3px',
+      borderRadius: '2px',
+    },
+  },
+  variants: {
+    state: {
+      work: { _before: { borderColor: 'amber', background: 'oklch(0.82 0.16 75 / 0.14)' } },
+      ready: { _before: { borderLeftColor: 'cyan' } },
+    },
   },
 });
 export const orderNote = css({

@@ -40,6 +40,12 @@ export const selectQueue = (state: DashboardState): readonly AttentionItem[] => 
   return cachedVisibleQueue;
 };
 
+// The server marks a started task's activity unknown only when the whole host observation is
+// unknown, so one published count answers for every row: while it is above zero, no row shows a
+// works or paused figure and the header alone says that host activity is unavailable.
+export const selectHostActivityUnknown = (state: DashboardState): boolean =>
+  state.taskCounts.unknown > 0;
+
 /** Format a server-computed age. Input is `waitSeconds` / `staleSeconds`, never `Date.now()`. */
 export function fmtWait(seconds: number | undefined | null): string {
   if (seconds == null) return '—';

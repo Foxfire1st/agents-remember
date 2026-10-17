@@ -2912,6 +2912,21 @@
         "counts": {
           "$ref": "#/$defs/TaskCounts"
         },
+        "disagreements": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TaskListDisagreement"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disagreements"
+        },
         "eventAt": {
           "anyOf": [
             {
@@ -3314,6 +3329,78 @@
         "digest"
       ],
       "title": "TaskIntentIdentity",
+      "type": "object"
+    },
+    "TaskListDisagreement": {
+      "additionalProperties": false,
+      "description": "One task record that a master's sub-task list and the record's own master place apart.\n\n``names-another-master``: this master lists the record, the record names ``recordMaster``.\n``not-listed``: the record names this master (or, naming none, lies in its folder) and no\nmaster lists it. ``listed-twice``: this master lists a record that ``parent`` holds already.\n``unresolvable-master``: the record's ``master`` text, served as ``masterLiteral``, names no\ntask document; this master lists the record (``row``) or holds its folder.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "names-another-master",
+            "not-listed",
+            "listed-twice",
+            "unresolvable-master"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "masterLiteral": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Masterliteral"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent"
+        },
+        "record": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "recordMaster": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "row": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row"
+        }
+      },
+      "required": [
+        "kind",
+        "record"
+      ],
+      "title": "TaskListDisagreement",
       "type": "object"
     },
     "TaskReviewFindingNode": {
