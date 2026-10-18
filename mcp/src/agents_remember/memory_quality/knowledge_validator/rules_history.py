@@ -20,7 +20,12 @@ family row in a file this route publishes records its own revision and an author
   candidate: a retired record still resolves, so no legitimate row ever names an unknown subject,
   and a closed file committed outside the AR routes cannot carry a ghost subject past a master or
   checkpoint landing.
-* The re-anchor check reads every **open** history file.
+* The re-anchor check reads every **open** history file, and the item check of
+  :func:`check_history_rows` reads the same files: :func:`checked_history_files` names that one scope
+  for both (MIK-R180). So an item that a leaf's own publication judged there is not judged again at a
+  master's checkpoint, a master-level landing or a sync; the closed file of one of the master's
+  leaves is covered there by MIK-R52 rule 5 (closed, owned by a leaf the master accounts for, and
+  byte-identical to that owner's recorded publication).
 * At a commit that **publishes a leaf** (``leaf_publication``: closeout, direct landing, the recorded
   landing of a leaf), the re-anchor check also reads every history file that is not closed in a
   comparison base, whatever its own ``closed`` flag says. The leaf's own file stays editable until its
@@ -262,17 +267,19 @@ def _hidden_change_message(row: Judgment, hidden: Judgment) -> str:
 
 
 def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
+    # The item check reads the re-anchor check's files (MIK-R180): a row a leaf's own publication
+    # judged is not judged again at a master's checkpoint, a master-level landing or a sync.
+    for path, history in checked_history_files(context):
+        for row in history.rows:
+            for item in invalid_history_items(row.items):
+                yield Finding(
+                    path,
+                    f"rows.{row.id}.items",
+                    f"row {row.id} ({row.subject}) has invalid item {item!r}: new history "
+                    "items must be sha256:<64 hex>; name the row again through the writer "
+                    "with the worklist's item IDs",
+                )
     for path, history in context.parsed.histories:  # every file: a subject never disappears
-        if not any(is_closed_history(base.get(path)) for base in context.bases):
-            for row in history.rows:
-                for item in invalid_history_items(row.items):
-                    yield Finding(
-                        path,
-                        f"rows.{row.id}.items",
-                        f"row {row.id} ({row.subject}) has invalid item {item!r}: new history "
-                        "items must be sha256:<64 hex>; name the row again through the writer "
-                        "with the worklist's item IDs",
-                    )
         for subject in unknown_subjects(history, context.record_ids):
             row = history.row_about(subject)
             yield Finding(

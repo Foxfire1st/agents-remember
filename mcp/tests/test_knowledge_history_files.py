@@ -220,11 +220,21 @@ def test_closed_in_comparison_base_legacy_items_parse_and_validate_unchanged(dig
 
 
 @pytest.mark.parametrize(
-    ("closed", "base_state"),
-    [(False, "absent"), (False, "open"), (True, "absent"), (True, "open"), (True, "frozen")],
+    ("closed", "base_state", "publication", "judged"),
+    [
+        (False, "absent", False, True),  # an open file is always checked
+        (False, "open", False, True),  # also when a comparison base holds it open
+        (True, "absent", True, True),  # the leaf's own file, closed at its own publication
+        # A master's checkpoint, a master-level landing or a sync: the closed file of one of the
+        # master's leaves was judged at its own publication (MIK-R180; MIK-R52 rule 5 covers it).
+        (True, "absent", False, False),
+        # Closed by an earlier closeout of the same leaf that was not integrated: frozen and
+        # historical, like one closed in a base (L37 ruling B).
+        (True, "frozen", True, False),
+    ],
 )
-def test_validator_refuses_short_items_without_closed_comparison_base(
-    closed: bool, base_state: str
+def test_short_items_are_judged_only_in_the_files_the_reanchor_check_reads(
+    closed: bool, base_state: str, publication: bool, judged: bool
 ) -> None:
     item = "sha256:" + "e" * 63
     path = history_path(LEAF)
@@ -233,13 +243,16 @@ def test_validator_refuses_short_items_without_closed_comparison_base(
     data = canonical_text(document).encode()
     candidate = tree(files | {path: data})
     bases = [tree(files, "base")]
-    publication: bool | LeafCommit = False
+    commit: bool | LeafCommit = publication
     if base_state == "open":
         bases = [tree(files | {path: canonical_text({**document, "closed": False}).encode()})]
     elif base_state == "frozen":
-        publication = LeafCommit(frozen=(candidate,))
-    report = validate_tree(candidate, bases=bases, code=code(), leaf_publication=publication)
+        commit = LeafCommit(frozen=(candidate,))
+    report = validate_tree(candidate, bases=bases, code=code(), leaf_publication=commit)
     findings = [one for one in report.violations if one.field == "rows.ROW-3F9Q7K.items"]
+    if not judged:
+        assert not findings, report
+        return
     assert not report.ok and len(findings) == 1, report
     finding = findings[0]
     assert finding.path == path and not finding.report_only
