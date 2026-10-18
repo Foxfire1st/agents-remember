@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
-import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -21,6 +21,7 @@ from agents_remember.serving.changeset_cache import ChangesetCache, RepositoryRe
 from agents_remember.serving.changeset_generation import identity
 from agents_remember.worktrees.modules.git import changed_worktree_paths, stage_tree
 from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, wait_until
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from test_master_net_generation import (
@@ -699,27 +700,28 @@ def test_one_read_does_not_wait_on_another_cache_read(tmp_path, monkeypatch):
     def blocking(source):
         if isinstance(source, Path) and source == slow_input:
             observing.set()
-            assert release.wait(5)
+            assert release.wait(HANG_GUARD_SECONDS), "slow observation was not released"
         return original(source)
 
     monkeypatch.setattr(cache, "snapshot", blocking)
-    produced: list[str] = []
 
     def slow_read():
         with cache.reading():
-            produced.append(cached_read(("slow",), (slow_input,), lambda: "slow"))
+            return cached_read(("slow",), (slow_input,), lambda: "slow")
 
-    thread = threading.Thread(target=slow_read)
-    thread.start()
-    assert observing.wait(5)
-    started = time.perf_counter()
-    with cache.reading():
-        assert cached_read(("fast",), (fast_input,), lambda: "fast") == "fast"
-    elapsed = time.perf_counter() - started
-    release.set()
-    thread.join(5)
-    assert elapsed < 1.0
-    assert produced == ["slow"]
+    def fast_read():
+        with cache.reading():
+            return cached_read(("fast",), (fast_input,), lambda: "fast")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        slow = pool.submit(slow_read)
+        try:
+            wait_until(observing.is_set, "the slow cache observation to start")
+            assert pool.submit(fast_read).result(timeout=HANG_GUARD_SECONDS) == "fast"
+            assert not slow.done(), "the fast read waited for the slow observation"
+        finally:
+            release.set()
+        assert slow.result(timeout=HANG_GUARD_SECONDS) == "slow"
 
 
 def test_the_admitted_input_carrier_does_not_change_what_a_read_produces(world, monkeypatch):

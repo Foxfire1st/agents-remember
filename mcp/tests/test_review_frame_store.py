@@ -23,7 +23,8 @@ import shutil
 import subprocess
 import sys
 import threading
-import time
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -70,6 +71,7 @@ from agents_remember.models.knowledge.review_trees import (
     ReviewTreeComparisonRecord,
     ReviewTreeSide,
 )
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
 
 AT = "2026-10-18T00:00:00Z"
 LATER = "2026-10-18T06:00:00Z"
@@ -687,24 +689,28 @@ def test_f11_r2_an_intermediate_revision_link_is_not_served(task: Path, tmp_path
     assert (external / "index.html").read_text() == "foreign bytes"
 
 
-def test_f12_r2_archive_waits_for_the_publication_lock(task: Path) -> None:
+def test_f12_r2_archive_waits_for_the_publication_lock(
+    task: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _publish(task, _record())
     scope = frame_scope(task, LEAF, FRAME)
     lock_path = scope.area.parent / TASK_LOCK_NAME
-    waited: list[float] = []
-    with exclusive_file_lock(lock_path, "test holds the task lock"):
-        started = time.monotonic()
-        thread = threading.Thread(
-            target=lambda: (
-                reclaim_task_frames(task, dry_run=False, now=LATER),
-                waited.append(time.monotonic() - started),
-            )
-        )
-        thread.start()
-        time.sleep(0.3)
-        assert not waited, "the archive must wait while the publication lock is held"
-    thread.join(timeout=10)
-    assert waited and waited[0] >= 0.3
+    attempted = threading.Event()
+
+    @contextmanager
+    def observe_lock(path: Path, resource: str) -> Iterator[None]:
+        assert path == lock_path
+        attempted.set()
+        with exclusive_file_lock(path, resource):
+            yield
+
+    monkeypatch.setattr(store, "exclusive_file_lock", observe_lock)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with exclusive_file_lock(lock_path, "test holds the task lock"):
+            archive = pool.submit(reclaim_task_frames, task, dry_run=False, now=LATER)
+            assert attempted.wait(timeout=HANG_GUARD_SECONDS), "archive did not enter its task lock"
+            assert not archive.done(), "the archive must wait while the publication lock is held"
+        assert archive.result(timeout=HANG_GUARD_SECONDS)["state"] == "reclaimed"
 
 
 def test_f13_r2_a_corrupt_manifest_is_not_served(task: Path) -> None:

@@ -12,17 +12,24 @@ import asyncio
 import contextvars
 import gc
 import os
+import signal
 import threading
-import time
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from shlex import quote
 from typing import cast
 
 import pytest
 from agents_remember.kernel import git_command
-from agents_remember.kernel.git_command import cancellable_git_commands, run_git
+from agents_remember.kernel.git_command import GitRunnerOptions, cancellable_git_commands, run_git
 from agents_remember.serving.changeset import _BoundedReads, _read_off_the_loop
 from agents_remember.serving.changeset_cache import ChangesetCache, cached_read
+from agents_remember_test_support.testing.waits import (
+    HANG_GUARD_SECONDS,
+    async_wait_until,
+    wait_until,
+)
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
@@ -32,19 +39,29 @@ pytestmark = pytest.mark.evidence_unit
 class _Client:
     """The one request fact the route reads: whether its client is still connected."""
 
-    def __init__(self, *, disconnect_after: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        disconnect_after: int | None = None,
+        disconnected: threading.Event | None = None,
+    ) -> None:
         self._remaining = disconnect_after
+        self._disconnected = disconnected
 
     async def is_disconnected(self) -> bool:
+        if self._disconnected is not None:
+            return self._disconnected.is_set()
         if self._remaining is None:
             return False
         self._remaining -= 1
         return self._remaining < 0
 
 
-def _client(*, disconnect_after: int | None = None) -> Request:
+def _client(
+    *, disconnect_after: int | None = None, disconnected: threading.Event | None = None
+) -> Request:
     """The route reads only ``is_disconnected``; the cast names that seam for the type check."""
-    return cast(Request, _Client(disconnect_after=disconnect_after))
+    return cast(Request, _Client(disconnect_after=disconnect_after, disconnected=disconnected))
 
 
 def _reads(*, threads: int = 8, pending: int = 8) -> _BoundedReads:
@@ -62,76 +79,85 @@ def _use_fake_git(binary: Path, monkeypatch) -> None:
     monkeypatch.setenv("PATH", f"{binary.parent}{os.pathsep}{os.environ['PATH']}")
 
 
-async def _wait_for(event: threading.Event, timeout: float = 5.0) -> bool:
-    """Wait without blocking the loop the read is scheduled on."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if event.is_set():
-            return True
-        await asyncio.sleep(0.02)
-    return False
+def _gated_git(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
+    """Hold the real child until released; callers bound the runner with the hang guard."""
+    pid_file, release, finished = (tmp_path / name for name in ("git.pid", "release", "finished"))
+    binary = tmp_path / "bin" / "git"
+    _fake_git(
+        binary,
+        f"echo $$ > {quote(str(pid_file))}\n"
+        f"while [ ! -f {quote(str(release))} ]; do sleep 0.01; done\n"
+        f"echo done >> {quote(str(finished))}\n",
+    )
+    _use_fake_git(binary, monkeypatch)
+    return pid_file, release, finished
 
 
-def _process_gone(pid: int, timeout: float = 5.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return True
-        time.sleep(0.02)
+def _process_gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
     return False
 
 
 def test_a_slow_read_of_one_task_does_not_delay_anothers(tmp_path, monkeypatch):
-    binary = tmp_path / "bin" / "git"
-    _fake_git(binary, "sleep 2\nexit 0\n")
-    _use_fake_git(binary, monkeypatch)
+    pid_file, release, _finished = _gated_git(tmp_path, monkeypatch)
     reads = _reads()
 
     def slow(_cancellation: threading.Event) -> Response:
-        run_git(tmp_path, ["status"])
+        assert (
+            run_git(tmp_path, ["status"], GitRunnerOptions(timeout=HANG_GUARD_SECONDS)).returncode
+            == 0
+        )
         return JSONResponse({"read": "slow"})
 
-    async def drive() -> tuple[int, float]:
+    async def drive() -> tuple[int, int]:
         slow_read = asyncio.ensure_future(_read_off_the_loop(_client(), reads, slow))
-        await asyncio.sleep(0.1)  # The slow read is in its Git child now.
-        started = time.monotonic()
-        fast = await _read_off_the_loop(
-            _client(), reads, lambda _cancellation: JSONResponse({"read": "fast"})
-        )
-        fast_seconds = time.monotonic() - started
-        await slow_read
-        return fast.status_code, fast_seconds
+        try:
+            await async_wait_until(pid_file.exists, "the slow read's Git child to start")
+            fast = await asyncio.wait_for(
+                _read_off_the_loop(
+                    _client(), reads, lambda _cancellation: JSONResponse({"read": "fast"})
+                ),
+                HANG_GUARD_SECONDS,
+            )
+            assert not slow_read.done(), "the fast read waited for the slow Git child"
+        finally:
+            release.touch()
+        return fast.status_code, (await slow_read).status_code
 
     try:
-        status, fast_seconds = asyncio.run(drive())
-        assert status == 200
-        assert fast_seconds < 0.5  # The other read's Git child is still sleeping.
+        assert asyncio.run(drive()) == (200, 200)
     finally:
+        release.touch()
         reads.shutdown()
 
 
 def test_a_disconnected_read_ends_its_git_process(tmp_path, monkeypatch):
-    pid_file = tmp_path / "git.pid"
-    binary = tmp_path / "bin" / "git"
-    _fake_git(binary, f"echo $$ > {pid_file}\nsleep 60\n")
-    _use_fake_git(binary, monkeypatch)
+    pid_file, release, finished = _gated_git(tmp_path, monkeypatch)
+    disconnected = threading.Event()
     reads = _reads(threads=2, pending=2)
 
     def read(_cancellation: threading.Event) -> Response:
-        run_git(tmp_path, ["status"])
+        run_git(tmp_path, ["status"], GitRunnerOptions(timeout=HANG_GUARD_SECONDS))
         return JSONResponse({"read": "abandoned"})
 
+    async def drive() -> int:
+        pending = asyncio.create_task(
+            _read_off_the_loop(_client(disconnected=disconnected), reads, read)
+        )
+        await async_wait_until(pid_file.exists, "the abandoned read's Git child to start")
+        disconnected.set()
+        return (await asyncio.wait_for(pending, HANG_GUARD_SECONDS)).status_code
+
     try:
-        started = time.monotonic()
-        # The client is gone after a few polls: enough for the child to have started.
-        asyncio.run(_read_off_the_loop(_client(disconnect_after=3), reads, read))
-        assert time.monotonic() - started < 30
-        assert pid_file.exists(), "the Git child never started"
+        assert asyncio.run(drive()) == 499
         pid = int(pid_file.read_text().strip())
-        assert _process_gone(pid), "the Git child outlived the client that abandoned it"
+        wait_until(lambda: _process_gone(pid), "the abandoned read's Git child to be reaped")
+        assert not finished.exists(), "the abandoned Git child completed instead of being killed"
     finally:
+        release.touch()
         reads.shutdown()
 
 
@@ -145,7 +171,7 @@ def test_a_queued_abandoned_read_never_produces():
 
     def blocking(_cancellation: threading.Event) -> Response:
         producing.set()
-        assert release.wait(10)
+        assert release.wait(HANG_GUARD_SECONDS), "the live producer was not released"
         return JSONResponse({"read": "first"})
 
     def queued(_cancellation: threading.Event) -> Response:
@@ -154,7 +180,7 @@ def test_a_queued_abandoned_read_never_produces():
 
     async def drive() -> tuple[int, int]:
         first = asyncio.ensure_future(_read_off_the_loop(_client(), reads, blocking))
-        assert await _wait_for(producing)
+        await async_wait_until(producing.is_set, "the live producer to start")
         second = await _read_off_the_loop(_client(disconnect_after=1), reads, queued)
         release.set()
         first_response = await first
@@ -166,6 +192,7 @@ def test_a_queued_abandoned_read_never_produces():
         assert produced == [], "a queued read whose client left still ran its work"
         assert first_status == 200
     finally:
+        release.set()
         reads.shutdown()
 
 
@@ -178,14 +205,14 @@ def test_over_capacity_answers_an_explicit_refusal():
 
     def blocking(_cancellation: threading.Event) -> Response:
         started.set()
-        assert release.wait(10)
+        assert release.wait(HANG_GUARD_SECONDS), "the blocking producer was not released"
         return JSONResponse({"read": "blocking"})
 
     async def drive() -> tuple[int, int, Response]:
         first = asyncio.ensure_future(_read_off_the_loop(_client(), reads, blocking))
-        assert await _wait_for(started)
+        await async_wait_until(started.is_set, "the blocking producer to start")
         second = asyncio.ensure_future(_read_off_the_loop(_client(), reads, blocking))
-        await asyncio.sleep(0.1)  # It is admitted and waiting for the only thread.
+        await async_wait_until(lambda: reads.queued() == 1, "the second read to be queued")
         over = await _read_off_the_loop(
             _client(), reads, lambda _cancellation: JSONResponse({"read": "over"})
         )
@@ -198,6 +225,7 @@ def test_over_capacity_answers_an_explicit_refusal():
         assert over.status_code == 503
         assert over.headers["retry-after"] == "1"  # an explicit refusal, not a queue
     finally:
+        release.set()
         reads.shutdown()
 
 
@@ -208,27 +236,31 @@ def test_an_abandoned_successful_read_is_never_cached():
     reads = _reads(threads=1, pending=1)
     started = threading.Event()
     release = threading.Event()
+    disconnected = threading.Event()
 
     def produce(cancellation: threading.Event) -> Response:
         with cache.reading(abandoned=cancellation):
             started.set()
-            assert release.wait(10)
+            assert release.wait(HANG_GUARD_SECONDS), "the abandoned producer was not released"
             value = cached_read(("abandoned",), (), lambda: {"value": 1})
             return JSONResponse(value)
 
     async def drive() -> int:
         read = asyncio.ensure_future(
-            _read_off_the_loop(_client(disconnect_after=3), reads, produce)
+            _read_off_the_loop(_client(disconnected=disconnected), reads, produce)
         )
-        assert await _wait_for(started)
-        await asyncio.sleep(0.2)  # The poller sees the client gone and cancels.
+        await async_wait_until(started.is_set, "the abandoned producer to start")
+        disconnected.set()
+        response = await asyncio.wait_for(read, HANG_GUARD_SECONDS)
         release.set()
-        return (await read).status_code
+        await async_wait_until(lambda: reads._admitted == 0, "the abandoned producer to finish")
+        return response.status_code
 
     try:
         assert asyncio.run(drive()) == 499
         assert not cache._values, "an abandoned answer entered the cache"
     finally:
+        release.set()
         reads.shutdown()
 
 
@@ -239,53 +271,52 @@ def test_the_cancellation_is_scoped_to_its_read_and_restored(tmp_path, monkeypat
     ends the child inside the block and does not touch the command after it.
     """
 
-    binary = tmp_path / "bin" / "git"
-    _fake_git(binary, "sleep 2\nexit 0\n")
-    _use_fake_git(binary, monkeypatch)
+    _pid_file, release, finished = _gated_git(tmp_path, monkeypatch)
     abandoned = threading.Event()
     abandoned.set()  # The client went away before this read's block was entered.
 
     assert git_command._GIT_CANCELLATION.get() is None
     with cancellable_git_commands(abandoned):
         assert git_command._GIT_CANCELLATION.get() is abandoned
-        started = time.monotonic()
-        run_git(tmp_path, ["status"])
-        inside = time.monotonic() - started
+        inside = run_git(tmp_path, ["status"], GitRunnerOptions(timeout=HANG_GUARD_SECONDS))
         with cancellable_git_commands(threading.Event()):
             assert git_command._GIT_CANCELLATION.get() is not abandoned
         assert git_command._GIT_CANCELLATION.get() is abandoned  # the outer block is restored
     assert git_command._GIT_CANCELLATION.get() is None  # leaving restores the prior state
 
-    started = time.monotonic()
-    run_git(tmp_path, ["status"])
-    after = time.monotonic() - started
-    assert inside < 1.5, "the abandoned read's child was not ended with its read"
-    assert after >= 1.5, "a later command was cancelled by an event set for another read"
+    assert inside.returncode == -signal.SIGKILL, "the abandoned read's child was not killed"
+    assert not finished.exists()
+    release.touch()
+    after = run_git(tmp_path, ["status"], GitRunnerOptions(timeout=HANG_GUARD_SECONDS))
+    assert after.returncode == 0, "a later command was cancelled by another read's event"
+    assert finished.read_text().strip() == "done"
 
 
 def test_a_cancellation_never_reaches_another_tasks_git_child(tmp_path, monkeypatch):
     """M4-26 (2): the carrier is context-local, so a sibling task's child is never cancelled."""
 
-    marker = tmp_path / "sibling-finished"
-    binary = tmp_path / "bin" / "git"
-    _fake_git(binary, f"sleep 1\necho done >> {marker}\nexit 0\n")
-    _use_fake_git(binary, monkeypatch)
+    pid_file, release, marker = _gated_git(tmp_path, monkeypatch)
     abandoned = threading.Event()
     abandoned.set()
 
-    def sibling() -> None:
-        run_git(tmp_path, ["status"])
+    def sibling() -> int:
+        return run_git(
+            tmp_path, ["status"], GitRunnerOptions(timeout=HANG_GUARD_SECONDS)
+        ).returncode
 
-    thread = threading.Thread(target=sibling, name="sibling-read")
     # The event is already set when the sibling starts its own child: only context-locality,
     # not the child's start order, can keep that child alive.
-    with cancellable_git_commands(abandoned):
-        thread.start()
-        time.sleep(0.2)  # The sibling's child is inside its sleep now.
-        run_git(tmp_path, ["status"])  # this context's own child, ended with its read
-
-    thread.join(timeout=10)
-    assert not thread.is_alive()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        try:
+            with cancellable_git_commands(abandoned):
+                pending = pool.submit(sibling)
+                wait_until(pid_file.exists, "the sibling's Git child to start")
+                own = run_git(tmp_path, ["status"], GitRunnerOptions(timeout=HANG_GUARD_SECONDS))
+                assert own.returncode == -signal.SIGKILL
+                assert not pending.done(), "another task's Git child was cancelled"
+        finally:
+            release.touch()
+        assert pending.result(timeout=HANG_GUARD_SECONDS) == 0
     assert marker.read_text().strip() == "done", "another task's Git child was cancelled"
 
     context = contextvars.copy_context()
@@ -385,10 +416,13 @@ def test_the_family_bounds_admits_and_reclaims_at_over_capacity(population):
 
     reads = _BoundedReads(threads=1, pending=1, name="r103")
     gate = threading.Event()
+    entered = threading.Event()
+    disconnected = threading.Event()
     other = _BoundedReads(threads=1, pending=1, name="r103-other")
 
     def slow(_cancellation: threading.Event) -> Response:
-        gate.wait(5)
+        entered.set()
+        assert gate.wait(HANG_GUARD_SECONDS), "the live worker was not released"
         return JSONResponse({"read": "slow"})
 
     def quick(_cancellation: threading.Event) -> Response:
@@ -396,22 +430,22 @@ def test_the_family_bounds_admits_and_reclaims_at_over_capacity(population):
 
     async def drive() -> tuple[list[int], int, int, int, int, int]:
         live = asyncio.ensure_future(_read_off_the_loop(_client(), reads, slow))
-        await asyncio.sleep(0.05)
+        await async_wait_until(entered.is_set, "the live worker to start")
         assert reads.queued() == 0
 
         # The first extra read takes the single pending place; the next is refused at once.
         first_extra = asyncio.ensure_future(
-            _read_off_the_loop(_client(disconnect_after=2), reads, quick)
+            _read_off_the_loop(_client(disconnected=disconnected), reads, quick)
         )
-        await asyncio.sleep(0.02)
+        await async_wait_until(lambda: reads.queued() == 1, "the extra read to occupy the queue")
         refused = await _read_off_the_loop(_client(), reads, quick)
         queued_with_one_waiting = reads.queued()
+        disconnected.set()
         await first_extra
 
         abandoned = []
         for _ in range(population - 1):
             abandoned.append(await _read_off_the_loop(_client(disconnect_after=1), reads, quick))
-        await asyncio.sleep(0.05)
         queued_after_abandon = reads.queued()
 
         # Another route family is untouched by this one's saturation.
@@ -460,12 +494,12 @@ def test_abandoned_jobs_release_their_copied_request_contexts(population):
 
     def slow(_):
         entered.set()
-        gate.wait(5)
+        assert gate.wait(HANG_GUARD_SECONDS), "the context-owning worker was not released"
         return Response()
 
     async def drive():
         live = asyncio.create_task(_read_off_the_loop(_client(), reads, slow))
-        assert await _wait_for(entered)
+        await async_wait_until(entered.is_set, "the context-owning worker to start")
         for _ in range(population):
             payload = Payload()
             retained.append(weakref.ref(payload))
@@ -494,18 +528,22 @@ def test_a_running_abandoned_job_keeps_its_slot_until_its_worker_ends():
     reads = _reads(threads=1, pending=1)
     entered = threading.Event()
     gate = threading.Event()
+    disconnected = threading.Event()
 
     def slow(_):
         entered.set()
-        gate.wait(5)
+        assert gate.wait(HANG_GUARD_SECONDS), "the abandoned running worker was not released"
         return Response()
 
     async def drive():
-        gone = asyncio.create_task(_read_off_the_loop(_client(disconnect_after=0), reads, slow))
-        assert await _wait_for(entered)
+        gone = asyncio.create_task(
+            _read_off_the_loop(_client(disconnected=disconnected), reads, slow)
+        )
+        await async_wait_until(entered.is_set, "the soon-abandoned worker to start")
+        disconnected.set()
         assert (await gone).status_code == 499
         current = asyncio.create_task(_read_off_the_loop(_client(), reads, lambda _: Response()))
-        await asyncio.sleep(0)
+        await async_wait_until(lambda: reads.queued() == 1, "the current read to occupy the queue")
         excess = await _read_off_the_loop(_client(disconnect_after=0), reads, lambda _: Response())
         assert excess.status_code == 503
         gate.set()
