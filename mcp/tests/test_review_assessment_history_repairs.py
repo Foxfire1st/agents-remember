@@ -27,7 +27,7 @@ from curator_coherence_test_support import (
     read_prepared_candidate_set,
     write_curator_evidence,
 )
-from test_knowledge_review_evidence_channels import (
+from review_curator_fixture_support import (
     EVIDENCE_RELATIVE,
     _assessment_revision,
     build_recorded_fixture,

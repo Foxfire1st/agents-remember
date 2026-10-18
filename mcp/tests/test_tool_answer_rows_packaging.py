@@ -68,7 +68,7 @@ from curator_coherence_test_support import (
     write_curator_evidence,
 )
 from knowledge_index_test_support import commit_all, init_repository, write_review_tree
-from test_knowledge_review_evidence_channels import build_recorded_fixture
+from review_curator_fixture_support import build_recorded_fixture
 from test_memory_attribution_producers import _carryover_world
 from test_worktree_support import git, init_repo, open_external_contract_fixture
 from tool_answer_l110_rows import (

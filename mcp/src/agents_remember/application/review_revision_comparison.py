@@ -1,65 +1,25 @@
-"""The explicit revision comparison's selection policy (ICR-R07@v1).
+"""Select each tree's recorded revision of the reviewed invariant or family.
 
-This module owns the one rule the packet's Required Behavior states: **a revision head is a
-retained revision of that identity in the selected snapshot revision population**. Text records
-hold no predecessor edge (MIK-R74 rule 1), so no recorded successor relation narrows the
-population: a side with exactly one retained revision establishes one head, and a side with
-several establishes several. No collection order, no presence on both sides, no timestamp and no
-text similarity participates, because none of them is a statement
-an author made about which revision replaced which.
-
-**What it reads.** The selected populations come from the shipped comparison's own union items
-(one item per retained revision, each carrying the side payloads that selected it). This module
-invents nothing.
-
-**What it returns.** One :class:`~agents_remember.models.knowledge.revision_selection.ReviewRevisionSelection`
-per reviewed identity: the unique-head pair when each nonempty side retains exactly one revision,
-the one-sided head under ICR-R06@v1 when a side is known-empty, and an explicit ambiguous or
-unresolved selection -- with every head and every retained revision still listed -- when multiple
-heads prevent a unique head. Intermediate revisions stay in the union and stay addressable through
-the comparison's own per-side explicit revision selector; this module removes none of them.
-
-**Why this is its own module.** The review adapter is over the repository's soft file-size rail,
-and the packet's Scope asks a leaf that touches a responsibility inside it to move that
-responsibility out before adding behavior. Head selection is that responsibility here: one
-implementation, called by :mod:`agents_remember.application.knowledge_review`, which stays the
-adapter that resolves, calls and assembles. The adapter re-exports nothing from here because no
-module under ``mcp/`` imported the rule this replaces -- the both-sides preference was private
-to the adapter -- so there is one implementation and no alias to keep.
+A text record holds one revision. The comparison therefore has a pair, an addition,
+a removal, or no selected record. There is no multi-head lineage selection here.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from agents_remember.models.knowledge.diff import KnowledgeDiffItem
 from agents_remember.models.knowledge.read import KnowledgeReadSeed
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 
-__all__ = [
-    "SubjectRevisionSelection",
-    "revision_heads",
-    "select_subject_revisions",
-]
-
-# The union item kinds this policy reads populations from. A claim and a frontier link hold no
-# selectable revisions -- a claim's identity is the claim -- so they never establish heads.
-_SELECTABLE_KINDS = ("invariant", "family")
+__all__ = ["SubjectRevisionSelection", "revision_heads", "select_subject_revisions"]
 
 
 @dataclass(frozen=True)
 class SubjectRevisionSelection:
-    """One reviewed identity's head selection, with the union items its statements render from.
-
-    ``selection`` is the recorded value: the pair or the explicit non-pair, with every head and
-    every retained revision listed. ``before_item``/``after_item`` are the union items whose side
-    payloads the pane renders -- the before head's item for the before statement and the after
-    head's item for the after statement -- or ``None`` when the selection named no pair and the
-    pane must render the explicit ambiguity instead of a winner. A one-sided selection carries
-    the nonempty side's head item, which is exactly the item ICR-R06@v1's absent-side rendering
-    already reads.
-    """
+    """The selected revision on each side and the comparison items carrying their text."""
 
     selection: ReviewRevisionSelection | None
     before_item: KnowledgeDiffItem | None
@@ -67,309 +27,95 @@ class SubjectRevisionSelection:
 
 
 def revision_heads(population: Sequence[str]) -> tuple[str, ...]:
-    """Return the heads of one selected revision population, in sorted order.
-
-    Text records hold no predecessor edge (MIK-R74 rule 1), so no recorded successor relation
-    narrows the population: every retained revision is a head. The sorted order is a rendering
-    determinism -- the same snapshots always list the same heads -- and never a semantic revision
-    rule: no caller may read the first head as the selected one.
-    """
+    """List the recorded revisions deterministically; text records carry no lineage edges."""
 
     return tuple(sorted(population))
 
 
-@dataclass(frozen=True)
-class _ReviewedPopulations:
-    """One reviewed identity's two selected populations and their established heads.
-
-    The four tuples travel together because every decision below -- compared, one-sided,
-    ambiguous or unresolved -- reads the same four values, and a helper handed them separately
-    could be handed one subject's populations with another's heads.
-    """
-
-    kind: str
-    record_id: str
-    before: tuple[str, ...]
-    after: tuple[str, ...]
-    before_heads: tuple[str, ...]
-    after_heads: tuple[str, ...]
-
-
 def select_subject_revisions(
-    items: Sequence[KnowledgeDiffItem],
-    selector: KnowledgeReadSeed | None,
+    items: Sequence[KnowledgeDiffItem], selector: KnowledgeReadSeed | None
 ) -> SubjectRevisionSelection:
-    """Select the reviewed identity's before/after revision pair from retained heads.
-
-    The populations are the shipped comparison's own union items for the selector's identity --
-    the before payloads' revisions on the before side and the after payloads' on the after side --
-    and every retained revision is a head (MIK-R74 rule 1: text records hold no predecessor edge).
-    The combination is the packet's Required Behavior: unique heads compare head to head, a
-    known-empty side stays an ICR-R06@v1 addition or removal, and multiple heads are an explicit
-    ambiguous selection that still lists every head and every retained revision.
-    A selector that names no identity addresses no identity item, exactly as the adapter's rule
-    it replaces did.
-    """
+    """Select the subject's own revision per tree, not a collection-wide default."""
 
     identity = _selector_identity(selector)
     if identity is None:
         return SubjectRevisionSelection(selection=None, before_item=None, after_item=None)
     kind, record_id = identity
-    populations = _populations(items, kind, record_id)
-    if populations is None:
-        return _unresolved(
-            _ReviewedPopulations(
-                kind=kind,
-                record_id=record_id,
-                before=(),
-                after=(),
-                before_heads=(),
-                after_heads=(),
-            ),
-            f"no revision of the {kind} {record_id} was selected on either side, so no "
-            "pair was established and no statements render as operands",
-        )
-    return _decide(items, populations)
-
-
-def _populations(
-    items: Sequence[KnowledgeDiffItem], kind: str, record_id: str
-) -> _ReviewedPopulations | None:
-    """Return one identity's two selected populations with their heads, or ``None`` when empty.
-
-    ``None`` means both populations are empty -- there is nothing to decide a head from, so the
-    caller records that explicitly rather than deciding. A ``_ReviewedPopulations`` otherwise,
-    even when one side is known-empty: a one-sided head is still a head the snapshots establish.
-    """
-
-    before_population = _side_population(items, kind, record_id, "before")
-    after_population = _side_population(items, kind, record_id, "after")
-    if not before_population and not after_population:
-        return None
-    return _ReviewedPopulations(
-        kind=kind,
-        record_id=record_id,
-        before=before_population,
-        after=after_population,
-        before_heads=revision_heads(before_population),
-        after_heads=revision_heads(after_population),
+    before_item = _side_item(items, kind, record_id, "before")
+    after_item = _side_item(items, kind, record_id, "after")
+    before = (
+        None
+        if before_item is None or before_item.before is None
+        else before_item.before.revision_id
+    )
+    after = None if after_item is None or after_item.after is None else after_item.after.revision_id
+    before_ids = () if before is None else (before,)
+    after_ids = () if after is None else (after,)
+    state, statement = _selection_description(kind, record_id, before, after)
+    return SubjectRevisionSelection(
+        selection=ReviewRevisionSelection(
+            record_kind=kind,
+            record_id=record_id,
+            state=state,
+            before_revision_id=before,
+            after_revision_id=after,
+            before_heads=before_ids,
+            after_heads=after_ids,
+            before_retained=before_ids,
+            after_retained=after_ids,
+            statement=statement,
+        ),
+        before_item=before_item,
+        after_item=after_item,
     )
 
 
-def _decide(
-    items: Sequence[KnowledgeDiffItem],
-    populations: _ReviewedPopulations,
-) -> SubjectRevisionSelection:
-    """Route one identity's established populations to their recorded selection."""
+def _selection_description(
+    kind: str, record_id: str, before: str | None, after: str | None
+) -> tuple[Literal["compared", "added", "removed", "unresolved"], str]:
+    if before is not None and after is not None:
+        return "compared", (
+            f"the {kind} {record_id} comparison uses the before revision {before} and "
+            f"the after revision {after}, each recorded by its own memory tree"
+        )
+    if after is not None:
+        return "added", (
+            f"the before snapshot retains no revision of the {kind} {record_id}, so "
+            f"the after revision {after} is shown as an addition under the one-sided contract"
+        )
+    if before is not None:
+        return "removed", (
+            f"the after snapshot retains no revision of the {kind} {record_id}, so "
+            f"the before revision {before} is shown as a removal under the one-sided contract"
+        )
+    return "unresolved", (
+        f"no revision of the {kind} {record_id} was selected on either side, so no "
+        "pair was established and no statements render as operands"
+    )
 
-    if not populations.before or not populations.after:
-        return _one_sided(items, populations, added=not populations.before)
-    return _combine(items, populations)
 
-
-def _combine(
-    items: Sequence[KnowledgeDiffItem], populations: _ReviewedPopulations
-) -> SubjectRevisionSelection:
-    """Record the selection for two nonempty populations: compared or ambiguous."""
-
-    if len(populations.before_heads) != 1 or len(populations.after_heads) != 1:
-        return _ambiguous(populations)
-    return _compared(items, populations)
-
-
-def _selector_identity(selector: KnowledgeReadSeed | None) -> tuple[str, str] | None:
-    """Return ``(union kind, record id)`` for an identity selector, or ``None`` otherwise."""
-
+def _selector_identity(
+    selector: KnowledgeReadSeed | None,
+) -> tuple[Literal["invariant", "family"], str] | None:
     kind = getattr(selector, "kind", None)
     if kind == "invariant":
-        return ("invariant", str(selector.invariant_id))  # type: ignore[attr-defined]
+        return "invariant", str(selector.invariant_id)  # type: ignore[attr-defined]
     if kind == "family":
-        return ("family", str(selector.family_id))  # type: ignore[attr-defined]
+        return "family", str(selector.family_id)  # type: ignore[attr-defined]
     return None
 
 
-def _side_population(
+def _side_item(
     items: Sequence[KnowledgeDiffItem], kind: str, record_id: str, side: str
-) -> tuple[str, ...]:
-    """Return one side's selected revision ids for one identity, in sorted order.
-
-    The population is what the shipped comparison selected -- the side payloads the union items
-    carry -- and not a second read of either snapshot, so the heads below are heads of the
-    population the comparison actually shows. The sorted order is the same rendering determinism
-    :func:`revision_heads` states. Only the two supersedable kinds are read: a claim and a
-    frontier link are never revision heads.
-    """
-
-    if kind not in _SELECTABLE_KINDS:
-        return ()
-    revisions = {
-        str(payload.revision_id)
-        for item in items
-        if item.kind == kind and item.record_id == record_id
-        for payload in (item.before if side == "before" else item.after,)
-        if payload is not None and payload.revision_id is not None
-    }
-    return tuple(sorted(revisions))
-
-
-def _compared(
-    items: Sequence[KnowledgeDiffItem], populations: _ReviewedPopulations
-) -> SubjectRevisionSelection:
-    """Record the unique-head pair the two snapshots are compared on."""
-
-    before_id = populations.before_heads[0]
-    after_id = populations.after_heads[0]
-    history = len(populations.before) + len(populations.after) - 2
-    kind, record_id = populations.kind, populations.record_id
-    return SubjectRevisionSelection(
-        selection=ReviewRevisionSelection(
-            record_kind=kind,  # type: ignore[arg-type]
-            record_id=record_id,
-            state="compared",
-            before_revision_id=before_id,
-            after_revision_id=after_id,
-            before_heads=(before_id,),
-            after_heads=(after_id,),
-            before_retained=populations.before,
-            after_retained=populations.after,
-            statement=(
-                f"the {kind} {record_id} comparison uses the before head {before_id} and "
-                f"the after head {after_id}, each the unique retained revision with no "
-                f"recorded successor in its snapshot's selected population; {history} other "
-                "retained revision(s) remain selectable history"
-            ),
-        ),
-        before_item=_item_with(items, kind, record_id, before_id, "before"),
-        after_item=_item_with(items, kind, record_id, after_id, "after"),
-    )
-
-
-def _one_sided(
-    items: Sequence[KnowledgeDiffItem], populations: _ReviewedPopulations, *, added: bool
-) -> SubjectRevisionSelection:
-    """Record a known-empty side as an ICR-R06@v1 addition or removal.
-
-    A known-empty side is a side whose selected population holds no revision of the reviewed
-    identity: the nonempty side's unique head is shown and the empty side renders as absent,
-    exactly as the one-sided contract already does. A nonempty side with anything but one head
-    is not a one-sided side with a head to show -- it is an ambiguity, and
-    it is reported as one rather than as an addition or removal wearing a chosen revision.
-    """
-
-    kind, record_id = populations.kind, populations.record_id
-    shown = "after" if added else "before"
-    heads = populations.after_heads if added else populations.before_heads
-    if len(heads) != 1:
-        return _ambiguous(
-            populations,
-            crowded_side=shown,
-            crowded_ids=heads,
-        )
-    head = heads[0]
-    empty = "before" if added else "after"
-    head_item = _item_with(items, kind, record_id, head, shown)
-    return SubjectRevisionSelection(
-        selection=ReviewRevisionSelection(
-            record_kind=kind,  # type: ignore[arg-type]
-            record_id=record_id,
-            state="added" if added else "removed",
-            before_revision_id=None if added else head,
-            after_revision_id=head if added else None,
-            before_heads=() if added else (head,),
-            after_heads=(head,) if added else (),
-            before_retained=populations.before,
-            after_retained=populations.after,
-            statement=(
-                f"the {empty} snapshot retains no revision of the {kind} {record_id}, so "
-                f"the {shown} head {head} is shown as "
-                f"{'an addition' if added else 'a removal'} under the one-sided contract"
-            ),
-        ),
-        before_item=None if added else head_item,
-        after_item=head_item if added else None,
-    )
-
-
-def _ambiguous(
-    populations: _ReviewedPopulations,
-    *,
-    crowded_side: str | None = None,
-    crowded_ids: tuple[str, ...] = (),
-) -> SubjectRevisionSelection:
-    """Record multiple legitimate heads with no winner chosen."""
-
-    if crowded_side is not None:
-        crowded = f"{crowded_side} heads [{', '.join(crowded_ids)}]"
-    else:
-        named = []
-        if len(populations.before_heads) != 1:
-            named.append(f"before heads [{', '.join(populations.before_heads)}]")
-        if len(populations.after_heads) != 1:
-            named.append(f"after heads [{', '.join(populations.after_heads)}]")
-        crowded = " and ".join(named) if named else "heads []"
-    kind, record_id = populations.kind, populations.record_id
-    return SubjectRevisionSelection(
-        selection=ReviewRevisionSelection(
-            record_kind=kind,  # type: ignore[arg-type]
-            record_id=record_id,
-            state="ambiguous",
-            before_heads=populations.before_heads,
-            after_heads=populations.after_heads,
-            before_retained=populations.before,
-            after_retained=populations.after,
-            statement=(
-                f"ambiguous revision selection for the {kind} {record_id}: the snapshots "
-                f"retain multiple legitimate heads ({crowded}) with no authored successor "
-                "ordering between them, so no revision was chosen; select one retained "
-                "revision explicitly to compare it"
-            ),
-        ),
-        before_item=None,
-        after_item=None,
-    )
-
-
-def _unresolved(populations: _ReviewedPopulations, reason: str) -> SubjectRevisionSelection:
-    """Record a lineage failure with the revisions still visible and no pair fabricated."""
-
-    kind, record_id = populations.kind, populations.record_id
-    return SubjectRevisionSelection(
-        selection=ReviewRevisionSelection(
-            record_kind=kind,  # type: ignore[arg-type]
-            record_id=record_id,
-            state="unresolved",
-            before_heads=populations.before_heads,
-            after_heads=populations.after_heads,
-            before_retained=populations.before,
-            after_retained=populations.after,
-            statement=f"unresolved revision selection for the {kind} {record_id}: {reason}",
-        ),
-        before_item=None,
-        after_item=None,
-    )
-
-
-def _item_with(
-    items: Sequence[KnowledgeDiffItem],
-    kind: str,
-    record_id: str,
-    revision_id: str,
-    side: str,
 ) -> KnowledgeDiffItem | None:
-    """Return the union item carrying one selected revision's side payload, or ``None``.
-
-    The item is keyed by the stored revision identity the selection recorded, never by stream
-    position or by presence on both sides: a head the snapshots replaced is found by its id
-    wherever the union placed it.
-    """
-
-    for item in items:
-        if item.kind != kind or item.record_id != record_id:
-            continue
-        payload = item.before if side == "before" else item.after
-        if payload is not None and str(payload.revision_id) == revision_id:
-            return item
-    for item in items:
-        if item.kind == kind and item.item_id == revision_id:
-            return item
-    return None
+    return next(
+        (
+            item
+            for item in items
+            if item.kind == kind
+            and item.record_id == record_id
+            and (payload := item.before if side == "before" else item.after) is not None
+            and payload.revision_id is not None
+        ),
+        None,
+    )

@@ -104,6 +104,7 @@ export function sourceContentKey(
 }
 
 export class ReviewReadCache {
+  inputEpoch = 0;
   private readonly reviews = new BoundedStore<ReviewPayload>(REVIEW_CACHE_LIMIT);
   private readonly sources = new BoundedStore<ReviewSourceContentResult>(SOURCE_CACHE_LIMIT);
   // The generation every kept entry was read under; a different one empties both stores.
@@ -144,6 +145,11 @@ export class ReviewReadCache {
 
   forgetReview(key: string): void {
     this.reviews.delete(key);
+  }
+
+  invalidateReviews(): void {
+    this.inputEpoch += 1;
+    this.reviews.clear();
   }
 
   source(key: string): ReviewSourceContentResult | undefined {

@@ -18,7 +18,7 @@
 // away in the disclosure beside the control (ICR-R16). A partial answer shows its counts marked partial.
 //
 // UNEXPLAINED IS A SEPARATE FACT. A tree comparison's summary also carries the unexplained-changes
-// lane's file count (MIK-R32): `· K unexplained`, or `· K unexplained · U unknown` when some file's
+// lane's file count: `· K without an invariant`, with a separate unknown count when some file's
 // attribution is unknown. It is its own element after `+N −N`, never added to it. A partially measured
 // change set says `· attribution partial` (the unmeasured scope is in the disclosure), an unmeasured
 // one `· attribution unknown`; zero of both, a dataset comparison and a pending read show nothing.
@@ -81,8 +81,8 @@ function attributionText(attribution: ReviewLaneSummary): string | null {
   if (attribution.state === 'unavailable') return '· attribution unknown';
   const unexplained = attribution.unexplained ?? 0;
   const unknown = attribution.attribution_unknown ?? 0;
-  if (unknown > 0) return `· ${unexplained} unexplained · ${unknown} unknown`;
-  return unexplained > 0 ? `· ${unexplained} unexplained` : null;
+  if (unknown > 0) return `· ${unexplained} without an invariant · ${unknown} unknown`;
+  return unexplained > 0 ? `· ${unexplained} without an invariant` : null;
 }
 
 function AttributionCount({ read }: { read: IntentSummaryRead }) {
@@ -98,6 +98,16 @@ function AttributionCount({ read }: { read: IntentSummaryRead }) {
       data-unknown={attribution.attribution_unknown}
     >
       {text}
+    </span>
+  );
+}
+
+function OpenWorkCount({ read }: { read: IntentSummaryRead }) {
+  const count = read.phase === 'loading' ? undefined : read.unexplainedOpen;
+  if (count === undefined) return null;
+  return (
+    <span className={changeSetCounts} data-testid="intent-review-open">
+      {count ? `· ${count} open` : '· all answered'}
     </span>
   );
 }
@@ -171,6 +181,7 @@ export function IntentReviewEntry({
         ⇄ {live ? 'Intent review' : 'Intent review (recorded)'}
         <IntentCounts read={read} />
         <AttributionCount read={read} />
+        <OpenWorkCount read={read} />
       </button>
       <IntentDetails read={read} />
       <AttributionDetails read={read} />

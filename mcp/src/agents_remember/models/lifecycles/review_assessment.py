@@ -466,8 +466,9 @@ class SubjectAssessmentState(_StrictAssessmentModel):
     disagreements, ``notMeasuredCount`` counts records no measurement covered, ``unavailableCount``
     counts records whose measurement failed, and the remainder are measured current. The partition is
     *enforced*, not promised: every count must equal the number of entries that carry its state, the
-    three of them together may not exceed the records, and ``status`` must be the status those entries
-    themselves state. A summary able to disagree with the records it summarises -- a ``current``
+    three of them together may not exceed the records. ``unresolvedCount`` separately counts
+    entries whose disposition is unresolved, independent of currentness. ``status`` follows the entries
+    themselves. A summary able to disagree with the records it summarises -- a ``current``
     subject holding an entry nothing measured, say -- is therefore unrepresentable.
     """
 
@@ -488,8 +489,11 @@ class SubjectAssessmentState(_StrictAssessmentModel):
         if self.status != "none-recorded" and not self.assessments:
             raise ValueError("a subject with a recorded assessment cannot report none")
         self._require_the_counts_to_partition_the_records()
-        if self.unresolvedCount > self.assessmentCount:
-            raise ValueError("the unresolved count cannot exceed the records it counts")
+        unresolved = sum(entry.disposition == "unresolved" for entry in self.assessments)
+        if self.unresolvedCount != unresolved:
+            raise ValueError(
+                "the unresolved count must equal the entries with unresolved disposition"
+            )
         if self.assessmentCount and self._status_of_records() != self.status:
             raise ValueError(
                 f"status {self.status!r} does not follow from the records: their states are "
@@ -530,7 +534,7 @@ class SubjectAssessmentState(_StrictAssessmentModel):
             )
 
     def _status_of_records(self) -> SubjectAssessmentStatus:
-        """Return the status these records themselves state, in precedence order."""
+        """Apply precedence to binding states and the counted unresolved dispositions."""
 
         states = {entry.currentness for entry in self.assessments}
         if "stale" in states:

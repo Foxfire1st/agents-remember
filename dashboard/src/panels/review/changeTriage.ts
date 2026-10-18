@@ -1,7 +1,6 @@
 // The family tree's triage (MIK-R33, adopting ICR-R32): the change facts the server delivered with
 // the roster, turned into order, counts and labels. Pure functions over the delivered facts; nothing
-// here decides a fact. A family entry without `change_kinds` (a dataset review) is left exactly as
-// the landed tree shows it.
+// here decides a fact. Missing facts remain unknown.
 
 import type {
   ReviewChangeKind,
@@ -13,6 +12,7 @@ import type {
 } from '../../data/reviewFamily';
 import type { ReviewOutlineMeaning } from '../../data/review';
 import type { TreeOrder } from './triageOrderPreference';
+import type { ReviewCodeChange } from '../../data/reviewTrees';
 
 // Precedence and sort weight (ICR-R32 rule 2): intent > implementation > membership > unknown >
 // unchanged.
@@ -65,10 +65,6 @@ const GUARANTEE_WEIGHT: Record<ReviewFamilyChanges['guarantee'], number> = {
   unknown: CHANGE_WEIGHT.unknown,
   unchanged: CHANGE_WEIGHT.unchanged,
 };
-
-export function hasChangeFacts(entries: readonly ReviewFamilyContextEntry[]): boolean {
-  return entries.some((entry) => entry.change_kinds !== undefined);
-}
 
 export function memberChanges(entry: ReviewFamilyContextEntry): Map<string, ReviewMemberChange> {
   return new Map((entry.change_kinds?.members ?? []).map((member) => [member.member_id, member]));
@@ -147,7 +143,7 @@ export function orderFamilies(
   entries: readonly ReviewFamilyContextEntry[],
   order: TreeOrder,
 ): ReviewFamilyContextEntry[] {
-  if (order === 'authored' || !hasChangeFacts(entries)) return [...entries];
+  if (order === 'authored') return [...entries];
   return entries
     .map((entry, index) => ({ entry, index, weight: familyTriage(entry)?.weight ?? 0 }))
     .sort((a, b) => b.weight - a.weight || a.index - b.index)
@@ -162,7 +158,6 @@ export function orderMemberRows<Row extends { member: ReviewFamilyMember }>(
   rows: readonly Row[],
   order: TreeOrder,
 ): Row[] {
-  if (entry.change_kinds === undefined) return [...rows];
   const facts = memberChanges(entry);
   const first = new Map<string, number>();
   rows.forEach((row, index) => {
@@ -251,15 +246,21 @@ function catalogueGroups(catalogue: readonly CatalogueEntry[]): OutlineGroup[] {
     { members: catalogue.filter((entry) => entry.selector_kind === 'invariant').map(row) },
   ];
 }
+function unknownImplementation(fact: ReviewMemberChange | ReviewCodeChange | undefined): boolean {
+  return (
+    fact?.implementation === 'unknown' ||
+    (fact !== undefined && 'primary' in fact && fact.primary === 'unknown')
+  );
+}
 function memberBadge(
   change: OutlineBadge,
-  fact: ReviewMemberChange | undefined,
+  fact: ReviewMemberChange | ReviewCodeChange | undefined,
   membership: OutlineMember['membership'] | undefined,
 ): OutlineBadge {
-  if (realChange(change)) return change;
-  if (fact?.primary === 'implementation') return 'code changed';
+  if (realChange(change) || change === 'unknown') return change;
+  if (fact?.implementation === 'established') return 'code changed';
   if (membership === 'joined' || membership === 'left') return membership;
-  if (fact?.primary === 'unknown') return 'unknown';
+  if (unknownImplementation(fact)) return 'unknown';
   return change;
 }
 function walkedMember(walked: readonly ReviewFamilyContextEntry[], id: string, familyId?: string) {
@@ -291,6 +292,7 @@ function outlineMember(
   id: string,
   familyId?: string,
   membership?: OutlineMember['membership'],
+  code?: Map<string, ReviewCodeChange> | null,
 ): OutlineRow {
   const invariant = outline.invariants.find((entry) => entry.selector_id === id);
   const { revisionId, fact } = walkedMember(walked, id, familyId);
@@ -302,7 +304,11 @@ function outlineMember(
     selectorId: id,
     familyId,
     title: `${label} ${invariant?.summary ?? ''}`.trim(),
-    badge: memberBadge(invariant?.change ?? 'unknown', fact, membership),
+    badge: memberBadge(
+      invariant?.change ?? 'unknown',
+      code === undefined ? fact : code?.get(id),
+      membership,
+    ),
     revisionId,
     meaning,
   };
@@ -318,6 +324,7 @@ export function outlineGroups(
   catalogue: readonly CatalogueEntry[],
   walked: readonly ReviewFamilyContextEntry[],
   order: TreeOrder,
+  code?: Map<string, ReviewCodeChange> | null,
 ): OutlineGroup[] {
   if (outline?.state !== 'outlined') return catalogueGroups(catalogue);
   const listed = new Set<string>();
@@ -327,7 +334,14 @@ export function outlineGroups(
     const members = sort(
       entry.members.map((item) => {
         listed.add(item.selector_id);
-        return outlineMember(outline, walked, item.selector_id, entry.selector_id, item.membership);
+        return outlineMember(
+          outline,
+          walked,
+          item.selector_id,
+          entry.selector_id,
+          item.membership,
+          code,
+        );
       }),
     );
     const count = members.filter((item) => realChange(item.badge)).length;
@@ -351,7 +365,9 @@ export function outlineGroups(
     members: sort(
       outline.invariants
         .filter((entry) => !listed.has(entry.selector_id))
-        .map((entry) => outlineMember(outline, walked, entry.selector_id)),
+        .map((entry) =>
+          outlineMember(outline, walked, entry.selector_id, undefined, undefined, code),
+        ),
     ),
   });
   return groups;

@@ -16,6 +16,7 @@ import { DiffPane, type DiffMode } from '../changeset/DiffPane';
 import type { PaneMarks } from '../file-viewer/markGutter';
 import { FilePane } from '../file-viewer/FilePane';
 import { sideMarks, useSourceMarking } from './IntentMarkers';
+import { useFullFileMarks } from './full-file-marks/useFullFileMarks';
 
 const textual = (side: ReviewSourceSide) => side.text !== undefined;
 
@@ -81,6 +82,7 @@ function Sides({
 }) {
   const { before, after } = expansion;
   const marking = useSourceMarking(expansion, mode, markers);
+  const fullFile = useFullFileMarks(expansion, markers, marking.marks);
   const lines = (
     <>
       {sideLine(before, 'before')}
@@ -92,15 +94,25 @@ function Sides({
       <>
         {lines}
         {marking.note}
-        <div style={{ height: '26rem', maxHeight: '60vh', minHeight: '12rem' }}>
-          <DiffPane
-            before={before.text ?? ''}
-            after={after.text ?? ''}
-            language={expansion.language}
-            mode={mode}
-            collapse={collapse}
-            marks={marking.marks}
-          />
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(24rem, 100%), 1fr))',
+            gap: '1rem',
+            minWidth: 0,
+          }}
+        >
+          <div style={{ height: '26rem', maxHeight: '60vh', minHeight: '12rem', minWidth: 0 }}>
+            <DiffPane
+              before={before.text ?? ''}
+              after={after.text ?? ''}
+              language={expansion.language}
+              mode={mode}
+              collapse={collapse}
+              marks={fullFile.marks}
+            />
+          </div>
+          {fullFile.list}
         </div>
         {marking.panel}
       </>
@@ -116,11 +128,12 @@ function Sides({
       </p>
       {marking.note}
       {textual(before)
-        ? contentBlock(before, 'before', expansion.language, sideMarks(marking.marks, 'before'))
+        ? contentBlock(before, 'before', expansion.language, sideMarks(fullFile.marks, 'before'))
         : null}
       {textual(after)
-        ? contentBlock(after, 'after', expansion.language, sideMarks(marking.marks, 'after'))
+        ? contentBlock(after, 'after', expansion.language, sideMarks(fullFile.marks, 'after'))
         : null}
+      {fullFile.list}
       {marking.panel}
     </>
   );

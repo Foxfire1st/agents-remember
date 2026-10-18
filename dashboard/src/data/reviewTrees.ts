@@ -10,8 +10,9 @@
 //     the tree; it is named, never replaced) or `legacy-unavailable` -- and its index state
 //     (`partial` names the files that failed);
 //   * each invariant's MIK-R03 currentness per side, against that side's own code tree;
-//   * the MIK-R08 worklist view: items, the history rows about their subjects (no current/stale mark
-//     until MIK-R09), and the gate linkage of every changed hunk;
+//   * the MIK-R08 worklist view: items, their gate verdicts and witnesses, the subjects' history rows,
+//     and the gate linkage of every changed hunk;
+//   * the leaf-wide implementation facts, with explicit unavailable state;
 //   * every realization and proof entry located on both code sides (MIK-R31), for the focused
 //     expression cards (panels/review/focusedCards.ts).
 //
@@ -148,6 +149,7 @@ export interface ReviewWorklistView {
   detail?: string;
   items: ReviewWorklistItem[];
   history_rows: ReviewWorklistHistoryRow[];
+  item_states?: Record<string, ReviewItemVerdict>;
   changes: ReviewWorklistChange[];
   incomplete: Record<string, unknown>[];
 }
@@ -189,6 +191,27 @@ export interface ReviewTreeEntry {
   change: 'changed' | 'unchanged' | 'undetermined';
 }
 
+export interface ReviewCodeChange {
+  invariant: string;
+  invariant_key: string;
+  implementation: 'established' | 'unknown' | 'not_established';
+  proof: boolean;
+  range_unresolved: boolean;
+  evidence: string[];
+  unknown_reasons: string[];
+}
+export interface ReviewCodeChanges {
+  state: 'facts' | 'unavailable';
+  detail?: string;
+  invariants: ReviewCodeChange[];
+}
+export interface ReviewItemVerdict {
+  state: 'answered' | 'open' | 'undecided';
+  witness?: string;
+  row_id?: string;
+  reason?: string;
+}
+
 export interface ReviewTreesResult {
   state: 'trees' | 'not-converted' | 'refused';
   repository_id: string;
@@ -200,6 +223,7 @@ export interface ReviewTreesResult {
   code_sides?: ReviewCodeSide[];
   currentness?: Partial<Record<'before' | 'after', ReviewSideCurrentness>>;
   worklist?: ReviewWorklistView;
+  code_changes?: ReviewCodeChanges;
   entries?: ReviewTreeEntry[];
   refusal?: ReviewRefusal;
 }
@@ -319,8 +343,8 @@ export function unexplainedHunks(
 }
 
 // The recorded tree comparison a landed review payload was composed over: the server declares it as
-// the limitation token `review:trees:<n>`. A payload without it is a dataset review, for which no
-// tree read is made at all, so an unconverted review behaves exactly as before.
+// the limitation token `review:trees:<n>`. Without the token no comparison number
+// has been admitted; a caller must not guess a tree identity.
 export function treeComparisonNumber(limitations: string[]): number | undefined {
   for (const token of limitations) {
     const match = /^review:trees:(\d+)$/.exec(token);
@@ -370,7 +394,8 @@ function fetchCardEntries(
   // ever shows the answer whose key matches its own question.
   const fetch = reviewTrees(repo, master, leaf, { comparison, invariants }).then(
     (result) => reviewTreesRead(result),
-    (cause: unknown) => ({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }) as ReviewTreesRead,
+    (cause: unknown) =>
+      ({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }) as ReviewTreesRead,
   );
   const tracked = fetch.then((read) => {
     cardInflight.delete(key);
@@ -417,23 +442,17 @@ export function useReviewTreeEntries(
   invariants: string[],
 ): ReviewTreesRead | null {
   const wanted = [...invariants].sort().join(',');
-  const key =
-    comparison === undefined ? null : cardsKey(repo, master, leaf, comparison, wanted);
+  const key = comparison === undefined ? null : cardsKey(repo, master, leaf, comparison, wanted);
   const [, retell] = useReducer((telling: number) => telling + 1, 0);
   useEffect(() => {
     if (key === null || !wanted) return undefined;
     if (cardAnswers.has(key)) return undefined;
     let alive = true;
-    void fetchCardEntries(
-      key,
-      repo,
-      master,
-      leaf,
-      comparison as number,
-      wanted.split(','),
-    ).then(() => {
-      if (alive) retell();
-    });
+    void fetchCardEntries(key, repo, master, leaf, comparison as number, wanted.split(',')).then(
+      () => {
+        if (alive) retell();
+      },
+    );
     return () => {
       alive = false;
     };

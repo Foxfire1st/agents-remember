@@ -44,6 +44,7 @@ it composed instead of a page stitched from two states.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,7 @@ from agents_remember.application.review_family_rosters import (
 )
 from agents_remember.application.review_revision_comparison import revision_heads
 from agents_remember.memory.knowledge import families
+from agents_remember.memory.knowledge_index import KnowledgeIndex, text_uuid
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.read import (
     MAX_PAGE_ITEMS,
@@ -531,6 +533,9 @@ def _applicable_family(
     recorded = families.list_family_revision_ids(side.store, family_id)
     identity = families.get_family(side.store, family_id)
     if identity is None and not recorded:
+        failed = _family_problems(side, family_id)
+        if failed:
+            return _Applicable(reason=failed)
         return _Applicable(
             absent=(f"this snapshot records neither the family {family_id} nor any revision of it")
         )
@@ -563,6 +568,28 @@ def _applicable_invariant(side: FamilyRosterSide, selector: KnowledgeReadSeed) -
         return _Applicable(reason=detail)
     return _Applicable(
         families={row.family_id: () for row in result.directly_containing_families},
+        reason=_family_problems(side),
+    )
+
+
+def _family_problems(side: FamilyRosterSide, family_id: str | None = None) -> str | None:
+    """Discovery needs all families; absence of a named family needs only its own file."""
+    with KnowledgeIndex(side.database) as index:
+        failed = []
+        for path, detail in index.state.problems:
+            if not path.startswith("knowledge/families/"):
+                continue
+            named = re.match(r"(FAM-[A-Z0-9]+)(?:-|\.json$)", Path(path).name)
+            if family_id is None or (
+                named is not None and text_uuid("identity", named[1]) == family_id
+            ):
+                failed.append(f"{path}: {detail}")
+    return (
+        (f"the {side.name} family scope could not be fully read: " + "; ".join(failed))[
+            :PROSE_MAX_LENGTH
+        ]
+        if failed
+        else None
     )
 
 
@@ -593,9 +620,25 @@ def _entry(
         axis=_axis(sources),
     )
     selection = _selection(family_id, revisions)
+    unread = [side for side, value in applicable.items() if not value.read]
+    if unread:
+        selection = ReviewRevisionSelection(
+            record_kind="family",
+            record_id=family_id,
+            state="unresolved",
+            before_heads=revisions.before_heads,
+            after_heads=revisions.after_heads,
+            before_retained=revisions.before,
+            after_retained=revisions.after,
+            statement=(
+                "family presence could not be established on "
+                + "; ".join(f"{side}: {applicable[side].reason}" for side in unread)
+            )[:PROSE_MAX_LENGTH],
+        )
     label, label_side = _label(family_id, sides)
     if selection.state in ("ambiguous", "unresolved"):
-        return _unresolved_entry(family_id, selection, sides, label, label_side), None, None
+        entry = _unresolved_entry(family_id, selection, sides, (label, label_side), applicable)
+        return entry, None, None
     before_read = read_family_roster(
         before,
         family_id,
@@ -698,7 +741,7 @@ def _selection(family_id: str, revisions: _FamilyRevisions) -> ReviewRevisionSel
     return ReviewRevisionSelection(
         record_kind="family",
         record_id=family_id,
-        state="ambiguous" if ambiguous else "unresolved",
+        state="unresolved",
         before_heads=revisions.before_heads,
         after_heads=revisions.after_heads,
         before_retained=revisions.before,
@@ -718,7 +761,7 @@ def _selection_state(revisions: _FamilyRevisions) -> RevisionSelectionState:
     if not revisions.after:
         return "removed" if len(before_heads) == 1 else "unresolved"
     if len(before_heads) != 1 or len(after_heads) != 1:
-        return "ambiguous" if before_heads and after_heads else "unresolved"
+        return "unresolved"
     return "compared"
 
 
@@ -783,8 +826,8 @@ def _unresolved_entry(
     family_id: str,
     selection: ReviewRevisionSelection,
     sides: tuple[FamilyRosterSide, FamilyRosterSide],
-    label: str | None,
-    label_side: ReviewFamilySideName | None,
+    label: tuple[str | None, ReviewFamilySideName | None],
+    applicable: dict[str, _Applicable],
 ) -> ReviewFamilyContextEntry:
     """One family context that chose no revision: its candidate heads and their own guarantees."""
 
@@ -794,15 +837,25 @@ def _unresolved_entry(
         *family_guarantees(after, family_id, selection.after_heads),
     )
     side_state: ReviewFamilySideState = "not_resolved" if candidates else "unreadable"
+    contexts = {
+        side.name: side_statement(
+            side,
+            family_id,
+            "unreadable" if applicable[side.name].reason is not None else side_state,
+            applicable[side.name].reason or selection.statement,
+        )
+        for side in sides
+    }
+    unavailable = any(not value.read for value in applicable.values()) or not candidates
     return ReviewFamilyContextEntry(
         family_id=family_id,
-        display_label=label,
-        label_side=label_side,
+        display_label=label[0],
+        label_side=label[1],
         selection=selection,
-        before=side_statement(before, family_id, side_state, selection.statement),
-        after=side_statement(after, family_id, side_state, selection.statement),
+        before=contexts["before"],
+        after=contexts["after"],
         candidates=candidates,
-        state="unresolved" if candidates else "unavailable",
+        state="unavailable" if unavailable else "unresolved",
         detail=selection.statement,
     )
 

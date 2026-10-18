@@ -1,17 +1,42 @@
 {
-  "captured_at": "2026-10-11T16:42:30.016741+00:00",
-  "captured_source_tree": "23cb164fa24dcbc4a98a56fa1324e1fb42c1bf41",
-  "command": "mcp/.venv/bin/python /tmp/mik-run3/L43/work/l43_capture.py (XDG_CONFIG_HOME=/tmp/mik-run3/L43/config)",
-  "fixtures": {
-    "l43.entries.captured.json": {
+  "schema": "l57-current-public-route-captures/v1",
+  "captured_at": "2026-10-15T22:42:18.428980+00:00",
+  "producer": "L57 current serving_collaborators and registered public FastAPI routes",
+  "source_tree": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57",
+  "normalization": "none; exact response.content bytes",
+  "scenario": "l43.* only; canonical disposable native four-tree Git fixture, not real user data",
+  "manifest": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/publication-needed.json",
+  "manifest_sha256": "95413d6ee10d1b0248860efd744529c9eddf1e494ce90bb1edabc8b29ad7f38d",
+  "source_hashes_verified": 7,
+  "source_files": {
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/application/knowledge_review.py": "9aab83a43c586477131ed5c1c7de0b2e799bfc4416af17893f8422a95d94541a",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/cli/dashboard.py": "64bf9582a52fc120bba0a8b86a49f172eaafa8ac92339c19933bc37ec1057f2a",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/serving/review.py": "c41738f81b60c273721bf14a04af95d9bca272d6ebc182d266d9cde456f242de",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/serving/review_trees.py": "17b99f2e3d4db2cbed1017cdb738551f19704d3aa657a8c1071930a7f8f360cf",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/models/knowledge/review.py": "d507c4c87bbdff521874d3517a392a16cc3b76081aec4d334fa4c82e1ba6e3b0"
+  },
+  "prior_capture_provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/prior-repository-bytes/l43.capture-provenance.json",
+  "fixtures": [
+    {
+      "file": "src/panels/review/l43.entries.captured.json",
+      "route": "GET /api/review/intent/entries",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
         "repo": "agents-remember"
       },
-      "sha256": "485a975c6153c2879e79c6a3dc4a7e64bc27e27cf581bc08b5e135dc5a380546"
+      "status": 200,
+      "seconds": null,
+      "bytes": 3528,
+      "sha256": "14ebf6997809dccfa2422a683539185c5c34d14d16fbe851bc0bf30bc744fbbc",
+      "previous_sha256": "b162cef07e2af3d209148af8bb2deff6b1c0db3bf331e5b92fea9857335e9742",
+      "model_validation": "ReviewEntryListResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.entries.captured.json"
     },
-    "l43.family.captured.json": {
+    {
+      "file": "src/panels/review/l43.family.captured.json",
+      "route": "GET /api/review/intent",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
@@ -19,9 +44,18 @@
         "selectorId": "c651d020-ae81-58f7-a62b-8e4cc9cc24fe",
         "selectorKind": "family"
       },
-      "sha256": "f934f02a4071fde26bef88fb5021a2baae1cfcb28600bb3daeb26d6907ed2dc3"
+      "status": 200,
+      "seconds": null,
+      "bytes": 21818,
+      "sha256": "74a1e94a241f7ec48bc4c00887f624e8160dd3a108dc837bb76d8c3aa6a58a40",
+      "previous_sha256": "480e2b78d446ced6ced2ada16aa7786bc492e71a9f64a761bcee9883546869cf",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.family.captured.json"
     },
-    "l43.invariant1.captured.json": {
+    {
+      "file": "src/panels/review/l43.invariant1.captured.json",
+      "route": "GET /api/review/intent",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
@@ -29,9 +63,18 @@
         "selectorId": "ff9e5633-4d36-5c4a-b856-77098b5bedfc",
         "selectorKind": "invariant"
       },
-      "sha256": "3b735b2b8c8dddb3c74065da515d0b0b75140c85e5ee90992632b500de6fec4f"
+      "status": 200,
+      "seconds": null,
+      "bytes": 21946,
+      "sha256": "5281a997f66e11429cec3f9f451191f0f9cb50f6ab02de80a109904b731034ac",
+      "previous_sha256": "037c617a066f380c1cc39dc17e9f301a79ef018c81e41689a45e60c5bf3cd6cf",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.invariant1.captured.json"
     },
-    "l43.invariant2.captured.json": {
+    {
+      "file": "src/panels/review/l43.invariant2.captured.json",
+      "route": "GET /api/review/intent",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
@@ -39,9 +82,18 @@
         "selectorId": "a99f21b1-63af-569e-94c6-4ecbc65e34ca",
         "selectorKind": "invariant"
       },
-      "sha256": "d2436adca0aec6b1430131996743758f76c719ce161bf7ad39482f481399077d"
+      "status": 200,
+      "seconds": null,
+      "bytes": 12222,
+      "sha256": "866c09eeeed8a12f38aef226a19eb73ce6042af0e0f7a645ccd6792f74fd11f3",
+      "previous_sha256": "e5d516f532b6cbec31b0fba1ef7d90460f0051f755a8b2d04953ee2a03bcc427",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.invariant2.captured.json"
     },
-    "l43.invariant4.captured.json": {
+    {
+      "file": "src/panels/review/l43.invariant4.captured.json",
+      "route": "GET /api/review/intent",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
@@ -49,9 +101,18 @@
         "selectorId": "2faaf5a7-1dfc-50aa-98fe-6b16cb14b43b",
         "selectorKind": "invariant"
       },
-      "sha256": "0e1ba7019d1f292c2843ab30a0f1dee65dd8e642ceaee60f666e20b42b2391d4"
+      "status": 200,
+      "seconds": null,
+      "bytes": 22769,
+      "sha256": "ff7b716f5dd3fc133c298d72ec379df0dcf62161b3710011aef1a74628f8799c",
+      "previous_sha256": "91b0f40192c1ea8eff57cf87ccc0e92a1a10d87803a0b26fc9528d34bb777a04",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.invariant4.captured.json"
     },
-    "l43.none.captured.json": {
+    {
+      "file": "src/panels/review/l43.none.captured.json",
+      "route": "GET /api/review/intent",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
@@ -59,9 +120,18 @@
         "selectorId": "52593890-ca5b-5683-b9e3-37b83b68048e",
         "selectorKind": "invariant"
       },
-      "sha256": "a632c63d4b88253ba7cb6c1174f456d9fae77f2b26711e8944e687783d7abb76"
+      "status": 200,
+      "seconds": null,
+      "bytes": 11304,
+      "sha256": "270c2ccd535156579623a6993fd2b86486c8dd26f9920ba4dfe9e05e5c3e1d11",
+      "previous_sha256": "ced59fc692c54fe2269d9065623b93413c2086e37917978f94451ebda11b2ac9",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.none.captured.json"
     },
-    "l43.oldfamily.captured.json": {
+    {
+      "file": "src/panels/review/l43.oldfamily.captured.json",
+      "route": "GET /api/review/intent",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
@@ -69,36 +139,70 @@
         "selectorId": "a5362441-9eb7-539d-bbf8-ed1d52b11c23",
         "selectorKind": "family"
       },
-      "sha256": "725f17658b1e098159c07dcb6ffc53ab76b75378ab44f95c265297eb9c04ff53"
+      "status": 200,
+      "seconds": null,
+      "bytes": 15144,
+      "sha256": "f6235612346903bbdbdf5edca72adbc2c4eb7fdd56e4f1f20919d67b0d87918a",
+      "previous_sha256": "992d33be361ac04b0572acd84c22e2109c0063b315cb265bb3d818d9e5fa6fea",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.oldfamily.captured.json"
     },
-    "l43.task.captured.json": {
+    {
+      "file": "src/panels/review/l43.task.captured.json",
+      "route": "GET /api/review/intent",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
         "repo": "agents-remember"
       },
-      "sha256": "3032d5e0dd2f5b0cef55127cafcb4586f50c087d42fcfe09a8669b5d55813f9a"
+      "status": 200,
+      "seconds": null,
+      "bytes": 9457,
+      "sha256": "d738eec2f174733e2db2fa0d63bc51bbb29125c38fc2d80e120c650b2b84b210",
+      "previous_sha256": "e0f58eafb8052cbabb31b3df956c1da7baab253ead406ff4ddb1cd0ba407de52",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.task.captured.json"
     },
-    "l43.trees.captured.json": {
+    {
+      "file": "src/panels/review/l43.trees.captured.json",
+      "route": "GET /api/review/trees",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
         "repo": "agents-remember"
       },
-      "sha256": "8c7dae294f96d7cbeaf084c480d20684a81545c10119f656f8b1f07b4d4ff6f7"
+      "status": 200,
+      "seconds": null,
+      "bytes": 4320,
+      "sha256": "b431e06d15052b48f39082d0c3c76b8145b4f813f54e9d73eb2b57962be4b650",
+      "previous_sha256": "4b0417cc7ad038c674bdf32b7d25e568bec5d0fc8f01372b510995fba3300af9",
+      "model_validation": "ReviewTreesResult:PASS",
+      "input_world": "world",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.trees.captured.json"
     },
-    "l43.unavailable.captured.json": {
+    {
+      "file": "src/panels/review/l43.unavailable.captured.json",
+      "route": "GET /api/review/intent",
       "params": {
         "leaf": "260101-TRV-L1",
         "master": "260101_tree_review",
-        "partial": true,
-        "repo": "agents-remember"
+        "repo": "agents-remember",
+        "selectorKind": "invariant",
+        "selectorId": "2faaf5a7-1dfc-50aa-98fe-6b16cb14b43b"
       },
-      "sha256": "c6ad41f42341a287166ca1bcf2aa197c8b39f997af88f36bba881b15ce41c441"
+      "status": 200,
+      "seconds": null,
+      "bytes": 21107,
+      "sha256": "98f70bea59de472fea4e05066797811ee351ddb5a884dfd3b8d82a9a1ce896a2",
+      "previous_sha256": "fd302fcd64c34daa0b841508a6a72e697464e7c0606e5f368b41ed5414b057f3",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": "partial",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/l43-current-recapture/raw/l43.unavailable.captured.json"
     }
-  },
-  "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators",
-  "route": "GET /api/review/intent(+/entries) and /api/review/trees over TestClient; ports call read_knowledge_review/list_knowledge_review_entries/read_review_trees with the world's McpRuntimeConfig",
-  "scope": "Real review-route bodies over disposable enclosures built by the repository's own test builders (test_review_git_trees.build_world); test evidence, not product knowledge. Fixture worlds are rebuilt on every run under /tmp/mik-run3/L43/work/captures/ with fresh Git repositories.",
-  "selection_rule": "attempt files 1,2,3,10 about one invariant (four steps); one step about a second invariant; a family with its effect; an old family row without effect or revision; one invariant with no rows; one partial-index world for the unavailable capture"
+  ],
+  "limitations": "Fresh producer tree/binding identities are retained; historical metadata is archived, not restamped. Fixture worlds are disposable test inputs, not production writer evidence.",
+  "source_manifest_canonical_sha256": "a0ace51aa3d419fb757883fed6df03624b45695590880bb8994c35161074f551",
+  "source_files_scope": "Selected owner hashes below; complete source manifest retained in manifest (hash above). All full-manifest hashes independently verified at publication."
 }

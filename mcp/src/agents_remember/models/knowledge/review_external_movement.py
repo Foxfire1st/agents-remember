@@ -44,8 +44,6 @@ ExternalGitTransition = Literal[
     "unchanged",
     "ordinary-append",
     "rebase",
-    "cherry-pick",
-    "revert",
     "branch-switch",
 ]
 

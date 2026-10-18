@@ -2,8 +2,8 @@
 
 MIK-R33 (adopting ICR-R32) badges every family occurrence and member occurrence of the reviewer's
 tree with the kind of recorded change that brings it into review. The facts are computed here, on
-the server, for the members the roster page returned and for nothing else, and they travel on each
-family context entry (``change_kinds``); the browser orders and traverses by them and never
+the server, for each returned member and for the leaf-wide implementation-fact view. They travel
+on each family context entry (``change_kinds``) or the leaf-wide view; the browser never
 recomputes one. Each fact is read from the comparison itself:
 
 * **intent** -- the invariant record's ``revision`` in the memory base tree against the memory
@@ -41,6 +41,9 @@ from typing import Final
 import apsw
 from pydantic import ValidationError
 
+from agents_remember.application.knowledge_worklist.classification_context import (
+    WorklistClassification,
+)
 from agents_remember.application.knowledge_worklist.classify import (
     Classifier,
     EntryClass,
@@ -63,7 +66,7 @@ from agents_remember.application.review_lane_classification import (
 from agents_remember.application.review_record_changes import Fact, Known, RecordChanges, problems
 from agents_remember.application.review_tree_comparison import ReviewTrees
 from agents_remember.memory.knowledge.tree_observation import TreeChange
-from agents_remember.memory.knowledge_index import Entry
+from agents_remember.memory.knowledge_index import Entry, text_uuid
 from agents_remember.memory.knowledge_index.build import IndexedEntry, ParsedTree
 from agents_remember.models.knowledge.review_change_kinds import (
     UNKNOWN_FACTS,
@@ -73,6 +76,7 @@ from agents_remember.models.knowledge.review_change_kinds import (
     ReviewFamilyChanges,
     ReviewMemberChange,
 )
+from agents_remember.models.knowledge.review_code_changes import ReviewCodeChange
 from agents_remember.models.knowledge.review_family_context import (
     ReviewFamilyContext,
     ReviewFamilyContextEntry,
@@ -84,7 +88,7 @@ from agents_remember.models.knowledge_files.documents import (
 from agents_remember.models.knowledge_files.ids import RecordKind
 from agents_remember.models.knowledge_files.sidecars import ProofEntry, RealizationEntry
 
-__all__ = ["with_change_kinds"]
+__all__ = ["implementation_facts", "with_change_kinds"]
 
 _RETIRED: Final = "retired"
 _UNREADABLE: Final = "the comparison's trees cannot be read or compared: {error}"
@@ -115,6 +119,33 @@ def with_change_kinds(
         detail = bounded_text(_UNREADABLE.format(error=error))
         entries = tuple(_with(entry, _unread(entry, detail)) for entry in context.entries)
     return ReviewFamilyContext(**{**dict(context), "entries": entries})
+
+
+def implementation_facts(
+    lane: TreeLane, classification: WorklistClassification | None = None
+) -> tuple[ReviewCodeChange, ...]:
+    """Every invariant recording an entry on either side, through the family fact owner."""
+    reader = _ChangeKinds(lane, classification=classification)
+    identities = set()
+    for side in reader.sides:
+        if side.index is not None:
+            entries = side.index.entries_under(".").value
+            identities.update(entry.invariant for entry in (*entries.realizations, *entries.proofs))
+    facts = []
+    for invariant in sorted(identities):
+        fact = reader._implementation(invariant)
+        facts.append(
+            ReviewCodeChange(
+                invariant=invariant,
+                invariant_key=text_uuid("identity", invariant),
+                implementation=fact.state,
+                proof=fact.proof,
+                range_unresolved=bool(fact.unresolved),
+                evidence=tuple(fact.established[:4]),
+                unknown_reasons=tuple(fact.reasons[:5]),
+            )
+        )
+    return tuple(facts)
 
 
 def _with(entry: ReviewFamilyContextEntry, kinds: ReviewFamilyChanges) -> ReviewFamilyContextEntry:
@@ -153,6 +184,7 @@ class _ChangeKinds:
     """The facts of one comparison, over the lane's code trees and both memory indexes."""
 
     lane: TreeLane
+    classification: WorklistClassification | None = None
     meaning: RecordChanges = field(default_factory=RecordChanges)
     _changes: dict[str, TreeChange] | None = None
     _inventory_problem: str | None = None
@@ -383,7 +415,16 @@ class _ChangeKinds:
     def _file(self, change: TreeChange) -> FileResult | str:
         if change.path not in self._files:
             try:
-                self._files[change.path] = self.lane.classify(change)
+                computed = (
+                    None
+                    if self.classification is None
+                    else self.classification.paths.get(change.path)
+                )
+                self._files[change.path] = (
+                    self.lane.classify(change)
+                    if computed is None
+                    else self.lane.from_worklist(computed)
+                )
             except LaneReadError as error:
                 self._files[change.path] = bounded_text(
                     f"{change.path} could not be classified: {error}"
@@ -405,6 +446,12 @@ class _ChangeKinds:
             return None
         if index is None:
             return None
+        classifier = None if self.classification is None else self.classification.classifier
+        if classifier is not None and classifier.base.entries.get(entry.id) == indexed:
+            try:
+                return classifier.classify(entry.id).entry_class
+            except CodeReadError:
+                return None
         side = KnowledgeSide(
             label="K_B",
             key=index.state.key,

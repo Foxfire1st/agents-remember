@@ -3,8 +3,7 @@
 // real diff and an unchanged range once, labelled unchanged. Full-file inspection and the complete
 // changed-file inventory stay one step away from every card.
 //
-// The cards read the selection's entries from the tree view (data/reviewTrees.ts); an unconverted
-// review never mounts this component and keeps the landed file view (ReviewExpressions.tsx).
+// The cards read the selection's entries from the measured tree comparison (data/reviewTrees.ts).
 import { Fragment, useContext, useEffect, useState } from 'react';
 
 import { css } from '../../../styled-system/css';
@@ -15,7 +14,7 @@ import { FilePane } from '../file-viewer/FilePane';
 import { sideMarks, useExcerptMarking } from './IntentMarkers';
 import { IntentMarkerScope } from './intentMarkerScope';
 import { ReviewProblemBlock } from './ReviewOutcome';
-import { ExpressionControls } from './ReviewExpressions';
+import { ExpressionControls } from './ExpressionControls';
 import { SourceContent } from './SourceContent';
 import type { DiffMode } from '../changeset/DiffPane';
 import { ReviewChangeSetNavigation } from './changeSetNavigation';
@@ -270,9 +269,11 @@ function returnedCard(pane: string | undefined): string | null {
 function ScopeLine({ scope }: { scope: CardScope }) {
   return (
     <p className={gap} data-testid="review-cards-scope">
-      These cards cover the loaded {scope.loaded} of {scope.total} members. Continue the
-      family&apos;s roster walk (its next-page control) to load the rest; their locations are not
-      counted here.
+      These cards cover the loaded {scope.loaded} of {scope.total} members.
+      {scope.missing?.length ? ` ${scope.missing.join('; ')}.` : ''}
+      {scope.loaded < scope.total
+        ? " Continue the family's roster walk (its next-page control) to load the rest; their locations are not counted here."
+        : ' The cards do not cover the missing content named above.'}
     </p>
   );
 }

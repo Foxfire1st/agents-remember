@@ -22,13 +22,9 @@ import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
 import { dashboardStore } from '../../data/store';
 
-// These are complete HTTP bodies captured from the public authorship + real review route, following the
-// published cursors at page size 4 as test_review_family_context_population.py::walk_responses does. No
-// display payload is constructed. familyPaging.captured.json was re-captured by MIK-L31 with ICR-L44's
-// producer (first build accepted) at the L10-synced tree 18b77329 (familyReview.capture-provenance.json,
-// `mik_l31_recapture`); its member sources carry the structured locator, resolved ranges and locator
-// state. Families are ordered by the identities each build draws, so the cases open the walked family
-// (`family_id`) explicitly rather than relying on its position.
+// Raw current tree-route bodies following the producer's published page-size-4 cursors.
+// See familyReview.capture-provenance.json. No successful review body is rewritten.
+// Corruptions below are explicit negative transport/admission probes, not capture replacements.
 interface Body {
   payload: ReviewPayload;
 }
@@ -44,6 +40,30 @@ const capture = JSON.parse(
   after: Body[];
 };
 const first = capture.before[0];
+const cards = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(new URL(import.meta.url).pathname), 'l86.member-cards.captured.json'),
+    'utf8',
+  ),
+);
+// Historical full-tree response is retained only to isolate worklist chrome here;
+// the current full-tree producer refusal is tracked separately, not qualified by these tests.
+const trees = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(new URL(import.meta.url).pathname), 'l86.trees.captured.json'),
+    'utf8',
+  ),
+);
+const lane = JSON.parse(
+  readFileSync(
+    path.join(path.dirname(new URL(import.meta.url).pathname), 'l86.lane.captured.json'),
+    'utf8',
+  ),
+);
+function treeReply(url: URL) {
+  if (!url.pathname.endsWith('/trees')) return undefined;
+  return url.searchParams.has('invariants') ? cards : url.searchParams.has('lane') ? lane : trees;
+}
 const target = {
   repo: first.payload.candidate.repository_id,
   master: first.payload.candidate.master,
@@ -220,7 +240,7 @@ it('retains exact content and claim identities while before and after walks adva
       initialMembers.map((member) => member.statement),
     );
     expect(payload.knowledge).toEqual(body.payload.knowledge);
-    expect(payload.evidence).toEqual(body.payload.evidence);
+    expect(payload.judgment).toEqual(body.payload.judgment);
     expect(payload.source.inventory).toEqual(first.payload.source.inventory);
     expect(payload.knowledge.revision_selection?.record_id).toBe(target.selectorId);
   }
@@ -372,7 +392,10 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes('/source-content'))
+        const url = new URL(String(input), 'http://review.test');
+        const tree = treeReply(url);
+        if (tree) return response(tree);
+        if (url.pathname.endsWith('/source-content'))
           return response({
             state: 'refused',
             operation: 'read_knowledge_review_source_content',
@@ -383,6 +406,7 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
               next_action: 'Read the served file.',
             },
           });
+        if (url.pathname !== '/api/review/intent') throw new Error(`Unexpected route: ${url}`);
         return response(bodies.shift());
       }),
     );
@@ -401,7 +425,7 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
       expect(view.getByTestId('review-page-bounds').textContent).toContain('returned 8'),
     );
     const selected = view.getByTestId('review-center-member-changed').textContent;
-    const evidence = view.getByTestId('review-center-evidence').textContent;
+    const evidence = view.getByTestId('review-center-judgment').textContent;
     const members = view.getAllByTestId('review-family-member').map((row) => row.textContent);
     fireEvent.click(next(capture.before[2]));
     const failure = await view.findByTestId('review-failure');
@@ -410,7 +434,7 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
     );
     expect(view.getByTestId('review-retained-generation')).toBeTruthy();
     expect(view.getByTestId('review-center-member-changed').textContent).toBe(selected);
-    expect(view.getByTestId('review-center-evidence').textContent).toBe(evidence);
+    expect(view.getByTestId('review-center-judgment').textContent).toBe(evidence);
     expect(view.getAllByTestId('review-family-member').map((row) => row.textContent)).toEqual(
       members,
     );
@@ -559,12 +583,14 @@ it('resets accumulated context on refresh, subject and history changes and drops
   expect(fresh.result.current.retained!.payload).toEqual(first.payload);
 });
 
-it('keeps selected intent, evidence, siblings, focus and open layout while a late source expression becomes reachable', async () => {
+it('keeps selected intent, judgment, siblings, focus and open layout while later roster claims become reachable', async () => {
   const pages = new Map(
     [...capture.before.slice(1), ...capture.after.slice(1)].map((body) => [cursorOf(body), body]),
   );
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), 'http://review.test');
+    const tree = treeReply(url);
+    if (tree) return response(tree);
     if (url.pathname.endsWith('/source-content'))
       return response({
         state: 'refused',
@@ -581,9 +607,7 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
   vi.stubGlobal('fetch', fetch);
   const view = render(<ReviewSurface {...target} onBack={vi.fn()} />);
   await view.findByTestId('review-center-member');
-  // The walked family is the capture's `family_id`. Families are ordered by their stored identities,
-  // which each build draws afresh, so the reader opens the subject inside that family's context
-  // rather than relying on it being listed first (MIK-L31 re-capture of familyPaging).
+  // Open the actual captured subject within its recorded family context.
   const walked = view
     .getAllByTestId('review-family')
     .find((node) => node.dataset.family === capture.family_id)!;
@@ -592,23 +616,27 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
       .getAllByTestId('review-family-member-open')
       .find(
         (node) =>
-          node.dataset.revision === first.payload.knowledge.revision_selection!.before_revision_id,
+          node.dataset.revision === first.payload.knowledge.revision_selection!.after_revision_id,
       )!,
   );
   await waitFor(() =>
     expect(view.getByTestId('review-center-member').dataset.family).toBe(capture.family_id),
   );
-  expect(view.getByTestId('review-display-state').textContent).toContain('not yet fully loaded');
-  const evidence = view.getByTestId('review-center-evidence').textContent;
+  expect(view.getAllByTestId('review-center-roster-next')).toHaveLength(2);
+  const displayState = () =>
+    `expanded: ${view.container.querySelector<HTMLElement>('[data-testid="review-card-full-file"][aria-expanded="true"]')?.closest<HTMLElement>('[data-path]')?.dataset.path ?? ''}`;
+  const evidence = view.getByTestId('review-center-judgment').textContent;
   const siblings = view.getAllByTestId('review-family-member').length;
   const layout = view.getByTestId('review-center-diff-layout') as HTMLSelectElement;
   fireEvent.change(layout, { target: { value: 'inline' } });
-  // Wait for the real statement editor to mount before freezing the retained text.
-  await waitFor(() => {
-    const text = view.getByTestId('review-center-member-changed').textContent;
-    expect(text).toContain(first.payload.knowledge.before_statement.text);
-    expect(text).toContain(first.payload.knowledge.after_statement.text);
-  });
+  // The word-diff is mounted, and preserves the authoritative revision pair.
+  const selected = first.payload.knowledge.revision_selection!;
+  expect(view.getByTestId('review-center-member-changed').textContent).toContain(
+    selected.before_revision_id,
+  );
+  expect(view.getByTestId('review-center-member-changed').textContent).toContain(
+    selected.after_revision_id,
+  );
   const statement = view.getByTestId('review-center-member-changed').textContent;
   fireEvent.click(view.getByTestId('review-center-full-file'));
   // No source excerpt is supplied on the first bounded page. The removed inventory bar
@@ -636,21 +664,19 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
     expect(document.activeElement).toBe(layout);
     const cards = view.queryAllByTestId('review-expression-card');
     if (openedPath === null && cards.length) {
-      const open = cards[0].querySelector<HTMLButtonElement>('button[data-path]')!;
+      const open = within(cards[0]).getByTestId('review-card-full-file') as HTMLButtonElement;
       expect(open).not.toBeNull();
       // The first linked expression opens automatically. Collapse it before explicitly opening
       // it, so the same reader-owned path stays selected across subsequent continuations.
       if (open.getAttribute('aria-expanded') === 'true') fireEvent.click(open);
       fireEvent.click(open);
-      openedPath = open.dataset.path!;
-      expanded = view.getByTestId('review-display-state').textContent;
+      openedPath = cards[0].dataset.path!;
+      expanded = displayState();
       expect(expanded).toContain(`expanded: ${openedPath}`);
       layout.focus();
     } else if (openedPath !== null) {
       continuedWithOpen += 1;
-      expect(view.getByTestId('review-display-state').textContent).toContain(
-        `expanded: ${openedPath}`,
-      );
+      expect(displayState()).toContain(`expanded: ${openedPath}`);
       expect(view.getByTestId('review-center-full-file').getAttribute('aria-pressed')).toBe('true');
       expect(layout.value).toBe('inline');
     }
@@ -659,17 +685,15 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
   expect(continuedWithOpen).toBeGreaterThan(0);
   const selectedStatement = view.getByTestId('review-center-member-changed');
   expect(selectedStatement.textContent).toBe(statement);
-  expect(selectedStatement.textContent).toContain(first.payload.knowledge.before_statement.text);
-  expect(selectedStatement.textContent).toContain(first.payload.knowledge.after_statement.text);
-  expect(view.getByTestId('review-center-evidence').textContent).toBe(evidence);
+  expect(selectedStatement.textContent).toContain(selected.before_revision_id);
+  expect(selectedStatement.textContent).toContain(selected.after_revision_id);
+  expect(view.getByTestId('review-center-judgment').textContent).toBe(evidence);
   expect(view.getAllByTestId('review-family-member')).toHaveLength(siblings);
   expect(layout.value).toBe('inline');
   expect(view.getByTestId('review-center-full-file').getAttribute('aria-pressed')).toBe('true');
-  expect(view.getByTestId('review-display-state').textContent).toContain('expanded:');
+  expect(displayState()).toContain('expanded:');
   expect(expanded).toContain('expanded:');
-  expect(view.getByTestId('review-display-state').textContent).not.toContain(
-    'not yet fully loaded',
-  );
+  expect(view.queryByTestId('review-center-roster-next')).toBeNull();
   const changedPaths = new Set(first.payload.source.inventory.entries.map((entry) => entry.path));
   const selectedRevision = first.payload.knowledge.revision_selection!.before_revision_id;
   const latePaths = new Set(

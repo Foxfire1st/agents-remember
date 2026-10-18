@@ -45,18 +45,25 @@ from typing import Any
 
 import pytest
 from agents_remember.application import knowledge_review
+from agents_remember.application.knowledge_currentness.observe import CodeTree, open_code_tree
+from agents_remember.application.knowledge_gate.gate import GateTrees, item_verdicts
+from agents_remember.application.knowledge_gate.predicates import GateContext, item_verdict
 from agents_remember.application.knowledge_review import compose_review
-from agents_remember.application.knowledge_worklist.code import CodeTrees
+from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
+from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
+from agents_remember.application.knowledge_worklist.leaf import CandidateTrees, leaf_worklist
 from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
     resolve_review_candidate,
 )
 from agents_remember.application.review_change_kinds import with_change_kinds
+from agents_remember.application.review_code_changes import code_changes
 from agents_remember.application.review_lane_classification import TreeLane
 from agents_remember.application.review_outline import read_review_outline
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
+from agents_remember.application.review_tree_knowledge import read_review_trees
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.memory.knowledge_index import KnowledgeIndex, text_uuid
+from agents_remember.memory.knowledge_index import KnowledgeIndex, git_tree_snapshot, text_uuid
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
 from agents_remember.models.knowledge.review_change_kinds import ReviewMemberChange
 from agents_remember.models.knowledge.review_family_context import (
@@ -64,7 +71,10 @@ from agents_remember.models.knowledge.review_family_context import (
     ReviewFamilyContextEntry,
 )
 from agents_remember.models.knowledge_files import canonical_text
+from agents_remember.models.knowledge_files.history import HistoryFile
+from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.worktrees.services import reset_worktree_services
+from agents_remember.worktrees.worktree_contract import load_contract
 from agents_remember_test_support.testing.review_git_trees import (
     LEAF,
     MASTER,
@@ -74,6 +84,7 @@ from agents_remember_test_support.testing.review_git_trees import (
     git,
 )
 from pydantic import ValidationError
+from reviewer_leaf_view_support import classified_leaf_view
 
 A, B, C, D, E, F, G, H, K, M, N, P, R, S, X = (f"INV-{letter * 6}" for letter in "ABCDEFGHKMNPRSX")
 FAM1, FAM2, FAM3 = "FAM-F00001", "FAM-F00002", "FAM-F00003"
@@ -517,7 +528,9 @@ def test_an_unreadable_family_record_leaves_guarantee_and_membership_unknown(
     assert _by_invariant(second)[F].membership == "unknown"
     # The membership's reason is its own: never stated as a change-kind unknown.
     assert _by_invariant(second)[F].unknown_reasons == ()
-    assert any("do not parse" in line for line in _by_invariant(second)[F].membership_reasons)
+    assert any(
+        f"cannot read {FAM2}" in line for line in _by_invariant(second)[F].membership_reasons
+    )
     assert _kinds(second)[F][0] == "unknown"
 
 
@@ -795,9 +808,171 @@ def test_the_outline_states_unknown_records_and_unavailable_membership_or_indexe
     family_path = world.memory_worktree / "knowledge" / "families" / f"{FAM1}-{FAM1.lower()}.json"
     family_path.write_text("{")
     unread = read_review_outline(_resolve(world))
-    assert unread.state == "unavailable" and "do not parse" in unread.detail
+    assert unread.state == "unavailable" and f"cannot read {FAM1}" in unread.detail
     assert not unread.families and not unread.invariants
     dataset = read_review_outline(replace(resolved, trees=None))
     assert dataset.state == "unavailable" and "no converted memory" in dataset.detail
     missing = read_review_outline(replace(resolved, baseline_database=world.root / "absent-index"))
     assert missing.state == "unavailable" and "indexes could not be read" in missing.detail
+
+
+def test_leaf_facts_equal_every_walked_family_without_reading_rosters(tmp_path, monkeypatch):
+
+    world = build_world(tmp_path)
+    for size in (1, 12):
+        for number in range(size):
+            (world.code_worktree / f"extra-{number}.py").write_text("VALUE = 1\n")
+        result = classified_leaf_view(
+            world.config,
+            ReviewTreesQuery(repository_id=REPO, master=MASTER, leaf_id=LEAF),
+            tmp_path / f"classification-{size}.json",
+        )
+    assert result.state == "trees", result.refusal
+    assert result.code_changes is not None
+    assert result.code_changes.state == "facts"
+    facts = {fact.invariant: fact for fact in result.code_changes.invariants}
+    assert {B, C, D} <= {key for key, fact in facts.items() if fact.implementation == "established"}
+    assert facts[E].implementation == facts[K].implementation == "not_established"
+    assert facts[G].implementation == "unknown"
+    assert facts[D].proof
+    assert facts[A].range_unresolved
+    for family in (FAM1, FAM2, FAM3):
+        entry = _entry_of(_context(world, _family_seed(family)), family)
+        for invariant, member in _by_invariant(entry).items():
+            if invariant not in facts:
+                continue
+            fact = facts[invariant]
+            assert fact.invariant_key == text_uuid("identity", invariant)
+            assert (fact.implementation, fact.proof, fact.range_unresolved) == (
+                member.implementation,
+                member.proof,
+                member.range_unresolved,
+            )
+
+
+def test_unreadable_code_facts_are_unavailable_not_empty(tmp_path):
+
+    world = build_world(tmp_path)
+    trees = _resolve(world).trees
+    assert trees is not None
+    bad = trees.record.code_base.model_copy(update={"tree": "f" * 40})
+    trees = replace(trees, record=trees.record.model_copy(update={"code_base": bad}))
+    facts = code_changes(trees)
+    assert facts.state == "unavailable"
+    assert facts.detail
+    assert not facts.invariants
+
+
+def test_worklist_states_follow_gate_and_name_the_actual_witness(tmp_path):
+
+    world = build_world(tmp_path)
+    result = read_review_trees(
+        world.config, ReviewTreesQuery(repository_id=REPO, master=MASTER, leaf_id=LEAF)
+    )
+    assert result.worklist is not None and result.comparison is not None
+    record = result.comparison
+    trees = GateTrees(
+        world.code,
+        record.code_candidate.tree,
+        world.memory,
+        record.memory_candidate.tree,
+        (),
+        world.code_base,
+    )
+    # The reviewer consumes the same public gate result, computed in its child.
+
+    doc = leaf_worklist(
+        load_contract(world.contract()),
+        persist=False,
+        candidate=CandidateTrees(record.code_candidate.tree, record.memory_candidate.tree),
+    )
+    assert doc is not None
+    states = item_verdicts(doc["items"], trees, LEAF)
+    assert result.worklist.item_states == states
+    assert any(state.state == "open" and state.reason for state in states.values())
+    code = open_code_tree(CodeTree(world.code, record.code_candidate.tree))
+    candidate = KnowledgeSide.from_snapshot(
+        "K_C", git_tree_snapshot(world.memory, record.memory_candidate.tree)
+    )
+    context = GateContext(LEAF, None, candidate, code)
+    item = {
+        "kind": "planned_untouched",
+        "subject": "planned:invariant:INV-AAAAAA#strengthen",
+        "facts": {},
+    }
+    assert item_verdict(item, context).state == "open"
+    context = replace(
+        context,
+        history=HistoryFile.model_validate(
+            {
+                "leaf": LEAF,
+                "closed": False,
+                "rows": [
+                    {
+                        "id": "ROW-AAAAAA",
+                        "subject": item["subject"],
+                        "disposition": "deferred",
+                        "reason": "The planned effect belongs to a follow-up leaf.",
+                        "items": [],
+                        "ref": {"leaf": LEAF},
+                    }
+                ],
+            }
+        ),
+    )
+    verdict = item_verdict(item, context)
+    assert verdict.state == "answered" and verdict.witness == "ROW-AAAAAA"
+
+
+@pytest.mark.parametrize(
+    "wrong", ("memory", "code-tree", "code-root", "only-knowledge", "only-code", "read-failed")
+)
+def test_held_gate_inputs_fail_closed_unless_the_exact_candidate_is_readable(
+    tmp_path, monkeypatch, wrong
+):
+    world = build_world(tmp_path)
+    resolved = _resolve(world)
+    assert resolved.trees is not None
+    record = resolved.trees.record
+    trees = GateTrees(
+        world.code,
+        record.code_candidate.tree,
+        world.memory,
+        record.memory_candidate.tree,
+        (),
+        world.code_base,
+    )
+    knowledge = KnowledgeSide.from_snapshot(
+        "K_C", git_tree_snapshot(world.memory, record.memory_candidate.tree)
+    )
+    code = CodeTrees.open(world.code, world.code_base, record.code_candidate.tree)
+    items = [
+        {
+            "id": "planned",
+            "kind": "planned_untouched",
+            "subject": "planned:invariant:INV-AAAAAA#strengthen",
+            "facts": {},
+        }
+    ]
+    assert item_verdicts(items, trees, LEAF)["planned"].state == "open"
+    assert item_verdicts(items, trees, LEAF, knowledge=knowledge, code=code) == item_verdicts(
+        items, trees, LEAF
+    )
+    if wrong == "memory":
+        knowledge = replace(knowledge, key="f" * 40)
+    elif wrong == "code-tree":
+        code = replace(code, candidate_tree=world.code_base)
+    elif wrong == "code-root":
+        code = CodeTrees.open(tmp_path / "wrong-store", world.code_base, trees.code_tree)
+    elif wrong == "only-knowledge":
+        code = None
+    elif wrong == "only-code":
+        knowledge = None
+    else:
+
+        def unreadable(self):
+            raise CodeReadError("held C read failed")
+
+        monkeypatch.setattr(CodeTrees, "candidate", unreadable)
+    verdict = item_verdicts(items, trees, LEAF, knowledge=knowledge, code=code)["planned"]
+    assert verdict.state == "undecided" and verdict.reason

@@ -1,5 +1,9 @@
 import { GuaranteeComparisonBlock } from './FamilyGuarantees';
-import { shell, sectionLabel, card, muted, prose, rows, linkButton } from './familyCenterStyles';
+import {
+  FamilyMemberStatement,
+  memberStatementPairs,
+} from './family-member-statement/FamilyMemberStatement';
+import { shell, sectionLabel, card, muted, rows, linkButton } from './familyCenterStyles';
 import type {
   ReviewFamilyContextEntry,
   ReviewFamilyMember,
@@ -24,11 +28,7 @@ import {
 } from '../../data/reviewTrees';
 import { ExpressionCards } from './ExpressionCards';
 import { MemberFamilyLabel } from './MarkerTargetState';
-import {
-  IntentWordDiffScope,
-  guaranteeFact,
-  useTreeComparison,
-} from './IntentWordDiff';
+import { IntentWordDiffScope, guaranteeFact } from './IntentWordDiff';
 import { SubjectKnowledge } from './SubjectWorklistIdentity';
 import { planningMarks } from './worklistGroups';
 import { cardScope } from './focusedCards';
@@ -41,12 +41,13 @@ import {
 } from './ChangeBadges';
 import { useTreeOrder, type TreeOrder } from './triageOrderPreference';
 import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
-import { ReviewExpressions } from './ReviewExpressions';
+
 import { KnowledgeStatements } from './KnowledgeStatements';
 import { MeaningBlock, MeaningFieldGuard } from './MeaningEffects';
 import {
+  Origin,
   SelectedStatement,
-  SubjectEvidence,
+  SubjectJudgment,
   selectedRevision,
   type MemberSides,
 } from './SubjectReview';
@@ -390,6 +391,7 @@ function FamilyMemberContext({
   onOpenMember: (memberRevisionId: string) => void;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
 }) {
+  const statements = memberStatementPairs(entry);
   return (
     <div className={card} data-testid="review-center-family-members">
       <h3 className={sectionLabel} data-testid="review-center-member-heading">
@@ -425,13 +427,10 @@ function FamilyMemberContext({
               {member.display_label ?? member.invariant_revision_id}
             </button>
             <MemberMeaning entry={entry} member={member} />
-            {member.state === 'recorded' ? (
-              <div className={prose} data-review-content="statement">
-                {member.statement}
-              </div>
-            ) : (
-              <div className={muted}>statement not carried on this page ({member.state})</div>
-            )}
+            <FamilyMemberStatement
+              pair={statements.get(member.invariant_id ?? '')}
+              member={member}
+            />
           </li>
         ))}
       </ul>
@@ -468,8 +467,7 @@ function displayedMemberRanks(
 }
 
 // The family's member revisions in the order the center lists them: the tree's displayed order
-// through the outline where the comparison served one (MIK-R33), else the entry's own order
-// (a dataset review's entry carries no change facts and keeps its order).
+// through the outline where the comparison served one, else the entry's own order.
 function orderedCenterMembers(
   entry: ReviewFamilyContextEntry,
   walked: readonly ReviewFamilyContextEntry[],
@@ -541,6 +539,8 @@ function FamilyCenter({
       </div>
       <GuaranteeChangeBadge kinds={entry.change_kinds} />
       <FamilyBreakdown triage={familyTriage(entry)} />
+      <Origin side="before" origin={payload.knowledge.before_origin} />
+      <Origin side="after" origin={payload.knowledge.after_origin} />
       <GuaranteeComparisonBlock entry={entry} layout={layout} />
       <MeaningBlock payload={payload} record={entry.family_id} />
       <FamilyMemberContext
@@ -560,7 +560,7 @@ function FamilyCenter({
           onOpenPath={onOpenPath}
         />
       </section>
-      <FamilyEvidence entry={entry} payload={payload} />
+      <FamilyJudgment entry={entry} payload={payload} />
       {knowledge}
     </section>
   );
@@ -575,7 +575,6 @@ function IndependentFacts({
   payload: ReviewPayload;
   subject: ReviewSubject;
 }) {
-  const tree = useTreeComparison();
   const selected = selectedRevision(payload.knowledge, subject);
   if (!selected)
     return (
@@ -595,7 +594,7 @@ function IndependentFacts({
   return (
     <ul className={rows} data-testid="review-center-facts">
       <li data-fact="guarantee">
-        guarantee: {entry ? guaranteeFact(entry, tree) : 'no family guarantee selected'}
+        guarantee: {entry ? guaranteeFact(entry) : 'no family guarantee selected'}
       </li>
       <li data-fact="statement">
         member statement: {selected.state} · before {selected.before_revision_id ?? 'not selected'}{' '}
@@ -610,9 +609,9 @@ function IndependentFacts({
         source attribution: {locations.length} location record(s) name this member's retained
         revisions
       </li>
-      <li data-fact="assessment">
-        authored judgment: {payload.evidence.assessment_state}. No member, membership or guarantee
-        change creates one.
+      <li data-fact="judgment">
+        No member, membership or guarantee change creates an authored judgment. Read Judgment/proofs
+        below for the selected subject.
       </li>
     </ul>
   );
@@ -695,7 +694,7 @@ function MemberCenter({
         ) : null}
       </section>
       <div className={card}>
-        <SubjectEvidence payload={payload} subject={subject} />
+        <SubjectJudgment payload={payload} subject={subject} />
       </div>
       {knowledge}
       {entry ? (
@@ -734,9 +733,9 @@ function UnavailableMember({
       <MeaningFieldGuard payload={payload} />
       <GuaranteeComparisonBlock entry={entry} layout={layout} />
       <p data-review-content="statement">{member.statement ?? member.detail}</p>
-      <p className={muted} data-testid="review-center-evidence-unavailable">
+      <p className={muted} data-testid="review-center-judgment-unavailable">
         This page did not supply the member's invariant identity. Continue the roster to open its
-        own review; no assessment absence is claimed.
+        own review; no judgment absence is claimed.
       </p>
       <RosterNext entry={entry} onRosterNext={onRosterNext} testid="review-center-roster-next" />
     </section>
@@ -756,8 +755,7 @@ interface FamilyReviewCenterProps {
   openPath: string | null | undefined;
   onOpenPath: (path: string | null) => void;
   onOpenFromCenter: (path: string) => void;
-  // The leaf's tree view (MIK-R25), read once per task context by the workspace; `null` for a
-  // dataset review, which renders exactly as before.
+  // The leaf's measured tree view, read once per task context by the workspace.
   leafTrees?: ReviewTreesRead | null;
   outline?: ReviewOutline;
 }
@@ -773,22 +771,10 @@ export function FamilyReviewCenter(props: FamilyReviewCenterProps) {
 
 function ReviewCenterBody(props: FamilyReviewCenterProps) {
   const { payload, subject, selection, layout, onRosterNext } = props;
-  const { entry, member, members, listed, linksIncomplete } = centerSelection(
-    payload,
-    selection,
-    subject,
-  );
+  const { entry, member, listed } = centerSelection(payload, selection);
   const addressedSubject = member && !member.invariant_id ? undefined : subject;
   const invariant = addressedSubject?.kind === 'invariant';
-  const expressions = (
-    <CenterExpressions
-      {...props}
-      entry={entry}
-      members={members}
-      subject={addressedSubject}
-      linksIncomplete={linksIncomplete}
-    />
-  );
+  const expressions = <CenterExpressions {...props} entry={entry} subject={addressedSubject} />;
   const common = {
     payload,
     layout,
@@ -930,14 +916,11 @@ function MemberMeaning({
   );
 }
 
-// The code and test expressions of the selection: focused cards for a tree comparison (MIK-R31),
-// the landed file view for a dataset review, which never asks for cards.
+// The code and test expressions of the selection, as focused cards of its tree comparison.
 function CenterExpressions({
   payload,
   entry,
-  members,
   subject,
-  linksIncomplete,
   layout,
   onLayout,
   fullFile,
@@ -947,8 +930,6 @@ function CenterExpressions({
   leafTrees = null,
 }: FamilyReviewCenterProps & {
   entry?: ReviewFamilyContextEntry;
-  members?: ReviewFamilyMember[];
-  linksIncomplete: boolean;
 }) {
   const cardRead = useReviewTreeEntries(
     payload.candidate.repository_id,
@@ -958,20 +939,7 @@ function CenterExpressions({
     cardInvariants(entry, subject),
   );
   if (cardRead === null)
-    return (
-      <ReviewExpressions
-        payload={payload}
-        members={members}
-        subject={subject}
-        linksIncomplete={linksIncomplete}
-        layout={layout}
-        onLayout={onLayout}
-        fullFile={fullFile}
-        onFullFile={onFullFile}
-        openPath={openPath}
-        onOpenPath={onOpenPath}
-      />
-    );
+    return <p className={muted}>Code locations require a measured tree comparison.</p>;
   return (
     <ExpressionCards
       payload={payload}
@@ -1001,15 +969,12 @@ function cardInvariants(
   const keys = new Set<string>();
   for (const row of entry ? [...entry.before.members, ...entry.after.members] : [])
     if (row.invariant_id) keys.add(row.invariant_id);
-  if (!entry && subject?.kind === 'invariant') keys.add(subject.id);
+  // An unreadable family roster does not erase the selected invariant's independent source read.
+  if ((!entry || keys.size === 0) && subject?.kind === 'invariant') keys.add(subject.id);
   return [...keys].sort();
 }
 
-function centerSelection(
-  payload: ReviewPayload,
-  selection: FamilySelection | null,
-  subject?: ReviewSubject,
-) {
+function centerSelection(payload: ReviewPayload, selection: FamilySelection | null) {
   const entry = payload.family_context?.entries.find(
     (candidate) => candidate.family_id === selection?.familyId,
   );
@@ -1017,20 +982,11 @@ function centerSelection(
   const member = all.find(
     (candidate) => candidate.invariant_revision_id === selection?.memberRevisionId,
   );
-  const members =
-    member && !member.invariant_id
-      ? undefined
-      : subject?.kind === 'invariant'
-        ? all.filter((row) => row.invariant_id === subject.id)
-        : entry
-          ? all
-          : undefined;
   const listed = new Set(payload.source.inventory.entries.map((row) => row.path));
-  const linksIncomplete = entry ? !membersComplete(entry) : false;
-  return { entry, member, members, listed, linksIncomplete };
+  return { entry, member, listed };
 }
 
-function FamilyEvidence({
+function FamilyJudgment({
   entry,
   payload,
 }: {
@@ -1038,8 +994,8 @@ function FamilyEvidence({
   payload: ReviewPayload;
 }) {
   return (
-    <div className={card} data-testid="review-family-assessment">
-      <SubjectEvidence payload={payload} subject={{ kind: 'family', id: entry.family_id }} />
+    <div className={card} data-testid="review-family-judgment">
+      <SubjectJudgment payload={payload} subject={{ kind: 'family', id: entry.family_id }} />
     </div>
   );
 }

@@ -42,7 +42,7 @@ a read that did not happen (L09 review R1, finding 9).
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import Any, Final
 
@@ -63,6 +63,7 @@ from agents_remember.application.knowledge_worklist.route_conditions import (
     family_route_item_open,
 )
 from agents_remember.memory.knowledge_index import Entry
+from agents_remember.models.knowledge.item_verdict import ItemVerdict
 from agents_remember.models.knowledge_files.history import (
     FamilyRow,
     HistoryFile,
@@ -80,6 +81,7 @@ from agents_remember.models.knowledge_files.sidecars import ProofEntry
 from agents_remember.models.knowledge_files.unexplained import (
     COVERED,
     UNCOVERED,
+    row_subject,
     unexplained_satisfied_by,
 )
 from agents_remember.worktrees.modules.onboarding_trace import (
@@ -94,6 +96,7 @@ __all__ = [
     "GitReadFailed",
     "ItemPredicate",
     "item_open_reason",
+    "item_verdict",
     "register_gate_predicate",
 ]
 
@@ -171,6 +174,44 @@ def item_open_reason(item: Mapping[str, Any], context: GateContext) -> str | Non
             f"no gate predicate is registered for the item kind {kind!r}, so it cannot be answered"
         )
     return predicate(item, context)
+
+
+def _witness_row(item: Mapping[str, Any], context: GateContext) -> str | None:
+    kind = item.get("kind")
+    subject = str(item.get("subject"))
+    facts = item.get("facts") or {}
+    if kind in ("unexplained_hunk", "unexplained_file"):
+        if (facts.get("coverage") or {}).get("state") == UNCOVERED:
+            subject = str((facts.get("onboardingTrace") or {}).get("subject"))
+        else:
+            subject = row_subject(item) or subject
+    elif kind == "family_route_condition":
+        subject = subject.split("#", 1)[0]
+    return context.rows_by_subject.get(subject)
+
+
+def item_verdict(item: Mapping[str, Any], context: GateContext) -> ItemVerdict:
+    """The registered predicate's verdict, with its actual row or counted-change witness.
+
+    Failed reads are undecided, not a pass and not a guessed open reason. The caller
+    supplies open invariant subjects before judging family items, as the gate does.
+    """
+    row = _witness_row(item, context)
+    try:
+        reason = item_open_reason(item, context)
+        # If the predicate answers without history, that change -- not an incidental
+        # row about the same subject -- is its witness.
+        if (
+            reason is None
+            and row is not None
+            and item_open_reason(item, replace(context, history=None)) is None
+        ):
+            row = None
+    except GitReadFailed as error:
+        return ItemVerdict(state="undecided", reason=str(error)[:12000], row_id=row)
+    if reason is not None:
+        return ItemVerdict(state="open", reason=reason[:12000], row_id=row)
+    return ItemVerdict(state="answered", witness=row or "counted change", row_id=row)
 
 
 # --------------------------------------------------------------------------------------------------

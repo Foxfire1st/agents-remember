@@ -92,8 +92,17 @@ export function MemberTargetNote({
   );
 }
 
-const familyIdsOf = (context?: ReviewFamilyContext) =>
-  (context?.entries ?? []).map((entry) => entry.family_id);
+// A named family alone does not establish a member row: partial contexts can carry only a
+// guarantee candidate while their roster is unreadable.
+function hasTargetMember(context: ReviewFamilyContext | undefined, target: MarkTarget): boolean {
+  return (context?.entries ?? []).some(
+    (entry) =>
+      entry.family_id === target.familyKey &&
+      [...entry.before.members, ...entry.after.members].some(
+        (member) => member.invariant_revision_id === target.memberRevisionKey,
+      ),
+  );
+}
 
 // The unknown membership to show on the invariant view: the target invariant is the subject, and its
 // membership has no row in this tree (no family is named, or the named family is not in the review's
@@ -104,7 +113,7 @@ export function useInvariantTargetState(
 ): MarkTarget | null {
   const target = unknownTarget(useContext(IntentMarkerScope)?.target);
   if (!target || subject?.kind !== 'invariant' || subject.id !== target.invariantKey) return null;
-  return target.familyKey && familyIdsOf(context).includes(target.familyKey) ? null : target;
+  return hasTargetMember(context, target) ? null : target;
 }
 
 function reasonText(target: MarkTarget): string {

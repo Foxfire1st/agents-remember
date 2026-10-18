@@ -58,8 +58,13 @@ export function serve(world: Served): Requests {
       all.push(url);
       let body: unknown;
       if (url.pathname.endsWith('/entries')) body = world.entries;
-      else if (url.pathname.endsWith('/trees') || url.pathname.endsWith('/source-content'))
-        body = world.tree?.(url) ?? REFUSED;
+      else if (url.pathname.endsWith('/trees') || url.pathname.endsWith('/source-content')) {
+        const leafWide = url.pathname.endsWith('/trees') &&
+          !['lane', 'file', 'invariants'].some((key) => url.searchParams.has(key));
+        // R64 no longer derives code badges from whichever family happened to be read.
+        // Supply the genuine matching leaf-wide answer for these walk-world tests.
+        body = world.tree?.(url) ?? (leafWide ? leafTrees : REFUSED);
+      }
       else body = world.review(url);
       if (body === undefined) throw new Error(`Unexpected review request: ${address}`);
       if (body instanceof Error) throw body;
@@ -123,6 +128,7 @@ export const memberOccurrences = (block: HTMLElement) =>
 // ---- the real-data world of lane D2's scratch leaf (walkReal.capture-provenance.json)
 
 const entries = captured<unknown>('walkReal.entries.captured.json');
+const leafTrees = captured<unknown>('walkReal.trees.captured.json');
 const task = captured<ReviewResult>('walkReal.task.captured.json');
 // The seven changes of FAM-R6R095RW in the order `j` visits them: intent, implementation, membership.
 export const CHANGES = [

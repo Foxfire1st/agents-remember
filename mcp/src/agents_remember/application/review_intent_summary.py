@@ -54,6 +54,7 @@ from agents_remember.application.review_candidate_resolution import (
 from agents_remember.application.review_pair_preflight import pair_preflight_refusal
 from agents_remember.application.review_revision_comparison import revision_heads
 from agents_remember.application.review_unexplained_lane import lane_summary
+from agents_remember.application.review_worklist_answers import stored_unexplained_open
 from agents_remember.kernel.git_command import memo_git_object_lookups
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.connection import open_read_only_database
@@ -147,7 +148,12 @@ def read_review_intent_summary(
         summary = intent_summary_of(resolved, master)
         if resolved.trees is None:
             return summary
-        return summary.model_copy(update={"attribution": lane_summary(resolved.trees)})
+        return summary.model_copy(
+            update={
+                "attribution": lane_summary(resolved.trees),
+                "unexplained_open": stored_unexplained_open(resolved.contract, resolved.trees),
+            }
+        )
 
 
 def intent_summary_of(

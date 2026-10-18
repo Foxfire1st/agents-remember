@@ -1,5 +1,6 @@
-// Explicit synthetic index adapter for immutable pre-R86 marker captures. It carries their
-// recorded change facts into the new tree, without interpreting a missing roster as removal.
+// Explicit synthetic paired catalogue for the focused complete-comparison marker controls.
+// It carries the current capture's recorded change facts into the tree; it is not producer proof.
+// The unreadable-family cases instead use their genuine current catalogue and invariant question.
 import type { ReviewResult } from '../../data/review';
 import { memberChanges } from './changeTriage';
 import { syntheticCatalogue } from './outline.test-utils';

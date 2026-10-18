@@ -35,7 +35,6 @@ from uuid import uuid4
 import pytest
 from agents_remember.application.knowledge_review import (
     ReviewCandidateResolution,
-    ReviewRecordInputs,
     compose_review,
 )
 from agents_remember.application.review_statement_sides import (
@@ -179,7 +178,6 @@ def review(pair: OneSidedPair, selector: KnowledgeReadSeed) -> KnowledgeReviewPa
             leaf_id=LEAF,
             selector=selector,
         ),
-        ReviewRecordInputs(),
     )
     if result.payload is None:
         raise AssertionError(f"the composition refused: {result.refusal}")
@@ -323,7 +321,6 @@ def test_a_review_that_compared_no_subject_serves_no_operand_at_all(pair: OneSid
             leaf_id=LEAF,
             selector=None,
         ),
-        ReviewRecordInputs(),
     )
     assert result.payload is not None
     knowledge = result.payload.knowledge

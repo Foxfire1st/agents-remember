@@ -79,10 +79,6 @@ export const NO_FAMILY_CONTEXT: ReviewFamilyContext = {
   references: {
     relationship_union: '',
     source_inventory: '',
-    evidence_links: '',
-    observations: '',
-    assessments: '',
-    applicability: '',
     join_key: '',
     detail: '',
   },

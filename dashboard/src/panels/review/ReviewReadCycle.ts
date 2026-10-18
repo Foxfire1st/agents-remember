@@ -169,6 +169,7 @@ interface ReadContext {
 function startRead(reads: { current: number }, context: ReadContext): () => void {
   let superseded = false;
   const askedFor = context.targetKey;
+  const inputEpoch = context.cache.inputEpoch;
   const seq = ++reads.current;
   const current = () => !superseded && reads.current === seq;
   // THE IDENTITY BELONGS TO ONE READ (L17-F1). It is sent only when this read is the one the refresh
@@ -205,6 +206,7 @@ function startRead(reads: { current: number }, context: ReadContext): () => void
     continuing ? { ...continuing, key: askedFor } : retained?.key === askedFor ? retained : null,
   );
   askReview({ ...context.request, previous }, (answered) => {
+    if (context.cache.inputEpoch !== inputEpoch) return;
     if (!current()) {
       // Superseded: it never writes the read state. The task-context answer is kept unshown.
       const taskContext = context.request.selectorKind === undefined;
@@ -306,6 +308,8 @@ export interface ReviewReadCycle {
   // The reader's own request that the displayed comparison be re-read against the candidate as it is
   // now: the same question, carrying the identity of what is on screen.
   refresh: () => void;
+  memoryChanged: () => void;
+  memoryWatchFailed: (detail: string) => void;
   // The last payload admitted for this task context, whichever subject it answered. The surface keeps
   // its shell (scope, navigation, source explorer) over it while another subject is pending, failed or
   // refused, and never renders it as that subject's reading. `null` before any answer.
@@ -365,6 +369,25 @@ function useLatest<T>(value: T): { current: T } {
   const ref = useRef(value);
   ref.current = value;
   return ref;
+}
+
+function memoryWatchActions(context: {
+  cache: ReviewReadCache; reads: { current: number }; refresh: () => void;
+  setAnswer: (answer: KeyedRead) => void; targetRef: { current: string };
+}) {
+  return {
+    memoryChanged: () => {
+      context.reads.current += 1;
+      context.cache.invalidateReviews();
+      context.refresh();
+    },
+    memoryWatchFailed: (detail: string) => {
+      context.reads.current += 1;
+      context.setAnswer({ key: context.targetRef.current, read: {
+        phase: 'failed', problem: reviewProblemFromCause(new Error(detail)),
+      } });
+    },
+  };
 }
 
 export function useReviewReadCycle({
@@ -478,6 +501,7 @@ export function useReviewReadCycle({
     retained,
     carried: carriedHere,
     refresh,
+    ...memoryWatchActions({ cache, reads, refresh, setAnswer, targetRef }),
     frame,
   };
 }

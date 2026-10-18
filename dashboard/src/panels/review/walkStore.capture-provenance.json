@@ -1,15 +1,22 @@
 {
-  "captured_at": "2026-10-04T15:56:14+00:00",
-  "producer": "260928-MIK-L39 worker, capture_store_bodies.py (kept with the leaf's evidence)",
-  "command": "PYTHONPATH=mcp/tests:mcp/src <mcp venv python> capture_store_bodies.py <scratch> <review folder> <this file>",
-  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
-  "source_tree": "260928-mik-l39 worktree, base e40d1f21660386f9b091ae5e6fee595a467d4cef (no file under mcp/ changed)",
-  "comparison": "STORE-AUTHORED fixture: mcp/tests/test_review_change_kinds.py build_world (a live leaf over four Git trees; every memory side read through its derived index)",
-  "attempts": "one capture per body; each body is the first answer",
-  "not_kept": "The same run also captured walkStore.INV-AAAAAA.captured.json and walkStore.INV-HHHHHH.captured.json, and the script still does. No test loads them, so they were removed on 2026-10-05 and their records are not listed here.",
+  "producer": "capture_current_store.py: canonical build_world, actual current public HTTP routes",
+  "comparison": "STORE-AUTHORED four-Git-tree test fixture, not real user data",
+  "route": "FastAPI register_review_routes wired by serving_collaborators(world.config), TestClient.get",
+  "raw_policy": "response.content written byte-for-byte; JSON parsed only for verification and deriving continuation",
+  "argv": [
+    "../scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture_current_store.py"
+  ],
+  "python": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/.venv/bin/python",
+  "python_version": "3.14.8 (main, Oct  6 2026, 09:12:12) [GCC 15.2.0]",
+  "import_origin": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/__init__.py",
+  "source_manifest": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture-01/provenance.json",
+  "source_manifest_sha256": "42815d2396ae44fdb598ea68c159d693cae80bc8e8c839a5a914368fef2ea6e9",
+  "scope": "Canonical STORE-AUTHORED four-Git-tree fixture through the current public producer; synthetic fixture records, not real user data; raw response bytes unchanged.",
   "fixtures": [
     {
+      "case_id": "walkStore.entries",
       "file": "src/panels/review/walkStore.entries.captured.json",
+      "publication_file": "src/panels/review/walkStore.entries.captured.json",
       "route": "GET /api/review/intent/entries",
       "params": {
         "repo": "agents-remember",
@@ -17,12 +24,15 @@
         "leaf": "260101-TRV-L1"
       },
       "status": 200,
-      "seconds": 0.17,
-      "sha256": "f660066b9fb0093cbc8d08dabcf40c98676663707c51177629c1d2d503e19283",
-      "bytes": 2922
+      "sha256": "0703e4572f5b46cb557d75b4b437161ef1ce5371507fb2ccb67ae467858db430",
+      "bytes": 9606,
+      "state": "entries",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture-01/raw/walkStore.entries.captured.json"
     },
     {
+      "case_id": "walkStore.shared",
       "file": "src/panels/review/walkStore.shared.captured.json",
+      "publication_file": "src/panels/review/walkStore.shared.captured.json",
       "route": "GET /api/review/intent",
       "params": {
         "repo": "agents-remember",
@@ -32,12 +42,15 @@
         "selectorId": "e701c262-50a6-553b-bab6-691caed0fb04"
       },
       "status": 200,
-      "seconds": 0.33,
-      "sha256": "fadaa6a39190e30b18f7522cd509ca80995385c9c24f2ba92631b906fd3b5e12",
-      "bytes": 167364
+      "sha256": "d921e16829c6b5b34eb4a543234e8a244cc8221d2fe5563fe8cd8ad93ce51201",
+      "bytes": 139231,
+      "state": "review",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture-01/raw/walkStore.shared.captured.json"
     },
     {
+      "case_id": "walkStore.FAM-F00001",
       "file": "src/panels/review/walkStore.FAM-F00001.captured.json",
+      "publication_file": "src/panels/review/walkStore.FAM-F00001.captured.json",
       "route": "GET /api/review/intent",
       "params": {
         "repo": "agents-remember",
@@ -47,12 +60,15 @@
         "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0"
       },
       "status": 200,
-      "seconds": 0.25,
-      "sha256": "4fcb32769e3f2022f787d437f410d4328a37fb0b8c80b34d19b16cb99eace722",
-      "bytes": 147279
+      "sha256": "59db36996ca967d596d5e82ba804686059ae6cbd6b8e4f837e484e17f82fef71",
+      "bytes": 123099,
+      "state": "review",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture-01/raw/walkStore.FAM-F00001.captured.json"
     },
     {
+      "case_id": "walkStore.FAM-F00002",
       "file": "src/panels/review/walkStore.FAM-F00002.captured.json",
+      "publication_file": "src/panels/review/walkStore.FAM-F00002.captured.json",
       "route": "GET /api/review/intent",
       "params": {
         "repo": "agents-remember",
@@ -62,12 +78,15 @@
         "selectorId": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44"
       },
       "status": 200,
-      "seconds": 0.21,
-      "sha256": "e2a31b8b39bcebd93897c04d1b3863f6c994860e1169220eb560c7c05462e841",
-      "bytes": 58741
+      "sha256": "53c1773d8d6d9f0ae3ac0843ffc219887c805af3edbbeec900a36b8c68acf987",
+      "bytes": 49107,
+      "state": "review",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture-01/raw/walkStore.FAM-F00002.captured.json"
     },
     {
+      "case_id": "walkStore.INV-PPPPPP",
       "file": "src/panels/review/walkStore.INV-PPPPPP.captured.json",
+      "publication_file": "src/panels/review/walkStore.INV-PPPPPP.captured.json",
       "route": "GET /api/review/intent",
       "params": {
         "repo": "agents-remember",
@@ -77,12 +96,15 @@
         "selectorId": "a6312ea8-654b-5f11-8f5b-5881ea910b60"
       },
       "status": 200,
-      "seconds": 0.24,
-      "sha256": "e81ea3f2d64f0bfe251b6d8e6da6a71cb15383a969a92c2b72269744219f5f01",
-      "bytes": 58785
+      "sha256": "729b47d248eec71e40a663a6077d54aa2e8c3b3508b67e16c4f50ca8e8f28063",
+      "bytes": 49371,
+      "state": "review",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture-01/raw/walkStore.INV-PPPPPP.captured.json"
     },
     {
+      "case_id": "walkStore.sharedPage",
       "file": "src/panels/review/walkStore.sharedPage.captured.json",
+      "publication_file": "src/panels/review/walkStore.sharedPage.captured.json",
       "route": "GET /api/review/intent",
       "params": {
         "repo": "agents-remember",
@@ -93,12 +115,15 @@
         "pageSize": 2
       },
       "status": 200,
-      "seconds": 0.28,
-      "sha256": "8bb02f3d33c10c22a26de9389d0d961c8f5d849595f31741c146bc0b07d0f569",
-      "bytes": 49980
+      "sha256": "30cb482df0ac91bd8124bfbe956163d107b39c2871e3a9dec69575c23ccb152c",
+      "bytes": 42845,
+      "state": "review",
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture-01/raw/walkStore.sharedPage.captured.json"
     },
     {
+      "case_id": "walkStore.FAM-F00001Continued",
       "file": "src/panels/review/walkStore.FAM-F00001Continued.captured.json",
+      "publication_file": "src/panels/review/walkStore.FAM-F00001Continued.captured.json",
       "route": "GET /api/review/intent",
       "params": {
         "repo": "agents-remember",
@@ -108,12 +133,28 @@
         "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0",
         "pageSize": 2,
         "pageOf": "family_members",
-        "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6IjRjNjEzOThkZWM1ZTc4MmUwOTRkNmM0YWM2NGUwODA5YmZmMzI5ODk3ZDMyN2FiMmM2MTQ1NDg4YTJkNTViNDgiLCJzZWVkX2RpZ2VzdCI6IjU3YjMwMDNjY2VhMDFkMzJhNTYxZjM2MDRlMzBmYjYzMjBhYTJkMjFiMzZhMDMxYTk1NWU5YjlkZTI3MTg3OTQiLCJtYW5pZmVzdF9kaWdlc3QiOiJkYTA0MjlmMjU5ZDVlNmYwYmU3OWVjMDcwMGU4OGEwMzU5ZmI2NTAzNGI0OWZhOGNjZjUxM2IxYjExNDMxNWMxIiwibG9naWNhbF9kaWdlc3QiOiI2NGQ2OGY5NmYzOTllYzJlNTEyMDNjYWM3YWJkMjU2MGZhNzU2NjI5ZGY1ZWJiMjVjYjRhZDEwN2E0OWU1MTljIiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjJ9"
+        "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6ImEwNDU1ZmExMmFmZWM2N2ZmYmJmZWZjNDQ4M2Q3NTg0NWViOTMxYjU1Yjc3ZjQxZDM4ZTUyMzIxNjIxMDg2YTkiLCJzZWVkX2RpZ2VzdCI6IjU3YjMwMDNjY2VhMDFkMzJhNTYxZjM2MDRlMzBmYjYzMjBhYTJkMjFiMzZhMDMxYTk1NWU5YjlkZTI3MTg3OTQiLCJtYW5pZmVzdF9kaWdlc3QiOiJkYTA0MjlmMjU5ZDVlNmYwYmU3OWVjMDcwMGU4OGEwMzU5ZmI2NTAzNGI0OWZhOGNjZjUxM2IxYjExNDMxNWMxIiwibG9naWNhbF9kaWdlc3QiOiI1YjNkOTlmZWU4ZmZjNzljZTVlY2U4MTA2OTBjMzkwM2ZlNGM1ZTQwOGRiZWJhYzQ1NGJhNTJhODdhYTZkZjk3Iiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjJ9"
       },
       "status": 200,
-      "seconds": 0.24,
-      "sha256": "48da1c486ebd6b040602a68fe088d7d82130e08bbcf49545357cc788c0e45a72",
-      "bytes": 37642
+      "sha256": "5d9a7d6bfdaf532f67199db1ac428c704614e8a3290b28eb61535bdd6f93e779",
+      "bytes": 32490,
+      "state": "review",
+      "derived_from": {
+        "case_id": "walkStore.sharedPage",
+        "json_pointer": "/payload/family_context/entries/0/after/page/continuation",
+        "policy": "opaque continuation copied from actual first answer, not decoded or reconstructed"
+      },
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/store-recapture-helper/capture-01/raw/walkStore.FAM-F00001Continued.captured.json",
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/before-cursor-recaptures/walkStore.FAM-F00001Continued.captured.json",
+      "seconds": 0.17287222199956886,
+      "cursor_from": "walkStore.sharedPage.captured.json payload.family_context.entries[FAM-F00001].before.page.continuation",
+      "new_before_members": [
+        "9acebe6e-c7bb-5f65-bd46-81335059df7a",
+        "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc"
+      ],
+      "source_unchanged": true,
+      "continuation_correction": "Actual before-side producer cursor, as the preserved roster-union tests require. Earlier after-cursor body archived unchanged."
     }
-  ]
+  ],
+  "continuation_correction_receipt": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/before-cursor-recaptures/receipt.json"
 }

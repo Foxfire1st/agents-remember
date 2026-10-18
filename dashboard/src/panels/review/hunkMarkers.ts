@@ -103,11 +103,9 @@ export function fileMarks(file: ReviewFileClassification): FileMarks {
 
 export function hunkMark(file: ReviewFileClassification, hunk: ReviewLaneHunk): HunkMark {
   const realizations = markEntries(
-    file,
     hunk.links.filter((link) => link.kind !== 'proof'),
   );
   const proofs = markEntries(
-    file,
     hunk.links.filter((link) => link.kind === 'proof'),
   );
   const unknown = [
@@ -140,7 +138,7 @@ function unreadChangedSides(file: ReviewFileClassification, hunk: ReviewLaneHunk
 }
 
 // The links of one kind, one entry per invariant, in the owner's order.
-function markEntries(file: ReviewFileClassification, links: ReviewLaneLink[]): MarkEntry[] {
+function markEntries(links: ReviewLaneLink[]): MarkEntry[] {
   const entries = new Map<string, MarkEntry>();
   for (const link of links) {
     const key = `${link.kind}:${link.invariant_key}`;
@@ -158,7 +156,7 @@ function markEntries(file: ReviewFileClassification, links: ReviewLaneLink[]): M
     addOnce(entry.entryIds, link.id);
     if (link.facet) addOnce(entry.facets, link.facet);
     if (link.invariant_revision !== undefined) addOnce(entry.revisions, link.invariant_revision);
-    for (const family of link.families) addOccurrence(entry, link, family, file);
+    for (const family of link.families) addOccurrence(entry, link, family);
   }
   return [...entries.values()];
 }
@@ -173,7 +171,6 @@ function addOccurrence(
   entry: MarkEntry,
   link: ReviewLaneLink,
   family: Occurrence,
-  file: ReviewFileClassification,
 ): void {
   const key = `${family.state}:${family.family_key ?? ''}:${link.invariant_revision_key ?? ''}`;
   const known = entry.occurrences.find((one) => one.key === key);
@@ -195,35 +192,9 @@ function addOccurrence(
       memberRevisionKey: family.family_key ? link.invariant_revision_key : undefined,
       family: family.family,
       state: family.state,
-      reason: unknownReason(file, link, family),
+      reason: family.reason,
     },
   });
-}
-
-// Why an occurrence's membership is not established, from the owner's own facts. A named family is
-// unknown only for a before-side occurrence whose after side could not be read whole (the owner
-// compares the side's family record with the other side's); a family-less one, because not every
-// family record of its own side was read.
-//
-// The rule's owner is MIK-L32's server: `_membership` and `_occurrences` in
-// `application/review_unexplained_lane.py` decide these states. The response carries no reason per
-// occurrence, so this sentence restates that rule; it must change when that mapping does.
-function unknownReason(
-  file: ReviewFileClassification,
-  link: ReviewLaneLink,
-  family: Occurrence,
-): string | undefined {
-  if (family.state !== 'membership_unknown') return undefined;
-  const side = family.family ? (link.side === 'before' ? 'after' : 'before') : link.side;
-  const read = file.sides.find((one) => one.side === side);
-  const why =
-    read?.knowledge === 'unavailable'
-      ? `the ${side} knowledge could not be read (${read.detail ?? 'unavailable'})`
-      : `not every family record of the ${side} knowledge could be read`;
-  const what = family.family
-    ? `whether ${family.family} still lists ${link.invariant} there`
-    : `whether a family lists ${link.invariant} on that side`;
-  return `${why}, so ${what} is not established`;
 }
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;

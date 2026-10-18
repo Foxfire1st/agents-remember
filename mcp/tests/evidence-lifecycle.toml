@@ -473,6 +473,7 @@ consumers = [
   "mcp/tests/test_read_anchor_memo.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_reader_task_context_protocol.py",
+  "mcp/tests/test_reader_timeline_spill.py",
   "mcp/tests/test_reconsideration_route_trigger.py",
   "mcp/tests/test_reconsideration_surfacing.py",
   "mcp/tests/test_record_integrity.py",
@@ -506,7 +507,9 @@ consumers = [
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_limit_wording.py",
   "mcp/tests/test_review_meaning_effects.py",
+  "mcp/tests/test_review_memory_watch.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_record_presence.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_review_route_refusals.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
@@ -515,7 +518,7 @@ consumers = [
   "mcp/tests/test_review_sync_movement_read.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_unexplained_lane.py",
-  "mcp/tests/test_review_verification_observation_model.py",
+  "mcp/tests/test_reviewer_text_shape.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_role_capsule_admission.py",
@@ -694,6 +697,7 @@ consumers = [
   "mcp/tests/test_knowledge_reopen_governing_rows.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_attribution_precedence.py",
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_one_sided_statements.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_knowledge_review_relationship_movement.py",
@@ -702,6 +706,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_revision_selection.py",
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
+  "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_revision_seals.py",
   "mcp/tests/test_knowledge_route_chain.py",
@@ -713,6 +718,7 @@ consumers = [
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
+  "mcp/tests/test_review_change_kinds.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_family_context.py",
   "mcp/tests/test_review_family_context_population.py",
@@ -902,8 +908,6 @@ consumers = [
   "mcp/tests/test_knowledge_bootstrap_procedure.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_read_boundary.py",
-  "mcp/tests/test_knowledge_review_evidence_channels.py",
-  "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_landing_report.py",
   "mcp/tests/test_landing_state_refusals.py",
@@ -1497,6 +1501,8 @@ permanence_rationale = "The L37 real-case regression reads these rows as the pac
 replacement_contract = "node:mcp/tests/test_review_meaning_effects.py::test_the_l37_sequences_from_the_real_history_files"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
+  "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_review_meaning_effects.py",
 ]
 
@@ -1515,6 +1521,8 @@ permanence_rationale = "The L37 real-case regression reads these rows as the pac
 replacement_contract = "node:mcp/tests/test_review_meaning_effects.py::test_the_l37_sequences_from_the_real_history_files"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
+  "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_review_meaning_effects.py",
 ]
 
@@ -1887,6 +1895,7 @@ consumers = [
   "mcp/tests/test_read_anchor_memo.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_reader_task_context_protocol.py",
+  "mcp/tests/test_reader_timeline_spill.py",
   "mcp/tests/test_reconsideration_route_trigger.py",
   "mcp/tests/test_reconsideration_surfacing.py",
   "mcp/tests/test_record_integrity.py",
@@ -1920,7 +1929,9 @@ consumers = [
   "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_limit_wording.py",
   "mcp/tests/test_review_meaning_effects.py",
+  "mcp/tests/test_review_memory_watch.py",
   "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_review_record_presence.py",
   "mcp/tests/test_review_result_blocks_through_real_tools.py",
   "mcp/tests/test_review_route_refusals.py",
   "mcp/tests/test_review_source_inventory_boundaries.py",
@@ -1929,7 +1940,7 @@ consumers = [
   "mcp/tests/test_review_sync_movement_read.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_unexplained_lane.py",
-  "mcp/tests/test_review_verification_observation_model.py",
+  "mcp/tests/test_reviewer_text_shape.py",
   "mcp/tests/test_reviewer_worklist_process.py",
   "mcp/tests/test_reviewer_worklist_reads.py",
   "mcp/tests/test_role_capsule_admission.py",
@@ -2304,6 +2315,8 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_reopen.py",
   "mcp/tests/test_knowledge_reopen_governing_rows.py",
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
+  "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_route_chain.py",
   "mcp/tests/test_knowledge_views.py",
   "mcp/tests/test_landing_state_refusals.py",
@@ -2311,7 +2324,9 @@ consumers = [
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
+  "mcp/tests/test_review_change_kinds.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
+  "mcp/tests/test_review_intent_summary.py",
   "mcp/tests/test_review_meaning_effects.py",
   "mcp/tests/test_review_read_latency.py",
   "mcp/tests/test_reviewer_worklist_process.py",
@@ -2406,6 +2421,7 @@ consumers = [
   "mcp/tests/test_knowledge_reopen_governing_rows.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_attribution_precedence.py",
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_one_sided_statements.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_knowledge_review_relationship_movement.py",
@@ -2414,6 +2430,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_revision_selection.py",
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
+  "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_revision_seals.py",
   "mcp/tests/test_knowledge_route_chain.py",
@@ -2425,6 +2442,7 @@ consumers = [
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
+  "mcp/tests/test_review_change_kinds.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
   "mcp/tests/test_review_family_context.py",
   "mcp/tests/test_review_family_context_population.py",
@@ -2879,6 +2897,48 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+]
+
+[[artifact]]
+path = "mcp/tests/review_curator_fixture_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "260928-MIK-L57"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "Extracted typed curator-coherence fixture author shared by preserved authority and historical-manifest tests"
+introduced_by = "260928-MIK-L57"
+lifetime = "permanent"
+permanence_rationale = "Preserves the existing curator writer contract while the reviewer removes its display-only assessment channel."
+replacement_contract = "node:mcp/tests/test_review_assessment_history_repairs.py::test_integrity_rejection_precedes_canonical_authority_replacement"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_curator_coherence_file_transport.py",
+  "mcp/tests/test_review_assessment_history_repairs.py",
+  "mcp/tests/test_tool_answer_rows_packaging.py",
+]
+
+[[artifact]]
+path = "mcp/tests/reviewer_leaf_view_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "260928-MIK-L57"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "Extracted expected leaf-view enrichment over the production gate and code-fact owners"
+introduced_by = "260928-MIK-L57"
+lifetime = "permanent"
+permanence_rationale = "Keeps the isolated child comparison test on one real enrichment contract without duplicating gate predicates."
+replacement_contract = "node:mcp/tests/test_reviewer_worklist_process.py::test_real_child_parity_source_reads_and_held_conversion_at_two_result_sizes"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_review_change_kinds.py",
+  "mcp/tests/test_review_intent_summary.py",
+  "mcp/tests/test_review_read_latency.py",
+  "mcp/tests/test_reviewer_worklist_process.py",
+  "mcp/tests/test_reviewer_worklist_reads.py",
 ]
 
 [[artifact]]

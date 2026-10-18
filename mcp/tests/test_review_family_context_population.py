@@ -11,6 +11,7 @@ its population -- is pinned here through the same production composition.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -20,10 +21,18 @@ from agents_remember.application.knowledge_review import (
     compose_review,
     read_knowledge_review,
 )
+from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.knowledge.read import FamilyIdentitySeed, InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.serving.review import KNOWLEDGE_REVIEW_ROUTE
-from agents_remember_test_support.testing.review_git_trees import build_world
+from agents_remember_test_support.testing.review_git_trees import (
+    FAMILY,
+    INVARIANT,
+    INVARIANT_PATH,
+    build_world,
+    commit,
+    git,
+)
 from diff_scope_test_support import rebuild_after_tree, replace_after_tree
 from fastapi.testclient import TestClient
 from knowledge_rows_test_support import INDEX_REPOSITORY_ID, open_knowledge_store
@@ -49,6 +58,64 @@ from test_review_family_context import (
 )
 
 pytestmark = pytest.mark.evidence_unit
+
+
+@pytest.mark.parametrize("member", [True, False])
+def test_malformed_after_family_is_unknown_not_absent(tmp_path: Path, member: bool) -> None:
+    """Native complete-before/partial-after trees do not prove removal or a measured zero."""
+    world = build_world(tmp_path)
+    if not member:
+        path = world.memory / f"knowledge/families/{FAMILY}-landing.json"
+        document = json.loads(path.read_text())
+        document["members"] = []
+        world.memory_base = commit(
+            world.memory,
+            {str(path.relative_to(world.memory)): json.dumps(document)},
+            trailer=world.code_base,
+        )
+        git(world.memory_worktree, "reset", "--hard", world.memory_base)
+        world.contract()
+    assert (world.memory_worktree / INVARIANT_PATH).is_file()
+    (world.memory_worktree / f"knowledge/families/{FAMILY}-landing.json").write_text("{}\n")
+    result = read_knowledge_review(
+        world.config,
+        world.review(selector=InvariantIdentitySeed(invariant_id=text_uuid("identity", INVARIANT))),
+    )
+    assert result.state == "review", result.refusal
+    assert result.payload is not None
+    context = result.payload.family_context
+    if member:
+        assert context.state == "partial", context.detail
+        entry = context.entries[0]
+        assert entry.selection.state == "unresolved", entry.selection.statement
+        assert entry.after.state == "unreadable", entry.after.detail
+        assert entry.selection.before_retained
+        assert entry.candidates[0].joint_guarantee == "Landing holds."
+        assert "landing.json" in entry.after.detail
+    else:
+        assert context.state == "unavailable", context.detail
+        assert "not a measured zero" in context.detail
+        assert "after" in context.detail and "landing.json" in context.detail
+
+
+@pytest.mark.parametrize("unrelated_failure", [False, True])
+def test_native_absent_family_remains_removed(tmp_path: Path, unrelated_failure: bool) -> None:
+    """Only the named family's own failed file makes its absence unknown."""
+    world = build_world(tmp_path)
+    (world.memory_worktree / f"knowledge/families/{FAMILY}-landing.json").unlink()
+    if unrelated_failure:
+        (world.memory_worktree / "knowledge/families/FAM-OTHER0-broken.json").write_text("{}\n")
+    result = read_knowledge_review(
+        world.config,
+        world.review(selector=InvariantIdentitySeed(invariant_id=text_uuid("identity", INVARIANT))),
+    )
+    assert result.state == "review", result.refusal
+    assert result.payload is not None
+    entry = result.payload.family_context.entries[0]
+    assert entry.selection.state == "removed"
+    assert entry.before.state == "recorded"
+    assert entry.after.state == "not_recorded"
+
 
 # The guarantee a family records before any membership exists. It is a real authored sentence with
 # its own seal and provenance, which is exactly what the pre-fix composition dropped.
@@ -144,14 +211,14 @@ _REMOVED_HISTORY_SENTENCE_CASE = "test_the_history_sentence_is_measured_against_
 
 
 def _assert_primary_unchanged(before, after) -> None:
-    """Family curation cannot replace the selected invariant's operands or evidence."""
+    """Family curation cannot replace the selected invariant's operands or judgment."""
 
     assert after.knowledge.revision_selection == before.knowledge.revision_selection
     assert after.knowledge.before_statement == before.knowledge.before_statement
     assert after.knowledge.after_statement == before.knowledge.after_statement
     assert after.knowledge.before_conditions == before.knowledge.before_conditions
     assert after.knowledge.after_conditions == before.knowledge.after_conditions
-    assert after.evidence == before.evidence
+    assert after.judgment == before.judgment
     assert after.source.inventory == before.source.inventory
 
 
@@ -397,7 +464,7 @@ def test_content_and_claim_only_pages_preserve_the_authored_population(
             payload = body["payload"]
             assert payload["source"]["inventory"] == first["source"]["inventory"]
             assert payload["knowledge"] == first["knowledge"]
-            assert payload["evidence"] == first["evidence"]
+            assert payload["judgment"] == first["judgment"]
             assert payload["comparison"] == first["comparison"]
             count = page["page"]["counts"]["primary_items_returned"]
             assert 0 < count - last_returned <= page_size

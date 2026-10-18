@@ -34,18 +34,24 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final
 
-from agents_remember.application.knowledge_currentness.observe import CodeTree, open_code_tree
+from agents_remember.application.knowledge_currentness.observe import (
+    CodeTree,
+    OpenedCodeTree,
+    open_code_tree,
+)
 from agents_remember.application.knowledge_gate import memo
 from agents_remember.application.knowledge_gate.predicates import (
     INVARIANT_KINDS,
     GateContext,
     GitReadFailed,
     item_open_reason,
+    item_verdict,
 )
 from agents_remember.application.knowledge_worklist.base_cache import (
     converted_base_files,
     default_base_cache_directory,
 )
+from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
 from agents_remember.application.knowledge_worklist.compute import (
     Incomplete,
     git_failure,
@@ -83,6 +89,7 @@ from agents_remember.memory_quality.knowledge_validator.trees import (
 )
 from agents_remember.memory_quality.knowledge_validator.validator import LeafCommit
 from agents_remember.memory_quality.knowledge_worklist_section import item_facts
+from agents_remember.models.knowledge.item_verdict import ItemVerdict
 from agents_remember.models.knowledge_files.documents import history_path, owner_history_attempt
 from agents_remember.models.knowledge_files.history import is_closed_history, writable_attempt
 from agents_remember.worktrees.knowledge_gate import closed_out_memory
@@ -99,6 +106,7 @@ __all__ = [
     "GateResult",
     "GateTrees",
     "evaluate_leaf_gate",
+    "item_verdicts",
     "judge",
     "recompute_for_gate",
     "validation_findings",
@@ -403,9 +411,17 @@ def judge(
     )
 
 
-def _candidate(trees: GateTrees, owner: str | None) -> GateContext | GateFinding:
+def _candidate(
+    trees: GateTrees,
+    owner: str | None,
+    *,
+    knowledge: KnowledgeSide | None = None,
+    code: CodeTrees | None = None,
+) -> GateContext | GateFinding:
     """K_C and C read once for every predicate, or the finding that says which cannot be read."""
 
+    if knowledge is not None or code is not None:
+        return _held_candidate(trees, owner, knowledge, code)
     try:
         snapshot = git_tree_snapshot(trees.memory_repository, trees.memory_tree)
         candidate = KnowledgeSide.from_snapshot("K_C", snapshot)
@@ -413,14 +429,46 @@ def _candidate(trees: GateTrees, owner: str | None) -> GateContext | GateFinding
         return _unreadable("K_C", error)
     except subprocess.SubprocessError as error:
         return _unreadable("git", error)
-    code = open_code_tree(CodeTree(trees.code_repository, trees.code_tree))
-    if code.problem is not None:
-        return GateFinding(RUN_INCOMPLETE, "C", f"the code tree C cannot be read: {code.problem}")
+    opened = open_code_tree(CodeTree(trees.code_repository, trees.code_tree))
+    if opened.problem is not None:
+        return GateFinding(RUN_INCOMPLETE, "C", f"the code tree C cannot be read: {opened.problem}")
     return GateContext(
         owner=owner,
         history=candidate.history(owner) if owner else None,
         candidate=candidate,
-        code=code,
+        code=opened,
+    )
+
+
+def _held_candidate(
+    trees: GateTrees,
+    owner: str | None,
+    knowledge: KnowledgeSide | None,
+    code: CodeTrees | None,
+) -> GateContext | GateFinding:
+    """Use this run's immutable sides, never a different or half-bound comparison."""
+    try:
+        if (
+            knowledge is None
+            or code is None
+            or knowledge.key != trees.memory_tree
+            or code.candidate_tree != trees.code_tree
+            or code.repository.resolve() != trees.code_repository.resolve()
+        ):
+            return _unreadable("K_C/C", ValueError("held inputs do not match both candidate trees"))
+        opened = OpenedCodeTree(
+            tree=CodeTree(trees.code_repository, trees.code_tree),
+            trees=code,
+            files=code.candidate(),
+            problem=None,
+        )
+    except (CodeReadError, OSError, ValueError, subprocess.SubprocessError) as error:
+        return _unreadable("K_C/C", error)
+    return GateContext(
+        owner=owner,
+        history=knowledge.history(owner) if owner else None,
+        candidate=knowledge,
+        code=opened,
     )
 
 
@@ -446,6 +494,42 @@ def _item_findings(
             )
         )
     return findings + decided
+
+
+def item_verdicts(
+    items: Sequence[Mapping[str, Any]],
+    trees: GateTrees,
+    owner: str | None,
+    *,
+    knowledge: KnowledgeSide | None = None,
+    code: CodeTrees | None = None,
+) -> dict[str, ItemVerdict]:
+    """Gate-owned judgments; optionally reuse this run's already-read exact K_C and C."""
+    context = _candidate(trees, owner, knowledge=knowledge, code=code)
+    if isinstance(context, GateFinding):
+        return {
+            str(item["id"]): ItemVerdict(state="undecided", reason=context.message)
+            for item in items
+        }
+    invariants = {
+        str(item["id"]): item_verdict(item, context)
+        for item in items
+        if item.get("kind") in INVARIANT_KINDS
+    }
+    context = replace(
+        context,
+        open_invariants=frozenset(
+            str(item.get("subject"))
+            for item in items
+            if str(item["id"]) in invariants and invariants[str(item["id"])].state != "answered"
+        ),
+    )
+    return {
+        str(item["id"]): invariants[str(item["id"])]
+        if str(item["id"]) in invariants
+        else item_verdict(item, context)
+        for item in items
+    }
 
 
 def _writable_history(context: GateContext, owner: str, trees: GateTrees) -> str:

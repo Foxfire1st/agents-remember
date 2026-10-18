@@ -37,7 +37,6 @@ import pytest
 from agents_remember.application.knowledge_review import (
     list_knowledge_review_entries,
     read_knowledge_review,
-    review_records_for,
 )
 from agents_remember.application.review_source_content import (
     EXPANSION_TEXT_BYTES,
@@ -182,7 +181,7 @@ def _served(fixture: EndpointFixture) -> FastAPI:
     register_review_routes(
         app,
         config,
-        lambda request: read_knowledge_review(config, request, review_records_for(config, request)),
+        lambda request: read_knowledge_review(config, request),
         lambda repository_id, master, leaf_id: list_knowledge_review_entries(
             config, repository_id, master, leaf_id
         ),

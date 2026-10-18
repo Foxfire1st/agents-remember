@@ -23,6 +23,7 @@ from agents_remember.serving.review import (
     KnowledgeReviewPort,
     ReviewSourceContentPort,
 )
+from agents_remember.serving.review_memory_watch import ReviewMemoryRootPort
 from agents_remember.serving.review_trees import ReviewTreesPort
 from agents_remember.serving.served_state import served_state_tail
 from agents_remember.serving.task_document_cache import TaskDocumentBodyCache
@@ -209,6 +210,9 @@ class ServingCollaborators:
     review_trees_shutdown: Callable[[], None] | None = None
     """Stop and reap the tree route's transient child computations at serving shutdown."""
 
+    review_memory_root: ReviewMemoryRootPort | None = None
+    """Cheap canonical leaf memory-root admission, used only by an open review stream."""
+
     knowledge_reader: KnowledgeReaderPort | None = None
     """The path-based knowledge reader (MIK-R29): read-only views of any converted memory tree.
 
@@ -242,6 +246,7 @@ class _ServingRuntime:
     clock: Callable[[], datetime]
     build: ServingBuild
     interval: float
+    review_memory_root: ReviewMemoryRootPort | None = None
     review_trees_shutdown: Callable[[], None] | None = None
     # The always-on background account (MIK-R81 rule 1): the projector and every
     # background loop record their units here; the diagnostics route serves it.

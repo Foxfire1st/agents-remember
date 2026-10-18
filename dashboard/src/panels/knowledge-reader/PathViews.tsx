@@ -1,12 +1,15 @@
 // The reader's path-side views (MIK-R29 rule 2): a file's path view, a directory's bounded summary
 // and its paged subtree, the without-proof list, the census view and a code file opened at its
 // locator.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { css } from '../../../styled-system/css';
 import {
   locatorLabel,
   readSubtree,
+  readerGet,
+  type FileRead,
+  type ReaderAnswer,
   type CensusAnswer,
   type FamilyAtPath,
   type InvariantGroup,
@@ -210,8 +213,99 @@ function DocumentFacts({ answer }: { answer: PathViewAnswer }) {
   );
 }
 
+function usePathProse(answer: PathViewAnswer) {
+  const nav = useReaderNav();
+  const [prose, setProse] = useState(answer.prose);
+  const [loading, setLoading] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const loadWhole = () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setLoading(true);
+    setFailure(null);
+    readerGet<FileRead & ReaderAnswer>('prose', {
+      repo: nav.repo,
+      commit: nav.commit,
+      path: answer.path,
+    })
+      .then(
+        (read) => {
+          if (!live.current) return;
+          if (
+            read.selection?.treeKey !== answer.selection?.treeKey ||
+            read.selection?.memoryRevision !== answer.selection?.memoryRevision
+          ) {
+            setFailure(
+              'The memory snapshot changed. Reload the whole view before loading whole text.',
+            );
+            return;
+          }
+          if (read.state === 'present') setProse(read);
+          else setFailure(`${read.state}: ${read.detail ?? 'whole text could not be read'}`);
+        },
+        (error: unknown) => {
+          if (live.current) setFailure(String(error));
+        },
+      )
+      .finally(() => {
+        inFlight.current = false;
+        if (live.current) setLoading(false);
+      });
+  };
+  return { prose, loading, failure, loadWhole };
+}
+
+function PathReadNotes({
+  answer,
+  prose,
+  loading,
+  failure,
+  loadWhole,
+}: {
+  answer: PathViewAnswer;
+  prose: FileRead;
+  loading: boolean;
+  failure: string | null;
+  loadWhole: () => void;
+}) {
+  return (
+    <>
+      {answer.kind === 'directory' && (answer.deeperEntries ?? 0) > 0 ? (
+        <p className={muted}>
+          Families of invariants in deeper folders are listed in those folders' views.
+        </p>
+      ) : null}
+      {prose.truncated ? (
+        <p className={muted}>
+          Onboarding prose is truncated; full size {prose.fullSize} bytes.{' '}
+          <button type="button" disabled={loading} onClick={loadWhole}>
+            Load whole text
+          </button>
+        </p>
+      ) : null}
+      {failure ? (
+        <p role="alert">
+          {failure}{' '}
+          <button type="button" onClick={() => window.location.reload()}>
+            Reload whole view
+          </button>
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 export function PathView({ answer }: { answer: PathViewAnswer }) {
-  const text = answer.prose.text ?? '';
+  const { prose, loading, failure, loadWhole } = usePathProse(answer);
+  const text = prose.text ?? '';
   const first = /^#\s+(.+)$/m.exec(text);
   const title = first?.[1] ?? `${pathLabel(answer)} ${answer.path === '.' ? '' : answer.path}`;
   const body = first
@@ -222,8 +316,15 @@ export function PathView({ answer }: { answer: PathViewAnswer }) {
       <Breadcrumbs path={answer.path} />
       <h1 className={css({ fontSize: '1.35rem', color: 'amber', margin: '0.5rem 0' })}>{title}</h1>
       <DocumentFacts answer={answer} />
+      <PathReadNotes
+        answer={answer}
+        prose={prose}
+        loading={loading}
+        failure={failure}
+        loadWhole={loadWhole}
+      />
       <ProseWithReferences
-        read={{ ...answer.prose, text: body }}
+        read={{ ...prose, text: body }}
         references={answer.references.items}
         referencesState={answer.references}
       />

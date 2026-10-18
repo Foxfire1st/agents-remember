@@ -18,9 +18,18 @@ const memberCards = captured('l86.member-cards.captured.json');
 const lane = captured('l86.lane.captured.json');
 const changes = captured('l86.changeset.captured.json');
 const diffs = captured<Record<string, FileDiff>>('l86.file-diffs.captured.json');
-export const selectedMemberId = captured<{ selected_member: { selector_id: string } }>(
-  'l86.capture-provenance.json',
-).selected_member.selector_id;
+// The refreshed provenance records the exact public request, not the retired
+// selected_member convenience field. Fail closed if that request is absent.
+const memberRequest = captured<{
+  responses: { file: string; route: string; params: { selectorKind?: string; selectorId?: string } }[];
+}>('l86.capture-provenance.json').responses.find(
+  (row) => row.file === 'l86.member.captured.json' && row.route === '/api/review/intent',
+);
+if (memberRequest?.params.selectorKind !== 'invariant' || !memberRequest.params.selectorId)
+  throw new Error('The member capture has no invariant-selector request provenance.');
+export const selectedMemberId = memberRequest.params.selectorId;
+if (selectedMemberId !== member.payload!.knowledge.revision_selection!.record_id)
+  throw new Error('The member capture and its request provenance select different invariants.');
 const fullFile = captured('l86.full-file.captured.json');
 const classification = captured('l86.classification.captured.json');
 export const target = {
@@ -63,7 +72,7 @@ function treeReply(url: URL): unknown {
     ? memberCards
     : cards;
 }
-function replyFor(url: URL, entries: ReviewEntryListResult): unknown {
+export function replyFor(url: URL, entries: ReviewEntryListResult = catalogue): unknown {
   switch (url.pathname) {
     case '/api/review/intent/entries':
       return entries;

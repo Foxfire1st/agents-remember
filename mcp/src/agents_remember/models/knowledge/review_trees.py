@@ -29,6 +29,8 @@ from agents_remember.models.knowledge.base import (
     REFERENCE_MAX_LENGTH,
     KnowledgeModel,
 )
+from agents_remember.models.knowledge.item_verdict import ItemVerdict
+from agents_remember.models.knowledge.review_code_changes import ReviewCodeChanges
 from agents_remember.models.knowledge.review_lane import (
     ReviewFileClassification,
     ReviewUnexplainedLane,
@@ -219,18 +221,20 @@ class ReviewWorklistView(KnowledgeModel):
     """The leaf's MIK-R08 worklist as the reviewer shows it (rule 3).
 
     ``items`` are the worklist's own items, verbatim. ``history_rows`` are the rows about their
-    subjects in the after memory tree, shown without a current or stale mark: the gate leaf
-    (MIK-R09) owns that rule. ``changes`` is the worklist's gate linkage, each text hunk marked
+    subjects in the after memory tree. ``item_states`` are the gate's own verdicts,
+    with its row or counted-change witness, only for a bound comparison. ``changes`` is the worklist's gate linkage, each text hunk marked
     ``linked`` or not (unexplained). ``source`` says where the worklist came from, and ``bound``
     whether its recorded pairing is exactly this comparison's four trees.
     """
 
+    code_changes: ReviewCodeChanges | None = Field(default=None, exclude=True)
     source: Literal["computed", "persisted", "absent"]
     bound: bool = False
     state: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     items: tuple[dict[str, Any], ...] = ()
     history_rows: tuple[dict[str, Any], ...] = ()
+    item_states: dict[str, ItemVerdict] = Field(default_factory=dict)
     changes: tuple[dict[str, Any], ...] = ()
     incomplete: tuple[dict[str, Any], ...] = ()
 
@@ -257,6 +261,7 @@ class ReviewTreesResult(KnowledgeModel):
     code_sides: tuple[ReviewCodeSide, ...] = ()
     currentness: dict[str, dict[str, Any]] | None = None
     worklist: ReviewWorklistView | None = None
+    code_changes: ReviewCodeChanges | None = None
     # Every realization and proof entry, on both code sides, for the focused cards (MIK-R31).
     entries: tuple[ReviewTreeEntry, ...] = ()
     # The unexplained-changes lane's destinations, or one changed path's classification (MIK-R32).

@@ -47,7 +47,7 @@ const SUBJECT = '3c513a59-5e5f-428a-b5e2-7301fcb280f7';
 // and one for the record selection's. They are different documents, which is why a control that
 // mixed them up would be a real defect rather than a cosmetic one.
 const KNOWLEDGE_CURSOR =
-  'eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLWRpZmYtY3Vyc29yL3YxIiwicG9zaXRpb24iOjE2fQ==';
+  'eyJjdX...E2fQ==';
 const RECORDS_CURSOR =
   'review_matrix:0f9c1c5b8a1d4e0f9a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081:3';
 
@@ -76,8 +76,6 @@ function payloadWith(page: ReviewPayload['page']): ReviewPayload {
       revision_groups: [],
       field_changes: [],
 
-      signals: [],
-      assessments: [],
       unresolved: [],
       selection_state: 'subject_selected',
     },
@@ -97,15 +95,7 @@ function payloadWith(page: ReviewPayload['page']): ReviewPayload {
       attributed_changed_paths: [],
       unresolved: [],
     },
-    evidence: {
-      evidence_state: 'none_recorded',
-      assessment_state: 'unassessed',
-      evidence_links: [],
-      observations: [],
-      assessments: [],
-      source_inspection_available: true,
-      unresolved: [],
-    },
+    judgment: { state: "none", detail: "This leaf recorded no judgment about this record", rows: [], proofs: [] },
     staleness: { state: 'current', statement: 'the displayed comparison is current', moved: [] },
     submission: {
       state: 'unavailable',

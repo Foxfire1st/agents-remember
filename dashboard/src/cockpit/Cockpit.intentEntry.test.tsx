@@ -21,6 +21,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   dashboardStore.getState().reset();
   window.localStorage.clear();
+  window.history.replaceState(null, '', '/');
 });
 
 const LEAF = 'direct-leaf';
@@ -207,8 +208,10 @@ it('(b) re-validates when the developer leaves the reviewer back to the entry', 
   await waitFor(() => expect(routes.catalogueReads()).toBe(1));
   // Opening the reviewer is not a re-validation of the (now hidden) entry.
   expect(routes.summaryReads()).toBe(1);
+  expect(window.location.hash).toBe('#review?repo=repo-a&master=ops&leaf=direct-leaf');
 
   fireEvent.click(view.getByTestId('review-back'));
+  expect(window.location.hash).toBe('');
   await waitFor(() =>
     expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0'),
   );

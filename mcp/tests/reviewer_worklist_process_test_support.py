@@ -26,7 +26,7 @@ import json, os, sys, time
 r = json.load(sys.stdin)
 answer = {'operation': r['operation'], 'request': r['request'], 'source': r['source'],
           'module': r['source']['packageRoot'] + '/application/reviewer_worklist_child.py',
-          'pid': os.getpid(), 'document': None, 'reads': {}, 'computation': [time.monotonic(), time.monotonic()], 'error': None}
+          'pid': os.getpid(), 'document': None, 'review': None, 'reads': {}, 'computation': [time.monotonic(), time.monotonic()], 'error': None}
 """
 
 LIFETIME_CHILD = """

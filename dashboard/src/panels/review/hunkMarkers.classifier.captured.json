@@ -15,20 +15,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "0000000000000000000000000000000000000000"
     },
     "number": 1,
@@ -65,18 +65,21 @@
           "family": "FAM-F00001",
           "family_key": "338785bb-9701-50e9-a383-ff33746d5bc0",
           "family_revision": 1,
+          "reason": "The after memory tree could not be read (Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory); whether a family lists INV-AAAAAA on that side is not established.",
           "state": "membership_unknown"
          },
          {
           "family": "FAM-F00002",
           "family_key": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
           "family_revision": 1,
+          "reason": "The after memory tree could not be read (Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory); whether a family lists INV-AAAAAA on that side is not established.",
           "state": "membership_unknown"
          },
          {
           "family": "FAM-F00003",
           "family_key": "59af4eac-eebc-53f9-b736-7043d5bd122d",
           "family_revision": 1,
+          "reason": "The after memory tree could not be read (Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory); whether a family lists INV-AAAAAA on that side is not established.",
           "state": "membership_unknown"
          }
         ],
@@ -105,7 +108,7 @@
       "links": [],
       "unknown": [
        {
-        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
         "entries": [],
         "reason": "knowledge_unavailable",
         "side": "after"
@@ -141,7 +144,7 @@
      },
      {
       "blob": "c728aae5f5ac3e385709013a8d97a0850b98d950",
-      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
       "entries": [],
       "knowledge": "unavailable",
       "path": "pkg/a.py",
@@ -159,7 +162,7 @@
      "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
     },
     {
-     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "problems": [],
      "side": "after",
      "state": "unavailable-history",
@@ -192,20 +195,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "0000000000000000000000000000000000000000"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
     },
     "number": 1,
@@ -294,7 +297,7 @@
     "sides": [
      {
       "blob": "4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5",
-      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
       "entries": [],
       "knowledge": "unavailable",
       "path": "pkg/a.py",
@@ -334,7 +337,7 @@
    },
    "knowledge_sides": [
     {
-     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "problems": [],
      "side": "before",
      "state": "unavailable-history",
@@ -372,20 +375,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "0000000000000000000000000000000000000000"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
     },
     "number": 1,
@@ -417,7 +420,7 @@
       "links": [],
       "unknown": [
        {
-        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
         "entries": [],
         "reason": "knowledge_unavailable",
         "side": "before"
@@ -446,7 +449,7 @@
       "links": [],
       "unknown": [
        {
-        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
         "entries": [],
         "reason": "knowledge_unavailable",
         "side": "before"
@@ -475,7 +478,7 @@
       "links": [],
       "unknown": [
        {
-        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
         "entries": [],
         "reason": "knowledge_unavailable",
         "side": "before"
@@ -485,11 +488,11 @@
     ],
     "mode_change": false,
     "path": "pkg/lines.txt",
-    "reason": "the before knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory; on the after side 2 entries recorded here supply no range: RLZ-A00010 (recorded_blob_mismatch), RLZ-B00001 (recorded_blob_mismatch)",
+    "reason": "the before knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory; on the after side 2 entries recorded here supply no range: RLZ-A00010 (recorded_blob_mismatch), RLZ-B00001 (recorded_blob_mismatch)",
     "sides": [
      {
       "blob": "b414108e81e5091fe0974a1858b4d0d22b107f70",
-      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
       "entries": [],
       "knowledge": "unavailable",
       "path": "pkg/lines.txt",
@@ -522,7 +525,7 @@
    },
    "knowledge_sides": [
     {
-     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "problems": [],
      "side": "before",
      "state": "unavailable-history",
@@ -562,20 +565,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "0000000000000000000000000000000000000000"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "0000000000000000000000000000000000000000"
     },
     "number": 1,
@@ -607,13 +610,13 @@
       "links": [],
       "unknown": [
        {
-        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
         "entries": [],
         "reason": "knowledge_unavailable",
         "side": "before"
        },
        {
-        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
         "entries": [],
         "reason": "knowledge_unavailable",
         "side": "after"
@@ -633,7 +636,7 @@
       "links": [],
       "unknown": [
        {
-        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+        "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
         "entries": [],
         "reason": "knowledge_unavailable",
         "side": "after"
@@ -643,11 +646,11 @@
     ],
     "mode_change": false,
     "path": "pkg/a.py",
-    "reason": "the before knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory; the after knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+    "reason": "the before knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory; the after knowledge is unavailable: Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
     "sides": [
      {
       "blob": "4a44ab00acb5fa4535ceb4b23083c02d3aba5ba5",
-      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
       "entries": [],
       "knowledge": "unavailable",
       "path": "pkg/a.py",
@@ -655,7 +658,7 @@
      },
      {
       "blob": "c728aae5f5ac3e385709013a8d97a0850b98d950",
-      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+      "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
       "entries": [],
       "knowledge": "unavailable",
       "path": "pkg/a.py",
@@ -666,14 +669,14 @@
    },
    "knowledge_sides": [
     {
-     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "problems": [],
      "side": "before",
      "state": "unavailable-history",
      "tree": "0000000000000000000000000000000000000000"
     },
     {
-     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /tmp/tmp3b8tqae9/memory",
+     "detail": "Git can no longer produce the tree 0000000000000000000000000000000000000000 in /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "problems": [],
      "side": "after",
      "state": "unavailable-history",
@@ -706,20 +709,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "3d9c200493d4cc4c326cf4fbe587ba61a182a2d5"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
     },
     "number": 1,
@@ -931,20 +934,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "3d9c200493d4cc4c326cf4fbe587ba61a182a2d5"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "1ece4e9293ce7838dfe6e20481aa20377f3122a5"
     },
     "number": 1,
@@ -1154,20 +1157,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "59331fa585bfd80db7509716e1f346b05a9aca82"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
     },
     "number": 1,
@@ -1201,6 +1204,7 @@
         "end_line": 3,
         "families": [
          {
+          "reason": "Not every family record of the before memory tree could be read; whether a family lists INV-BBBBBB on that side is not established.",
           "state": "membership_unknown"
          }
         ],
@@ -1336,20 +1340,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
     },
     "number": 1,
@@ -1528,20 +1532,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
     },
     "number": 1,
@@ -1703,20 +1707,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
     },
     "number": 1,
@@ -1808,20 +1812,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
     },
     "number": 1,
@@ -1948,20 +1952,20 @@
    ],
    "comparison": {
     "code_base": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "08ff0d2d89d770ea9eab5ee0bd98955d05e8cf72"
     },
     "code_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/code",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/code",
      "tree": "c8af799c585a685b1abd5eb795047f422600c693"
     },
     "leaf_id": "260101-TRV-L1",
     "memory_base": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "50846ab6b0d1d7c758736f9e10dcb9c404c535e1"
     },
     "memory_candidate": {
-     "repository": "/tmp/tmp3b8tqae9/memory",
+     "repository": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/classifier-01/tmp/tmp4lj04mvw/memory",
      "tree": "5168d9bb6564eb2480538a7e979b1f1758435d7a"
     },
     "number": 1,

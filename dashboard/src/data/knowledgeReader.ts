@@ -92,6 +92,8 @@ export interface ReferenceItem {
 }
 
 export interface FileRead {
+  truncated?: boolean;
+  fullSize?: number;
   path: string;
   state: 'present' | 'absent' | 'unavailable';
   text?: string;
@@ -192,6 +194,7 @@ export interface PathViewAnswer extends ReaderAnswer {
   // counts, and the size of its subtree (listed in pages by the `subtree` view).
   children?: { name: string; path: string; entries: number }[];
   subtree?: { entries: number; view: 'subtree' };
+  deeperEntries?: number;
 }
 
 export interface SubtreeRow {
@@ -258,6 +261,7 @@ export interface TimelineEvent {
   meaning?: { field: string; before: unknown; after: unknown }[];
   owner?: string;
   ownerKind?: string;
+  attempt?: number | null;
   closed?: boolean;
   row?: string;
   disposition?: string;
@@ -270,6 +274,11 @@ export interface TimelineEvent {
 }
 
 export interface Timeline {
+  state?: string;
+  code?: string;
+  detail?: string;
+  continuation?: string | null;
+  page?: { start: number; rowsOnPage: number; total: number };
   sources: Record<string, { state: string; events?: number; detail?: string }>;
   events: TimelineEvent[];
 }

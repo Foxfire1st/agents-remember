@@ -60,6 +60,8 @@ const badgeRow = css({
   marginTop: '0.25rem',
 });
 const muted = css({ color: 'muted', fontSize: '0.75rem', margin: '0.15rem 0' });
+const CURATION_EXPLANATION =
+  'No entry covers these lines yet; curation attaches them to an invariant or records that none applies.';
 // Why an unknown is unknown, in view beside its badge (not only in a tooltip).
 const why = css({
   display: 'block',
@@ -134,7 +136,7 @@ function UnknownReason({
       data-review-content="reason"
       title={reasons.join('\n')}
     >
-      {label}: {reasons.join('; ')}
+      {label}: {reasons.join('; ')}{' '}{CURATION_EXPLANATION}
     </span>
   );
 }
@@ -240,7 +242,7 @@ function MembershipReason({ state }: { state: MemberChangeState }) {
 }
 
 // One member occurrence's primary badge, its secondary marks, and why any unknown is unknown --
-// nothing without change facts (a dataset review). A returned member the facts do not describe reads
+// nothing without change facts. A returned member the facts do not describe reads
 // `unknown`.
 export function MemberChangeBadge({ state }: { state: MemberChangeState | undefined }) {
   if (!state) return null;
@@ -377,7 +379,7 @@ const OUTLINE_MEANING: Record<string, string> = {
   'code changed': 'A recorded implementation entry or a hunk within its range changed.',
   joined: 'This family lists the invariant on the after side only.',
   left: 'This family lists the invariant on the before side only.',
-  unknown: 'A change fact could not be read or established.',
+  unknown: `A change fact could not be read or established. ${CURATION_EXPLANATION}`,
   unchanged: 'The record is unchanged; this does not assert that its code is unchanged.',
 };
 export function OutlineChangeBadge({ badge }: { badge?: OutlineBadge }) {

@@ -5,8 +5,8 @@ A reader selection names one repository and one memory tree:
 * ``published`` (the default) -- the published memory-tree selection of MIK-R23 rule 6: the
   repository's own memory root, read in its current captured state through
   :func:`~agents_remember.application.published_intent.select_knowledge_dataset`;
-* a memory **commit** (its full or abbreviated hexadecimal name) -- that commit's tree, read through
-  Git objects with nothing checked out;
+* a memory **commit** (its full or abbreviated hexadecimal name) or **branch** -- resolved to the
+  commit's tree, read through Git objects with nothing checked out;
 * ``leaf:<scope>`` -- a live leaf's candidate tree: the memory worktree of the active enclosure
   whose worktree group is ``<scope>``, in its current captured state.
 
@@ -28,7 +28,6 @@ a repository.
 from __future__ import annotations
 
 import logging
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,9 +79,12 @@ __all__ = [
 PUBLISHED: Final = "published"
 LEAF_PREFIX: Final = "leaf:"
 SelectionKind = Literal["published", "commit", "leaf"]
-_HEX: Final = re.compile(r"^[0-9a-fA-F]{4,64}$")
 _RECENT_COMMITS: Final = 40
 CodeSource = Literal["paired-code-commit", "checkout-head", "none"]
+_ACCEPTED_NAMES: Final = (
+    "accepted forms are a full or abbreviated memory commit name, a memory branch name, "
+    "'published', or leaf:<scope>"
+)
 
 
 class ReaderReadError(RuntimeError):
@@ -176,17 +178,17 @@ def open_selection(
     """Open the memory tree ``commit`` names in ``repository_id`` (``published`` when ``None``)."""
 
     spelled = commit or PUBLISHED
+    # NUL cannot be serialized as a subprocess argument; other names remain Git's decision.
+    if "\x00" in spelled:
+        return ReaderUnavailable(
+            "invalid-request", f"memory names cannot contain NUL; {_ACCEPTED_NAMES}"
+        )
     try:
         if spelled == PUBLISHED:
             scope = resolve_scope(config, repository_id, "mainline")
             return _directory_selection(config, repository_id, spelled, scope)
         if spelled.startswith(LEAF_PREFIX):
             return _leaf_selection(config, repository_id, spelled)
-        if not _HEX.match(spelled):
-            return ReaderUnavailable(
-                "invalid-request",
-                "a selection is 'published', a memory commit's hexadecimal name, or leaf:<scope>",
-            )
         scope = resolve_scope(config, repository_id, "mainline")
         return _commit_selection(config, repository_id, spelled, scope)
     except (*READ_FAILURES, MemoryTreeError, IndexMismatchError) as error:
@@ -257,7 +259,8 @@ def _commit_selection(
     commit = _rev_parse(repository, f"{spelled}^{{commit}}")
     if commit is None:
         return ReaderUnavailable(
-            "unavailable", f"{spelled} names no commit in the memory repository {repository}"
+            "invalid-request",
+            f"{spelled!r} names no commit in the memory repository; {_ACCEPTED_NAMES}",
         )
     if not _holds(repository, commit, LAYOUT_MARKER_PATH):
         return ReaderUnavailable(

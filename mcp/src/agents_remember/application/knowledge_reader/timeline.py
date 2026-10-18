@@ -27,27 +27,47 @@ with a source that could not be read is never remembered: the next read asks aga
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Final
 
+from agents_remember.application.knowledge_paging import PageBinding
+from agents_remember.application.knowledge_paging.bindings import (
+    PagingRefusal,
+    mint_continuation,
+    position_refusal,
+    read_continuation,
+    request_binding_refusal,
+)
 from agents_remember.application.knowledge_reader.files import read_memory_file
 from agents_remember.application.knowledge_reader.selection import (
     READ_FAILURES,
     ReaderReadError,
     ReaderSelection,
 )
+from agents_remember.application.knowledge_reader.timeline_manifest import (
+    TIMELINE_CACHE_BYTES,
+    TimelineKey,
+    TimelineManifest,
+    freeze_timeline,
+    timeline_weight,
+)
+from agents_remember.application.knowledge_reader.timeline_memo import TimelineMemo
+from agents_remember.kernel.canonical_json import sha256_digest
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
     read_git_blobs_bytes,
     run_git,
 )
-from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import Entry, HistoryRow, Record
-from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH, ONBOARDING_ROOT
+from agents_remember.models.knowledge_files.documents import (
+    LAYOUT_MARKER_PATH,
+    ONBOARDING_ROOT,
+    owner_history_attempt,
+)
 
 __all__ = ["TIMELINES", "meaning_diff", "record_timeline"]
 
@@ -57,9 +77,8 @@ _FIELD_SEPARATOR: Final = "\x1f"
 _FORMAT: Final = f"--format={_RECORD_SEPARATOR}%H{_FIELD_SEPARATOR}%cI{_FIELD_SEPARATOR}%s"
 _OPTIONS: Final = GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS)
 _UNCOMMITTED: Final = "uncommitted"
-TimelineKey = tuple[str, str, str, str]
-# Bounded in entries; one timeline is a few kilobytes to a few tens of kilobytes of events.
-TIMELINES: Final[BoundedMemo[TimelineKey, dict[str, Any]]] = BoundedMemo(256)
+# Complete immutable manifests, reclaimed LRU by resident-byte weight, never event truncation.
+TIMELINES: Final = TimelineMemo(TIMELINE_CACHE_BYTES, weigh=timeline_weight)
 
 
 @dataclass(frozen=True)
@@ -84,26 +103,115 @@ def record_timeline(
     selection: ReaderSelection,
     record: Record,
     entries: Sequence[Entry],
-    history: Sequence[HistoryRow],
+    history: Sequence[HistoryRow] | Callable[[], Sequence[HistoryRow]],
+    *,
+    continuation: str | None = None,
 ) -> dict[str, Any]:
-    """The timeline of ``record``: its file's log, the rows about it, and its entries' log.
+    """The newest fifty events, resumed with the shared tree-bound continuation format."""
 
-    The answer is shared with later reads of the same tree and record; callers do not mutate it.
-    """
+    timeline = _full_timeline(selection, record, entries, history)
+    binding = PageBinding(
+        memory_tree_id=selection.index.state.key,
+        selection_policy="knowledge-reader-timeline",
+        policy_version="1",
+        manifest_digest=timeline.manifest_digest,
+    )
+    start = _timeline_start(continuation, record.id, binding, len(timeline.events))
+    if isinstance(start, PagingRefusal):
+        return {
+            "state": "refused",
+            "code": start.code,
+            "detail": start.detail,
+            "sources": {},
+            "events": [],
+            "continuation": None,
+        }
+    end = min(start + 50, len(timeline.events))
+    token = (
+        None
+        if end == len(timeline.events)
+        else mint_continuation(
+            binding,
+            response="view",
+            view="reader-timeline",
+            seeds=({"id": record.id},),
+            position=end,
+        )
+    )
+    try:
+        events = [json.loads(event) for event in timeline.events[start:end]]
+    except OSError:
+        TIMELINES.discard(_timeline_key(selection, record), timeline)
+        raise
+    return {
+        "state": "view",
+        "sources": json.loads(timeline.sources),
+        "events": events,
+        "continuation": token,
+        "page": {"start": start, "rowsOnPage": end - start, "total": len(timeline.events)},
+    }
 
-    key: TimelineKey = (
+
+def _timeline_start(
+    token: str | None,
+    record_id: str,
+    binding: PageBinding,
+    total: int,
+) -> int | PagingRefusal:
+    if token is None:
+        return 0
+    walk = read_continuation(token, view="reader-timeline")
+    if isinstance(walk, PagingRefusal):
+        return walk
+    refused = request_binding_refusal(
+        walk,
+        memory_tree_id=binding.memory_tree_id,
+        selection_policy=binding.selection_policy,
+        policy_version=binding.policy_version,
+    )
+    if refused is None and walk.seed != {"id": record_id}:
+        refused = PagingRefusal(
+            "continuation_binding_mismatch",
+            "This continuation names another record; load the first page without a continuation.",
+        )
+    refused = refused or position_refusal(
+        walk, manifest_digest=binding.manifest_digest, total=total
+    )
+    return refused if refused is not None else walk.position
+
+
+def _timeline_key(selection: ReaderSelection, record: Record) -> TimelineKey:
+    return (
         str(selection.memory_repository),
         str(selection.revision),
         selection.index.state.key,
         record.id,
     )
+
+
+def _full_timeline(
+    selection: ReaderSelection,
+    record: Record,
+    entries: Sequence[Entry],
+    history: Sequence[HistoryRow] | Callable[[], Sequence[HistoryRow]],
+) -> TimelineManifest:
+    """The timeline of ``record``: its file's log, the rows about it, and its entries' log.
+
+    The answer is shared with later reads of the same tree and record; callers do not mutate it.
+    """
+
+    key = _timeline_key(selection, record)
     remembered = TIMELINES.get(key)
     if remembered is not None:
         return remembered[0]
-    timeline = _timeline(selection, record, entries, history)
+    rows = history() if callable(history) else history
+    timeline = _timeline(selection, record, entries, rows)
+    manifest = freeze_timeline(
+        key, timeline, sha256_digest({"id": record.id, "events": timeline["events"]})
+    )
     if all(source["state"] == "read" for source in timeline["sources"].values()):
-        TIMELINES.put(key, timeline)
-    return timeline
+        TIMELINES.put(key, manifest)
+    return manifest
 
 
 def _timeline(
@@ -272,6 +380,7 @@ def _history_events(
             "subject": _UNCOMMITTED if dated[row.path][0] is None else None,
             "owner": row.owner,
             "ownerKind": row.owner_kind,
+            "attempt": owner_history_attempt(row.path, row.owner),
             "closed": row.closed,
             "row": row.id,
             "disposition": row.disposition,

@@ -1,7 +1,8 @@
 // MIK-R34 (the rulings round, Q3): where an unknown membership's `Attribution unknown` state is shown.
 // The payload is the REAL review of INV-Z66EMHMH on comparison 3 of the MIK-L34 scratch leaf, and the
 // target is the real before-side occurrence of its FAM-4V4GSQCS membership (markerUnknown.* provenance);
-// the one derived body drops the review's family entries, as a review that composed no family has none.
+// its roster is unreadable, so a named entry alone is not a member row. The explicit synthetic
+// component controls below exercise alternate renderer inputs, not producer/classification evidence.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { cleanup, render } from '@testing-library/react';
@@ -52,7 +53,7 @@ function inScope(node: React.ReactNode) {
   return render(<IntentMarkerScope.Provider value={scope}>{node}</IntentMarkerScope.Provider>);
 }
 
-it("marks the member's row when the named family is in the tree, and only that row", () => {
+it('marks only the exact row props and keeps the invariant fallback when its roster is unreadable', () => {
   expect([target.state, target.family]).toEqual(['membership_unknown', 'FAM-4V4GSQCS']);
   const row = inScope(
     <>
@@ -61,24 +62,34 @@ it("marks the member's row when the named family is in the tree, and only that r
     </>,
   );
   expect(row.getAllByTestId('review-member-target-state')).toHaveLength(1);
-  // The invariant view keeps the review's own label: the row carries the state.
+  // Synthetic row props above do not make the actual native unreadable roster acquire that row.
   cleanup();
   const label = inScope(
     <MemberFamilyLabel subject={subject} payload={payload} entry={undefined} />,
   );
-  expect(label.queryByTestId('review-center-target-state')).toBeNull();
+  expect(label.getByTestId('review-center-target-state').textContent).toContain(target.reason);
+});
+
+it('suppresses a duplicate center state only when the exact member is present', () => {
+  // Synthetic component pairing: the healthy native comparison-2 roster supplies the row topology.
+  // This tests hasTargetMember's positive branch, not a same-comparison unknown-membership producer.
+  const withRoster = captured<ReviewResult>('markerReturn.invariant.captured.json').payload!;
+  const view = inScope(<MemberFamilyLabel subject={subject} payload={withRoster} entry={undefined} />);
+  expect(view.queryByTestId('review-center-target-state')).toBeNull();
 });
 
 it('shows the state on the invariant view when the named family is not in the review', () => {
   const composedNone: ReviewPayload = {
     ...payload,
-    family_context: { ...payload.family_context!, entries: [] },
+    // Explicit renderer-only composition with a real native unavailable/empty context.
+    family_context: captured<ReviewResult>('markerUnknown.noFamily.captured.json')
+      .payload!.family_context,
   };
   const view = inScope(
     <MemberFamilyLabel subject={subject} payload={composedNone} entry={undefined} />,
   );
   expect(view.getByTestId('review-center-target-state').textContent).toContain(
-    'Attribution unknownINV-Z66EMHMH in FAM-4V4GSQCS: not every family record of the after knowledge',
+    target.reason,
   );
   // Another subject on screen: the marker's target is not this view's selection.
   cleanup();

@@ -26,9 +26,7 @@ from agents_remember.application.knowledge_review import (
     compose_review,
     list_knowledge_review_entries,
     resolve_review_candidate,
-    review_records_for,
 )
-from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.serving.review import register_review_routes, review_request_from_query
 from agents_remember_test_support.testing.review_git_trees import (
@@ -388,31 +386,3 @@ def test_the_previous_binding_identity_reaches_the_port_and_is_compared_against_
         )
         assert malformed.status_code == 400
         assert malformed.json()["offendingInput"] == "not-a-digest"
-
-
-def test_the_published_assessment_loader_returns_nothing_for_an_unresolvable_candidate() -> None:
-    """A candidate with no readable authority yields an empty collection, not a fabricated record.
-
-    The same unresolvable context is asked for the surface's *entry* list (260915-KS-L45 S2): the
-    entry read resolves through the identical operation the review does, so it refuses with the same
-    code rather than answering with an empty list. An empty list would read as "this candidate
-    records nothing to review", which is a different fact from "no candidate resolves here", and the
-    task view renders no entry for either -- but only one of the two is what happened.
-    """
-
-    config = review_config()
-    request = ReviewSurfaceRequest(
-        repository_id="agents-remember",
-        master="260915_knowledge-substrate",
-        leaf_id=REPOSITORY_LEAF,
-        selector=InvariantIdentitySeed(invariant_id="11111111-1111-1111-1111-111111111111"),
-    )
-    assert review_records_for(config, request).assessments == ()
-
-    entries = list_knowledge_review_entries(
-        config, request.repository_id, request.master, request.leaf_id
-    )
-    assert entries.state == "refused"
-    assert entries.refusal is not None
-    assert entries.refusal.code == "candidate_unresolved"
-    assert entries.entries == ()

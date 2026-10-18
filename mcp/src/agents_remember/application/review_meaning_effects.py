@@ -52,6 +52,7 @@ from typing import NamedTuple, cast
 
 import apsw
 
+from agents_remember.application.review_history import owner_rows, raw_subject
 from agents_remember.memory.knowledge_index import (
     HistoryRow,
     IndexMismatchError,
@@ -159,7 +160,7 @@ def read_subjects_meaning(
     """
 
     subjects = tuple(subjects)
-    rows, problem = _owner_rows(index, owner)
+    rows, problem = owner_rows(index, owner)
     if problem is not None:
         return ReviewMeaningEffects(
             records=tuple(_unavailable(record, kind, problem) for record, kind in subjects),
@@ -200,7 +201,7 @@ def outline_meanings(
     """
 
     records = tuple(records)
-    rows, problem = _owner_rows(index, owner)
+    rows, problem = owner_rows(index, owner)
     if problem is not None:
         return {
             record: ReviewOutlineMeaning(state="unavailable", detail=problem)
@@ -217,57 +218,6 @@ def outline_meanings(
     }
 
 
-def _raw_subject(
-    index: KnowledgeIndex, addressed: str, *, identity_index: KnowledgeIndex | None = None
-) -> str | None:
-    """The raw record id ``addressed`` names, or ``None`` when it names no record.
-
-    Projected UUIDs resolve through the after index's own reverse map; when the after
-    map misses -- a retired record, or one the after tree no longer holds -- the open
-    comparison baseline resolves the UUID it still maps, and history is still read
-    from the after tree. A raw record id stands as itself, so callers that already
-    hold raw ids -- the outline -- read unchanged. Anything else names no recorded
-    invariant or family.
-    """
-
-    found = index.text_id(addressed)
-    if found is not None:
-        return found
-    if identity_index is not None:
-        found = identity_index.text_id(addressed)
-        if found is not None:
-            try:
-                row_kind_for_subject(found)
-            except ValueError:
-                return None
-            return found
-    try:
-        row_kind_for_subject(addressed)
-    except ValueError:
-        return None
-    return addressed
-
-
-def _owner_rows(
-    index: KnowledgeIndex, owner: str
-) -> tuple[tuple[HistoryRow, ...] | None, str | None]:
-    """The owner's history rows across every attempt file, or the unavailable reason.
-
-    Rows of another owner are left out before anything else: they are never steps of
-    this review, and they cannot make it unavailable either. Only files the path names
-    as this owner's count; anything else filed under the owner is not one of its
-    attempt files.
-    """
-
-    answer = index.history_rows_of(owner)
-    if not answer.index.complete:
-        return None, _incomplete_detail(answer.index.problems)
-    return (
-        tuple(row for row in answer.value if owner_history_attempt(row.path, owner) is not None),
-        None,
-    )
-
-
 def _answer(
     index: KnowledgeIndex,
     record: str,
@@ -277,7 +227,7 @@ def _answer(
     fallback: _IdentityFallback | None = None,
 ) -> RecordMeaningEffects:
     identity = fallback.index if fallback is not None else None
-    raw = _raw_subject(index, record, identity_index=identity)
+    raw = raw_subject(index, record, identity_index=identity)
     if raw is None:
         if fallback is not None and fallback.problem is not None:
             return _unavailable(record, kind, fallback.problem)
@@ -401,15 +351,6 @@ def _unavailable(record: str, kind: MeaningRecordKind, detail: str) -> RecordMea
         kind=kind,
         state="unavailable",
         detail=detail[:20000],
-    )
-
-
-def _incomplete_detail(problems: tuple[tuple[str, str], ...]) -> str:
-    named = ", ".join(path for path, _ in problems[:3])
-    more = f", and {len(problems) - 3} more" if len(problems) > 3 else ""
-    return (
-        f"the after memory index is incomplete ({len(problems)} file(s) failed: "
-        f"{named}{more}); history it did not read cannot be reported as absent"
     )
 
 

@@ -969,30 +969,6 @@ def test_the_census_view_shows_measures_and_each_routes_status_history(world: Wo
 # --------------------------------------------------------------------------------------------------
 
 
-def test_any_commit_is_selectable_by_its_hexadecimal_name_only(
-    world: World, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    options = world.read("selections")
-    assert options["default"] == "published" and options["published"]["converted"] is True
-    marks = {row["commit"]: row["converted"] for row in options["commits"]}
-    assert marks == {world.second: True, world.first: True, world.unconverted: False}
-    old = world.read("record", commit=world.first[:10], record_id=REVIEW_INVARIANT)
-    assert (old["selection"]["commit"], old["record"]["revision"]) == (world.first, 1)
-    assert old["selection"]["codeSource"] == "paired-code-commit"
-    unconverted = world.read("path", commit=world.unconverted, path=REVIEW_PATH)
-    assert unconverted["state"] == "not-converted"
-    # A branch name is not a commit spelling, even one that resolves (review F6).
-    assert world.read("path", commit="main", path=REVIEW_PATH)["state"] == "invalid-request"
-    # A commit list that cannot be read is named, never an empty list (F11).
-    from agents_remember.application.knowledge_reader import selection  # noqa: PLC0415
-
-    def failing(_repository: Path) -> list[dict[str, Any]]:
-        raise selection.ReaderReadError("git log failed")
-
-    monkeypatch.setattr(selection, "_recent_commits", failing)
-    assert world.read("selections")["commitsState"]["state"] == "unavailable"
-
-
 def test_the_published_tree_reads_uncommitted_state_writes_nothing_and_offers_a_pin(
     world: World,
 ) -> None:

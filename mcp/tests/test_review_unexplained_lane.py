@@ -562,6 +562,10 @@ def test_a_partial_index_makes_only_its_unparsed_files_unknown(lane: Lane) -> No
     link = _file(trees, "pkg/lines.txt").hunks[0].links[0]
     assert link.side == "before"
     assert [(one.family, one.state) for one in link.families] == [(None, "membership_unknown")]
+    assert getattr(link.families[0], "reason", None) == (
+        "Not every family record of the before memory tree could be read; "
+        "whether a family lists INV-BBBBBB on that side is not established."
+    )
     # The gate computes nothing over a side it cannot read whole, so the mode-only change's gate
     # linkage is unknown -- listed under Unknown attribution, never as "gate unexplained".
     _gate_unknown_on_a_partial_side(trees)

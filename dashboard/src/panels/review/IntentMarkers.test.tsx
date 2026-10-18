@@ -313,13 +313,7 @@ describe('a file without per-hunk marks', () => {
     expect(view.queryAllByTestId('review-hunk-mark')).toHaveLength(0);
   });
 
-  it('marks nothing outside a tree comparison, for an unchanged file, or for other content', async () => {
-    // A dataset review provides no scope: the landed view, and no classification is asked for.
-    const dataset = open('curated', 'pkg/lines.txt', { scope: null, markers: {} }).view;
-    await dataset.findByTestId('diff-pane');
-    expect(dataset.queryAllByTestId('review-hunk-mark')).toHaveLength(0);
-    expect(dataset.queryByTestId('review-marks-state')).toBeNull();
-    cleanup();
+  it('marks nothing for an unchanged file or for other content', async () => {
     // An unchanged realization-linked file has no hunks: nothing is classified or marked.
     const classify = vi.fn(() => null);
     const unchanged = open('curated', 'pkg/lines.txt', {
@@ -594,6 +588,77 @@ describe("a card's excerpt", () => {
     leaf_id: task.leaf,
     knowledge_sides: [],
   };
+
+  it.each(
+    (
+      [
+        {
+          excerpt: 'unchanged',
+          change: 'unchanged',
+          before: lines12('before', file.sides[0].blob),
+        },
+        { excerpt: 'diff', change: 'changed', before: lines12('before', file.sides[0].blob) },
+        { excerpt: 'separate', change: 'undetermined', before: unreadable },
+      ] as const
+    ).flatMap((variant) =>
+      (['ready', 'unavailable'] as const).map((outcome) => ({ ...variant, outcome })),
+    ),
+  )(
+    'shows marks loading in the $excerpt excerpt until $outcome (R57 rule 5)',
+    async ({ excerpt: variant, change, before, outcome }) => {
+      type ClassificationRead = Exclude<
+        Awaited<ReturnType<IntentMarkerScopeValue['classify']>>,
+        null
+      >;
+      let finish!: (read: ClassificationRead) => void;
+      const pending = new Promise<ClassificationRead>((resolve) => {
+        finish = resolve;
+      });
+      const classify = vi.fn(() => pending);
+      const view = card(file.sides[1].blob, {
+        before,
+        change,
+        scope: { classify },
+      });
+      const excerpt = await view.findByTestId('review-card-excerpt');
+      expect(excerpt.dataset.excerpt).toBe(variant);
+      expect(within(excerpt).getByTestId('review-marks-state').dataset.marksState).toBe('loading');
+      expect(within(excerpt).getByTestId('review-marks-state').textContent).toBe(
+        'intent marks loading…',
+      );
+      expect(within(excerpt).queryAllByTestId('review-hunk-mark')).toHaveLength(0);
+      expect(classify).toHaveBeenCalledExactlyOnceWith(file.path);
+
+      await act(async () => {
+        finish(
+          outcome === 'ready'
+            ? { phase: 'ready', value: file }
+            : {
+                phase: 'unavailable',
+                problem: {
+                  token: 'unreadable',
+                  code: 'marks-read-failed',
+                  detail: 'The classification read failed.',
+                },
+              },
+        );
+      });
+      if (outcome === 'ready') {
+        await waitFor(() =>
+          expect(within(excerpt).queryAllByTestId('review-hunk-mark').length).toBeGreaterThan(0),
+        );
+        expect(within(excerpt).queryByTestId('review-marks-state')).toBeNull();
+      } else {
+        const note = within(excerpt).getByTestId('review-marks-state');
+        expect(note.dataset.marksState).toBe('unavailable');
+        expect(note.textContent).toBe(
+          'intent marks unavailable · marks-read-failed: The classification read failed.',
+        );
+        expect(within(excerpt).queryAllByTestId('review-hunk-mark')).toHaveLength(0);
+      }
+      expect(classify).toHaveBeenCalledExactlyOnceWith(file.path);
+    },
+  );
 
   it("keeps the drawn side's marks when the other memory side cannot be read (review R1 F1)", async () => {
     const view = card(file.sides[1].blob);

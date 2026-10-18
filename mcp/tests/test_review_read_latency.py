@@ -37,7 +37,7 @@ from agents_remember.application import (
     review_tree_comparison,
     review_tree_knowledge,
 )
-from agents_remember.application.knowledge_review import read_knowledge_review, review_records_for
+from agents_remember.application.knowledge_review import read_knowledge_review
 from agents_remember.application.knowledge_worklist import leaf as worklist_leaf
 from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
 from agents_remember.application.review_leaf_view_memo import (
@@ -53,7 +53,7 @@ from agents_remember.application.review_leaf_view_memo import (
 from agents_remember.application.review_tree_comparison import ReviewTrees
 from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.kernel import git_command, reviewer_worklist_process
-from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity
+from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity, recorded_reads
 from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge.review import KnowledgeReviewResult, ReviewSurfaceRequest
@@ -83,6 +83,7 @@ from agents_remember_test_support.testing.review_git_trees import (
     invariant,
 )
 from knowledge_index_test_support import rewrite_in_the_second_of_the_index_write
+from reviewer_leaf_view_support import observe_child
 from test_review_git_trees import world  # noqa: F401 - ``world`` is the fixture
 
 SUBJECT_READ_CHILDREN = 80  # the packet's bound for one subject read (rule 7)
@@ -238,10 +239,8 @@ def test_a_subject_read_resolves_once_and_captures_each_worktree_once_and_for_th
     assert review.state == "review" and _body(review) == _body(warm)
     # The answer is the one the two-resolution port gave: the composition over the candidate's
     # complete record collection.
-    assert _body(review) == _body(
-        read_knowledge_review(world.config, request, review_records_for(world.config, request))
-    )
-    assert review.payload is not None and review.payload.evidence.channels
+    assert _body(review) == _body(read_knowledge_review(world.config, request))
+    assert review.payload is not None and review.payload.judgment
     # The records half and the composition read one resolution (rule 2).
     assert seen.resolutions == 1
     # One capture per worktree for the resolution; the recheck before publication (ICR-R01)
@@ -471,10 +470,15 @@ def test_the_leaf_wide_view_captures_nothing_itself_and_is_computed_once_per_com
             contract.read_text().replace("task_id: 260101_TREE-REVIEW", "task_id: 260101_TREE"),
             encoding="utf-8",
         )
-        ports.trees(_query())
+        contract_edited = ports.trees(_query())
         assert worklists.call_count == 4
-        ports.trees(_query())
-        assert worklists.call_count == 4
+        repeated_contract = ports.trees(_query())
+        assert worklists.call_count == 4, (
+            contract_edited.refusal,
+            repeated_contract.refusal,
+            None if contract_edited.worklist is None else contract_edited.worklist.item_states,
+            contract_edited.code_changes,
+        )
 
 
 def test_a_view_behind_which_a_read_failed_is_never_kept(world: World) -> None:  # noqa: F811
@@ -792,3 +796,67 @@ def test_a_read_after_an_edit_shows_the_new_content_and_nothing_composed_is_kept
         != _comparison(before_view).memory_candidate.tree
     )
     assert read()[0] == "Values land exactly as granted."
+
+
+def test_recorded_leaf_view_observes_its_stored_worklist_and_keeps_absence_distinct(
+    world: World,  # noqa: F811
+) -> None:
+    """A historical full-tree read retains facts without inventing a worklist or read evidence."""
+    world.edit()
+    contract, trees = _live(world)
+    document = worklist_leaf.leaf_worklist(
+        contract,
+        persist=False,
+        candidate=worklist_leaf.CandidateTrees(
+            trees.record.code_candidate.tree, trees.record.memory_candidate.tree
+        ),
+    )
+    assert document is not None and document["state"] == "complete"
+    path = contract.contract_path.parent / worklist_leaf.WORKLIST_FILE_NAME
+    raw = (json.dumps(document, indent=2) + "\r\n").encode()
+    path.write_bytes(raw)
+    world.contract(live=False)
+    ports = _ports(world)
+    replies: list[dict[str, Any]] = []
+    with mock.patch.object(
+        reviewer_worklist_process,
+        "_reply",
+        observe_child(replies, reviewer_worklist_process._reply),
+    ):
+        with recorded_reads() as imported:
+            view = ports.trees(_query(recorded=True))
+        assert view.state == "trees", view.refusal
+        assert view.worklist is not None and view.worklist.source == "persisted"
+        assert view.worklist.bound and view.worklist.state == "complete"
+        assert view.code_changes is not None and view.code_changes.state == "facts"
+        assert replies[-1]["reads"][str(path)] == imported[str(path)] == bytes_identity(raw)
+        assert not LEAF_VIEW_MEMO
+
+        path.unlink()
+        with recorded_reads() as imported:
+            missing = ports.trees(_query(recorded=True))
+        assert missing.state == "trees", missing.refusal
+        assert missing.worklist is not None and missing.worklist.source == "absent"
+        assert missing.worklist.state is None and not missing.worklist.items
+        assert missing.code_changes is not None and missing.code_changes.state == "facts"
+        assert replies[-1]["document"] is None
+        assert replies[-1]["reads"][str(path)] == imported[str(path)] == ABSENT
+        assert not LEAF_VIEW_MEMO
+
+        path.write_text("{")
+        with recorded_reads() as imported:
+            broken = ports.trees(_query(recorded=True))
+        assert broken.state == "refused" and broken.refusal is not None
+        assert "JSONDecodeError" in broken.refusal.detail
+        assert replies[-1]["document"] is None and replies[-1]["error"]
+        assert imported[str(path)] == bytes_identity(b"{")
+        assert not LEAF_VIEW_MEMO
+
+        path.unlink()
+        path.mkdir()
+        with recorded_reads() as imported:
+            unreadable = ports.trees(_query(recorded=True))
+        assert unreadable.state == "refused" and unreadable.refusal is not None
+        assert "IsADirectoryError" in unreadable.refusal.detail
+        assert imported[str(path)] == "unreadable (IsADirectoryError)"
+        assert not LEAF_VIEW_MEMO

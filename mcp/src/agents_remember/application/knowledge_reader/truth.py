@@ -63,7 +63,9 @@ __all__ = ["census_view", "code_view", "record_list", "record_view"]
 _FACET_FRAME: Final = frozenset({"schema", "id", "links"})
 
 
-def record_view(selection: ReaderSelection, record_id: str) -> dict[str, Any] | None:
+def record_view(
+    selection: ReaderSelection, record_id: str, *, continuation: str | None = None
+) -> dict[str, Any] | None:
     """The truth view of ``record_id`` at the selection, or ``None`` when the tree holds none."""
 
     index = selection.index
@@ -83,13 +85,23 @@ def record_view(selection: ReaderSelection, record_id: str) -> dict[str, Any] | 
         document["outgoingState"] = {"state": "unavailable", "detail": unreadable}
     part, entries = _kind_part(selection, record, decisions)
     document.update(part)
+    document["timeline"] = record_timeline(
+        selection,
+        record,
+        entries,
+        lambda: _record_history(index, record),
+        continuation=continuation,
+    )
+    return document
+
+
+def _record_history(index: KnowledgeIndex, record: Record) -> tuple[HistoryRow, ...]:
+    """Acquire once on a manifest miss, not before the owner can reuse a continuation."""
     history = index.history_rows_about(record.id).value
     if record.kind == "invariant":
-        # A membership row's subject names the invariant after its prefix, so it is read
-        # beside the rows about the invariant itself (MIK-R53 rule 6).
+        # Membership rows still sit beside the invariant's own rows (MIK-R53 rule 6).
         history = (*history, *index.history_rows_about(membership_subject(record.id)).value)
-    document["timeline"] = record_timeline(selection, record, entries, history)
-    return document
+    return history
 
 
 def _kind_part(

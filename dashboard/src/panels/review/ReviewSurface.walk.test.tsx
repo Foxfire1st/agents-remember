@@ -147,7 +147,7 @@ it('tags a kept family, counts it apart, describes the subject context only and 
   expect(center.textContent).toContain(HBJ_TITLE);
   expect(center.textContent).not.toContain(R6R_TITLE);
   expect(center.querySelectorAll(`[data-family="${R6R_ID}"]`)).toHaveLength(0);
-  expect(center.textContent).not.toContain('kept');
+  expect(center.querySelector('[data-testid="review-family-kept"]')).toBeNull();
   expect(rail.contains(tag)).toBe(true);
 });
 

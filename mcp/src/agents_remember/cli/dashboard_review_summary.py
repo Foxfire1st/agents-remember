@@ -40,6 +40,7 @@ def _initial(config: McpRuntimeConfig, repo: str, master: str, leaf: str) -> tup
     inputs: list[ReadInput] = [
         selection,
         contract.contract_path,
+        contract.contract_path.parent / "knowledge-worklist.json",
         _repository(contract.code_repo_path),
     ]
     if contract.code_worktree is None or not contract.code_worktree.exists():

@@ -11,6 +11,7 @@ import type {
   ReviewWorklistView,
 } from '../../data/reviewTrees';
 import { degradedKnowledgeSides } from '../../data/reviewTrees';
+import { itemAnswer, itemAnswerText, fileAnswer, worklistAnswer } from './worklistState';
 import { hunkLinkage, worklistGroups, type WorklistEntry } from './worklistGroups';
 
 const shell = css({ minWidth: 0, display: 'grid', gap: '0.6rem', overflowWrap: 'anywhere' });
@@ -33,8 +34,8 @@ const NAMES: Record<string, string> = {
   family_route_condition: 'family route condition',
   onboarding_trace: 'onboarding trace',
   planned_untouched: 'planned effect not delivered',
-  unexplained_hunk: 'unexplained change',
-  unexplained_file: 'unexplained change',
+  unexplained_hunk: 'change without an invariant',
+  unexplained_file: 'change without an invariant',
 };
 const identityKey = (key: string) => /(^id$|digest|blob|content|identit|revision|^row$)/i.test(key);
 
@@ -106,17 +107,16 @@ function rowEffect(row: ReviewWorklistHistoryRow): string {
 
 function ItemLine({ entry, trees }: { entry: WorklistEntry; trees: ReviewTreesResult }) {
   const { item, rows } = entry;
-  const state = item.satisfied_by
-    ? `answered by ${factText(item.satisfied_by, true)}`
-    : rows.length
-      ? rows.map((row) => `${row.owner} ${row.disposition}${rowEffect(row)} (${row.id})`).join(', ')
-      : 'no history row';
+  const answer = itemAnswer(trees.worklist, item);
+  const witness = rows.find((row) => row.id === answer?.witness);
+  const state = itemAnswerText(answer) + (witness ? rowEffect(witness) : '');
   const reasons = currentnessReasons(trees, item.subject);
   return (
     <li
       data-testid="review-worklist-item"
       data-review-content="worklist"
       data-kind={item.kind}
+      data-answer={answer?.state}
       data-subject={item.subject}
       data-planning={item.planning}
     >
@@ -240,7 +240,7 @@ function worklistStatus(worklist?: ReviewWorklistView): string {
   if (!worklist) return 'worklist unavailable';
   if (worklist.source === 'absent') return 'No worklist applies or was persisted · source absent';
   const count = completeWorklist(worklist)
-    ? `${worklist.items.length} items`
+    ? (worklistAnswer(worklist) ?? `${worklist.items.length} items; gate states unavailable`)
     : `${worklist.items.length} reported items · partial or unbound measurement`;
   return `worklist ${worklist.state ?? 'state unknown'} · ${worklist.source} · ${count} · ${worklist.bound ? 'bound to this comparison' : 'not bound to this comparison'}`;
 }
@@ -369,7 +369,7 @@ function WorklistGroupsView({
       ))}
       {unexplained.length ? (
         <section data-testid="review-unexplained-groups">
-          <h3 className={label}>Unexplained changes · {unexplained.length} items</h3>
+          <h3 className={label}>Changes without an invariant · {unexplained.length} items</h3>
           {groups.unexplained.map((group) => (
             <div key={group.path} data-testid="review-unexplained-file" data-path={group.path}>
               <p>
@@ -377,6 +377,9 @@ function WorklistGroupsView({
                   {group.path}
                 </button>{' '}
                 · {group.coverage.map((one) => `${one.entries.length} ${one.state}`).join(' · ')}
+                {fileAnswer(trees.worklist, group.path)
+                  ? ` · ${fileAnswer(trees.worklist, group.path)}`
+                  : ''}
               </p>
               <ul className={list}>
                 {group.coverage
@@ -412,9 +415,11 @@ function WorklistStatus({
       </p>
       {degradedKnowledgeSides(trees).map((side) => (
         <p key={side.side} data-review-content="reason">
-          {side.side} knowledge {side.state}
+          {side.side} knowledge: {side.detail ?? 'This knowledge side could not be read.'}
+          {side.state === 'legacy-unavailable'
+            ? ' The code changes of this leaf are shown in full.'
+            : ''}
           {side.index_state === 'partial' ? ' · partial index' : ''}
-          {side.detail ? `: ${side.detail}` : ''}
           {side.problems.map(([path, reason]) => (
             <span key={path}>
               {' '}
@@ -458,7 +463,11 @@ export function LeafWorklistView({
   onOpenChanges: () => void;
   onOpenPath: (path: string) => void;
 }) {
-  const trees = read?.phase === 'trees' ? read.trees : undefined;
+  const answer = read?.phase === 'trees' ? read.trees : undefined;
+  const trees =
+    answer && reviewComparison !== undefined && answer.comparison?.number !== reviewComparison
+      ? { ...answer, worklist: answer.worklist ? { ...answer.worklist, bound: false } : undefined }
+      : answer;
   return (
     <section className={shell} data-testid="review-worklist-view">
       <h2 className={label}>Worklist</h2>

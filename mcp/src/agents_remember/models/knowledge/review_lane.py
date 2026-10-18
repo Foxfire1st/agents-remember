@@ -131,6 +131,13 @@ class ReviewLaneFamilyOccurrence(KnowledgeModel):
     family_key: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     family_revision: int | None = Field(default=None, ge=1)
     state: LaneMembershipState
+    reason: str | None = Field(default=None, min_length=1, max_length=PROSE_MAX_LENGTH)
+
+    @model_validator(mode="after")
+    def _unknown_names_its_reason(self) -> ReviewLaneFamilyOccurrence:
+        if (self.state == "membership_unknown") != (self.reason is not None):
+            raise ValueError("unknown membership carries its reason; a known membership does not")
+        return self
 
 
 class ReviewLaneLink(KnowledgeModel):

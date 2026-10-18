@@ -12,12 +12,21 @@ from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any, get_args, get_origin, get_type_hints
 
+from agents_remember.application.knowledge_worklist import read_leaf_worklist
+from agents_remember.application.knowledge_worklist.classification_context import classification_run
 from agents_remember.application.knowledge_worklist.leaf import (
     CandidateTrees,
     CapturedBase,
     leaf_worklist,
 )
-from agents_remember.kernel.git_command import shared_blob_reads
+from agents_remember.application.review_code_changes import (
+    tree_request,
+    trees_from_request,
+)
+from agents_remember.application.review_leaf_facts import leaf_facts
+from agents_remember.application.review_source_inventory import memo_tree_observations
+from agents_remember.application.review_tree_comparison import ReviewTrees
+from agents_remember.kernel.git_command import memo_git_object_lookups, shared_blob_reads
 from agents_remember.kernel.recorded_reads import recorded_reads, replay_reads
 from agents_remember.kernel.reviewer_worklist_process import (
     EXIT_BUILD_MISMATCH,
@@ -44,6 +53,7 @@ def isolated_leaf_worklist(
     candidate: CandidateTrees,
     base: CapturedBase,
     processes: ReviewerWorklistProcesses | None = None,
+    trees: ReviewTrees | None = None,
 ) -> dict[str, Any] | None:
     """Call the one leaf owner in another interpreter and import its exact consumed-byte reads."""
 
@@ -56,11 +66,18 @@ def isolated_leaf_worklist(
     source = build_identity(
         process_serving_build().payload().model_dump(mode="json", exclude_none=True)
     )
+    if trees is not None:
+        payload["review"] = tree_request(trees)
     answer = (processes or DIRECT_WORKLIST_PROCESSES).compute(payload, source)
     replay_reads(answer["reads"])
     if answer["error"] is not None:
         raise WorklistProcessError(f"reviewer worklist computation failed: {answer['error']}")
-    return answer["document"]
+    document = answer["document"]
+    return (
+        {**(document or {}), "_review": answer["review"]}
+        if answer["review"] is not None
+        else document
+    )
 
 
 def _path(value: object) -> str:
@@ -99,9 +116,24 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
     base = CapturedBase(**payload["base"])
     started = time.monotonic()
     error = None
-    with recorded_reads() as reads, shared_blob_reads():
+    review_facts = None
+    with (
+        recorded_reads() as reads,
+        shared_blob_reads(),
+        memo_git_object_lookups(),
+        memo_tree_observations(),
+        classification_run() as classification,
+    ):
         try:
-            document = leaf_worklist(contract, persist=False, candidate=candidate, base=base)
+            review = payload.get("review")
+            trees = None if review is None else trees_from_request(review)
+            document = (
+                read_leaf_worklist(contract.contract_path)
+                if trees is not None and not trees.live
+                else leaf_worklist(contract, persist=False, candidate=candidate, base=base)
+            )
+            if trees is not None:
+                review_facts = leaf_facts(document, trees, classification)
         except Exception as failure:
             document = None
             error = f"{type(failure).__name__}: {failure}"
@@ -112,6 +144,7 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
         "module": Path(__file__).resolve().as_posix(),
         "pid": os.getpid(),
         "document": document,
+        "review": review_facts,
         "reads": reads,
         "computation": [started, time.monotonic()],
         "error": error,

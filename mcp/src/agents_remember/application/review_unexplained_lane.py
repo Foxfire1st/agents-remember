@@ -37,6 +37,7 @@ from agents_remember.application.review_lane_classification import (
     FileResult,
     HunkResult,
     LaneReadError,
+    LaneSide,
     Placed,
     SideReading,
     TreeLane,
@@ -344,15 +345,45 @@ def _occurrences(
         state: LaneMembershipState = (
             "confirmed_no_family" if own.families_complete else "membership_unknown"
         )
-        return (ReviewLaneFamilyOccurrence(state=state),)
-    return tuple(
-        ReviewLaneFamilyOccurrence(
-            family=family,
-            family_key=text_uuid("identity", family),
-            family_revision=own.revision(family),
-            state=_membership(lane, side, family, invariant),
+        return (
+            ReviewLaneFamilyOccurrence(
+                state=state,
+                reason=(
+                    _membership_reason(own, invariant) if state == "membership_unknown" else None
+                ),
+            ),
         )
-        for family in families
+    return tuple(_occurrence(lane, side, family, invariant) for family in families)
+
+
+def _membership_reason(reading: LaneSide, invariant: str) -> str:
+    # The reason travels from the same read that decides membership, not from a client's rule.
+    name, detail = reading.name, reading.detail
+    why = (
+        f"The {name} memory tree could not be read ({detail})"
+        if detail
+        else f"Not every family record of the {name} memory tree could be read"
+    )
+    return bounded_text(
+        f"{why}; whether a family lists {invariant} on that side is not established."
+    )
+
+
+def _occurrence(
+    lane: TreeLane, side: LaneSideName, family: str, invariant: str
+) -> ReviewLaneFamilyOccurrence:
+    own = lane.side(side)
+    state = _membership(lane, side, family, invariant)
+    return ReviewLaneFamilyOccurrence(
+        family=family,
+        family_key=text_uuid("identity", family),
+        family_revision=own.revision(family),
+        state=state,
+        reason=(
+            _membership_reason(lane.other(side), invariant)
+            if state == "membership_unknown"
+            else None
+        ),
     )
 
 

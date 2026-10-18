@@ -6,7 +6,7 @@
 //   loading            the read is in flight; nothing is claimed about the answer yet.
 //   known-empty        the read *answered* and there is nothing to show: `knownEmpty` is the
 //                      measured shape of that (a measured inventory of zero paths, no knowledge
-//                      comparison, and no recorded evidence or assessment). It is never rendered as
+//                      comparison, and an answered judgment with no rows or proofs). It is never rendered as
 //                      a failure, and a failure is never rendered as this.
 //   not-initialized    `candidate_dataset_absent`: the named dataset half does not exist.
 //   unavailable-history the leaf's live candidate, its enclosure contract, or the review adapter
@@ -41,6 +41,16 @@ export type ReviewRead =
 // a review of an empty candidate.
 export function readFrom(result: ReviewResult): ReviewRead {
   if (result.state === 'review' && result.payload) {
+    if (!result.payload.judgment) {
+      return {
+        phase: 'failed',
+        problem: {
+          token: 'unreadable',
+          code: 'review_judgment_missing',
+          detail: 'The server did not supply judgment for this read.',
+        },
+      };
+    }
     return { phase: 'reviewed', payload: result.payload };
   }
   if (result.state === 'refused') {
@@ -82,14 +92,15 @@ export function ReviewLoading() {
 
 // A successful answer with nothing in it. `measured` is what makes it known: the pair's two Git
 // trees were really compared and differ at no path. Anything unmeasured, or any recorded knowledge,
-// evidence or assessment, is not this state and does not reach here.
+// judgment or proofs, is not this state and does not reach here.
 export function knownEmpty(payload: ReviewPayload): boolean {
   return (
     payload.source.inventory.state === 'measured' &&
     payload.source.inventory.listed_total === 0 &&
     payload.comparison === undefined &&
-    payload.evidence.evidence_links.length === 0 &&
-    payload.evidence.assessments.length === 0
+    payload.judgment?.state === 'none' &&
+    payload.judgment.rows.length === 0 &&
+    payload.judgment.proofs.length === 0
   );
 }
 
@@ -101,7 +112,7 @@ export function KnownEmptyNote() {
       data-review-state="known-empty"
     >
       known empty: the review answered — the bound pair differs at no path, no knowledge subject was
-      compared, and no evidence or assessment is recorded. This is a measured empty result, not an
+      compared, and no judgment or proofs are recorded. This is a measured empty result, not an
       unavailable one.
     </p>
   );

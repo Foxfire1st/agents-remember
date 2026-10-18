@@ -123,6 +123,7 @@ def _build_serving_runtime(
         # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
         build=process_serving_build(),
         interval=cadence.interval,
+        review_memory_root=collaborators.review_memory_root,
         review_trees_shutdown=collaborators.review_trees_shutdown,
         background_ledger=ledger,
     )

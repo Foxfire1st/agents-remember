@@ -163,8 +163,18 @@ it('explains all nine labels by keyboard and states none and unavailable', async
   expect(asked.filter((url) => url.pathname === '/api/review/intent')).toHaveLength(1);
 });
 
-it('shows a missing field as a failure, not as none', async () => {
+it('shows a synthetically omitted required field as a failure, not as none', async () => {
   serve86();
+  const recordedFetch = globalThis.fetch;
+  // Deliberately malformed transport input; the genuine capture is not edited.
+  vi.stubGlobal('fetch', vi.fn(async (address: string) => {
+    const response = await recordedFetch(address);
+    if (new URL(address, 'http://localhost').pathname !== '/api/review/intent') return response;
+    const body = await response.json();
+    return { ...response, json: async () => ({
+      ...body, payload: { ...body.payload, meaning_effects: undefined },
+    }) } as Response;
+  }));
   const view = render(
     <ReviewSurface
       repo={target86.repo}
@@ -253,7 +263,7 @@ it('prints the governing row effect in the worklist panel', async () => {
   );
   const block = await view.findByTestId('review-subject-worklist');
   await waitFor(() =>
-    expect(block.textContent).toContain('changed · weaken (ROW-KY2EJG)'),
+    expect(block.textContent).toContain('answered by ROW-KY2EJG · weaken'),
   );
   view.unmount();
   const familyId = catalogue.outline!.families.find((one) => one.id === 'FAM-7B6N3Y4Q')!
@@ -270,7 +280,7 @@ it('prints the governing row effect in the worklist panel', async () => {
   );
   const familyBlock = await familyView.findByTestId('review-subject-worklist');
   await waitFor(() =>
-    expect(familyBlock.textContent).toContain('changed · effect not recorded (ROW-N46VKD)'),
+    expect(familyBlock.textContent).toContain('answered by ROW-N46VKD · effect not recorded'),
   );
   familyView.unmount();
 });

@@ -8,6 +8,7 @@ path or record ID -- the same values its URL carries, so every view can be share
 ``selections``            the commit selector's choices (:func:`.selection.selection_options`)
 ``tree``                  one directory level of the explorer (:func:`.paths.tree_listing`)
 ``path``                  the path view of a file, or the bounded summary of a directory (:func:`.paths.path_view`)
+``prose``                 the whole onboarding text for a code path (:func:`.paths.path_prose`)
 ``subtree``               every entry under a directory, paged by the shared continuation (:func:`.subtree.subtree_page`)
 ``record``                the truth view of one record, with its timeline (:func:`.truth.record_view`)
 ``records``               every record by kind (:func:`.truth.record_list`)
@@ -30,6 +31,7 @@ from typing import Any, Final
 
 from agents_remember.application.knowledge_reader.files import ReaderRequestError
 from agents_remember.application.knowledge_reader.paths import (
+    path_prose,
     path_view,
     tree_listing,
     without_proof,
@@ -57,6 +59,7 @@ READER_VIEWS: Final = (
     "selections",
     "tree",
     "path",
+    "prose",
     "subtree",
     "record",
     "records",
@@ -90,6 +93,8 @@ def read_knowledge_reader(config: McpRuntimeConfig, query: ReaderQuery) -> dict[
 
 
 def _answer(selection: ReaderSelection, query: ReaderQuery) -> dict[str, Any]:
+    if query.view == "prose":
+        return path_prose(selection, query.path or "")
     if query.view == "census":
         return census_view(selection, query.census_id)
     if query.view == "code":
@@ -97,7 +102,7 @@ def _answer(selection: ReaderSelection, query: ReaderQuery) -> dict[str, Any]:
             raise ReaderRequestError("the code view names a path")
         return code_view(selection, query.path, query.locator, query.blob)
     if query.view == "record":
-        return _record(selection, query.record_id)
+        return _record(selection, query.record_id, query.continuation)
     views: dict[str, Callable[[], dict[str, Any]]] = {
         "tree": lambda: tree_listing(selection, query.path or ""),
         "path": lambda: path_view(selection, query.path or ""),
@@ -108,10 +113,12 @@ def _answer(selection: ReaderSelection, query: ReaderQuery) -> dict[str, Any]:
     return {"state": "view", **views[query.view]()}
 
 
-def _record(selection: ReaderSelection, record_id: str | None) -> dict[str, Any]:
+def _record(
+    selection: ReaderSelection, record_id: str | None, continuation: str | None
+) -> dict[str, Any]:
     if not record_id:
         raise ReaderRequestError("the record view names a record ID")
-    found = record_view(selection, record_id)
+    found = record_view(selection, record_id, continuation=continuation)
     if found is None:
         return {"state": "not-found", "detail": f"the selected tree holds no record {record_id}"}
     return {"state": "view", **found}

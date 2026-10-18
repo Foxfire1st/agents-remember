@@ -1,73 +1,15 @@
-"""The Intent Reviewer's thin adapter over the shared read, diff and view operations.
+"""Compose the review of four Git trees from one canonical task resolution.
 
-This module **selects nothing**. It resolves which candidate a task context names, calls the
-shipped operations, and assembles their results into the typed payload
-:mod:`agents_remember.models.knowledge.review` defines. R07's selection policy, R08's comparison
-result, `Route` as the recorded scope axis and L20's review matrix are consumed exactly as their
-owners publish them: no scope is computed, no frontier is widened, no reference is re-resolved and
-no row is re-diffed here.
-
-**Rank, and why the adapter is here rather than in ``serving/``.** ``layers.toml`` ranks ``serving``
-below ``application``, so a serving module may not import the application operations this adapter
-composes. The dashboard reaches it the way it reaches the launch-capsule compiler: through a port on
-``ServingCollaborators`` that the composition root wires. The HTTP shim therefore does transport
-only, and the composition lives at the tier that may import the operations.
-
-**The candidate is resolved from canonical task context.** A caller names a repository, a master and
-a leaf id. The leaf's enclosure contract is located from the recorded task root -- never from a
-caller-supplied path -- and the two datasets the comparison is between are derived from the
-contract's own recorded worktree group. A candidate that does not resolve is refused by name; the
-current ``HEAD``, a guessed worktree path and a browser-supplied path are all unavailable as
-fallbacks, because none of them is reachable from this module's inputs.
-
-**The endpoints are bound next door, and this adapter delegates to them.**
-:mod:`agents_remember.application.review_candidate_resolution` owns the resolution: the recorded
-task base commit on one side, the captured add-all candidate tree on the other, the recheck that
-refuses by name when either moved, and the refusals every failure earns. It is a separate module
-because resolution is a responsibility of its own and because this adapter is at the repository's
-file-size rail; ``review_candidate_resolution`` is the one implementation, and the names re-exported
-below are that module's -- there is no second resolution path here.
-
-**Six more responsibilities this adapter hands to their own modules, for the same reason.**
-:mod:`agents_remember.application.review_source_inventory` measures the exact source-change inventory
-of the bound pair and renders the source pane; :mod:`agents_remember.application.review_record_rendering`
-renders the record collections the caller supplied into the evidence and submission values;
-:mod:`agents_remember.application.review_statement_sides` projects one comparison item's recorded
-content into the pane's statement sides and mechanical field rows, where ICR-R06's one-sided contract
-lives; :mod:`agents_remember.application.review_revision_comparison` selects which retained
-revisions those sides render -- the before head and the after head from the snapshots' own
-authored successor relationships, with explicit ambiguity when no unique head exists, which is
-ICR-R07's explicit revision comparison; :mod:`agents_remember.application.review_subject_catalogue`
-enumerates the entry's labelled subject catalogue from both snapshots' own identity tables, with
-totals and per-row presence, comparing no subject to earn its row (ICR-R09); and
-:mod:`agents_remember.application.review_task_context` composes the entry that needs no
-selected subject; and :mod:`agents_remember.application.review_comparison_staleness` carries the
-comparison's own declared identity and the staleness that identity earns against the previous
-binding a refresh read supplies (ICR-R17). **Two movement readings are delegated the same way, and
-they are the two the read renders beside that staleness**: the leaf's own managed syncs
-(:mod:`agents_remember.application.review_sync_movement`, ICR-R22) and the identities a *raw* Git
-operation replaced with no managed transaction behind it
-(:mod:`agents_remember.application.review_external_git_movement`, ICR-R23, which also owns the
-transition vocabulary and the support matrix of routes this system does and does not reconcile).
-Each is one responsibility with one implementation, the external reading outranks both the carried
-identity and a recorded rebinding when it measured a replacement, and
-every name an importer
-referenced is re-exported below so no importer had to learn a new home -- the statement-side helpers
-are the one move that leaves no alias, because they were private to this adapter and no module under
-``mcp/`` imported them, the head-selection rule likewise leaves no alias because the
-both-sides preference it replaces was private to this adapter, and the entry enumeration leaves
-none either: the per-subject compare-to-earn-a-row helpers were private to this adapter, and the
-catalogue replaces their mechanism rather than moving it -- this adapter resolves, calls and
-assembles, and it grows no feature logic of its own while its file is over the soft rail.
-
-**Every absence is a state.** An unresolvable author, a missing operand, an absent assessment
-collection and a comparison the shipped operation refused each produce a named field or a typed
-refusal -- never a blank a reader could take for a measured zero, and never a favourable default.
+The adapter binds the code and memory sides, calls the comparison and the source,
+family, meaning-history and judgment projections, then rechecks the candidate before
+publication. It selects no additional subject and writes no judgment. The source
+inventory is independent of the selected knowledge subject, so task-context and
+pre-conversion reviews retain their source comparison.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
 from agents_remember.application.review_candidate_resolution import (
@@ -88,10 +30,6 @@ from agents_remember.application.review_comparison_staleness import (
     comparison_identity,
     review_staleness,
 )
-from agents_remember.application.review_evidence_records import (
-    review_records_for,
-    review_records_of,
-)
 from agents_remember.application.review_external_git_movement import external_git_movement
 from agents_remember.application.review_family_context import (
     FAMILY_MEMBERS_COLLECTION,
@@ -99,6 +37,7 @@ from agents_remember.application.review_family_context import (
     review_family_context,
 )
 from agents_remember.application.review_family_rosters import family_collection_refusal
+from agents_remember.application.review_judgment import review_judgment
 from agents_remember.application.review_legacy_comparison import (
     knowledge_unavailable_detail,
     knowledge_unavailable_limitations,
@@ -111,22 +50,7 @@ from agents_remember.application.review_pagination import (
     reset_comparison_page,
 )
 from agents_remember.application.review_pair_preflight import pair_preflight_refusal
-from agents_remember.application.review_record_applicability import (
-    AppliedRecords,
-    review_applicability,
-)
-from agents_remember.application.review_record_rendering import (
-    EMPTY_REVIEW_RECORDS,
-    KNOWLEDGE_APPLICABILITY_CLASSES,
-    ReviewRecordInputs,
-    assessment_displays,
-    evidence_pane,
-    refused,
-    signal,
-    subject_states,
-    submission,
-)
-from agents_remember.application.review_recorded_selection import ComparisonFacts
+from agents_remember.application.review_record_rendering import refused, submission
 from agents_remember.application.review_relationship_movement import (
     RelationshipSources,
     relationship_movements,
@@ -147,6 +71,7 @@ from agents_remember.application.review_statement_sides import (
     field_changes,
     side_conditions,
     side_content,
+    side_origin,
 )
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.application.review_sync_movement import (
@@ -190,27 +115,22 @@ from agents_remember.models.knowledge.review_meaning_effects import MeaningRecor
 from agents_remember.models.knowledge.view import (
     MAX_VIEW_ROWS,
 )
-from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
 from agents_remember.worktrees.modules.capture_baseline import memo_capture_baselines
 
 __all__ = [
-    "EMPTY_REVIEW_RECORDS",
     "ReviewCandidateResolution",
-    "ReviewRecordInputs",
     "ReviewSurfaceRequest",
     "compose_review",
     "list_knowledge_review_entries",
     "read_complete_knowledge_review",
     "read_knowledge_review",
     "resolve_review_candidate",
-    "review_records_for",
 ]
 
 
 def read_knowledge_review(
     config: McpRuntimeConfig,
     request: ReviewSurfaceRequest,
-    records: ReviewRecordInputs = EMPTY_REVIEW_RECORDS,
     *,
     probe: TreeDifferenceProbe | None = None,
 ) -> KnowledgeReviewResult:
@@ -234,7 +154,7 @@ def read_knowledge_review(
     )
     if isinstance(resolved, ReviewRefusal):
         return refused(request.repository_id, resolved)
-    return compose_review(resolved, request, records, probe=probe)
+    return compose_review(resolved, request, probe=probe)
 
 
 def read_complete_knowledge_review(
@@ -265,7 +185,7 @@ def read_complete_knowledge_review(
         )
         if isinstance(resolved, ReviewRefusal):
             return refused(request.repository_id, resolved)
-        return compose_review(resolved, request, review_records_of(resolved))
+        return compose_review(resolved, request)
 
 
 def list_knowledge_review_entries(
@@ -350,7 +270,6 @@ def _entry_refused(
 def compose_review(
     resolved: ReviewCandidateResolution,
     request: ReviewSurfaceRequest,
-    records: ReviewRecordInputs = EMPTY_REVIEW_RECORDS,
     *,
     probe: TreeDifferenceProbe | None = None,
 ) -> KnowledgeReviewResult:
@@ -383,7 +302,7 @@ def compose_review(
     )
     inventory = review_inventory(before_source, after_source, observed=observed)
     if request.selector is None:
-        return task_context_review(resolved, request, records, inventory, observed)
+        return task_context_review(resolved, request, inventory, observed)
     # A closed leaf's pair answers for itself before the shipped preflight does (ICR-R12): a half the
     # record states this leaf never had is a fact about the repository's history and one the record
     # kept and that no longer resolves is unavailable now, and the two are different refusals. A live
@@ -425,7 +344,6 @@ def compose_review(
         return refused(request.repository_id, moved)
 
     identity = comparison_identity(comparison)
-    subjects = subject_states(records)
     # One comparison and one answer about it: the state the payload publishes and the submission
     # state beside it are read from the same rule, so "an assessment is never submitted against a
     # comparison that has moved" cannot be true of one field and false of the other.
@@ -510,19 +428,6 @@ def compose_review(
     else:
         published_page = _collection_page(request, page, comparison, reset)
         page_refusal = None
-    # Which supplied record may be displayed beside *this* subject, and why, is decided once, here,
-    # before either pane renders anything (ICR-R26@v1); the panes receive what it kept.
-    applicability = review_applicability(
-        resolved,
-        request,
-        records,
-        ComparisonFacts(
-            items=page.items,
-            selected=selected,
-            generation=identity,
-            relationships=relationships,
-        ),
-    )
     # The recorded effects of this leaf's meaning changes (MIK-R43): the steps of the
     # selected record and of the families and members the family context returns, read
     # from the after tree's index the resolution already holds. No new route, no second
@@ -550,11 +455,11 @@ def compose_review(
                 master=request.master,
             ),
             comparison=identity,
-            knowledge=_knowledge_pane(comparison, records, subjects, applicability),
+            knowledge=_knowledge_pane(comparison, selected, resolved),
             source=source_pane(
                 comparison, inventory, _comparison_attribution(comparison), relationships
             ),
-            evidence=evidence_pane(records, subjects, applicability),
+            judgment=review_judgment(resolved, request.selector),
             # A tree comparison's families carry the change facts of the members this page
             # returned (MIK-R33); without a tree comparison the context is published as composed.
             family_context=with_change_kinds(family.context, resolved.trees),
@@ -877,27 +782,19 @@ def _limitations(
 
 def _knowledge_pane(
     comparison: KnowledgeDiffResult,
-    records: ReviewRecordInputs,
-    subjects: Mapping[str, SubjectAssessmentState],
-    applicability: AppliedRecords,
+    selected: SubjectRevisionSelection,
+    resolved: ReviewCandidateResolution,
 ) -> ReviewKnowledgePane:
     """Pane 1: identities, retained revisions, exact statements and separately authored records.
 
     The two statements are the reviewed identity's selected revisions: the before head's
-    statement and the after head's, chosen from the snapshots' own authored successor
-    relationships rather than by presence on both sides (ICR-R07@v1). An ambiguous or
-    unresolved selection renders no winner: both sides state the explicit ambiguity and the
+    statement and the after head's, each recorded by its own memory tree. An
+    unresolved selection renders no winner: both sides state the missing selection and the
     recorded selection beside them still lists every head and every retained revision.
     """
 
     assert comparison.page is not None
     items = comparison.page.items
-    # The selection the statements render from is the one the classification was made against, read
-    # from the projection rather than passed a second time: two spellings of "which revisions were
-    # selected" is how a pane comes to render one selection beside another selection's records.
-    selected = applicability.revision_selection or SubjectRevisionSelection(
-        selection=None, before_item=None, after_item=None
-    )
     before_statement, after_statement, before_conditions, after_conditions = _selected_statements(
         selected
     )
@@ -906,19 +803,13 @@ def _knowledge_pane(
         family_ids=_identity_ids(items, "family"),
         before_statement=before_statement,
         after_statement=after_statement,
+        before_origin=side_origin(resolved.baseline_database, selected.before_item, "before"),
+        after_origin=side_origin(resolved.candidate_database, selected.after_item, "after"),
         before_conditions=before_conditions,
         after_conditions=after_conditions,
         revision_groups=_revision_groups(comparison),
         revision_selection=selected.selection,
         field_changes=field_changes(items),
-        signals=tuple(
-            signal(entry, applicability.label_of(entry.signal_id))
-            for entry in records.signals
-            if applicability.label_of(entry.signal_id) is not None
-        ),
-        assessments=assessment_displays(records, subjects, applicability),
-        context=applicability.context_of(KNOWLEDGE_APPLICABILITY_CLASSES),
-        applicability=applicability.summaries_of(KNOWLEDGE_APPLICABILITY_CLASSES),
     )
 
 
@@ -928,14 +819,14 @@ def _selected_statements(
     """Render one head selection's two statement sides and their conditions.
 
     A compared or one-sided selection renders the selected head items' own recorded sides, so a
-    known-empty side stays the absent state ICR-R06@v1 already gives it. An ambiguous or
+    known-empty side stays the absent state ICR-R06@v1 already gives it. An
     unresolved selection renders no head's text as the subject's operand: both sides carry the
     explicit statement that says why no pair was chosen, and the recorded selection beside them
     keeps every head and every retained revision visible.
     """
 
     selection = selected.selection
-    if selection is not None and selection.state in ("ambiguous", "unresolved"):
+    if selection is not None and selection.state == "unresolved":
         explicit = ReviewSideContent(
             state="unresolved", language="text", detail=selection.statement
         )

@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { cleanup, fireEvent, render, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   ReviewFamilyMember,
@@ -26,6 +26,7 @@ import {
 import { PROSE_LAYOUT_KEY, proseLayoutStore, readProseLayout } from './intentDiffPreference';
 import { SelectedStatement, type MemberSides } from './SubjectReview';
 import { REWRITE_RATIO } from './wordDiff';
+import * as wordDiff from './wordDiff';
 
 const captured = (name: string) =>
   (
@@ -45,6 +46,7 @@ const [FIRST, SECOND] = row.essential_conditions;
 const NEXT = 'f0f0f0f0-0000-5000-8000-000000000002';
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   proseLayoutStore.getState().setLayout('inline');
   localStorage.clear();
@@ -63,7 +65,7 @@ interface Options {
   before?: Partial<ReviewFamilyMember>;
   knowledge?: Partial<ReviewKnowledgePane>;
   revision?: string;
-  tree?: boolean;
+
   // The member rows the page carried, per side (default: both sides' rows). `none`: no member row
   // was carried, so the pane and its field rows answer.
   rows?: MemberSides | 'none';
@@ -89,12 +91,8 @@ function review(change: Partial<ReviewFamilyMember> = {}, options: Options = {})
     after_conditions: after.essential_conditions,
     ...options.knowledge,
   };
-  const scope =
-    options.tree === false
-      ? { ...payload, limitations: payload.limitations.filter((t) => !t.startsWith('review:')) }
-      : payload;
   return render(
-    <IntentWordDiffScope payload={scope}>
+    <IntentWordDiffScope payload={payload}>
       <SelectedStatement
         knowledge={knowledge}
         subject={subject}
@@ -113,6 +111,49 @@ const label = (view: ReturnType<typeof render>) =>
   view.getByTestId('review-center-statement-label').textContent;
 
 describe('a tree comparison statement', () => {
+  it('computes each text passage once for both layout choice and drawing', () => {
+    const diff = vi.spyOn(wordDiff, 'textDiff');
+    review({
+      statement: STATEMENT.replace('is refused', 'is rejected'),
+      applicability: `${row.applicability} Now.`,
+      essential_conditions: [FIRST, `${SECOND} Now.`],
+    });
+    for (const before of [STATEMENT, row.applicability, SECOND])
+      expect(diff.mock.calls.filter((call) => call[0] === before)).toHaveLength(1);
+  });
+
+  it('explains unequal list gaps on their removed and added rows', () => {
+    const view = review({ essential_conditions: [FIRST, 'One.', 'Two.'] });
+    const list = view.getByTestId('intent-diff-list');
+    const note = view.getByText(
+      'These items could not be paired one to one; they are shown as removed and added.',
+    );
+    expect([...list.children].map((item) => item.getAttribute('data-item'))).toEqual([
+      'unchanged',
+      'removed',
+      'added',
+      'added',
+    ]);
+    for (const item of [...list.children].slice(1))
+      expect(item.getAttribute('aria-describedby')).toBe(note.id);
+  });
+
+  it('states the cell bound when lists are shown without alignment', () => {
+    const before = Array.from({ length: 1500 }, (_, i) => `condition ${i}`);
+    const view = review(
+      { essential_conditions: before.map((text) => `${text} edited`) },
+      {
+        before: { essential_conditions: before },
+      },
+    );
+    expect(view.getByTestId('intent-diff-coarse').textContent).toContain(
+      'too long to align word by word',
+    );
+    const list = view.getByTestId('intent-diff-list');
+    expect(list.children).toHaveLength(3000);
+    expect(list.querySelector('[data-item="changed"]')).toBeNull();
+  });
+
   it('marks the changed words of the statement in place, in one passage', () => {
     expect(payload.limitations).toContain('review:trees:1');
     const view = review({ statement: STATEMENT.replace('is refused', 'is rejected and reported') });
@@ -194,7 +235,7 @@ describe('a tree comparison statement', () => {
     );
   });
 
-  it("reads only the selected revisions' field rows, on tree and dataset reviews alike", () => {
+  it("reads only the selected revisions' field rows", () => {
     const fieldRow = (item_id: string) => ({
       item_id,
       item_kind: 'invariant',
@@ -209,22 +250,20 @@ describe('a tree comparison statement', () => {
         ?.querySelector('[data-field="applicability"]') ?? null;
     // No member row was carried, so the pane and the page's field rows answer. Those rows also
     // report other records' changes (keyed by their revision ids); they are never this subject's.
-    for (const tree of [true, false]) {
-      const other = review(
-        { statement },
-        { rows: 'none', tree, knowledge: { field_changes: [fieldRow('another-record-revision')] } },
-      );
-      expect(label(other)).toMatch(/^Changed statement · revision /);
-      expect(applicability(other)).toBeNull();
-      cleanup();
-      const own = review(
-        { statement },
-        { rows: 'none', tree, knowledge: { field_changes: [fieldRow(NEXT)] } },
-      );
-      expect(label(own)).toMatch(/^Changed statement, applicability · revision /);
-      expect(applicability(own)).not.toBeNull();
-      cleanup();
-    }
+    const other = review(
+      { statement },
+      { rows: 'none', knowledge: { field_changes: [fieldRow('another-record-revision')] } },
+    );
+    expect(label(other)).toMatch(/^Changed statement · revision /);
+    expect(applicability(other)).toBeNull();
+    cleanup();
+    const own = review(
+      { statement },
+      { rows: 'none', knowledge: { field_changes: [fieldRow(NEXT)] } },
+    );
+    expect(label(own)).toMatch(/^Changed statement, applicability · revision /);
+    expect(applicability(own)).not.toBeNull();
+    cleanup();
   });
 
   // Review R1 F1: one revision whose texts differ, with the subject's member row carried on one side
@@ -418,7 +457,7 @@ describe('a tree comparison statement', () => {
   });
 });
 
-describe('one-sided, unavailable and ambiguous statements', () => {
+describe('one-sided and unavailable statements', () => {
   const absent: ReviewSideContent = { state: 'absent', language: 'text', detail: 'no revision' };
   const unresolved: ReviewSideContent = {
     state: 'unresolved',
@@ -480,8 +519,8 @@ describe('one-sided, unavailable and ambiguous statements', () => {
     expect(compared.queryByTestId('intent-diff')).toBeNull();
   });
 
-  it('draws no diff for an ambiguous or unresolved revision selection', () => {
-    for (const state of ['ambiguous', 'unresolved'] as const) {
+  it('draws no diff for an unresolved revision selection', () => {
+    for (const state of ['unresolved'] as const) {
       const view = review(
         { statement: STATEMENT.replace('refused', 'rejected') },
         { knowledge: { revision_selection: { ...selection, state, after_revision_id: NEXT } } },
@@ -490,14 +529,6 @@ describe('one-sided, unavailable and ambiguous statements', () => {
       expect(view.queryByTestId('intent-diff')).toBeNull();
       cleanup();
     }
-  });
-
-  it("leaves a dataset review's statement rendering as landed", () => {
-    const view = review({ statement: STATEMENT.replace('refused', 'rejected') }, { tree: false });
-    expect(label(view)).toBe('Changed statement · revision r2 → r3');
-    expect(view.getByTestId('diff-pane')).toBeTruthy();
-    expect(view.queryByTestId('intent-diff')).toBeNull();
-    expect(view.queryByTestId('intent-diff-layout-control')).toBeNull();
   });
 });
 
@@ -577,8 +608,7 @@ describe('the family guarantee', () => {
 });
 
 // Review R1 F2: the Q1 rule on every tree-comparison label. The family navigator's joint guarantee and
-// member tag, and the center details, never call one revision "unchanged" when its texts differ. A
-// dataset review (tree = false) keeps the landed labels: there a revision is one immutable text.
+// member tag, and the center details, never call one revision "unchanged" when its texts differ.
 describe('labels of one revision whose texts differ', () => {
   const context = familyPayload.family_context!;
   const entry = context.entries[0];
@@ -590,8 +620,7 @@ describe('labels of one revision whose texts differ', () => {
       ...entry,
       after: { ...entry.after, guarantee: { ...guarantee, joint_guarantee: edited } },
     };
-    expect(guaranteeFact(differs, true)).toBe('same_revision_text_changed');
-    expect(guaranteeFact(differs, false)).toBe('unchanged_revision');
-    expect(guaranteeFact(entry, true)).toBe('unchanged_revision');
+    expect(guaranteeFact(differs)).toBe('same_revision_text_changed');
+    expect(guaranteeFact(entry)).toBe('unchanged_revision');
   });
 });

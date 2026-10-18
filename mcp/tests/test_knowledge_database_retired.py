@@ -189,7 +189,6 @@ HELPER_CALLERS: dict[str, dict[str, str]] = {
         "application/knowledge_diff.py": "the comparison of a baseline and a candidate dataset",
         "application/review_attribution.py": _REVIEW,
         "application/review_intent_summary.py": _REVIEW,
-        "application/review_recorded_selection.py": _REVIEW,
         "application/review_relationship_movement.py": _REVIEW,
         "application/review_source_realization_link.py": _REVIEW,
     },

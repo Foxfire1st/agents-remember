@@ -68,9 +68,17 @@ from agents_remember.models.knowledge_files.documents import (
 )
 from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH
 
-__all__ = ["entry_document", "path_view", "states_at", "tree_listing", "without_proof"]
+__all__ = [
+    "entry_document",
+    "path_prose",
+    "path_view",
+    "states_at",
+    "tree_listing",
+    "without_proof",
+]
 
 _RETIRED: Final = "retired"
+_PROSE_LIMIT: Final = 64 * 1024
 
 
 # --------------------------------------------------------------------------------------------------
@@ -123,7 +131,7 @@ def path_view(selection: ReaderSelection, raw_path: str) -> dict[str, Any]:
     document: dict[str, Any] = {
         "kind": kind,
         "path": path,
-        "prose": read_memory_file(selection, prose_path).to_document(),
+        "prose": _summary_prose(selection, prose_path),
         "references": _references(selection, sidecar_path, path if kind == "file" else None),
         "testFile": kind == "file" and bool(at.proofs),
         "invariants": _invariant_groups(index, live, currentness),
@@ -135,6 +143,27 @@ def path_view(selection: ReaderSelection, raw_path: str) -> dict[str, Any]:
     }
     if kind == "directory":
         document.update(_directory_summary(index, path))
+    return document
+
+
+def path_prose(selection: ReaderSelection, raw_path: str) -> dict[str, Any]:
+    """The explicitly requested whole onboarding prose for a code path, at the selected tree."""
+
+    path = normal_path(raw_path)
+    prose_path, _sidecar = _onboarding_paths(path, _path_kind(selection, path))
+    return read_memory_file(selection, prose_path).to_document()
+
+
+def _summary_prose(selection: ReaderSelection, path: str) -> dict[str, Any]:
+    read = read_memory_file(selection, path)
+    document = read.to_document()
+    if read.text is not None:
+        encoded = read.text.encode("utf-8")
+        document.update(
+            text=encoded[:_PROSE_LIMIT].decode("utf-8", errors="ignore"),
+            truncated=len(encoded) > _PROSE_LIMIT,
+            fullSize=len(encoded),
+        )
     return document
 
 
@@ -168,6 +197,10 @@ def _directory_summary(index: KnowledgeIndex, path: str) -> dict[str, Any]:
             for name, n in sorted(counts.items())
         ],
         "subtree": {"entries": len(under), "view": "subtree"},
+        "deeperEntries": sum(
+            "/" in entry_path.removeprefix("" if path == ROOT_ROUTE_PATH else f"{path}/")
+            for entry_path in under
+        ),
     }
 
 

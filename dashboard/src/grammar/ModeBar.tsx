@@ -14,6 +14,8 @@ const bar = css({
   flexShrink: 0,
   gap: "0.3rem",
   "@media (max-width: 40rem)": {
+    flexWrap: "wrap",
+    minWidth: "0",
     gap: "0.2rem",
     "& button": { paddingInline: "0.35rem", letterSpacing: "0" },
   },

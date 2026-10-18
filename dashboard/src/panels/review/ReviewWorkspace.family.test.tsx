@@ -1,979 +1,653 @@
-// R24/R31 preservation at the mounted R86 workspace: recorded guarantees, member statements,
-// bounded rosters and continuations, wording distinctions, expressions, focus and retained UI state.
-// Review bodies keep the immutable bytes of the original familyReview captures and their provenance.
-// Their pre-R86 catalogue is supplied by the explicitly synthetic outline adapter; this is focused
-// component evidence and does not claim a newly captured outline or live-browser qualification.
-
+// Current raw tree captures, never old dataset answers with compatibility fields added.
+// Family selectors are served only their own captured bodies. Bounded invariant captures
+// additionally exercise FamilyReviewCenter's roster projection directly: this is component
+// evidence, not a claim that those bytes answered a family-selector HTTP request.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import {
-  REVIEW_PAGED_COLLECTIONS,
-  REVIEW_WALKABLE_COLLECTIONS,
-  type ReviewResult,
-} from '../../data/review';
+import { afterEach, expect, it, vi } from 'vitest';
+import type { ReviewResult } from '../../data/review';
+import { REVIEW_PAGED_COLLECTIONS, REVIEW_WALKABLE_COLLECTIONS } from '../../data/review';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
+import { FamilyReviewCenter } from './FamilyReviewCenter';
+import { emptyRosterSentence } from './FamilyTree';
 import { ReviewSurface } from './ReviewSurface';
 import { syntheticCatalogue } from './outline.test-utils';
 import { treeViewStore } from './triageViewPreference';
 import { treeOrderStore } from './triageOrderPreference';
-import { emptyRosterSentence } from './FamilyTree';
-let syntheticNavigation = syntheticCatalogue([]);
 
-// Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
-// exercised through both real readers in ReviewSurface.navigation.test.tsx.
-vi.mock("../../data/useReviewCatalogue", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../data/useReviewCatalogue")>();
+const captured = <T,>(name: string): T =>
+  JSON.parse(
+    readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), name), 'utf8'),
+  ) as T;
+const FAMILY = captured<ReviewResult>('subjectReview.successorFamily.captured.json');
+const MEMBER = captured<ReviewResult>('subjectReview.successorInvariant.captured.json');
+const COMPLETE = captured<ReviewResult>('familyReview.complete.captured.json');
+const TRUNCATED = captured<ReviewResult>('familyReview.truncated.captured.json');
+const CONTINUED = captured<ReviewResult>('familyReview.continued.captured.json');
+const IDENTICAL = captured<ReviewResult>('familyReview.identical.captured.json');
+const ONE_SIDED = captured<ReviewResult>('familyReview.oneSided.captured.json');
+const EMPTY = captured<ReviewResult>('familyReview.emptyRoster.captured.json');
+const FINAL = captured<ReviewResult>('familyReview.walkFinal.captured.json');
+const PAGING = captured<{ before: ReviewResult[]; after: ReviewResult[] }>(
+  'familyPaging.captured.json',
+);
+const CARDS = captured('l86.member-cards.captured.json');
+// Historical worklist response, only to isolate chrome; not current full-tree acceptance.
+const TREES = captured('l86.trees.captured.json');
+const LANE = captured('l86.lane.captured.json');
+const SOURCE_REFUSAL = {
+  state: 'refused',
+  refusal: {
+    code: 'not-found',
+    detail: 'Source bytes are outside this roster check.',
+    next_action: 'Read the served source endpoint.',
+  },
+};
+const family = (body: ReviewResult) => body.payload!.family_context!.entries[0];
+const selected = (body: ReviewResult) => body.payload!.knowledge.revision_selection!;
+const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
+let catalogue = syntheticCatalogue([FAMILY, IDENTICAL]);
+vi.mock('../../data/useReviewCatalogue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../data/useReviewCatalogue')>();
   return {
     ...actual,
-  useReviewCatalogue: () => ({
-    loading: false,
-    ...syntheticNavigation,
-    refresh: () => undefined,
-  }),
+    useReviewCatalogue: () => ({ loading: false, ...catalogue, refresh: () => undefined }),
   };
 });
 
-const REPO = 'agents-remember';
-const MASTER = '260921_complete-code-and-intent-review';
-const LEAF = '260921-ICR-L24';
+afterEach(() => {
+  cleanup();
+  resetCardCachesForTests();
+  vi.unstubAllGlobals();
+});
 
-// Two families the captured bodies record, with the exact authored guarantee text each selected
-// revision carries. They are read from the capture below rather than typed, so a changed capture
-// fails this module's own reading instead of silently re-pointing the assertions.
-const COMPLETE = captured('familyReview.complete.captured.json');
-const TRUNCATED = captured('familyReview.truncated.captured.json');
-const CONTINUED = captured('familyReview.continued.captured.json');
-const IDENTICAL = captured('familyReview.identical.captured.json');
-const ONE_SIDED = captured('familyReview.oneSided.captured.json');
-const EMPTY_ROSTER = captured('familyReview.emptyRoster.captured.json');
-const WALK_FINAL = captured('familyReview.walkFinal.captured.json');
-
-// Resolved from this file rather than from the process cwd, the same way `wireFixtureGuard` resolves
-// the dashboard root: the suite is run from the dashboard root by convention, but a case that depended
-// on that would fail for a reader running one file from elsewhere.
-function captured(name: string): unknown {
-  const here = path.dirname(new URL(import.meta.url).pathname);
-  return JSON.parse(readFileSync(path.join(here, name), 'utf8')) as unknown;
-}
-
-// The one identity a case needs out of a captured body whose subject was a FAMILY rather than an
-// invariant. The bodies are `unknown` on purpose -- they carry fields this client's mirror does not
-// declare -- so the value is narrowed at runtime instead of asserted with a type assertion, and a
-// body that does not carry it fails loudly rather than mounting the surface under a wrong subject.
-function firstFamilyId(body: unknown): string {
-  if (typeof body !== 'object' || body === null || !('payload' in body)) {
-    throw new Error('the captured body carries no payload');
-  }
-  const { payload } = body;
-  if (typeof payload !== 'object' || payload === null || !('family_context' in payload)) {
-    throw new Error('the captured body carries no family context');
-  }
-  const { family_context: context } = payload;
-  if (typeof context !== 'object' || context === null || !('entries' in context)) {
-    throw new Error('the captured family context carries no entries');
-  }
-  const { entries } = context;
-  if (!Array.isArray(entries) || entries.length === 0) {
-    throw new Error('the captured family context composes no family');
-  }
-  const first: unknown = entries[0];
-  if (typeof first !== 'object' || first === null || !('family_id' in first)) {
-    throw new Error('the composed family names no identity');
-  }
-  const { family_id: familyId } = first;
-  if (typeof familyId !== 'string') throw new Error('the family identity is not a string');
-  return familyId;
-}
-
-// The route's own typed answer for one listed entry whose content was not opened: this module's cases
-// about the explorer never assert on a file's bytes, only on the expansion state, and a real refusal
-// body is the shortest honest answer that keeps the decode path identical.
-const SOURCE_REFUSAL: unknown = {
-  state: 'refused',
-  operation: 'read_knowledge_review_source_content',
-  repository_id: REPO,
-  refusal: {
-    code: 'not-found',
-    detail:
-      "this case does not open entry content; the explorer's expansion state is what it reads",
-    next_action: 'open an entry against a served repository to read its content',
-  },
-};
-
-interface Serving {
-  urls: string[];
-}
-
-// One `fetch` for the whole surface, routed the way the browser routes: the review reads answer with
-// the queue of real bodies in order, and the source-content read answers with the typed refusal above.
-let initialFamily: string | undefined;
-function withoutFamilyContext(body: unknown): unknown {
-  const clone = JSON.parse(JSON.stringify(body)) as { payload?: Record<string, unknown> };
-  if (clone && typeof clone === 'object' && clone.payload && typeof clone.payload === 'object') {
-    delete clone.payload['family_context'];
-  }
-  return clone;
-}
-
-function serving(queue: unknown[]): Serving {
-  syntheticNavigation = syntheticCatalogue([queue[0] as ReviewResult]);
+function serving(first: ReviewResult = FAMILY, next: ReviewResult[] = []) {
+  catalogue = syntheticCatalogue([first, IDENTICAL]);
   treeViewStore.getState().setView('all');
   treeOrderStore.getState().setOrder('authored');
-  try {
-    initialFamily = firstFamilyId(queue[0]);
-  } catch {
-    initialFamily = undefined;
-  }
-  const urls: string[] = [];
-  let index = 0;
+  const urls: URL[] = [];
+  const subjects = new Map(
+    [first, FAMILY, MEMBER, IDENTICAL, ONE_SIDED, EMPTY].map((body) => [
+      `${selected(body).record_kind}:${selected(body).record_id}`,
+      body,
+    ]),
+  );
+  // The caller's first body wins when its selector shares a complete capture's identity.
+  subjects.set(`${selected(first).record_kind}:${selected(first).record_id}`, first);
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: unknown) => {
-      const address = String(url);
-      urls.push(address);
-      const body = address.includes('/source-content')
-        ? SOURCE_REFUSAL
-        : (queue[Math.min(index++, queue.length - 1)] as unknown);
-      return {
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        json: async () => body,
-      } as unknown as Response;
+    vi.fn(async (address: string) => {
+      const url = new URL(address, 'http://localhost');
+      urls.push(url);
+      if (url.pathname.endsWith('/source-content')) return response(SOURCE_REFUSAL);
+      if (url.pathname.endsWith('/trees')) {
+        if (!url.searchParams.has('invariants'))
+          return response(url.searchParams.has('lane') ? LANE : TREES);
+        const expected = [
+          ...new Set(
+            [...family(FAMILY).before.members, ...family(FAMILY).after.members].map(
+              (row) => row.invariant_id,
+            ),
+          ),
+        ]
+          .sort()
+          .join(',');
+        if (url.searchParams.get('invariants') !== expected)
+          throw new Error(
+            'Focused expressions for this other family are deliberately outside this roster-only check.',
+          );
+        return response(CARDS);
+      }
+      if (url.pathname !== '/api/review/intent') throw new Error(`Unexpected route: ${url}`);
+      if (url.searchParams.has('continuation')) {
+        const answer = next.shift();
+        if (!answer) throw new Error(`Uncaptured continuation: ${url}`);
+        return response(answer);
+      }
+      const answer = subjects.get(
+        `${url.searchParams.get('selectorKind')}:${url.searchParams.get('selectorId')}`,
+      );
+      if (!answer) throw new Error(`Uncaptured subject: ${url}`);
+      return response(answer);
     }),
   );
-  return { urls };
+  return { urls, reviews: () => urls.filter((url) => url.pathname === '/api/review/intent') };
 }
-
-function mount(history?: 'recorded', familyId?: string) {
+function mount(body: ReviewResult = FAMILY) {
+  const { candidate } = body.payload!;
   return render(
     <ReviewSurface
-      repo={REPO}
-      master={MASTER}
-      leaf={LEAF}
-      selectorKind={(familyId ?? initialFamily) ? 'family' : undefined}
-      selectorId={familyId ?? initialFamily}
-      history={history}
+      repo={candidate.repository_id}
+      master={candidate.master}
+      leaf={candidate.leaf_id}
+      history="recorded"
+      selectorKind={selected(body).record_kind}
+      selectorId={selected(body).record_id}
       onBack={vi.fn()}
     />,
   );
 }
+// Honest presentation-level probe of family context from an invariant-selector answer.
+function roster(body: ReviewResult, memberRevisionId?: string) {
+  const onRosterNext = vi.fn();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => response(CARDS)),
+  );
+  const entry = family(body);
+  const view = render(
+    <FamilyReviewCenter
+      payload={body.payload!}
+      selection={{ familyId: entry.family_id, memberRevisionId }}
+      layout="split"
+      onLayout={vi.fn()}
+      fullFile={false}
+      onFullFile={vi.fn()}
+      onOpenMember={vi.fn()}
+      onRosterNext={onRosterNext}
+      openPath={null}
+      onOpenPath={vi.fn()}
+      onOpenFromCenter={vi.fn()}
+    />,
+  );
+  return { ...view, onRosterNext };
+}
+const familyButton = (view: ReturnType<typeof render>, id: string) =>
+  view.getAllByTestId('review-family-open').find((button) => button.dataset.family === id)!;
 
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
+// Recover the text actually drawn by the word-diff, without its opposite edits
+// or screen-reader-only announcements. It must equal the producer's entire statement.
+function displayedSide(passage: HTMLElement, side: 'before' | 'after') {
+  const prose =
+    within(passage).queryByTestId(`intent-diff-${side}`) ??
+    within(passage).getByTestId('intent-diff-inline');
+  const copy = prose.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll(side === 'before' ? 'ins' : 'del').forEach((node) => node.remove());
+  copy
+    .querySelectorAll('del > span:not([aria-hidden]), ins > span:not([aria-hidden])')
+    .forEach((node) => node.remove());
+  return copy.textContent!.replace(/·/g, ' ').replace(/→/g, '\t').replace(/↵\n/g, '\n');
+}
+
+it('renders the real family, its authored guarantee and full member statements', async () => {
+  serving();
+  const view = mount();
+  const center = await view.findByTestId('review-center-family');
+  expect(view.getAllByTestId('review-family')).toHaveLength(2);
+  expect(view.getByTestId('review-family-tree').querySelector('details')).toBeNull();
+  expect(center.dataset.family).toBe(family(FAMILY).family_id);
+  expect(view.getByTestId('review-center-guarantee-label').textContent).toBe(
+    'Changed guarantee · revision r1 → r3',
+  );
+  const members = within(center).getByTestId('review-center-family-members');
+  expect(within(members).getAllByTestId('review-center-open-member')).toHaveLength(5);
+  for (const before of family(FAMILY).before.members) {
+    const after = family(FAMILY).after.members.find(
+      (row) => row.invariant_id === before.invariant_id,
+    )!;
+    const row = within(members)
+      .getAllByTestId('review-center-open-member')
+      .find((button) => button.dataset.revision === before.invariant_revision_id)!
+      .closest('li')!;
+    expect(row.textContent).toContain(before.display_label);
+    if (before.statement === after.statement) {
+      expect(row.textContent).toContain(before.statement);
+    } else {
+      const passage = within(row).getByTestId('intent-diff');
+      expect(displayedSide(passage, 'before')).toBe(before.statement);
+      expect(displayedSide(passage, 'after')).toBe(after.statement);
+    }
+  }
+  const guarantee = within(center).getByTestId('review-center-guarantee-changed');
+  const passage = within(guarantee).getByTestId('intent-diff');
+  expect(displayedSide(passage, 'before')).toBe(family(FAMILY).before.guarantee!.joint_guarantee);
+  expect(displayedSide(passage, 'after')).toBe(family(FAMILY).after.guarantee!.joint_guarantee);
 });
 
-describe('ReviewSurface family-centered workspace (ICR-R24@v3)', () => {
-  it('renders the recorded families, their authored guarantees and the full member statements', async () => {
-    serving([COMPLETE]);
-    const view = mount();
-    const tree = await view.findByTestId('review-family-tree');
-    expect(view.getAllByTestId('review-family')).toHaveLength(2);
-    expect(tree.querySelector('details')).toBeNull();
-    expect(tree.querySelector('[data-testid="review-center-guarantee"]')).toBeNull();
-    const centre = await view.findByTestId('review-center-family');
-    expect(centre.textContent).toContain(
-      'The retry budget is shared by integration and synchronization.',
-    );
-    fireEvent.click(view.getAllByTestId('review-family-open')[1]);
-    await waitFor(() =>
-      expect(view.getByTestId('review-center-family').textContent).toContain(
-        'The retry budget and the anchor identity rule hold together.',
-      ),
-    );
-    expect(view.getByTestId('review-center-family').textContent).toContain(
-      'The retry budget and the batch obligation hold together under the revised member.',
-    );
-    expect(centre.textContent).toContain(
-      'Retries share one budget across integration and synchronization.',
-    );
-    expect(view.getAllByTestId('review-family-member-open').length).toBeGreaterThanOrEqual(5);
+it('draws changed and unchanged guarantees according to their actual revision pairs', async () => {
+  serving();
+  const view = mount();
+  await view.findByTestId('review-center-family');
+  expect(view.getByTestId('review-center-guarantee-changed').dataset.wordDiff).toBe('true');
+  fireEvent.click(familyButton(view, family(IDENTICAL).family_id));
+  const unchanged = await view.findByTestId('review-center-guarantee-unchanged');
+  expect(unchanged.textContent).toContain('Guarantee unchanged · same recorded revision');
+  expect(unchanged.textContent).toContain(family(IDENTICAL).after.guarantee!.joint_guarantee);
+  expect(view.queryByTestId('review-center-guarantee-changed')).toBeNull();
+});
+
+it('reads a member owner, retains its family and keeps the five independent facts distinct', async () => {
+  const server = serving();
+  const view = mount();
+  await view.findByTestId('review-center-family');
+  fireEvent.click(
+    view
+      .getAllByTestId('review-center-open-member')
+      .find((button) => button.dataset.revision === selected(MEMBER).after_revision_id)!,
+  );
+  const center = await view.findByTestId('review-center-member');
+  expect(center.dataset.family).toBe(family(MEMBER).family_id);
+  expect(
+    server
+      .reviews()
+      .some((url) => url.searchParams.get('selectorId') === selected(MEMBER).record_id),
+  ).toBe(true);
+  const facts = view.getByTestId('review-center-facts');
+  for (const fact of ['guarantee', 'statement', 'membership', 'source', 'judgment'])
+    expect(facts.querySelector(`[data-fact="${fact}"]`)?.textContent).toBeTruthy();
+  expect(facts.querySelector('[data-fact="judgment"]')?.textContent).toContain(
+    'No member, membership or guarantee change creates an authored judgment',
+  );
+  expect(view.getByTestId('review-center-judgment').dataset.judgmentState).toBe(
+    MEMBER.payload!.judgment.state,
+  );
+});
+
+it('keeps All changes and the complete source population independent of family selection', async () => {
+  serving();
+  const view = mount();
+  const workspace = await view.findByTestId('review-workspace');
+  const all = within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
+    name: /^All changes/,
   });
-
-  it('opens a family review whose guarantee comparison is the shape the two recorded revisions support', async () => {
-    serving([COMPLETE]);
-    const view = mount();
-    const openers = await view.findAllByTestId('review-family-open');
-
-    // One of these two families selected the SAME family revision on both snapshots -- the only shape
-    // in which "the guarantee is unchanged" is a true sentence -- and the other selected two DIFFERENT
-    // revisions with different authored text, which must be drawn as the real before/after diff. The
-    // case reads which is which from the rendered blocks rather than from a capture's row order, so a
-    // re-captured body cannot silently re-point it at the wrong family.
-    const shapes: string[] = [];
-    for (const familyId of openers.map((node) => node.dataset.family)) {
-      fireEvent.click(
-        view.getAllByTestId('review-family-open').find((node) => node.dataset.family === familyId)!,
-      );
-      await waitFor(() =>
-        expect(view.getByTestId('review-center-family').dataset.family).toBe(familyId),
-      );
-      if (view.queryByTestId('review-center-guarantee-unchanged') !== null) {
-        expect(view.getByTestId('review-center-guarantee-unchanged').textContent).toContain(
-          'Guarantee unchanged · same recorded revision',
-        );
-        expect(view.queryByTestId('review-center-guarantee-changed')).toBeNull();
-        shapes.push('unchanged');
-        continue;
-      }
-      const changed = await view.findByTestId('review-center-guarantee-changed');
-      expect(changed.textContent).toContain(
-        'The retry budget and the anchor identity rule hold together.',
-      );
-      expect(changed.textContent).toContain(
-        'The retry budget and the batch obligation hold together under the revised member.',
-      );
-      shapes.push('changed');
-    }
-    expect(shapes.sort()).toEqual(['changed', 'unchanged']);
-    expect(view.getByTestId('review-center').dataset.selectionKind).toBe('family');
-  });
-
-  it('keeps the family context when a member is selected and states the five facts separately', async () => {
-    serving([COMPLETE]);
-    const view = mount();
-    const memberOpeners = await view.findAllByTestId('review-family-member-open');
-
-    fireEvent.click(memberOpeners[0]);
-    await view.findByTestId('review-center-member');
-
-    // The member's review retains its family: the guarantee the statement is about is on screen above
-    // it, not behind a tab or an inspector.
-    expect(view.getByTestId('review-center-member-family').textContent).toContain('Member review');
-    expect(
-      view.queryByTestId('review-center-guarantee-changed') ??
-        view.queryByTestId('review-center-guarantee-unchanged') ??
-        view.queryByTestId('review-center-guarantee-one-sided'),
-    ).not.toBeNull();
-
-    // Statement, membership/realization, source attribution and authored judgment are four more
-    // separate facts beside the guarantee, each stated from its own owner's value.
-    const facts = view.getByTestId('review-center-facts');
-    const byFact = (name: string) =>
-      facts.querySelector(`[data-fact="${name}"]`)?.textContent ?? '';
-    expect(byFact('guarantee')).toContain('guarantee:');
-    expect(byFact('statement')).toContain('member statement:');
-    expect(byFact('membership')).toContain('recorded realization claim(s)');
-    expect(byFact('source')).toContain("location record(s) name this member's retained revisions");
-    expect(byFact('assessment')).toContain('No member, membership or guarantee change creates one');
-    expect(view.getByTestId('review-center-evidence')).toBeTruthy();
-  });
-
-  it('keeps the complete source explorer independent of the family selection', async () => {
-    serving([COMPLETE]);
-    const view = mount();
-    const workspace = await view.findByTestId('review-workspace');
-    expect(view.queryByTestId('review-source-explorer')).toBeNull();
-    const all = within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
+  expect(all.textContent).toContain(String(FAMILY.payload!.source.inventory.listed_total));
+  fireEvent.click(familyButton(view, family(IDENTICAL).family_id));
+  await view.findByTestId('review-center-guarantee-unchanged');
+  expect(
+    within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
       name: /^All changes/,
-    });
-    expect(all.textContent).toContain('All changes');
-    fireEvent.click((await view.findAllByTestId('review-family-open'))[1]);
-    await view.findByTestId('review-center-family');
-    expect(
-      within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
-        name: /^All changes/,
-      }),
-    ).toBe(all);
-    expect(view.getByTestId('review-workspace')).toBe(workspace);
-  });
+    }),
+  ).toBe(all);
+  expect(view.getByTestId('review-workspace')).toBe(workspace);
+  expect(view.queryByTestId('review-source-explorer')).toBeNull();
+});
 
-  it("sends the family's published cursor and refuses a response from another walk", async () => {
-    const { urls } = serving([TRUNCATED, CONTINUED]);
-    const view = mount();
-
-    // The collection picker offers only the collections a cursor-less request can be answered for.
-    // `family_members` is a member of the server's union and of this client's mirror, and is
-    // deliberately absent here: naming it with no cursor earns the server's own
-    // `comparison_page_unreadable` refusal, so a picker option for it would be a control that fetches
-    // a refusal for a question the reader did not ask.
-    expect(REVIEW_PAGED_COLLECTIONS).toContain('family_members');
-    expect(REVIEW_WALKABLE_COLLECTIONS).not.toContain('family_members');
-    const picker = await view.findByTestId('review-page-collection');
-    const offered = within(picker)
+it('sends the published family cursor and rejects a response from another walk', async () => {
+  const server = serving(TRUNCATED, [CONTINUED]);
+  const view = mount(TRUNCATED);
+  await view.findByTestId('review-center-member');
+  expect(REVIEW_PAGED_COLLECTIONS).toContain('family_members');
+  expect(REVIEW_WALKABLE_COLLECTIONS).not.toContain('family_members');
+  const picker = view.getByTestId('review-page-collection');
+  expect(
+    within(picker)
       .getAllByTestId('review-page-option')
-      .map((option) => (option as HTMLOptionElement).value);
-    expect(offered).toEqual([...REVIEW_WALKABLE_COLLECTIONS]);
-    expect(offered).not.toContain('family_members');
+      .map((node) => (node as HTMLOptionElement).value),
+  ).toEqual([...REVIEW_WALKABLE_COLLECTIONS]);
+  const next = view.getAllByTestId('review-center-roster-next')[0];
+  const cursor = next.dataset.continuation!;
+  expect(cursor).toBe(family(TRUNCATED).before.page!.continuation);
+  fireEvent.click(next);
+  const failure = await view.findByTestId('review-failure');
+  expect(failure.dataset.reviewCode).toBe('comparison_page_unreadable');
+  expect(server.reviews()[1].searchParams.get('continuation')).toBe(cursor);
+  expect(server.reviews()[1].searchParams.get('pageOf')).toBe('family_members');
+  expect(view.getByTestId('review-retained-generation')).toBeTruthy();
+});
 
-    // The truncated roster states both of the read owner's own measures, with the population each one
-    // measured -- the item walk and the membership rows are different counts.
-    const roster = view.getAllByTestId('review-center-roster')[0];
-    expect(roster.dataset.rosterComplete).toBe('false');
-    expect(roster.textContent).toContain("item(s) of this family revision's recorded selection");
-    expect(roster.textContent).toContain('membership row(s); loaded context contains');
+it('keeps expanded full-file and inline layout state across actual family selections', async () => {
+  serving();
+  const view = mount();
+  await view.findByTestId('review-center-family');
+  fireEvent.change(view.getByTestId('review-center-diff-layout'), { target: { value: 'inline' } });
+  fireEvent.click(view.getByTestId('review-center-full-file'));
+  fireEvent.click(familyButton(view, family(IDENTICAL).family_id));
+  await view.findByTestId('review-center-guarantee-unchanged');
+  expect(view.getByTestId('review-workspace').dataset.fullFile).toBe('true');
+  expect(view.getByTestId('review-workspace').dataset.diffLayout).toBe('inline');
+});
 
-    const nexts = await view.findAllByTestId('review-center-roster-next');
-    expect(nexts.length).toBeGreaterThan(0);
-    const published = nexts[0].dataset.continuation ?? '';
-    expect(published).not.toBe('');
-    fireEvent.click(nexts[0]);
+it('marks the selection and traverses the intact tree by keyboard', async () => {
+  serving();
+  const view = mount();
+  await view.findByTestId('review-center-family');
+  expect(familyButton(view, family(FAMILY).family_id).getAttribute('aria-current')).toBe('true');
+  const members = view.getAllByTestId('review-family-member-open');
+  members[0].focus();
+  fireEvent.keyDown(members[0], { key: 'ArrowDown' });
+  expect(document.activeElement).toBe(members[1]);
+  fireEvent.keyDown(members[1], { key: 'ArrowUp' });
+  expect(document.activeElement).toBe(members[0]);
+});
 
-    await waitFor(() => expect(urls.length).toBeGreaterThan(1));
-    const continuationRequest = urls[1];
-    expect(continuationRequest).toContain('pageOf=family_members');
-    // The value sent is the value the family context's own roster page published, unchanged.
-    expect(decodeURIComponent(continuationRequest)).toContain(published);
-
-    // This older capture continues the after-side cursor and carries a different primary revision
-    // selection. The clicked before cursor cannot admit it as a successful replacement.
-    const failure = await view.findByTestId('review-failure');
-    expect(failure.dataset.reviewCode).toBe('comparison_page_unreadable');
-    expect(view.getByTestId('review-retained-generation')).toBeTruthy();
-    expect(view.queryByTestId('review-roster-walk')).toBeNull();
-  });
-
-  it('renders a body that carries no family context as that fact, never as a measured zero', async () => {
-    serving([withoutFamilyContext(COMPLETE)]);
-    const view = mount();
-    await view.findByTestId('review-family-tree');
-    expect(view.getByTestId('review-scope-families').textContent).toContain(
-      'Family context was not supplied',
-    );
-    expect(view.queryAllByTestId('review-family')).toHaveLength(0);
-    expect(view.queryByTestId('review-source-explorer')).toBeNull();
-  });
-
-  it('keeps an expanded entry expanded across a diff-layout switch', async () => {
-    serving([COMPLETE]);
-    const view = mount();
-    await view.findByTestId('review-center-family');
-    fireEvent.change(view.getByTestId('review-center-diff-layout'), {
-      target: { value: 'inline' },
-    });
-    expect(view.getByTestId('review-workspace').dataset.diffLayout).toBe('inline');
-    fireEvent.click(view.getByTestId('review-center-full-file'));
-    expect(view.getByTestId('review-workspace').dataset.fullFile).toBe('true');
-    fireEvent.click(view.getAllByTestId('review-family-open')[1]);
-    await view.findByTestId('review-center-family');
-    expect(view.getByTestId('review-workspace').dataset.fullFile).toBe('true');
-    expect(view.getByTestId('review-workspace').dataset.diffLayout).toBe('inline');
-  });
-
-  it('marks the current selection and traverses the tree by keyboard', async () => {
-    serving([COMPLETE]);
-    const view = mount();
-    const nodes = await view.findAllByTestId('review-family-open');
-
-    fireEvent.click(nodes[0]);
-    await waitFor(() => expect(view.getByTestId('review-center')).toBeTruthy());
-    const currentNode = view
-      .getAllByTestId('review-family-open')
-      .find((node) => node.getAttribute('aria-current') === 'true');
-    expect(currentNode).toBe(view.getAllByTestId('review-family-open')[0]);
-
-    // Arrow traversal inside the one roving-focus group, and the current selection is exposed on the
-    // tree itself rather than only implied by what the centre column happens to show.
-    const tree = view.getByTestId('review-family-list');
-    const memberOpeners = view.getAllByTestId('review-family-member-open');
-    const target = memberOpeners[0];
-    target.focus();
-    fireEvent.keyDown(target, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(memberOpeners[1]);
-    fireEvent.keyDown(memberOpeners[1], { key: 'ArrowUp' });
-    expect(document.activeElement).toBe(target);
-    expect(tree).toBeTruthy();
-  });
-
-  it("reports the filter scope without restating the comparison's totals", async () => {
-    serving([COMPLETE]);
-    const view = mount();
-    await view.findByTestId('review-family-tree');
-    expect(view.queryByTestId('review-family-filter-scope')).toBeNull();
-    fireEvent.change(view.getByTestId('review-family-filter'), {
-      target: { value: 'retry budget family' },
-    });
-    expect(view.getAllByTestId('review-family')).toHaveLength(1);
-    expect(
-      within(view.getAllByTestId('review-family')[0]).getAllByTestId('review-family-member').length,
-    ).toBeGreaterThan(0);
-    fireEvent.change(view.getByTestId('review-family-filter'), {
-      target: { value: 'no-such-family-anywhere' },
-    });
-    expect(view.getByText('No rows match “no-such-family-anywhere”.')).toBeTruthy();
-  });
-  // ── fix round 1: the two blocked sentences, and the two unpinned distinctions ────────────────────
-
-  it('states a bounded roster page as the part of the measured rows it carried, never as zero', async () => {
-    serving([TRUNCATED]);
-    const view = mount();
-    await view.findByTestId('review-family-tree');
-
-    // Every family in this capture has a roster page that is a position in a walk: each side MEASURED
-    // 2 recorded membership rows and this page carried 1 of them. (Since ICR-L38 a first page always
-    // carries the member its first items represent, so the route no longer serves a bounded page that
-    // carries none; MIK-L31 re-captured this body from the current route.) The owner's own measures
-    // are printed, the continuation is offered, and nothing says "measured zero" or prints the
-    // empty-roster sentence for a roster that is not empty.
-    const rosters = view
-      .getAllByTestId('review-center-roster')
-      .map((node) => node.textContent ?? '');
-    expect(rosters).toHaveLength(2);
-    for (const roster of rosters)
-      expect(roster).toContain('records 2 membership row(s); loaded context contains 1 of them');
-    expect(view.queryAllByTestId('review-center-family-empty')).toHaveLength(0);
-    expect(view.getByTestId('review-family-tree').textContent).not.toContain('measured zero');
-    expect(view.getAllByTestId('review-center-roster-next').length).toBeGreaterThan(0);
-  });
-
-  it('says a bounded roster carried none of the measured rows, never that the read measured zero (SYNTHETIC body)', async () => {
-    // SYNTHETIC FIXTURE, not a route body: the real TRUNCATED capture with every roster's member rows
-    // removed. Since ICR-L38 the route's first page always carries the member its first items
-    // represent, so no real body reaches this branch any more; it is kept (MIK-L31 ruling Q3) and
-    // covered by this derived body, whose owner counts still say each side records 2 rows.
-    const synthetic = structuredClone(TRUNCATED as ReviewResult);
-    for (const entry of synthetic.payload!.family_context!.entries) {
-      entry.before.members = [];
-      entry.after.members = [];
-    }
-    serving([synthetic]);
-    const view = mount();
-    await view.findByTestId('review-family-tree');
-    const empties = view.getAllByTestId('review-center-family-empty');
-    expect(empties).toHaveLength(1);
-    const said = empties.map((node) => node.textContent ?? '').join('\n');
-    expect(said).toContain('this page carried no member row');
-    expect(said).toContain('0 of the 2 recorded membership row(s) it measured');
-    expect(said).toContain(
-      'The continuation beside each bounded roster reaches the rows this page did not carry.',
-    );
-    expect(said).not.toContain('measured zero');
-  });
-
-  it('still says the measured zero when the read really measured zero memberships', async () => {
-    // The other direction of the same sentence: this body records a family revision whose roster the
-    // read took whole and measured zero membership rows for. Only here may "measured zero" be said.
-    serving([EMPTY_ROSTER]);
-    const view = mount(undefined, firstFamilyId(EMPTY_ROSTER));
-    const empty = await view.findByTestId('review-center-family-empty');
-    expect(empty.textContent).toContain(
-      'the read measured zero memberships for the selected family revision',
-    );
-    expect(empty.textContent).toContain('0 recorded membership row(s)');
-    expect(empty.textContent).not.toContain('this page carried no member row');
-  });
-
-  it("heads a bounded member context partial and counts the owner's rows, not this page's", async () => {
-    const { urls } = serving([TRUNCATED, CONTINUED]);
-    const view = mount();
-    await view.findByTestId('review-family-tree');
-    fireEvent.click((await view.findAllByTestId('review-family-open'))[0]);
-    await view.findByTestId('review-center-family');
-
-    // The centre is the packet's primary reading path, so it may not present a bounded page as the
-    // member context's whole: the heading, the counts and the per-side lines all state the bound.
-    expect(view.getByTestId('review-center-member-heading').textContent).toContain(
-      'Recorded member context (partial)',
-    );
-    const counts = view.getByTestId('review-center-member-counts').textContent ?? '';
-    expect(counts).toContain(
-      '4 recorded membership row(s) measured by the read across 2 recorded side(s) (before 2 + after 2)',
-    );
-    // The loaded count is this capture's own distinct member revisions of the opened family (the
-    // builders draw fresh identities, so it is read from the body, not written as a literal).
-    const opened = view.getByTestId('review-center-family').dataset.family;
-    const family = (TRUNCATED as ReviewResult).payload!.family_context!.entries.find(
-      (entry) => entry.family_id === opened,
-    )!;
-    const loaded = new Set(
-      [...family.before.members, ...family.after.members].map(
-        (member) => member.invariant_revision_id,
-      ),
-    ).size;
-    expect(loaded).toBeLessThan(4); // a capture that carried every row could not pass silently
-    expect(counts).toContain(`loaded context contains ${loaded} member row(s) of them`);
-    expect(counts).toContain('the continuations beside the bounded rosters reach the rest');
-    expect(view.getByTestId('review-center-member-distinct').textContent).toContain(
-      'among the loaded membership contexts',
-    );
-    // The per-side owner lines and the walk control are the tree's own components, mounted here too.
-    for (const line of view.getAllByTestId('review-center-roster')) {
-      expect(line.textContent).toContain('membership row(s); loaded context contains');
-    }
-    // The centre's own control must WORK, not merely exist: it is clicked here and the request it
-    // issues is asserted, because a control mounted without its handler renders identically and
-    // fetches nothing (fix round 2, V6).
-    const control = view.getAllByTestId('review-center-roster-next')[0];
-    const published = control.dataset.continuation ?? '';
-    expect(published).not.toBe('');
-    expect(urls.length).toBe(1);
-    fireEvent.click(control);
-    await waitFor(() => expect(urls.length).toBeGreaterThan(1));
-    expect(urls[1]).toContain('pageOf=family_members');
-    expect(decodeURIComponent(urls[1])).toContain(published);
-  });
-
-  it('distinguishes two distinct revisions with identical text from one unchanged revision', async () => {
-    serving([IDENTICAL]);
-    const view = mount();
-    const openers = await view.findAllByTestId('review-family-open');
-
-    // Family 2 authored a successor revision carrying the parent's own text: two DISTINCT revisions,
-    // identical text. That is not "the guarantee is unchanged" -- a revision was authored between
-    // them. MIK-R31 rule 3 (the 13:40 decision): it is "wording unchanged", the text shown ONCE with
-    // `revision <before> → <after>` as compact metadata and both revision identities in details.
-    fireEvent.click(openers[1]);
-    const identical = await view.findByTestId('review-center-guarantee-identical-text');
-    const family = (IDENTICAL as ReviewResult).payload!.family_context!.entries[1];
-    const [before, after] = [family.before.guarantee!, family.after.guarantee!];
-    expect(identical.textContent).toContain(
-      `Wording unchanged · revision ${before.revision_id.slice(0, 8)} → ${after.revision_id.slice(0, 8)}`,
-    );
-    expect(identical.querySelectorAll('[data-testid="review-center-guarantee"]')).toHaveLength(1);
-    expect(identical.textContent!.split(after.joint_guarantee)).toHaveLength(2);
-    expect(identical.textContent).toContain(`before revision ${before.revision_id}`);
-    expect(identical.textContent).toContain(`after revision ${after.revision_id}`);
-    expect(view.queryByTestId('review-center-guarantee-unchanged')).toBeNull();
-    expect(identical.textContent).not.toContain('so the guarantee is unchanged');
-
-    // Family 1 selected the SAME revision on both snapshots, which is the only shape allowed to say
-    // the guarantee is unchanged.
-    fireEvent.click(view.getAllByTestId('review-family-open')[0]);
-    const unchanged = await view.findByTestId('review-center-guarantee-unchanged');
-    expect(unchanged.textContent).toContain('Guarantee unchanged · same recorded revision');
-    expect(view.queryByTestId('review-center-guarantee-identical-text')).toBeNull();
-  });
-
-  it('states a member whose content the page did not carry as that, not as a one-sided statement', async () => {
-    serving([ONE_SIDED]);
-    const view = mount();
-    await view.findByTestId('review-family-tree');
-
-    // This walk carried one membership row whose revision content it did not carry, on the only side
-    // that records it. Selecting it must say the content was not on the page; the one-sided wrapper
-    // beside it would instead present a comparison that was never made.
-    const missing = (ONE_SIDED as ReviewResult)
-      .payload!.family_context!.entries.flatMap((entry) => [
-        ...entry.before.members,
-        ...entry.after.members,
-      ])
-      .find((member) => member.state === 'content_not_on_page')!;
-    const row = view
-      .getAllByTestId('review-family-member-open')
-      .find((node) => node.dataset.revision === missing.invariant_revision_id)!
-      .closest('li');
-    expect(row).not.toBeNull();
-    fireEvent.click(within(row as HTMLElement).getByTestId('review-family-member-open'));
-
-    const block = await view.findByTestId('review-center-member-unavailable');
-    expect(block.textContent).toContain('No statement comparison is claimed');
-    expect(view.queryByTestId('review-center-member-one-sided')).toBeNull();
-    expect(view.queryByTestId('review-center-member-unchanged')).toBeNull();
-    expect(view.queryByTestId('review-center-member-changed')).toBeNull();
-  });
-  it('does not turn an uncarried roster operand into an absent statement', async () => {
-    const { urls } = serving([CONTINUED]);
-    const view = mount();
-    const tree = await view.findByTestId('review-family-tree');
-    const row = within(tree)
-      .getAllByTestId('review-family-member')
-      .find((node) =>
-        node.querySelector(
-          `[data-revision="${(CONTINUED as ReviewResult).payload!.family_context!.entries[0].before.members[0].invariant_revision_id}"]`,
-        ),
-      )!;
-    const revision = within(row).getByTestId('review-family-member-open').dataset.revision!;
-    fireEvent.click(within(row).getByTestId('review-family-member-open'));
-    await waitFor(() =>
-      expect(urls.some((url) => url.includes('selectorKind=invariant'))).toBe(true),
-    );
-    await view.findByTestId('review-center-member-ambiguous');
-    expect(view.queryByTestId('review-center-member-one-sided')).toBeNull();
-    expect(
-      view.getByTestId('review-family-tree').querySelector(`[data-revision="${revision}"]`),
-    ).not.toBeNull();
-    const control = view.getAllByTestId('review-center-roster-next')[0];
-    const published = control.dataset.continuation!;
-    fireEvent.click(control);
-    await waitFor(() =>
-      expect(urls.some((url) => url.includes('pageOf=family_members'))).toBe(true),
-    );
-    expect(decodeURIComponent(urls.at(-1)!)).toContain(published);
-  });
-
-  it('retains a bounded before-only membership without claiming that the invariant was removed', async () => {
-    const { urls } = serving([CONTINUED]);
-    const view = mount();
-    const tree = await view.findByTestId('review-family-tree');
-    const row = within(tree)
-      .getAllByTestId('review-family-member')
-      .find((node) =>
-        node.querySelector(
-          `[data-revision="${(CONTINUED as ReviewResult).payload!.family_context!.entries.flatMap((entry) => entry.before.members.filter((member) => !entry.after.members.some((after) => after.invariant_revision_id === member.invariant_revision_id)))[0].invariant_revision_id}"]`,
-        ),
-      )!;
-    const revision = within(row).getByTestId('review-family-member-open').dataset.revision!;
-    fireEvent.click(within(row).getByTestId('review-family-member-open'));
-    await waitFor(() =>
-      expect(urls.some((url) => url.includes('selectorKind=invariant'))).toBe(true),
-    );
-    await view.findByTestId('review-center-member');
-    expect(view.queryByTestId('review-center-member-one-sided')).toBeNull();
-    expect(
-      view.getByTestId('review-family-tree').querySelector(`[data-revision="${revision}"]`),
-    ).not.toBeNull();
-    expect(view.getAllByTestId('review-center-roster-next').length).toBeGreaterThan(0);
-  });
-
-  it('prints one empty-roster sentence in both columns, not two that happen to agree', async () => {
-    serving([EMPTY_ROSTER]);
-    const view = mount(undefined, firstFamilyId(EMPTY_ROSTER));
-    await view.findByTestId('review-family-tree');
-    expect(
-      view
-        .getByTestId('review-family-tree')
-        .querySelector('[data-testid="review-center-family-empty"]'),
-    ).toBeNull();
-    const openers = view.getAllByTestId('review-family-open');
-    for (const opener of openers) {
-      fireEvent.click(opener);
-      await view.findByTestId('review-center-family');
-      const id = view.getByTestId('review-center-family').dataset.family;
-      const entry = (EMPTY_ROSTER as ReviewResult).payload!.family_context!.entries.find(
-        (entry) => entry.family_id === id,
-      )!;
-      expect(view.getByTestId('review-center-family-empty').textContent).toBe(
-        emptyRosterSentence(entry),
-      );
-    }
-  });
-  it("states the page that completes a multi-page walk as the walk's last page, not as the whole roster", async () => {
-    serving([WALK_FINAL]);
-    const view = mount();
-    await view.findByTestId('review-family-tree');
-
-    // This body is the final page of a four-page roster walk: it completes the walk and carried some
-    // of the revision's 72 recorded membership rows (re-captured by MIK-L31 from the current route;
-    // how many depends on the build's identity draw, so the count is read from the body). Before the walk's completion guard was corrected the
-    // route answered this page's request with HTTP 500, so nothing here was renderable at all.
-    const completed = (WALK_FINAL as ReviewResult).payload!.family_context!.entries.find(
-      (entry) => entry.after.members_total === 72,
-    )!;
-    fireEvent.click(
-      view
-        .getAllByTestId('review-family-open')
-        .find((node) => node.dataset.family === completed.family_id)!,
-    );
-    await waitFor(() =>
-      expect(view.getByTestId('review-center-family').dataset.family).toBe(completed.family_id),
-    );
-    const lines = view.getAllByTestId('review-center-roster');
-    const lastPage = lines.filter((node) =>
-      (node.textContent ?? '').includes('completes the walk'),
-    );
-    expect(lastPage).toHaveLength(1);
-    expect(lastPage[0].textContent).toContain('loaded context can retain earlier pages');
-    const walked = (WALK_FINAL as ReviewResult).payload!.family_context!.entries.find(
-      (entry) => entry.after.members_total === 72,
-    )!;
-    expect(walked.after.members.length).toBeLessThan(72);
-    expect(lastPage[0].textContent).toContain(
-      `loaded context contains ${walked.after.members.length} of them`,
-    );
-    expect(lastPage[0].textContent).not.toContain('the page is the whole selection');
-
-    // The rosters the read really did take in one page still say so, and never claim to be a step in
-    // a walk they are the whole of.
-    const whole = lines.filter((node) =>
-      (node.textContent ?? '').includes('the page is the whole selection'),
-    );
-    fireEvent.click(
-      view
-        .getAllByTestId('review-family-open')
-        .find((node) => node.dataset.family !== completed.family_id)!,
-    );
-    await view.findByTestId('review-center-family');
-    expect(
-      view
-        .getAllByTestId('review-center-roster')
-        .some((node) => node.textContent?.includes('the page is the whole selection')),
-    ).toBe(true);
-    for (const line of whole) expect(line.textContent).not.toContain('completes the walk');
-
-    // And the surface read the real route's own sentence for that side rather than inventing one.
-  });
-  it("keeps the reader's workspace state across two page requests through the centre's own control", async () => {
-    const { urls } = serving([TRUNCATED, CONTINUED, CONTINUED]);
-    const view = mount();
-    await view.findByTestId('review-family-tree');
-
-    // The reader sets all four pieces of local state: a selected family, a filter, an inline diff
-    // layout and "full file". A page read unmounts the workspace subtree -- the payload is
-    // null while the answer is in flight -- so state owned below that switch would be discarded on
-    // every page, which is what the round-4 verification measured (fix round 5, V10).
-    fireEvent.click((await view.findAllByTestId('review-family-open'))[0]);
-    await view.findByTestId('review-center-family');
-    fireEvent.change(view.getByTestId('review-family-filter'), { target: { value: 'anchor' } });
-    fireEvent.change(view.getByTestId('review-center-diff-layout'), {
-      target: { value: 'inline' },
-    });
-    fireEvent.click(view.getByTestId('review-center-full-file'));
-    await waitFor(() => expect(view.getByTestId('review-workspace').dataset.fullFile).toBe('true'));
-    expect(view.getByTestId('review-workspace').dataset.diffLayout).toBe('inline');
-
-    const state = () => ({
-      selectionKind: view.getByTestId('review-center').dataset.selectionKind,
-      centreControls: view.getAllByTestId('review-center-roster-next').length,
-      filter: (view.getByTestId('review-family-filter') as HTMLInputElement).value,
-      layout: view.getByTestId('review-workspace').dataset.diffLayout,
-      fullFile: view.getByTestId('review-workspace').dataset.fullFile,
-    });
-    expect(state()).toEqual({
-      selectionKind: 'family',
-      centreControls: 2,
-      filter: 'anchor',
-      layout: 'inline',
-      fullFile: 'true',
-    });
-
-    // TWO page requests, each issued by the CENTRE's own continuation control -- the control that was
-    // single-use while the state was owned below the pane switch.
-    for (const step of [1, 2]) {
-      const control = view.getAllByTestId('review-center-roster-next')[0];
-      const published = control.dataset.continuation ?? '';
-      expect(published).not.toBe('');
-      fireEvent.click(control);
-      await waitFor(() => expect(urls.length).toBe(step + 1));
-      expect(decodeURIComponent(urls[step])).toContain(published);
-      expect(urls[step]).toContain('pageOf=family_members');
-      // Every value survives, and the control is there to be used again.
-      await waitFor(() => expect(state().selectionKind).toBe('family'));
-      expect(state()).toEqual({
-        selectionKind: 'family',
-        centreControls: 2,
-        filter: 'anchor',
-        layout: 'inline',
-        fullFile: 'true',
-      });
-    }
-    expect(urls).toHaveLength(3);
-  });
-
-  // B3 (the accepted design's finding P2-3). The narrow-screen route to the review must be composed
-  // ABOVE the family tree, because the tree's own height is the reason the affordance exists: the
-  // finding records the rail at 2,298px pushing the review to y=2,821px, and its fix puts the
-  // affordance "near the top" at y≈307 "while keeping the full family/sibling tree intact". Composed
-  // immediately before the centre column instead, the control lands below the whole tree — measured on
-  // the mounted product at y=1183 in a 900px viewport, i.e. reachable only after the scroll it exists
-  // to avoid. This case pins the composition order, not a pixel: a jsdom render has no layout, and the
-  // pixels are the mounted capture's job.
-  it("renders the family's changed expression excerpts, deduplicated, over the captured family", async () => {
-    // A4's third half: "Whole-family selection presents the full guarantee, all members including the
-    // unchanged sibling, and deduplicated changed expression excerpts" (RENDER-CHECKLIST.md:46). The
-    // body is the real captured one and the expectation is computed from that body here rather than
-    // typed, so a re-captured body moves the expectation with it. What it pins is that the rendered
-    // count is the DISTINCT set of excerpts, never the number of rows that named them.
-    const expected = familyExpressionArithmetic(WALK_FINAL);
-    expect(expected.rows).toBeGreaterThan(expected.distinct);
-    expect(expected.divergent.length).toBeGreaterThan(0);
-
-    serving([WALK_FINAL]);
-    const view = mount();
-    const openers = await view.findAllByTestId('review-family-open');
-    const opener = openers.find((node) => node.dataset.family === expected.familyId);
-    expect(
-      opener,
-      `the tree did not render the family ${expected.familyId} the body records`,
-    ).toBeTruthy();
-    fireEvent.click(opener as HTMLElement);
-    await view.findByTestId('review-center-family');
-
-    // The collection is present in the family view at all -- the defect this case exists for was that
-    // the centre went family state -> guarantee -> roster -> source explorer with no expressions.
-    const section = view.getByTestId('review-center-family-expressions');
-    const rows = within(section).getAllByTestId('review-center-family-expression');
-    expect(rows).toHaveLength(expected.distinct);
-    expect(rows.length).not.toBe(expected.rows);
-
-    // Every row's collapse count is the body's own group size, and the counts add up to the row total
-    // the verdict states -- so the rendered number is the deduplicated set and not a member-row count.
-    const collapsedPerRow = rows
-      .map((row) => Number(row.dataset.collapsedRows))
-      .sort((left, right) => left - right);
-    expect(collapsedPerRow).toEqual([...expected.groupSizes].sort((left, right) => left - right));
-    expect(collapsedPerRow.reduce((total, value) => total + value, 0)).toBe(expected.rows);
-    expect(Math.max(...collapsedPerRow)).toBeGreaterThan(1);
-
-    // A row whose two sides read one address differently names BOTH readings, which is the fact a
-    // first-wins reading of the member rows would have hidden (the captured body records exactly this
-    // for `src/batch.py`: resolved before, mismatched after). The expectation is the body's own
-    // per-side reading, so the assertion is about the divergence, not about the word "before".
-    expect(expected.divergent.length).toBeGreaterThan(0);
-    for (const divergent of expected.divergent) {
-      const row = rows.find((candidate) => candidate.dataset.path === divergent.path);
-      expect(row, `no rendered excerpt names ${divergent.path}`).toBeTruthy();
-      const resolution =
-        row?.querySelector('[data-testid=review-center-family-expression-resolution]')
-          ?.textContent ?? '';
-      const sides = (row?.dataset.sides ?? '').split(',').filter(Boolean);
-      expect(sides.sort()).toEqual([...divergent.sides].sort());
-      for (const reading of divergent.readings) {
-        expect(
-          resolution,
-          `${divergent.path} does not print the ${reading.side} reading`,
-        ).toContain(`${reading.side} ${reading.resolutions.join(' and ')}`);
-      }
-    }
-
-    // EVERY rendered row names exactly the sides the body resolves that excerpt on -- the page's own
-    // sentence about both sides, checked row by row against the body rather than read from the page.
-    for (const row of rows) {
-      const group = expected.groups.find((candidate) => candidate.key === row.dataset.dedupKey);
-      expect(
-        group,
-        `the rendered row ${row.dataset.dedupKey} is not an excerpt of the captured body`,
-      ).toBeTruthy();
-      expect((row.dataset.sides ?? '').split(',').filter(Boolean).sort()).toEqual(
-        [...(group?.sides ?? [])].sort(),
-      );
-    }
-
-    // The verdict states both counts, so a reader can see the collapse without adding rows up.
-    const verdict = view.getByTestId('review-center-family-expressions-verdict').textContent ?? '';
-    expect(verdict).toContain(`${expected.rows} changed expression row(s)`);
-    expect(verdict).toContain(`collapse to ${expected.distinct} distinct excerpt(s)`);
-    expect(verdict).toContain("not the comparison's own measured change set");
-    // The member roster A4's first half requires is untouched by the collection.
-    expect(view.getByTestId('review-center-member-counts').textContent).toContain(
-      'recorded membership row(s) measured by the read',
-    );
-    expect(view.getAllByTestId('review-center-open-member').length).toBeGreaterThan(1);
-  });
-
-  // The arithmetic this case's expectation is read from, computed from the captured body alone. A
-  // changed expression is a realization claim whose recorded address did not resolve to the recorded
-  // bytes ON THE SIDE THAT CARRIED IT; the excerpt's identity is its address together with the RECORDED
-  // identity the claim names. The observed identity is deliberately NOT part of the identity: it is what
-  // one side's read found at the address, so a divergent address has one observed value per side, and
-  // folding it into the key splits that address into two excerpts that can never be paired -- the defect
-  // this case exists for. Written here rather than imported from the component so the assertion is
-  // checked against the BODY and not against the implementation it tests, and every step narrows at
-  // runtime, the way `firstFamilyId` does, because a captured body is `unknown` on purpose.
-  function familyExpressionArithmetic(body: unknown): {
-    familyId: string;
-    rows: number;
-    distinct: number;
-    groupSizes: number[];
-    groups: { key: string; path: string; sides: string[] }[];
-    divergent: {
-      path: string;
-      sides: string[];
-      readings: { side: string; resolutions: string[] }[];
-    }[];
-  } {
-    const record = (value: unknown, what: string): Record<string, unknown> => {
-      if (typeof value !== 'object' || value === null) throw new Error(`${what} is not an object`);
-      return value as Record<string, unknown>;
-    };
-    const payload = record(record(body, 'the captured body').payload, 'the captured payload');
-    const context = record(payload.family_context, 'the captured family context');
-    if (!Array.isArray(context.entries))
-      throw new Error('the captured family context carries no entries');
-    const resolved = new Set(['exact_recorded_blob']);
-    const unmeasured = new Set(['recorded_object_unavailable', 'not_requested']);
-    let best: {
-      familyId: string;
-      rows: number;
-      distinct: number;
-      groupSizes: number[];
-      groups: { key: string; path: string; sides: string[] }[];
-      divergent: {
-        path: string;
-        sides: string[];
-        readings: { side: string; resolutions: string[] }[];
-      }[];
-    } | null = null;
-    for (const rawEntry of context.entries) {
-      const entry = record(rawEntry, 'a family entry');
-      const familyId = entry.family_id;
-      if (typeof familyId !== 'string') throw new Error('a family entry carries no identity');
-      const groups = new Map<string, number>();
-      // Every side whose read resolved an address, with the resolutions it gave -- the per-side fact.
-      const readings = new Map<string, Map<string, Set<string>>>();
-      let rows = 0;
-      for (const side of ['before', 'after']) {
-        const sideRecord = record(entry[side], `the ${side} side`);
-        if (!Array.isArray(sideRecord.members))
-          throw new Error(`the ${side} side carries no members`);
-        for (const rawMember of sideRecord.members) {
-          const member = record(rawMember, 'a member');
-          if (!Array.isArray(member.sources)) continue;
-          for (const rawSource of member.sources) {
-            const source = record(rawSource, 'a realization claim');
-            const resolution = typeof source.resolution === 'string' ? source.resolution : '';
-            if (typeof source.path !== 'string' || resolution === '') continue;
-            const key = `${source.path}\u0000${String(source.recorded_source_identity ?? '')}`;
-            if (!readings.has(key)) readings.set(key, new Map());
-            const perSide = readings.get(key);
-            if (!perSide?.has(side)) perSide?.set(side, new Set());
-            perSide?.get(side)?.add(resolution);
-            if (resolved.has(resolution) || unmeasured.has(resolution)) continue;
-            rows += 1;
-            groups.set(key, (groups.get(key) ?? 0) + 1);
-          }
-        }
-      }
-      if (rows === 0) continue;
-      // An excerpt of this family, with the sides the body resolves it on -- what the page's own
-      // sentence about both sides must be true of, row by row.
-      const groupList = [...groups.keys()].map((key) => ({
-        key,
-        path: key.split('\u0000')[0],
-        sides: [...(readings.get(key)?.keys() ?? [])].sort(),
-      }));
-      // A DIVERGENT address is one whose sides did not read it the same way. This is the predicate that
-      // matters: "seen on more than one side" is not divergence, because a side can carry an address
-      // and resolve it identically, and the shipped case must bite on the reading that differs.
-      const divergent = [...groups.keys()]
-        .filter((key) => {
-          const distinct = new Set(
-            [...(readings.get(key)?.values() ?? [])].map((set) => [...set].sort().join('+')),
-          );
-          return distinct.size > 1;
-        })
-        .map((key) => ({
-          path: key.split('\u0000')[0],
-          sides: [...(readings.get(key)?.keys() ?? [])].sort(),
-          readings: [...(readings.get(key)?.entries() ?? [])]
-            .map(([side, set]) => ({ side, resolutions: [...set].sort() }))
-            .sort((left, right) => left.side.localeCompare(right.side)),
-        }));
-      const candidate = {
-        familyId,
-        rows,
-        distinct: groups.size,
-        groupSizes: [...groups.values()],
-        groups: groupList,
-        divergent,
-      };
-      if (best === null || candidate.rows > best.rows) best = candidate;
-    }
-    if (best === null)
-      throw new Error('the captured body records no changed expression in any family');
-    return best;
+it.each([false, true])('reveals an in-tree selection only inside its panel (narrow=%s)', async (narrow) => {
+  // Synthetic geometry tests the mounted caller; real-browser evidence measures actual clipping.
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: narrow && /max-width/.test(query), media: query, onchange: null,
+    addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+  }));
+  serving();
+  const view = mount();
+  await view.findByTestId('review-center-family');
+  const row = familyButton(view, family(IDENTICAL).family_id);
+  const panel = row.closest<HTMLElement>('[data-review-tree-panel]')!;
+  const surface = view.getByTestId('review-surface');
+  surface.scrollTop = 77;
+  const height = () => Math.min(400, Number.parseFloat(panel.style.maxHeight) || 400);
+  const surfaceBounds = vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 300 } as DOMRect);
+  const panelBounds = vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(() => ({ top: 100, bottom: 100 + height() } as DOMRect));
+  const rowBounds = vi.spyOn(row, 'getBoundingClientRect').mockImplementation(() => ({ top: 480 - panel.scrollTop, bottom: 500 - panel.scrollTop } as DOMRect));
+  const focused = vi.spyOn(row, 'focus');
+  try {
+    fireEvent.click(row);
+    await view.findByTestId('review-center-guarantee-unchanged');
+    await waitFor(() => expect(document.activeElement).toBe(row));
+    expect(focused).toHaveBeenCalledWith({ preventScroll: true });
+    expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(300);
+    expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
+    expect(panel.scrollTop).toBeGreaterThan(0);
+    // Keep the existing wide explicit-selection reset; narrow navigation preserves its common
+    // reading position. The new regression is the panel-local reveal at BOTH widths.
+    expect(surface.scrollTop).toBe(narrow ? 77 : 0);
+  } finally {
+    focused.mockRestore(); rowBounds.mockRestore(); panelBounds.mockRestore(); surfaceBounds.mockRestore();
   }
+});
 
-  it('composes the narrow jump route above the family tree, with the tree intact', async () => {
-    serving([COMPLETE]);
-    const view = mount();
-
-    const jump = await view.findByTestId('review-jump-to-selection');
-    const tree = view.getByTestId('review-family-tree');
-    // DOCUMENT_POSITION_FOLLOWING: the tree comes after the jump control in document order.
-    expect(jump.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(tree.compareDocumentPosition(jump) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-
-    // "While keeping the full family/sibling tree intact": the tree is not trimmed, hidden or moved.
-    expect(view.getAllByTestId('review-family')).toHaveLength(2);
-    expect(view.getAllByTestId('review-family-member-open').length).toBeGreaterThan(0);
-
-    // The route still does what it is for: it focuses this column, which is the whole of its effect.
-    const centre = view.getByTestId('review-center-column');
-    fireEvent.click(jump);
-    expect(document.activeElement).toBe(centre);
+it('filters by the actual captured label without restating comparison totals', async () => {
+  serving();
+  const view = mount();
+  await view.findByTestId('review-family-tree');
+  fireEvent.change(view.getByTestId('review-family-filter'), {
+    target: { value: family(FAMILY).display_label!.replaceAll('-', ' ') },
   });
+  expect(view.getAllByTestId('review-family')).toHaveLength(1);
+  expect(view.getAllByTestId('review-family-member').length).toBeGreaterThan(0);
+  expect(view.queryByTestId('review-family-filter-scope')).toBeNull();
+  fireEvent.change(view.getByTestId('review-family-filter'), {
+    target: { value: 'no-such-family-anywhere' },
+  });
+  expect(view.getByText('No rows match “no-such-family-anywhere”.')).toBeTruthy();
+});
+
+it('states the bounded roster as the part of the measured rows it carried, never zero', () => {
+  const view = roster(TRUNCATED);
+  for (const [index, side] of (['before', 'after'] as const).entries()) {
+    const own = family(TRUNCATED)[side];
+    const line = view.getAllByTestId('review-center-roster')[index];
+    expect(own.members.length).toBeLessThan(own.members_total);
+    expect(line.dataset.rosterComplete).toBe('false');
+    expect(line.textContent).toContain(
+      `records ${own.members_total} membership row(s); loaded context contains ${own.members.length} of them`,
+    );
+  }
+  expect(view.queryByTestId('review-center-family-empty')).toBeNull();
+  expect(view.getAllByTestId('review-center-roster-next')).toHaveLength(2);
+});
+
+it('does not call a deliberately uncarried bounded roster a measured zero (synthetic omission probe)', () => {
+  const body = structuredClone(TRUNCATED);
+  for (const entry of body.payload!.family_context!.entries) {
+    entry.before.members = [];
+    entry.after.members = [];
+  }
+  const view = roster(body);
+  const text = view.getByTestId('review-center-family-empty').textContent;
+  expect(text).toContain('this page carried no member row');
+  expect(text).toContain('0 of the 3 recorded membership row(s) it measured');
+  expect(text).toContain(
+    'The continuation beside each bounded roster reaches the rows this page did not carry.',
+  );
+  expect(text).not.toContain('measured zero');
+});
+
+it('says measured zero only for the genuinely empty scratch-authored family capture', async () => {
+  serving(EMPTY);
+  const view = mount(EMPTY);
+  const empty = await view.findByTestId('review-center-family-empty');
+  expect(empty.textContent).toBe(emptyRosterSentence(family(EMPTY)));
+  expect(empty.textContent).toContain(
+    'the read measured zero memberships for the selected family revision',
+  );
+  expect(empty.textContent).toContain('0 recorded membership row(s)');
+  expect(empty.textContent).not.toContain('this page carried no member row');
+});
+
+it('heads a bounded family projection partial, states owner totals, and wires its own cursor control', () => {
+  const view = roster(TRUNCATED);
+  const entry = family(TRUNCATED);
+  expect(view.getByTestId('review-center-member-heading').textContent).toContain(
+    'Recorded member context (partial)',
+  );
+  const text = view.getByTestId('review-center-member-counts').textContent;
+  expect(text).toContain(
+    '6 recorded membership row(s) measured by the read across 2 recorded side(s) (before 3 + after 3)',
+  );
+  expect(text).toContain('the continuations beside the bounded rosters reach the rest');
+  const loaded = new Set(
+    [...entry.before.members, ...entry.after.members].map((row) => row.invariant_revision_id),
+  ).size;
+  expect(loaded).toBeLessThan(6);
+  expect(text).toContain(`loaded context contains ${loaded} member row(s) of them`);
+  fireEvent.click(view.getAllByTestId('review-center-roster-next')[0]);
+  expect(view.onRosterNext).toHaveBeenCalledWith(
+    entry.family_id,
+    'before',
+    entry.before.page!.continuation,
+  );
+});
+
+it('states genuinely uncarried member content without inventing a one-sided statement', () => {
+  const missing = family(CONTINUED).after.members.find(
+    (row) => row.state === 'content_not_on_page',
+  )!;
+  expect(missing).toBeDefined();
+  const view = roster(CONTINUED, missing.invariant_revision_id);
+  expect(view.getByTestId('review-center-member-context')).toBeTruthy();
+  expect(view.getByTestId('review-center-judgment-unavailable').textContent).toContain(
+    'no judgment absence is claimed',
+  );
+  for (const state of ['one-sided', 'unchanged', 'changed'])
+    expect(view.queryByTestId(`review-center-member-${state}`)).toBeNull();
+});
+
+it('uses the real owner comparison rather than treating an uncarried roster operand as absent', async () => {
+  serving(CONTINUED);
+  const view = mount(CONTINUED);
+  await view.findByTestId('review-center-member');
+  expect(selected(CONTINUED).state).toBe('compared');
+  expect(view.getByTestId('review-center-member-changed').dataset.revisionState).toBe('compared');
+  expect(view.queryByTestId('review-center-member-one-sided')).toBeNull();
+  expect(view.getAllByTestId('review-center-roster-next').length).toBeGreaterThan(0);
+});
+
+it('retains a bounded before-only revision without claiming the invariant was removed', async () => {
+  const entry = family(CONTINUED);
+  const before = entry.before.members.find(
+    (row) =>
+      !entry.after.members.some(
+        (other) => other.invariant_revision_id === row.invariant_revision_id,
+      ),
+  )!;
+  expect(before).toBeDefined();
+  serving(CONTINUED);
+  const view = mount(CONTINUED);
+  const tree = await view.findByTestId('review-family-tree');
+  expect(tree.querySelector(`[data-subject-id="${before.invariant_id}"]`)).not.toBeNull();
+  expect(view.getByTestId('review-center-member-changed').dataset.revisionState).toBe('compared');
+  expect(view.queryByTestId('review-center-member-one-sided')).toBeNull();
+});
+
+it('prints the shared empty-roster sentence once in the reading path, never again in the tree', async () => {
+  serving(EMPTY);
+  const view = mount(EMPTY);
+  await view.findByTestId('review-center-family');
+  expect(view.getAllByTestId('review-center-family-empty')).toHaveLength(1);
+  expect(view.getByTestId('review-center-family-empty').textContent).toBe(
+    emptyRosterSentence(family(EMPTY)),
+  );
+  expect(
+    view
+      .getByTestId('review-family-tree')
+      .querySelector('[data-testid="review-center-family-empty"]'),
+  ).toBeNull();
+});
+
+it('states a final bounded page as completing its walk, not as the whole selection', () => {
+  const view = roster(FINAL);
+  const own = family(FINAL).after;
+  expect(own.page!.complete).toBe(true);
+  expect(own.members.length).toBeLessThan(own.members_total);
+  const final = view
+    .getAllByTestId('review-center-roster')
+    .find((node) => node.textContent?.includes('completes the walk'))!;
+  expect(final).toBeDefined();
+  expect(final.textContent).toContain('loaded context can retain earlier pages');
+  expect(final.textContent).toContain(`loaded context contains ${own.members.length} of them`);
+  expect(final.textContent).not.toContain('the page is the whole selection');
+});
+
+it('keeps reader state across two admitted same-subject continuation requests', async () => {
+  const first = PAGING.before[0];
+  const steps = PAGING.before.slice(1, 3);
+  const server = serving(first, [...steps]);
+  const view = mount(first);
+  await view.findByTestId('review-center-member');
+  fireEvent.change(view.getByTestId('review-family-filter'), {
+    target: { value: family(first).display_label },
+  });
+  fireEvent.change(view.getByTestId('review-center-diff-layout'), { target: { value: 'inline' } });
+  fireEvent.click(view.getByTestId('review-center-full-file'));
+  const workspace = view.getByTestId('review-workspace');
+  for (const [index, body] of steps.entries()) {
+    const next = view
+      .getAllByTestId('review-center-roster-next')
+      .find((node) => node.dataset.continuation === body.payload!.page!.continued_from)!;
+    expect(next).toBeDefined();
+    fireEvent.click(next);
+    await waitFor(() =>
+      expect(view.getByTestId('review-page-bounds').textContent).toContain(
+        `returned ${body.payload!.page!.returned}`,
+      ),
+    );
+    expect(server.reviews()[index + 1].searchParams.get('continuation')).toBe(
+      body.payload!.page!.continued_from,
+    );
+    expect(view.getByTestId('review-workspace')).toBe(workspace);
+    expect(workspace.dataset.fullFile).toBe('true');
+    expect(workspace.dataset.diffLayout).toBe('inline');
+    expect((view.getByTestId('review-family-filter') as HTMLInputElement).value).toBe(
+      family(first).display_label,
+    );
+  }
+  expect(server.reviews()).toHaveLength(3);
+});
+
+it('deduplicates real changed family expressions without losing the recorded membership occurrences', () => {
+  const view = roster(COMPLETE);
+  const rows = view.getAllByTestId('review-center-family-expression');
+  // Current real capture: five changed realization rows collapse to four recorded addresses.
+  expect(rows).toHaveLength(4);
+  const sizes = rows.map((row) => Number(row.dataset.collapsedRows));
+  expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(5);
+  expect(Math.max(...sizes)).toBe(2);
+  const verdict = view.getByTestId('review-center-family-expressions-verdict').textContent;
+  expect(verdict).toContain('5 changed expression row(s)');
+  expect(verdict).toContain('collapse to 4 distinct excerpt(s)');
+  expect(verdict).toContain("not the comparison's own measured change set");
+  expect(view.getAllByTestId('review-center-open-member')).toHaveLength(5);
+});
+
+it('states the actual added-family side as not recorded, not unreadable or a measured empty family', async () => {
+  serving(ONE_SIDED);
+  const view = mount(ONE_SIDED);
+  await view.findByTestId('review-center-family');
+  expect(family(ONE_SIDED).before.state).toBe('not_recorded');
+  expect(view.getByTestId('review-center-guarantee-one-sided').textContent).toContain(
+    family(ONE_SIDED).after.guarantee!.joint_guarantee,
+  );
+  expect(view.queryByTestId('review-center-family-empty')).toBeNull();
+});
+
+it('composes the narrow jump route above the intact family tree and focuses the reading column', async () => {
+  serving();
+  const view = mount();
+  const jump = await view.findByTestId('review-jump-to-selection');
+  const tree = view.getByTestId('review-family-tree');
+  expect(jump.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(view.getAllByTestId('review-family')).toHaveLength(2);
+  expect(view.getAllByTestId('review-family-member-open').length).toBeGreaterThan(0);
+  fireEvent.click(jump);
+  expect(document.activeElement).toBe(view.getByTestId('review-center-column'));
+});
+
+it('renders deliberately omitted family context as unavailable, never as a measured zero', async () => {
+  const body = structuredClone(MEMBER);
+  delete body.payload!.family_context;
+  serving(body);
+  const view = mount(body);
+  await view.findByTestId('review-family-tree');
+  expect(view.getByTestId('review-scope-families').textContent).toContain(
+    'Family context was not supplied',
+  );
+  expect(view.getByTestId('review-center-member')).toBeTruthy();
+  expect(view.queryByTestId('review-center-family-empty')).toBeNull();
+});
+
+it('labels whole roster selections as whole, not as continued final pages', () => {
+  const view = roster(COMPLETE);
+  for (const line of view.getAllByTestId('review-center-roster')) {
+    expect(line.textContent).toContain('the page is the whole selection');
+    expect(line.textContent).not.toContain('completes the walk');
+  }
+});
+
+// MIK-R86 rule 20 holds one view's closed disclosures at the cap and draws its Identifiers once per
+// group, so the count does not grow with rows, proofs, files, cards or members; MIK-R57 rule 3 keeps
+// a row's identifiers and history path in that disclosure and its judgment text in the open.
+it('keeps a whole family view at the disclosure cap with every judgment and proof identifier listed', async () => {
+  serving(ONE_SIDED);
+  const view = mount(ONE_SIDED);
+  await view.findByTestId('review-center-family');
+  await waitFor(() => expect(view.getAllByTestId('review-judgment-proof')).toHaveLength(18));
+  const root = view.getByTestId('review-surface');
+  const details = [...root.querySelectorAll('details')];
+  expect(details.length).toBeLessThanOrEqual(20);
+  for (const element of details)
+    expect(['identifiers', 'provenance']).toContain(element.dataset.disclosure);
+  const listed = [...root.querySelectorAll('details[data-disclosure="identifiers"]')]
+    .map((element) => element.textContent ?? '')
+    .join('\n');
+  for (const proof of ONE_SIDED.payload!.judgment.proofs) expect(listed).toContain(proof.id);
+  for (const row of ONE_SIDED.payload!.judgment.rows) expect(listed).toContain(row.row_id);
+  for (const node of [
+    ...root.querySelectorAll('[data-testid="review-judgment-row"], [data-testid="review-judgment-proof"]'),
+  ])
+    expect(node.closest('details')).toBeNull();
+});
+
+// Labeled synthetic growth probe over the capture's own payload, not a new capture: it separates a
+// repair that groups the identifiers from one that only moved the threshold.
+function grownJudgment(body: ReviewResult, rowCount: number, proofCount: number): ReviewResult {
+  const grown = structuredClone(body);
+  const judgment = grown.payload!.judgment;
+  const [row] = judgment.rows;
+  const [proof] = judgment.proofs;
+  judgment.rows = Array.from({ length: rowCount }, (_, index) => ({
+    ...row,
+    attempt: row.attempt + index,
+    row_id: `${row.row_id}-GROWN${index}`,
+  }));
+  judgment.proofs = Array.from({ length: proofCount }, (_, index) => ({
+    ...proof,
+    id: `${proof.id}-GROWN${index}`,
+  }));
+  return grown;
+}
+
+it('holds that disclosure count for a subject with far more rows and proofs than the capture', async () => {
+  serving(ONE_SIDED);
+  const capturedView = mount(ONE_SIDED);
+  await capturedView.findByTestId('review-center-family');
+  await waitFor(() => expect(capturedView.getAllByTestId('review-judgment-proof')).toHaveLength(18));
+  const captured = capturedView.getByTestId('review-surface').querySelectorAll('details').length;
+  cleanup();
+  const grown = grownJudgment(ONE_SIDED, 9, 57);
+  serving(grown);
+  const grownView = mount(grown);
+  await grownView.findByTestId('review-center-family');
+  await waitFor(() => expect(grownView.getAllByTestId('review-judgment-proof')).toHaveLength(57));
+  expect(grownView.getByTestId('review-surface').querySelectorAll('details').length).toBe(captured);
 });

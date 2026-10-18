@@ -22,10 +22,6 @@ const context: ReviewFamilyContext = {
   references: {
     relationship_union: '',
     source_inventory: '',
-    evidence_links: '',
-    observations: '',
-    assessments: '',
-    applicability: '',
     join_key: '',
     detail: '',
   },
@@ -190,7 +186,7 @@ it('lists catalogue rows under All without an outline and reports loading, known
     />,
   );
   expect(navigation.getByTestId('review-navigation-summary').textContent).toBe(
-    '2 families changed · 1 invariants changed · 7 files unexplained · 2 unknown attribution',
+    '2 families changed · 1 invariants changed · 7 files without an invariant · 2 files of unknown attribution',
   );
   navigation.rerender(
     <ReviewNavigation

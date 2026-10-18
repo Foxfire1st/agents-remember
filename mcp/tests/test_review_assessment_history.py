@@ -1,57 +1,72 @@
-"""Public comparison recording retains owner-authored assessments through cleanup and restart."""
+"""Unreadable after-tree history remains unavailable with bounded, complete diagnostics."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
-from agents_remember.application import review_curator_records as curator
+from agents_remember.application.review_candidate_resolution import (
+    ReviewCandidateResolution,
+    resolve_review_candidate,
+)
+from agents_remember.application.review_judgment import review_judgment
+from agents_remember.memory.knowledge_index import KnowledgeIndex, text_uuid
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
+from agents_remember.models.knowledge.read import InvariantIdentitySeed
+from agents_remember.models.knowledge.review_judgment import ReviewJudgmentPane
+from agents_remember_test_support.testing.review_git_trees import (
+    INVARIANT,
+    LEAF,
+    MASTER,
+    REPO,
+    build_world,
+)
 
 pytestmark = pytest.mark.evidence_unit
 
 
-def _historical(endpoint, selector=None):
-    request = endpoint.request().model_copy(update={"history": "recorded"})
-    return request if selector is None else request.model_copy(update={"selector": selector})
-
-
-def _curator_channel(monkeypatch, paths: tuple[str, ...]):
-    owner = next(iter(curator.RESERVED_CURATOR_OWNERS))
-    evidence = [SimpleNamespace(owner=owner, state="missing", relative_path=path) for path in paths]
-    resolved = SimpleNamespace(
-        contract=object(),
-        closed_leaf=SimpleNamespace(reopened=SimpleNamespace(evidence=evidence)),
+def _unreadable_histories(root: Path, count: int) -> tuple[ReviewJudgmentPane, tuple[str, ...]]:
+    world = build_world(root)
+    paths = tuple(f"knowledge/history/{LEAF}-attempt-{10000 + n}.json" for n in range(count))
+    for relative in paths:
+        path = world.memory_worktree / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{broken", encoding="utf-8")
+    resolved = resolve_review_candidate(world.config, REPO, MASTER, LEAF)
+    assert isinstance(resolved, ReviewCandidateResolution), resolved
+    with KnowledgeIndex(resolved.candidate_database) as index:
+        answer = index.history_rows_of(LEAF)
+        assert not answer.index.complete
+        # The current pane samples the detail, but the native answer keeps every unreadable path.
+        assert tuple(path for path, _ in answer.index.problems) == paths
+    pane = review_judgment(
+        resolved, InvariantIdentitySeed(invariant_id=text_uuid("identity", INVARIANT))
     )
-
-    def missing(_resolved: object) -> None:
-        raise ValueError(f"Bound curator artifacts are unavailable: {', '.join(paths)}")
-
-    monkeypatch.setattr(curator, "_historical_records", missing)
-    return curator.review_curator_records(resolved).channel  # type: ignore[arg-type]
+    assert pane.state == "unavailable" and pane.rows == ()
+    return pane, paths
 
 
-def test_a_leaf_binding_many_missing_curator_artifacts_reads_as_unavailable(monkeypatch) -> None:
-    """MIK-L25 Q8 (fixed in MIK-L31): ICR-L47 binds 94 curator artifacts; with them missing, the
-    owner's error names every path and the review failed on the detail's length (a ValidationError)
-    instead of reporting the channel ``unavailable``. A detail over the prose bound now names the
-    count and the first few; one that fits keeps its landed wording exactly (review F6).
-    ``unreadable`` lists every artifact either way."""
+def test_a_leaf_binding_many_missing_curator_artifacts_reads_as_unavailable(tmp_path: Path) -> None:
+    """Preserve L25 Q8/L31's overflow regression on R57's staying history/judgment interface.
 
-    paths = tuple(
-        f"notes/reports/curator-coherence/L47/judgment-evidence/{n:064x}" for n in range(100)
+    No retired external-artifact channel is restored: actual failed history reads remain
+    unavailable, every failure stays in the native answer, and the current short wording is exact.
+    """
+    count = PROSE_MAX_LENGTH // len(f"knowledge/history/{LEAF}-attempt-10000.json, ") + 1
+    pane, paths = _unreadable_histories(tmp_path / "many", count)
+    assert len(", ".join(paths)) > PROSE_MAX_LENGTH
+    assert len(pane.detail) <= PROSE_MAX_LENGTH
+    assert pane.detail.startswith(f"the after memory index is incomplete ({count} file(s) failed: ")
+    assert all(path in pane.detail for path in paths[:3])
+    assert f"and {count - 3} more" in pane.detail and paths[-1] not in pane.detail
+
+    # Keep the old ten-file boundary: more than the sample, but its complete paths fit the bound.
+    fits, few = _unreadable_histories(tmp_path / "few", 10)
+    assert len(", ".join(few)) <= PROSE_MAX_LENGTH
+    expected = (
+        f"the after memory index is incomplete (10 file(s) failed: {', '.join(few[:3])}, "
+        "and 7 more); "
+        "history it did not read cannot be reported as absent"
     )
-    channel = _curator_channel(monkeypatch, paths)
-    assert channel.state == "unavailable" and channel.unreadable == paths
-    assert channel.detail.startswith("The curator owner could not be read (100 bound artifacts")
-    assert paths[0] in channel.detail and paths[-1] not in channel.detail.split("):")[0]
-
-    # Ten artifacts: over the three the summary names, so the two branches write different text,
-    # yet the landed detail still fits the prose bound and is kept exactly (review R2-2).
-    few = paths[:10]
-    fits = _curator_channel(monkeypatch, few)
-    error = f"Bound curator artifacts are unavailable: {', '.join(few)}"
-    landed = f"The curator owner could not be read ({', '.join(few)}): {error}"
-    assert len(landed) <= PROSE_MAX_LENGTH
-    assert fits.detail == landed and "bound artifacts, listed as unreadable" not in fits.detail
-    assert fits.unreadable == few
+    assert len(expected) <= PROSE_MAX_LENGTH
+    assert fits.detail == expected

@@ -47,6 +47,10 @@ from typing import Any, Final
 import apsw
 
 from agents_remember.application.knowledge_currentness.observe import observation_key
+from agents_remember.application.knowledge_worklist.classification_context import (
+    HunkClassification,
+    PathClassification,
+)
 from agents_remember.application.knowledge_worklist.code import (
     CodeReadError,
     CodeTrees,
@@ -279,15 +283,19 @@ class TreeLane:
         bucket, reason = _bucket(before, after)
         return bucket, reason, before, after
 
-    def _reading(self, side: LaneSide, path: str) -> SideReading:
+    def _reading(
+        self, side: LaneSide, path: str, placements: Mapping[str, Resolved | None] | None = None
+    ) -> SideReading:
         unavailable = side.unavailable(path)
         blob = side.files.get(path)
         if unavailable is not None:
             return SideReading(side=side, blob=blob, unavailable=unavailable, placed=())
-        placed = tuple(self._place(side, entry) for entry in side.entries_at(path))
+        placed = tuple(self._place(side, entry, placements) for entry in side.entries_at(path))
         return SideReading(side=side, blob=blob, unavailable=None, placed=placed)
 
-    def _place(self, side: LaneSide, entry: Entry) -> Placed:
+    def _place(
+        self, side: LaneSide, entry: Entry, placements: Mapping[str, Resolved | None] | None = None
+    ) -> Placed:
         anchor: Mapping[str, Any] = entry.document.get("anchor") or {}
         locator: Mapping[str, Any] = anchor.get("locator") or {}
         recorded = str(anchor.get("blob", ""))
@@ -305,7 +313,11 @@ class TreeLane:
             detail = f"the locator kind {kind!r} is not resolved in this file"
             return Placed(entry, None, "unsupported_locator", detail)
         try:
-            resolved = _placement(self.code, entry.path, locator, blob)
+            resolved = (
+                _placement(self.code, entry.path, locator, blob)
+                if placements is None
+                else placements.get(entry.id)
+            )
         except (CodeReadError, subprocess.SubprocessError, OSError) as error:
             return Placed(
                 entry, None, "unreadable", f"a Git read failed: {bounded_text(str(error))}"
@@ -325,35 +337,66 @@ class TreeLane:
             hunks = change_hunks(self.code, change, before.blob, after.blob)
         except CodeReadError as error:
             raise LaneReadError(str(error)) from error
-        non_text = None
-        if hunks is None or change.mode_change:
-            non_text = ReviewLaneNonText(
-                content=change.content,
-                mode_change=change.mode_change,
-                gate=_gate(before, after),
-            )
-        return FileResult(
-            change=change,
-            bucket=bucket,
-            reason=reason,
-            before=before,
-            after=after,
-            hunks=tuple(_classified(hunk, before, after) for hunk in hunks or ()),
-            non_text=non_text,
+        return _file_result(change, hunks, (bucket, reason, before, after))
+
+    def from_worklist(self, classified: PathClassification) -> FileResult:
+        """Project computed gate path facts, retaining the reviewer's recorded-blob rule.
+
+        Mapped gate ranges at another blob must still withhold reviewer attribution; `_place`
+        applies that check before consulting the already-resolved placements.
+        """
+        path = classified.change.path
+        before = self._reading(self.before, path, classified.before)
+        after = self._reading(self.after, path, classified.after)
+        bucket, reason = _bucket(before, after)
+        hunks = None if classified.hunks is None else tuple(one.hunk for one in classified.hunks)
+        projected = tuple(_projected_hunk(one, before, after) for one in classified.hunks or ())
+        return _file_result(classified.change, hunks, (bucket, reason, before, after), projected)
+
+
+def _file_result(
+    change: TreeChange,
+    hunks: tuple[Hunk, ...] | None,
+    reading: tuple[LaneBucket, str, SideReading, SideReading],
+    classified: tuple[HunkResult, ...] | None = None,
+) -> FileResult:
+    bucket, reason, before, after = reading
+    non_text = None
+    if hunks is None or change.mode_change:
+        non_text = ReviewLaneNonText(
+            content=change.content,
+            mode_change=change.mode_change,
+            gate=_gate(before, after),
         )
+    return FileResult(
+        change=change,
+        bucket=bucket,
+        reason=reason,
+        before=before,
+        after=after,
+        hunks=(
+            tuple(_classified(hunk, before, after) for hunk in hunks or ())
+            if classified is None
+            else classified
+        ),
+        non_text=non_text,
+    )
 
 
 @contextmanager
-def open_tree_lane(trees: ReviewTrees) -> Iterator[TreeLane]:
+def open_tree_lane(trees: ReviewTrees, *, code: CodeTrees | None = None) -> Iterator[TreeLane]:
     """Open the comparison's code trees and both memory indexes; close the indexes on exit.
 
     Raises :class:`LaneReadError` when a code tree cannot be listed.
     """
 
     record = trees.record
-    code = CodeTrees.open(
-        Path(record.code_candidate.repository), record.code_base.tree, record.code_candidate.tree
-    )
+    if code is None:
+        code = CodeTrees.open(
+            Path(record.code_candidate.repository),
+            record.code_base.tree,
+            record.code_candidate.tree,
+        )
     try:
         base, candidate = code.base(), code.candidate()
     except CodeReadError as error:
@@ -497,6 +540,26 @@ def _links(hunk: Hunk, reading: SideReading) -> list[tuple[LaneSideName, Placed]
 def _classified(hunk: Hunk, before: SideReading, after: SideReading) -> HunkResult:
     changed = [one for one in (before, after) if changes_lines(hunk, one.side.name)]
     links = tuple(link for one in changed for link in _links(hunk, one))
+    return _hunk_result(hunk, changed, links)
+
+
+def _projected_hunk(
+    classified: HunkClassification, before: SideReading, after: SideReading
+) -> HunkResult:
+    """Filter the computed intersections by ranges the reviewer may actually attribute."""
+    changed = [one for one in (before, after) if changes_lines(classified.hunk, one.side.name)]
+    links: tuple[tuple[LaneSideName, Placed], ...] = tuple(
+        (reading.side.name, placed)
+        for reading, entries in ((before, classified.before), (after, classified.after))
+        for placed in reading.supplying
+        if placed.entry.id in entries
+    )
+    return _hunk_result(classified.hunk, changed, links)
+
+
+def _hunk_result(
+    hunk: Hunk, changed: list[SideReading], links: tuple[tuple[LaneSideName, Placed], ...]
+) -> HunkResult:
     if links:
         return HunkResult(hunk=hunk, classification="linked", links=links)
     unknown = tuple(reason for one in changed if (reason := _unknown(one)) is not None)

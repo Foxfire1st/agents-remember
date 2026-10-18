@@ -64,8 +64,10 @@ const LANE_COUNT_NAMES: Record<string, 'unexplained' | 'unknown'> = {
 export function laneCountText(name: string, facts: LaneAttributionFacts): string | undefined {
   const which = LANE_COUNT_NAMES[name];
   if (which === undefined) return undefined;
-  if (facts.state === 'pending') return `${name}: ${EXPLORER_PENDING}`;
-  if (facts.state === 'unknown')
-    return `${name}: ${EXPLORER_LABELS.attribution_unknown} (the lane could not be read)`;
-  return `${name}: ${facts[which].length}${facts.partial ? ' (partial)' : ''}`;
+  const label = which === 'unexplained'
+    ? 'changed files without an invariant'
+    : 'changed files of unknown attribution';
+  if (facts.state === 'pending') return `${label}: ${EXPLORER_PENDING}`;
+  if (facts.state === 'unknown') return `${label}: the change set could not be measured`;
+  return `${label}: ${facts[which].length}${facts.partial ? ' (partial)' : ''}`;
 }

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
+import { ReviewHeader } from './ReviewHeader';
+import { matchingTreeRead } from './codeFacts';
+import { useReviewTrees } from '../../data/reviewTrees';
+import { useReviewMemoryWatch } from '../../data/reviewMemoryWatch';
 import type { ReviewChangeContext } from '../changeset/reviewChangeSet';
 import { ReviewChangeSetNavigation, type OpenReviewChanges } from './changeSetNavigation';
 import { css } from '../../../styled-system/css';
@@ -89,16 +93,6 @@ const reviewShell = css({
   '& button:hover': { color: 'amber' },
   '& [data-testid=review-center-column]': { outlineOffset: '3px' },
 });
-
-function subjectLabel(
-  selectorKind: ReviewSelectorKind | undefined,
-  selectorId: string | undefined,
-  instead: ReviewFailure | null,
-): string {
-  if (instead !== null) return 'whole task (no subject selected)';
-  if (selectorKind && selectorId) return `${selectorKind} ${selectorId}`;
-  return 'whole task (no subject selected)';
-}
 
 const retryFor = (read: ReviewRead, reread: () => void) =>
   read.phase === 'failed' ? reread : undefined;
@@ -342,8 +336,7 @@ function ReviewPanes({
 }: ReviewPanesProps) {
   const payload = shown ?? (reading ? frame : null);
   // The unexplained-changes lane of the tree comparison on screen, read once: the workspace's lane
-  // and explorer and the technical details all show this one classification. A dataset review
-  // names no tree comparison and reads nothing.
+  // and explorer and the technical details all show this one classification.
   const laneRead = useReviewLane(
     repo,
     master,
@@ -351,6 +344,7 @@ function ReviewPanes({
     payload === null ? undefined : treeComparisonNumber(payload.limitations),
   );
   const comparison = payload ? treeComparisonNumber(payload.limitations) : undefined;
+  const leafTrees = useReviewTrees(repo, master, leaf, { comparison }, comparison !== undefined);
   const { changePage, openChanges, closeChanges } = useReviewChangePage({
     repo,
     master,
@@ -358,6 +352,7 @@ function ReviewPanes({
     comparison,
     payload,
     laneRead,
+    leafTrees,
   });
   if (payload === null) return null;
   return (
@@ -376,6 +371,7 @@ function ReviewPanes({
           state={workspace}
           navigation={navigation}
           laneRead={laneRead}
+          leafTrees={leafTrees}
           changesOpen={changePage !== null}
         />
         <ReviewDetails
@@ -444,6 +440,7 @@ type CurrentChangeContext = {
   comparison: number | undefined;
   payload: ReviewPayload | null;
   laneRead: ReturnType<typeof useReviewLane>;
+  leafTrees: ReturnType<typeof useReviewTrees>;
 };
 function pageMatchesCurrent(
   state: Extract<OpenChangePage, { kind: 'comparison' }>,
@@ -458,23 +455,21 @@ function pageMatchesCurrent(
     sameGeneration(state.generation, comparisonGenerationOf(current.payload))
   );
 }
+function sameChangeRead(context: ReviewChangeContext, current: CurrentChangeContext,
+  worklist: ReviewChangeContext['worklist']): boolean {
+  return sameLane(context.lane, current.laneRead) && context.worklist === worklist;
+}
 function useHeldPageLane(
   state: OpenChangePage | null,
   setState: React.Dispatch<React.SetStateAction<OpenChangePage | null>>,
-  current: {
-    repo: string;
-    master: string;
-    leaf: string;
-    comparison: number | undefined;
-    payload: ReviewPayload | null;
-    laneRead: ReturnType<typeof useReviewLane>;
-  },
+  current: CurrentChangeContext,
 ) {
   useEffect(() => {
     if (state?.kind !== 'comparison' || !current.payload) return;
     const matching = pageMatchesCurrent(state, current);
-    if (matching && !sameLane(state.context.lane, current.laneRead)) {
-      setState({ ...state, context: { ...state.context, lane: current.laneRead } });
+    const worklist = matchingTreeRead(current.leafTrees, current.comparison)?.worklist;
+    if (matching && !sameChangeRead(state.context, current, worklist)) {
+      setState({ ...state, context: { ...state.context, lane: current.laneRead, worklist } });
     } else if (!matching && state.context.lane?.phase === 'loading') {
       setState({
         ...state,
@@ -494,14 +489,7 @@ function useHeldPageLane(
     }
   }, [state, setState, current]);
 }
-function useReviewChangePage(current: {
-  repo: string;
-  master: string;
-  leaf: string;
-  comparison: number | undefined;
-  payload: ReviewPayload | null;
-  laneRead: ReturnType<typeof useReviewLane>;
-}) {
+export function useReviewChangePage(current: CurrentChangeContext) {
   const [changePage, setChangePage] = useState<OpenChangePage | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   useHeldPageLane(changePage, setChangePage, current);
@@ -532,6 +520,7 @@ function useReviewChangePage(current: {
         page: { comparison: current.comparison, filter, path, kind },
         lane: current.laneRead,
         inventory: current.payload.source.inventory,
+        worklist: matchingTreeRead(current.leafTrees, current.comparison)?.worklist,
       },
     });
   };
@@ -628,62 +617,6 @@ function readingStatusOf(
   };
 }
 
-function ReviewHeader({
-  repo,
-  master,
-  leaf,
-  selectorKind,
-  selectorId,
-  instead,
-  history,
-  refresh,
-  onBack,
-}: {
-  repo: string;
-  master: string;
-  leaf: string;
-  selectorKind?: ReviewSelectorKind;
-  selectorId?: string;
-  instead: ReviewFailure | null;
-  history?: ReviewHistory;
-  refresh?: React.ReactNode;
-  onBack: () => void;
-}) {
-  return (
-    <>
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '0.5rem',
-          alignItems: 'center',
-          marginBottom: '0.75rem',
-        }}
-      >
-        <button type="button" onClick={onBack} data-testid="review-back">
-          ← back
-        </button>
-        <strong>Intent review · {leaf}</strong>
-        <span
-          style={{ color: 'var(--muted)', minWidth: 0, overflowWrap: 'anywhere' }}
-          data-testid="review-subject"
-        >
-          <details data-disclosure="identifiers">
-            <summary>Task and subject identifiers</summary>
-            {repo} · {master} · {leaf} · {subjectLabel(selectorKind, selectorId, instead)}
-          </details>
-        </span>
-        {refresh}
-      </div>
-      {history === 'recorded' ? (
-        <span data-testid="review-history" className={css({ color: 'muted', fontSize: '0.75rem' })}>
-          Historical task comparison
-        </span>
-      ) : null}
-    </>
-  );
-}
-
 // Every selection but the one of a row the family tree shows starts the walked tree afresh (MIK-R39).
 function subjectSelection(parts: {
   navigation: ReturnType<typeof useReviewNavigation>;
@@ -761,6 +694,7 @@ function useSurface({
     cache,
   });
   const { read, retained, frame } = cycle;
+  useReviewMemoryWatch({ repo, master, leaf, history }, cycle, navigation.engage);
   const key = targetKeyOf(
     repo,
     master,
@@ -865,7 +799,8 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
       data-review-history={history ?? 'live'}
       data-review-pending={reading && !reading.problem ? reading.subject : undefined}
       data-review-unavailable={reading?.problem ? reading.subject : undefined}
-      style={{ height: '100%', minHeight: 0, minWidth: 0, overflowY: 'auto' }}
+      // This surface owns its scroll; pending/answer relayout must not move it via UA anchoring.
+      style={{ height: '100%', minHeight: 0, minWidth: 0, overflowY: 'auto', overflowAnchor: 'none' }}
     >
       <ReviewReadCacheContext.Provider value={surface.cache}>
         <ReviewHeader

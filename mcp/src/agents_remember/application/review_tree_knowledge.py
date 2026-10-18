@@ -8,7 +8,7 @@ review composition does not already show, and nothing more (rules 2 and 3):
   MIK-R03 state function, computed against that side's own code tree: the before memory tree at
   the code base, the after memory tree at the code candidate.
 * **The worklist view (rule 3).** The leaf's current MIK-R08 worklist items, the history rows about
-  their subjects (shown without a current or stale mark until MIK-R09 supplies one), and the gate
+  their subjects, the gate's own per-item verdict and witness, and the gate
   linkage of every changed hunk (linked, or unexplained).
 * **The entries (MIK-R31).** When the query names invariants, the view answers only their
   realization and proof entries, located on both code sides with each range's excerpt, for the
@@ -46,8 +46,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal, cast
 
-from agents_remember.application.knowledge_currentness import CodeTree, invariant_currentness
-from agents_remember.application.knowledge_worklist import read_leaf_worklist
 from agents_remember.application.knowledge_worklist.leaf import CandidateTrees, CapturedBase
 from agents_remember.application.review_candidate_resolution import (
     recorded_leaf_contract,
@@ -66,10 +64,13 @@ from agents_remember.application.review_tree_comparison import (
     reopen_review_trees,
 )
 from agents_remember.application.review_tree_entries import tree_entries
+from agents_remember.application.review_tree_state import history_rows as _history_rows
+from agents_remember.application.review_tree_state import side_currentness
 from agents_remember.application.review_unexplained_lane import (
     classify_changed_path,
     unexplained_lane,
 )
+from agents_remember.application.review_worklist_answers import worklist_bound
 from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
 from agents_remember.kernel.git_command import (
     PARSED_DIFF_OPTIONS,
@@ -86,9 +87,11 @@ from agents_remember.kernel.reviewer_worklist_process import (
     ReviewerWorklistProcesses,
     WorklistProcessError,
 )
-from agents_remember.memory.knowledge_index import HistoryRow, KnowledgeIndex, is_indexed_path
+from agents_remember.memory.knowledge_index import is_indexed_path
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, REFERENCE_MAX_LENGTH
+from agents_remember.models.knowledge.item_verdict import ItemVerdict
 from agents_remember.models.knowledge.review import ReviewRefusal, ReviewRefusalCode
+from agents_remember.models.knowledge.review_code_changes import ReviewCodeChanges
 from agents_remember.models.knowledge.review_lane import (
     ReviewFileClassification,
     ReviewUnexplainedLane,
@@ -105,7 +108,6 @@ from agents_remember.models.knowledge.review_trees import (
 from agents_remember.models.knowledge_files.documents import (
     KNOWLEDGE_ROOT,
     ONBOARDING_ROOT,
-    owner_history_attempt,
 )
 from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.worktrees.worktree_contract import WorktreeContract
@@ -248,6 +250,7 @@ def _view(
         code_sides=trees.code_sides,
         currentness=snake_keys(side_currentness(trees)),
         worklist=parts.worklist,
+        code_changes=parts.code_changes,
     )
 
 
@@ -318,8 +321,17 @@ def _compute_leaf_parts(
             )
     finally:
         replay_reads(reads)
-    parts = LeafViewParts(worklist)
-    return parts, available and settled, reads
+    parts = LeafViewParts(worklist, worklist.code_changes)
+    decided = all(state.state != "undecided" for state in worklist.item_states.values())
+    return (
+        parts,
+        available
+        and settled
+        and decided
+        and worklist.code_changes is not None
+        and worklist.code_changes.state == "facts",
+        reads,
+    )
 
 
 def _focused(
@@ -758,38 +770,6 @@ def _changed_entries(
 # -- rule 2: currentness per side ------------------------------------------------------------------
 
 
-def side_currentness(trees: ReviewTrees) -> dict[str, dict[str, Any]]:
-    """Each side's MIK-R03 currentness, at that side's own code tree; an unread side says why."""
-
-    record = trees.record
-    code = {
-        "before": CodeTree(Path(record.code_base.repository), record.code_base.tree),
-        "after": CodeTree(Path(record.code_candidate.repository), record.code_candidate.tree),
-    }
-    result: dict[str, dict[str, Any]] = {}
-    for side in (trees.before, trees.after):
-        name = side.wire.side
-        if side.database is None:
-            result[name] = {"unverifiableReason": side.wire.detail or side.wire.state}
-            continue
-        with KnowledgeIndex(side.database) as index:
-            currentness = invariant_currentness(
-                code[name],
-                index,
-                index.record_ids("invariant").value,
-                index.record_ids("family").value,
-            )
-            document = currentness.to_document()
-            # Review responses retain the MIK-R03 listing: all entries are checked,
-            # but only entries that are not current are listed (MIK-R81 preservation).
-            for invariant in document["invariants"]:
-                invariant["entries"] = [
-                    entry for entry in invariant["entries"] if entry["state"] != "current"
-                ]
-            result[name] = {**document, "indexState": index.state.state}
-    return result
-
-
 # -- rule 3: the worklist view -----------------------------------------------------------------------
 
 
@@ -807,28 +787,31 @@ def _worklist_view(
     exactly what the review compares and captures no worktree a second time.
     """
 
-    if live:
-        candidate = CandidateTrees(
-            code=trees.record.code_candidate.tree, memory=trees.record.memory_candidate.tree
-        )
-        if trees.record.code_base.commit is None or trees.record.memory_base.commit is None:
-            raise WorklistProcessError("reviewer worklist comparison has no captured base commits")
-        base = CapturedBase(
-            code=trees.record.code_base.commit,
-            memory=trees.record.memory_base.commit,
-            read_tree=trees.before.wire.tree,
-        )
-        document = isolated_leaf_worklist(
-            contract, candidate=candidate, base=base, processes=processes
-        )
-        source: Literal["computed", "persisted", "absent"] = "computed"
-    else:
-        document = read_leaf_worklist(contract.contract_path)
-        source = "persisted"
-    if document is None:
+    candidate = CandidateTrees(
+        code=trees.record.code_candidate.tree, memory=trees.record.memory_candidate.tree
+    )
+    if live and (trees.record.code_base.commit is None or trees.record.memory_base.commit is None):
+        raise WorklistProcessError("reviewer worklist comparison has no captured base commits")
+    base = CapturedBase(
+        code=trees.record.code_base.commit or trees.record.code_base.tree,
+        memory=trees.record.memory_base.commit or trees.record.memory_base.tree,
+        read_tree=trees.before.wire.tree,
+    )
+    document = isolated_leaf_worklist(
+        contract, candidate=candidate, base=base, processes=processes, trees=trees
+    )
+    source: Literal["computed", "persisted", "absent"] = "computed" if live else "persisted"
+    review_parts = {} if document is None else document.get("_review", {})
+    facts = (
+        ReviewCodeChanges.model_validate(review_parts["code_changes"])
+        if "code_changes" in review_parts
+        else None
+    )
+    if not document or "state" not in document:
         return (
             ReviewWorklistView(
                 source="absent",
+                code_changes=facts,
                 detail="no MIK-R08 worklist applies to this leaf, or none was persisted for it",
             ),
             False,
@@ -843,86 +826,23 @@ def _worklist_view(
         )
     items = tuple(dict(item) for item in document.get("items", ()))
     view = ReviewWorklistView(
+        code_changes=facts,
         source=source,
         bound=_bound(document.get("pairing") or {}, trees),
         state=str(document.get("state")),
         items=tuple(snake_keys(items)),
         history_rows=tuple(snake_keys(_history_rows(trees, items))),
+        item_states={
+            key: ItemVerdict.model_validate(value)
+            for key, value in review_parts.get("item_states", {}).items()
+        },
         changes=tuple(snake_keys(list(document.get("changes", ())))),
         incomplete=tuple(snake_keys(list(document.get("incomplete", ())))),
     )
     return view, live and document.get("state") == "complete"
 
 
-def _bound(pairing: Mapping[str, Any], trees: ReviewTrees) -> bool:
-    """Whether the worklist's recorded pairing is exactly this comparison's four trees."""
-
-    record = trees.record
-    try:
-        return (
-            pairing["base"]["tree"] == record.code_base.tree
-            and pairing["candidate"]["tree"] == record.code_candidate.tree
-            and pairing["memoryBase"]["commit"] == record.memory_base.commit
-            and pairing["memoryCandidate"]["tree"] == record.memory_candidate.tree
-        )
-    except (KeyError, TypeError):
-        return False
-
-
-def _history_rows(
-    trees: ReviewTrees, items: tuple[dict[str, Any], ...]
-) -> tuple[dict[str, Any], ...]:
-    """The after tree's history rows about the items' subjects, with no currency mark (rule 3).
-
-    An item names the subject its answering row carries in ``facts.row`` when that is not its own
-    subject (an unexplained hunk is answered by a ``hunk:…`` row, MIK-R10), so both are looked up.
-    Of one owner's rows about a subject only its latest attempt's is shown: a leaf that continued
-    after a closeout answers the subject again in its next attempt file, and that judgment governs
-    (L37 ruling B). The superseded row stays in its frozen file, read on the change-set page.
-    """
-
-    database = trees.after.database
-    subjects = sorted({subject for item in items for subject in _row_subjects(item)})
-    if database is None or not subjects:
-        return ()
-    rows: list[dict[str, Any]] = []
-    with KnowledgeIndex(database) as index:
-        for subject in subjects:
-            rows += [
-                {
-                    "id": row.id,
-                    "owner": row.owner,
-                    "ownerKind": row.owner_kind,
-                    "closed": row.closed,
-                    "path": row.path,
-                    "subject": row.subject,
-                    "disposition": row.disposition,
-                    "row": row.document,
-                }
-                for row in _governing(index.history_rows_about(subject).value)
-            ]
-    return tuple(rows)
-
-
-def _governing(rows: tuple[HistoryRow, ...]) -> Iterator[HistoryRow]:
-    """Each owner's row about one subject from that owner's latest attempt file."""
-
-    attempts = [owner_history_attempt(row.path, row.owner) or 1 for row in rows]
-    latest: dict[str, int] = {}
-    for row, attempt in zip(rows, attempts, strict=True):
-        latest[row.owner] = max(latest.get(row.owner, 0), attempt)
-    for row, attempt in zip(rows, attempts, strict=True):
-        if attempt == latest[row.owner]:
-            yield row
-
-
-def _row_subjects(item: Mapping[str, Any]) -> Iterator[str]:
-    if item.get("subject"):
-        yield str(item["subject"])
-    facts = item.get("facts")
-    row = facts.get("row") if isinstance(facts, Mapping) else None
-    if isinstance(row, str) and row:
-        yield row
+_bound = worklist_bound
 
 
 def _no_contract(master: str, leaf_id: str) -> ReviewRefusal:

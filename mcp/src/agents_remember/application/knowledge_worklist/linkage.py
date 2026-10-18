@@ -6,9 +6,15 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from agents_remember.application.knowledge_worklist.classification_context import (
+    HunkClassification,
+    PathClassification,
+    share_path,
+)
 from agents_remember.application.knowledge_worklist.code import (
     CodeTrees,
     Hunk,
+    Resolved,
     change_hunks,
     hits_new,
     hits_old,
@@ -46,12 +52,15 @@ class _Linkage:
             # file level; a text change's hunks are linked below all the same.
             document["fileLevel"] = {"linked": self._file_covered(path)}
         if hunks is None:
+            share_path(PathClassification(change, hunks))
             return document
-        base_spans = self._spans(self.base, path, base_blob, tree_side="base")
-        candidate_spans = self._spans(self.candidate, path, candidate_blob)
+        before = self._placements(self.base, path, base_blob, tree_side="base")
+        after = self._placements(self.candidate, path, candidate_blob)
+        classified = tuple(_classify_hunk(hunk, before, after) for hunk in hunks)
+        share_path(PathClassification(change, classified, before, after))
         document["hunks"] = [
-            {**hunk.to_document(), "linked": _linked(hunk, base_spans, candidate_spans)}
-            for hunk in hunks
+            {**one.hunk.to_document(), "linked": bool(one.before or one.after)}
+            for one in classified
         ]
         return document
 
@@ -60,20 +69,18 @@ class _Linkage:
     ) -> tuple[Hunk, ...] | None:
         return change_hunks(self.code, change, base_blob, candidate_blob)
 
-    def _spans(
+    def _placements(
         self, side: KnowledgeSide, path: str, blob: str | None, *, tree_side: str = "candidate"
-    ) -> list[tuple[int, int]]:
+    ) -> dict[str, Resolved | None]:
         if blob is None:
-            return []
-        spans: list[tuple[int, int]] = []
+            return {}
+        placements: dict[str, Resolved | None] = {}
         for entry_id in side.entries_by_path.get(path, ()):
             anchor = side.entries[entry_id].entry.anchor
-            resolved = self.code.resolve(
+            placements[entry_id] = self.code.resolve(
                 path, anchor.locator.to_document(), anchor.blob, blob, side=tree_side
             )
-            if resolved is not None:
-                spans.append(resolved.span)
-        return spans
+        return placements
 
     def _file_covered(self, path: str) -> bool:
         return non_text_linked(
@@ -92,9 +99,11 @@ def non_text_linked(locator_kinds: Iterable[str]) -> bool:
     return any(kind == "file" for kind in locator_kinds)
 
 
-def _linked(
-    hunk: Hunk, base_spans: Iterable[tuple[int, int]], candidate_spans: Iterable[tuple[int, int]]
-) -> bool:
+def _classify_hunk(
+    hunk: Hunk,
+    before: Mapping[str, Resolved | None],
+    after: Mapping[str, Resolved | None],
+) -> HunkClassification:
     """Definition 8: the hunk's *changed lines* intersect an entry's range on their own side.
 
     A side with no changed line links nothing there, symmetrically: a delete-only hunk changes no
@@ -102,8 +111,18 @@ def _linked(
     no line at B, so only a K_C range at C links it (MIK-R09, carried from the L10 review, N3).
     """
 
-    return (hunk.old_count > 0 and any(hits_old(hunk, span) for span in base_spans)) or (
-        hunk.new_count > 0 and any(hits_new(hunk, span) for span in candidate_spans)
+    return HunkClassification(
+        hunk,
+        frozenset(
+            entry_id
+            for entry_id, resolved in before.items()
+            if hunk.old_count > 0 and resolved is not None and hits_old(hunk, resolved.span)
+        ),
+        frozenset(
+            entry_id
+            for entry_id, resolved in after.items()
+            if hunk.new_count > 0 and resolved is not None and hits_new(hunk, resolved.span)
+        ),
     )
 
 

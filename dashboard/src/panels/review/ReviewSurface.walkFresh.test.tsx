@@ -383,7 +383,7 @@ it('keeps the walked tree at the actions rule 9 says change nothing', async () =
   await view.findByTestId('review-center-family', undefined);
   expect(shown()).toEqual(initial);
   // Filtered change-set destinations open over the mounted reviewer and return to it.
-  fireEvent.click(view.getByRole('button', { name: /^Unexplained changes/ }));
+  fireEvent.click(view.getByRole('button', { name: /^Changes without an invariant/ }));
   await view.findByTestId('changeset-viewer', undefined);
   expect(shown()).toEqual(initial);
   fireEvent.click(view.getByTestId('changeset-back'));
@@ -406,7 +406,7 @@ async function recordingScrolls(run: (scrolled: Element[]) => Promise<void>) {
 }
 
 it.each([true, false])(
-  'reveals an in-tree read only in the stacked layout (%s)',
+  'keeps in-tree reveal panel-local in either layout (%s)',
   async (stacked) => {
     const media = window.matchMedia;
     window.matchMedia = (query) => ({
@@ -420,22 +420,23 @@ it.each([true, false])(
       await recordingScrolls(async (scrolled) => {
         const reads = reviewCount();
         await clickedSecondFamily(view);
-        const center = view.getByTestId('review-center-column');
-        expect(scrolled).toEqual(stacked ? [center] : []);
+        // Kept-node reveal is panel-local; it never scrolls the common reading area.
+        // Its measured geometry is pinned in ReviewWorkspace.family.test.tsx.
+        expect(scrolled).toEqual([]);
         expect(document.activeElement).toBe(selectedNode(view));
         expect(reviewCount() - reads).toBe(1);
         expect(view.getByTestId('review-workspace')).toBe(workspace);
         // A key activation reads the cached shared member and follows the same reveal rule.
         scrolled.length = 0;
         await step(view, K, 0);
-        expect(scrolled).toEqual(stacked ? [center] : []);
+        expect(scrolled).toEqual([]);
         expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
         await clickedSecondFamily(view);
         scrolled.length = 0;
         // Re-selecting the same row remains an in-tree gesture and keeps the outline.
         fireEvent.click(treeRow(view, HBJ_ID));
         await settled(view);
-        expect(scrolled).toEqual(stacked ? [center] : []);
+        expect(scrolled).toEqual([]);
         expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
       });
     } finally {

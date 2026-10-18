@@ -71,6 +71,7 @@ from agents_remember.kernel.recorded_reads import (
     replay_reads,
 )
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
+from agents_remember.models.knowledge.review_code_changes import ReviewCodeChanges
 from agents_remember.models.knowledge.review_trees import (
     ReviewWorklistView,
 )
@@ -114,6 +115,7 @@ class LeafViewParts:
     """The computed worklist of one leaf-wide view."""
 
     worklist: ReviewWorklistView
+    code_changes: ReviewCodeChanges | None = None
 
 
 @dataclass(frozen=True)

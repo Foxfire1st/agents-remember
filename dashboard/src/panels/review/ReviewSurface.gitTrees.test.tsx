@@ -1,12 +1,7 @@
-// MIK-R25 rule 6 and MIK-R31 on real data: the review workspace over a converted leaf's Git trees.
-//
-// The bodies are the REAL served answers of the reviewer routes for the 260928-MIK-L31 worker's
-// scratch copy of the real repositories after conversion (provenance: gitTrees.capture-provenance
-// .json): the leaf edits `_not_listed` in review_source_admission.py, re-anchors the realization it
-// touches, adds a (scratch-authored) proof and declares two expected effects. Each memory side was
-// read through the derived index of its tree, never a dataset copy. `ReviewSurface` is the real
-// component and only `fetch` is stubbed. The workspace and its navigation behave as over datasets;
-// the central reading path shows the selected family's focused expression cards (MIK-R31).
+// Current L37 raw tree-route answers: family/member reading and focused expression cards.
+// Provenance: subjectReview.capture-provenance.json and l86.capture-provenance.json.
+// The full-tree fixture is historical, used only for isolated worklist chrome;
+// these tests do not qualify the separately reported current full-tree refusal.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
@@ -20,12 +15,11 @@ const captured = <T,>(name: string): T =>
   JSON.parse(
     readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), name), 'utf8'),
   ) as T;
-const family = captured<ReviewResult>('gitTrees.family.captured.json');
-const invariant = captured<ReviewResult>('gitTrees.invariant.captured.json');
-const entries = captured<unknown>('gitTrees.entries.captured.json');
-const cards = captured<ReviewTreesResult>('gitTrees.cards.captured.json');
-const leafTrees = captured<ReviewTreesResult>('../../data/reviewTrees.captured.json');
-const CHANGED = 'mcp/src/agents_remember/application/review_source_admission.py';
+const family = captured<ReviewResult>('subjectReview.successorFamily.captured.json');
+const invariant = captured<ReviewResult>('subjectReview.successorInvariant.captured.json');
+const entries = captured<unknown>('l86.entries.captured.json');
+const cards = captured<ReviewTreesResult>('l86.member-cards.captured.json');
+const leafTrees = captured<ReviewTreesResult>('l86.trees.captured.json');
 
 afterEach(() => {
   resetCardCachesForTests();
@@ -35,13 +29,7 @@ afterEach(() => {
 
 const requested: URL[] = [];
 
-// These captures predate the unexplained-changes lane (MIK-R32): its read is answered with the
-// comparison and no lane, which the tree's destinations show as unavailable -- never as a zero.
-const withoutLane = (body: ReviewTreesResult) => ({
-  state: body.state,
-  comparison: body.comparison,
-  knowledge_sides: body.knowledge_sides,
-});
+const lane = captured<ReviewTreesResult>('l86.lane.captured.json');
 
 function serve(leafWide: ReviewTreesResult = leafTrees) {
   requested.length = 0;
@@ -55,7 +43,7 @@ function serve(leafWide: ReviewTreesResult = leafTrees) {
         ? url.searchParams.get('invariants')
           ? cards
           : url.searchParams.get('lane')
-            ? withoutLane(leafWide)
+            ? lane
             : leafWide
         : url.pathname.endsWith('/entries')
           ? entries
@@ -83,7 +71,7 @@ function serve(leafWide: ReviewTreesResult = leafTrees) {
 it('renders a converted leaf family review from its trees and opens the touched member', async () => {
   serve();
   const payload = family.payload!;
-  expect(payload.limitations).toContain('review:trees:1');
+  expect(payload.limitations).toContain('review:trees:5');
   const view = render(
     <ReviewSurface
       repo={payload.candidate.repository_id}
@@ -95,16 +83,22 @@ it('renders a converted leaf family review from its trees and opens the touched 
     />,
   );
   await view.findByTestId('review-center-family');
-  expect(view.getByTestId('review-scope-record').textContent).toContain('1 changed files');
+  expect(view.getByTestId('review-scope-record').textContent).toContain(
+    `${payload.source.inventory.listed_total} changed files`,
+  );
   expect(view.queryByTestId('review-inventory-entry')).toBeNull();
   // The family and its whole recorded roster, read from the memory trees' indexes.
   const entry = payload.family_context!.entries[0];
-  expect(entry.display_label).toBe('Comparison-bound unchanged realization context');
+  expect(entry.display_label).toBe('knowledge-write-and-publication-foundation');
   const members = within(view.getByTestId('review-center-family')).getAllByTestId(
     'review-center-open-member',
   );
-  expect(members).toHaveLength(entry.before.members.length);
-  expect(entry.before.members).toHaveLength(7);
+  expect(members).toHaveLength(
+    new Set(
+      [...entry.before.members, ...entry.after.members].map((row) => row.invariant_revision_id),
+    ).size,
+  );
+  expect(entry.before.members).toHaveLength(3);
   // Opening the touched member reads its own review and shows both statements.
   const touched = invariant.payload!.knowledge.revision_selection!;
   fireEvent.click(
@@ -113,19 +107,28 @@ it('renders a converted leaf family review from its trees and opens the touched 
       .find((node) => node.dataset.revision === touched.after_revision_id)!,
   );
   const center = await view.findByTestId('review-center-member');
-  await waitFor(() =>
-    expect(center.textContent).toContain(
-      invariant.payload!.knowledge.after_statement.text!.slice(0, 60),
-    ),
-  );
+  const statement = within(center).getByTestId('review-center-member-changed');
+  expect(statement.textContent).toContain(touched.before_revision_id);
+  expect(statement.textContent).toContain(touched.after_revision_id);
+  expect(
+    within(statement)
+      .getAllByTestId('intent-diff')
+      .some((node) => node.dataset.field === 'statement'),
+  ).toBe(true);
   expect(center.dataset.family).toBe(entry.family_id);
-  // The member keeps its family's cards, its own entries first (the seed of MIK-R01's order).
+  // The member keeps its family's real expression cards, all of its own entries first.
   const seeded = await within(center).findAllByTestId('review-expression-card');
-  expect(seeded[0].dataset.entries).toBe('RLZ-CXH58B4W');
-  expect(seeded[1].dataset.entries).toBe('PRF-7Q3M5K');
+  const owners = seeded.map((card) =>
+    within(card)
+      .getAllByTestId('review-card-voice')
+      .map((voice) => voice.dataset.invariant),
+  );
+  expect(owners.slice(0, 7)).toEqual(Array.from({ length: 7 }, () => ['INV-1XKX9ERN']));
+  expect(owners.slice(7).every((names) => !names.includes('INV-1XKX9ERN'))).toBe(true);
+  expect(seeded.some((card) => card.dataset.entries?.includes('RLZ-Y766ENWA'))).toBe(true);
 });
 
-it('shows the family around _not_listed as focused cards: one changed range, the rest unchanged', async () => {
+it('shows the current family as focused cards with changed and unchanged expressions', async () => {
   serve();
   const payload = family.payload!;
   const view = render(
@@ -145,7 +148,7 @@ it('shows the family around _not_listed as focused cards: one changed range, the
   const section = within(center).getByTestId('review-expression-cards');
   // The cards read names the review's own comparison and every member of the family.
   const read = requested.find((url) => url.searchParams.get('invariants'))!;
-  expect(read.searchParams.get('comparison')).toBe('1');
+  expect(read.searchParams.get('comparison')).toBe('5');
   // The leaf-wide read is pinned to the same comparison (review F11).
   const leafWide = requested.find(
     (url) =>
@@ -153,109 +156,39 @@ it('shows the family around _not_listed as focused cards: one changed range, the
       !url.searchParams.get('invariants') &&
       !url.searchParams.get('lane'),
   )!;
-  expect(leafWide.searchParams.get('comparison')).toBe('1');
+  expect(leafWide.searchParams.get('comparison')).toBe('5');
   expect(leafWide.searchParams.get('history')).toBeNull();
-  expect(read.searchParams.get('invariants')!.split(',')).toHaveLength(7);
+  expect(read.searchParams.get('invariants')!.split(',')).toHaveLength(3);
   // No accordion of whole files: the center holds cards, one per (path, range).
   expect(within(center).queryByTestId('review-expression-diffs')).toBeNull();
   const all = within(section).getAllByTestId('review-expression-card');
-  expect(all).toHaveLength(11);
-  expect([section.dataset.changedCount, section.dataset.unchangedCount]).toEqual(['1', '10']);
-  // The packet's conforming example: four cards in the edited file, distinct regions, each with its
-  // role and its own rationale; the one changed range is a diff, the other three are unchanged. They
-  // come in the family order (member by ID: INV-2TQGXFAX, -9ECAFVTQ, -XTXZESS6, -YBS0CVBK).
-  const inFile = all.filter((card) => card.dataset.path === CHANGED);
-  expect(inFile.map((card) => [card.dataset.entries, card.dataset.cardChange])).toEqual([
-    ['RLZ-CXH58B4W', 'changed'],
-    ['RLZ-D43E5CF2', 'unchanged'],
-    ['RLZ-9EC7B6PN', 'unchanged'],
-    ['RLZ-NM6160PK', 'unchanged'],
-  ]);
-  const changed = inFile[0];
-  expect(changed.dataset.beforeRange).toBe('L194–213');
-  expect(within(changed).getByTestId('review-card-rationale').textContent).toContain(
-    'Builds the source_content_unresolved refusal',
-  );
-  expect(changed.textContent).toContain('Code expression · primary-authority');
+  expect(all).toHaveLength(12);
+  expect([section.dataset.changedCount, section.dataset.unchangedCount]).toEqual(['3', '6']);
+  const proof = all.find((card) => card.dataset.cardKind === 'proof')!;
+  expect(proof.dataset.entries).toBe('PRF-TMK4N3');
+  expect(proof.textContent).toContain('Test proof · facet');
+  const changed = all.find((card) => card.dataset.cardChange === 'changed')!;
+  expect(changed).toBeDefined();
+  expect(within(changed).getByTestId('review-card-excerpt').dataset.excerpt).toBe('diff');
   const rationale = within(changed).getByTestId('review-card-rationales');
   const excerpt = within(changed).getByTestId('review-card-excerpt');
-  expect(excerpt.dataset.excerpt).toBe('diff');
   expect(
     rationale.compareDocumentPosition(excerpt) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  expect(within(inFile[1]).getByTestId('review-card-excerpt').dataset.excerpt).toBe('unchanged');
-  expect(
-    new Set(inFile.map((card) => within(card).getByTestId('review-card-rationale').textContent))
-      .size,
-  ).toBe(4);
-  // The proof entry's card names its facet in place of a role and a rationale.
-  const proof = all.find((card) => card.dataset.cardKind === 'proof')!;
-  expect(proof.textContent).toContain('Test proof · facet');
-  expect(within(proof).getByTestId('review-card-rationale').textContent).toContain(
-    'no content is read for it',
-  );
-  // MIK-R11's marks from the worklist: the touched member is planned.
-  expect(within(changed).getByTestId('review-card-voice').textContent).toContain(
-    'touched invariant · planned',
-  );
+  expect(all.some((card) => card.dataset.cardChange === 'unchanged')).toBe(true);
   // Worklist records have their own view; the subject shows only its own items.
   const block = within(center).getByTestId('review-subject-worklist');
   expect(block.textContent).toContain('Worklist items about this record');
-  expect(view.getByRole('button', { name: /Unexplained changes unavailable/ })).toBeTruthy();
-  expect(view.getByRole('button', { name: /Unknown attribution unavailable/ })).toBeTruthy();
+  expect(requested.some((url) => url.searchParams.has('lane'))).toBe(true);
   fireEvent.click(view.getByRole('button', { name: /^Worklist/ }));
   const knowledge = view.getByTestId('review-worklist-view');
   expect(
     within(knowledge)
       .getAllByTestId('review-worklist-item')
-      .map((row) => row.dataset.kind),
-  ).toContain('planned_untouched');
+      .map((row) => row.dataset.kind)
+      .sort(),
+  ).toEqual(leafTrees.worklist!.items.map((item) => item.kind).sort());
   expect(knowledge.querySelector('pre')).toBeNull();
-});
-
-it('leaves a dataset review exactly as it was: no tree read, the landed file view', async () => {
-  // A dataset (unconverted) review declares no `review:trees:<n>`, so the surface asks the tree view
-  // nothing and renders the landed expression view (MIK-R31 Transition: unconverted is unchanged).
-  const dataset = captured<ReviewResult>('familyReview.complete.captured.json');
-  expect(dataset.payload!.limitations.some((token) => token.startsWith('review:trees:'))).toBe(
-    false,
-  );
-  const urls: URL[] = [];
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (address: string) => {
-      const url = new URL(address, 'http://localhost');
-      urls.push(url);
-      const body = url.pathname.endsWith('/entries')
-        ? { state: 'entries', entries: [], total_subjects: 0 }
-        : dataset;
-      return { ok: true, status: 200, json: async () => body } as Response;
-    }),
-  );
-  const payload = dataset.payload!;
-  const view = render(
-    <ReviewSurface
-      repo={payload.candidate.repository_id}
-      master={payload.candidate.master}
-      leaf={payload.candidate.leaf_id}
-      selectorKind="invariant"
-      selectorId={payload.knowledge.revision_selection!.record_id}
-      onBack={() => undefined}
-    />,
-  );
-  await view.findByTestId('review-expression-diffs');
-  expect(view.queryByTestId('review-expression-cards')).toBeNull();
-  expect(view.queryByTestId('review-leaf-knowledge')).toBeNull();
-  expect(view.queryByTestId('review-lane-destinations')).toBeNull();
-  expect(urls.some((url) => url.pathname.endsWith('/trees'))).toBe(false);
-  expect(view.queryByTestId('review-inventory-entry')).toBeNull();
-  const remaining = view.getByTestId('review-remaining');
-  expect(remaining.closest('details')).toBeNull();
-  expect(remaining.dataset.attributionSource).toBe('landed');
-  const counted = payload.source.remaining.find(
-    (count) => count.name === 'unattributed_changed_paths',
-  )!;
-  expect(remaining.textContent).toContain(`unattributed_changed_paths: ${counted.value}`);
 });
 
 it('takes no planning mark from a leaf-wide read of another comparison (review R2-3)', async () => {

@@ -58,9 +58,9 @@ it('opens each existing viewer filter, draws its first diff, and returns without
   const view = render(<ReviewSurface {...target} />);
   const rail = await view.findByTestId('review-catalogue-navigation');
   await view.findByTestId('review-center-family');
-  await waitFor(() => expect(rail.textContent).toMatch(/Unexplained changes\s*167/));
+  await waitFor(() => expect(rail.textContent).toMatch(/Changes without an invariant\s*167/));
   const surface = view.getByTestId('review-surface');
-  for (const destination of ['Unexplained changes', 'Unknown attribution', 'All changes']) {
+  for (const destination of ['Changes without an invariant', 'Changes of unknown attribution', 'All changes']) {
     const trigger = within(rail).getByRole('button', { name: new RegExp(`^${destination}`) });
     trigger.focus();
     surface.scrollTop = 91;
@@ -97,7 +97,7 @@ it('shows the persisted worklist as its own open view and preserves the named su
   );
   await view.findByTestId('review-center-family');
   const rail = view.getByTestId('review-catalogue-navigation');
-  await waitFor(() => expect(rail.textContent).toMatch(/Worklist\s*673/));
+  await waitFor(() => expect(rail.textContent).toMatch(/Worklist\s*518 open/));
   const selection = rail.querySelector('[aria-current="true"]');
   fireEvent.click(within(rail).getByRole('button', { name: /^Worklist/ }));
   await view.findByText(/Changed knowledge files are read in the change-set viewer/);

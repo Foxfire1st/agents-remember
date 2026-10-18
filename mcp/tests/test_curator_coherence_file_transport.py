@@ -48,7 +48,7 @@ from curator_coherence_test_support import (
     write_curator_evidence,
 )
 from pydantic import ValidationError
-from test_knowledge_review_evidence_channels import (
+from review_curator_fixture_support import (
     EVIDENCE_RELATIVE,
     build_recorded_fixture,
 )

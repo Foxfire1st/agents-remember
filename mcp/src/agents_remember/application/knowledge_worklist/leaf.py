@@ -85,6 +85,7 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.kernel.memory_attribution import MemoryAttributionError, attributed_commits
+from agents_remember.kernel.recorded_reads import observed_text
 from agents_remember.memory.conversion.base import pinned_version
 from agents_remember.memory.knowledge_index import (
     MemoryTreeError,
@@ -151,9 +152,10 @@ def read_leaf_worklist(contract_path: Path) -> dict[str, Any] | None:
     """The latest persisted worklist beside the contract at ``contract_path``, or ``None``."""
 
     path = contract_path.parent / WORKLIST_FILE_NAME
-    if not path.is_file():
+    try:
+        loaded = json.loads(observed_text(path))
+    except FileNotFoundError:
         return None
-    loaded = json.loads(path.read_text(encoding="utf-8"))
     return loaded if isinstance(loaded, dict) else None
 
 

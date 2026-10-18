@@ -13,7 +13,7 @@
 //     unexplained hunks or a non-text change the gate holds unexplained) and `Unknown attribution`.
 //
 // The entry's own count (`ReviewLaneSummary`) travels on the changed-intent summary, read together
-// with it (data/reviewIntentSummary.ts). A dataset review asks this adapter nothing.
+// with it (data/reviewIntentSummary.ts).
 
 import { useEffect, useState } from 'react';
 
@@ -56,6 +56,7 @@ export interface ReviewLaneFamilyOccurrence {
   family_key?: string;
   family_revision?: number;
   state: LaneMembershipState;
+  reason?: string;
 }
 
 export interface ReviewLaneLink {
@@ -244,7 +245,7 @@ function picked<T>(
 }
 
 // The lane's two destinations for the comparison a review payload names; `null` (and no request) for a
-// dataset review, which names no tree comparison.
+// read whose comparison has not yet arrived.
 export function useReviewLane(
   repo: string,
   master: string,

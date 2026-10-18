@@ -73,19 +73,18 @@ def source_locations(
 
     A side whose recorded address could not be read has no address to list, and it is not invented:
     the movement carries that side with its own unresolved state and reason, and this view lists the
-    sides that have an address. One row per *recorded side* rather than one per movement that displays
-    it, because this view is a list of addresses and an address two movements continue is one address.
+    sides that have an address. A side shared by two movements gets a row for each movement, so
+    listing the old address never silently drops its second recorded continuation.
     """
 
     locations: list[ReviewSourceLocation] = []
-    seen: set[tuple[str, str]] = set()
+
     for movement in movements:
         if movement.relationship_kind != "realization":
             continue
         for side in _displayed_sides(movement):
-            if side.path is None or (str(side.relationship_id), side.path) in seen:
+            if side.path is None:
                 continue
-            seen.add((str(side.relationship_id), side.path))
             locations.append(_location(movement, side))
     return tuple(locations)
 

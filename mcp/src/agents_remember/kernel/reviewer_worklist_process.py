@@ -183,6 +183,7 @@ def _reply(data: bytes, request: Mapping[str, Any]) -> dict[str, Any]:
         "module",
         "pid",
         "document",
+        "review",
         "reads",
         "computation",
         "error",
@@ -223,6 +224,10 @@ def _reply(data: bytes, request: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise WorklistProcessError("reviewer worklist child returned invalid actual-read evidence")
     _validate_document(value["document"], reads, value["error"])
+    if value["review"] is not None and (
+        not isinstance(value["review"], dict) or value["error"] is not None
+    ):
+        raise WorklistProcessError("reviewer worklist child returned invalid review facts")
     return value
 
 

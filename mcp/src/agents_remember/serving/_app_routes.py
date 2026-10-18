@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Annotated
 
@@ -38,6 +39,7 @@ from agents_remember.serving.response_contract import (
     HttpDetailRefusal,
     StreamReadyMarker,
 )
+from agents_remember.serving.review_memory_watch import multiplex_review_memory
 from agents_remember.serving.served_state import ServedWorkspaceProjection, served_state_tail
 
 if TYPE_CHECKING:
@@ -141,13 +143,35 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
             }
         },
     )
-    async def api_stream() -> AsyncIterator[ServerSentEvent]:
-        async for event in stream_events(
+    async def api_stream(
+        reviewRepo: str | None = None,
+        reviewMaster: str | None = None,
+        reviewLeaf: str | None = None,
+    ) -> AsyncIterator[ServerSentEvent]:
+        supplied = (reviewRepo, reviewMaster, reviewLeaf)
+        identity = (
+            None
+            if all(value is None for value in supplied)
+            else (
+                reviewRepo or "",
+                reviewMaster or "",
+                reviewLeaf or "",
+            )
+        )
+        ordinary = stream_events(
             runtime.projector,
             build=runtime.build,
             watcher_health=runtime.projector.watcher_health(),
-        ):
-            yield event
+        )
+        async with contextlib.aclosing(
+            multiplex_review_memory(
+                ordinary,
+                identity,
+                runtime.review_memory_root,
+            )
+        ) as events:
+            async for event in events:
+                yield event
 
     # The raw river: every ``event`` frame is a verbatim observer JSONL record replayed from
     # disk, so its schema belongs to the observer. What THIS route mints is the ready marker,

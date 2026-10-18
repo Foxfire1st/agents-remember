@@ -198,14 +198,6 @@ describe('tree order', () => {
       complete.family_id,
     ]);
   });
-
-  it('leaves a dataset review (no change facts) in its landed order', () => {
-    const dataset = only(family);
-    const bare = { ...dataset, change_kinds: undefined };
-    const rows = memberRows(bare);
-    expect(orderMemberRows(bare, rows, 'triage')).toEqual(rows);
-    expect(orderFamilies([bare], 'triage')).toEqual([bare]);
-  });
 });
 
 describe('roster walk', () => {

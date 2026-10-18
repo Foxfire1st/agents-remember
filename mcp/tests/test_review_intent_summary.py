@@ -20,29 +20,49 @@ the production summary over it, so the counts asserted are the counts the entry 
 
 from __future__ import annotations
 
+import json
+import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
-from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
-from agents_remember.application.review_intent_summary import intent_summary_of
+from agents_remember.application.knowledge_currentness.observe import open_code_tree
+from agents_remember.application.knowledge_gate.gate import GateTrees, item_verdicts
+from agents_remember.application.knowledge_gate.predicates import GateContext, item_verdict
+from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
+from agents_remember.application.knowledge_worklist.leaf import CandidateTrees, leaf_worklist
+from agents_remember.application.review_candidate_resolution import (
+    ReviewCandidateResolution,
+    resolve_review_candidate,
+)
+from agents_remember.application.review_code_changes import code_changes
+from agents_remember.application.review_intent_summary import (
+    intent_summary_of,
+)
+from agents_remember.cli.dashboard_review_summary import review_intent_summary_port
 from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID
+from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.review_intent_summary import ReviewIntentSummaryResult
 from agents_remember.models.knowledge.source import FileLocator
+from agents_remember.models.knowledge_files import canonical_text
+from agents_remember.models.knowledge_files.history import HistoryFile
+from agents_remember.models.knowledge_files.records import DecisionRecord
+from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.serving.changeset_cache import ChangesetCache
 from agents_remember.serving.intent_summary_cache import ReviewIntentSummaryPort
 from agents_remember.serving.review_summary import (
     KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
     register_review_summary_route,
 )
+from agents_remember.worktrees.worktree_contract import load_contract
 from anchor_fixture_models import GitBlobIdentity, RealizationClaimDraft, SourceAnchorDraft
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -61,6 +81,10 @@ from knowledge_rows_test_support import (
     open_knowledge_store,
     realizations,
 )
+from test_review_change_kinds import LEAF as TREE_LEAF
+from test_review_change_kinds import MASTER as TREE_MASTER
+from test_review_change_kinds import REPO as TREE_REPO
+from test_review_change_kinds import _family, _invariant, build_world
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -619,3 +643,222 @@ def test_the_route_answers_every_typed_state_in_the_body(
     assert "counts" not in absent.json()
     assert missing.status_code == 503
     assert missing.json()["status"] == "unavailable"
+
+
+def test_summary_counts_only_open_unexplained_items_of_a_matching_stored_worklist(
+    tmp_path, monkeypatch
+):
+
+    world = build_world(tmp_path)
+    (world.code_worktree / "no-rule.py").write_text("answer = 42\n")
+    resolved = resolve_review_candidate(world.config, TREE_REPO, TREE_MASTER, TREE_LEAF)
+    assert isinstance(resolved, ReviewCandidateResolution), resolved
+    assert resolved.trees is not None
+    contract = load_contract(world.contract())
+    app = FastAPI()
+    register_review_summary_route(
+        app,
+        review_intent_summary_port(world.config),
+        ChangesetCache(),
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+
+    def summary():
+        response = client.get(
+            KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
+            params={"repo": TREE_REPO, "master": TREE_MASTER, "leaf": TREE_LEAF},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    readable = summary()
+    assert readable["state"] == "counted" and readable["attribution"]
+    assert "unexplained_open" not in readable
+    record = resolved.trees.record
+    document = leaf_worklist(
+        contract,
+        persist=False,
+        candidate=CandidateTrees(record.code_candidate.tree, record.memory_candidate.tree),
+    )
+    assert document is not None
+    path = contract.contract_path.parent / "knowledge-worklist.json"
+    path.write_text(json.dumps(document))
+    result = summary()
+    expected = sum(
+        item["kind"] in ("unexplained_hunk", "unexplained_file") for item in document["items"]
+    )
+    assert expected > 0 and result == {**readable, "unexplained_open": expected}
+    document["pairing"]["memoryCandidate"]["tree"] = "f" * 40
+    path.write_text(json.dumps(document))
+    assert summary() == readable
+    for corrupt in (b"{broken", b"\xff"):
+        path.write_bytes(corrupt)
+        assert summary() == readable
+    path.unlink()
+    path.mkdir()
+    assert summary() == readable
+    path.rmdir()
+    path.write_text(json.dumps(document))
+    read_bytes = Path.read_bytes
+
+    def permission_denied(target):
+        if target == path:
+            raise PermissionError("auxiliary worklist permission denied")
+        return read_bytes(target)
+
+    path.chmod(0)
+    try:
+        with monkeypatch.context() as denied:
+            # Privileged test runners can bypass mode bits; ordinary runners use the real failure.
+            if os.access(path, os.R_OK):
+                denied.setattr(Path, "read_bytes", permission_denied)
+            assert summary() == readable
+    finally:
+        path.chmod(0o600)
+
+
+def test_partial_entry_side_cannot_claim_complete_leaf_code_facts(tmp_path):
+    world = build_world(tmp_path)
+    (world.memory_worktree / "onboarding/pkg/a.py.json").write_text("{broken")
+    resolved = resolve_review_candidate(world.config, TREE_REPO, TREE_MASTER, TREE_LEAF)
+    assert isinstance(resolved, ReviewCandidateResolution), resolved
+    assert resolved.trees is not None
+    facts = code_changes(resolved.trees)
+    assert facts.state == "unavailable"
+    assert facts.detail is not None
+    assert "onboarding/pkg/a.py.json" in facts.detail
+
+
+def test_a_counted_refresh_does_not_claim_an_incidental_history_row_as_its_witness():
+    anchor = Anchor.model_validate(
+        {
+            "path": "pkg/a.py",
+            "blob": "a" * 40,
+            "content": "sha256:" + "a" * 64,
+            "locator": {"kind": "file"},
+        }
+    )
+    subject = "reconsider:DEC-AAAAAA#1"
+    # Parse a real decision with the unchanged link; its history row is incidental
+    # because the counted restoration answers even when that row is absent.
+    decision = DecisionRecord.model_validate(
+        {
+            "id": "DEC-AAAAAA",
+            "revision": 1,
+            "status": "active",
+            "context": "The existing choice still holds when its original link is restored.",
+            "alternatives": [
+                {"option": "Keep the choice", "status": "chosen", "reason": "It still holds."},
+                {
+                    "option": "Replace the choice",
+                    "status": "rejected",
+                    "reason": "The original source still applies.",
+                    "reconsider_when": "The linked source changes.",
+                },
+            ],
+            "consequences": ["Keep the original source link."],
+            "decider": "fixture",
+            "supersedes": [],
+            "admission": "legacy-unassessed",
+            "origin": {"task": "260101-OLD", "leaf": "260101-OLD-L1"},
+            "links": [
+                {"relation": "reconsider_on", "target": anchor.to_document(), "alternative": 1}
+            ],
+        }
+    )
+    candidate = KnowledgeSide.from_tree(
+        "K_C",
+        "candidate",
+        KnowledgeTree(
+            "candidate",
+            {
+                "knowledge/decisions/DEC-AAAAAA-choice.json": canonical_text(
+                    decision.to_document()
+                ).encode()
+            },
+        ),
+    )
+    history = HistoryFile.model_validate(
+        {
+            "leaf": TREE_LEAF,
+            "closed": False,
+            "rows": [
+                {
+                    "id": "ROW-AAAAAA",
+                    "subject": subject,
+                    "disposition": "still_rejected",
+                    "reason": "The original source still applies.",
+                    "items": [],
+                }
+            ],
+        }
+    )
+    context = GateContext(TREE_LEAF, history, candidate, open_code_tree(None))
+    item = {
+        "kind": "reconsideration_candidate",
+        "subject": subject,
+        "facts": {
+            "decision": "DEC-AAAAAA",
+            "changed": [
+                {
+                    "trigger": "refresh_not_current",
+                    "link": 0,
+                    "baseTarget": anchor.to_document(),
+                }
+            ],
+        },
+    }
+    answer = item_verdict(item, context)
+    assert answer.state == "answered"
+    assert answer.witness == "counted change"
+
+
+@pytest.mark.parametrize(
+    ("kind", "subject", "row_fields", "facts"),
+    [
+        ("touched_invariant", "INV-AAAAAA", {"covers": []}, {}),
+        ("reached_family", "FAM-AAAAAA", {"examined": []}, {"members": []}),
+    ],
+)
+def test_item_verdict_shows_answered_stale_open_and_undecided(
+    kind, subject, row_fields, facts, tmp_path
+):
+    history = HistoryFile.model_validate(
+        {
+            "leaf": TREE_LEAF,
+            "closed": False,
+            "rows": [
+                {
+                    "id": "ROW-AAAAAA",
+                    "subject": subject,
+                    "disposition": "no_impact",
+                    "reason": "The requirement is unchanged.",
+                    "items": [],
+                    "revision": 1,
+                    **row_fields,
+                }
+            ],
+        }
+    )
+    files = dict([_invariant("INV-AAAAAA"), _family("FAM-AAAAAA", [], "The family holds.")])
+    candidate = KnowledgeSide.from_tree(
+        "K_C",
+        "candidate",
+        KnowledgeTree("candidate", {path: text.encode() for path, text in files.items()}),
+    )
+    context = GateContext(TREE_LEAF, history, candidate, open_code_tree(None))
+    item = {"id": "item", "kind": kind, "subject": subject, "facts": facts}
+    verdict = item_verdict(item, context)
+    assert verdict.state == "answered" and verdict.witness == "ROW-AAAAAA"
+    stale = history.model_copy(
+        update={"rows": (history.rows[0].model_copy(update={"revision": 2}),)}
+    )
+    verdict = item_verdict(item, replace(context, history=stale))
+    assert verdict.reason is not None
+    assert (
+        verdict.state == "open" and verdict.row_id == "ROW-AAAAAA" and "revision" in verdict.reason
+    )
+    assert item_verdict(item, replace(context, history=None)).state == "open"
+    trees = GateTrees(tmp_path, "a" * 40, tmp_path, "b" * 40, (), "c" * 40)
+    verdict = item_verdicts([item], trees, TREE_LEAF)["item"]
+    assert verdict.state == "undecided" and verdict.reason

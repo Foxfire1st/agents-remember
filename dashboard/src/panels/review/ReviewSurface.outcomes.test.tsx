@@ -134,8 +134,6 @@ function taskContextPayload(): ReviewPayload {
       after_conditions: [],
       revision_groups: [],
       field_changes: [],
-      signals: [],
-      assessments: [],
       unresolved: [],
       selection_state: "task_context",
       selection_detail:
@@ -169,15 +167,7 @@ function taskContextPayload(): ReviewPayload {
       attributed_changed_paths: [],
       unresolved: [],
     },
-    evidence: {
-      evidence_state: "none_recorded",
-      assessment_state: "unassessed",
-      evidence_links: [],
-      observations: [],
-      assessments: [],
-      source_inspection_available: true,
-      unresolved: [],
-    },
+    judgment: { state: "none", detail: "This leaf recorded no judgment about this record", rows: [], proofs: [] },
     staleness: {
       state: "not_compared",
       statement:

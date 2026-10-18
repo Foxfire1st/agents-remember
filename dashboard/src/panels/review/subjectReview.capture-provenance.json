@@ -1,72 +1,42 @@
 {
-  "captured_source_tree": "f023200696ff374108c1a72f1de0bea985c94111",
-  "producer_notes": "ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reviewer-repair-2026-09-26",
+  "scope": "All files below are current real tree route captures; the former dataset-only assessed/ambiguous shapes are removed. The family/invariant names remain only as shared consumer seeds, not compatibility fixtures.",
+  "producer": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/replay_http.py",
   "fixtures": [
     {
       "file": "subjectReview.family.captured.json",
-      "sha256": "24fb0979b9859d72012bbd855ba226bc29f75f4d24c19c3b96250866392b4fd3",
-      "captured_source_tree": "a8039b8e036e2c0d83100e9b4683901d6d54bd0d",
-      "captured_at": "2026-09-28T10:39:12.669478+00:00",
-      "command": "/workspace/agents-remember/mcp/.venv/bin/python /workspace/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/l44_recapture_review_fixtures.py /workspace/ar-coordination/worktrees/agents-remember/260921-icr-l44-ar/260921-icr-l44",
-      "route": "GET /api/review/intent served by serving.review.register_review_routes wired with cli.dashboard.serving_collaborators(config) (review routes only) under uvicorn on a free 127.0.0.1 port; bodies read over HTTP",
-      "capture_record": "/workspace/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-capture/capture-record.json",
-      "capture_record_sha256": "aeae0851e110a5244ccebfa34555479662e2e8e6a5a611695e3a167be5fb0172",
-      "selection_rule": "each scenario was rebuilt with fresh identities until every route body it produced carried the committed capture's structural signature; attempts per group are recorded",
-      "signature": "per body: revision_selection.state, before/after statement state, family_context.state, per family entry in order (display_label, entry state, selection state, per side: side state, members_total, roster page state, (member label, member state) pairs in served order), and the published page's (state, total, returned, remaining); familyPaging: every walk body",
-      "attempts": {
-        "complete": 22,
-        "identical": 11,
-        "subject": 46
-      },
-      "scenario": "test_knowledge_review_evidence_channels.build_recorded_fixture (assessed member); invariant, then its first recorded family",
-      "requests": [
-        "subject46-subject-invariant",
-        "subject46-subject-family"
-      ]
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorFamily.captured.json",
+      "sha256": "2a4621f84171f3d722740bddd84496ebbaefa42538dcf92c6d7a4732d48af8cb",
+      "previous_sha256": "24fb0979b9859d72012bbd855ba226bc29f75f4d24c19c3b96250866392b4fd3",
+      "bytes": 270999,
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json",
+      "provenance_sha256": "b0bfd3545f211b810a0432f60d53556a8bf16f0eabcaeee682e136b822899628"
     },
     {
       "file": "subjectReview.invariant.captured.json",
-      "sha256": "71926526671d2a6b1ea63650cee02c12493435a396533a2fd1c49a8772a0d7c6",
-      "captured_source_tree": "a8039b8e036e2c0d83100e9b4683901d6d54bd0d",
-      "captured_at": "2026-09-28T10:39:12.669478+00:00",
-      "command": "/workspace/agents-remember/mcp/.venv/bin/python /workspace/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/l44_recapture_review_fixtures.py /workspace/ar-coordination/worktrees/agents-remember/260921-icr-l44-ar/260921-icr-l44",
-      "route": "GET /api/review/intent served by serving.review.register_review_routes wired with cli.dashboard.serving_collaborators(config) (review routes only) under uvicorn on a free 127.0.0.1 port; bodies read over HTTP",
-      "capture_record": "/workspace/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-capture/capture-record.json",
-      "capture_record_sha256": "aeae0851e110a5244ccebfa34555479662e2e8e6a5a611695e3a167be5fb0172",
-      "selection_rule": "each scenario was rebuilt with fresh identities until every route body it produced carried the committed capture's structural signature; attempts per group are recorded",
-      "signature": "per body: revision_selection.state, before/after statement state, family_context.state, per family entry in order (display_label, entry state, selection state, per side: side state, members_total, roster page state, (member label, member state) pairs in served order), and the published page's (state, total, returned, remaining); familyPaging: every walk body",
-      "attempts": {
-        "complete": 22,
-        "identical": 11,
-        "subject": 46
-      },
-      "scenario": "test_knowledge_review_evidence_channels.build_recorded_fixture (assessed member); invariant, then its first recorded family",
-      "requests": [
-        "subject46-subject-invariant",
-        "subject46-subject-family"
-      ]
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/l57.invariant.captured.json",
+      "sha256": "d9ab4558bb99695b37f50350aa70cc668718ea909260232008c2f001d5324f5c",
+      "previous_sha256": "71926526671d2a6b1ea63650cee02c12493435a396533a2fd1c49a8772a0d7c6",
+      "bytes": 283497,
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json",
+      "provenance_sha256": "b0bfd3545f211b810a0432f60d53556a8bf16f0eabcaeee682e136b822899628"
     },
     {
       "file": "subjectReview.successorFamily.captured.json",
-      "sha256": "217b51f05f723da57fc935959d04d5753efef94be954c39c8d7da4c85f2096b3",
-      "owner_response": "data-reviewer-full-single-head-family-context-family-response.json",
-      "provenance": "data-reviewer-single-head-family-provenance.json",
-      "provenance_sha256": "0a28a1b1e499bc44e0e26416ff322502924f725cf29b27e42de29916b3780492"
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorFamily.captured.json",
+      "sha256": "2a4621f84171f3d722740bddd84496ebbaefa42538dcf92c6d7a4732d48af8cb",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json"
     },
     {
       "file": "subjectReview.successorInvariant.captured.json",
-      "sha256": "c0b39ebc94805b10d7193acf01c557d5137bd6c858559c3a41d2d3840e7466c1",
-      "owner_response": "data-reviewer-full-single-head-family-context-invariant-response.json",
-      "provenance": "data-reviewer-single-head-family-provenance.json",
-      "provenance_sha256": "0a28a1b1e499bc44e0e26416ff322502924f725cf29b27e42de29916b3780492"
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.successorInvariant.captured.json",
+      "sha256": "c5afaba7ee5e8ea8c2fd003d4e2d0422c49304cbd71fa40a0bfc654f08018797",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json"
     },
     {
       "file": "subjectReview.noFamily.captured.json",
-      "sha256": "d3192500b87f5eb36e16e6ce08a5eb6f91426d97111d738cb29b32fbef8ea3ec",
-      "owner_response": "data-reviewer-full-single-head-invariant-response.json",
-      "provenance": "data-reviewer-single-head-provenance.json",
-      "provenance_sha256": "fc4ac94491ef4ce48bcdb057f52d712816a49742f26950704fe9941c161c90a5"
+      "raw_file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/raw/subjectReview.noFamily.captured.json",
+      "sha256": "fcf34721bbc361ca3967a038dc294262b8dddd9aa93cdf3bb1b40ffc7bca749f",
+      "provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/capture-helper/current-final-01/provenance.json"
     }
-  ],
-  "scope": "The family and invariant fixtures are real review-route bodies re-captured with the entry's own command and source tree (route bytes omit null fields). The other entries are exact application-owner responses from disposable repositories, unchanged. All are test evidence, not product knowledge or mounted acceptance. The assessed invariant intentionally has ambiguous heads. The successor family and invariant responses have a genuinely unique authored pair."
+  ]
 }

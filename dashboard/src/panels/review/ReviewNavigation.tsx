@@ -65,11 +65,13 @@ export function ReviewNavigation({
   catalogue,
   children,
   summaryCounts,
+  codeSummary,
   destinations,
   walkedEntries = [],
 }: ReviewNavigationState & {
   children?: React.ReactNode;
   summaryCounts?: NavigationCounts;
+  codeSummary?: string;
   destinations?: React.ReactNode;
   walkedEntries?: import('../../data/review').ReviewFamilyContextEntry[];
 }) {
@@ -78,7 +80,7 @@ export function ReviewNavigation({
     <section data-testid="review-catalogue-navigation" aria-label="Families and invariants">
       <h2 className={css({ fontSize: '0.85rem', margin: 0 })}>Families &amp; invariants</h2>
       <p className={summary} data-testid="review-navigation-summary">
-        {text}
+        {text}{codeSummary ? ` · ${codeSummary}` : ''}
       </p>
       {reason ? (
         <p className={summary} data-testid="review-outline-unavailable">
@@ -109,7 +111,13 @@ function summaryText(
 ): string {
   const families = counts?.families ?? placeholder;
   const invariants = counts?.invariants ?? placeholder;
-  return `${families} families changed · ${invariants} invariants changed · ${lanes?.unexplained ?? '…'} files unexplained · ${lanes?.unknown ?? '…'} unknown attribution`;
+  return `${families} families changed · ${invariants} invariants changed · ${attributionSummary(lanes)}`;
+}
+
+function attributionSummary(lanes?: NavigationCounts): string {
+  if (lanes?.unexplained === 'unavailable' || lanes?.unknown === 'unavailable')
+    return 'the change set could not be measured';
+  return `${lanes?.unexplained ?? '…'} files without an invariant · ${lanes?.unknown ?? '…'} files of unknown attribution`;
 }
 
 function unavailableReason(catalogue: ReviewNavigationState['catalogue']): string {

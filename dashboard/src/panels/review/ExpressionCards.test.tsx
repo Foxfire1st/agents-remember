@@ -237,8 +237,8 @@ describe('review fixes', () => {
   });
 
   it("says a bounded roster's cards cover only the loaded members and points to the walk (F2)", () => {
-    const walk = captured<ReviewResult>('familyReview.walkFinal.captured.json').payload!;
-    const bounded = walk.family_context!.entries.find((entry) => cardScope(entry) !== undefined)!;
+    const bounded = captured<ReviewResult>('familyReview.truncated.captured.json').payload!.family_context!.entries[0];
+    const complete = captured<ReviewResult>('familyReview.complete.captured.json').payload!.family_context!.entries[0];
     const scope = cardScope(bounded)!;
     const sides = [bounded.before, bounded.after];
     expect(scope.total).toBe(Math.max(...sides.map((side) => side.members_total)));
@@ -248,20 +248,50 @@ describe('review fixes', () => {
     const disjoint = structuredClone(bounded);
     disjoint.before.members_total = 2;
     disjoint.after.members_total = 2;
-    disjoint.before.members = bounded.after.members.slice(0, 2);
-    disjoint.after.members = bounded.after.members.slice(2, 4).map((member) => ({
+    disjoint.before.members = complete.after.members.slice(0, 2);
+    disjoint.after.members = complete.after.members.slice(2, 4).map((member) => ({
       ...member,
       state: 'content_not_on_page' as const,
     }));
     const across = cardScope(disjoint)!;
     expect(across.loaded).toBeLessThanOrEqual(across.total);
     expect(across.total).toBe(2);
-    const complete = walk.family_context!.entries.find((entry) => entry !== bounded)!;
+    expect(new Set([...disjoint.before.members, ...disjoint.after.members].map((member) => member.invariant_id)).size).toBeGreaterThan(across.total);
     expect(cardScope(complete)).toBeUndefined();
     const view = mount([real('RLZ-CXH58B4W')], undefined, scope);
     const line = view.getByTestId('review-cards-scope').textContent ?? '';
     expect(line).toContain(`the loaded ${scope.loaded} of ${scope.total} members`);
     expect(line).toContain('roster walk');
+  });
+
+  it('names the incomplete side when all members of the widest side are loaded', () => {
+    const entry = structuredClone(payload.family_context!.entries[0]);
+    entry.before.members = entry.before.members.slice(0, 2);
+    entry.before.members_total = 2;
+    entry.before.page = undefined;
+    entry.after.members = entry.after.members.slice(0, 1);
+    entry.after.members_total = 1;
+    entry.after.page = undefined;
+    entry.after.members[0].state = 'content_not_on_page';
+    entry.after.members[0].detail = 'the member content could not be read';
+    const scope = cardScope(entry)!;
+    expect(scope.loaded).toBe(scope.total);
+    const view = mount([], undefined, scope);
+    const line = view.getByTestId('review-cards-scope').textContent!;
+    expect(line).toContain('after');
+    expect(line).toContain('the member content could not be read');
+    expect(line).not.toContain('load the rest');
+    view.unmount();
+    entry.after.members = [];
+    const missing = mount([], undefined, cardScope(entry));
+    expect(missing.getByTestId('review-cards-scope').textContent).toContain(
+      'after side is not fully loaded',
+    );
+    missing.unmount();
+    entry.after.state = 'unreadable';
+    entry.after.detail = 'the after memory tree could not be read';
+    const unread = mount([], undefined, cardScope(entry));
+    expect(unread.getByTestId('review-cards-scope').textContent).toContain(entry.after.detail);
   });
 
   it('marks an entry that is not current on its side with its MIK-R03 state (F4)', () => {

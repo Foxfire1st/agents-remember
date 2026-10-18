@@ -34,7 +34,9 @@ resolved = resolve_review_candidate(world.config, REPO, MASTER, LEAF)
 assert resolved.trees is not None, resolved
 # Audit the reviewer computation owner in THIS test child, not an unaudited grandchild.
 # The process transport is tested separately; this seam runs the identical leaf owner.
-def inline(contract, *, candidate, base, processes=None):
+def inline(contract, *, candidate, base, processes=None, trees=None):
+    # The audited seam replaces the child transport, which now also carries the comparison;
+    # this double keeps the same signature and runs the identical leaf owner in-process.
     return leaf.leaf_worklist(contract, candidate=candidate, base=base, persist=False)
 review.isolated_leaf_worklist = inline
 unused = world.config.coordination_root / 'tasks' / REPO / 'audit-unused' / 'task.json'

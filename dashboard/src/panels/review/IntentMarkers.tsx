@@ -515,23 +515,22 @@ export function useExcerptMarking(
     ...marking,
     note: (
       <>
-        <MarkReadNote read={read} mismatch={matches === false} quietWhileReading />
+        <MarkReadNote read={read} mismatch={matches === false} excerpt />
         {marking.note}
       </>
     ),
   };
 }
 
-// Why a changed file shows no marks yet, or none at all: never silence, never a zero. A card excerpt
-// is quiet while the read is under way (its marks simply appear).
+// Why a changed file shows no marks yet, or none at all: excerpts name pending marks too (R57 rule 5).
 export function MarkReadNote({
   read,
   mismatch,
-  quietWhileReading = false,
+  excerpt = false,
 }: {
   read: MarkRead;
   mismatch: boolean;
-  quietWhileReading?: boolean;
+  excerpt?: boolean;
 }) {
   if (read.phase === 'unlisted')
     return (
@@ -540,11 +539,10 @@ export function MarkReadNote({
         its classification is not read.
       </p>
     );
-  if (read.phase === 'loading' && quietWhileReading) return null;
   if (read.phase === 'loading')
     return (
       <p className={muted} data-testid="review-marks-state" data-marks-state="loading">
-        reading this file&apos;s intent marks…
+        {excerpt ? 'intent marks loading…' : "reading this file's intent marks…"}
       </p>
     );
   if (read.phase === 'unavailable')

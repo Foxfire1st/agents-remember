@@ -1,16 +1,15 @@
 // The reader's truth view (MIK-R29 rules 3 and 4): one record with every field, its states, its
 // links both ways and its timeline, newest first, from the record file's log (meaning diffs), the
 // history rows about it and the log of the entries that realize or prove it.
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { css } from '../../../styled-system/css';
 import type {
   LinkTarget,
   RecordViewAnswer,
   StatesHeader,
-  Timeline,
   TimelineEvent,
 } from '../../data/knowledgeReader';
-import { locatorLabel } from '../../data/knowledgeReader';
+import { locatorLabel, readerGet } from '../../data/knowledgeReader';
 import {
   DecisionCard,
   EntryRow,
@@ -23,6 +22,7 @@ import {
   card,
   list,
   muted,
+  useReaderNav,
 } from './readerParts';
 
 const heading = css({ margin: '0 0 0.3rem', fontSize: '0.95rem', overflowWrap: 'anywhere' });
@@ -288,7 +288,7 @@ export function TruthView({ answer }: { answer: RecordViewAnswer }) {
       ) : null}
       <OutgoingSection answer={answer} />
       <IncomingSection answer={answer} />
-      <TimelineSection timeline={answer.timeline} />
+      <TimelineSection key={record.id} initial={answer} />
       <RecordOrigin answer={answer} />
     </div>
   );
@@ -437,6 +437,21 @@ function becauseTargets(document: TimelineEvent['document']): LinkTarget[] {
   );
 }
 
+function LegacyFamilyEffect({ event }: { event: TimelineEvent }) {
+  if (
+    event.disposition !== 'changed' ||
+    !String(event.document?.subject).startsWith('FAM-') ||
+    typeof event.document?.effect === 'string'
+  )
+    return null;
+  return (
+    <>
+      <span data-testid="history-effect">effect not recorded</span>
+      <div className={muted}>This row was written before the effect label became required.</div>
+    </>
+  );
+}
+
 function HistoryLine({ event }: { event: TimelineEvent }) {
   const reason = event.document?.reason;
   const effect = event.document?.effect;
@@ -445,13 +460,22 @@ function HistoryLine({ event }: { event: TimelineEvent }) {
     <>
       <strong>{event.owner}</strong> {event.disposition}
       {typeof effect === 'string' ? <span data-testid="history-effect"> · {effect}</span> : null}
+      <LegacyFamilyEffect event={event} />
       {event.closed === false ? <span className={muted}> (open)</span> : null}
       {because.length > 0 ? (
         <div data-testid="history-because">
           <span className={muted}>because</span>
           {because.map((target, index) => (
             <span key={index}>
-              {index > 0 ? ',' : ''} <TargetLink target={target} />
+              {index > 0 ? ',' : ''}{' '}
+              {target.kind === 'requirement' ? (
+                <span className={muted}>
+                  requirement {String(target.requirement?.id ?? '')} (a task document; not part of
+                  this memory repository)
+                </span>
+              ) : (
+                <TargetLink target={target} />
+              )}
             </span>
           ))}
         </div>
@@ -507,7 +531,78 @@ function EventLine({ event }: { event: TimelineEvent }) {
   return <RecordLine event={event} />;
 }
 
-function TimelineSection({ timeline }: { timeline: Timeline }) {
+function useTimelinePages(initial: RecordViewAnswer) {
+  const nav = useReaderNav();
+  const [timeline, setTimeline] = useState(initial.timeline);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const inFlight = useRef(false);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const load = (restart = false) => {
+    if (inFlight.current || (!restart && !timeline.continuation)) return;
+    inFlight.current = true;
+    setLoading(true);
+    setFailure(null);
+    readerGet<RecordViewAnswer>('record', {
+      repo: nav.repo,
+      commit: nav.commit,
+      id: initial.record.id,
+      continuation: restart ? undefined : (timeline.continuation ?? undefined),
+    })
+      .then(
+        (answer) => {
+          if (!live.current) return;
+          const refusal = timelineLoadFailure(initial, answer);
+          if (refusal) {
+            setFailure(refusal);
+            return;
+          }
+          const next = answer.timeline;
+          setTimeline((known) => ({
+            ...next,
+            events: restart ? next.events : [...known.events, ...next.events],
+          }));
+        },
+        (error: unknown) => {
+          if (live.current) setFailure(String(error));
+        },
+      )
+      .finally(() => {
+        inFlight.current = false;
+        if (live.current) setLoading(false);
+      });
+  };
+  return { timeline, failure, loading, load };
+}
+
+function timelineReadFailure(answer: RecordViewAnswer): string | null {
+  if (answer.state !== 'view') return `${answer.state}: ${answer.detail ?? ''}`;
+  const next = answer.timeline;
+  if (!next) return 'unavailable: the reader returned no timeline';
+  if (next.state === 'refused') return `${next.code ?? 'refused'}: ${next.detail ?? ''}`;
+  return null;
+}
+
+function timelineLoadFailure(initial: RecordViewAnswer, answer: RecordViewAnswer): string | null {
+  const unreadable = timelineReadFailure(answer);
+  if (unreadable) return unreadable;
+  if (
+    answer.selection?.treeKey !== initial.selection?.treeKey ||
+    answer.selection?.memoryRevision !== initial.selection?.memoryRevision
+  ) {
+    return 'The memory snapshot changed. Reload the whole view before loading history.';
+  }
+  return null;
+}
+
+function TimelineSection({ initial }: { initial: RecordViewAnswer }) {
+  const { timeline, failure, loading, load } = useTimelinePages(initial);
   return (
     <Section title="Timeline" testid="record-timeline">
       <p className={muted} data-testid="timeline-sources">
@@ -535,6 +630,12 @@ function TimelineSection({ timeline }: { timeline: Timeline }) {
               {event.commit ? event.commit.slice(0, 9) : 'uncommitted'}
               {event.date ? ` · ${event.date}` : ''}
               {event.subject && event.commit ? ` · ${event.subject}` : ''} · {event.source}
+              {event.source === 'history' ? (
+                <span>
+                  {' '}
+                  · attempt {event.attempt ?? 'not recorded'} · {event.path}
+                </span>
+              ) : null}
             </div>
             <div>
               <EventLine event={event} />
@@ -542,6 +643,22 @@ function TimelineSection({ timeline }: { timeline: Timeline }) {
           </li>
         ))}
       </ol>
+      {failure ? (
+        <p role="alert">
+          {failure}{' '}
+          <button type="button" onClick={() => load(true)} disabled={loading}>
+            Load first page
+          </button>{' '}
+          <button type="button" onClick={() => window.location.reload()}>
+            Reload whole view
+          </button>
+        </p>
+      ) : null}
+      {timeline.continuation ? (
+        <button type="button" onClick={() => load()} disabled={loading}>
+          Show older
+        </button>
+      ) : null}
     </Section>
   );
 }

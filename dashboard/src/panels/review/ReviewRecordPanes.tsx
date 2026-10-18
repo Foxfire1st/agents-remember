@@ -30,14 +30,9 @@ const fieldValue = (value?: string) =>
   value === undefined ? '(absent)' : value === '' ? '(recorded empty)' : value;
 
 function RecordFacts({ payload }: { payload: ReviewPayload }) {
-  const { knowledge, source, evidence } = payload;
+  const { knowledge, source } = payload;
   const fields = knowledge.field_changes.filter((change) => !authoredFields.has(change.field));
-  const references = [
-    ...knowledge.unresolved,
-    ...source.unresolved,
-    ...evidence.unresolved,
-    ...evidence.evidence_links.flatMap((one) => one.unresolved),
-  ];
+  const references = [...knowledge.unresolved, ...source.unresolved];
   return (
     <>
       {' '}
@@ -49,18 +44,6 @@ function RecordFacts({ payload }: { payload: ReviewPayload }) {
             </li>
           ))}
         </ul>
-      ) : null}
-      {knowledge.signals.length ? (
-        <div data-review-content="signal">
-          <h3>Detection signals</h3>
-          <ul>
-            {knowledge.signals.map((signal) => (
-              <li key={signal.signal_id}>
-                {signal.condition} · {signal.scope_limitations.join('; ')}
-              </li>
-            ))}
-          </ul>
-        </div>
       ) : null}
       {references.length ? (
         <div>
@@ -81,7 +64,7 @@ export function ReviewMainFacts({
   onAllChanges?: () => void;
 }) {
   const { source, submission, staleness } = payload;
-  const lane = laneRead ? laneAttributionFacts(laneRead) : null;
+  const lane = laneRead ? laneAttributionFacts(laneRead) : { state: 'unknown' as const };
   return (
     <section data-testid="review-main-facts">
       <RecordFacts payload={payload} />
@@ -89,12 +72,12 @@ export function ReviewMainFacts({
         <p
           data-review-content="counts"
           data-testid="review-remaining"
-          data-attribution-source={lane ? 'lane' : 'landed'}
+          data-attribution-source="lane"
         >
           {source.remaining
             .map(
               (count) =>
-                (lane && laneCountText(count.name, lane)) ??
+                laneCountText(count.name, lane) ??
                 `${count.name}: ${count.value ?? `not measured (${count.reason ?? 'no reason recorded'})`}`,
             )
             .join(' · ')}
@@ -107,10 +90,7 @@ export function ReviewMainFacts({
           )
         : null}
       <div data-review-content="submission-state">
-        <p data-submission-state={submission.state}>
-          assessment submission:{' '}
-          {submission.state === 'disabled_stale' ? 'DISABLED' : 'not offered'} — {submission.reason}
-        </p>
+        <p data-submission-state={submission.state}>Read-only review — {submission.reason}</p>
         <p>next: {submission.next_action}</p>
       </div>
       {onAllChanges ? (
@@ -119,6 +99,18 @@ export function ReviewMainFacts({
         </button>
       ) : null}
     </section>
+  );
+}
+
+function JudgmentIdentifiers({ judgment }: { judgment: ReviewPayload['judgment'] | undefined }) {
+  if (!judgment) return <p>Judgment identifiers not supplied.</p>;
+  return (
+    <p>
+      Judgment rows:{' '}
+      {judgment.rows.map((row) => `${row.row_id} · ${row.history_path}`).join(', ') ||
+        'none returned'}
+      ; proof identifiers: {judgment.proofs.map((proof) => proof.id).join(', ') || 'none returned'}
+    </p>
   );
 }
 
@@ -169,16 +161,7 @@ export function ReviewTechnicalDetails({
             <p data-testid="review-expansion">
               {payload.source.expansion_reference} {payload.source.expansion_command}
             </p>
-            <p>
-              Evidence records:{' '}
-              {payload.evidence.evidence_links.map((link) => link.claim_id).join(', ') || 'none'};
-              observation records:{' '}
-              {payload.evidence.observations.map((one) => one.observation_id).join(', ') || 'none'};
-              assessment records:{' '}
-              {[...payload.knowledge.assessments, ...payload.evidence.assessments]
-                .map((one) => one.assessment_id)
-                .join(', ') || 'none'}
-            </p>
+            <JudgmentIdentifiers judgment={payload.judgment} />
             <p>
               Dispositions the existing authority accepts:{' '}
               {payload.submission.proposed_dispositions.join(', ')}. None is publication approval.

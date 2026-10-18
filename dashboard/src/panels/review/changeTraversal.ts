@@ -10,6 +10,7 @@ import { tinykeys, type KeybindingsMap } from 'tinykeys';
 
 import { bindingFor, useEffectiveKeymap } from '../../data/keymap/preferences';
 import { routeKey, zoneForTarget } from '../../data/keymap/zones';
+import { revealTreeRow } from './treeScroll';
 
 export type TraversalDirection = 1 | -1;
 
@@ -123,6 +124,10 @@ export function useChangeTraversal(
   rows: string,
 ): { move: (direction: TraversalDirection) => void; status: string } {
   const [status, setStatus] = useStatusFor(rows);
+  useLayoutEffect(() => {
+    // An endpoint's new status enlarges the sticky bar after the immediate handler reveal.
+    if (status) revealTreeRow(tree.current?.querySelector<HTMLElement>('[data-tree-node][aria-current="true"]') ?? null);
+  }, [status, tree]);
   const move = useCallback(
     (direction: TraversalDirection) => {
       const list = tree.current?.querySelector<HTMLElement>(LIST_SELECTOR);
@@ -130,15 +135,14 @@ export function useChangeTraversal(
       const outcome = nextChange(list, direction, document.activeElement);
       setStatus(outcomeMessage(outcome));
       if (outcome.kind === 'end') {
-        // The selection stays; bring it into view, so the status in the sticky triage bar is read
-        // where the selection is (a stacked layout may have scrolled it away).
-        list
-          .querySelector<HTMLElement>('[data-tree-node][aria-current="true"]')
-          ?.scrollIntoView?.({ block: 'center' });
+        // The selection stays. Reveal it in its own panel, never through outer ancestors.
+        revealTreeRow(list.querySelector<HTMLElement>('[data-tree-node][aria-current="true"]'));
         return;
       }
       // Focus first, so the selection's answer returns focus to the node the reader moved to.
-      outcome.element.focus();
+      // Native focus must not scroll the surface before that answer arrives (or at all).
+      outcome.element.focus({ preventScroll: true });
+      revealTreeRow(outcome.element);
       if (outcome.kind === 'select') outcome.element.click();
     },
     [tree, setStatus],

@@ -36,7 +36,7 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
-from agents_remember.models.knowledge.review_records import ReviewRecordChannel
+from agents_remember.models.lifecycles.comparison_records import ComparisonAssessmentAvailability
 from agents_remember.worktrees.modules.code_object_retention import (
     CUSTODY_RETAINED,
     CodeObjectCustody,
@@ -291,7 +291,7 @@ class ComparisonRecordBinding(KnowledgeModel):
     current_measured: bool
     collection_digest: str = Field(pattern=SHA256_PATTERN)
     detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    assessment_channel: ReviewRecordChannel | None = None
+    assessment_channel: ComparisonAssessmentAvailability | None = None
 
     @model_serializer(mode="wrap")
     def _canonical_availability(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:

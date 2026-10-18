@@ -9,9 +9,8 @@
 // * Truth (rule 8). The diff is presentation only. Its parts are the two texts' own tokens: the
 //   `same` and `removed` parts concatenate to the before text byte for byte, and the `same` and
 //   `added` parts to the after text. Nothing is normalized, trimmed or summarized.
-// * Byte inequality (rule 1). Two texts differ when their strings differ. Texts that are equal once
-//   all their whitespace is removed differ only in whitespace (rule 3), which is its own answer: that
-//   includes a space inserted into or removed from a word ("a,b" -> "a, b"), review R1 F3.
+// * Byte inequality. Whitespace-only changes preserve the ordered non-whitespace tokens;
+//   joining or splitting a word changes those tokens and must be word-diffed.
 // * Rewrite fallback (rule 4). The changed words of a passage are the words of its longer side that
 //   are not unchanged (for two texts, `max(removed words, added words)`). When they are more than
 //   REWRITE_RATIO of the longer side's words, the passage is a rewrite and is shown side by side.
@@ -179,9 +178,12 @@ function betweenChanges(parts: DiffPart[], index: number): boolean {
 
 export function textDiff(before: string, after: string): TextDiff {
   if (before === after) return { kind: 'identical' };
-  if (before.replace(/\s+/g, '') === after.replace(/\s+/g, '')) return { kind: 'whitespace_only' };
   const a = tokenize(before);
   const b = tokenize(after);
+  const wordsA = a.filter((token) => !isWhitespace(token));
+  const wordsB = b.filter((token) => !isWhitespace(token));
+  if (wordsA.length === wordsB.length && wordsA.every((word, index) => word === wordsB[index]))
+    return { kind: 'whitespace_only' };
   const { ops, coarse } = editScript(a, b);
   const parts = regions(
     merged(
@@ -246,8 +248,8 @@ export type ListRow =
   | { kind: 'unchanged'; text: string; before: number; after: number }
   | { kind: 'moved'; text: string; before: number; after: number }
   | { kind: 'changed'; beforeText: string; afterText: string; before: number; after: number }
-  | { kind: 'removed'; text: string; before: number }
-  | { kind: 'added'; text: string; after: number };
+  | { kind: 'removed'; text: string; before: number; note?: 'cell_limit' | 'unpaired_gap' }
+  | { kind: 'added'; text: string; after: number; note?: 'cell_limit' | 'unpaired_gap' };
 
 // 1. The longest common subsequence of items by exact text: those items are unchanged.
 // 2. An item outside it whose exact text also occurs outside it on the other side is `moved`; equal
@@ -256,8 +258,17 @@ export type ListRow =
 //    are word-diffed) only when the gap holds as many on each side; otherwise they are removed and
 //    added items. Nothing is ever paired by its position in the whole list.
 export function alignLists(before: string[], after: string[]): ListRow[] {
-  // Lists are aligned exactly whatever their length: a coarse script would pair by position.
-  const anchors = editScript(before, after, Infinity).ops.filter(
+  if ((before.length + 1) * (after.length + 1) > DIFF_CELL_LIMIT)
+    return [
+      ...before.map((text, i): ListRow => ({
+        kind: 'removed',
+        text,
+        before: i,
+        note: 'cell_limit',
+      })),
+      ...after.map((text, j): ListRow => ({ kind: 'added', text, after: j, note: 'cell_limit' })),
+    ];
+  const anchors = editScript(before, after).ops.filter(
     (op): op is Extract<Op, { kind: 'same' }> => op.kind === 'same',
   );
   const inA = new Set(anchors.map((op) => op.i));
@@ -310,7 +321,12 @@ function gapRows(
   const paired = plain.length > 0 && plain.length === gapA.length;
   const rows: ListRow[] = paired
     ? []
-    : gapA.map((i) => ({ kind: 'removed' as const, text: before[i], before: i }));
+    : gapA.map((i) => ({
+        kind: 'removed' as const,
+        text: before[i],
+        before: i,
+        note: 'unpaired_gap' as const,
+      }));
   let next = 0;
   for (const j of gapB) {
     const from = moved.get(j);
@@ -324,7 +340,7 @@ function gapRows(
         before: i,
         after: j,
       });
-    } else rows.push({ kind: 'added', text: after[j], after: j });
+    } else rows.push({ kind: 'added', text: after[j], after: j, note: 'unpaired_gap' });
   }
   return rows;
 }

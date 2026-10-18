@@ -169,7 +169,21 @@ def test_a_closed_leaf_serves_its_recorded_comparison_byte_for_byte(closed_fixtu
     inventory = _body(live)["payload"]["source"]["inventory"]
     assert inventory["before_code_tree_id"] == record.code_base.commit
     assert inventory["after_code_tree_id"] == record.code_candidate.tree
+    task_status, task_live = _serve(world, _source_params())
+    assert task_status == 200
+    task = _body(task_live)["payload"]
+    assert f"review:trees:{record.number}" in task["limitations"]
+    assert task["source"]["inventory"] == inventory
+    assert task.get("comparison") is None and task["staleness"]["state"] == "not_compared"
+    assert task["knowledge"]["selection_state"] == "task_context"
+    assert task["family_context"]["state"] == "no_subject_selected"
     _close(world)
+    for params in (_source_params(), {**_source_params(), "history": "recorded"}):
+        task_closed = _body(_serve(world, params)[1])["payload"]
+        assert f"review:trees:{record.number}" in task_closed["limitations"]
+        assert task_closed["source"]["inventory"] == inventory
+        assert task_closed.get("comparison") is None
+        assert task_closed["knowledge"]["selection_state"] == "task_context"
     status, closed = _serve(world, _subject_params("recorded"))
     default_status, default = _serve(world, _subject_params())
     assert status == default_status == 200

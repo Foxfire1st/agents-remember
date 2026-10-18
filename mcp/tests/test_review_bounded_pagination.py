@@ -575,9 +575,7 @@ def test_the_removed_records_collection_is_a_named_refusal_on_every_request(
     )
     assert crossed.page is None and crossed.page_refusal is not None
     assert crossed.page_refusal.code == "comparison_page_unreadable"
-    assert crossed.evidence.channels == (), (
-        "the removed collection publishes no channel rows rather than a measured zero"
-    )
+    assert "evidence" not in crossed.model_dump()
 
 
 def test_a_records_cursor_is_never_admitted_at_any_snapshot(tmp_path: Path) -> None:
@@ -599,7 +597,7 @@ def test_a_records_cursor_is_never_admitted_at_any_snapshot(tmp_path: Path) -> N
     assert crossed.page is None and crossed.page_refusal is not None
     assert crossed.page_refusal.code == "comparison_page_unreadable"
     assert "no records cursor is admitted" in crossed.page_refusal.detail
-    assert crossed.evidence.channels == ()
+    assert "evidence" not in crossed.model_dump()
 
     stale = _matrix_cursor(fixture, RECORDS_PAGE)
     moved = _advanced_candidate(tmp_path / "refused-advanced", fixture)

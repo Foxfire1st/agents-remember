@@ -56,6 +56,7 @@ export interface ReviewIntentSummaryResult {
   counts?: ReviewIntentCounts;
   refusal?: ReviewRefusal;
   attribution?: ReviewLaneSummary;
+  unexplained_open?: number;
 }
 
 const summaryUrl = (repo: string, master: string, leaf: string): string =>
@@ -65,13 +66,26 @@ const summaryUrl = (repo: string, master: string, leaf: string): string =>
 // a tree comparison whatever the intent counts' own state.
 export type IntentSummaryRead =
   | { phase: 'loading' }
-  | { phase: 'counted' | 'partial'; counts: ReviewIntentCounts; attribution?: ReviewLaneSummary }
-  | { phase: 'unavailable'; problem: ReviewFailure; attribution?: ReviewLaneSummary };
+  | {
+      phase: 'counted' | 'partial';
+      counts: ReviewIntentCounts;
+      attribution?: ReviewLaneSummary;
+      unexplainedOpen?: number;
+    }
+  | {
+      phase: 'unavailable';
+      problem: ReviewFailure;
+      attribution?: ReviewLaneSummary;
+      unexplainedOpen?: number;
+    };
 
 // One answer as the read state it is. A counted/partial body without counts, and an unavailable body
 // without its refusal, are not this route's answer and are reported as unreadable rather than drawn.
 function summaryRead(result: ReviewIntentSummaryResult): IntentSummaryRead {
-  const attribution = result.attribution ? { attribution: result.attribution } : {};
+  const attribution = {
+    ...(result.attribution ? { attribution: result.attribution } : {}),
+    ...(result.unexplained_open !== undefined ? { unexplainedOpen: result.unexplained_open } : {}),
+  };
   if ((result.state === 'counted' || result.state === 'partial') && result.counts)
     return { phase: result.state, counts: result.counts, ...attribution };
   if (result.state === 'unavailable' && result.refusal)
@@ -113,6 +127,7 @@ export function useIntentReviewSummary(
         (result) => apply(summaryRead(result)),
         (cause: unknown) => apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }),
       );
+
     return () => {
       mounted = false;
     };

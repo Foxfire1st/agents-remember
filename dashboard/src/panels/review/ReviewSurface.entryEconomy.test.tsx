@@ -10,8 +10,7 @@
 //   * a refresh that reaches a new candidate generation (other snapshot digests) re-reads it once;
 //   * the wait for the catalogue is bounded: a catalogue that never answers does not withhold the
 //     task-context review or its All changes destination beyond `SUBJECT_HOLD_MS`.
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
+import { captured, selectedMemberId, replyFor } from './l86.test-utils';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewEntry, ReviewPayload, ReviewResult } from '../../data/review';
@@ -19,17 +18,14 @@ import { dashboardStore } from '../../data/store';
 import { SUBJECT_HOLD_MS } from './ReviewNavigation';
 import { ReviewSurface } from './ReviewSurface';
 
-const captured = JSON.parse(
-  readFileSync(
-    path.join(
-      path.dirname(new URL(import.meta.url).pathname),
-      'familyReview.complete.captured.json',
-    ),
-    'utf8',
-  ),
-) as ReviewResult;
-const recorded = captured.payload as ReviewPayload;
-const families = recorded.family_context!.entries;
+// Two independently captured family-selector answers from the same real L37 comparison.
+const familyBodies = [
+  captured<ReviewResult>('subjectReview.successorFamily.captured.json'),
+  captured<ReviewResult>('l86.family.captured.json'),
+];
+const taskBody = captured<ReviewResult>('l86.task.captured.json');
+const recorded = familyBodies[0].payload as ReviewPayload;
+const families = familyBodies.map((body) => body.payload!.family_context!.entries[0]);
 const catalogue: ReviewEntry[] = families.map((family) => ({
   selector_kind: 'family',
   selector_id: family.family_id,
@@ -51,24 +47,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function familyReview(familyId: string | null, afterSnapshot: string) {
-  const family = families.find((item) => item.family_id === familyId);
-  return {
-    ...captured,
-    payload: {
-      ...recorded,
-      comparison: { ...recorded.comparison!, after_snapshot_digest: afterSnapshot },
-      family_context: {
-        ...recorded.family_context,
-        entries: family ? [family] : [],
-        families_returned: family ? 1 : 0,
-        state: family ? 'recorded' : 'no_subject_selected',
-      },
-    },
-  };
+function familyReview(familyId: string | null, afterSnapshot: string): ReviewResult {
+  const body = familyId === null
+    ? taskBody
+    : familyBodies.find((item) => item.payload!.knowledge.revision_selection!.record_id === familyId);
+  if (!body) throw new Error(`Uncaptured family selector: ${familyId}`);
+  // Explicit generation-only perturbation; semantic content/judgment is never manufactured.
+  if (!body.payload!.comparison || body.payload!.comparison.after_snapshot_digest === afterSnapshot)
+    return structuredClone(body);
+  return { ...body, payload: { ...body.payload!, comparison: {
+    ...body.payload!.comparison, after_snapshot_digest: afterSnapshot,
+  } } };
 }
 
 it('reads the catalogue once on entry, then asks the review only for the subject it chose', async () => {
+  expect(selectedMemberId).toBe(captured<ReviewResult>('l86.member.captured.json').payload!.knowledge.revision_selection!.record_id);
   const urls: URL[] = [];
   let releaseCatalogue: (() => void) | undefined;
   let afterSnapshot = recorded.comparison!.after_snapshot_digest!;
@@ -86,7 +79,9 @@ it('reads the catalogue once on entry, then asks the review only for the subject
           state: 'refused',
           refusal: { code: 'not-found', detail: 'outside this case', next_action: 'none' },
         });
-      return response(familyReview(url.searchParams.get('selectorId'), afterSnapshot));
+      return response(url.pathname === '/api/review/intent'
+        ? familyReview(url.searchParams.get('selectorId'), afterSnapshot)
+        : replyFor(url));
     }),
   );
   const catalogueReads = () => urls.filter((url) => url.pathname.endsWith('/entries'));
@@ -165,7 +160,7 @@ it.each([300, 600])(
             state: 'refused',
             refusal: { code: 'not-found', detail: 'outside this case', next_action: 'none' },
           });
-        return response(
+        return response(url.pathname !== '/api/review/intent' ? replyFor(url) :
           familyReview(
             url.searchParams.get('selectorId'),
             recorded.comparison!.after_snapshot_digest!,
@@ -205,7 +200,9 @@ it('reads the task-context review and keeps All changes reachable when the catal
       urls.push(url);
       // The catalogue stalls for the whole case: its answer never arrives.
       if (url.pathname.endsWith('/entries')) return await new Promise<Response>(() => {});
-      return response(familyReview(null, recorded.comparison!.after_snapshot_digest!));
+      return response(url.pathname === '/api/review/intent'
+        ? familyReview(null, recorded.comparison!.after_snapshot_digest!)
+        : replyFor(url));
     }),
   );
   const reviewReads = () => urls.filter((url) => url.pathname === '/api/review/intent');

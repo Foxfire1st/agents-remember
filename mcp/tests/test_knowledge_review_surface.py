@@ -30,7 +30,6 @@ measured in ``test_knowledge_review_resolution_and_route.py``, which reuses this
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal, get_args
@@ -40,52 +39,25 @@ from agents_remember.application.knowledge_diff import diff_knowledge_scope, ope
 from agents_remember.application.knowledge_read import read_row_counts
 from agents_remember.application.knowledge_review import (
     ReviewCandidateResolution,
-    ReviewRecordInputs,
     compose_review,
 )
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge import review as vocabulary
-from agents_remember.models.knowledge.detection import (
-    DetectionInputSide,
-    DetectionRecordedInputSet,
-    DetectionRelationshipPath,
-    DetectionScopeManifest,
-    DetectionSignalPayload,
-)
 from agents_remember.models.knowledge.diff import KnowledgeDiffRequest, KnowledgeDiffSide
-from agents_remember.models.knowledge.evidence import (
-    ResultArtifactReference,
-    RunEnvironment,
-    VerificationObservationPayload,
-)
 from agents_remember.models.knowledge.graph import RealizationRole
 from agents_remember.models.knowledge.read import InvariantIdentitySeed, KnowledgeReadSeed
 from agents_remember.models.knowledge.review import (
     PROPOSED_ASSESSMENT_DISPOSITIONS,
     KnowledgeReviewPayload,
-    ReviewAssessmentDisplay,
-    ReviewEvidencePane,
+    ReviewJudgmentPane,
     ReviewKnowledgePane,
     ReviewSideContent,
-    ReviewSignal,
     ReviewSourceInventory,
     ReviewSourceLocation,
     ReviewSourcePane,
     ReviewSurfaceRequest,
     ReviewUnrepresentablePath,
-)
-from agents_remember.models.lifecycles.review_assessment import (
-    AssessmentEvidenceReference,
-    AssessmentSubject,
-    ReviewAssessment,
-    ReviewAssessmentDisposition,
-    ReviewAssessmentRevision,
-)
-from agents_remember.models.lifecycles.review_assessment_binding import measured_currentness
-from agents_remember.models.lifecycles.review_assessment_store import (
-    AssessmentInputs,
-    bind_assessment,
 )
 from diff_scope_test_support import (
     RETRY_FIRST_REFUSAL_CONDITION,
@@ -183,12 +155,8 @@ def reviewed_selector(fixture: DiffFixture) -> KnowledgeReadSeed:
     return selector
 
 
-NO_RECORDS = ReviewRecordInputs()
-
-
 def render(
     fixture: DiffFixture,
-    records: ReviewRecordInputs = NO_RECORDS,
     *,
     previous_binding_digest: str | None = None,
 ) -> KnowledgeReviewPayload:
@@ -202,123 +170,10 @@ def render(
     request = review_request(fixture).model_copy(
         update={"previous_binding_digest": previous_binding_digest}
     )
-    result = compose_review(resolution_for(fixture), request, records)
+    result = compose_review(resolution_for(fixture), request)
     assert result.state == "review", result.refusal
     assert result.payload is not None
     return result.payload
-
-
-def published_assessment(
-    fixture: DiffFixture,
-    *,
-    disposition: ReviewAssessmentDisposition = "concern_found",
-    assessment_id: str = "AS-1",
-    author: str = "curator-3",
-    finding: str = "The combined retry configuration can exceed the five-second budget.",
-) -> ReviewAssessment:
-    """One assessment bound to the exact inputs it examined, through the shipped binding seam."""
-
-    revision = ReviewAssessmentRevision(
-        assessmentId=assessment_id,
-        subject=AssessmentSubject(
-            kind="invariant-revision",
-            recordId=fixture.retry_invariant_id,
-            beforeRevisionIds=(fixture.subject_revision_id,),
-            afterRevisionIds=(fixture.revised_revision_id,),
-        ),
-        disposition=disposition,
-        finding=finding,
-        rationale=(
-            "Four attempts may each consume two seconds and the inspected call path permits all "
-            "four with no earlier shared deadline."
-        ),
-        evidenceRefs=(AssessmentEvidenceReference(namespace="code", ref="src/retry_interval.py"),),
-        comparisonRef="comparison-B-M-F1",
-        scopeManifestRef="scope-union-B-M-F1",
-    )
-    return bind_assessment(
-        authorized=revision,
-        inputs=AssessmentInputs(
-            scopeManifestRef="scope-union-B-M-F1",
-            comparisonRef="comparison-B-M-F1",
-            codeCandidateTree=fixture.after_tree_id,
-            memoryCandidateTree=None,
-            pairIdentityDigest="a" * 64,
-            taskTopologyFingerprint="b" * 64,
-            taskIntentDigest="c" * 64,
-            resolverVersion="resolver/v1",
-            policyVersion="policy/v1",
-        ),
-        author_ref=author,
-        author_role="curator",
-        publication_ref="publication/1",
-    )
-
-
-def observation(execution_result: str = "passed") -> VerificationObservationPayload:
-    return VerificationObservationPayload(
-        command_name="pytest",
-        command_identity="mcp/.venv/bin/python -m pytest mcp/tests -m 'not integration'",
-        code_candidate_tree_id="e" * 40,
-        result_artifact=ResultArtifactReference(
-            path="reports/test-results.json",
-            sha256="d" * 64,
-            size_bytes=1024,
-            digest_checked_against_bytes=True,
-        ),
-        execution_result=execution_result,  # type: ignore[arg-type]
-        environment=RunEnvironment(host="builder", interpreter="cpython-3.13.15"),
-    )
-
-
-def signal(fixture: DiffFixture) -> DetectionSignalPayload:
-    return DetectionSignalPayload(
-        signal_id="11111111-1111-1111-1111-111111111111",
-        repository_id="22222222-2222-2222-2222-222222222222",
-        governing_route_id="33333333-3333-3333-3333-333333333333",
-        condition="absent_anchor",
-        input_set=DetectionRecordedInputSet(
-            declared="trigger_side_only",
-            sides=(
-                DetectionInputSide(
-                    side="trigger",
-                    context=open_diff_side(
-                        fixture.after.database_path,
-                        fixture.repository_id,
-                        repository_root=fixture.after.git_root,
-                        code_tree_id=fixture.after_tree_id,
-                    ),
-                    selector_digest="f" * 64,
-                    selector_policy_version="knowledge-read-selection/v1",
-                ),
-            ),
-        ),
-        observed_changes=(),
-        relationship_paths=(
-            DetectionRelationshipPath(
-                path_id="path-1", snapshot_side="trigger", edges=("e1",), reached_item_id="item-1"
-            ),
-        ),
-        extractor_version="recorded-anchor-locator/v1",
-        policy_version="family-detection/v1",
-        scope_manifest=DetectionScopeManifest(
-            manifest_ref="manifest-1",
-            retention_required=False,
-            destination_kind="enclosure_local",
-            retention_basis="the manifest is retained with the run's own report",
-        ),
-        registered_scope_status="incomplete_scan",
-        unmapped_changed_paths=("src/unmapped.py",),
-        limitations=(
-            "unmapped_changed_paths",
-            "truncated_scan",
-            "no_semantic_assessment_performed",
-        ),
-        detail=(
-            "condition=absent_anchor; followed_paths=path-1; limitations=unmapped_changed_paths | "
-            "truncated_scan | no_semantic_assessment_performed"
-        ),
-    )
 
 
 # -- the panes ---------------------------------------------------------------------------------
@@ -538,72 +393,6 @@ def test_the_adapter_selects_nothing_because_the_shipped_comparison_is_the_compa
 # -- the refusal states, each a rendering ------------------------------------------------------
 
 
-def test_an_unassessed_subject_is_displayed_unassessed_and_never_defaulted_to_compatible(
-    fixture: DiffFixture,
-) -> None:
-    """With no published assessment the pane says ``unassessed`` and offers no disposition at all."""
-
-    payload = render(fixture)
-    assert payload.evidence.assessment_state == "unassessed"
-    assert payload.evidence.assessments == ()
-    assert payload.knowledge.assessment is None
-    assert payload.knowledge.assessments == ()
-    # No disposition value is carried anywhere but the published vocabulary of the authority.
-    assert "disposition" not in json.dumps(
-        payload.knowledge.model_dump(mode="json", exclude={"assessment", "assessments"})
-    )
-    assert payload.submission.none_is_approval is True
-
-    # The evidence pane's version of the same rule: an empty corpus is a *stated* absence with
-    # source inspection still available beside it, never a silent blank and never a conclusion. This
-    # was a second case until the two were merged, because both measure one rendering rule -- what
-    # the surface does when it has no record to show -- across the two panes it applies to.
-    assert payload.evidence.evidence_state == "none_recorded"
-    assert payload.evidence.evidence_links == ()
-    assert payload.evidence.observations == ()
-    assert payload.evidence.source_inspection_available is True
-    assert payload.source.locations
-
-
-def test_a_passing_observation_is_displayed_as_an_observation_and_never_as_invariant_satisfied(
-    fixture: DiffFixture,
-) -> None:
-    """A passed run keeps its candidate, command, digest, result and environment, and stays a run."""
-
-    payload = render(fixture, ReviewRecordInputs(observations=(observation("passed"),)))
-    assert payload.evidence.evidence_state == "recorded"
-    assert len(payload.evidence.observations) == 1
-    shown = payload.evidence.observations[0]
-    assert shown.execution_result == "passed"
-    assert shown.command_identity is not None
-    assert shown.result_artifact_digest == "d" * 64
-    assert shown.environment_identity == "builder/cpython-3.13.15"
-    # The passing run is not an assessment, and the payload contains no sufficiency verdict.
-    assert payload.evidence.assessment_state == "unassessed"
-    assert "invariant satisfied" not in json.dumps(payload.model_dump(mode="json")).lower()
-
-
-def test_a_detection_signal_carries_its_facts_and_scope_limitations_and_no_severity(
-    fixture: DiffFixture,
-) -> None:
-    """A signal is the matched condition with its versions and limits -- never a finding."""
-
-    payload = render(fixture, ReviewRecordInputs(signals=(signal(fixture),)))
-    assert len(payload.knowledge.signals) == 1
-    shown = payload.knowledge.signals[0]
-    assert shown.condition == "absent_anchor"
-    assert shown.policy_version == "family-detection/v1"
-    assert shown.extractor_version == "recorded-anchor-locator/v1"
-    assert "unmapped_changed_paths" in shown.scope_limitations
-    assert shown.relationship_paths == ("path-1:item-1",)
-    fields = set(ReviewSignal.model_fields)
-    assert fields & FORBIDDEN_FIELD_NAMES == set()
-    # A signal is a different kind from an authored effect, so neither collection can absorb it.
-    # The pane carries no matrix collection: the removed-collection channel is the whole
-    # statement about authored effects.
-    assert not hasattr(payload.knowledge, "authored_effects")
-
-
 def test_the_stale_rule_holds_in_both_directions(fixture: DiffFixture) -> None:
     """A moved comparison is previous input with submission disabled -- and the pair is not forgeable.
 
@@ -638,7 +427,8 @@ def test_the_surface_reports_the_absent_submission_path_instead_of_growing_a_pri
     assert payload.submission.state == "unavailable"
     assert set(payload.submission.proposed_dispositions) == set(PROPOSED_ASSESSMENT_DISPOSITIONS)
     assert payload.submission.none_is_approval is True
-    assert "curator authority" in payload.submission.next_action
+    assert "existing writer" in payload.submission.next_action
+    assert "author, task and authority provenance" in payload.submission.next_action
 
 
 def test_an_item_whose_author_is_not_published_is_shown_as_an_unresolved_reference(
@@ -673,172 +463,7 @@ def test_a_missing_side_is_its_own_state_and_never_an_empty_string(fixture: Diff
 # -- two authors, one subject, no resolution ----------------------------------------------------
 
 
-def test_two_disagreeing_assessments_are_both_displayed_with_their_authors_and_no_resolution(
-    fixture: DiffFixture,
-) -> None:
-    """Both authored records are shown; the surface picks no winner and has no resolution field."""
-
-    stored = (
-        published_assessment(
-            fixture, disposition="concern_found", assessment_id="AS-1", author="c1"
-        ),
-        published_assessment(
-            fixture,
-            disposition="no_concern_found",
-            assessment_id="AS-2",
-            author="c2",
-            finding="",
-        ),
-    )
-    payload = render(fixture, ReviewRecordInputs(assessments=stored))
-    shown = payload.evidence.assessments
-    assert {entry.assessment_id for entry in shown} == {"AS-1", "AS-2"}
-    assert {entry.author_ref for entry in shown} == {"c1", "c2"}
-    assert {entry.disposition for entry in shown} == {"concern_found", "no_concern_found"}
-    assert payload.evidence.assessment_state == "assessed"
-    fields = set(ReviewAssessmentDisplay.model_fields)
-    assert fields & {"resolution", "winner", "resolved", "conflict"} == set()
-    # Nothing measured these bindings, so they are reported `not-measured` -- never promoted to
-    # `current`, and never demoted to `stale`, which is a *measured* movement (``ICR-R15@v1``).
-    assert {entry.binding_state for entry in shown} == {"not-measured"}
-
-
-def test_only_a_complete_matching_measurement_reports_the_assessment_current(
-    fixture: DiffFixture,
-) -> None:
-    """``ICR-R15@v1``: the four measurement inputs, and only one of them is a currency claim.
-
-    The S26 anchor case asserted that supplying ``current={}`` yields ``current``; that is the
-    non-conforming example the packet names, and this case asserts the corrected behaviour for every
-    measurement input the adapter can be handed: absent, empty, mismatched and matching. Coverage
-    decides, and the shipped comparison decides equality within it -- an empty measurement covers
-    nothing and is therefore not a measurement of anything.
-    """
-
-    stored = published_assessment(fixture)
-    declared = dict(stored.examinedInputs.identities)
-
-    absent = render(fixture, ReviewRecordInputs(assessments=(stored,)))
-    assert [entry.binding_state for entry in absent.evidence.assessments] == ["not-measured"]
-
-    empty = render(
-        fixture,
-        ReviewRecordInputs(
-            assessments=(stored,),
-            currentness=measured_currentness({}, detail="the fixture measured nothing"),
-        ),
-    )
-    assert [entry.binding_state for entry in empty.evidence.assessments] == ["not-measured"]
-
-    moved = dict(declared)
-    moved[("code-tree", "candidate")] = ("git-object", "9" * 40)
-    mismatched = render(
-        fixture,
-        ReviewRecordInputs(
-            assessments=(stored,),
-            currentness=measured_currentness(moved, detail="the fixture measured a moved source"),
-        ),
-    )
-    assert [entry.binding_state for entry in mismatched.evidence.assessments] == ["stale"]
-
-    partial = dict(declared)
-    del partial[("code-tree", "candidate")]
-    incomplete = render(
-        fixture,
-        ReviewRecordInputs(
-            assessments=(stored,),
-            currentness=measured_currentness(partial, detail="the fixture measured part of it"),
-        ),
-    )
-    assert [entry.binding_state for entry in incomplete.evidence.assessments] == ["not-measured"]
-
-    matching = render(
-        fixture,
-        ReviewRecordInputs(
-            assessments=(stored,),
-            currentness=measured_currentness(declared, detail="the fixture measured the world"),
-        ),
-    )
-    assert [entry.binding_state for entry in matching.evidence.assessments] == ["current"]
-    assert matching.evidence.assessments[0].author_ref == "curator-3"
-    assert matching.evidence.assessments[0].examined_inputs
-
-
 # -- the worked review --------------------------------------------------------------------------
-
-
-def test_the_worked_review_journey_renders_every_step_it_walks(fixture: DiffFixture) -> None:
-    """``retrieval-review-design.md`` §8's journey, read back from the surface at each step."""
-
-    # 1. Change knowledge and open the review before any commit: the comparison is page-rendered.
-    payload = render(fixture)
-    assert payload.comparison is not None
-    assert payload.comparison.after_snapshot_digest
-    # 2. Expand the unchanged sibling and the removed claim, each on its own side.
-    locations = {location.path: location for location in payload.source.locations}
-    assert locations[fixture.unchanged_source_path].change_state == "unchanged"
-    assert locations[fixture.baseline_only_path].before_only is True
-    # 3. Inspect the unmapped path: it is reported outside any recorded attribution.
-    assert fixture.unattributed_path in payload.source.unattributed_changed_paths
-    # 4. Author an assessment bound to the exact examined inputs and read it back as authored.
-    stored = published_assessment(fixture)
-    declared = dict(stored.examinedInputs.identities)
-    authored = render(
-        fixture,
-        ReviewRecordInputs(
-            assessments=(stored,),
-            currentness=measured_currentness(declared, detail="the journey measured the world"),
-        ),
-    )
-    displayed = authored.evidence.assessments[0]
-    assert displayed.author_ref == "curator-3"
-    assert displayed.role_ref == "curator"
-    assert displayed.binding_state == "current"
-    assert displayed.evidence_refs == ("code:src/retry_interval.py",)
-    # 5. Change only the source: the new measurement of the same world makes the assessment stale,
-    #    still readable, and never current again.
-    moved_world = dict(declared)
-    moved_world[("code-tree", "candidate")] = ("git-object", "9" * 40)
-    moved = render(
-        fixture,
-        ReviewRecordInputs(
-            assessments=(stored,),
-            currentness=measured_currentness(
-                moved_world, detail="the journey remeasured the source"
-            ),
-        ),
-    )
-    after = moved.evidence.assessments[0]
-    assert after.binding_state == "stale"
-    assert after.assessment_id == displayed.assessment_id
-    assert moved.evidence.assessment_state == "assessed"
-    # ... and a read that measured nothing says so instead of inheriting either answer.
-    unmeasured = render(fixture, ReviewRecordInputs(assessments=(stored,)))
-    assert unmeasured.evidence.assessments[0].binding_state == "not-measured"
-
-
-def test_a_stale_assessment_is_never_reused_as_a_review_of_the_new_candidate(
-    fixture: DiffFixture,
-) -> None:
-    """A measured-stale assessment stays displayed as stale, and submission against it is disabled."""
-
-    stored = published_assessment(fixture)
-    moved_world = dict(stored.examinedInputs.identities)
-    moved_world[("code-tree", "candidate")] = ("git-object", "9" * 40)
-    payload = render(
-        fixture,
-        ReviewRecordInputs(
-            assessments=(stored,),
-            currentness=measured_currentness(moved_world, detail="the comparison moved"),
-        ),
-        previous_binding_digest="9" * 64,
-    )
-    assert payload.evidence.assessments[0].binding_state == "stale"
-    assert payload.submission.state == "disabled_stale"
-    # Re-rendering against the current comparison does not carry the old status forward, and a read
-    # nobody measured reports `not-measured` rather than inheriting either answer.
-    fresh = render(fixture, ReviewRecordInputs(assessments=(stored,)))
-    assert fresh.evidence.assessments[0].binding_state == "not-measured"
 
 
 # -- the pane types and the measured source inventory ------------------------------------------
@@ -859,11 +484,11 @@ def test_the_rendered_pane_types_are_the_three_the_design_names(fixture: DiffFix
     """
 
     panes = KnowledgeReviewPayload.model_fields
-    assert {"knowledge", "source", "evidence"} <= set(panes)
-    assert {panes[name].annotation for name in ("knowledge", "source", "evidence")} == {
+    assert {"knowledge", "source", "judgment"} <= set(panes)
+    assert {panes[name].annotation for name in ("knowledge", "source", "judgment")} == {
         ReviewKnowledgePane,
         ReviewSourcePane,
-        ReviewEvidencePane,
+        ReviewJudgmentPane,
     }
     # The knowledge pane keeps mechanical signals in their own collection of their own element
     # type, so a signal cannot be rendered in a finding's place by a missing branch. The matrix's
@@ -871,7 +496,7 @@ def test_the_rendered_pane_types_are_the_three_the_design_names(fixture: DiffFix
     # such field at all, and the removed-collection channel is the whole statement about it.
     fields = ReviewKnowledgePane.model_fields
     assert "authored_effects" not in fields
-    assert "signals" in fields
+    assert "signals" not in fields
 
     resolved = resolution_for(fixture)
     offered = read_subject_catalogue(resolved)

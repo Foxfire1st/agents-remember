@@ -102,7 +102,7 @@ class GitTransitionSupport:
     way, so ``unsupported`` is never a dead end -- it is the instruction a reader needs.
     """
 
-    transition: ExternalGitTransition
+    transition: ExternalGitTransition | Literal["cherry-pick", "revert"]
     measured_signature: str
     state: _MovementState
     reconciliation: GitTransitionReconciliation

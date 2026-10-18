@@ -12,7 +12,7 @@
 // families (MIK-R32); choosing one swaps the reading area for the lane, and choosing a family returns.
 // Its diffs mark each hunk with the intents whose recorded ranges it meets (MIK-R34); following a
 // marker selects its tree position here, and `Back to <file>` returns to the hunk.
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useContext, useLayoutEffect, useRef } from 'react';
 import { css } from '../../../styled-system/css';
 import type { ReviewPayload, ReviewSelectorKind } from '../../data/review';
 import type { ReviewFamilyContextEntry } from '../../data/reviewFamily';
@@ -28,7 +28,9 @@ import { firstOutlineChange } from './changeTriage';
 import { ReviewProblemBlock } from './ReviewOutcome';
 import { ReviewNavigation, type ReviewNavigationState } from './ReviewNavigation';
 import { ReviewScopeHeader } from './ReviewScopeHeader';
-import type { DiffMode } from '../changeset/DiffPane';
+import { revealTreeRow } from './treeScroll';
+import { codeChangesSummary } from './codeFacts';
+import { ReviewDestinations, laneCounts } from './ReviewDestinations';
 import { ReviewChangeSetNavigation } from './changeSetNavigation';
 import { ReviewMainFacts } from './ReviewRecordPanes';
 import { InvariantTargetState, useInvariantTargetState } from './MarkerTargetState';
@@ -144,93 +146,8 @@ function ReadingStatusCenter({ reading }: { reading: ReadingStatus }) {
   );
 }
 
-// A selection's request to land focus on the selected node once its answer is shown. `scrollOnly`
-// (a refresh) only brings the node into view; `answered` is set when an answer has arrived after the
-// request was made.
-interface FocusRequest {
-  from: Element | null;
-  // The tree intent that was current when the request was made. A render from before the selection
-  // (its passive effect can run late, after the reader's next click) must not take the request.
-  after: number;
-  scrollOnly?: boolean;
-  answered?: boolean;
-}
-
-export interface WorkspaceState {
-  chosen: FamilySelection | null;
-  setChosen: (selection: FamilySelection | null) => void;
-  query: string;
-  setQuery: (next: string) => void;
-  layout: DiffMode;
-  setLayout: (next: DiffMode) => void;
-  fullFile: boolean;
-  setFullFile: (next: boolean) => void;
-  openPath: string | null | undefined;
-  openFromCenter: (path: string) => void;
-  closePath: (path: string | null) => void;
-  // Sets the opened path without moving focus (an intent marker's follow and return).
-  setOpenPath: (path: string | null | undefined) => void;
-  center: React.RefObject<HTMLDivElement | null>;
-  // The unexplained-changes lane destination on screen (and the file it opened), or none.
-  worklist: boolean;
-  setWorklist: (next: boolean) => void;
-  // Set by an explicit selection with the element that had focus then; the answer's focus lands on
-  // the selected node only if the reader has not moved focus elsewhere in the meantime.
-  focusSelection: React.RefObject<FocusRequest | null>;
-  // The latest selection as far as the family tree is concerned (MIK-R39): an in-tree selection
-  // keeps the tree the reader has walked, anything else starts it afresh. See `walkedTree.ts`.
-  treeIntent: TreeIntent;
-  beginSelection: (keepTree: boolean) => void;
-}
-
-export function useWorkspaceState(): WorkspaceState {
-  const [chosen, setChosen] = useState<FamilySelection | null>(null);
-  const [query, setQuery] = useState('');
-  const [layout, setLayout] = useState<DiffMode>('split');
-  const [fullFile, setFullFile] = useState(false);
-  const [openPath, setOpenPath] = useState<string | null>();
-  const [worklist, setWorklist] = useState(false);
-  const opener = useRef<HTMLElement | null>(null);
-  const center = useRef<HTMLDivElement>(null);
-  const focusSelection = useRef<FocusRequest | null>(null);
-  const [treeIntent, setTreeIntent] = useState<TreeIntent>({ id: 0, keep: false });
-  const beginSelection = (keepTree: boolean) =>
-    setTreeIntent((previous) => ({ id: previous.id + 1, keep: keepTree }));
-  const openFromCenter = (path: string) => {
-    opener.current = document.activeElement as HTMLElement | null;
-    setOpenPath(path);
-  };
-  const closePath = (path: string | null) => {
-    if (path !== null) opener.current = document.activeElement as HTMLElement | null;
-    setOpenPath(path);
-    if (path === null) opener.current?.focus();
-  };
-  const choose = (selection: FamilySelection | null) => {
-    setChosen(selection);
-    setWorklist(false);
-    if (selection) revealCenter(center);
-  };
-  return {
-    chosen,
-    setChosen: choose,
-    query,
-    setQuery,
-    layout,
-    setLayout,
-    fullFile,
-    setFullFile,
-    openPath,
-    openFromCenter,
-    closePath,
-    setOpenPath,
-    center,
-    worklist,
-    setWorklist,
-    focusSelection,
-    treeIntent,
-    beginSelection,
-  };
-}
+import type { FocusRequest, WorkspaceState } from './workspaceState';
+export { useWorkspaceState, type WorkspaceState } from './workspaceState';
 
 // The selection to mark. `shown` are the families a mark may sit on: the answer's own for the reading
 // area, the walked tree's for the rail (a kept family's row is a row of the tree, not of the answer).
@@ -259,14 +176,14 @@ interface ReviewWorkspaceProps {
   state: WorkspaceState;
   navigation?: ReviewNavigationState;
   // The unexplained-changes lane of this payload's tree comparison (read once by the surface, which
-  // also gives it to the technical details); `null` for a dataset review.
+  // also gives it to the technical details); null until a read starts.
   laneRead?: LaneRead<ReviewUnexplainedLane> | null;
   changesOpen?: boolean;
+  leafTrees: ReturnType<typeof useReviewTrees>;
 }
 
 // The workspace, inside the scope of its diffs' intent markers: a tree comparison's changed files are
-// classified for them (once per surface), and a followed marker can be returned to. A dataset review
-// names no tree comparison and has no scope.
+// classified for them (once per surface), and a followed marker can be returned to.
 export function ReviewWorkspace(props: ReviewWorkspaceProps) {
   const { payload, repo, master, leaf, state, navigation } = props;
   const markers = useIntentMarkerScope({
@@ -363,13 +280,13 @@ function WorkspaceBody({
   navigation,
   laneRead = null,
   changesOpen = false,
+  leafTrees,
 }: ReviewWorkspaceProps) {
   const boundNavigation = bindWorkspaceNavigation(navigation, payload);
   const safeCatalogue = boundNavigation?.catalogue;
   useSelectionFocus(payload, state, reading, safeCatalogue?.loading === true);
   const returning = useMarkerReturnState();
   const comparison = treeComparisonNumber(payload.limitations);
-  const leafTrees = useReviewTrees(repo, master, leaf, { comparison }, comparison !== undefined);
   // The rail tree's selections start their cards beside the subject request too (L81-R1-F18):
   // the same bound prefetch the center roster's `choose` uses, shared with the rail below.
   const prefetchFamilyCards = (invariants: string[]) =>
@@ -459,8 +376,7 @@ function WorkspaceCenter({
   catalogue?: ReviewNavigationState['catalogue'];
   laneRead: LaneRead<ReviewUnexplainedLane> | null;
 }) {
-  // The leaf's tree view (MIK-R25), read once per comparison and only for a tree comparison: a
-  // dataset review's payload declares no `review:trees:<n>`, so it makes no tree read.
+  // The leaf's tree view (MIK-R25), shared from the surface's single comparison-bound read.
   // The read is pinned to the comparison the payload names (review F11), so the knowledge panel and
   // the cards' planning marks describe the same four trees as the review on screen.
   const comparison = treeComparisonNumber(payload.limitations);
@@ -596,6 +512,7 @@ const rail = css({
     maxHeight: 'none',
     overflowY: 'visible',
   },
+  '@media (max-width: 40rem)': { maxHeight: '45dvh', overflowY: 'auto' },
 });
 
 function WorkspaceRail({
@@ -638,16 +555,18 @@ function WorkspaceRail({
       navigation={navigation}
       traversalEnabled={!changesOpen}
       prefetchCards={prefetchCards}
+      leafTrees={leafTrees}
     />
   );
   return (
-    <aside className={rail}>
+    <aside className={rail} data-review-tree-panel>
       <div className={shell}>
         {navigation ? (
           <ReviewNavigation
             {...navigation}
             walkedEntries={tree.entries}
             summaryCounts={laneCounts(laneRead)}
+            codeSummary={codeChangesSummary(navigation.catalogue.outline, leafTrees, treeComparisonNumber(payload.limitations))}
             destinations={
               <ReviewDestinations
                 payload={payload}
@@ -664,59 +583,6 @@ function WorkspaceRail({
         )}
       </div>
     </aside>
-  );
-}
-
-function laneCounts(read: LaneRead<ReviewUnexplainedLane> | null): {
-  unexplained: number | '…' | 'unavailable';
-  unknown: number | '…' | 'unavailable';
-} {
-  if (read?.phase === 'loading') return { unexplained: '…', unknown: '…' };
-  if (read?.phase !== 'ready' || read.value.state === 'unavailable')
-    return { unexplained: 'unavailable', unknown: 'unavailable' };
-  return {
-    unexplained: read.value.unexplained_changes?.files.length ?? 'unavailable',
-    unknown: read.value.unknown_attribution?.files.length ?? 'unavailable',
-  };
-}
-function ReviewDestinations({
-  payload,
-  laneRead,
-  state,
-  leafTrees,
-}: {
-  payload: ReviewPayload;
-  laneRead: LaneRead<ReviewUnexplainedLane> | null;
-  state: WorkspaceState;
-  leafTrees: ReturnType<typeof useReviewTrees>;
-}) {
-  const open = useContext(ReviewChangeSetNavigation);
-  const counts = laneCounts(laneRead);
-  const worklist =
-    leafTrees?.phase === 'loading'
-      ? '…'
-      : leafTrees?.phase === 'trees'
-        ? (leafTrees.trees.worklist?.items.length ?? 'not available')
-        : 'not available';
-  return (
-    <div style={{ display: 'grid', gap: '0.25rem' }}>
-      <button type="button" onClick={() => open?.('unexplained')}>
-        Unexplained changes <span>{counts.unexplained}</span>
-      </button>
-      <button type="button" onClick={() => open?.('unknown')}>
-        Unknown attribution <span>{counts.unknown}</span>
-      </button>
-      <button type="button" onClick={() => open?.('all')}>
-        All changes{' '}
-        <span>
-          {payload.source.inventory.listed_total +
-            payload.source.inventory.unrepresentable_paths.length}
-        </span>
-      </button>
-      <button type="button" aria-pressed={state.worklist} onClick={() => state.setWorklist(true)}>
-        Worklist <span>{worklist}</span>
-      </button>
-    </div>
   );
 }
 
@@ -765,6 +631,7 @@ function FamilyRailContext({
   navigation,
   traversalEnabled,
   prefetchCards,
+  leafTrees,
 }: {
   payload: ReviewPayload;
   state: WorkspaceState;
@@ -775,11 +642,14 @@ function FamilyRailContext({
   navigation?: ReviewNavigationState;
   traversalEnabled: boolean;
   prefetchCards: (invariants: string[]) => void;
+  leafTrees: ReturnType<typeof useReviewTrees>;
 }) {
   const context = payload.family_context;
   return (
     <FamilyTree
       context={context ?? NO_FAMILY_CONTEXT}
+      treeRead={leafTrees}
+      reviewComparison={treeComparisonNumber(payload.limitations)}
       walked={walked}
       selection={chosen}
       query={state.query}
@@ -844,7 +714,7 @@ function useSelectionFocus(
   const pending = reading !== null;
   const unavailable = reading !== null && reading.problem !== null;
   const seen = useRef(payload);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const request = focusSelection.current;
     const answered = seen.current !== payload;
     seen.current = payload;
@@ -854,13 +724,25 @@ function useSelectionFocus(
     if (answered) request.answered = true;
     if (catalogueLoading && !pending) return;
     if (pending) {
-      if (unavailable) revealUnavailableRead(request, center.current, treeIntent);
+      revealPendingRead(request, center.current, treeIntent, unavailable);
       return;
     }
     if (request.scrollOnly && !request.answered) return;
     focusSelection.current = null;
     landFocus(request, center.current, treeIntent);
   }, [payload, pending, unavailable, catalogueLoading, treeIntent, center, focusSelection]);
+}
+
+function revealPendingRead(
+  request: FocusRequest,
+  center: HTMLElement | null,
+  intent: TreeIntent,
+  unavailable: boolean,
+): void {
+  if (unavailable) revealUnavailableRead(request, center, intent);
+  else if (intent.keep && selectionFocusAvailable(request))
+    // The pending shell can move/clip the panel after the key handler's first reveal.
+    revealTreeRow(selectionNode(center));
 }
 
 // OR-R042: a failed/refused selection reveals its own status without landing focus early or
@@ -896,12 +778,14 @@ function stackedTreeRead(intent: TreeIntent): boolean {
 
 function focusSelectedRead(center: HTMLElement | null, intent: TreeIntent): void {
   const node = selectionNode(center) ?? center;
-  // OR-R033: a stacked in-tree activation reveals its read while focus stays on its row. Other
-  // selections and the shared lane/file reveal path keep their existing scroll behavior.
-  if (stackedTreeRead(intent)) {
+  // Kept-tree navigation has the same local scroll ownership at every width. Desktop panels can
+  // also extend past the review's clipping edge, so native focus alone cannot reveal their rows.
+  if (intent.keep) {
     node?.focus({ preventScroll: true });
-    center?.scrollIntoView({ block: 'start' });
-  } else node?.focus();
+    revealTreeRow(node);
+    return;
+  }
+  node?.focus();
 }
 
 // What a selection focuses: an intent marker's unknown-membership target as its own state (MIK-R34,
@@ -913,12 +797,6 @@ function selectionNode(center: HTMLElement | null): HTMLElement | null {
     workspace.querySelector<HTMLElement>('[data-target-state-focus]') ??
     workspace.querySelector<HTMLElement>('[data-tree-node][aria-current="true"]')
   );
-}
-
-// The rail owns its scroll; selecting there restores the common reading position without stealing focus.
-function revealCenter(center: React.RefObject<HTMLDivElement | null>): void {
-  const surface = center.current?.closest<HTMLElement>('[data-testid="review-surface"]');
-  if (surface) surface.scrollTop = 0;
 }
 
 // The invariants whose entries make one family's cards: every member's invariant, sorted, so one

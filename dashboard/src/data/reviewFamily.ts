@@ -29,7 +29,7 @@ export type ReviewFamilySideState = "recorded" | "not_recorded" | "not_resolved"
 
 export type ReviewFamilyEntryState = "recorded" | "partial" | "unresolved" | "unavailable";
 
-// The one key that joins a member context to the evidence and assessment owners' own collections.
+// The key joining a member context to its recorded source and relationship collections.
 // It is a value rather than prose because joining on a display label or a path would be inventing
 // the association.
 export const FAMILY_CONTEXT_JOIN_KEY = "invariant_revision_id";
@@ -127,8 +127,9 @@ export interface ReviewReadCounts {
 }
 
 // The read owner's own window of one family revision's recorded scope, stated as its page.
-// `complete` is the owner's own `enumeration_complete`: a truncated roster carries the cursor that
-// reaches the rest, and the server refuses the two facts disagreeing.
+// `complete` means the end of enumeration, not that this page holds every member. The whole
+// selection was returned when primary_items_returned equals primary_items_total. A truncated
+// roster carries the owner's cursor, and the server refuses contradictory remainder facts.
 export interface ReviewFamilyRosterPage {
   scope: string[];
   state: "first_page" | "continued";
@@ -159,7 +160,6 @@ export interface ReviewFamilyRevisionContext {
 // statement pane. Both consume the recorded pair or explicit non-pair; neither selects a head.
 export type ReviewRevisionSelectionState =
   | "compared"
-  | "ambiguous"
   | "unresolved"
   | "added"
   | "removed";
@@ -179,7 +179,7 @@ export interface ReviewRevisionSelection {
 
 // The change facts of a tree comparison (MIK-R33), mirroring `models/knowledge/review_change_kinds.py`.
 // The server computes every fact for the members a page returned; a rendering orders, counts and
-// traverses by them and never recomputes one. A dataset review carries none.
+// traverses by them and never recomputes one.
 export type ReviewChangeKind = "intent" | "implementation" | "membership" | "unknown" | "unchanged";
 export type ReviewChangeFact = "established" | "not_established" | "unknown";
 export type ReviewChangeMark =
@@ -244,10 +244,6 @@ export interface ReviewFamilyContextEntry {
 export interface ReviewFamilyContextReferences {
   relationship_union: string;
   source_inventory: string;
-  evidence_links: string;
-  observations: string;
-  assessments: string;
-  applicability: string;
   join_key: string;
   detail: string;
 }
@@ -279,10 +275,8 @@ export interface FamilyMemberRow {
 }
 
 // Why a family context could not name one selected revision, in the server's own vocabulary. It is a
-// distinct answer from "no members": a lineage this context could not reduce to a head is not a
-// roster that came back empty.
+// distinct answer from "no members": an unreadable selection is not an empty roster.
 export const UNRESOLVED_SELECTION_STATES: ReviewRevisionSelectionState[] = [
-  "ambiguous",
   "unresolved",
 ];
 

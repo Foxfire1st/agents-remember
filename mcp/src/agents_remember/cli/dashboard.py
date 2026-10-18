@@ -70,6 +70,43 @@ _DEV_HEARTBEAT_ENV = "AR_DASHBOARD_DEV_HEARTBEAT"
 DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS = 3
 
 
+def _review_memory_root(
+    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
+) -> Path | None:
+    """Admit only this authority's exact live leaf root; never capture Git or open an index."""
+    from agents_remember.application.review_candidate_resolution import (  # noqa: PLC0415
+        recorded_leaf_contract,
+    )
+
+    for value in (repository_id, master, leaf_id):
+        if not value or "/" in value or "\\" in value or value.startswith("."):
+            return None
+    contract = recorded_leaf_contract(config, repository_id, master, leaf_id)
+    if contract is None or contract.kind != "leaf" or contract.memory_mode != "external":
+        return None
+    task_root = config.coordination_root / "tasks" / repository_id / master
+    if (
+        contract.coordination_root.resolve() != config.coordination_root.resolve()
+        or contract.task_root.resolve() != task_root.resolve()
+        or not contract.contract_path.resolve().is_relative_to(task_root.resolve() / "enclosures")
+    ):
+        return None
+    root = contract.memory_worktree
+    if (
+        root is None
+        or root.is_symlink()
+        or root != root.resolve()
+        or not root.is_dir()
+        or not contract.code_worktree.is_dir()
+        or root == contract.code_worktree.resolve()
+        or not root.is_relative_to(contract.worktree_group.resolve())
+        or root == contract.worktree_group.resolve()
+        or "provider-runtime" in root.parts
+    ):
+        return None
+    return root
+
+
 def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     """The collaborators one dashboard app is composed with, bound to this configuration.
 
@@ -148,6 +185,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
     return ServingCollaborators(
         host_activity_reconcile=lambda runtime: bridge_call(runtime, "host-activity-snapshot", {}),
+        review_memory_root=partial(_review_memory_root, config),
         knowledge_review=review_port,
         knowledge_review_entries=review_entries_port,
         review_source_content=review_source_content_port,

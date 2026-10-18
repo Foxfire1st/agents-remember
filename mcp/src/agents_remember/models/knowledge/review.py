@@ -1,24 +1,8 @@
-"""The Intent Reviewer surface's own vocabulary: what the three panes carry, and nothing more.
+"""The three tree-review panes and their comparison-bound response contract.
 
-This module defines **no record kind**. Every value here is a rendering of records another owner
-already stores, or a stated absence where no record exists. The one thing it does own is the shape
-of a display, and that shape is where the display's prohibitions are enforced:
-
-* **There is no field a conclusion could be assembled in.** No summary, no narrative, no severity,
-  no score, no conflict verdict, no causal explanation and no approval exists anywhere in this
-  vocabulary, so the surface cannot grow one by filling a blank that happens to be there.
-* **Unassessed is the absence of a value, never a value.** An assessment is ``None`` or it is a
-  record with an author and examined inputs; there is no "compatible", no "no concern recorded" and
-  no default disposition that could stand in for a judgement nobody made.
-* **A missing side is a state, not an empty string.** :class:`ReviewSideContent` refuses to carry
-  text unless it is ``present``, so a missing operand renders as its own named state rather than as
-  a blank that reads like an empty file.
-* **The stale rule is structural.** A payload whose comparison is stale must carry the submission
-  state that disables submission against it, and one that is current must not: the prohibition is a
-  constructor check, not a note a renderer is asked to remember.
-* **A signal is not a finding, and the vocabulary keeps them apart.** A mechanical detection fact
-  carries its matched condition, its inputs, its versions and its scope limitations and has no
-  field for a voice, a severity or a disposition.
+Statements, source facts, history judgments and proofs keep their own recorded
+meaning. Missing text is an explicit state, not an empty operand. A stale comparison
+structurally disables submission, and a missing required judgment pane is invalid.
 """
 
 from __future__ import annotations
@@ -29,32 +13,17 @@ from pydantic import Field, model_validator
 
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
-    PATH_MAX_LENGTH,
     PROSE_MAX_LENGTH,
     REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
     KnowledgeModel,
 )
-from agents_remember.models.knowledge.diff import SourceAttribution
 from agents_remember.models.knowledge.read import KnowledgeReadSeed
-from agents_remember.models.knowledge.review_applicability import (
-    ReviewApplicabilityClass,
-    ReviewApplicabilityState,
-    ReviewApplicabilitySummary,
-    ReviewContextRecord,
-    ReviewDisplayedApplicability,
-    ReviewDisplayedApplicabilityState,
-)
 from agents_remember.models.knowledge.review_external_movement import ExternalGitMovement
 from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
+from agents_remember.models.knowledge.review_judgment import ReviewJudgmentPane
 from agents_remember.models.knowledge.review_meaning_effects import ReviewMeaningEffects
 from agents_remember.models.knowledge.review_outline import ReviewOutline
-from agents_remember.models.knowledge.review_records import (
-    ReviewRecordChannel,
-    ReviewRecordChannelState,
-    ReviewRecordClassName,
-    evidence_classes_unread,
-)
 from agents_remember.models.knowledge.review_refusal import ReviewRefusal, ReviewRefusalCode
 from agents_remember.models.knowledge.review_relationships import (
     ReviewRelationshipGap,
@@ -63,6 +32,18 @@ from agents_remember.models.knowledge.review_relationships import (
     ReviewRelationshipTransition,
     ReviewRenameInference,
 )
+from agents_remember.models.knowledge.review_source import (
+    ReviewChangedFile,
+    ReviewFileContent,
+    ReviewFileStatus,
+    ReviewRemainingCount,
+    ReviewRemainingCountName,
+    ReviewSourceInventory,
+    ReviewSourceLocation,
+    ReviewSourcePane,
+    ReviewUnrepresentablePath,
+    ReviewUnresolvedReference,
+)
 from agents_remember.models.knowledge.review_staleness import (
     ReviewStaleness,
     ReviewSubmission,
@@ -70,6 +51,7 @@ from agents_remember.models.knowledge.review_staleness import (
 )
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 from agents_remember.models.knowledge.view import MAX_VIEW_ROWS
+from agents_remember.models.knowledge_files.shapes import Origin
 
 __all__ = [
     "KNOWLEDGE_REVIEW_SURFACE_VERSION",
@@ -82,26 +64,16 @@ __all__ = [
     "ExternalGitMovement",
     "KnowledgeReviewPayload",
     "KnowledgeReviewResult",
-    "ReviewApplicabilityClass",
-    "ReviewApplicabilityState",
-    "ReviewApplicabilitySummary",
-    "ReviewAssessmentDisplay",
     "ReviewCandidateRef",
     "ReviewChangedFile",
     "ReviewCollectionPage",
-    "ReviewContextRecord",
-    "ReviewDisplayedApplicability",
-    "ReviewDisplayedApplicabilityState",
     "ReviewEntry",
     "ReviewEntryListResult",
-    "ReviewEvidenceLink",
-    "ReviewEvidencePane",
     "ReviewFieldChange",
+    "ReviewFileContent",
+    "ReviewFileStatus",
+    "ReviewJudgmentPane",
     "ReviewKnowledgePane",
-    "ReviewObservation",
-    "ReviewRecordChannel",
-    "ReviewRecordChannelState",
-    "ReviewRecordClassName",
     "ReviewRefusal",
     "ReviewRefusalCode",
     "ReviewRelationshipGap",
@@ -113,7 +85,6 @@ __all__ = [
     "ReviewRenameInference",
     "ReviewRevisionGroup",
     "ReviewSideContent",
-    "ReviewSignal",
     "ReviewSourceInventory",
     "ReviewSourceLocation",
     "ReviewSourcePane",
@@ -139,7 +110,7 @@ __all__ = [
 # package, so ``/2`` would be a claim with no enforcement behind it.
 KNOWLEDGE_REVIEW_SURFACE_VERSION = "knowledge-review-surface/1"
 
-REVIEW_PANE_NAMES: tuple[str, ...] = ("knowledge", "source", "evidence")
+REVIEW_PANE_NAMES: tuple[str, ...] = ("knowledge", "source", "judgment")
 
 # ``RRD:366``'s three proposed dispositions, verbatim. They are published on the payload so a
 # reviewer can see which judgements are expressible; none of them is publication approval, and the
@@ -199,7 +170,7 @@ ReviewSubjectKind = Literal["invariant", "family"]
 # selection state: which snapshot selections reach the row.
 ReviewSubjectPresence = Literal["before_only", "after_only", "both"]
 
-ReviewSideState = Literal["present", "absent", "binary", "unresolved"]
+ReviewSideState = Literal["present", "absent", "unresolved"]
 
 # Which record a review read is addressed to (ICR-R12). One value, because the surface addresses
 # exactly one historical record: the leaf's own published comparison generation. A second spelling
@@ -208,23 +179,10 @@ ReviewSideState = Literal["present", "absent", "binary", "unresolved"]
 ReviewHistoryRef = Literal["recorded"]
 
 
-class ReviewUnresolvedReference(KnowledgeModel):
-    """One reference the surface could not resolve, named rather than dropped or made anonymous.
-
-    It exists so that "cannot be resolved" is a *displayed* fact: a row whose author or examined
-    inputs are missing carries one of these instead of an empty attribution, and no rendering is
-    able to present the row as one whose basis is simply uninteresting.
-    """
-
-    field: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    recorded_reference: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-
-
 class ReviewSideContent(KnowledgeModel):
     """One side's exact payload text, or the explicit state that says why there is none.
 
-    ``text`` is carried only when the side is ``present``. A binary operand, an absent one and an
+    ``text`` is carried only when the side is ``present``. An absent operand and an
     unresolved one each name themselves, so none of them degenerates into an empty string that a
     reader would take for an empty document -- the rule the diff renderer is fed rather than asked
     to infer.
@@ -243,7 +201,7 @@ class ReviewSideContent(KnowledgeModel):
             )
         if self.state != "present" and self.text is not None:
             raise ValueError(
-                "a side that is not present carries no text: rendering an absent, binary or "
+                "a side that is not present carries no text: rendering an absent or "
                 "unresolved operand as text is how a missing side is read as an empty one"
             )
         return self
@@ -493,102 +451,6 @@ class ReviewFieldChange(KnowledgeModel):
     after_value: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
 
 
-class ReviewSignal(KnowledgeModel):
-    """One mechanical detection fact: the matched condition, its inputs, versions and its limits.
-
-    There is deliberately no severity, no verdict, no causal explanation and no author on this
-    record, because a detection signal has none: it is a fact the detector matched. The scope
-    limitations travel with it so a partial detection can never be read as a whole one.
-    """
-
-    applicability: ReviewDisplayedApplicability | None = None
-    signal_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    condition: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    input_set: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    detected_at: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    relationship_paths: tuple[str, ...] = ()
-    extractor_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    policy_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    scope_limitations: tuple[str, ...] = ()
-
-
-class ReviewAssessmentDisplay(KnowledgeModel):
-    """One authored assessment as displayed: disposition, author, examined inputs, binding status.
-
-    ``binding_state`` is what a *measurement* put this binding in, carried verbatim: ``current`` and
-    ``stale`` are a completed measurement's two answers, ``not-measured`` says nothing measured the
-    record, and ``unavailable`` says the measurement failed (``ICR-R15@v1``).
-    """
-
-    applicability: ReviewDisplayedApplicability | None = None
-    assessment_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    disposition: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    finding: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    rationale: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    author_ref: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    role_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    examined_inputs: tuple[str, ...] = Field(min_length=1)
-    binding_state: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    evidence_refs: tuple[str, ...] = ()
-
-    @model_validator(mode="after")
-    def _require_the_basis_to_travel(self) -> ReviewAssessmentDisplay:
-        """Refuse an assessment displayed without its author or without the inputs it examined.
-
-        A disposition with no author is an anonymous verdict, and an assessment that examined
-        nothing cannot have been made *about* the subject it is shown beside. Neither is a
-        rendering of a recorded assessment, so neither is constructible.
-        """
-
-        if not self.author_ref.strip():
-            raise ValueError(
-                "a displayed assessment carries its author: an anonymous verdict is not a "
-                "rendering of a recorded assessment"
-            )
-        if not self.examined_inputs:
-            raise ValueError(
-                "a displayed assessment carries the exact inputs it examined; an assessment that "
-                "examined nothing cannot be the basis for the subject it is displayed with"
-            )
-        return self
-
-
-class ReviewEvidenceLink(KnowledgeModel):
-    """One evidence claim reference as recorded, with its own authored limitations."""
-
-    applicability: ReviewDisplayedApplicability | None = None
-    claim_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    claimed_coverage: tuple[str, ...] = ()
-    limitations: tuple[str, ...] = ()
-    author_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    assessment_refs: tuple[str, ...] = ()
-    lifecycle: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    unresolved: tuple[ReviewUnresolvedReference, ...] = ()
-
-
-class ReviewObservation(KnowledgeModel):
-    """One verification observation displayed exactly, including what it does not establish.
-
-    Everything here is what the run recorded: the tested candidate, the command or gate identity,
-    the result artifact and its digest, the execution result and the environment. The model has no
-    field for a sufficiency verdict, which is what keeps a passing run from being rendered as an
-    invariant being satisfied.
-    """
-
-    applicability: ReviewDisplayedApplicability | None = None
-    observation_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    tested_candidate: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    command_identity: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
-    result_artifact_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    result_artifact_digest: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    execution_result: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    environment_identity: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    limitations: tuple[str, ...] = ()
-
-
 # The six persistent counts the source pane exposes, declared once so the pane's own vocabulary and
 # the composition that fills it cannot come to disagree about which counts exist. The attribution
 # counts are three and not two (ICR-R04): ``unattributed_changed_paths`` is the confirmed negative
@@ -596,81 +458,12 @@ class ReviewObservation(KnowledgeModel):
 # not be drawn for, and a reader must be able to see both numbers beside each other -- a bare zero
 # with no undetermined count next to it is the "measured zero implies completeness" reading this
 # vocabulary exists to prevent.
-ReviewRemainingCountName = Literal[
-    "locations_remaining",
-    "changed_paths_outside_selection",
-    "unattributed_changed_paths",
-    "unknown_attribution_changed_paths",
-    "references_unresolved",
-    "records_present_outside_selection",
-]
-
-
-class ReviewRemainingCount(KnowledgeModel):
-    """One persistent count exposing what the selection did not reach.
-
-    ``value`` is ``None`` exactly when the quantity has no meaning for this rendering, and the
-    reason is then stated: a zero that means "none" and a zero that means "not measured here" are
-    different facts and a reviewer must be able to tell them apart.
-    """
-
-    name: ReviewRemainingCountName
-    value: int | None = Field(default=None, ge=0)
-    reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
-
-    @model_validator(mode="after")
-    def _require_a_stated_state(self) -> ReviewRemainingCount:
-        if self.value is None and not (self.reason or "").strip():
-            raise ValueError(
-                "a count without a meaning states why; an unexplained absent count reads as a zero"
-            )
-        if self.value is not None and self.reason is not None:
-            raise ValueError("a measured count carries its value and no not-applicable reason")
-        return self
-
-
-class ReviewSourceLocation(KnowledgeModel):
-    """One selected source location under its recorded claim, as the read reported it.
-
-    ``role`` is the author's recorded word and stays ``None`` when the record carries none: a
-    missing role is displayed as unclassified rather than guessed from a path, and there is no
-    field here for an importance or a ranking derived from a name.
-
-    ``invariant_id`` is the **preserved canonical identity** the location's recorded relationship
-    sits under (ICR-R08@v1), which is what makes two rows one association: a realization the author
-    moved from A to B is two locations carrying the same ``invariant_id``, each naming the side of the
-    movement its own address is (``recorded_side``) and carrying the whole relationship in
-    ``movement``. ``counterpart_path`` is the other side's recorded address when the movement records
-    exactly one there, and is absent when the other side records several or none -- the movement lists
-    every one of them, and no single address is chosen to stand for them. The identity is absent
-    exactly when the traversal could not establish it, and the movement beside it states that as a gap
-    rather than the location inventing one.
-    """
-
-    claim_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    invariant_revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
-    role: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    rationale: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
-    recorded_source_identity: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    observed_source_identity: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    resolution: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    change_state: Literal["changed", "unchanged", "not_selected"]
-    before_only: bool = False
-    reached_via: tuple[str, ...] = ()
-    invariant_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    transition: ReviewRelationshipTransition = "unchanged"
-    recorded_side: Literal["before", "after"] | None = None
-    counterpart_path: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
-    movement: ReviewRelationshipMovement | None = None
 
 
 class ReviewKnowledgePane(KnowledgeModel):
     """Pane 1 -- Knowledge: identities, retained revisions, exact statements and authored records.
 
-    The authored records and the mechanical signal facts are separate collections with separate
-    element types, so a rendering cannot place a signal where a finding goes without the type
-    system objecting first.
+    Each side carries the selected record's raw origin separately from its statement.
 
     ``selection_state`` says which question this pane answered. ``subject_selected`` means the
     reviewed subject was compared and the two statements below are that comparison's operands;
@@ -684,41 +477,21 @@ class ReviewKnowledgePane(KnowledgeModel):
     family_ids: tuple[str, ...] = ()
     before_statement: ReviewSideContent
     after_statement: ReviewSideContent
+    before_origin: Origin | None = None
+    after_origin: Origin | None = None
     before_conditions: tuple[str, ...] = ()
     after_conditions: tuple[str, ...] = ()
     revision_groups: tuple[ReviewRevisionGroup, ...] = ()
     # The explicit before/after revision selection the two statements were rendered from
-    # (ICR-R07@v1): the compared head pair, the one-sided head, or the explicit ambiguous or
+    # (ICR-R07@v1): the compared revision pair, the one-sided revision, or the explicit
     # unresolved selection that rendered no winner. It is absent exactly when no subject was
     # compared -- the task-context pane below -- because a review that compared no operand
     # selected no revision either.
     revision_selection: ReviewRevisionSelection | None = None
     field_changes: tuple[ReviewFieldChange, ...] = ()
-    signals: tuple[ReviewSignal, ...] = ()
-    assessment: ReviewAssessmentDisplay | None = None
-    assessments: tuple[ReviewAssessmentDisplay, ...] = ()
-    # The records of *other* subjects this selection reaches through an explicit recorded
-    # relationship, displayed as labelled context with their true subject and none of their
-    # judgment content (ICR-R26@v1). Nothing in ``assessments`` above is another subject's record.
-    context: tuple[ReviewContextRecord, ...] = ()
-    # The six-way count of every supplied collection this pane displays, including the records it
-    # does not display as the selected subject's judgments. Filtering is therefore stated as
-    # arithmetic rather than performed silently.
-    applicability: tuple[ReviewApplicabilitySummary, ...] = ()
     unresolved: tuple[ReviewUnresolvedReference, ...] = ()
     selection_state: Literal["subject_selected", "task_context"] = "subject_selected"
     selection_detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
-
-    @model_validator(mode="after")
-    def _require_the_assessment_state_to_be_one_fact(self) -> ReviewKnowledgePane:
-        """Keep the single assessment and the collection from describing two different states."""
-
-        if self.assessment is not None and self.assessment not in self.assessments:
-            raise ValueError(
-                "the pane's own assessment must be one of the assessments it displays; two "
-                "spellings of the same subject's state are how a pane comes to disagree with itself"
-            )
-        return self
 
     @model_validator(mode="after")
     def _require_the_selection_state_to_state_itself(self) -> ReviewKnowledgePane:
@@ -739,220 +512,6 @@ class ReviewKnowledgePane(KnowledgeModel):
             raise ValueError(
                 "a recorded revision selection is a selection a compared subject was rendered "
                 "from; a task-context pane that compared nothing records none"
-            )
-        return self
-
-
-ReviewFileStatus = Literal["added", "deleted", "modified", "type_changed", "unknown"]
-
-ReviewFileContent = Literal["text", "binary", "symlink", "submodule", "unknown"]
-
-
-class ReviewChangedFile(KnowledgeModel):
-    """One path the bound source pair differs at, as an address, a status and a renderability.
-
-    This is the surface's own inventory entry, and it is deliberately three separate facts.
-    ``path`` is the **raw filename** exactly as Git recorded it -- a tab or a newline inside it is
-    part of the address the same file is expanded with and never a separator -- so the string here
-    is the string a later read of that file must use. ``status`` is what happened to the path and
-    carries no assessment of it. ``content`` states whether the path's content can be rendered at
-    all, which is a property of the content and not of the change: a binary path, a symlink and a
-    submodule pointer are listed exactly like a text file and are simply not text.
-
-    ``mode_change`` separates "the bytes moved" from "only the permission word moved" without
-    turning either into a different status, and ``detail`` is present exactly when ``content`` is
-    ``unknown``, where it says whether the classification was not measured or was not reported for
-    this path.
-    """
-
-    path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
-    status: ReviewFileStatus
-    content: ReviewFileContent
-    mode_change: bool = False
-    detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
-
-    @model_validator(mode="after")
-    def _require_an_unknown_content_to_state_its_reason(self) -> ReviewChangedFile:
-        if (self.content == "unknown") != (self.detail is not None):
-            raise ValueError(
-                "an entry whose content cannot be classified states why, and a classified entry "
-                "states no reason; an unexplained unknown reads like a measured absence"
-            )
-        return self
-
-
-class ReviewUnrepresentablePath(KnowledgeModel):
-    """One changed path whose **name** cannot be carried as text by this vocabulary.
-
-    A Git pathname is bytes and this surface carries text. The runner preserves the bytes exactly, so
-    a name that is not valid UTF-8 arrives as lone surrogates -- a value a ``str`` field refuses --
-    and such a path would otherwise vanish from a response that claimed to be complete, or crash the
-    response that was supposed to state the fact. It is carried here instead.
-
-    ``path_bytes`` is the path's exact bytes rendered ASCII-safely (``b'src/caf\xe9-latin1.py'``), so
-    the value is valid text and still says precisely which file changed; ``status`` and
-    ``mode_change`` are what Git reported for it. Nothing is re-encoded: a re-encoded name would
-    address a file this repository does not hold, which is worse than an unusual spelling.
-    """
-
-    # The byte form of a pathname is longer than the pathname (up to four characters per byte), so it
-    # is bounded by the prose limit rather than by the path limit.
-    path_bytes: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    status: ReviewFileStatus
-    mode_change: bool = False
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-
-
-class ReviewSourceInventory(KnowledgeModel):
-    """The complete source change set of one bound pair: measured, partial, or unavailable.
-
-    This is the value R02 exists for. It is measured from the two code trees the resolution bound
-    and from nothing else, so it is present and complete for a candidate that records no invariant,
-    for a candidate whose datasets do not exist, and for a comparison whose knowledge half is a
-    different question entirely. The knowledge selection may filter *attribution*; it can never
-    remove an entry from here.
-
-    ``state`` is the honesty boundary. ``measured`` means this list is the whole change set of the
-    pair, including the measured empty set two identical trees produce. ``unavailable`` means the
-    measurement was not made at all, and then ``entries`` is empty **because nothing was observed**:
-    the ``detail`` carries the reason, and the count is zero rather than reported as "no changes".
-    ``partial`` is the third state and it is not a weaker measurement of the path set -- every
-    changed path is listed and one field of some entries could not be classified, which each entry
-    states for itself.
-
-    ``listed_total`` is the length of the list above and is checked against it, so a count can never
-    describe a population the response does not carry. Both code tree ids travel with the list, so a
-    caller can reproduce the exact measurement the entries came from.
-
-    ``unrepresentable_paths`` is the rest of the measured population, and it exists so the two lists
-    together are the whole change set: a changed path whose *name* is not valid text cannot be
-    ``entries`` without the value itself being unrepresentable, and dropping it would make a partial
-    change set read as a complete one. An inventory that carries any of them is ``partial`` by
-    construction, because it is exactly that.
-    """
-
-    state: Literal["measured", "unavailable"]
-    entries: tuple[ReviewChangedFile, ...] = ()
-    listed_total: int = Field(ge=0)
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    partial: bool = False
-    command: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    before_code_tree_id: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    after_code_tree_id: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    unrepresentable_paths: tuple[ReviewUnrepresentablePath, ...] = ()
-
-    @model_validator(mode="after")
-    def _require_the_count_to_describe_the_list(self) -> ReviewSourceInventory:
-        if self.listed_total != len(self.entries):
-            raise ValueError(
-                "an inventory's count is the length of the list beside it; a count of a population "
-                "the response does not carry is how a partial list is read as a whole one"
-            )
-        if self.state == "unavailable" and self.entries:
-            raise ValueError(
-                "an unavailable measurement lists nothing: entries beside it would be read as an "
-                "observed change set"
-            )
-        if self.state == "unavailable" and self.partial:
-            raise ValueError(
-                "an unavailable measurement is not a partial one; there is no measured remainder "
-                "to label"
-            )
-        if self.unrepresentable_paths and (self.state != "measured" or not self.partial):
-            raise ValueError(
-                "an inventory that could not carry some changed paths as text is a measured, "
-                "partial one; an unrepresentable path beside a complete or unavailable inventory "
-                "describes no measurement"
-            )
-        return self
-
-
-class ReviewSourcePane(KnowledgeModel):
-    """Pane 2 -- Source: the whole-task inventory, selected locations, and what the selection missed.
-
-    ``inventory`` is required and comes first, because it is the pane's one fact that does not depend
-    on a knowledge selection: the complete source change set of the comparison's bound pair. Every
-    field below it is the *attribution* half -- which of those changes a recorded realization claim
-    reaches -- and that half may legitimately be empty, filtered or unmeasured without shortening the
-    inventory above it.
-
-    ``attribution`` is that half as **one** accounting rather than three independent lists: the
-    measured change population partitioned once into attributed, confirmed unregistered and
-    undetermined, with each bound snapshot's inspection state beside it. The three path lists below it
-    are that value's own buckets, so a path can appear in exactly one of them and a change nobody
-    looked for is never listed as a change nobody registered.
-    """
-
-    inventory: ReviewSourceInventory
-    locations: tuple[ReviewSourceLocation, ...] = ()
-    # The recorded before/after relationship union this review traversed (ICR-R08@v1): every
-    # realization, family membership, advertised frontier link and the reviewed identity's governing
-    # route, each displayed with both sides. It is a separate collection from ``locations`` because
-    # it holds the relationships that have no source address at all -- a membership and a route
-    # association -- and because a movement whose two sides are one row at one address is still one
-    # relationship rather than two locations.
-    relationships: tuple[ReviewRelationshipMovement, ...] = ()
-    remaining: tuple[ReviewRemainingCount, ...] = ()
-    expansion_reference: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    expansion_command: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
-    unattributed_changed_paths: tuple[str, ...] = ()
-    attributed_changed_paths: tuple[str, ...] = ()
-    unknown_attribution_changed_paths: tuple[str, ...] = ()
-    attribution: SourceAttribution | None = None
-    unresolved: tuple[ReviewUnresolvedReference, ...] = ()
-
-
-class ReviewEvidencePane(KnowledgeModel):
-    """Pane 3 -- Evidence and assessment, with its two absence states stated rather than implied.
-
-    ``evidence_state`` and ``assessment_state`` are separate because they are separate facts: a
-    corpus can hold evidence and no assessment, an assessment and no evidence, or neither. Neither
-    state has a favourable member, so no rendering can turn an absence into a clearance.
-
-    ``evidence_state`` summarises the two evidence classes this pane displays, the evidence claims
-    and the execution observations, and it agrees with their channels: ``none_recorded`` is a
-    measured zero, so a pane that displays no evidence while one of those channels is ``unavailable``
-    says ``unavailable`` instead of reporting a zero nobody counted.
-
-    ``channels`` is the composition's own supply of every record class this review read, one entry per
-    class, with the availability fact each owner's answer earned. It is carried here because this is
-    the pane that displays records rather than recorded knowledge, and it is carried *whole*: a class
-    that was not read, or that could not be read, appears with that state instead of being absent from
-    the list.
-    """
-
-    evidence_state: Literal["recorded", "none_recorded", "unavailable"]
-    assessment_state: Literal["assessed", "unassessed"]
-    evidence_links: tuple[ReviewEvidenceLink, ...] = ()
-    observations: tuple[ReviewObservation, ...] = ()
-    assessments: tuple[ReviewAssessmentDisplay, ...] = ()
-    source_inspection_available: bool
-    channels: tuple[ReviewRecordChannel, ...] = ()
-    # The labelled context rows and the six-way counts this pane displays (ICR-R26@v1), carried here
-    # exactly as on the knowledge pane: the two panes show the same assessments, so a record that is
-    # context for one is context for both, and neither may drop it silently.
-    context: tuple[ReviewContextRecord, ...] = ()
-    applicability: tuple[ReviewApplicabilitySummary, ...] = ()
-    unresolved: tuple[ReviewUnresolvedReference, ...] = ()
-
-    @model_validator(mode="after")
-    def _require_the_states_to_match_their_collections(self) -> ReviewEvidencePane:
-        if (self.evidence_state == "recorded") != bool(self.evidence_links or self.observations):
-            raise ValueError(
-                "the evidence pane's state must match the links and observations it carries; an "
-                "empty corpus reported as recorded, or a populated one reported as empty, is a "
-                "false statement about the evidence either way"
-            )
-        unread = evidence_classes_unread(self.channels)
-        if self.evidence_state != "recorded" and (self.evidence_state == "unavailable") != unread:
-            raise ValueError(
-                "an evidence pane that displays no evidence agrees with its channels: it is "
-                "unavailable exactly when an evidence class could not be read, because "
-                "none_recorded beside an unavailable channel reads as a zero nobody counted"
-            )
-        if (self.assessment_state == "assessed") != bool(self.assessments):
-            raise ValueError(
-                "the evidence pane's assessment state must match the assessments it carries"
             )
         return self
 
@@ -988,7 +547,7 @@ class KnowledgeReviewPayload(KnowledgeModel):
     comparison: ComparisonIdentity | None = None
     knowledge: ReviewKnowledgePane
     source: ReviewSourcePane
-    evidence: ReviewEvidencePane
+    judgment: ReviewJudgmentPane
     # The recorded families the selected subject belongs to on each bound snapshot, with each selected
     # family revision's own guarantee and its recorded member roster (ICR-R31@v1). It is required, not
     # optional: every review answers the question, and a selection that read its scope and holds no

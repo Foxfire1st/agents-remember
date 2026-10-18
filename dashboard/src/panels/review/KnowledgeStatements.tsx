@@ -13,7 +13,7 @@
 //     addition or a removal (`a` empty = every line added; `b` empty = every line removed), and the
 //     absent side is named as absent in its own line above it, so an empty column is a stated fact
 //     and never a blank a reader has to interpret.
-//   * one `present`, other `binary`/`unresolved` -> the available side's text as content, with the
+//   * one `present`, other `unresolved` -> the available side's text as content, with the
 //     unavailable side's own reason beside it, and NO diff. A diff here would claim the other
 //     operand is a known-empty document; the server distinguished `absent` from an unreadable side
 //     precisely so this rendering could not make that claim, and an empty-string operand is what the
@@ -32,7 +32,7 @@ import { FilePane } from '../file-viewer/FilePane';
 // The one unavailable-content pair: the side holds no renderable text and says why. It is not a
 // known absence, and the difference is the whole point of rendering it on its own line.
 const unavailable = (state: ReviewSideContent['state']) =>
-  state === 'binary' || state === 'unresolved';
+  state === 'unresolved';
 
 const sideLine = (side: ReviewSideContent, name: 'before' | 'after') => (
   <p

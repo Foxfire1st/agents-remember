@@ -35,11 +35,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
+from agents_remember.memory.knowledge_index import KnowledgeIndex
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.diff import KnowledgeDiffItem
 from agents_remember.models.knowledge.read import ReadItem
 from agents_remember.models.knowledge.review import ReviewFieldChange, ReviewSideContent
+from agents_remember.models.knowledge_files.shapes import Origin
 
 __all__ = [
     "STRUCTURED_VALUE_LEAD",
@@ -49,6 +52,7 @@ __all__ = [
     "read_side",
     "side_conditions",
     "side_content",
+    "side_origin",
     "structured_value_text",
 ]
 
@@ -100,7 +104,8 @@ def side_content(item: KnowledgeDiffItem | None, side: str) -> ReviewSideContent
             language="text",
             detail=f"the {side} snapshot selected no record for the reviewed subject",
         )
-    if read_item.statement is None:
+    text = read_item.joint_guarantee if read_item.kind == "family_revision" else read_item.statement
+    if text is None:
         return ReviewSideContent(
             state="unresolved",
             language="text",
@@ -111,10 +116,30 @@ def side_content(item: KnowledgeDiffItem | None, side: str) -> ReviewSideContent
         )
     return ReviewSideContent(
         state="present",
-        text=read_item.statement,
+        text=text,
         language="text",
         detail=f"the {side} snapshot's recorded statement for this revision",
     )
+
+
+def side_origin(database: Path, item: KnowledgeDiffItem | None, side: str) -> Origin | None:
+    """Read the selected record's raw origin, not its lossy projected authorship."""
+
+    selected = read_side(item, side)
+    if selected is None or selected.record_id is None:
+        return None
+    with KnowledgeIndex(database) as index:
+        raw = index.text_id(selected.record_id)
+        if raw is None:
+            return None
+        record = (
+            index.family(raw).value.record
+            if selected.kind == "family_revision"
+            else index.invariant(raw).value.record
+        )
+        if record is None or record.document.get("origin") is None:
+            return None
+        return Origin.model_validate(record.document["origin"])
 
 
 def side_conditions(item: KnowledgeDiffItem | None, side: str) -> tuple[str, ...]:

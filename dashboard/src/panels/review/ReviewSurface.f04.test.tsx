@@ -1,9 +1,9 @@
-// MIK-R43 F04 mounted: the real-ingest two-attempt family on the real ReviewSurface.
-//
-// Bodies are the R2 successor captures (l43r2.f04.*) served by the leaf build over
-// scratch memory the real knowledge-ingest command wrote: family FAM-8V48H2 shows
-// weaken (attempt 1, own rev 1) then clarify (attempt 2, own rev 2). Only fetch is
-// replaced. R1 captures are untouched.
+// F04 preserved through today's native writer in a disposable two-leaf world.
+// Leaf A authors family/invariant revision 1 without a judgment (R07); leaf B's two real
+// knowledge-ingest calls produce weaken at family revision 2, then clarify at revision 3.
+// The first B history's lifecycle-only closed flag is an explicitly disclosed fixture closeout;
+// judgment fields are unedited. All response bytes are genuine current public-route captures.
+// See l57.f04-native.capture-provenance.json; the obsolete pre-judgment bodies are not used.
 import { cleanup, render, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReviewEntryListResult, ReviewResult } from '../../data/review';
@@ -13,17 +13,17 @@ import { treeOrderStore } from './triageOrderPreference';
 import { treeViewStore } from './triageViewPreference';
 import { captured } from './l43.test-utils';
 
-const entries = captured<ReviewEntryListResult>('l43r2.f04.entries.captured.json');
-const family = captured<ReviewResult>('l43r2.f04.family.captured.json');
-const trees = captured<ReviewTreesResult>('l43r2.f04.trees.captured.json');
+const entries = captured<ReviewEntryListResult>('l57.f04-native.entries.captured.json');
+const family = captured<ReviewResult>('l57.f04-native.family.captured.json');
+const trees = captured<ReviewTreesResult>('l57.f04-native.trees.captured.json');
+const candidate = family.payload!.candidate;
 const target = {
-  repo: 'agents-remember',
-  master: '260928-f04-proof',
-  leaf: '260928-MIK-L43-F04',
+  repo: candidate.repository_id,
+  master: candidate.master,
+  leaf: candidate.leaf_id,
   onBack: () => undefined,
 };
-const familySelector = entries.outline!.families.find((one) => one.id === 'FAM-8V48H2')!
-  .selector_id;
+const familySelector = family.payload!.knowledge.revision_selection!.record_id;
 
 beforeEach(() => {
   localStorage.clear();
@@ -68,11 +68,11 @@ it('shows the real-ingest family weaken then clarify in the tree and the block',
   // Reading-area block: both writer-minted rows with their fields.
   const block = await view.findByTestId('review-recorded-steps');
   expect(block.textContent).toContain("These are the leaf's successive recorded judgments.");
-  expect(block.textContent).toContain('ROW-FM83GE');
-  expect(block.textContent).toContain('ROW-Z3V0PQ');
+  expect(block.textContent).toContain('ROW-YXKVEC');
+  expect(block.textContent).toContain('ROW-NVYMV1');
   expect(block.textContent).toContain('weaken');
   expect(block.textContent).toContain('clarify');
-  expect(block.textContent).toContain('revision 1');
   expect(block.textContent).toContain('revision 2');
+  expect(block.textContent).toContain('revision 3');
   view.unmount();
 });

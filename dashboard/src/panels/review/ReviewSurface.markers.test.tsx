@@ -11,7 +11,7 @@
 // `fetch` is stubbed: `ReviewSurface` and everything under it is the real component tree.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import type { ReviewFileClassification } from '../../data/reviewLane';
@@ -21,6 +21,7 @@ import {
   syntheticMarkerFamilyReview,
 } from './markerCatalogue.test-utils';
 import { treeViewStore } from './triageViewPreference';
+import { treeOrderStore } from './triageOrderPreference';
 
 const captured = <T,>(name: string): T =>
   JSON.parse(
@@ -34,6 +35,8 @@ const file = captured<{ file_classification: ReviewFileClassification }>(
 const source = captured<unknown>('markerReturn.source.captured.json');
 const invariant = captured<ReviewResult>('markerReturn.invariant.captured.json');
 const cards = captured<unknown>('markerReturn.cards.captured.json');
+const completeTrees = captured<unknown>('markerReturn.trees.captured.json');
+let deliverCompleteTrees = false;
 const initialFamily = syntheticMarkerFamilyReview(invariant);
 const NOTES = 'mcp/src/agents_remember/serving/notes.py';
 const [edit] = file.file_classification.hunks;
@@ -41,6 +44,7 @@ const Z66 = edit.links.find((link) => link.invariant === 'INV-Z66EMHMH')!;
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   delete (Element.prototype as Partial<Element>).scrollIntoView;
 });
@@ -53,7 +57,7 @@ function answer(url: URL): unknown {
   if (url.pathname.endsWith('/trees')) {
     if (url.searchParams.get('lane')) return lane;
     if (url.searchParams.get('invariants')) return cards;
-    return url.searchParams.get('file') === NOTES ? file : undefined;
+    return url.searchParams.get('file') === NOTES ? file : deliverCompleteTrees ? completeTrees : undefined;
   }
   const selector = url.searchParams.get('selectorId');
   if (selector === null) return task;
@@ -62,7 +66,8 @@ function answer(url: URL): unknown {
   return selector === Z66.invariant_key ? invariant : null;
 }
 
-function serve() {
+function serve(complete = false) {
+  deliverCompleteTrees = complete;
   treeViewStore.getState().setView('all');
   requested.length = 0;
   vi.stubGlobal(
@@ -214,13 +219,56 @@ it('selects the tree position a marker names, and returns to the hunk with focus
   expect(requested.filter((url) => url.searchParams.get('file'))).toHaveLength(1);
 });
 
+it('releases a held marker return on j and selects the next measured changed tree row', async () => {
+  localStorage.clear();
+  treeOrderStore.getState().setOrder('triage');
+  serve(true);
+  const view = open();
+  await openFullFile(view);
+  const marks = await marksOf(view, 2);
+  fireEvent.click(marks['124:1:124:1']);
+  fireEvent.click(within(view.getByTestId('review-hunk-mark-panel'))
+    .getAllByTestId('review-hunk-mark-occurrence')[0]);
+  await view.findByTestId('review-marker-return');
+  await waitFor(() => expect(view.container.querySelector(
+    '[data-tree-node="member"][aria-current="true"]',
+  )).toBeTruthy());
+  vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
+  fireEvent.click(view.getByTestId('review-marker-return'));
+  const held = await waitFor(async () => {
+    await act(async () => { vi.advanceTimersToNextFrame(); });
+    const active = document.activeElement as HTMLElement;
+    expect(active.dataset.testid).toBe('review-hunk-mark');
+    expect(active.dataset.hunk).toBe('124:1:124:1');
+    return active;
+  });
+  await act(async () => { vi.advanceTimersToNextFrame(); });
+  expect(document.activeElement).toBe(held);
+  const rows = [...view.container.querySelectorAll<HTMLElement>(
+    '[data-testid="review-family-tree"] [data-tree-node]',
+  )];
+  const current = rows.find((row) => row.getAttribute('aria-current') === 'true');
+  expect(current).toBeTruthy();
+  const next = rows.slice(rows.indexOf(current!) + 1).find((row) =>
+    row.dataset.changePrimary && !['unchanged', 'unknown'].includes(row.dataset.changePrimary),
+  );
+  expect(next).toBeTruthy();
+  fireEvent.keyDown(held, { key: 'j', code: 'KeyJ' });
+  await waitFor(() => expect(document.activeElement).toBe(next));
+  expect(next!.getAttribute('aria-current')).toBe('true');
+  expect(view.queryByTestId('review-marker-return')).toBeNull();
+  await act(async () => { vi.advanceTimersToNextFrame(); });
+  expect(document.activeElement).toBe(next);
+});
+
 // -- the rulings round, Q3: an unknown membership opens in its own state, never as "no family" -------
 //
 // Comparison 3 of the same scratch leaf (markerUnknown.capture-provenance.json): the leaf's
 // FAM-4V4GSQCS record does not parse on the after side. In notes.py's line 124 hunk, INV-Z66EMHMH's
 // before-side membership of FAM-4V4GSQCS is unknown (the family is named) and its after-side
 // membership is unknown with no family; INV-413DC8XE has no family on the before side (confirmed)
-// and an unknown one on the after side, where the review itself states a measured zero.
+// and an unknown one on the after side. Today's producer correctly calls that family context partial,
+// never a measured zero. The unavailable roster cannot supply a synthetic selected member row.
 const unknownSet = {
   task: captured<ReviewResult>('markerUnknown.task.captured.json'),
   lane: captured<unknown>('markerUnknown.lane.captured.json'),
@@ -230,9 +278,11 @@ const unknownSet = {
   source: captured<unknown>('markerUnknown.source.captured.json'),
   memberUnknown: captured<ReviewResult>('markerUnknown.memberUnknown.captured.json'),
   noFamily: captured<ReviewResult>('markerUnknown.noFamily.captured.json'),
-  cards: captured<unknown>('triageMarker.cards.captured.json'),
+  cards: captured<unknown>('markerUnknown.cards.captured.json'),
+  entries: captured<unknown>('markerUnknown.entries.captured.json'),
+  trees: captured<unknown>('markerUnknown.trees.captured.json'),
+  family: captured<ReviewResult>('markerUnknown.family.captured.json'),
 };
-const initialUnknownFamily = syntheticMarkerFamilyReview(unknownSet.memberUnknown);
 const unknownLinks = unknownSet.file.file_classification.hunks[0].links;
 const keyOf = (id: string) => unknownLinks.find((link) => link.invariant === id)!.invariant_key;
 
@@ -246,7 +296,7 @@ function serveUnknown() {
       requested.push(url);
       const selector = url.searchParams.get('selectorId');
       const body = url.pathname.endsWith('/entries')
-        ? syntheticMarkerCatalogue(unknownSet.memberUnknown)
+        ? unknownSet.entries
         : url.pathname.endsWith('/source-content')
           ? unknownSet.source
           : url.pathname.endsWith('/trees')
@@ -256,9 +306,9 @@ function serveUnknown() {
                 ? unknownSet.cards
                 : url.searchParams.get('file') === NOTES
                   ? unknownSet.file
-                  : undefined
-            : selector === initialUnknownFamily.payload!.knowledge.revision_selection!.record_id
-              ? initialUnknownFamily
+                  : unknownSet.trees
+            : selector === unknownSet.family.payload!.knowledge.revision_selection!.record_id
+              ? unknownSet.family
               : selector === null
                 ? unknownSet.task
                 : selector === keyOf('INV-Z66EMHMH')
@@ -309,9 +359,33 @@ async function backToNotes(view: ReturnType<typeof open>) {
   );
 }
 
-it('opens an unknown membership in its own Attribution unknown state, apart from no family', async () => {
+it('keeps the selected invariant source available when its family roster is unreadable', async () => {
   serveUnknown();
-  const view = open(initialUnknownFamily);
+  const view = open(unknownSet.memberUnknown);
+  await openFullFile(view);
+  await marksOf(view, 2);
+});
+
+it('shows the named unknown marker on the invariant when the family has no member row', async () => {
+  serveUnknown();
+  const view = open(unknownSet.memberUnknown);
+  await openFullFile(view);
+  await followFrom(view, 'FAM-4V4GSQCS r1 · membership unknown (before, r1)', 'INV-Z66EMHMH');
+  const rail = await view.findByTestId('review-rail-target-state');
+  const occurrence = unknownLinks
+    .find((link) => link.invariant === 'INV-Z66EMHMH' && link.side === 'before')!
+    .families[0];
+  expect(rail.textContent).toContain(occurrence.reason);
+  expect(rail.dataset.familyState).toBe('partial');
+  expect(view.getByTestId('review-center-target-state').textContent).toContain(occurrence.reason);
+  await waitFor(() => expect(document.activeElement).toBe(rail));
+  expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
+  await backToNotes(view);
+});
+
+it('separates before-side absence from unknown after-side membership without inventing a roster', async () => {
+  serveUnknown();
+  const view = open(unknownSet.memberUnknown);
   await openFullFile(view);
   fireEvent.click((await marksOf(view, 2))['124:1:124:1']);
   expect(
@@ -325,82 +399,59 @@ it('opens an unknown membership in its own Attribution unknown state, apart from
     'INV-413DC8XE membership_unknown Attribution unknown (after, r1)',
   ]);
 
-  // The family is named and in the tree: the member's own row carries the state and its reason. A
-  // tree comparison's row states its membership once (MIK-L33 merge round): the state is the
-  // `Attribution unknown` tag on the change facts' membership line, whose reason is the comparison's.
+  // A named occurrence is real before-side evidence, not permission to fabricate an after roster.
   await followFrom(view, 'FAM-4V4GSQCS r1 · membership unknown (before, r1)', 'INV-Z66EMHMH');
-  const row = await waitFor(() => {
-    const node = view.container.querySelector<HTMLElement>(
-      '[data-tree-node="member"][aria-current="true"]',
-    );
-    expect(node).toBeTruthy();
-    return node!;
-  });
-  await waitFor(() => expect(document.activeElement).toBe(row));
-  const centerReview = view.getByTestId('review-center-member');
-  const reason = within(centerReview).getByTestId('review-change-membership-why');
-  expect(reason.textContent).toContain(
-    'Attribution unknown opened from an intent marker · membership unknown: the after memory tree has family records that do not parse: knowledge/families/FAM-4V4GSQCS-',
-  );
-  expect(reason.closest('details')).toBeNull();
-  expect(row.querySelector('[data-member-state]')).toBeNull();
-  expect(row.getAttribute('aria-label')).not.toMatch(/Attribution unknown|membership unknown/);
-  expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
-  await backToNotes(view);
-
-  // A confirmed absence reads "No recorded family", with no unknown state anywhere.
-  await followFrom(view, 'No recorded family (before, r1)', 'INV-413DC8XE');
-  expect((await view.findByTestId('review-center-member-family')).textContent).toBe(
-    'No recorded family',
-  );
-  expect(view.queryByTestId('review-rail-target-state')).toBeNull();
-  expect(view.queryByTestId('review-center-target-state')).toBeNull();
-  expect((await view.findByTestId('review-center-member-family')).textContent).toBe(
-    'No recorded family',
-  );
-  await backToNotes(view);
-
-  // No family named, and the review states a measured zero: the invariant view shows the unknown
-  // state and its reason, in the rail and the center, and says what the review's context reads.
-  await followFrom(view, 'Attribution unknown (after, r1)', 'INV-413DC8XE');
-  const rail = await view.findByTestId('review-rail-target-state');
-  expect(within(rail).getByRole('heading').textContent).toBe('Attribution unknown');
-  expect(rail.dataset.familyState).toBe('no_family_recorded');
-  expect(rail.textContent).toContain(
-    'INV-413DC8XE: not every family record of the after knowledge could be read, so whether a ' +
-      'family lists INV-413DC8XE on that side is not established.',
-  );
-  expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
-  const center = await view.findByTestId('review-center-target-state');
-  expect(center.textContent).toContain("The review's family context reads: No recorded family.");
-  // What receives focus is the state itself: named "Attribution unknown", described by its reason.
-  await waitFor(() => expect(document.activeElement).toBe(rail));
-  expect(focusedAnnouncement()).toEqual({
-    testid: 'review-rail-target-state',
-    name: 'Attribution unknown',
-    description: expect.stringContaining('INV-413DC8XE: not every family record'),
-  });
-  await backToNotes(view);
-
-  // No family named while the review composes a tree (from the other side): the invariant view, and
-  // the state above the tree is what receives focus -- not the tree's auto-selected row, whose name
-  // says nothing of it (review R1 F3).
-  await followFrom(view, 'Attribution unknown (after, r1)', 'INV-Z66EMHMH');
-  expect((await view.findByTestId('review-center-target-state')).textContent).toContain(
-    'INV-Z66EMHMH: not every family record of the after knowledge could be read',
-  );
+  const named = await view.findByTestId('review-rail-target-state');
+  const namedReason = unknownLinks.find(
+    (link) => link.invariant === 'INV-Z66EMHMH' && link.side === 'before',
+  )!.families[0].reason!;
+  expect(named.textContent).toContain(namedReason);
+  expect(named.dataset.familyState).toBe('partial');
+  expect(named.closest('details')).toBeNull();
   expect(view.queryByTestId('review-member-target-state')).toBeNull();
-  const above = await view.findByTestId('review-rail-target-state');
-  expect(above.closest('[data-testid="review-center-column"]')).toBeTruthy();
-  expect(
-    within(view.getByTestId('review-family-tree')).queryByTestId('review-rail-target-state'),
-  ).toBeNull();
-  await waitFor(() => expect(document.activeElement).toBe(above));
-  expect(focusedAnnouncement()).toEqual({
-    testid: 'review-rail-target-state',
-    name: 'Attribution unknown',
-    description: expect.stringContaining(
-      'INV-Z66EMHMH: not every family record of the after knowledge could be read',
-    ),
+  expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
+  await waitFor(() => expect(document.activeElement).toBe(named));
+  await backToNotes(view);
+
+  // Confirmed absence belongs only to the before-side marker; the current family read is unavailable.
+  await followFrom(view, 'No recorded family (before, r1)', 'INV-413DC8XE');
+  const statement = unknownSet.noFamily.payload!.knowledge.after_statement;
+  const statementText = statement.text;
+  if (statement.state !== 'present' || typeof statementText !== 'string')
+    throw new Error('native selected invariant statement required');
+  await waitFor(() => {
+    const selected = view.getByTestId('review-center-member');
+    expect(selected.dataset.subject).toBe(keyOf('INV-413DC8XE'));
+    expect(selected.textContent?.replace(/\s+/g, ' '))
+      .toContain(statementText.replace(/\s+/g, ' '));
   });
+  expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
+  expect(view.getByTestId('review-center-member-family').textContent).not.toBe('No recorded family');
+  await backToNotes(view);
+
+  // An unknown after-side occurrence is announced in its own focusable state with the wire reason.
+  for (const [invariant, familyState] of [
+    ['INV-413DC8XE', 'unavailable'], ['INV-Z66EMHMH', 'partial'],
+  ]) {
+    await followFrom(view, 'Attribution unknown (after, r1)', invariant);
+    const nativeReason = unknownLinks.find(
+      (link) => link.invariant === invariant && link.side === 'after',
+    )!.families[0].reason!;
+    const rail = await view.findByTestId('review-rail-target-state');
+    expect(within(rail).getByRole('heading').textContent).toBe('Attribution unknown');
+    expect(rail.dataset.familyState).toBe(familyState);
+    expect(rail.textContent).toContain(nativeReason);
+    const center = await view.findByTestId('review-center-target-state');
+    expect(center.textContent).toContain(nativeReason);
+    expect(center.textContent).not.toContain("The review's family context reads: No recorded family.");
+    expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
+    expect(rail.closest('[data-tree-node="member"]')).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(rail));
+    expect(focusedAnnouncement()).toEqual({
+      testid: 'review-rail-target-state',
+      name: 'Attribution unknown',
+      description: expect.stringContaining(nativeReason),
+    });
+    await backToNotes(view);
+  }
 });

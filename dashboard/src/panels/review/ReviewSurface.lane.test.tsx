@@ -19,8 +19,8 @@ it('draws each destination in the existing page in the lane answer order, with i
   serve();
   const view = render(<ReviewSurface {...target} />);
   const rail = await view.findByTestId('review-catalogue-navigation');
-  await waitFor(() => expect(rail.textContent).toMatch(/Unexplained changes\s*167/));
-  fireEvent.click(within(rail).getByRole('button', { name: /^Unexplained changes/ }));
+  await waitFor(() => expect(rail.textContent).toMatch(/Changes without an invariant\s*167/));
+  fireEvent.click(within(rail).getByRole('button', { name: /^Changes without an invariant/ }));
   const page = await view.findByTestId('changeset-viewer');
   await waitFor(() => expect(page.querySelector('[data-active="true"]')).not.toBeNull());
   const code = within(page).getByText('changed code (167)').parentElement!;
@@ -46,13 +46,13 @@ it('keeps All working while lane counts are being read, and never supplies guess
   const rail = await view.findByTestId('review-catalogue-navigation');
   await view.findByTestId('review-center-family');
   expect(view.getByTestId('review-navigation-summary').textContent).toContain(
-    '… files unexplained',
+    '… files without an invariant',
   );
   fireEvent.click(within(rail).getByRole('button', { name: /^All changes/ }));
   const page = await view.findByTestId('changeset-viewer');
   expect(
     within(page)
-      .getByRole('button', { name: /^Unexplained/ })
+      .getByRole('button', { name: /^Changes without an invariant/ })
       .hasAttribute('disabled'),
   ).toBe(true);
   expect(
@@ -66,7 +66,7 @@ it('keeps All working while lane counts are being read, and never supplies guess
   await waitFor(() =>
     expect(
       within(page)
-        .getByRole('button', { name: /^Unexplained/ })
+        .getByRole('button', { name: /^Changes without an invariant/ })
         .hasAttribute('disabled'),
     ).toBe(false),
   );
@@ -82,5 +82,5 @@ it('states an unanswered leaf worklist as reading in its own view, never as no g
   );
   expect(view.queryByText('No worklist item names this record.')).toBeNull();
   await act(async () => release());
-  await waitFor(() => expect(rail.textContent).toMatch(/Worklist\s*673/));
+  await waitFor(() => expect(rail.textContent).toMatch(/Worklist\s*518 open/));
 });

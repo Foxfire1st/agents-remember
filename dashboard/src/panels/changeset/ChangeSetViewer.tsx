@@ -30,14 +30,13 @@ import { type ReviewFailure, reviewProblemFromCause } from '../../data/review';
 import { EmptyStateBackdrop } from '../EmptyStateBackdrop';
 import type { ReviewSelectorKind } from '../../data/review';
 import {
-  fileBadge,
+  reviewFileBadges,
   filteredChangeSet,
-  FILTER_NOTES,
-  laneFiles,
   type ReviewChangeContext,
   type ReviewChangeFilter,
 } from './reviewChangeSet';
 import { ChangeSetPane } from './ChangeSetPane';
+import { ReviewFilters } from './ReviewFilters';
 
 export interface ChangeSetTarget {
   repo: string;
@@ -387,6 +386,7 @@ function ChangeList({
   testPrefix?: string;
   reviewContext?: ReviewChangeContext;
 }) {
+  const badges = reviewContext ? reviewFileBadges(reviewContext) : new Map<string, string>();
   return (
     <div className={section}>
       <div className={sectionHead}>
@@ -408,9 +408,7 @@ function ChangeList({
           <button type="button" className={rowMain} onClick={() => onOpen(kind, f)}>
             <span className={statusChip}>{f.status}</span>
             <span className={pathText}>{f.path}</span>
-            {reviewContext && fileBadge(f, reviewContext) ? (
-              <span>{fileBadge(f, reviewContext)}</span>
-            ) : null}
+            {badges.has(f.path) ? <span>{badges.get(f.path)}</span> : null}
             <Counts file={f} />
           </button>
           {partnerHint(f) ? (
@@ -972,62 +970,6 @@ function useComparisonBack(comparison: number | undefined, onBack: () => void): 
     document.addEventListener('keydown', escape, true);
     return () => document.removeEventListener('keydown', escape, true);
   }, [comparison, onBack]);
-}
-function FilterButton({
-  name,
-  context,
-  data,
-  filter,
-  onFilter,
-}: {
-  name: ReviewChangeFilter;
-  context: ReviewChangeContext;
-  data: TaskChangeset | MasterChangeset | null;
-  filter: ReviewChangeFilter;
-  onFilter: (next: ReviewChangeFilter) => void;
-}) {
-  const files = laneFiles(context, name);
-  const waiting = context.lane?.phase === 'loading' ? 'reading…' : 'unavailable';
-  const count = name === 'all' ? (data?.code.length ?? '…') : (files?.length ?? waiting);
-  const labels = { all: 'All', unexplained: 'Unexplained', unknown: 'Unknown attribution' };
-  return (
-    <button
-      type="button"
-      aria-pressed={filter === name}
-      disabled={name !== 'all' && !files}
-      onClick={() => onFilter(name)}
-    >
-      {labels[name]} ({count})
-    </button>
-  );
-}
-function ReviewFilters({
-  context,
-  data,
-  filter,
-  onFilter,
-}: {
-  context?: ReviewChangeContext;
-  data: TaskChangeset | MasterChangeset | null;
-  filter: ReviewChangeFilter;
-  onFilter: (next: ReviewChangeFilter) => void;
-}) {
-  if (!context) return null;
-  return (
-    <div style={{ padding: '0.4rem', flexShrink: 0 }}>
-      {(['all', 'unexplained', 'unknown'] as const).map((name) => (
-        <FilterButton
-          key={name}
-          name={name}
-          context={context}
-          data={data}
-          filter={filter}
-          onFilter={onFilter}
-        />
-      ))}
-      {filter !== 'all' ? <p>{FILTER_NOTES[filter]}</p> : null}
-    </div>
-  );
 }
 function ComparisonTreesTag({ data }: { data: TaskChangeset | MasterChangeset | null }) {
   if (!data || !('trees' in data) || !data.trees) return null;

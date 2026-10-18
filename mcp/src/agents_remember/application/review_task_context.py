@@ -1,29 +1,11 @@
-"""The task-context review: the source entry that needs no selected subject (ICR-R02).
+"""A task-context review carries the source comparison without selecting a subject.
 
-A review of a *task* asks a different question from a review of a subject. The subject review asks
-"what changed about this recorded invariant"; this one asks "what did this task change at all", and
-its answer is the complete source inventory of the two bound code trees plus every collected fact
-that does not depend on a selection. It exists as its own module because it is a different
-composition, not a degraded one:
-
-* **No comparison is made, and none is faked.** No selector is resolved, no dataset is opened for
-  selection and no review matrix row is read, so a task whose knowledge half does not exist yet still
-  has an openable review. The payload says so in the vocabulary's own words rather than by rendering
-  an empty statement: the knowledge pane is ``task_context`` with its reason, and the staleness state
-  is ``not_compared`` because there is no comparison binding to be current or stale against.
-* **The source half is the whole point.** The inventory arrives already measured from the pair the
-  resolution bound, and the pane renders it whether it is complete, partial or unavailable -- the
-  three states the model keeps apart.
-* **Nothing here selects, ranks or concludes.** The records the caller supplied are rendered by
-  :mod:`agents_remember.application.review_record_rendering`, the same renderer the subject review
-  uses, so an unassessed assessment collection reads identically in both. The two collections the
-  *review matrix* owns are reported ``not_selected`` rather than omitted: this composition read no
-  matrix, and a review that did not ask may not report an owner's absence (``ICR-R14@v1``).
+No knowledge operand or history judgment is invented. Unavailable knowledge sides
+keep their reasons while the independently measured code inventory remains readable.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
@@ -56,18 +38,7 @@ from agents_remember.application.review_legacy_comparison import (
     knowledge_unavailable_detail,
     knowledge_unavailable_limitations,
 )
-from agents_remember.application.review_record_applicability import task_context_applicability
-from agents_remember.application.review_record_rendering import (
-    KNOWLEDGE_APPLICABILITY_CLASSES,
-    ReviewApplicabilityProjection,
-    ReviewRecordInputs,
-    assessment_displays,
-    evidence_pane,
-    refused,
-    signal,
-    subject_states,
-    submission,
-)
+from agents_remember.application.review_record_rendering import refused, submission
 from agents_remember.application.review_source_inventory import (
     attribution_limitations,
     inventory_limitations,
@@ -88,8 +59,8 @@ from agents_remember.models.knowledge.review import (
     ReviewSurfaceRequest,
 )
 from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
+from agents_remember.models.knowledge.review_judgment import ReviewJudgmentPane
 from agents_remember.models.knowledge.review_meaning_effects import ReviewMeaningEffects
-from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
 
 __all__ = ["pair_attribution", "task_context_review"]
 
@@ -97,7 +68,6 @@ __all__ = ["pair_attribution", "task_context_review"]
 def task_context_review(
     resolved: ReviewCandidateResolution,
     request: ReviewSurfaceRequest,
-    records: ReviewRecordInputs,
     inventory: ReviewSourceInventory,
     observed: TreePaths,
 ) -> KnowledgeReviewResult:
@@ -135,11 +105,6 @@ def task_context_review(
     unreadable = (
         unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database) or receipt
     )
-    subjects = subject_states(records)
-    # A task-context review selected no subject, so nothing can be a judgment on one: the records
-    # are labelled as the candidate's own input, each with its recorded subject beside it, and the
-    # counts state the whole supplied population (ICR-R26@v1).
-    applicability = task_context_applicability(records)
     return KnowledgeReviewResult(
         state="review",
         repository_id=request.repository_id,
@@ -150,10 +115,14 @@ def task_context_review(
                 master=request.master,
             ),
             comparison=None,
-            knowledge=_task_context_pane(resolved, records, subjects, applicability, unreadable),
+            knowledge=_task_context_pane(resolved, unreadable),
             # No comparison travels beside the inventory: this review selected no subject.
             source=source_pane(None, inventory, attribution),
-            evidence=evidence_pane(records, subjects, applicability),
+            judgment=ReviewJudgmentPane(
+                state="unavailable",
+                detail=knowledge_unavailable_detail(resolved)
+                or "No knowledge subject was selected for this review",
+            ),
             # A review that selected no subject composed no family context, and it says so with the
             # one state that claims nothing: the recorded families of a subject nobody named are not
             # an unread scope, an unavailable one or a measured zero (ICR-R31@v1).
@@ -210,17 +179,12 @@ def unreadable_half_limitations(unreadable: ReviewRefusal | None) -> tuple[str, 
 
 def _task_context_pane(
     resolved: ReviewCandidateResolution,
-    records: ReviewRecordInputs,
-    subjects: Mapping[str, SubjectAssessmentState],
-    applicability: ReviewApplicabilityProjection,
     unreadable: ReviewRefusal | None = None,
 ) -> ReviewKnowledgePane:
     """Pane 1 for a task-context review: no operand compared, and the reason it was not.
 
     The two sides are ``unresolved`` rather than empty, because an empty statement is a statement
-    about a snapshot and this pane made none. The records the caller supplied are rendered as they
-    are in the subject path -- which assessment belongs to which subject is the applicability
-    projection's own contract, and this composition grows no second rule for it.
+    about a snapshot and this pane made none.
     """
 
     detail = task_context_detail(resolved, unreadable=unreadable)
@@ -228,14 +192,6 @@ def _task_context_pane(
     return ReviewKnowledgePane(
         before_statement=side,
         after_statement=side,
-        signals=tuple(
-            signal(entry, applicability.label_of(entry.signal_id))
-            for entry in records.signals
-            if applicability.label_of(entry.signal_id) is not None
-        ),
-        assessments=assessment_displays(records, subjects, applicability),
-        context=applicability.context_of(KNOWLEDGE_APPLICABILITY_CLASSES),
-        applicability=applicability.summaries_of(KNOWLEDGE_APPLICABILITY_CLASSES),
         selection_state="task_context",
         selection_detail=detail,
     )

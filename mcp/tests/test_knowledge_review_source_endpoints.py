@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 from agents_remember.application.knowledge_review import (
-    ReviewRecordInputs,
     compose_review,
     read_knowledge_review,
     resolve_review_candidate,
@@ -383,13 +382,10 @@ def _place_datasets(diff: DiffFixture, contract: WorktreeContract) -> None:
 def compose_endpoint_review(
     fixture: EndpointFixture,
     request: ReviewSurfaceRequest | None = None,
-    records: ReviewRecordInputs | None = None,
 ) -> KnowledgeReviewResult:
     """Compose synthetic row inputs with captured source; this is not a public resolver test."""
 
-    if records is None:
-        return compose_review(fixture.resolve(), request or fixture.request())
-    return compose_review(fixture.resolve(), request or fixture.request(), records)
+    return compose_review(fixture.resolve(), request or fixture.request())
 
 
 def _index_path(worktree: Path) -> Path:
@@ -717,6 +713,8 @@ def test_a_task_context_review_lists_the_complete_source_inventory_with_no_knowl
     assert "comparison" not in payload and payload["staleness"]["state"] == "not_compared"
     assert payload["knowledge"]["selection_state"] == "task_context"
     assert payload["knowledge"]["before_statement"]["state"] == "unresolved"
+    assert payload["judgment"]["state"] == "unavailable"
+    assert "legacy-unavailable" in payload["judgment"]["detail"]
     inventory = payload["source"]["inventory"]
     assert inventory["state"] == "measured" and not inventory["partial"]
     listed = {entry["path"] for entry in inventory["entries"]}

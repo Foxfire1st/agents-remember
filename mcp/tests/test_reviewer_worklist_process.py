@@ -60,6 +60,7 @@ from agents_remember_test_support.testing.waits import (
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from reviewer_leaf_view_support import direct_leaf_view, observe_child
 from reviewer_worklist_process_test_support import (
     _BLOCKED_GIT,
     _PARENT,
@@ -103,12 +104,7 @@ def test_real_child_parity_source_reads_and_held_conversion_at_two_result_sizes(
     files["onboarding/pkg/overview.md"] = b"# The governing package route\n"
     ports = _ports(world)
     replies: list[dict[str, Any]] = []
-    reply = process_owner._reply
-
-    def observed(data: bytes, request: Any) -> Any:
-        answer = reply(data, request)
-        replies.append({**answer, "bytes": len(data), "request_payload": request["payload"]})
-        return answer
+    observed = observe_child(replies, process_owner._reply)
 
     with mock.patch.object(review_tree_comparison, "converted_base_files", return_value=files):
         for size in (1, 180):
@@ -132,20 +128,18 @@ def test_real_child_parity_source_reads_and_held_conversion_at_two_result_sizes(
             ]
             assert changed and all(item["facts"]["coverage"]["route"] == "pkg" for item in changed)
 
-            def direct(admitted: Any, **supplied: Any) -> Any:
-                return leaf_worklist(
-                    admitted, persist=False, candidate=supplied["candidate"], base=supplied["base"]
-                )
-
-            with mock.patch.object(review_tree_knowledge, "isolated_leaf_worklist", direct):
+            with mock.patch.object(
+                review_tree_knowledge, "isolated_leaf_worklist", direct_leaf_view
+            ):
                 baseline_public = ports.trees(_query())
             review_leaf_view_memo.LEAF_VIEW_MEMO.clear()
             with mock.patch.object(process_owner, "_reply", observed), recorded_reads() as imported:
                 answer = ports.trees(_query())
             assert answer.state == "trees" and answer.worklist is not None and answer.worklist.bound
             child = replies[-1]
-            assert child["document"] == baseline and child["reads"] == baseline_reads
-            assert json.dumps(child["document"]) == json.dumps(baseline)
+            core = child["document"]
+            assert core == baseline and child["reads"] == baseline_reads
+            assert json.dumps(core) == json.dumps(baseline)
             assert _body(answer, by_alias=True) == _body(baseline_public, by_alias=True)
             assert child["pid"] != os.getpid()
             assert child["source"]["pythonExecutable"] == Path(sys.executable).resolve().as_posix()

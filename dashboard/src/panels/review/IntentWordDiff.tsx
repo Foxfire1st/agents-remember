@@ -14,9 +14,7 @@
 // * Accessibility (rule 7): a removal is struck and an addition underlined, and each carries
 //   visually hidden `removed:` / `added:` text, so the marks never depend on colour.
 //
-// Only a tree comparison (MIK-R25, `review:trees:<n>`) is word-diffed, and only there do labels compare
-// text bytes rather than revision identities; a dataset review keeps the landed rendering
-// (`TreeComparisonScope`).
+// Tree comparisons are word-diffed by text bytes rather than revision identities.
 import {
   Fragment,
   createContext,
@@ -51,15 +49,21 @@ import {
 } from './statementWording';
 import {
   REWRITE_RATIO,
-  alignLists,
   describeWhitespace,
   isWhitespace,
   textDiff,
   visibleWhitespace,
   type DiffPart,
-  type ListRow,
   type TextDiff,
 } from './wordDiff';
+import {
+  COARSE_NOTE,
+  UNPAIRED_NOTE,
+  preparePassage,
+  passageHasWords,
+  type PreparedPassage,
+  type PreparedListRow,
+} from './intent-passage/model';
 
 const muted = css({ color: 'muted', fontSize: '0.78rem', margin: '0.35rem 0' });
 const prose = css({
@@ -140,10 +144,8 @@ const linkButton = css({
   textDecoration: 'underline',
 });
 
-// Whether the renderers below read a tree comparison (MIK-R25, `review:trees:<n>`). There the intent
-// wording is word-diffed and every label compares text bytes, since one text revision can carry
-// different bytes on its two sides (MIK-R21, the 11:53 Q1 ruling); a dataset review keeps the landed
-// rendering. The review center sets it from its payload, and the family navigator from its mount.
+// The review center and family navigator share their measured comparison scope.
+// One recorded revision can carry different text bytes on its two sides.
 const TreeComparison = createContext(false);
 
 export function TreeComparisonScope({ tree, children }: { tree: boolean; children: ReactNode }) {
@@ -302,8 +304,27 @@ function rewriteReason(diff: WordsDiff): string {
 
 // One changed text field as one passage. Its layout is the reader's preference, except that a
 // rewrite is shown side by side until the reader asks for this passage inline.
-function TextPassage({ before, after, field }: { before: string; after: string; field: string }) {
-  const diff = useMemo(() => textDiff(before, after), [before, after]);
+interface TextPassageProps {
+  before: string;
+  after: string;
+  field: string;
+  diff?: TextDiff;
+  offerLayout?: boolean;
+}
+
+export function IntentTextPassage(props: TextPassageProps) {
+  const { before, after, diff: prepared } = props;
+  const diff = useMemo(() => prepared ?? textDiff(before, after), [before, after, prepared]);
+  return <TextPassageBody {...props} diff={diff} />;
+}
+
+function TextPassageBody({
+  before,
+  after,
+  field,
+  diff,
+  offerLayout,
+}: TextPassageProps & { diff: TextDiff }) {
   const preferred = useProseLayout();
   const identity = `${before}\u0000${after}`;
   const [inlineFor, setInlineFor] = useState<string | null>(null);
@@ -329,6 +350,7 @@ function TextPassage({ before, after, field }: { before: string; after: string; 
       data-field={field}
       data-layout={layout}
     >
+      {offerLayout ? <ProseLayoutControl /> : null}
       {fallback ? (
         <p className={muted} data-testid="intent-diff-rewrite">
           {rewriteReason(diff)}{' '}
@@ -339,8 +361,7 @@ function TextPassage({ before, after, field }: { before: string; after: string; 
       ) : null}
       {diff.coarse ? (
         <p className={muted} data-testid="intent-diff-coarse">
-          The changed region is too long to align word by word; it is marked as one removed and one
-          added run.
+          {COARSE_NOTE}
         </p>
       ) : null}
       {layout === 'inline' ? (
@@ -352,15 +373,24 @@ function TextPassage({ before, after, field }: { before: string; after: string; 
   );
 }
 
-function ListItem({ row, field }: { row: ListRow; field: string }) {
+function ListItem({
+  row,
+  field,
+  noteId,
+}: {
+  row: PreparedListRow;
+  field: string;
+  noteId?: string;
+}) {
   if (row.kind === 'unchanged') return <li data-item="unchanged">{row.text}</li>;
   if (row.kind === 'changed')
     return (
       <li data-item="changed">
-        <TextPassage
+        <IntentTextPassage
           before={row.beforeText}
           after={row.afterText}
           field={`${field}.${row.after + 1}`}
+          diff={row.diff}
         />
       </li>
     );
@@ -374,7 +404,7 @@ function ListItem({ row, field }: { row: ListRow; field: string }) {
       </li>
     );
   return (
-    <li data-item={row.kind}>
+    <li data-item={row.kind} aria-describedby={noteId}>
       <Mark part={{ kind: row.kind, text: row.text }} />
       <span className={tag} aria-hidden="true">
         {row.kind} item
@@ -384,27 +414,38 @@ function ListItem({ row, field }: { row: ListRow; field: string }) {
 }
 
 // An ordered list (conditions, exclusions) aligned by exact item text (rule 1a).
-function ListPassage({
-  before,
-  after,
-  field,
-}: {
-  before: string[];
-  after: string[];
-  field: string;
-}) {
-  const rows = useMemo(() => alignLists(before, after), [before, after]);
+function ListPassage({ rows, field }: { rows: PreparedListRow[]; field: string }) {
+  const id = useId();
+  const coarse = rows.some((row) => 'note' in row && row.note === 'cell_limit');
+  const unpaired = rows.some((row) => 'note' in row && row.note === 'unpaired_gap');
   return (
-    <ul
-      className={items}
-      data-review-content="wording"
-      data-testid="intent-diff-list"
-      data-field={field}
-    >
-      {rows.map((row, index) => (
-        <ListItem key={index} row={row} field={field} />
-      ))}
-    </ul>
+    <>
+      {coarse ? (
+        <p id={`${id}-cell_limit`} className={muted} data-testid="intent-diff-coarse">
+          {COARSE_NOTE}
+        </p>
+      ) : null}
+      {unpaired ? (
+        <p id={`${id}-unpaired_gap`} className={muted}>
+          {UNPAIRED_NOTE}
+        </p>
+      ) : null}
+      <ul
+        className={items}
+        data-review-content="wording"
+        data-testid="intent-diff-list"
+        data-field={field}
+      >
+        {rows.map((row, index) => (
+          <ListItem
+            key={index}
+            row={row}
+            field={field}
+            noteId={'note' in row && row.note ? `${id}-${row.note}` : undefined}
+          />
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -483,27 +524,60 @@ const FIELD_TITLES: Record<WordingField, string> = {
 // One changed non-statement field. A null value is the record's known absence of the field; a list
 // the comparison only reported joined (`projected`) is shown as reported, since its items are not
 // known here and aligning the joined text would invent a list structure.
+function ListFieldBody({
+  before,
+  after,
+  field,
+  projected,
+  passage,
+}: {
+  before: string[];
+  after: string[];
+  field: WordingField;
+  projected: boolean;
+  passage?: PreparedPassage;
+}) {
+  return projected ? (
+    <p className={muted} data-testid="intent-field-projected">
+      before: {before.join('; ') || 'none'} · after: {after.join('; ') || 'none'}
+    </p>
+  ) : (
+    <ListPassage rows={passage?.kind === 'list' ? passage.rows : []} field={field} />
+  );
+}
+
 function FieldBody({
   field,
   before,
   after,
   projected,
+  passage,
 }: {
   field: WordingField;
   before: AuthoredWording[WordingField];
   after: AuthoredWording[WordingField];
   projected: boolean;
+  passage?: PreparedPassage;
 }) {
   if (Array.isArray(before) && Array.isArray(after))
-    return projected ? (
-      <p className={muted} data-testid="intent-field-projected">
-        before: {before.join('; ') || 'none'} · after: {after.join('; ') || 'none'}
-      </p>
-    ) : (
-      <ListPassage before={before} after={after} field={field} />
+    return (
+      <ListFieldBody
+        before={before}
+        after={after}
+        field={field}
+        projected={projected}
+        passage={passage}
+      />
     );
   if (typeof before === 'string' && typeof after === 'string')
-    return <TextPassage before={before} after={after} field={field} />;
+    return (
+      <IntentTextPassage
+        before={before}
+        after={after}
+        field={field}
+        diff={passage?.kind === 'text' ? passage.diff : undefined}
+      />
+    );
   const added = typeof after === 'string';
   return (
     <>
@@ -513,64 +587,29 @@ function FieldBody({
   );
 }
 
-// The layout control is offered only where it changes something: a passage of changed words (not an
-// identical or a whitespace-only text, which read the same either way).
-const wordsPassage = (before: string, after: string) => textDiff(before, after).kind === 'words';
-
-function drawsPassage(
-  before: AuthoredWording[WordingField],
-  after: AuthoredWording[WordingField],
-  projected: boolean,
-): boolean {
-  if (Array.isArray(before) && Array.isArray(after))
-    return (
-      !projected &&
-      alignLists(before, after).some(
-        (row) => row.kind === 'changed' && wordsPassage(row.beforeText, row.afterText),
-      )
-    );
-  return typeof before === 'string' && typeof after === 'string' && wordsPassage(before, after);
-}
-
-// Whether any changed field of the statement area draws a word-diffed passage.
-function offersLayout(
-  before: ReviewSideContent,
-  after: ReviewSideContent,
-  changed: WordingField[],
-  sides: { before: AuthoredWording; after: AuthoredWording },
-  projected: WordingField[],
-): boolean {
-  const statement =
-    changed.includes('statement') &&
-    before.state === 'present' &&
-    after.state === 'present' &&
-    wordsPassage(before.text ?? '', after.text ?? '');
-  return (
-    statement ||
-    changed.some(
-      (field) =>
-        field !== 'statement' &&
-        drawsPassage(sides.before[field], sides.after[field], projected.includes(field)),
-    )
-  );
-}
-
 function StatementText({
   before,
   after,
   changed,
   layout,
+  diff,
 }: {
   before: ReviewSideContent;
   after: ReviewSideContent;
   changed: boolean;
   layout: DiffLayout;
+  diff?: TextDiff;
 }) {
   // No word diff is drawn against a side that is not present; each side keeps its own state line.
   if (before.state !== 'present' || after.state !== 'present')
     return <KnowledgeStatements before={before} after={after} mode={layout} />;
   return changed ? (
-    <TextPassage before={before.text ?? ''} after={after.text ?? ''} field="statement" />
+    <IntentTextPassage
+      before={before.text ?? ''}
+      after={after.text ?? ''}
+      field="statement"
+      diff={diff}
+    />
   ) : (
     <p className={prose} data-review-content="wording" data-testid="review-center-statement-prose">
       {before.text}
@@ -596,6 +635,19 @@ export function IntentStatementBody({
   layout: DiffLayout;
 }) {
   const { before_statement: before, after_statement: after } = knowledge;
+  const prepared = useMemo(() => {
+    const fields = wording.kind === 'changed' ? wording.fields : [];
+    return new Map(
+      fields.map((field) => [
+        field,
+        field === 'statement'
+          ? before.state === 'present' && after.state === 'present'
+            ? preparePassage(before.text ?? '', after.text ?? '')
+            : undefined
+          : preparePassage(sides.before[field], sides.after[field], projected.includes(field)),
+      ]),
+    );
+  }, [wording, before, after, sides, projected]);
   if (selection.state === 'added' || selection.state === 'removed')
     return (
       <OneSidedStatement
@@ -607,7 +659,8 @@ export function IntentStatementBody({
     );
   const changed = wording.kind === 'changed' ? wording.fields : [];
   const others = changed.filter((field) => field !== 'statement');
-  const passages = offersLayout(before, after, changed, sides, projected);
+  const passages = [...prepared.values()].some(passageHasWords);
+  const statement = prepared.get('statement');
   return (
     <>
       {passages ? <ProseLayoutControl /> : null}
@@ -616,6 +669,7 @@ export function IntentStatementBody({
         after={after}
         changed={changed.includes('statement')}
         layout={layout}
+        diff={statement?.kind === 'text' ? statement.diff : undefined}
       />
       {others.length ? (
         <div data-testid="review-center-changed-fields">
@@ -627,6 +681,7 @@ export function IntentStatementBody({
                 before={sides.before[field]}
                 after={sides.after[field]}
                 projected={projected.includes(field)}
+                passage={prepared.get(field)}
               />
             </section>
           ))}
@@ -650,9 +705,9 @@ export function guaranteeTextChange(
 
 // The center details' guarantee fact: the landed comparison kind, except that on a tree comparison one
 // revision whose two texts differ is never called `unchanged_revision` (review R1 F2).
-export function guaranteeFact(entry: ReviewFamilyContextEntry, tree: boolean): string {
+export function guaranteeFact(entry: ReviewFamilyContextEntry): string {
   const kind = guaranteeComparison(entry).kind;
-  return tree && kind === 'unchanged_revision' && guaranteeTextChange(entry)
+  return kind === 'unchanged_revision' && guaranteeTextChange(entry)
     ? 'same_revision_text_changed'
     : kind;
 }
@@ -680,13 +735,11 @@ export function GuaranteeTextChange({
       </p>
       <div className={card}>
         <p className={sideLabel}>Joint guarantee</p>
-        {wordsPassage(before.joint_guarantee, after.joint_guarantee) ? (
-          <ProseLayoutControl />
-        ) : null}
-        <TextPassage
+        <IntentTextPassage
           before={before.joint_guarantee}
           after={after.joint_guarantee}
           field="guarantee"
+          offerLayout
         />
         <details data-disclosure="identifiers">
           <summary>Revision records</summary>

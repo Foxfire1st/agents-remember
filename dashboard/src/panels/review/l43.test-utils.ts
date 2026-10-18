@@ -20,7 +20,7 @@ const task = taskBody;
 const unavailable = captured<ReviewResult>('l43.unavailable.captured.json');
 const trees = captured<ReviewTreesResult>('l43.trees.captured.json');
 export const target = {
-  repo: '<repository_id>',
+  repo: 'agents-remember',
   master: '260101_tree_review',
   leaf: '260101-TRV-L1',
   onBack: () => undefined,

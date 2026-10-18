@@ -1,4 +1,11 @@
 import { useId, useRef } from 'react';
+import type { ReviewTreesRead } from '../../data/reviewTrees';
+import {
+  CodeFactsScrollAnchor,
+  codeFacts,
+  codeChangesCount,
+  useCodeFactsNotice,
+} from './codeFacts';
 import { css, cx } from '../../../styled-system/css';
 import type {
   ReviewEntry,
@@ -206,8 +213,7 @@ function familyLabel(entry: ReviewFamilyContextEntry): string {
 // badge; the badge joins the row's accessible name at the call site.
 function rowMeaningBadge(row: OutlineRow): string | undefined {
   if (row.meaning?.state !== 'steps') return undefined;
-  if (row.badge !== 'added' && row.badge !== 'removed' && row.badge !== 'changed')
-    return undefined;
+  if (row.badge !== 'added' && row.badge !== 'removed' && row.badge !== 'changed') return undefined;
   return meaningBadgeText(row.meaning.labels);
 }
 
@@ -302,6 +308,8 @@ interface FamilyTreeProps {
   query: string;
   onQuery: (next: string) => void;
   outline?: ReviewOutline;
+  treeRead?: ReviewTreesRead | null;
+  reviewComparison?: number;
   catalogueEntries?: ReviewEntry[];
   catalogueLoading?: boolean;
   catalogueProblem?: ReviewFailure;
@@ -484,6 +492,8 @@ export function FamilyTree(props: FamilyTreeProps) {
     available && props.traversalEnabled !== false,
     `${order}:${view}:${treeRowsKey(shown)}`,
   );
+  const codeCount = codeChangesCount(props.outline, props.treeRead, props.reviewComparison);
+  const codeNotice = useCodeFactsNotice(codeCount, props.reviewComparison);
   const status = [props.walked?.notice, catalogueStatus(props), traversal.status]
     .filter(Boolean)
     .join(' ');
@@ -491,6 +501,9 @@ export function FamilyTree(props: FamilyTreeProps) {
     <section ref={root} data-testid="review-family-tree" className={css({ minWidth: 0 })}>
       <TreeFilter query={props.query} onQuery={props.onQuery} view={view} available={available} />
       <TriageControls order={order} onMove={traversal.move} status={status} />
+      <p className={muted} aria-live="polite" data-testid="review-code-facts-status">
+        {codeNotice}
+      </p>
       {noChange ? <p className={muted}>This leaf changed no recorded meaning.</p> : null}
       <ul
         className={list}
@@ -498,7 +511,9 @@ export function FamilyTree(props: FamilyTreeProps) {
         data-tree-order={order}
         data-tree-view={view}
       >
-        <TreeRows groups={shown} props={props} />
+        <CodeFactsScrollAnchor root={root} count={codeCount} comparison={props.reviewComparison}>
+          <TreeRows groups={shown} props={props} />
+        </CodeFactsScrollAnchor>
       </ul>
       {props.query && shown.length === 0 ? (
         <p className={muted}>No rows match “{props.query}”.</p>
@@ -523,5 +538,6 @@ function admittedGroups(
     props.catalogueEntries ?? [],
     props.walked?.entries ?? props.context.entries,
     order,
+    props.treeRead === undefined ? undefined : codeFacts(props.treeRead, props.reviewComparison),
   );
 }

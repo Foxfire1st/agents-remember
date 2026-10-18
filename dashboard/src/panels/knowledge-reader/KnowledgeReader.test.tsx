@@ -1,128 +1,10 @@
-// MIK-R29 on real data: the Knowledge reader's views over the REAL served answers of
-// /api/knowledge/reader for a converted scratch copy of the real repositories (provenance: the
-// `_provenance` key of knowledgeReader.captured.json). The memory was converted by L24's
-// knowledge-convert; the decisions, incident, family routes, history rows, proof and census on top
-// of it are SCRATCH-AUTHORED (their text says so), because converted memory holds none yet.
-// `KnowledgeReader` is the real component; only `fetch` is stubbed.
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+// Mounted reader behavior over the served converted-tree fixture.
+import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
+import { expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-
 import { parseReaderHash, readerHash, type ReaderAddress } from '../../data/knowledgeReader';
 import { KnowledgeReader } from './KnowledgeReader';
-
-type Body = Record<string, unknown> & { state: string };
-const captured = JSON.parse(
-  readFileSync(
-    path.join(path.dirname(new URL(import.meta.url).pathname), 'knowledgeReader.captured.json'),
-    'utf8',
-  ),
-) as Record<string, Body>;
-
-const REPO = 'agents-remember';
-const WORKTREES = 'mcp/src/agents_remember/worktrees';
-const INTEGRATE = `${WORKTREES}/modules/integrate.py`;
-const LEDGER_TEST = 'mcp/tests/test_memory_ledger.py';
-
-let requests: URL[] = [];
-let overrides: Record<string, Body> = {};
-// Tree listings held back until the test releases them (the stale-response test, review F13).
-let heldTree: { commit: string; waiting: (() => void)[] } | null = null;
-
-function bodyFor(url: URL): Body | null {
-  const view = url.pathname.split('/').pop() ?? '';
-  const key = `${view}:${url.searchParams.get('path') ?? url.searchParams.get('id') ?? ''}`;
-  if (url.searchParams.get('continuation') && overrides[`${view}:next`]) {
-    return overrides[`${view}:next`];
-  }
-  if (overrides[key]) return overrides[key];
-  const pathBodies: Record<string, string> = {
-    '.': 'path-root',
-    [WORKTREES]: 'path-worktrees-dir',
-    [INTEGRATE]: 'path-integrate-file',
-    [LEDGER_TEST]: 'path-test-file',
-  };
-  const recordBodies: Record<string, string> = {
-    'INV-N213W04A': 'record-invariant',
-    'FAM-QWVGDSYX': 'record-family',
-    'DEC-R29DEC': 'record-decision',
-    'DEC-R29AAA': 'record-decision-superseded',
-    'INC-R29NC1': 'record-incident',
-  };
-  const name = {
-    selections: 'selections',
-    records: 'records',
-    census: 'census',
-    code: 'code-integrate',
-    'without-proof': 'without-proof-worktrees',
-    subtree: 'subtree-worktrees',
-    tree: { '': 'tree-root', [WORKTREES]: 'tree-worktrees' }[url.searchParams.get('path') ?? ''],
-    path: pathBodies[url.searchParams.get('path') ?? ''],
-    record: recordBodies[url.searchParams.get('id') ?? ''],
-  }[view];
-  return name ? captured[name] : null;
-}
-
-beforeEach(() => {
-  requests = [];
-  overrides = {};
-  heldTree = null;
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (address: string) => {
-      const url = new URL(address, 'http://localhost');
-      requests.push(url);
-      if (url.pathname === '/api/files/repos') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ repos: [{ repo: REPO }] }),
-        } as Response;
-      }
-      let body =
-        bodyFor(url) ??
-        (url.pathname.endsWith('/tree')
-          ? {
-              state: 'view',
-              directory: url.searchParams.get('path'),
-              code: { state: 'listed' },
-              children: [],
-            }
-          : null);
-      if (body && url.pathname.endsWith('/tree') && Array.isArray(body.children))
-        body = {
-          ...body,
-          children: (body.children as Record<string, unknown>[]).map((child) => ({
-            ...child,
-            hasKnowledge: Boolean(child.onboarding || child.entries),
-          })),
-        };
-      if (body === null) throw new Error(`unexpected reader request: ${address}`);
-      if (
-        heldTree &&
-        url.pathname.endsWith('/tree') &&
-        url.searchParams.get('commit') === heldTree.commit
-      ) {
-        const held = heldTree;
-        await new Promise<void>((release) => held.waiting.push(release));
-      }
-      return { ok: true, status: 200, json: async () => body } as Response;
-    }),
-  );
-});
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-  window.location.hash = '';
-});
-
-function open(address: Omit<ReaderAddress, 'repo' | 'commit'> & { commit?: string }) {
-  window.location.hash = readerHash({ repo: REPO, commit: 'published', ...address });
-  return render(<KnowledgeReader />);
-}
+import { captured, REPO, WORKTREES, INTEGRATE, LEDGER_TEST, requests, overrides, heldTree, holdTree, open, type Body } from './readerTestSupport';
 
 it('opens a file with its prose, resolved references, entries, families and linked records', async () => {
   const view = open({ view: 'path', path: INTEGRATE });
@@ -509,7 +391,7 @@ it('shows a history row with its effect and decision, and a decision with the ro
     '260928-MIK-L29 changed · replace (open)',
   );
   const because = within(changed).getByTestId('history-because');
-  expect(because.textContent).toContain('requirement MIK-R12@v2');
+  expect(because.textContent).toContain('requirement MIK-R12 (a task document; not part of this memory repository)');
   const decision = within(because).getByTestId('record-link');
   expect(decision.dataset.record).toBe('DEC-R29DEC');
   fireEvent.click(decision);
@@ -566,7 +448,7 @@ it('names side reads that failed, pins a clean published view, and drops stale e
   expect(pin.textContent).toContain('1e3c8b1ef');
 
   // The listing asked for the pinned commit is held; the tree switches back before it answers.
-  heldTree = { commit: '1e3c8b1ef3e35fd416dbc48ba02d3ef0252a3621', waiting: [] };
+  holdTree('1e3c8b1ef3e35fd416dbc48ba02d3ef0252a3621');
   fireEvent.click(pin);
   await waitFor(() => expect(window.location.hash).toContain('commit=1e3c8b1ef'));
   await waitFor(() =>
@@ -581,7 +463,7 @@ it('names side reads that failed, pins a clean published view, and drops stale e
   fireEvent.change(view.getByTestId('reader-commit'), { target: { value: 'published' } });
   await waitFor(() => expect(window.location.hash).toContain('commit=published'));
   // The pinned commit's listings answer now, after the switch back: they must not land.
-  const late = heldTree.waiting.length;
+  const late = heldTree!.waiting.length;
   await act(async () => { heldTree!.waiting.forEach((release) => release()); });
   expect(late).toBeGreaterThan(0);
   expect(within(view.getByTestId('knowledge-tree')).queryAllByTestId('tree-node')).toHaveLength(0);

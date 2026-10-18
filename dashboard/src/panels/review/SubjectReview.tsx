@@ -1,38 +1,24 @@
 // Statements and judgments belong to the server-selected subject, not to a local roster row.
 import { css } from '../../../styled-system/css';
 import type {
-  ReviewAssessmentDisplay,
-  ReviewDisplayedApplicability,
   ReviewFamilyMember,
   ReviewKnowledgePane,
-  ReviewObservation,
-  ReviewPayload,
+  ReviewOrigin,
   ReviewRevisionSelection,
 } from '../../data/review';
 import type { ReviewSubject } from './ReviewNavigation';
 import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
-import { KnowledgeStatements } from './KnowledgeStatements';
-import { IntentStatementBody, useTreeComparison } from './IntentWordDiff';
+import { IntentStatementBody } from './IntentWordDiff';
 import {
   revisionMeta,
   rowWording,
   textFirstComparison,
-  wordingComparison,
   type AuthoredWording,
   type WordingComparison,
   type WordingField,
 } from './statementWording';
 
 const muted = css({ color: 'muted', fontSize: '0.78rem', margin: '0.35rem 0' });
-const prose = css({ fontSize: '0.9rem', whiteSpace: 'pre-wrap', lineHeight: '1.8' });
-const sectionLabel = css({
-  color: 'cyan',
-  fontSize: '0.75rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.1em',
-});
-const rows = css({ paddingLeft: '1.1rem', margin: '0.4rem 0' });
-
 export function selectedRevision(
   knowledge: ReviewKnowledgePane,
   subject: ReviewSubject,
@@ -64,8 +50,6 @@ function statementLabel(
   wording: WordingComparison,
   revisions: string,
 ): string {
-  if (selection.state === 'ambiguous')
-    return 'Ambiguous revision selection · no before/after pair was chosen';
   if (selection.state === 'unresolved') return 'Revision comparison unresolved';
   if (selection.state === 'added') return 'Added statement · recorded on the after side only';
   if (selection.state === 'removed') return 'Removed statement · recorded on the before side only';
@@ -166,90 +150,14 @@ function listed(value: string | null | undefined): string[] | undefined {
   return value === null ? [] : [value];
 }
 
-function ChangedFields({
-  fields,
-  before,
-  after,
-}: {
-  fields: WordingField[];
-  before: AuthoredWording;
-  after: AuthoredWording;
-}) {
-  const shown = fields.filter((field) => field !== 'statement');
-  if (!shown.length) return null;
-  const text = (value: AuthoredWording[WordingField]) =>
-    Array.isArray(value) ? value.join('; ') || 'none' : (value ?? 'none');
-  return (
-    <ul className={rows} data-testid="review-center-changed-fields">
-      {shown.map((field) => (
-        <li key={field} data-field={field}>
-          {FIELD_NAMES[field]} · before: {text(before[field])} · after: {text(after[field])}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function StatementBody({
-  knowledge,
-  state,
-  wording,
-  sides,
-  layout,
-}: {
-  knowledge: ReviewKnowledgePane;
-  state: string;
-  wording: WordingComparison;
-  sides: { before: AuthoredWording; after: AuthoredWording };
-  layout: DiffLayout;
-}) {
-  const { before_statement: before, after_statement: after } = knowledge;
-  if (state === 'ambiguous' || state === 'unresolved')
-    return (
-      <p className={muted} data-testid="review-center-statement-unavailable">
-        Before: {before.state} · after: {after.state}. No statement diff is available.
-      </p>
-    );
-  if (state === 'one-sided') return <OneSidedStatement knowledge={knowledge} layout={layout} />;
-  const statementMoved = wording.kind === 'changed' && wording.fields.includes('statement');
-  // The prose is shown once only when both sides carry it; otherwise each side keeps its own state
-  // line (review F5), so an unreadable side is never dropped behind the other side's text.
-  const fields =
-    wording.kind === 'changed' ? (
-      <ChangedFields fields={wording.fields} before={sides.before} after={sides.after} />
-    ) : null;
-  return (
-    <>
-      {!statementMoved && before.state === 'present' && after.state === 'present' ? (
-        <p className={prose} data-testid="review-center-statement-prose">
-          {before.text}
-        </p>
-      ) : (
-        <KnowledgeStatements before={before} after={after} mode={layout} />
-      )}
-      {fields}
-    </>
-  );
-}
-
-// An added or removed statement is labelled prose (MIK-R31 rule 3), not a split code editor. A side
-// whose text is not present keeps the landed state lines, which name why.
-function OneSidedStatement({
-  knowledge,
-  layout,
-}: {
-  knowledge: ReviewKnowledgePane;
-  layout: DiffLayout;
-}) {
-  const { before_statement: before, after_statement: after } = knowledge;
-  const present = before.state === 'present' ? before : after;
-  if (present.state !== 'present')
-    return <KnowledgeStatements before={before} after={after} mode={layout} />;
-  return (
-    <p className={prose} data-testid="review-center-statement-prose">
-      {present.text}
-    </p>
-  );
+export function Origin({ side, origin }: { side: string; origin?: ReviewOrigin }) {
+  if (!origin) return null;
+  return <div className={muted} data-testid={`review-origin-${side}`}>
+    <p>{side} origin: task {origin.task}{origin.leaf ? ` · leaf ${origin.leaf}` : ''}
+      {origin.wave ? ` · wave ${origin.wave}` : ''}{origin.handoffEntry ? ` · hand-off entry ${origin.handoffEntry}` : ''}</p>
+    {origin.handoff?.path ? <p>Hand-off: {origin.handoff.path}</p> : null}
+    {origin.handoff?.evidence?.map((text, index) => <p key={index}>{text}</p>)}
+  </div>;
 }
 
 export function SelectedStatement({
@@ -263,9 +171,6 @@ export function SelectedStatement({
   layout: DiffLayout;
   members?: MemberSides;
 }) {
-  // A tree comparison's changed wording is word-diffed (MIK-R35); a dataset review keeps the landed
-  // rendering.
-  const wordDiff = useTreeComparison();
   const selection = selectedRevision(knowledge, subject);
   if (!selection)
     return (
@@ -276,7 +181,7 @@ export function SelectedStatement({
     );
   const sides = authoredSides(knowledge, selection, members);
   const oneRevision = selection.before_revision_id === selection.after_revision_id;
-  const wording = (wordDiff ? textFirstComparison : wordingComparison)(
+  const wording = textFirstComparison(
     sides.before,
     sides.after,
     oneRevision,
@@ -292,7 +197,9 @@ export function SelectedStatement({
         {statementLabel(selection, wording, revisionMeta(...sides.labels))}
         {sameRevisionNote(oneRevision, wording)}
       </p>
-      {wordDiff && ['compared', 'added', 'removed'].includes(selection.state) ? (
+      <Origin side="before" origin={knowledge.before_origin} />
+      <Origin side="after" origin={knowledge.after_origin} />
+      {['compared', 'added', 'removed'].includes(selection.state) ? (
         <IntentStatementBody
           knowledge={knowledge}
           selection={selection}
@@ -302,20 +209,11 @@ export function SelectedStatement({
           layout={layout}
         />
       ) : (
-        <StatementBody
-          knowledge={knowledge}
-          state={state}
-          wording={wording}
-          sides={sides}
-          layout={layout}
-        />
-      )}
-      {selection.state === 'ambiguous' ? (
-        <p className={muted}>
-          Retained revisions remain available as context. Manual revision pairing is not available
-          in this reviewer.
+        <p className={muted} data-testid="review-center-statement-unavailable">
+          Before: {knowledge.before_statement.state} · after: {knowledge.after_statement.state}.
+          No statement diff is available.
         </p>
-      ) : null}
+      )}
       <details data-disclosure="identifiers">
         <summary>Statement revision details</summary>
         <p className={muted} data-testid="review-center-member-revisions">
@@ -327,152 +225,4 @@ export function SelectedStatement({
   );
 }
 
-function Applicability({ value }: { value?: ReviewDisplayedApplicability }) {
-  if (!value) return <span> · applicability not supplied</span>;
-  return (
-    <span data-applicability={value.state}>
-      {' '}
-      · {value.state}
-      {value.subject_id ? ` · ${value.subject_kind} ${value.subject_id}` : ''}
-    </span>
-  );
-}
-
-function Assessment({ record }: { record: ReviewAssessmentDisplay }) {
-  return (
-    <li data-testid="review-center-assessment" data-binding={record.binding_state}>
-      <strong>{record.disposition}</strong> · {record.finding}
-      <p className={muted}>{record.rationale}</p>
-      <p className={muted}>
-        Currentness: {record.binding_state}
-        <Applicability value={record.applicability} />
-      </p>
-      <div>
-        <p>Assessment record</p>
-        <p>
-          {record.assessment_id} · {record.author_ref} · {record.role_ref}
-        </p>
-        <p>{record.examined_inputs.join(' · ')}</p>
-      </div>
-    </li>
-  );
-}
-
-function Observation({ record }: { record: ReviewObservation }) {
-  const candidate = record.applicability?.state === 'candidate';
-  return (
-    <li data-testid="review-center-observation">
-      <strong>
-        {candidate ? 'Candidate execution' : 'Recorded observation'}: {record.execution_result}
-      </strong>
-      {candidate ? (
-        <p className={muted}>Execution input for the candidate; this is not a subject judgment.</p>
-      ) : null}
-      <p className={muted}>
-        <Applicability value={record.applicability} />
-      </p>
-      <div>
-        <p>Execution record</p>
-        <p>
-          {record.observation_id} · {record.command_identity}
-        </p>
-        <p>
-          {record.tested_candidate} · {record.result_artifact_ref} · {record.result_artifact_digest}
-        </p>
-      </div>
-    </li>
-  );
-}
-
-function AssessmentAbsence({ payload }: { payload: ReviewPayload }) {
-  const channel = payload.evidence.channels?.find((value) => value.records === 'assessments');
-  const unread = channel && !['recorded', 'none_recorded'].includes(channel.state);
-  if (unread)
-    return (
-      <div className={muted} data-testid="review-center-assessment-unavailable">
-        Assessment {channel.state} · {channel.detail}
-        <p>{channel.next_action}</p>
-      </div>
-    );
-  return (
-    <p className={muted} data-testid="review-center-unassessed">
-      Not assessed · no authored judgment was returned for this subject.
-    </p>
-  );
-}
-
-export function SubjectEvidence({
-  payload,
-  subject,
-}: {
-  payload: ReviewPayload;
-  subject: ReviewSubject;
-}) {
-  const selection = selectedRevision(payload.knowledge, subject);
-  if (!selection)
-    return (
-      <p className={muted} data-testid="review-center-evidence-unavailable">
-        This payload does not contain the selected subject's evidence read. No absence of an
-        assessment is claimed.
-      </p>
-    );
-  const evidence = payload.evidence;
-  return (
-    <section
-      data-review-content="evidence"
-      data-testid="review-center-evidence"
-      data-evidence-state={evidence.evidence_state}
-    >
-      <h3 className={sectionLabel}>
-        {subject.kind === 'family'
-          ? 'Execution evidence and family impact'
-          : 'Execution evidence and authored assessment'}
-      </h3>
-      <p className={muted}>
-        Evidence: {evidence.evidence_state} · assessment: {evidence.assessment_state}
-      </p>
-      {evidence.observations.length ? (
-        <ul className={rows}>
-          {evidence.observations.map((record) => (
-            <Observation key={record.observation_id} record={record} />
-          ))}
-        </ul>
-      ) : (
-        <p className={muted} data-testid="review-center-no-observation">
-          No recorded observation was returned for this subject.
-        </p>
-      )}
-      {evidence.assessments.length ? (
-        <ul className={rows}>
-          {evidence.assessments.map((record) => (
-            <Assessment key={record.assessment_id} record={record} />
-          ))}
-        </ul>
-      ) : (
-        <AssessmentAbsence payload={payload} />
-      )}
-      {evidence.evidence_links.length ? (
-        <div>
-          <p>{evidence.evidence_links.length} recorded evidence claims</p>
-          <ul className={rows}>
-            {evidence.evidence_links.map((link) => (
-              <li key={link.claim_id}>
-                {link.claim_id}
-                <Applicability value={link.applicability} />
-                {link.unresolved.map((item) => (
-                  <p key={item.field}>{item.detail}</p>
-                ))}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {evidence.context?.length ? (
-        <p className={muted} data-testid="review-center-unjoined">
-          {evidence.context.length} context records concern other subjects; their judgments remain
-          with those subjects.
-        </p>
-      ) : null}
-    </section>
-  );
-}
+export { SubjectJudgment } from './SubjectJudgment';

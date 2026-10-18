@@ -4,6 +4,7 @@
 // and are replaced by a statement about the selected subject while it is pending or could not be read.
 import { css } from '../../../styled-system/css';
 import type { ReviewPayload } from '../../data/review';
+import { ReviewMovementStatus, ReviewMovementFacts } from './ReviewMovement';
 
 const muted = css({ color: 'muted', fontSize: '0.75rem', margin: '0.35rem 0' });
 
@@ -48,6 +49,8 @@ export function ReviewScopeHeader({
           {scope.currentness}
         </p>
       ) : null}
+      <ReviewMovementStatus payload={payload} status={status} />
+      <ReviewMovementFacts payload={payload} status={status} />
       <FamilyScope payload={payload} status={status} text={scope.families} />
       {status !== null ? (
         <p className={muted} data-review-content="read-state">

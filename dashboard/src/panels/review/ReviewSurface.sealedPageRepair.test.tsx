@@ -38,11 +38,11 @@ it('F05 main attribution uses the held destination counts and states pending wit
   await act(async () => release());
   await waitFor(() =>
     expect(view.getByTestId('review-remaining').textContent).toContain(
-      'unattributed_changed_paths: 167',
+      'changed files without an invariant: 167',
     ),
   );
   expect(view.getByTestId('review-remaining').textContent).toContain(
-    'unknown_attribution_changed_paths: 2',
+    'changed files of unknown attribution: 2',
   );
   expect(asked.filter((url) => url.searchParams.has('lane'))).toHaveLength(1);
 });
@@ -160,13 +160,13 @@ it('F04 an opened comparison retains its lane and inventory after a held subject
   const view = render(<ReviewSurface {...target} />);
   await view.findByTestId('review-center-family');
   const rail = view.getByTestId('review-catalogue-navigation');
-  await waitFor(() => expect(rail.textContent).toMatch(/Unexplained changes\s*167/));
+  await waitFor(() => expect(rail.textContent).toMatch(/Changes without an invariant\s*167/));
   fireEvent.click(
     rail.querySelector(`[data-selector-id="${selectedMemberId}"]`) ??
       within(rail).getByRole('button', { name: /INV-1XKX9ERN/ }),
   );
   await waitFor(() => expect(releaseSubject).toBeDefined());
-  fireEvent.click(within(rail).getByRole('button', { name: /^Unexplained changes/ }));
+  fireEvent.click(within(rail).getByRole('button', { name: /^Changes without an invariant/ }));
   const page = await view.findByTestId('changeset-viewer');
   await waitFor(() => expect(within(page).getByText('changed code (167)')).toBeTruthy());
   newComparison = true;
@@ -179,7 +179,7 @@ it('F04 an opened comparison retains its lane and inventory after a held subject
     ).toBe(true),
   );
   expect(within(page).getByText('changed code (167)')).toBeTruthy();
-  expect(within(page).getByRole('button', { name: 'Unexplained (167)' })).toBeTruthy();
+  expect(within(page).getByRole('button', { name: 'Changes without an invariant (167)' })).toBeTruthy();
   expect(
     asked
       .filter((url) => url.pathname.startsWith('/api/changeset/'))

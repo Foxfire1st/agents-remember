@@ -61,7 +61,7 @@ it("shows the real leaf's unexplained and unknown files beside +N −N, from the
   const counts = await view.findByTestId('intent-review-counts');
   const attribution = await view.findByTestId('intent-review-attribution');
   expect(counts.textContent).toBe('+0 −0');
-  expect(attribution.textContent).toBe('· 3 unexplained · 1 unknown');
+  expect(attribution.textContent).toBe('· 3 without an invariant · 1 unknown');
   // Two elements: the unexplained count is never folded into the intent counts.
   expect(counts.contains(attribution) || attribution.contains(counts)).toBe(false);
   // Requested with the intent counts and no more eagerly: the entry made exactly one read.
@@ -81,7 +81,7 @@ it.each([
       attribution_unknown: 0,
       unmeasured: [],
     }),
-    '· 3 unexplained',
+    '· 3 without an invariant',
   ],
   [
     'unknown with zero unexplained',
@@ -93,7 +93,7 @@ it.each([
       attribution_unknown: 2,
       unmeasured: [],
     }),
-    '· 0 unexplained · 2 unknown',
+    '· 0 without an invariant · 2 unknown',
   ],
   [
     'nothing unexplained or unknown',
@@ -148,4 +148,19 @@ it('shows nothing while the summary is pending: never a zero', async () => {
     expect(view.getByTestId('open-intent-review').dataset.intentState).toBe('loading'),
   );
   expect(view.queryByTestId('intent-review-attribution')).toBeNull();
+});
+
+it.each([
+  [0, '· all answered'],
+  [2, '· 2 open'],
+  [undefined, null],
+])('separates open work from attribution (%s)', async (count, expected) => {
+  const urls = serve({ ...summary, unexplained_open: count });
+  const view = entry();
+  await view.findByTestId('intent-review-counts');
+  expect(view.queryByTestId('intent-review-open')?.textContent ?? null).toBe(expected);
+  expect(view.getByTestId('intent-review-attribution').textContent).toBe(
+    '· 3 without an invariant · 1 unknown',
+  );
+  expect(urls).toHaveLength(1);
 });

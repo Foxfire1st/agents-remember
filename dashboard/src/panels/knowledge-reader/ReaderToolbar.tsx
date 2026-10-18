@@ -1,5 +1,5 @@
 // The fixed single-line header and truthful read problems of the Knowledge reader.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '../../../styled-system/css';
 import {
   readerGet,
@@ -86,12 +86,16 @@ export function SelectionNotes({ selection }: { selection: ReaderSelection }) {
   const problems = selection.problems ?? [];
   return (
     <>
-      {selection.codeNote ? <p className={muted} data-testid="reader-code-note">{selection.codeNote}</p> : null}
+      {selection.codeNote ? (
+        <p className={muted} data-testid="reader-code-note">
+          {selection.codeNote}
+        </p>
+      ) : null}
       {selection.indexState === 'partial' ? (
-    <div data-testid="reader-partial">
-      <StateBadge state="partial" /> index: {problems.length} file(s) could not be read —{' '}
-      {problems.map((problem) => `${problem.path}: ${problem.detail}`).join('; ')}
-    </div>
+        <div data-testid="reader-partial">
+          <StateBadge state="partial" /> index: {problems.length} file(s) could not be read —{' '}
+          {problems.map((problem) => `${problem.path}: ${problem.detail}`).join('; ')}
+        </div>
       ) : null}
     </>
   );
@@ -185,6 +189,68 @@ function CommitSelect({
   );
 }
 
+function resolvedCommit(answer: ReaderAnswer, name: string) {
+  return answer.selection?.commit ?? name.trim();
+}
+
+function CommitField({
+  address,
+  go,
+}: {
+  address: ReaderAddress;
+  go: (address: ReaderAddress) => void;
+}) {
+  const [name, setName] = useState('');
+  const [failure, setFailure] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const live = useRef(true);
+  const inFlight = useRef(false);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const choose = async () => {
+    if (!name.trim() || inFlight.current) return;
+    inFlight.current = true;
+    setLoading(true);
+    setFailure(null);
+    try {
+      const answer = await readerGet<ReaderAnswer>('path', {
+        repo: address.repo,
+        commit: name.trim(),
+        path: '.',
+      });
+      if (!live.current) return;
+      if (answer.state === 'view') go({ ...address, commit: resolvedCommit(answer, name) });
+      else setFailure(`${answer.state}: ${answer.detail ?? ''}`);
+    } catch (error) {
+      if (live.current) setFailure(String(error));
+    } finally {
+      inFlight.current = false;
+      if (live.current) setLoading(false);
+    }
+  };
+  return (
+    <>
+      <input
+        aria-label="Commit or branch"
+        placeholder="commit or branch"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') void choose();
+        }}
+      />
+      <button type="button" onClick={() => void choose()} disabled={loading}>
+        Choose tree
+      </button>
+      {failure ? <span role="alert">{failure}</span> : null}
+    </>
+  );
+}
+
 type SideRead<T> = { answer: T | null; failure: string | null; load: () => Promise<T> };
 
 // A side read (the selector's choices, the record list). A failure is kept and named beside the
@@ -194,7 +260,9 @@ export function useRead<T extends { state: string }>(
   params: Record<string, string>,
 ): SideRead<T> {
   const [read, setRead] = useState<{ key: string; answer: T | null; failure: string | null }>({
-    key: '', answer: null, failure: null,
+    key: '',
+    answer: null,
+    failure: null,
   });
   const key = JSON.stringify(params);
   const readKey = `${view}\0${key}`;
@@ -297,6 +365,7 @@ export function ReaderToolbar({
         </select>
       </label>
       <CommitSelect address={address} options={options.answer} go={go} />
+      <CommitField key={JSON.stringify(address)} address={address} go={go} />
       <input
         aria-label="Record ID"
         placeholder="INV-… / FAM-… / DEC-…"

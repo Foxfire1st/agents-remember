@@ -2,8 +2,7 @@
 // each changed file's classification (read once per surface), and the one followed marker the reader
 // can return to.
 //
-// Only a tree comparison provides a scope. A dataset review provides none, and every diff renders
-// exactly as before; so does any diff rendered outside a review workspace.
+// Diffs outside a review workspace have no scope and draw no review markers.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import type { ReviewSourceInventory } from '../../data/review';
@@ -79,7 +78,7 @@ export interface MarkerScopeInput {
   repo: string;
   master: string;
   leaf: string;
-  // The tree comparison the review on screen names; `undefined` for a dataset review.
+  // The tree comparison on screen; undefined while its identity has not arrived.
   comparison: number | undefined;
   // The comparison's changed paths: only these have hunks, so only these are classified.
   changed: string[];

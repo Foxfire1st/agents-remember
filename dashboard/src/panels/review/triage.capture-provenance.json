@@ -1,11 +1,22 @@
 {
-  "captured_at": "2026-09-30T19:15:19+00:00",
-  "producer": "260928-MIK-L33 worker, notes/reports/260928-MIK-L33-evidence/capture_fixture_bodies.py",
-  "command": "PYTHONPATH=mcp/tests <mcp venv python> capture_fixture_bodies.py <scratch> <L33 worktree>/dashboard <this file>",
-  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
-  "source_tree": "260928-mik-l33 worktree (base d3a22213ad3124603b0210afb7e3d049c5589b82, with this leaf's uncommitted changes)",
-  "comparison": "STORE-AUTHORED fixture: mcp/tests/test_review_change_kinds.py build_world (a live leaf over four Git trees; every memory side read through its derived index)",
-  "attempts": "one capture per body; each body is the first answer",
+  "schema": "l57-current-public-route-captures/v1",
+  "captured_at": "2026-10-15T22:42:18.580612+00:00",
+  "producer": "L57 current serving_collaborators and registered public FastAPI routes",
+  "source_tree": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57",
+  "normalization": "none; exact response.content bytes",
+  "scenario": "Canonical STORE-AUTHORED synthetic test fixture, not real user data; unmodified mcp/tests/test_review_change_kinds.py::build_world over four Git trees",
+  "manifest": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/triage-current-recapture/publication-needed.json",
+  "manifest_sha256": "d5f52b396e7dcdca65d599078561942637eaa1c44dbf144f1119f786c522ef81",
+  "source_hashes_verified": 1243,
+  "source_files": {
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/application/knowledge_review.py": "9aab83a43c586477131ed5c1c7de0b2e799bfc4416af17893f8422a95d94541a",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/application/review_judgment.py": "826f548392fcc2c321150bb973c3dec52714d190ee412db56dc15bbd731ca781",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/cli/dashboard.py": "64bf9582a52fc120bba0a8b86a49f172eaafa8ac92339c19933bc37ec1057f2a",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/models/knowledge/review.py": "d507c4c87bbdff521874d3517a392a16cc3b76081aec4d334fa4c82e1ba6e3b0",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/serving/review.py": "c41738f81b60c273721bf14a04af95d9bca272d6ebc182d266d9cde456f242de",
+    "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/260928-mik-l57/mcp/src/agents_remember/serving/review_trees.py": "17b99f2e3d4db2cbed1017cdb738551f19704d3aa657a8c1071930a7f8f360cf"
+  },
+  "prior_capture_provenance": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/triage-current-recapture/prior-repository-bytes/triage.capture-provenance.json",
   "fixtures": [
     {
       "file": "src/panels/review/triage.entries.captured.json",
@@ -16,9 +27,13 @@
         "leaf": "260101-TRV-L1"
       },
       "status": 200,
-      "seconds": 0.13,
-      "sha256": "f660066b9fb0093cbc8d08dabcf40c98676663707c51177629c1d2d503e19283",
-      "bytes": 2922
+      "seconds": 0.21663695201277733,
+      "bytes": 9606,
+      "sha256": "0703e4572f5b46cb557d75b4b437161ef1ce5371507fb2ccb67ae467858db430",
+      "previous_sha256": "f660066b9fb0093cbc8d08dabcf40c98676663707c51177629c1d2d503e19283",
+      "model_validation": "ReviewEntryListResult:PASS",
+      "input_world": null,
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/triage-current-recapture/raw/triage.entries.captured.json"
     },
     {
       "file": "src/panels/review/triage.family.captured.json",
@@ -31,9 +46,13 @@
         "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0"
       },
       "status": 200,
-      "seconds": 0.33,
-      "sha256": "13393f234accd77f975ee23c206b8f69bc59ce03f22af33cf49e21fd03fa0edb",
-      "bytes": 147276
+      "seconds": 0.34090873500099406,
+      "bytes": 123054,
+      "sha256": "e6cd62f61d03fb5977706486c9aeacbf3ffb9f159532fffdd1f35c9075383a44",
+      "previous_sha256": "13393f234accd77f975ee23c206b8f69bc59ce03f22af33cf49e21fd03fa0edb",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": null,
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/triage-current-recapture/raw/triage.family.captured.json"
     },
     {
       "file": "src/panels/review/triage.familyPage.captured.json",
@@ -47,9 +66,13 @@
         "pageSize": 2
       },
       "status": 200,
-      "seconds": 0.25,
-      "sha256": "a8fc710480e343b221323e1f0666a5ae08cad497eaacd224fcb6bfacb8732968",
-      "bytes": 34067
+      "seconds": 0.22070631399401464,
+      "bytes": 29016,
+      "sha256": "84be0b85129d8f89336ec86679c22d9478341419c5f3ca61b24db8e2801f3f05",
+      "previous_sha256": "a8fc710480e343b221323e1f0666a5ae08cad497eaacd224fcb6bfacb8732968",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": null,
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/triage-current-recapture/raw/triage.familyPage.captured.json"
     },
     {
       "file": "src/panels/review/triage.familyContinued.captured.json",
@@ -62,12 +85,23 @@
         "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0",
         "pageSize": 2,
         "pageOf": "family_members",
-        "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6IjFmMTdiYWIzMjRlZDA3NjU3MTlmNTMwOGEwNmEyZGVkMWU0MzczMjk5Njk3MGEyYmFmYzBhOTdiOGQ0OTMyNGMiLCJzZWVkX2RpZ2VzdCI6IjU3YjMwMDNjY2VhMDFkMzJhNTYxZjM2MDRlMzBmYjYzMjBhYTJkMjFiMzZhMDMxYTk1NWU5YjlkZTI3MTg3OTQiLCJtYW5pZmVzdF9kaWdlc3QiOiJkYTA0MjlmMjU5ZDVlNmYwYmU3OWVjMDcwMGU4OGEwMzU5ZmI2NTAzNGI0OWZhOGNjZjUxM2IxYjExNDMxNWMxIiwibG9naWNhbF9kaWdlc3QiOiI2NGQ2OGY5NmYzOTllYzJlNTEyMDNjYWM3YWJkMjU2MGZhNzU2NjI5ZGY1ZWJiMjVjYjRhZDEwN2E0OWU1MTljIiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjJ9"
+        "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6ImJjNWVkYWUzNWUyZTgxOWFlYzc1MmJlNDkyOTQ4YWI3MWQzOTQ4ZGU4Njg0NzcyMDE2ZDVhZjBjMWNlOTRlMjEiLCJzZWVkX2RpZ2VzdCI6IjU3YjMwMDNjY2VhMDFkMzJhNTYxZjM2MDRlMzBmYjYzMjBhYTJkMjFiMzZhMDMxYTk1NWU5YjlkZTI3MTg3OTQiLCJtYW5pZmVzdF9kaWdlc3QiOiJkYTA0MjlmMjU5ZDVlNmYwYmU3OWVjMDcwMGU4OGEwMzU5ZmI2NTAzNGI0OWZhOGNjZjUxM2IxYjExNDMxNWMxIiwibG9naWNhbF9kaWdlc3QiOiI1YjNkOTlmZWU4ZmZjNzljZTVlY2U4MTA2OTBjMzkwM2ZlNGM1ZTQwOGRiZWJhYzQ1NGJhNTJhODdhYTZkZjk3Iiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjJ9"
       },
       "status": 200,
-      "seconds": 0.24,
-      "sha256": "a5313daca34981e5dd6238774c89c572adfc3cea4ddb7a3884d43ac7164378ed",
-      "bytes": 37639
+      "seconds": 0.15571173198986799,
+      "bytes": 32445,
+      "sha256": "095935c19b6abc7bc24da47875285ea500c01999c635c405e08d008c9f088108",
+      "previous_sha256": "a5313daca34981e5dd6238774c89c572adfc3cea4ddb7a3884d43ac7164378ed",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": null,
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/before-cursor-recaptures/triage.familyContinued.captured.json",
+      "cursor_from": "triage.familyPage.captured.json payload.family_context.entries[FAM-F00001].before.page.continuation",
+      "new_before_members": [
+        "9acebe6e-c7bb-5f65-bd46-81335059df7a",
+        "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc"
+      ],
+      "source_unchanged": true,
+      "continuation_correction": "Actual before-side producer cursor, as the preserved roster-union tests require. Earlier after-cursor body archived unchanged."
     },
     {
       "file": "src/panels/review/triage.shared.captured.json",
@@ -80,9 +114,13 @@
         "selectorId": "e701c262-50a6-553b-bab6-691caed0fb04"
       },
       "status": 200,
-      "seconds": 0.31,
-      "sha256": "8898456293a4acab47f7eefac90791da513935fa92677d3385b27a351a56fded",
-      "bytes": 167361
+      "seconds": 0.3422922129975632,
+      "bytes": 139186,
+      "sha256": "7e858a8b0cb3b11a58de389c3bfdabe9511492deecfb3fe2912a9fb724ed4e44",
+      "previous_sha256": "8898456293a4acab47f7eefac90791da513935fa92677d3385b27a351a56fded",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": null,
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/triage-current-recapture/raw/triage.shared.captured.json"
     },
     {
       "file": "src/panels/review/triage.memberA.captured.json",
@@ -95,9 +133,13 @@
         "selectorId": "9e1dbcd4-407f-57b1-957b-36bb811bce81"
       },
       "status": 200,
-      "seconds": 0.27,
-      "sha256": "c088678eaeb35a4ab800b1a1b690f376f2925066338f5abfa44417d27d5bef21",
-      "bytes": 147490
+      "seconds": 0.2795141880051233,
+      "bytes": 123308,
+      "sha256": "65de6741a5a0dc8987ebb2cb40c1d313b73f9b8346f28a0da337dd86f3ce91b0",
+      "previous_sha256": "c088678eaeb35a4ab800b1a1b690f376f2925066338f5abfa44417d27d5bef21",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": null,
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/triage-current-recapture/raw/triage.memberA.captured.json"
     },
     {
       "file": "src/panels/review/triage.memberH.captured.json",
@@ -110,10 +152,17 @@
         "selectorId": "f84e4e24-5490-545f-9b16-62283a0da4ef"
       },
       "status": 200,
-      "seconds": 0.28,
-      "sha256": "b0c36e3e32a57ddbfaa2711c29aa9c3ff908ecbf509b4566106a6bcfde1759cd",
-      "bytes": 122130
+      "seconds": 0.19296945902169682,
+      "bytes": 100859,
+      "sha256": "a27d4c4383e292e308f42e94e05a586261146436760e2e7a935a28b9d784b211",
+      "previous_sha256": "b0c36e3e32a57ddbfaa2711c29aa9c3ff908ecbf509b4566106a6bcfde1759cd",
+      "model_validation": "KnowledgeReviewResult:PASS",
+      "input_world": null,
+      "raw_source": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/triage-current-recapture/raw/triage.memberH.captured.json"
     }
   ],
-  "merge_round": "MIK-L33 merge round: re-captured over the merged tree (MIK-L34 landed at d3a22213) because each body's change facts now carry `membership_reasons` apart from `unknown_reasons`; the world is the same build_world."
+  "limitations": "Fresh producer tree/binding identities are retained; historical metadata is archived, not restamped. Fixture worlds are disposable test inputs, not production writer evidence.",
+  "source_manifest_canonical_sha256": "51f4255a532111a493062a26921f4e54fa60f14a0cd6b3a17ed307d8809e3f56",
+  "source_files_scope": "Selected owner hashes below; complete source manifest retained in manifest (hash above). All full-manifest hashes independently verified at publication.",
+  "continuation_correction_receipt": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l57-ar/scratch/worker/48060148-87d0-4e1e-ad2e-6f1fa353092d/before-cursor-recaptures/receipt.json"
 }

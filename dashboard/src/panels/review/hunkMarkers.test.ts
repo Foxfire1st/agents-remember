@@ -113,15 +113,14 @@ describe('what each hunk names', () => {
     const [edit] = hunks(classified('after_unread', 'pkg/a.py'));
     const [named] = edit.realizations[0].occurrences;
     expect([named.target.state, named.target.family]).toEqual(['membership_unknown', 'FAM-F00001']);
-    expect(named.target.reason).toMatch(
-      /^the after knowledge could not be read \(.+\), so whether FAM-F00001 still lists INV-AAAAAA there is not established$/,
-    );
+    const namedReason = classified('after_unread', 'pkg/a.py').hunks[0].links[0].families[0].reason;
+    expect(namedReason).toEqual(expect.any(String));
+    expect(named.target.reason).toBe(namedReason);
     // No family named: a family record of the link's own side did not parse.
     const [two] = hunks(classified('partial', 'pkg/lines.txt'));
-    expect(two.realizations[0].occurrences[0].target.reason).toBe(
-      'not every family record of the before knowledge could be read, so whether a family lists ' +
-        'INV-BBBBBB on that side is not established',
-    );
+    const unnamedReason = classified('partial', 'pkg/lines.txt').hunks[0].links[0].families[0].reason;
+    expect(unnamedReason).toEqual(expect.any(String));
+    expect(two.realizations[0].occurrences[0].target.reason).toBe(unnamedReason);
     // A confirmed membership, or a confirmed absence, carries no reason.
     const [shared] = hunks(classified('curated', 'pkg/lines.txt'));
     expect(
@@ -129,6 +128,16 @@ describe('what each hunk names', () => {
         (one) => one.target.reason,
       ),
     ).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it('uses the membership reason supplied by the server verbatim', () => {
+    const file = structuredClone(classified('after_unread', 'pkg/a.py'));
+    const reason = 'The after memory tree refused its family read: broken family file.';
+    for (const hunk of file.hunks)
+      for (const link of hunk.links)
+        for (const family of link.families)
+          if (family.state === 'membership_unknown') Object.assign(family, { reason });
+    expect(hunks(file)[0].realizations[0].occurrences[0].target.reason).toBe(reason);
   });
 
   it("keeps the readable side's links and names the unread side's changed lines unknown", () => {

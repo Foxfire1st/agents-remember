@@ -190,21 +190,34 @@ export function languageOfPath(path: string): string {
 export interface CardScope {
   loaded: number;
   total: number;
+  missing?: string[];
 }
 
 export function cardScope(entry: ReviewFamilyContextEntry | undefined): CardScope | undefined {
   if (!entry) return undefined;
-  const sides = [entry.before, entry.after].filter((side) => side.state === 'recorded');
-  const complete = sides.every(
-    (side) =>
-      side.page?.complete !== false &&
-      side.members.length === side.members_total &&
-      side.members.every((member) => member.state === 'recorded'),
-  );
-  if (complete || sides.length === 0) return undefined;
+  const all = [entry.before, entry.after];
+  const sides = all.filter((side) => side.state === 'recorded');
+  const missing = all.flatMap((side) => {
+    if (side.state === 'not_recorded') return [];
+    if (side.state !== 'recorded') return [`${side.side} side could not be read: ${side.detail}`];
+    const reasons: string[] = [];
+    if (side.page?.complete === false || side.members.length < side.members_total)
+      reasons.push(`${side.side} side is not fully loaded`);
+    for (const member of side.members)
+      if (member.state !== 'recorded')
+        reasons.push(
+          `${side.side} member ${member.display_label ?? member.member_id} could not be read: ${member.detail}`,
+        );
+    return reasons;
+  });
+  if (!missing.length || !sides.length) return undefined;
   const widest = sides.reduce((most, side) =>
     side.members_total > most.members_total ? side : most,
   );
   const loaded = new Set(widest.members.map((member) => member.invariant_id ?? member.member_id));
-  return { loaded: Math.min(loaded.size, widest.members_total), total: widest.members_total };
+  return {
+    loaded: Math.min(loaded.size, widest.members_total),
+    total: widest.members_total,
+    missing,
+  };
 }

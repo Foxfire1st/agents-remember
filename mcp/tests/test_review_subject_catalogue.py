@@ -218,14 +218,10 @@ def test_a_newly_added_after_only_subject_is_listed_beside_the_retired_half(
     assert result.payload.knowledge.before_statement.state == "absent"
 
 
-def test_a_family_subject_is_listed_without_an_establishable_statement_side(
+def test_a_family_subject_is_listed_with_its_recorded_guarantee_sides(
     fixture: DiffFixture,
 ) -> None:
-    """Families are catalogue subjects even though no statement side can be established for them.
-
-    The routed R08/R09 debt names this leaf as co-owner: the catalogue must never drop a family
-    for lacking a statement, and the review states the side as unresolved with its reason.
-    """
+    """A catalogued family opens its joint guarantee, not a missing invariant statement."""
 
     offered = read_subject_catalogue(resolution_for(fixture))
     families = [entry for entry in offered if entry.selector_kind == "family"]
@@ -241,7 +237,9 @@ def test_a_family_subject_is_listed_without_an_establishable_statement_side(
         result.payload.knowledge.before_statement.state,
         result.payload.knowledge.after_statement.state,
     )
-    assert "unresolved" in sides, sides
+    assert sides == ("present", "present")
+    assert result.payload.knowledge.before_statement.text
+    assert result.payload.knowledge.after_statement.text
 
 
 def test_every_catalogue_row_opens_through_the_normal_review(

@@ -110,12 +110,15 @@ class RecordChanges:
         problem_key = (side.name, kind)
         if problem_key not in self.failed:
             self.failed[problem_key] = problems(side, kind)
-        failed = self.failed[problem_key]
+        failed = [
+            path
+            for path in self.failed[problem_key]
+            if path.rsplit("/", 1)[-1].startswith((f"{record_id}-", f"{record_id}."))
+        ]
         if failed:
             return Known(
                 unknown=bounded_text(
-                    f"the {side.name} memory tree has {kind} records that do not parse: "
-                    f"{', '.join(failed[:3])}"
+                    f"the {side.name} memory tree cannot read {record_id}: {', '.join(failed[:3])}"
                 )
             )
         return Known()

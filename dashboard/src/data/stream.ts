@@ -1,4 +1,5 @@
 import { dashboardStore } from "./store";
+import { reviewMemoryScope, subscribeReviewMemoryScope, publishReviewMemory, publishReviewMemoryError } from './reviewMemoryWatch';
 import { startStreamLivenessWatchdog } from "./streamLiveness";
 
 // The state channel's named SSE events (serving/app.py + serving/delta.py). Each is merged
@@ -46,9 +47,22 @@ export function connectState(base = ""): () => void {
   const open = (): void => {
     if (stopped) return;
     source?.close();
-    const next = new EventSource(`${base}/api/stream`);
+    const scope = reviewMemoryScope();
+    const query = scope ? `?${new URLSearchParams({ reviewRepo: scope.repo, reviewMaster: scope.master, reviewLeaf: scope.leaf })}` : '';
+    const next = new EventSource(`${base}/api/stream${query}`);
     source = next;
     openNow = false;
+    let initialMemory = true;
+    next.addEventListener('review.memory', (event) => {
+      if (stopped || source !== next) return;
+      watchdog.markAlive();
+      publishReviewMemory(JSON.parse((event as MessageEvent).data), initialMemory);
+      initialMemory = false;
+    });
+    next.addEventListener('review.memory.error', (event) => {
+      if (stopped || source !== next) return;
+      publishReviewMemoryError(JSON.parse((event as MessageEvent).data));
+    });
     next.addEventListener("snapshot", (event) => {
       if (stopped || source !== next) return;
       watchdog.markAlive();
@@ -63,6 +77,7 @@ export function connectState(base = ""): () => void {
     }
     next.addEventListener("open", () => {
       if (stopped || source !== next) return;
+      initialMemory = true;
       openNow = true;
       clearOpenDeadline(); // it opened in time — the M4 deadline no longer applies
       watchdog.markAlive();
@@ -104,8 +119,10 @@ export function connectState(base = ""): () => void {
 
   open();
 
+  const unsubscribeScope = subscribeReviewMemoryScope(open);
   return () => {
     stopped = true;
+    unsubscribeScope();
     watchdog.stop();
     clearOpenDeadline();
     source?.close();

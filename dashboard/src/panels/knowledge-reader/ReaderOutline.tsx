@@ -6,6 +6,29 @@ interface Chapter {
   title: string;
   level: number;
 }
+const headingSelector = 'h2[id], h3[id], h4[id], h5[id], h6[id], [data-page-section]';
+
+function chaptersOf(document: HTMLElement) {
+  const found = [...document.querySelectorAll<HTMLElement>(headingSelector)];
+  const rows = found.map((heading) => ({
+    id: heading.id || heading.parentElement?.id || '',
+    title: heading.textContent ?? '',
+    level: Number(heading.tagName.slice(1)),
+  }));
+  return { found, rows };
+}
+function signatureOf(rows: Chapter[]) {
+  return rows.map((row) => `${row.level}\u0000${row.id}\u0000${row.title}`).join('\n');
+}
+function currentChapter(document: HTMLElement, found: HTMLElement[], rows: Chapter[]) {
+  const top = document.getBoundingClientRect().top + 48;
+  let id = rows[0]?.id ?? '';
+  for (let index = 0; index < found.length; index++) {
+    if (found[index].getBoundingClientRect().top > top) break;
+    id = rows[index].id;
+  }
+  return id;
+}
 export function ReaderOutline({
   pane,
   ready,
@@ -19,29 +42,33 @@ export function ReaderOutline({
   useEffect(() => {
     const document = pane.current;
     if (!document || !ready) return;
-    const headings = [
-      ...document.querySelectorAll<HTMLElement>(
-        'h2[id], h3[id], h4[id], h5[id], h6[id], [data-page-section]',
-      ),
-    ];
-    const rows = headings.map((heading) => ({
-      id: heading.id || heading.parentElement?.id || '',
-      title: heading.textContent ?? '',
-      level: Number(heading.tagName.slice(1)),
-    }));
-    setChapters(rows.filter((row) => row.id));
-    const mark = () => {
-      const top = document.getBoundingClientRect().top + 48;
-      let id = rows[0]?.id ?? '';
-      for (let index = 0; index < headings.length; index++) {
-        if (headings[index].getBoundingClientRect().top > top) break;
-        id = rows[index].id;
-      }
-      setCurrent(id);
+    let found: HTMLElement[] = [];
+    let rows: Chapter[] = [];
+    // Nothing enumerated yet: the first pass of a new pane must commit its real list, even when
+    // the pane renders no chapter at all. '' is a real empty signature, so it cannot mean "unset".
+    let seen: string | null = null;
+    // The chapters are the ones rendered, whatever rendered them: whole prose replaces a
+    // summary in place (PathViews), so this list follows the pane instead of the address.
+    const enumerate = () => {
+      ({ found, rows } = chaptersOf(document));
+      const signature = signatureOf(rows);
+      if (signature === seen) return false;
+      seen = signature;
+      setChapters(rows.filter((row) => row.id));
+      return true;
     };
+    const mark = () => setCurrent(currentChapter(document, found, rows));
+    enumerate();
     mark();
     document.addEventListener('scroll', mark, { passive: true });
-    return () => document.removeEventListener('scroll', mark);
+    const changes = new MutationObserver(() => {
+      if (enumerate()) mark();
+    });
+    changes.observe(document, { childList: true, characterData: true, subtree: true });
+    return () => {
+      changes.disconnect();
+      document.removeEventListener('scroll', mark);
+    };
   }, [pane, ready]);
   useEffect(() => revealCurrentChapter(viewport.current), [current, chapters]);
   return (

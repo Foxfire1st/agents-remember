@@ -104,9 +104,17 @@ describe('a changed text field', () => {
     expect(textDiff(STATEMENT, STATEMENT)).toEqual({ kind: 'identical' });
     expect(textDiff(STATEMENT, `${STATEMENT} `)).toEqual({ kind: 'whitespace_only' });
     expect(textDiff('a b', 'a\nb')).toEqual({ kind: 'whitespace_only' });
-    // A space inserted into or removed from a word is whitespace only too (review R1 F3).
-    expect(textDiff('a,b', 'a, b')).toEqual({ kind: 'whitespace_only' });
-    expect(textDiff('answered, and', 'answered,and')).toEqual({ kind: 'whitespace_only' });
+    for (const [before, after] of [
+      ['a,b', 'a, b'],
+      ['answered, and', 'answered,and'],
+      ['must not', 'mustnot'],
+      ['mustnot', 'must not'],
+    ]) {
+      const diff = textDiff(before, after);
+      expect(diff.kind).toBe('words');
+      expect(sideText(words(diff), 'before')).toBe(before);
+      expect(sideText(words(diff), 'after')).toBe(after);
+    }
     expect(textDiff('a b', 'a b.').kind).toBe('words');
   });
 });
@@ -157,12 +165,12 @@ describe('list alignment (rule 1a)', () => {
   it('names an inserted and a removed condition, keeping the aligned ones unchanged', () => {
     expect(alignLists(CONDITIONS, [first, 'A new condition.', second])).toEqual([
       { kind: 'unchanged', text: first, before: 0, after: 0 },
-      { kind: 'added', text: 'A new condition.', after: 1 },
+      { kind: 'added', text: 'A new condition.', after: 1, note: 'unpaired_gap' },
       { kind: 'unchanged', text: second, before: 1, after: 2 },
     ]);
     expect(alignLists([first, 'Dropped.', second], CONDITIONS)).toEqual([
       { kind: 'unchanged', text: first, before: 0, after: 0 },
-      { kind: 'removed', text: 'Dropped.', before: 1 },
+      { kind: 'removed', text: 'Dropped.', before: 1, note: 'unpaired_gap' },
       { kind: 'unchanged', text: second, before: 2, after: 1 },
     ]);
   });
@@ -173,13 +181,17 @@ describe('list alignment (rule 1a)', () => {
       { kind: 'unchanged', text: first, before: 0, after: 0 },
       { kind: 'changed', beforeText: second, afterText: edited, before: 1, after: 1 },
     ]);
-    expect(alignLists(['A', 'B', 'C'], ['A', 'X', 'Y', 'C']).map((row) => row.kind)).toEqual([
+    const unequal = alignLists(['A', 'B', 'C'], ['A', 'X', 'Y', 'C']);
+    expect(unequal.map((row) => row.kind)).toEqual([
       'unchanged',
       'removed',
       'added',
       'added',
       'unchanged',
     ]);
+    expect(unequal.slice(1, 4).every((row) => 'note' in row && row.note === 'unpaired_gap')).toBe(
+      true,
+    );
   });
 
   it('shows a reordered item as moved, never pairing by position across the list', () => {
@@ -195,6 +207,21 @@ describe('list alignment (rule 1a)', () => {
       'unchanged',
       'removed',
     ]);
+  });
+
+  it('bounds list alignment without guessing pairs even for matching positions', () => {
+    for (const size of [1500, 3000]) {
+      const before = Array.from({ length: size }, (_, i) => `before ${i}`);
+      const after = Array.from({ length: size }, (_, i) => `after ${i}`);
+      // A shared middle item must not cause an over-budget global alignment.
+      after[Math.floor(size / 2)] = before[Math.floor(size / 2)];
+      const rows = alignLists(before, after);
+      expect(rows).toHaveLength(size * 2);
+      expect(rows.every((row) => row.kind === 'removed' || row.kind === 'added')).toBe(true);
+      expect(rows.every((row) => 'note' in row && row.note === 'cell_limit')).toBe(true);
+      expect(rows.filter((row) => row.kind === 'removed').map((row) => row.text)).toEqual(before);
+      expect(rows.filter((row) => row.kind === 'added').map((row) => row.text)).toEqual(after);
+    }
   });
 
   it('takes moved items out of the gaps before pairing, and pairs equal texts one to one', () => {

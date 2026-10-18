@@ -1,25 +1,7 @@
-"""The explicit revision comparison: heads from retained revisions, never from order or presence.
+"""A tree comparison selects each side's recorded revision of one subject.
 
-These cases drive the **real** two-snapshot comparison over **real** snapshot pairs built through
-the text-backed builder, then run the exact head-selection function the review adapter calls.
-Nothing here re-implements a read, a comparison or a predecessor lookup, fakes a snapshot, or
-asserts a rendering it did not read back -- except the fault-injection shape the void case
-names: an empty side cannot be authored as a text revision, so it is an empty built file.
-
-A text record holds exactly one revision (MIK-R74 rule 3), so one side retaining several
-revisions is not a shape a text tree can express: the multi-revision cases below name their
-removal rather than asserting it. What the selection still answers -- the single retained
-revision per side, the one-sided removal with its recorded head, and the retained population
-in sorted order -- is pinned here.
-
-The load-bearing properties, one case each:
-
-* a unique single retained revision per side compares head to head, with the exact selected
-  revision ids recorded;
-* a known-empty side stays a one-sided addition or removal with the nonempty side's head
-  recorded, which is ICR-R06@v1's contract reused rather than restated;
-* heads are the retained population in sorted order: collection order selects nothing;
-* the review pane renders the selected head pair's own recorded statements.
+The before/after pair, a record removed on one side, and the primary statement
+operands are exercised through the comparison and composition boundaries.
 """
 
 from __future__ import annotations
@@ -37,7 +19,6 @@ from agents_remember.application.knowledge_review import (
     compose_review,
 )
 from agents_remember.application.review_revision_comparison import (
-    revision_heads,
     select_subject_revisions,
 )
 from agents_remember.models.knowledge.authorship import Authorship
@@ -276,18 +257,6 @@ def test_a_single_retained_revision_pair_compares_head_to_head(
     assert pair.revision_ids[0] in selection.statement
 
 
-# Dead: a text record holds exactly one revision (MIK-R74 rule 3), so one side retaining
-# several revisions is not a shape a text tree can express. The multi-revision cases below
-# name their removal rather than asserting it; the single retained revision per side above,
-# the one-sided removal, the sorted heads and the pane statements still pin the selection.
-_REMOVED_MULTI_REVISION_CASES = (
-    "test_a_second_retained_revision_is_ambiguity_not_a_default",
-    "test_an_intermediate_revision_stays_selectable_history",
-    "test_a_fork_on_the_after_side_is_an_explicit_ambiguity",
-    "test_a_fork_on_the_before_side_is_an_explicit_ambiguity",
-)
-
-
 def test_a_known_empty_after_side_stays_a_removal_with_the_before_head_recorded(
     tmp_path: Path,
 ) -> None:
@@ -338,18 +307,6 @@ def test_a_known_empty_after_side_stays_a_removal_with_the_before_head_recorded(
     assert selection.after_revision_id is None
     assert selection.after_heads == ()
     assert "removal" in selection.statement
-
-
-def test_heads_are_the_retained_population_in_sorted_order() -> None:
-    """Heads are every retained revision, in sorted order: collection order selects nothing.
-
-    Text records hold no predecessor edge (MIK-R74 rule 1), so no recorded successor relation
-    narrows the population. A rule that picked the first stored id would answer ``m`` here;
-    the head rule answers both, sorted.
-    """
-
-    assert revision_heads(("m-revision", "z-revision")) == ("m-revision", "z-revision")
-    assert revision_heads(("z-revision", "m-revision")) == ("m-revision", "z-revision")
 
 
 def _git_tree(root: Path, files: dict[str, str]) -> str:
