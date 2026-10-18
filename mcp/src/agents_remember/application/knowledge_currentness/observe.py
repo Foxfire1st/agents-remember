@@ -102,6 +102,8 @@ class CodeTree:
 
     repository: Path
     tree: str
+    object_directory: Path | None = None
+    """A held working-tree capture's scratch store, read beside the repository's (MIK-R73 rule 7)."""
 
     def to_document(self) -> dict[str, str]:
         return {"repositoryRoot": str(self.repository), "treeId": self.tree}
@@ -123,7 +125,9 @@ def open_code_tree(tree: CodeTree | None) -> OpenedCodeTree:
     if tree is None:
         return OpenedCodeTree(tree=None, trees=None, files={}, problem=NO_TREE_REQUESTED)
     try:
-        trees = CodeTrees.open(tree.repository, tree.tree, tree.tree)
+        trees = CodeTrees.open(
+            tree.repository, tree.tree, tree.tree, object_inputs=tree.object_directory
+        )
         files = trees.base()
     except (CodeReadError, OSError, ValueError, subprocess.SubprocessError) as error:
         return OpenedCodeTree(

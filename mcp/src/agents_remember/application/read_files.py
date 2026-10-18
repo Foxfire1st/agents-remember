@@ -31,15 +31,14 @@ import apsw
 from agents_remember.application.knowledge_currentness.observe import CodeTree
 from agents_remember.application.published_intent import select_knowledge_dataset
 from agents_remember.application.read_file_cards import (
-    CODE_STATE_HEAD,
     READ_AR_FILES_MAX_PATHS,
     CardSelection,
     SectionAnchors,
     aggregate_state,
     card_records_for_path,
-    head_tree_of,
 )
 from agents_remember.application.read_files_format import TEXT_FORMAT, memory_format
+from agents_remember.application.worktree_code_state import observed_code_tree
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.authority import require_repo
@@ -90,6 +89,7 @@ def read_ar_files_tool(
     repo_id: str,
     files: list[Any],
     working_folder: Path | None = None,
+    worktree_scope: str = "official-line",
     _context: CoordinationContext | None = None,
 ) -> dict[str, Any]:
     """Name the knowledge governing a batch of repository-relative paths.
@@ -97,7 +97,10 @@ def read_ar_files_tool(
     ``working_folder`` is the caller's working folder when the server knows
     it (a leaf's worktree group under task scope): locations inside it are
     answered relative, so the caller opens them as written. Otherwise
-    locations are absolute. ``_context`` is a test seam: callers normally let
+    locations are absolute. ``worktree_scope`` says whose worktrees were
+    read: ``leaf`` when the call named a leaf's task context, ``official-line``
+    when it read the configured checkout (MIK-R83 rule 6); the answer names
+    both roots either way. ``_context`` is a test seam: callers normally let
     the resolver run, but tests inject a pre-built
     :class:`CoordinationContext` to isolate one storage mode.
     """
@@ -127,14 +130,60 @@ def read_ar_files_tool(
 
     memory_state, dataset = _memory_selection(context, config)
     code_root = Path(repo.path)
-    head_tree = head_tree_of(code_root)
-    code_state = CODE_STATE_HEAD if head_tree is not None else "unmeasured"
-    scope = _BatchScope(
-        memory_state=memory_state,
-        dataset=dataset,
-        head_tree=head_tree,
-        working_folder=working_folder,
-    )
+    # The states are measured at the code the caller sees: the commit when the checkout is clean,
+    # else its working tree, captured and held for exactly this read (MIK-R73 rule 7).
+    with observed_code_tree(code_root) as observation:
+        if observation is None:
+            code_state, code_tree, object_directory = "unmeasured", None, None
+        else:
+            code_state = observation.code_state
+            code_tree = observation.tree_id
+            object_directory = observation.object_directory
+        return _named_files(
+            _NamedRead(
+                context=context,
+                repo_id=repo.repo_id,
+                code_root=code_root,
+                files=files,
+                scope=_BatchScope(
+                    memory_state=memory_state,
+                    dataset=dataset,
+                    code_tree=code_tree,
+                    object_directory=object_directory,
+                    working_folder=working_folder,
+                ),
+                worktree_scope=worktree_scope,
+                code_state=code_state,
+                code_tree=code_tree,
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _NamedRead:
+    """One batch read: whose memory, which paths, and the code tree it observed."""
+
+    context: CoordinationContext
+    repo_id: str
+    code_root: Path
+    files: list[Any]
+    scope: _BatchScope
+    worktree_scope: str
+    code_state: str
+    code_tree: str | None
+
+
+def _named_files(read: _NamedRead) -> dict[str, Any]:
+    """Name each path against the memory and the code tree the caller's read observed."""
+
+    context = read.context
+    repo_id = read.repo_id
+    code_root = read.code_root
+    files = read.files
+    scope = read.scope
+    worktree_scope = read.worktree_scope
+    code_state = read.code_state
+    code_tree = read.code_tree
 
     file_results: list[dict[str, Any]] = []
     for rel in files:
@@ -155,15 +204,21 @@ def read_ar_files_tool(
     payload: dict[str, Any] = {
         "ok": True,
         "operation": "read_ar_files",
-        "repoId": repo.repo_id,
+        "repoId": repo_id,
         "state": "named",
         "codeState": code_state,
-        "memoryState": memory_state,
+        "memoryState": scope.memory_state,
+        "worktreeScope": worktree_scope,
+        "sourceRoot": code_root.as_posix(),
+        "memoryRoot": context.onboarding_root.parent.as_posix(),
         "files": file_results,
-        "overviews": _overview_locations(context, code_root, files, working_folder),
+        "overviews": _overview_locations(context, code_root, files, scope.working_folder),
     }
-    if head_tree is not None:
-        payload["codeTree"] = head_tree
+    if any(row.get("routeIndexStale") for row in file_results):
+        payload["routeIndexStale"] = True
+        payload["routeIndexRefresh"] = "route_index_refresh"
+    if code_tree is not None:
+        payload["codeTree"] = code_tree
     else:
         payload["statesProblem"] = (
             "the code checkout's HEAD tree could not be read, so no record state "
@@ -253,8 +308,10 @@ class _BatchScope:
 
     memory_state: str
     dataset: _Dataset
-    head_tree: str | None
+    code_tree: str | None
     working_folder: Path | None
+    object_directory: Path | None
+    """The held capture's store when the read observes a working tree, else ``None``."""
 
 
 def _name_one(
@@ -271,10 +328,19 @@ def _name_one(
     if not exists:
         return result
 
-    card_rel = _governing_card(context, rel)
+    card_rel, probed = _governing_card(context, rel)
     if card_rel is None or scope.memory_state != "converted":
         result["card"] = None
+        if scope.memory_state == "converted":
+            # `missing` is said only when there is no card at all (MIK-R83
+            # rule 5): a path outside the onboarding scope has none, and so
+            # has a path whose card does not exist at its own place.
+            result["cardStatus"] = "missing"
         return result
+    if probed:
+        # The card exists but the route index does not list it: the answer
+        # names the stale index and the refresh that repairs it.
+        result["routeIndexStale"] = True
 
     memory_root = context.onboarding_root.parent
     card_absolute = memory_root / "onboarding" / f"{card_rel}.md"
@@ -283,6 +349,7 @@ def _name_one(
         # not a file (stale index): the row names the absence instead of an
         # unopenable location, and the valid siblings are still answered.
         result["card"] = None
+        result["cardStatus"] = "missing"
         result["statesProblem"] = (
             f"the governing card {card_rel} is indexed but has no readable file; "
             "it names no records"
@@ -298,35 +365,67 @@ def _name_one(
         # converted one) is reported, and the valid siblings are still
         # answered; a failed read never stands in for their aligned data.
         result["card"] = None
+        result["cardStatus"] = "missing"
         result["statesProblem"] = (
             f"the governing card {card_rel} is indexed but its file could not be read; "
             "it names no records"
         )
         return result
     result["card"] = _locate(card_absolute, scope.working_folder)
+    result["cardStatus"] = "found"
+    result.update(
+        _record_fields(
+            _NamedCard(
+                code_root=code_root,
+                rel=rel,
+                card_rel=card_rel,
+                card_absolute=card_absolute,
+                card_text=card_text,
+            ),
+            scope,
+        )
+    )
+    return result
+
+
+@dataclass(frozen=True)
+class _NamedCard:
+    """One card, its path and the code root whose records it is measured against."""
+
+    code_root: Path
+    rel: str
+    card_rel: str
+    card_absolute: Path
+    card_text: str
+
+
+def _record_fields(card: _NamedCard, scope: _BatchScope) -> dict[str, Any]:
+    """The record counts and action-asking records one card names on the code the caller sees."""
 
     dataset = scope.dataset
-    head_tree = scope.head_tree
-    if dataset.index_path is not None and head_tree is not None:
-        records = card_records_for_path(
-            CardSelection(
-                index_path=dataset.index_path,
-                memory_tree_id=dataset.memory_tree_id or "",
-                index_state=dataset.index_state or "",
-                code_tree=CodeTree(code_root, head_tree),
-                index_problems=dataset.index_problems,
-            ),
-            rel,
-            card_text,
-            card_rel,
-            anchors=SectionAnchors(
-                references=_sidecar_references(card_absolute),
-                own_path=rel,
-            ),
-        )
-        result["recordCounts"] = records.counts
-        result["cardState"] = aggregate_state(records.counts)
-        result["actionNeeded"] = [
+    code_tree = scope.code_tree
+    if dataset.index_path is None or code_tree is None:
+        return {}
+    records = card_records_for_path(
+        CardSelection(
+            index_path=dataset.index_path,
+            memory_tree_id=dataset.memory_tree_id or "",
+            index_state=dataset.index_state or "",
+            code_tree=CodeTree(card.code_root, code_tree, scope.object_directory),
+            index_problems=dataset.index_problems,
+        ),
+        card.rel,
+        card.card_text,
+        card.card_rel,
+        anchors=SectionAnchors(
+            references=_sidecar_references(card.card_absolute),
+            own_path=card.rel,
+        ),
+    )
+    fields: dict[str, Any] = {
+        "recordCounts": records.counts,
+        "cardState": aggregate_state(records.counts),
+        "actionNeeded": [
             {
                 "id": one.id,
                 "kind": one.kind,
@@ -335,27 +434,36 @@ def _name_one(
                 "titleFallback": one.title_fallback,
             }
             for one in records.action_needed
-        ]
-        if records.problem is not None:
-            result["statesProblem"] = records.problem
-        if not records.index_complete:
-            result["indexComplete"] = False
-    return result
+        ],
+    }
+    if records.problem is not None:
+        fields["statesProblem"] = records.problem
+    if not records.index_complete:
+        fields["indexComplete"] = False
+    return fields
 
 
-def _governing_card(context: CoordinationContext, rel: str) -> str | None:
-    """The card governing ``rel`` as its memory-relative stem, or ``None``.
+def _governing_card(context: CoordinationContext, rel: str) -> tuple[str | None, bool]:
+    """The card governing ``rel`` as its memory-relative stem, and whether it was probed.
 
     Which card governs a file is decided as today (packet Preservation): the
     route index says ``present`` exactly when the sidecar covers the path.
+    When it does not, the card's own path is checked once (MIK-R83 rule 5): a
+    card that exists is served, and the second value says the route index is
+    stale so the answer can name ``route_index_refresh``. A path outside the
+    onboarding scope is answered as today, with no probe.
     """
 
     storage_mode = resolve_storage_for_source(rel, context.storage, context.code_repository_name)
     if storage_mode not in _SIDECAR_STORAGE_MODES:
-        return None
-    if _route_sidecar_status(context.onboarding_root, rel) != "present":
-        return None
-    return rel
+        return None, False
+    if _route_sidecar_status(context.onboarding_root, rel) == "present":
+        return rel, False
+    try:
+        card_exists = (context.onboarding_root / f"{rel}.md").is_file()
+    except OSError:
+        card_exists = False
+    return (rel, True) if card_exists else (None, False)
 
 
 def _sidecar_references(card_absolute: Path) -> Mapping[str, Any] | None:

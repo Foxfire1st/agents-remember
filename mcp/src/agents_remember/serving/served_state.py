@@ -52,6 +52,16 @@ class WatcherHealthPayload(BaseModel):
     downSince: float | None = None
 
 
+class CheckoutBindingPayload(BaseModel):
+    """The disposable coordination root a linked-checkout process is bound to (MIK-R83 rule 7)."""
+
+    state: str
+    worktree: str
+    coordinationRoot: str
+    configuredRoot: str | None = None
+    remedy: str
+
+
 class ServedWorkspaceProjection(WorkspaceProjection):
     """A ``WorkspaceProjection`` as ``/api/state`` and the SSE ``snapshot`` emit it.
 
@@ -61,23 +71,34 @@ class ServedWorkspaceProjection(WorkspaceProjection):
 
     servingBuild: ServingBuildPayload | None = None
     watcherHealth: WatcherHealthPayload | None = None
+    checkoutBinding: CheckoutBindingPayload | None = None
 
 
-SERVED_TAIL_FIELDS: tuple[str, ...] = ("servingBuild", "watcherHealth")
+SERVED_TAIL_FIELDS: tuple[str, ...] = ("servingBuild", "watcherHealth", "checkoutBinding")
 """The keys :func:`served_state_tail` may add -- exactly this model's extension over the
 projection it wraps. Named so the assembly and the contract cannot drift apart silently."""
 
 
 def served_state_tail(
-    *, build: ServingBuild | None, watcher_health: dict[str, Any] | None = None
+    *,
+    build: ServingBuild | None,
+    watcher_health: dict[str, Any] | None = None,
+    checkout_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The serve-time tail, JSON-ready, to be merged onto a copy of the memoized dump.
 
-    A missing build fact is OMITTED: absence is not a fabricated claim.
+    A missing build fact is OMITTED: absence is not a fabricated claim. So is a
+    checkout binding: a declared process is not bound to a disposable root,
+    and its state says nothing about one (MIK-R83 rule 7).
     """
     tail: dict[str, Any] = {}
     if build is not None:
         tail["servingBuild"] = build.payload().model_dump(mode="json", exclude_none=True)
+    if checkout_binding is not None:
+        with contextlib.suppress(ValueError):
+            tail["checkoutBinding"] = CheckoutBindingPayload.model_validate(
+                checkout_binding
+            ).model_dump(mode="json", exclude_none=True)
     if watcher_health is not None:
         # Validated against the declared tail model so the assembly cannot drift
         # from the contract; a row that fails validation is omitted, never served raw.

@@ -677,19 +677,22 @@ def test_the_published_intent_block_flags_returned_invariants_at_its_resolved_tr
     assert block["sourceResolution"]["codeTreeId"] == head
     flagged = block["currentness"]
     assert flagged["codeTree"]["treeId"] == head
+    assert flagged["codeState"] == "commit"
     assert flagged["treeScope"] == (
-        f"states observed at the committed code tree {head} this read resolved; uncommitted "
-        "working-tree edits are not reflected"
+        f"states observed at the committed code tree {head} this read resolved"
     )
-    # An uncommitted edit of another function is not reflected: the committed tree is observed.
+    # MIK-R73 rule 7: an uncommitted edit is observed, at the captured working tree, instead of
+    # being silently reported as current at a commit that no longer holds the function.
     (world.code / REVIEW).write_text(
         _body_edit().replace("return value * 2", "return value * 3"), encoding="utf-8"
     )
     dirty = published_intent_block(context, [REVIEW])["currentness"]
-    assert dirty["codeTree"]["treeId"] == head
-    assert {one["id"]: one["state"] for one in dirty["invariants"]} == {
-        one["id"]: one["state"] for one in flagged["invariants"]
-    }
+    assert dirty["codeState"] == "working-tree"
+    assert dirty["codeTree"]["treeId"] != head
+    assert dirty["treeScope"] == (
+        f"states observed at the captured working tree {dirty['codeTree']['treeId']} of the code "
+        "checkout this read resolved"
+    )
     states = {one["id"]: one["state"] for one in flagged["invariants"]}
     assert states["INV-AAAAAA"] == "stale"
     assert states["INV-BBBBBB"] == "current"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import io
 import json
 import tempfile
 import unittest
@@ -9,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from agents_remember.cli.dashboard import _resolve_settings
 from agents_remember.controlplane.durable_store import (
     GATE_OWNERSHIP,
     append_line,
@@ -23,7 +26,11 @@ from agents_remember.kernel.primitives.checkout_coordination import (
     resolve_checkout_location,
 )
 from agents_remember.kernel.primitives.runtime_config import ConfigError, load_config
+from agents_remember.mcp.server import create_server
+from agents_remember.serving.app import LiveProjectionInputs, create_app
 from agents_remember_test_support.testing.global_state import preserve_owned_mutable_state
+from fastapi.testclient import TestClient
+from tool_entry_point_world import EntryPointWorld
 
 
 class CheckoutCoordinationIsolationTests(unittest.TestCase):
@@ -104,6 +111,69 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         self.assertFalse(config.dashboard.auto_start)
         self.assertFalse(config.benchmarks_enabled)
         self.assertFalse(live_settings.parent.joinpath("live-ar-coordination").exists())
+
+    def test_checkout_guard_is_named_by_cli_registered_server_and_dashboard(self) -> None:
+        world = EntryPointWorld()
+        self.addCleanup(world.close)
+        checkout, source = self._checkout()
+        self._undeclared_checkout(source)
+        settings = self.root / "live-settings.json"
+        self._settings(settings)
+        stderr = io.StringIO()
+
+        with patch("sys.stderr", stderr):
+            resolved = _resolve_settings(argparse.Namespace(config=str(settings)))
+
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        _path, config = resolved
+        disposable = checkout.parent / "provider-runtime" / "dev-ar-coordination"
+        configured = self.root / "live-ar-coordination"
+        (line,) = stderr.getvalue().splitlines()
+        for part in (
+            str(checkout),
+            str(disposable),
+            str(configured),
+            "is not used",
+            "--config does not change the binding",
+            "Run the installed command",
+            "declare the test mode",
+            "scratch work",
+        ):
+            self.assertIn(part, line)
+        self.assertEqual(config.coordination_root, disposable)
+        # Only the fixture's subsequent transport and HTTP work is a declared test process.
+        # The CLI above ran undeclared and produced the binding being tested.
+        declare_test_process()
+        expected = {
+            "state": "disposable-coordination-root",
+            "worktree": str(checkout),
+            "coordinationRoot": str(disposable),
+            "configuredRoot": str(configured),
+        }
+        world.server = create_server(config)
+        outcome, server = world.call("server_info", {})
+        self.assertEqual(outcome, "RETURNED", server)
+        assert server is not None
+        with TestClient(
+            create_app(
+                config,
+                live_inputs=LiveProjectionInputs(
+                    provider_state=False, landing_state=False, change_watch=False
+                ),
+            )
+        ) as client:
+            response = client.get("/api/state")
+        self.assertEqual(response.status_code, 200, response.text)
+        dashboard = response.json()
+        for payload in (server, dashboard):
+            binding = payload["checkoutBinding"]
+            for field, value in expected.items():
+                self.assertEqual(binding[field], value, payload)
+            self.assertIn("run the installed command", binding["remedy"])
+            self.assertIn("declare the test mode", binding["remedy"])
+            self.assertIn("--config does not change the binding", binding["remedy"])
+        self.assertFalse(configured.exists())
 
     @pytest.mark.integration
     @pytest.mark.usefixtures("worktree_services")

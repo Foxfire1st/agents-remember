@@ -16,6 +16,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from agents_remember.application import knowledge_write_route as write_body
 from agents_remember.application.knowledge_writer import Owner, WriteRequest
 from agents_remember.cli import knowledge_bootstrap, knowledge_write_route
 from agents_remember.cli.__main__ import main
@@ -689,7 +690,7 @@ def test_the_leaf_file_route_refuses_a_blank_authorization_and_reports_it(
     argv = ["knowledge-ingest", "--contract", str(world.contract), "--list", str(listed)]
     assert main([*argv, "--authorization-ref", "  "]) == 2
     assert "--authorization-ref must not be blank" in capsys.readouterr().out
-    wraps = mock.patch.object(knowledge_write_route, "write_knowledge", wraps=write_knowledge)
+    wraps = mock.patch.object(write_body, "write_knowledge", wraps=write_knowledge)
     with wraps as wrote:
         assert main([*argv, "--authorization-ref", "curator-7", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["authorization"] == "curator-7"
@@ -1071,7 +1072,7 @@ def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Pa
         for key, value in fields.items():
             setattr(args, key, value)
         locations = (world.memory, world.memory, "main", "main")
-        with mock.patch.object(knowledge_write_route, "side_locations", return_value=locations):
+        with mock.patch.object(write_body, "side_locations", return_value=locations):
             return knowledge_write_route.run_crossing_write(args, contract)
 
     refused, written = knowledge_write_route.EXIT_REFUSED, knowledge_write_route.EXIT_WRITTEN
@@ -1082,7 +1083,7 @@ def test_a_master_line_crossing_records_its_rows_through_the_writer(tmp_path: Pa
     assert run(series, f"{series.task_id}-crossing-2") == refused  # no such open file
     assert run(series, crossing, authorization_ref=" ") == refused  # a blank authorization
     assert run("no such contract", crossing) == refused  # an unreadable contract
-    wraps = mock.patch.object(knowledge_write_route, "write_knowledge", wraps=write_knowledge)
+    wraps = mock.patch.object(write_body, "write_knowledge", wraps=write_knowledge)
     with wraps as wrote:
         assert run(series, crossing) == written
     assert wrote.call_args.args[0].code_base == "refs/heads/main"  # the crossing's paired code

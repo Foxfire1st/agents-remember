@@ -53,6 +53,7 @@ from agents_remember.models.tools.knowledge_responses import (
     KnowledgeDiffResponse,
     KnowledgeIntegrityCheckResponse,
     KnowledgeReadResponse,
+    KnowledgeWriteResponse,
 )
 from agents_remember.models.worktree import (
     WorktreeAbandonResponse,
@@ -117,4 +118,5 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "knowledge_read": KnowledgeReadResponse,
     "knowledge_diff": KnowledgeDiffResponse,
     "knowledge_integrity_check": KnowledgeIntegrityCheckResponse,
+    "knowledge_write": KnowledgeWriteResponse,
 }

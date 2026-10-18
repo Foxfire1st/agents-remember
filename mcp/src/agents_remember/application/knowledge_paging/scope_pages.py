@@ -162,10 +162,11 @@ class PreparedScope:
     def collapsed(self, queued: Sequence[PreparedScope]) -> dict[str, Any]:
         """This seed and ``queued`` as one deferred entry whose one continuation walks them all."""
 
+        total = sum(len(one.rows) for one in (self, *queued))
         return {
             "seeds": [self.seed_json, *(one.seed_json for one in queued)],
             "state": "deferred",
-            "counts": {"total": sum(len(one.rows) for one in (self, *queued)), "returned": 0},
+            "counts": {"total": total, "returned": 0, "remaining": total},
             **self._first_continuation(tuple(one.seed_json for one in queued)),
         }
 
@@ -195,6 +196,7 @@ def prepare_scope(
         policy_version=SCOPE_POLICY_VERSION,
         manifest_digest=selected.manifest_digest,
         code_tree_id=request.context.code_tree_id,
+        index_state=request.tree.index_state,
     )
     resume = request.resume
     if resume is None:

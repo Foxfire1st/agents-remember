@@ -35,9 +35,11 @@ from ..tools.knowledge import (
     DiffToolRequest,
     IntegrityCheckRequest,
     ReadToolRequest,
+    WriteToolRequest,
     knowledge_diff_payload,
     knowledge_integrity_check_payload,
     knowledge_read_payload,
+    knowledge_write_payload,
 )
 
 
@@ -85,6 +87,7 @@ def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     _register_knowledge_read(server, config)
     _register_knowledge_diff(server, config)
     _register_knowledge_integrity_check(server)
+    _register_knowledge_write(server, config)
 
 
 def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -100,22 +103,22 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         continuation: str | None = None,
         invariantRevisionId: str | None = None,
         familyRevisionId: str | None = None,
+        recordId: str | None = None,
         sourcePath: str | None = None,
         repositoryRoot: str | None = None,
         codeTreeId: str | None = None,
     ) -> dict[str, Any]:
-        """Name records of one memory-tree view (MIK-R109).
+        """
+        Name records of one memory-tree view.
 
-        Rows hold text ID, kind, state and location: the file in the
-        caller's memory worktree, relative to memoryTree.memoryRoot, or
-        the absolute file with the commit beside the answer for a caller
-        with no memory worktree. No record
-        text: open named files yourself. Views: source_context, invariant,
-        family. Paging with continuation;
-        converted trees only (`legacy-format` otherwise). No mounted tool
-        writes knowledge through `agents-remember knowledge-ingest` and
-        `agents-remember knowledge-bootstrap`.
-        Longer explanation: docs/reference/mcp-tools.md."""
+        Views: source_context, invariant, family, and record (one record's fields, link states and
+        history). `recordId` takes any record's text ID (`INV-…`, `FAM-…`, `DEC-…`, `ASM-…`);
+        UUIDs are derived from it and stored nowhere. Rows name a record's text ID, kind, state and
+        location, never its text. `codeTreeId` with `repositoryRoot` names the tree states are
+        measured at; `working-tree` measures your uncommitted code. Writes go through
+        `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`, never this
+        tool. Docs: docs/reference/mcp-tools.md.
+        """
 
         return knowledge_read_payload(
             ReadToolRequest(
@@ -126,6 +129,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
                 continuation=continuation,
                 invariant_revision_id=invariantRevisionId,
                 family_revision_id=familyRevisionId,
+                record_id=recordId,
                 source_path=sourcePath,
                 repository_root=repositoryRoot,
                 code_tree_id=codeTreeId,
@@ -133,6 +137,49 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
             workspace_root=str(config.workspace_root),
             coordination_root=str(config.coordination_root),
             relative_locations=_worktree_relative_locations(config, memoryRoot),
+        )
+
+
+def _register_knowledge_write(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """The writer's mounted route: the same function the write commands run."""
+
+    @server.tool()
+    def knowledge_write(
+        contractPath: str | None = None,
+        *,
+        handoff: dict[str, Any] | None = None,
+        handoffName: str | None = None,
+        handoffPath: str | None = None,
+        authorizationRef: str = "",
+        commit: bool = False,
+        crossing: str | None = None,
+        repoId: str | None = None,
+        wave: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Plan or commit one knowledge write (MIK-R73 rule 1).
+
+        `contractPath` names a leaf, or with `crossing` a master's open crossing sync; the
+        contract guards the write and names the only memory worktree it may write. `repoId`
+        with `wave` writes a taskless wave. Give the hand-off as `handoff` with
+        `handoffName`, or as `handoffPath`. Without `commit` (the default) it plans,
+        validates and writes nothing; with it, it writes files and commits nothing to Git. A
+        refusal lists every problem, and the whole report is a file the answer names. Longer
+        explanation: docs/reference/mcp-tools.md.
+        """
+        return knowledge_write_payload(
+            WriteToolRequest(
+                contract_path=contractPath,
+                handoff=handoff,
+                handoff_name=handoffName,
+                handoff_path=handoffPath,
+                authorization_ref=authorizationRef,
+                commit=commit,
+                crossing=crossing,
+                repo_id=repoId,
+                wave=wave,
+            ),
+            config,
         )
 
 

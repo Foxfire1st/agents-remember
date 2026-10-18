@@ -52,7 +52,11 @@ def read_ar_files_payload(
     else:
         working_folder = _working_folder(scoped_config, task_context)
         body = read_ar_files_tool(
-            scoped_config, repo_id=repo_id, files=files, working_folder=working_folder
+            scoped_config,
+            repo_id=repo_id,
+            files=files,
+            working_folder=working_folder,
+            worktree_scope="leaf" if task_context is not None else "official-line",
         )
     return _tool_payload("read_ar_files", body)
 

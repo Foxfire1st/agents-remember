@@ -41,6 +41,7 @@ from agents_remember.application.knowledge_reader.files import (
 from agents_remember.application.knowledge_reader.paths import entry_document, states_at
 from agents_remember.application.knowledge_reader.records import (
     Decisions,
+    _target_state,
     decision_document,
     link_document,
     record_link_target,
@@ -73,12 +74,20 @@ def record_view(
     if record is None:
         return None
     decisions = Decisions(index)
-    outgoing, unreadable = _outgoing(record)
+    outgoing, unreadable = _outgoing(selection, record)
+    summary = summary_of(record)
     document: dict[str, Any] = {
-        "record": {**summary_of(record), "path": record.path, "document": record.document},
+        "record": {
+            **summary,
+            "path": record.path,
+            "heading": summary["title"],
+            "document": record.document,
+        },
         "prose": read_memory_file(selection, _prose_path(record.path)).to_document(),
         "outgoing": outgoing,
-        "incoming": [link_document(index, link) for link in index.incoming_links(record.id).value],
+        "incoming": [
+            link_document(index, link, selection) for link in index.incoming_links(record.id).value
+        ],
     }
     if unreadable is not None:
         # The record's own links could not be read: named, never shown as "no outgoing link".
@@ -137,13 +146,15 @@ def _prose_path(record_path: str) -> str:
     return f"{record_path[: -len('.json')]}.md" if record_path.endswith(".json") else record_path
 
 
-def _outgoing(record: Record) -> tuple[list[dict[str, Any]], str | None]:
+def _outgoing(
+    selection: ReaderSelection, record: Record
+) -> tuple[list[dict[str, Any]], str | None]:
     """The record's own relationships -- its ``links``, then a family's members and routes, then
     what it supersedes -- and why its ``links`` could not be read, if they could not."""
 
     document = record.document
     links, unreadable = _links_of(record)
-    return [
+    rows = [
         *links,
         *(
             {"relation": "member", "target": {"kind": "record", "id": one}}
@@ -157,7 +168,17 @@ def _outgoing(record: Record) -> tuple[list[dict[str, Any]], str | None]:
             {"relation": "supersedes", "target": {"kind": "record", "id": one}}
             for one in document.get("supersedes") or ()
         ),
-    ], unreadable
+    ]
+    for row in rows:
+        target = row["target"]
+        row["targetState"] = _target_state(
+            selection.index,
+            target["kind"],
+            target.get("id", target.get("path", "")),
+            selection,
+            detail=target.get("anchor", target.get("requirement")),
+        )
+    return rows, unreadable
 
 
 def _links_of(record: Record) -> tuple[list[dict[str, Any]], str | None]:

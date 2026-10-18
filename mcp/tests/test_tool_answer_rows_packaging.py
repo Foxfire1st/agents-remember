@@ -60,6 +60,7 @@ from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceJudgment,
     CuratorCoherenceRequest,
 )
+from agents_remember.models.tools.tool_answer import bound_for
 from agents_remember.worktrees.integration.closeout.curator_coherence_publication import (
     curator_coherence_action,
 )
@@ -470,8 +471,9 @@ class IntegrityProductionTests(unittest.TestCase):
             self.assertEqual(len(envelope["items"]), min(10, count))
             self.assertEqual(envelope["truncated"], count > 10)
             measured = assert_production_answer(self, "knowledge_integrity_check", shaped)
-            self.assertLessEqual(measured, 1500)
-            self.assertLessEqual(1500, 2 * measured)
+            bound = bound_for("knowledge_integrity_check")
+            self.assertLessEqual(measured, bound)
+            self.assertLessEqual(bound, 2 * measured)
             assert_answer_survives_the_guard("knowledge_integrity_check", whole, shaped)
         with self.subTest("refused"):
             self.assertEqual(legacy["state"], "refused")

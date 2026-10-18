@@ -64,6 +64,7 @@ from agents_remember.tasks.sprint_membership_refusal import (
     missing_master_detail,
 )
 from agents_remember.tasks.sprint_rows import SEAT_DOC_FILE, correlate_seat_row
+from agents_remember.tasks.task_paths import scan_stray_task_files
 from agents_remember.worktrees.task_document_copies import LINKAGE_REPORT_KEEP
 
 from .task_doc_graph_titles import build_publication_batch_graph_titles
@@ -458,6 +459,40 @@ def collect_linkage_facts(
     referenced = _row_facts(sprint, membership, facts)
     facts.extend(_membership_facts(membership, referenced))
     facts.extend(_uncommanded_facts(sprint, masters, membership))
+    facts.extend(_stray_task_file_facts(topology.coordination_root, sprint_ref.repository))
+    return facts
+
+
+def _stray_task_file_facts(coordination_root: Path, repository: str) -> list[dict[str, Any]]:
+    """The copies of a task document or a contract no lookup obeys (MIK-R83 rule 4).
+
+    The scan runs only here: every other lookup reaches the canonical places of
+    a task folder and never meets a copy. A folder the scan could not read is
+    named as its own fact, and the rest of the scan still lists what it found.
+    """
+
+    tasks_root = coordination_root / "tasks" / repository
+    strays, unreadable = scan_stray_task_files(tasks_root)
+    facts: list[dict[str, Any]] = [
+        {
+            "kind": "stray-task-file",
+            "path": path.as_posix(),
+            "detail": (
+                "a file named like a task document or a contract outside a canonical "
+                "place is ignored by every lookup; delete it or move it into an evidence "
+                "folder outside the task tree"
+            ),
+        }
+        for path in strays
+    ]
+    facts.extend(
+        {
+            "kind": "stray-scan-unreadable",
+            "folder": folder.as_posix(),
+            "detail": "this folder could not be scanned for stray task files; the rest were",
+        }
+        for folder in unreadable
+    )
     return facts
 
 

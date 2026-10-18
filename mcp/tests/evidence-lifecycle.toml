@@ -139,6 +139,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_abandoned_series_closeout.py",
   "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_agent_tool_surface_corrections.py",
   "mcp/tests/test_agentic_settings.py",
   "mcp/tests/test_agents_remember_quality.py",
   "mcp/tests/test_application_guards.py",
@@ -1566,6 +1567,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_abandoned_series_closeout.py",
   "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_agent_tool_surface_corrections.py",
   "mcp/tests/test_agentic_settings.py",
   "mcp/tests/test_agents_remember_quality.py",
   "mcp/tests/test_application_guards.py",
@@ -2518,6 +2520,7 @@ permanence_rationale = "The writer cases need one real enclosure shape rather th
 replacement_contract = "node:mcp/tests/test_knowledge_writer.py::test_a_decision_a_realization_and_a_tested_evidence_produce_validated_files"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_tool_surface_corrections.py",
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_generated_copy_worklist.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
@@ -3103,6 +3106,8 @@ permanence_rationale = "The sweep, its controls and the refusal census all drive
 replacement_contract = "node:mcp/tests/test_tool_entry_point_sweep.py::EntryPointProbeTests::test_every_public_tool_answers_in_the_products_own_vocabulary"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_agent_tool_surface_corrections.py",
+  "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_context_packet_slim.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
   "mcp/tests/test_knowledge_diff_report.py",

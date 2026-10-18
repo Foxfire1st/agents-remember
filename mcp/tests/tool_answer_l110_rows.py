@@ -268,6 +268,7 @@ INTEGRITY_ROW_FIELDS = frozenset(
         "refusalDetail",
         "worklistState",
         "worklist",
+        "routes",
     }
 )
 INTEGRITY_ROW_USES = {
@@ -280,9 +281,57 @@ INTEGRITY_ROW_USES = {
     "refusalDetail": "read why the call was refused",
     "worklistState": "read whether the leaf has a persisted change-to-knowledge worklist",
     "worklist": "work the leaf's persisted worklist items",
+    "routes": "read every family's routes, their state and the mechanical suggestion",
 }
-INTEGRITY_ROW_BOUND = 1500
+INTEGRITY_ROW_BOUND = 1700
 INTEGRITY_PRODUCTION_PATHS = ("reported", "refused")
+
+# MIK-R73 rule 1: ``knowledge_write`` answers with the writer's outcome, its
+# counts by kind, the problems and violations the caller must act on (cut to
+# the answer's list bound, with the truncation flags saying so) and the location
+# of the whole report, which is a file.
+KNOWLEDGE_WRITE_ROW_FIELDS = frozenset(
+    {
+        "state",
+        "owner",
+        "memoryRoot",
+        "codeTree",
+        "authorization",
+        "counts",
+        "problems",
+        "problemsTruncated",
+        "violations",
+        "violationsTruncated",
+        "provisionalIds",
+        "plannedBeforeRefusal",
+        "written",
+        "removed",
+        "reportPath",
+        "refusalCode",
+        "refusalDetail",
+    }
+)
+KNOWLEDGE_WRITE_ROW_USES = {
+    "state": "branch the caller on planned, written or refused",
+    "owner": "confirm which leaf, crossing or wave the run wrote as",
+    "memoryRoot": "confirm which memory worktree was written",
+    "codeTree": "confirm which code tree anchors were judged against",
+    "authorization": "read the authorization the run recorded",
+    "counts": "count what this run produced by kind",
+    "problems": "act on the writer's problems, first entries first",
+    "problemsTruncated": "know the whole problem list is the report file",
+    "violations": "act on the validator's violations, first entries first",
+    "violationsTruncated": "know the whole violation list is the report file",
+    "provisionalIds": "know a planning run's IDs are not the committing run's",
+    "plannedBeforeRefusal": "know how much a refused run planned and wrote nothing",
+    "written": "open the files the run wrote",
+    "removed": "open what the run removed",
+    "reportPath": "open the whole report with the caller's own tools",
+    "refusalCode": "branch the caller on the refusal's code",
+    "refusalDetail": "read why the write was refused, with every problem named",
+}
+KNOWLEDGE_WRITE_ROW_BOUND = 1500
+KNOWLEDGE_WRITE_PRODUCTION_PATHS = ("planned", "written", "refused")
 
 # MIK-R110 rule 7: ``drift_check`` keeps its report (the drift report and
 # snapshot files) and answers with the outcome, the counts and the first
@@ -624,6 +673,12 @@ L110_ROW_DATA = {
         INTEGRITY_ROW_USES,
         INTEGRITY_ROW_BOUND,
         INTEGRITY_PRODUCTION_PATHS,
+    ),
+    "knowledge_write": (
+        KNOWLEDGE_WRITE_ROW_FIELDS,
+        KNOWLEDGE_WRITE_ROW_USES,
+        KNOWLEDGE_WRITE_ROW_BOUND,
+        KNOWLEDGE_WRITE_PRODUCTION_PATHS,
     ),
     "drift_check": (
         DRIFT_ROW_FIELDS,

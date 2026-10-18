@@ -208,8 +208,17 @@ class CodeTrees:
     """Paths of B whose tree entry is a symlink, once read (MIK-R53 rule 3)."""
 
     @classmethod
-    def open(cls, repository: Path, base_tree: str, candidate_tree: str) -> CodeTrees:
-        return cls(CodeObjects(repository), base_tree, candidate_tree)
+    def open(
+        cls,
+        repository: Path,
+        base_tree: str,
+        candidate_tree: str,
+        *,
+        object_inputs: Path | None = None,
+    ) -> CodeTrees:
+        """Open both trees, reading ``object_inputs`` beside the repository's store when given."""
+
+        return cls(CodeObjects(repository, object_inputs=object_inputs), base_tree, candidate_tree)
 
     @property
     def repository(self) -> Path:
@@ -257,7 +266,9 @@ class CodeTrees:
                 [*BLOB_DIFF_ARGS, old, new],
                 # Git's environment context option overrides even --unified=0.
                 GitRunnerOptions(
-                    timeout=GIT_METADATA_TIMEOUT_SECONDS, identity={"GIT_DIFF_OPTS": ""}
+                    timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                    identity={"GIT_DIFF_OPTS": ""},
+                    object_inputs=self.objects.object_inputs,
                 ),
             )
             if result.returncode != 0:

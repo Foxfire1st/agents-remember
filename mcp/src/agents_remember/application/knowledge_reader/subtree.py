@@ -91,6 +91,7 @@ def subtree_page(
         policy_version=SUBTREE_POLICY_VERSION,
         manifest_digest=sha256_digest({"path": path, "entries": [one.id for one in entries]}),
         code_tree_id=_code_tree_id(selection),
+        index_state=index.state.state,
     )
     start = 0
     if walk is not None:

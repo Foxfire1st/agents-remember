@@ -84,12 +84,15 @@ async def stream_events(
     *,
     build: ServingBuild | None = None,
     watcher_health: dict[str, Any] | None = None,
+    checkout_binding: dict[str, Any] | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one atomic projector subscription.
 
     Module-level (not a route closure) so it is unit-testable without an HTTP client.
     ``build`` (the boot-time serving stamp) rides the snapshot as
     ``servingBuild`` so the cockpit can render which process/commit is answering.
+    ``checkout_binding`` rides as ``checkoutBinding`` when the process is bound to
+    a linked checkout's disposable coordination root (MIK-R83 rule 7).
     ``watcher_health`` rides as ``watcherHealth`` (whether the change watcher is
     running, and since when it is not), OMITTED where no watcher is configured.
 
@@ -112,6 +115,7 @@ async def stream_events(
                     served_state_tail(
                         build=build,
                         watcher_health=watcher_health,
+                        checkout_binding=checkout_binding,
                     )
                 )
             yield ServerSentEvent(data=payload, event=delta.event, id=str(seq), retry=2000)

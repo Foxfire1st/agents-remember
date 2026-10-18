@@ -71,7 +71,9 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
         # exclusions the sweep allows, so marked as writes.
         "memory_baseline_status",
         "memory_carryover_plan",
-        # Memory writers.
+        # Memory writers. knowledge_write plans by default but commits files
+        # with `commit`, so the mark describes what the call may write.
+        "knowledge_write",
         "memory_quality_check",
         "citation_fix",
         "route_index_refresh",

@@ -1,11 +1,12 @@
 {
- "codeState": "head",
+ "codeState": "commit",
  "codeTree": "dad51c6d24a203951e2ab1c9e1bfc0ee3a665079",
  "files": [
   {
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod0.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod0.py",
    "recordCounts": {
@@ -19,6 +20,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod1.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod1.py",
    "recordCounts": {
@@ -32,6 +34,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod2.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod2.py",
    "recordCounts": {
@@ -45,6 +48,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod3.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod3.py",
    "recordCounts": {
@@ -58,6 +62,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod4.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod4.py",
    "recordCounts": {
@@ -71,6 +76,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod5.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod5.py",
    "recordCounts": {
@@ -84,6 +90,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod6.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod6.py",
    "recordCounts": {
@@ -97,6 +104,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod7.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod7.py",
    "recordCounts": {
@@ -110,6 +118,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod8.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod8.py",
    "recordCounts": {
@@ -123,6 +132,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/mod9.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/mod9.py",
    "recordCounts": {
@@ -136,6 +146,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep0.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep0.py",
    "recordCounts": {
@@ -149,6 +160,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep1.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep1.py",
    "recordCounts": {
@@ -162,6 +174,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep2.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep2.py",
    "recordCounts": {
@@ -175,6 +188,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep3.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep3.py",
    "recordCounts": {
@@ -188,6 +202,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep4.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep4.py",
    "recordCounts": {
@@ -201,6 +216,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep5.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep5.py",
    "recordCounts": {
@@ -214,6 +230,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep6.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep6.py",
    "recordCounts": {
@@ -227,6 +244,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep7.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep7.py",
    "recordCounts": {
@@ -240,6 +258,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep8.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep8.py",
    "recordCounts": {
@@ -253,6 +272,7 @@
    "actionNeeded": [],
    "card": "memory-w/onboarding/pkg/sub/deep9.py.md",
    "cardState": "current",
+   "cardStatus": "found",
    "exists": true,
    "path": "pkg/sub/deep9.py",
    "recordCounts": {
@@ -264,6 +284,7 @@
   }
  ],
  "log": "/world/logs/mcp/ar-tools-2000-01-01/000000000000-read_ar_files-00000000.json",
+ "memoryRoot": "/world/worktrees/repo-a/w-ar/memory-w",
  "memoryState": "converted",
  "ok": true,
  "overviews": [
@@ -272,5 +293,7 @@
   "memory-w/onboarding/overview.md"
  ],
  "repoId": "repo-a",
- "state": "named"
+ "sourceRoot": "/world/worktrees/repo-a/w-ar/w",
+ "state": "named",
+ "worktreeScope": "leaf"
 }

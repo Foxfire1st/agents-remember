@@ -2872,6 +2872,13 @@
     }
   ],
   "version": 1,
+  "checkoutBinding": {
+    "state": "disposable-coordination-root",
+    "worktree": "/worktrees/agents-remember/sim-leaf",
+    "coordinationRoot": "/worktrees/agents-remember/provider-runtime/dev-ar-coordination",
+    "configuredRoot": "/configured/coordination",
+    "remedy": "run the installed command for the configured root, or declare the test mode for scratch work; --config does not change the binding"
+  },
   "watcherHealth": {
     "downSince": 1781427657.0,
     "running": false

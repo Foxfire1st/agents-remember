@@ -135,7 +135,7 @@ export function RosterLine({
       {side.members_total} membership row(s); loaded context contains {side.members.length} of them
       {completionNote(page)}
       {counts.unresolved_anchor_total
-        ? ` · ${counts.unresolved_anchor_total} unresolved anchor(s) in this selection`
+        ? ` · ${counts.unresolved_anchor_total} anchor(s) not at their recorded blob`
         : ''}{' '}
       · {page.scope.join(' · ') || 'no scope recorded'}
     </p>

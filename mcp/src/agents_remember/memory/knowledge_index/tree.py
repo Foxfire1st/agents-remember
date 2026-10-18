@@ -161,28 +161,43 @@ def directory_key(directory: Path) -> str:
 def _capture(root: Path) -> tuple[str, dict[str, str]]:
     """Return (tree id, indexed path -> blob id) of ``root``'s captured state."""
 
+    with tempfile.TemporaryDirectory(prefix="ar-knowledge-index-capture-") as temporary:
+        return capture_tree_into(root, Path(temporary))
+
+
+def capture_tree_into(root: Path, scratch: Path) -> tuple[str, dict[str, str]]:
+    """Capture ``root``'s working tree into caller-owned scratch storage.
+
+    The storage is the caller's so that a capture can outlive this call: a read that observes the
+    working tree holds the scratch object store for as long as it reads, then removes it (MIK-R73
+    rule 7). The repository itself is never written -- the index is a copy and ``git add`` stages
+    into the scratch store.
+
+    Returns (tree id, indexed path -> blob id) exactly as :func:`_capture` does.
+    """
+
+    root = root.resolve()
     prefix = _git_output(root, ["rev-parse", "--show-prefix"]) or ""
     objects = _absolute_git_path(root, "objects")
     real_index = _absolute_git_path(root, "index")
-    with tempfile.TemporaryDirectory(prefix="ar-knowledge-index-capture-") as temporary:
-        scratch = Path(temporary)
-        state = IsolatedGitState(scratch / "index", scratch / "objects", objects)
-        if real_index.is_file():
-            # The repository's own index is copied, never used: its stat data lets the capture
-            # rehash only the files that changed, and the copy is what the capture then updates.
-            # The copy keeps the index file's time, or a file rewritten in the second the index
-            # was written would keep its old blob in the key (:func:`copy_git_index`).
-            copy_git_index(real_index, state.index_path)
-            _clear_index_flags(root, state)
-        _isolated(root, ["add", "--all", "--", "."], state)
-        tree_arguments = ["write-tree"] + ([f"--prefix={prefix}"] if prefix else [])
-        tree = _isolated(root, tree_arguments, state).strip()
-        listing = run_git_with_isolated_index_and_objects(
-            root, ["ls-tree", "-r", "-z", "--full-tree", tree], state=state
-        )
-        if listing.returncode != 0:
-            raise MemoryTreeError(f"the captured tree of {root} could not be listed")
-        return tree, _indexed_entries(listing.stdout.encode("utf-8", "surrogateescape"))
+    scratch.mkdir(parents=True, exist_ok=True)
+    state = IsolatedGitState(scratch / "index", scratch / "objects", objects)
+    if real_index.is_file():
+        # The repository's own index is copied, never used: its stat data lets the capture
+        # rehash only the files that changed, and the copy is what the capture then updates.
+        # The copy keeps the index file's time, or a file rewritten in the second the index
+        # was written would keep its old blob in the key (:func:`copy_git_index`).
+        copy_git_index(real_index, state.index_path)
+        _clear_index_flags(root, state)
+    _isolated(root, ["add", "--all", "--", "."], state)
+    tree_arguments = ["write-tree"] + ([f"--prefix={prefix}"] if prefix else [])
+    tree = _isolated(root, tree_arguments, state).strip()
+    listing = run_git_with_isolated_index_and_objects(
+        root, ["ls-tree", "-r", "-z", "--full-tree", tree], state=state
+    )
+    if listing.returncode != 0:
+        raise MemoryTreeError(f"the captured tree of {root} could not be listed")
+    return tree, _indexed_entries(listing.stdout.encode("utf-8", "surrogateescape"))
 
 
 def _clear_index_flags(root: Path, state: IsolatedGitState) -> None:

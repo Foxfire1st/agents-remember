@@ -137,7 +137,12 @@ TOOL_ANSWER_EXCEPTIONS: dict[tuple[str, str | None], tuple[int, str]] = {
 SHAPED_TOOL_BOUNDS: dict[tuple[str, str | None], int] = {
     ("citation_fix", None): 1500,
     ("memory_quality_check", None): 1500,
-    ("knowledge_integrity_check", None): 1500,
+    # MIK-R73 rule 4: the answer carries every family's routes beside the findings, so this
+    # tool's own bound is the one that grew; every other tool keeps the default.
+    ("knowledge_integrity_check", None): 1700,
+    # MIK-R73: the writer answers with its outcome, its counts and the first
+    # problems it found; the whole report is the file the answer names.
+    ("knowledge_write", None): 1500,
     ("route_index_refresh", None): 400,
     ("drift_check", None): 1500,
     ("citation_migrate", None): 1500,

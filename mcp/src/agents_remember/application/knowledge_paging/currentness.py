@@ -5,9 +5,8 @@ A bounded page is found by rendering candidate pages until one fits, and a page 
 would open the index and observe the code again on each try, so this computes the state of every
 invariant and family the walk's candidate rows name once, at the walk's code tree, and then renders
 each candidate's block as the subset its own rows name. The subset is exactly the block
-:func:`~agents_remember.application.knowledge_currentness.read_currentness` would compute for that
-answer: the same records, the same order, and each family's stale members counted over all of its
-members.
+``knowledge_read`` computes for that answer: the same records, the same order, and each
+family's stale members counted over all of its members.
 """
 
 from __future__ import annotations

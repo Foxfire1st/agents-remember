@@ -995,16 +995,27 @@ def test_the_published_tree_reads_uncommitted_state_writes_nothing_and_offers_a_
     assert published["selection"]["pinnedCommit"] is None
 
 
-def test_a_live_leafs_candidate_is_selectable_and_names_what_its_code_tree_leaves_out(
+def test_a_live_leafs_candidate_is_selectable_and_names_what_its_code_tree_observed(
     world: World, tmp_path: Path
 ) -> None:
+    """MIK-R73 rule 7: a clean leaf reads at its HEAD, a dirty one at its captured working tree."""
+
     group = tmp_path / "group"
     git(world.code, "worktree", "add", "-q", "-b", "leaf", str(group / "code"))
     git(world.memory, "worktree", "add", "-q", "-b", "leaf", str(group / "memory"), world.second)
     _write_leaf_contract(world, group)
     leaf = world.read("record", commit="leaf:group", record_id=REVIEW_INVARIANT)
     assert (leaf["selection"]["kind"], leaf["record"]["revision"]) == ("leaf", 2)
-    assert "uncommitted code is not included" in leaf["selection"]["codeNote"]
+    assert leaf["selection"]["codeNote"] == "HEAD of the leaf's code worktree"
+    clean_tree = leaf["selection"]["codeTree"]["treeId"]
+
+    edited = next((group / "code").rglob("*.py"), None)
+    assert edited is not None
+    edited.write_text(edited.read_text(encoding="utf-8") + "\n# uncommitted\n", encoding="utf-8")
+
+    dirty = world.read("record", commit="leaf:group", record_id=REVIEW_INVARIANT)
+    assert "captured for this read" in dirty["selection"]["codeNote"]
+    assert dirty["selection"]["codeTree"]["treeId"] != clean_tree
     assert world.read("records", commit="leaf:nowhere")["state"] == "unavailable"
 
 

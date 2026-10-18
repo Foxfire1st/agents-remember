@@ -57,6 +57,8 @@ class CodeObjects:
     """Read-only access to one code repository's commits, trees and blobs, with caches."""
 
     repository: Path
+    object_inputs: Path | None = None
+    """A second object store read beside the repository's, never written (MIK-R73 rule 7)."""
     _commits: dict[str, str | None] = field(default_factory=dict)
     _trees: dict[str, dict[str, str]] = field(default_factory=dict)
     _modes: dict[str, dict[str, str]] = field(default_factory=dict)
@@ -77,7 +79,9 @@ class CodeObjects:
             result = run_git(
                 self.repository,
                 ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{name}^{{commit}}"],
-                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+                GitRunnerOptions(
+                    timeout=GIT_METADATA_TIMEOUT_SECONDS, object_inputs=self.object_inputs
+                ),
             )
             value = result.stdout.strip()
             self._commits[name] = value if result.returncode == 0 and value else None
@@ -94,7 +98,9 @@ class CodeObjects:
         listed = run_git(
             self.repository,
             ["rev-parse", f"--disambiguate={prefix}"],
-            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+            GitRunnerOptions(
+                timeout=GIT_METADATA_TIMEOUT_SECONDS, object_inputs=self.object_inputs
+            ),
         )
         candidates = sorted(line for line in listed.stdout.split() if line)
         if not candidates:
@@ -105,6 +111,7 @@ class CodeObjects:
             GitRunnerOptions(
                 timeout=GIT_METADATA_TIMEOUT_SECONDS,
                 input_text="".join(f"{c}\n" for c in candidates),
+                object_inputs=self.object_inputs,
             ),
         )
         return tuple(
@@ -121,7 +128,8 @@ class CodeObjects:
         if commit not in self._trees:
             blobs: dict[str, str] = {}
             modes: dict[str, str] = {}
-            for row in read_git_tree_bytes(self.repository, commit).split(b"\0"):
+            rows = read_git_tree_bytes(self.repository, commit, object_inputs=self.object_inputs)
+            for row in rows.split(b"\0"):
                 if not row:
                     continue
                 metadata, path = row.split(b"\t", 1)
@@ -144,7 +152,9 @@ class CodeObjects:
         result = run_git(
             self.repository,
             ["ls-tree", "-z", tree, "--", path],
-            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+            GitRunnerOptions(
+                timeout=GIT_METADATA_TIMEOUT_SECONDS, object_inputs=self.object_inputs
+            ),
         )
         if result.returncode:
             raise CodeObjectError(f"{path}: tree entry cannot be read: {result.stderr.strip()}")
@@ -163,7 +173,11 @@ class CodeObjects:
         for start in range(0, len(wanted), _BLOB_BATCH):
             try:
                 self._blobs.update(
-                    read_git_blobs_bytes(self.repository, wanted[start : start + _BLOB_BATCH])
+                    read_git_blobs_bytes(
+                        self.repository,
+                        wanted[start : start + _BLOB_BATCH],
+                        object_inputs=self.object_inputs,
+                    )
                 )
             except Exception as error:
                 raise CodeObjectError(f"code blobs cannot be read: {error}") from error
@@ -184,7 +198,9 @@ class CodeObjects:
 
         if blob_id in self._blobs:
             return True
-        options = GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS)
+        options = GitRunnerOptions(
+            timeout=GIT_METADATA_TIMEOUT_SECONDS, object_inputs=self.object_inputs
+        )
         exists = run_git(self.repository, ["cat-file", "-e", "--end-of-options", blob_id], options)
         if exists.returncode == _GIT_NOT_FOUND:
             return False

@@ -64,4 +64,6 @@ PUBLIC_TOOLS = (
     "knowledge_read",
     "knowledge_diff",
     "knowledge_integrity_check",
+    # MIK-R73 rule 1: the writer's mounted route, beside the reader.
+    "knowledge_write",
 )

@@ -173,10 +173,18 @@ def _admitted_leaf_roots(
         if admission.contract.memory_worktree is not None
         else None
     )
-    if not admitted_workspace.is_dir() or not admitted_code.is_dir():
-        raise ValueError("The admitted leaf MCP workspace or code worktree is unavailable.")
-    if admitted_memory is not None and not admitted_memory.is_dir():
-        raise ValueError("The admitted leaf memory worktree is unavailable.")
+    # MIK-R83 rule 6: a leaf whose worktrees no longer exist is refused by name, so the
+    # caller can see which root is gone instead of an empty read against a stale contract.
+    missing = [
+        path.as_posix()
+        for path in (admitted_workspace, admitted_code, admitted_memory)
+        if path is not None and not path.is_dir()
+    ]
+    if missing:
+        raise ValueError(
+            "The admitted leaf MCP context names worktrees that no longer exist: "
+            + ", ".join(missing)
+        )
     return admitted_workspace, admitted_code, admitted_memory
 
 

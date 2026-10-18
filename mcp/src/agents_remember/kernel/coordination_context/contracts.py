@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agents_remember.errors import ContractPlaceError
 from agents_remember.kernel.coordination_context.models import (
     ContractReaderPort,
     EnclosureSelector,
@@ -42,6 +43,11 @@ def resolve_contract(
         return None, candidate
     try:
         return reader.load_contract(candidate), candidate
+    except ContractPlaceError:
+        # MIK-R83 rule 3: a contract refused for naming another path is a
+        # refusal about the caller's inputs, not an absent contract -- passing
+        # it through is what keeps the copy from being silently ignored.
+        raise
     except Exception:
         return None, candidate
 

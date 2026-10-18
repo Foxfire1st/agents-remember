@@ -102,6 +102,9 @@ STATEFUL_REFUSALS: frozenset[str] = frozenset(
         # refused with `argument-removed` rather than read. The census drives
         # the object form, so that case is this tool's refusal proof.
         "read_ar_files",
+        # MIK-R73 rule 1: the mounted writer answers `refused` with a named code and detail for
+        # an inadmissible write (no contract, no authorization) instead of raising.
+        "knowledge_write",
     }
 )
 

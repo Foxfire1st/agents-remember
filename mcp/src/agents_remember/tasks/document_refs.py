@@ -30,6 +30,7 @@ from agents_remember.tasks.store import (
     TaskDocSourceSnapshot,
     read_task_doc_with_source,
 )
+from agents_remember.tasks.task_paths import iter_task_documents
 
 TaskAltitude = Literal["sprint", "master", "leaf"]
 
@@ -560,28 +561,17 @@ class TaskDocumentTopology:
         root = self._repo_root(repository)
         refs: set[TaskDocumentRef] = set()
         if root.is_dir():
-            # Canonical masters live exactly at ``tasks/<repo>/<task>/task.json``.
-            # A recursive glob walks every notes/, report and enclosure folder of
-            # the corpus (and admits valid-schema historical copies under notes/
-            # as live masters, the same duplication the projection's bounded walk
-            # removed) and dominates every sprint census once the tree is large
-            # (MIK-R81 rule 3: a wake for one task document reads that task, not
-            # the whole tree). Only the two canonical levels are listed.
-            for task_dir in _sorted_directories(root):
-                if task_dir.name in ("0_archive", "enclosures"):
-                    continue
-                candidate = task_dir / "task.json"
-                try:
-                    is_file = candidate.is_file()
-                except OSError:
-                    continue
-                if is_file:
-                    refs.add(
-                        TaskDocumentRef(
-                            repository=repository,
-                            path=(candidate.relative_to(root)).as_posix(),
-                        )
+            # Canonical masters live exactly at ``tasks/<repo>/<task>/task.json``,
+            # and the one walker of MIK-R83 rule 1 yields those task folders: a
+            # copy under notes/, reports/ or an enclosure folder is never met, so
+            # a valid-schema historical copy is never admitted as a live master.
+            for candidate in iter_task_documents(root):
+                refs.add(
+                    TaskDocumentRef(
+                        repository=repository,
+                        path=(candidate.relative_to(root)).as_posix(),
                     )
+                )
         for ref in overrides or {}:
             parts = Path(ref.path).parts
             if (

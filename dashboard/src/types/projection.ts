@@ -51,6 +51,14 @@ export interface AttentionItem {
   waitSeconds?: number;
 }
 
+export interface CheckoutBinding {
+  configuredRoot?: string;
+  coordinationRoot: string;
+  remedy: string;
+  state: string;
+  worktree: string;
+}
+
 export interface CloseoutCandidateNode {
   classification: string;
   generationId: string;
@@ -712,6 +720,7 @@ export interface WorkspaceProjection {
   taskCounts: TaskCounts;
   tasks: TaskEntry[];
   version: number;
+  checkoutBinding?: CheckoutBinding;
   servingBuild?: ServingBuild;
   watcherHealth?: WatcherHealth;
 }

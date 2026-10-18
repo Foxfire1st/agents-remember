@@ -111,6 +111,9 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 ViewName = Literal["source_context", "invariant", "family"]
+# The tree views the paged `ViewPayload` contract covers. `knowledge_read` also admits `record`
+# (MIK-R73 rule 2), whose single-record answer is not a paged row set and is answered by
+# `application/knowledge_reader.truth.record_view` rather than by this machinery.
 # ``VIEW_NAMES`` is the three names themselves, not three arbitrary strings: a caller that iterates it
 # is iterating admitted view names, and a caller holding a plain ``str`` must still satisfy the
 # request model's own check. Declaring the element type as the literal union says that once, instead

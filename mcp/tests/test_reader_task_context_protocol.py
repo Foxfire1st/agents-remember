@@ -117,7 +117,8 @@ class RegisteredTaskReaderContextProtocolTests(unittest.TestCase):
         leaf_naming = await read(leaf_args)
         for naming in (base_naming, leaf_naming):
             self.assertEqual(naming["state"], "named", naming)
-            self.assertNotIn("source", json.dumps(naming), naming)
+            for body_field in ("source", "content", "text", "body"):
+                self.assertNotIn(f'"{body_field}":', json.dumps(naming), naming)
         self.assertEqual([entry["path"] for entry in base_naming["files"]], [marker_name])
         self.assertFalse(base_naming["files"][0]["exists"], base_naming)
         self.assertTrue(leaf_naming["files"][0]["exists"], leaf_naming)

@@ -1,10 +1,12 @@
 """Pages of the family-complete leaf read, cut by the shared threshold (MIK-R01 with MIK-R02).
 
-The leaf read is one more response the paging seam (:mod:`agents_remember.application.
-knowledge_paging`) pages: its ordered selection is :func:`~.selection.leaf_rows`, its manifest the
-structure's digest, its policy ``family-complete-leaf/v2`` (v2 since MIK-R05 added the route chain). The same :class:`PreparedLeaf` builds
-page 1 inside a ``read_ar_files`` block and every page of ``knowledge_read``'s ``source_context``
-view, so both surfaces return one selection under one manifest (rule 6).
+The leaf read is one more response the paging seam
+(:mod:`agents_remember.application.knowledge_paging`) pages: its ordered selection is
+:func:`~.selection.leaf_rows`, its manifest the structure's digest, its policy
+``family-complete-leaf/v2`` (v2 since MIK-R05 added the route chain). The same
+:class:`PreparedLeaf` builds page 1 inside a ``read_ar_files`` block and every page of
+``knowledge_read``'s ``source_context`` view, so both surfaces return one selection under one
+manifest (rule 6).
 
 **A page that continues a family starts with the family's header reference as a literal row**
 (MIK-R02 rule 4, carried from L02): ``rows[0]`` is the ``family_header_reference`` row, which
@@ -143,10 +145,11 @@ class PreparedLeaf:
     def collapsed(self, queued: Sequence[PreparedLeaf]) -> dict[str, Any]:
         """This seed and ``queued`` as one deferred entry whose one continuation walks them all."""
 
+        total = sum(len(one.rows) for one in (self, *queued))
         return {
             "seeds": [self.seed_json, *(one.seed_json for one in queued)],
             "state": "deferred",
-            "counts": {"total": sum(len(one.rows) for one in (self, *queued)), "returned": 0},
+            "counts": {"total": total, "returned": 0, "remaining": total},
             **self._first_continuation(tuple(one.seed_json for one in queued)),
         }
 
@@ -186,6 +189,7 @@ def prepare_leaf(request: LeafRequest) -> PreparedLeaf | KnowledgeRefusal | Pagi
         policy_version=LEAF_POLICY_VERSION,
         manifest_digest=structure.manifest_digest,
         code_tree_id=None if request.code_tree is None else request.code_tree.tree,
+        index_state=request.index_state,
     )
     position = 0
     if request.resume is not None:

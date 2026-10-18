@@ -43,21 +43,22 @@ failure of the currentness step is stated as ``unverifiableReason`` and never re
 The view payload is unchanged, so a stale invariant stays visible.
 
 **The family-complete leaf read and family names (MIK-R01).** A
-``source_context`` read of a path is the leaf read: ``state: "page"`` whose ``payload.rows`` hold the
-path's invariants, each containing family's header and remaining members, their entries (each with
-its state) and the advertised families, in one declared order. An ``invariant`` view adds
+``source_context`` read of a path is the leaf read: ``state: "page"`` whose ``payload.rows``
+hold the path's invariants, each containing family's header and remaining members, their entries
+(each with its state) and the advertised families, in one declared order. An ``invariant`` view adds
 ``families``, the families containing its invariant by ID and title.
 
 **Route-chain families (MIK-R05).** After that content, ``payload.rows`` hold one compact
 ``chain_family`` row per family with a route on the path's directory or an ancestor, and
-``payload.routeChain`` states the mechanical chain (``no_governing_family`` when no route covers
-it). A ``registration_absent`` refusal of a path carries the same ``routeChain``. A
-``source_context`` read naming ``familyRevisionId`` and no path returns that family's full content.
+``payload.routeChain`` states the mechanical chain (``no_governing_family`` when no route
+covers it). A ``registration_absent`` refusal of a path carries the same ``routeChain``. A
+``source_context`` read naming ``familyRevisionId`` and no path returns that family's full
+content.
 
-**A refusal is a state, not a partial success.** ``state`` is ``view``/``result`` or ``refused``, and
-the refusal fields name the offending input. A handler never translates a refusal into an empty
-result or a default value, so a caller can always tell "nothing was selected" from "the selection was
-refused".
+**A refusal is a state, not a partial success.** ``state`` is ``view``/``result`` or
+``refused``, and the refusal fields name the offending input. A handler never translates a
+refusal into an empty result or a default value, so a caller can always tell "nothing was
+selected" from "the selection was refused".
 """
 
 from __future__ import annotations
@@ -113,6 +114,25 @@ class KnowledgeReadResponse(ToolResponse):
     routeChain: dict[str, Any] | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
+    # MIK-R73 rule 2: the `record` view answers the reader's truth view of one record -- its
+    # fields, its links with their states, and its history rows, each bounded with its total.
+    record: dict[str, Any] | None = None
+    prose: dict[str, Any] | None = None
+    memoryRoot: str | None = None
+    outgoing: list[dict[str, Any]] | None = None
+    incoming: list[dict[str, Any]] | None = None
+    timeline: dict[str, Any] | None = None
+    outgoingCount: int | None = None
+    incomingCount: int | None = None
+    timelineCount: int | None = None
+    outgoingTruncated: bool | None = None
+    incomingTruncated: bool | None = None
+    timelineTruncated: bool | None = None
+    outgoingState: dict[str, Any] | None = None
+    invariant: dict[str, Any] | None = None
+    family: dict[str, Any] | None = None
+    decision: dict[str, Any] | None = None
+    facet: dict[str, Any] | None = None
 
 
 class KnowledgeDiffResponse(ToolResponse):
@@ -149,18 +169,24 @@ class KnowledgeDiffResponse(ToolResponse):
 
 
 class KnowledgeIntegrityCheckResponse(ToolResponse):
-    """``knowledge_integrity_check``: the validator's report of one memory tree, and a leaf's worklist.
+    """``knowledge_integrity_check``: the validator's report of one memory tree and a leaf's
+    worklist.
 
     ``validation`` is the knowledge validator's report (MIK-R22) over the tree at ``memoryRoot``,
     against ``bases`` (memory commits) and the code checkout ``codeRoot``: ``ok``, ``refusalCount``,
     ``reportCount``, ``byRule`` (every rule that fired, with its count and whether it only reports),
     and ``violations`` -- every finding, refusing violations first, with ``violationsTruncated``
     set when the answer's list bound drops rows (the whole result stays whole: the log's detail
-    file is the report's location). The counts always cover the whole report. ``ok`` is the validator's own answer for this tree and these inputs; it is not a
-    statement about the code, and a report-only finding never makes it false.
+    file is the report's location). The counts always cover the whole report. ``ok`` is the
+    validator's own answer for this tree and these inputs; it is not a statement about the
+    code, and a report-only finding never makes it false.
 
     ``worklistState`` and ``worklist`` are present when the caller named a leaf: the leaf's latest
     persisted change-to-knowledge worklist (MIK-R08), or that none is persisted yet.
+
+    ``routes`` carries one row per family of the validated tree (MIK-R73 rule 4): its authored
+    routes, its route state, the mechanical suggestion of MIK-R04 rule 3 and ``differs`` -- the
+    same rows ``agents-remember knowledge-routes`` prints.
     """
 
     operation: Literal["knowledge_integrity_check"] = "knowledge_integrity_check"
@@ -169,8 +195,43 @@ class KnowledgeIntegrityCheckResponse(ToolResponse):
     codeRoot: str | None = None
     bases: list[str] = Field(default_factory=list)
     validation: dict[str, Any] | None = None
+    routes: list[dict[str, Any]] | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
     # The leaf's latest MIK-R08 worklist, when the caller named a leaf (``contractPath``).
     worklistState: Literal["present", "absent", "unreadable"] | None = None
     worklist: dict[str, Any] | None = None
+
+
+class KnowledgeWriteResponse(ToolResponse):
+    """``knowledge_write``: one planned or committed knowledge write, and its report's location.
+
+    ``state`` is the writer's own outcome: ``planned`` (the default, which writes nothing),
+    ``written`` or ``refused``. ``counts`` counts what this run produced by kind, and
+    ``problems``/``violations`` name what the caller must act on, cut to the answer's list bound
+    with ``problemsTruncated``/``violationsTruncated`` saying so -- the whole report is the file
+    at ``reportPath`` (MIK-R108 rule 3), which is the one place the full listing lives.
+
+    ``provisionalIds`` says the IDs in the report of a planning run are not the ones a committing
+    run will mint, and ``plannedBeforeRefusal`` says how many outcomes a refused run had planned
+    before it stopped: nothing was written in either case.
+    """
+
+    operation: Literal["knowledge_write"] = "knowledge_write"
+    state: Literal["planned", "written", "refused"]
+    owner: str | None = None
+    memoryRoot: str | None = None
+    codeTree: str | None = None
+    authorization: str | None = None
+    counts: dict[str, int] | None = None
+    problems: list[dict[str, Any]] | None = None
+    problemsTruncated: bool | None = None
+    violations: list[dict[str, Any]] | None = None
+    violationsTruncated: bool | None = None
+    provisionalIds: bool | None = None
+    plannedBeforeRefusal: int | None = None
+    written: list[str] | None = None
+    removed: list[str] | None = None
+    reportPath: str | None = None
+    refusalCode: str | None = None
+    refusalDetail: str | None = None

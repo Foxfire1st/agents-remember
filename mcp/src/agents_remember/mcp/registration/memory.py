@@ -52,7 +52,15 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     def memory_quality_check(
         request: MemoryQualityCheckRequest,
     ) -> dict[str, Any]:
-        """Check memory before closeout: findings, counts and the checklist location, not semantic certification. Pass a sync, start or poll request; candidate runs use the leaf contract. Ready memory also requires validated curator_coherence. Longer explanation: docs/tool-details.md."""
+        """
+        Check memory before closeout: findings, counts and the checklist location, not semantic
+        certification. Pass a sync, start or poll request; candidate runs use the leaf contract.
+        Ready memory also requires validated curator_coherence. Four operations have no tool, by
+        design: the conversion (it runs inside the crossing sync, or once per repository), the
+        index build (every read builds it on demand), the formatter (the writer renders canonical
+        files), and the worklist (this tool computes it and `knowledge_integrity_check` returns
+        it). Longer explanation: docs/tool-details.md.
+        """
         if isinstance(request, MemoryQualityPollRequest):
             return memory_quality_check_poll_payload(config, request)
         if isinstance(request, MemoryQualityStartRequest):

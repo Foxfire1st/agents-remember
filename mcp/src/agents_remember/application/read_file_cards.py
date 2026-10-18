@@ -37,10 +37,10 @@ from agents_remember.application.knowledge_leaf.pages import (
 # Packet rule 1: up to this many repository-relative paths per call.
 READ_AR_FILES_MAX_PATHS = 20
 
-# How the states were measured, while MIK-R73 rule 7 still measures at the
-# checkout's HEAD tree. L73 keeps the field and moves the measurement to the
-# working tree; the value then becomes "working-tree".
-CODE_STATE_HEAD = "head"
+# Where the states were measured: the commit when the checkout is clean, else its captured
+# working tree (MIK-R73 rule 7). ``unmeasured`` is a checkout whose HEAD tree cannot be read.
+CODE_STATE_COMMIT = "commit"
+CODE_STATE_WORKING_TREE = "working-tree"
 
 # A record asks the caller to act when its computed state is not current
 # (packet rule 1: stale, anchor not found, refused — today's vocabulary for
@@ -497,7 +497,8 @@ def aggregate_state(counts: dict[str, int]) -> InvariantState | None:
 
 __all__ = [
     "ACTION_STATES",
-    "CODE_STATE_HEAD",
+    "CODE_STATE_COMMIT",
+    "CODE_STATE_WORKING_TREE",
     "READ_AR_FILES_MAX_PATHS",
     "CardRecords",
     "CardSelection",

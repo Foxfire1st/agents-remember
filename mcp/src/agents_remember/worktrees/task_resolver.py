@@ -21,12 +21,15 @@ from agents_remember.tasks.task_paths import (
     ENCLOSURES_DIR,
     NOTES_DIR,
     SERIES_CONTRACT_FILENAME,
+    canonical_contract_place,
     enclosure_repository_tasks,
     is_archived_path,
     is_below_notes,
     is_enclosure_contract,
     is_foreign_enclosure_contract,
     iter_leaf_enclosure_contracts,
+    iter_task_contracts,
+    iter_task_folder_contracts,
     leaf_enclosure_dir,
     leaf_enclosure_path,
     series_contract_path,
@@ -39,6 +42,7 @@ __all__ = [
     "NOTES_DIR",
     "SERIES_CONTRACT_FILENAME",
     "TaskResolutionError",
+    "canonical_contract_place",
     "enclosure_repository_tasks",
     "is_archived_path",
     "is_below_notes",
@@ -46,6 +50,8 @@ __all__ = [
     "is_foreign_enclosure_contract",
     "iter_active_series_contracts",
     "iter_leaf_enclosure_contracts",
+    "iter_task_contracts",
+    "iter_task_folder_contracts",
     "leaf_enclosure_dir",
     "leaf_enclosure_path",
     "legacy_task_folder_name",
@@ -88,12 +94,9 @@ def task_root_candidates(coordination_root: Path, repo_name: str, task_name: str
 
 
 def iter_active_series_contracts(repo_task_root: Path) -> Iterator[Path]:
-    if not repo_task_root.is_dir():
-        return
-    for path in sorted(repo_task_root.rglob(SERIES_CONTRACT_FILENAME)):
-        if is_archived_path(path) or ENCLOSURES_DIR in path.parts:
-            continue
-        yield path
+    """Every live task's own series contract, at the canonical place (MIK-R83 rule 1)."""
+
+    yield from iter_task_folder_contracts(repo_task_root)
 
 
 def resolve_active_task_root(

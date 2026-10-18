@@ -201,6 +201,11 @@ file with your own tools. Paging stays: a page is within the bound, and a
 view whose result is a list to work through writes the list as a report and
 answers with the counts, the first entries and the report's location.
 
+Two counts are defined once and always mean this: `counts.unresolved_anchor_total`
+is the number of selected items whose anchor was not read from the blob it was
+recorded against, and a currentness `counts` block covers every invariant the
+answer names, including one it only names as a relationship.
+
 `state: "legacy-format"` means the memory tree is not converted (it holds no
 `knowledge/layout.json`). The refusal names how the tree converts (the
 crossing sync for a line that descends from a converted line, or

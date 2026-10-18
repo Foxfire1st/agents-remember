@@ -20,12 +20,20 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import ValidationError
 
+if TYPE_CHECKING:
+    from agents_remember.application.knowledge_reader.selection import ReaderSelection
+
+from agents_remember.application.knowledge_currentness.observe import observe_entry, open_code_tree
 from agents_remember.application.knowledge_leaf.selection import derived_title
-from agents_remember.memory.knowledge_index import KnowledgeIndex, Link, Record
+from agents_remember.memory.knowledge.requirement_endpoint import (
+    latest_approved_requirement_version,
+    resolve_requirement_endpoint,
+)
+from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex, Link, Record
 from agents_remember.models.knowledge_files.decisions import (
     derived_status,
     governs_links,
@@ -170,8 +178,10 @@ def record_link_target(target: str | Anchor | RequirementReference) -> dict[str,
     return {"kind": "requirement", "requirement": document}
 
 
-def link_document(index: KnowledgeIndex, link: Link) -> dict[str, Any]:
-    """One indexed relationship, with the record at either end summarised."""
+def link_document(
+    index: KnowledgeIndex, link: Link, selection: ReaderSelection | None = None
+) -> dict[str, Any]:
+    """One indexed relationship, with the record at either end summarised and its state assessed."""
 
     document: dict[str, Any] = {
         "source": link.source,
@@ -194,7 +204,100 @@ def link_document(index: KnowledgeIndex, link: Link) -> dict[str, Any]:
         document["sourceRecord"] = record_summary(index, link.source)
     if link.target_kind == "record":
         document["targetRecord"] = record_summary(index, link.target)
+    document["targetState"] = _target_state(
+        index, link.target_kind, link.target, selection, detail=link.detail
+    )
     return document
+
+
+def _target_state(
+    index: KnowledgeIndex,
+    kind: str,
+    target: str,
+    selection: ReaderSelection | None,
+    *,
+    detail: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """What a link's target is at this read: present or retired, current or stale, resolved or not.
+
+    MIK-R73 rule 2. A record target is the record the index holds, or ``retired`` when its status
+    says it left the line. Anchors use the full MIK-R03 observation at the captured tree; routes
+    are current when that tree holds their path and stale when absent. Requirements carry their
+    owner's answer, including its refusal code, archival flag and latest approved version.
+    """
+
+    if kind == "record":
+        return _record_target_state(index, target)
+    if kind in ("anchor", "code"):
+        return _code_target_state(target, detail or {}, selection)
+    if kind in ("route", "file"):
+        return _route_target_state(target, selection)
+    if kind == "requirement":
+        reference = RequirementReference.model_validate(
+            {
+                key: value
+                for key, value in (detail or {}).items()
+                if key in RequirementReference.model_fields
+            }
+        )
+        endpoint = resolve_requirement_endpoint(
+            None if selection is None else selection.coordination_root, reference
+        )
+        return {
+            "state": endpoint.state,
+            "code": endpoint.code,
+            "detail": endpoint.detail,
+            "archived": endpoint.archived,
+            "latestApproved": None
+            if endpoint.task_root is None
+            else latest_approved_requirement_version(endpoint.task_root, reference.id),
+        }
+    return {"state": "unverifiable", "detail": f"this reader does not assess a {kind} target"}
+
+
+def _record_target_state(index: KnowledgeIndex, target: str) -> dict[str, Any]:
+    found = index.record(target).value
+    if found is None:
+        return {"state": "absent", "detail": f"the tree holds no record {target}"}
+    if found.status in _RETIRED_STATUSES:
+        return {"state": "retired", "status": found.status}
+    return {"state": "present", "status": found.status}
+
+
+def _code_target_state(
+    target: str, anchor: Mapping[str, Any], selection: ReaderSelection | None
+) -> dict[str, Any]:
+    tree = None if selection is None else selection.code_tree
+    # The same link-to-entry adapter as reconsideration_gate_reason; nothing is indexed or authored.
+    observed = observe_entry(
+        Entry("link", "realization", "", target, "", {"anchor": dict(anchor)}), open_code_tree(tree)
+    ).to_document()
+    observed.pop("id")
+    observed.pop("kind")
+    return {**observed, "codeTree": None if tree is None else tree.to_document()}
+
+
+def _route_target_state(target: str, selection: ReaderSelection | None) -> dict[str, Any]:
+    tree = None if selection is None else selection.code_tree
+    code = open_code_tree(tree)
+    document: dict[str, Any] = {
+        "path": target,
+        "codeTree": None if tree is None else tree.to_document(),
+    }
+    if code.problem is not None:
+        return {**document, "state": "unverifiable", "reason": code.problem}
+    present = (
+        target == "."
+        or target in code.files
+        or any(path.startswith(f"{target}/") for path in code.files)
+    )
+    return {
+        **document,
+        "state": "current" if present else "stale",
+    }
+
+
+_RETIRED_STATUSES = frozenset({"retired", "superseded", "withdrawn"})
 
 
 def reference_items(

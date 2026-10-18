@@ -32,11 +32,7 @@ from agents_remember.application.knowledge_currentness.state import (
     invariant_currentness,
     invariant_state,
 )
-from agents_remember.application.knowledge_currentness.surface import (
-    read_currentness,
-    requested_code_tree,
-    returned_records,
-)
+from agents_remember.application.knowledge_currentness.surface import returned_records
 
 __all__ = [
     "EXTRACTOR_VERSION",
@@ -54,7 +50,5 @@ __all__ = [
     "observation_key",
     "observe_entry",
     "open_code_tree",
-    "read_currentness",
-    "requested_code_tree",
     "returned_records",
 ]

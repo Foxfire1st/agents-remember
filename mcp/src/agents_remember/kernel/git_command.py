@@ -144,6 +144,13 @@ class GitRunnerOptions:
     timeout: float = GIT_LOCAL_TIMEOUT_SECONDS
     identity: dict[str, str] | None = None
     new_session: bool = False
+    object_inputs: Path | None = None
+    """A second object store the command may read, never write (MIK-R73 rule 7).
+
+    A working-tree capture stages its blobs outside the repository, because a read may not write
+    into it. The captured tree is read back through Git's own ``GIT_ALTERNATE_OBJECT_DIRECTORIES``:
+    one mechanism, read-only, no copy of the objects and no second observation path.
+    """
 
 
 @dataclass(frozen=True)
@@ -246,6 +253,14 @@ def run_git_bytes(
     return _run_git(repo_root, args, _git_run(settings, repo_root), raw_output=True)
 
 
+def object_input_environment(object_inputs: Path | None) -> dict[str, str]:
+    """The environment that makes a read see objects held outside the repository."""
+
+    if object_inputs is None:
+        return {}
+    return {"GIT_ALTERNATE_OBJECT_DIRECTORIES": object_inputs.as_posix()}
+
+
 def _git_run(settings: GitRunnerOptions, repo_root: Path) -> _GitRun:
     """How one observed command runs: its sanitized environment, identity and aim."""
 
@@ -254,6 +269,7 @@ def _git_run(settings: GitRunnerOptions, repo_root: Path) -> _GitRun:
         if name in GIT_REPOSITORY_SELECTOR_ENV:
             raise ValueError(f"{name} is a Git repository selector and cannot be set as identity")
         environment[name] = value
+    environment.update(object_input_environment(settings.object_inputs))
     return _GitRun(
         work_dir=repo_root if settings.work_dir is None else settings.work_dir,
         input_text=settings.input_text,
@@ -471,11 +487,16 @@ def _wait_process(
             return process.communicate()
 
 
-def _read_git_bytes(root: Path, args: list[str]) -> bytes:
+def _read_git_bytes(root: Path, args: list[str], *, object_inputs: Path | None = None) -> bytes:
     result = _run_git(
         root,
         args,
-        _GitRun(root, None, GIT_LOCAL_TIMEOUT_SECONDS, git_environment()),
+        _GitRun(
+            root,
+            None,
+            GIT_LOCAL_TIMEOUT_SECONDS,
+            {**git_environment(), **object_input_environment(object_inputs)},
+        ),
         raw_output=True,
     )
     if result.returncode:
@@ -646,7 +667,9 @@ def shared_blob_reads() -> Iterator[None]:
         _BLOB_READS.reset(token)
 
 
-def read_git_blobs_bytes(root: Path, blob_ids: Iterable[str]) -> dict[str, bytes]:
+def read_git_blobs_bytes(
+    root: Path, blob_ids: Iterable[str], *, object_inputs: Path | None = None
+) -> dict[str, bytes]:
     """Read many fully named blobs' original bytes through one ``git cat-file --batch``.
 
     The result maps each requested ID to its exact bytes (no decoding, no newline
@@ -658,6 +681,10 @@ def read_git_blobs_bytes(root: Path, blob_ids: Iterable[str]) -> dict[str, bytes
         require_git_object_id(blob_id)
     if not requested:
         return {}
+    if object_inputs is not None:
+        # A capture's store lives only as long as its read, so its bytes are never pooled with
+        # the repository's: the pool is keyed by repository root and blob id alone.
+        return _batch_blobs(root, requested, object_inputs=object_inputs)
     shared = _BLOB_READS.get()
     held = {} if shared is None else _held_blobs(shared, root, requested)
     missing = [blob_id for blob_id in requested if blob_id not in held]
@@ -677,7 +704,9 @@ def _held_blobs(
     }
 
 
-def _batch_blobs(root: Path, requested: list[str]) -> dict[str, bytes]:
+def _batch_blobs(
+    root: Path, requested: list[str], *, object_inputs: Path | None = None
+) -> dict[str, bytes]:
     result = _run_git(
         root,
         ["cat-file", "--batch"],
@@ -685,7 +714,7 @@ def _batch_blobs(root: Path, requested: list[str]) -> dict[str, bytes]:
             root,
             "".join(f"{blob}\n" for blob in requested),
             GIT_LOCAL_TIMEOUT_SECONDS,
-            git_environment(),
+            {**git_environment(), **object_input_environment(object_inputs)},
         ),
         raw_output=True,
     )
@@ -737,10 +766,10 @@ def merge_file_bytes(
     return result.stdout, result.returncode
 
 
-def read_git_tree_bytes(root: Path, tree: str) -> bytes:
+def read_git_tree_bytes(root: Path, tree: str, *, object_inputs: Path | None = None) -> bytes:
     """Read recursive NUL-delimited tree rows with original pathname bytes."""
     require_git_object_id(tree)
-    return _read_git_bytes(root, ["ls-tree", "-r", "-z", tree])
+    return _read_git_bytes(root, ["ls-tree", "-r", "-z", tree], object_inputs=object_inputs)
 
 
 def _preparation_output(root: Path, args: list[str]) -> str:

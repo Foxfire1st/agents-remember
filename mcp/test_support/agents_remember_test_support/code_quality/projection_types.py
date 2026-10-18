@@ -31,6 +31,7 @@ SCHEMA_OUTPUT = Path("dashboard/src/types/projection.schema.json")
 TYPESCRIPT_OUTPUT = Path("dashboard/src/types/projection.ts")
 
 DEFINITION_RENAMES = {
+    "CheckoutBindingPayload": "CheckoutBinding",
     "ServingBuildPayload": "ServingBuild",
     "WatcherHealthPayload": "WatcherHealth",
 }

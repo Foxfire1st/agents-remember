@@ -1031,3 +1031,57 @@ class TestRegisteredWalkCompleteness:
             assert len(ids) == pages[0]["page"]["total"] == len(set(ids))
         finally:
             world.close()
+
+
+def test_the_record_view_answers_one_records_truth_as_a_view(tmp_path: Path) -> None:
+    """MIK-R73 rule 2: `knowledge_read` view `record` reads one record and its history.
+
+    Through the registered tool, on a converted tree: the family's own record by its text ID, with
+    its link states, its members and its history rows; a record the tree does not hold is refused
+    by name; and the view without a `recordId` is refused before anything is read.
+    """
+
+    world = EntryPointWorld()
+    try:
+        write_family_tree(world.memory, ["One.", "Two."])
+        outcome, answer = world.call(
+            "knowledge_read",
+            {"memoryRoot": str(world.memory), "view": "record", "recordId": FAMILY},
+        )
+        assert outcome == "RETURNED" and answer is not None, answer
+        assert answer["state"] == "view" and answer["view"] == "record", answer
+        assert answer["record"]["id"] == FAMILY, answer
+        # F03: the answer names the record and where it is, and never carries its document.
+        assert "document" not in answer["record"], answer
+        assert answer["record"]["path"].endswith(".json"), answer
+        assert answer["record"]["heading"], answer
+        # F01: every link states what its target is at this read's code tree.
+        assert answer["outgoing"], answer
+        for link in answer["incoming"] + answer["outgoing"]:
+            assert "targetState" in link, link
+        assert {
+            link["target"]["id"]: link["targetState"]["state"]
+            for link in answer["outgoing"]
+            if link["relation"] == "member"
+        } == {_member(0): "present", _member(1): "present"}
+        # F02: the timeline is read at the tree's commit, not reported as uncommitted-and-unread.
+        assert answer["timeline"]["sources"], answer["timeline"]
+        assert all(
+            source["state"] != "the memory tree has no commit"
+            for source in answer["timeline"]["sources"].values()
+        ), answer["timeline"]
+
+        missing_outcome, missing = world.call(
+            "knowledge_read",
+            {"memoryRoot": str(world.memory), "view": "record", "recordId": "FAM-NOT0001"},
+        )
+        assert missing_outcome == "RETURNED" and missing is not None, missing
+        assert missing["state"] == "refused" and missing["refusalCode"] == "selector_absent"
+
+        unnamed_outcome, unnamed = world.call(
+            "knowledge_read", {"memoryRoot": str(world.memory), "view": "record"}
+        )
+        assert unnamed_outcome == "RETURNED" and unnamed is not None, unnamed
+        assert unnamed["state"] == "refused" and unnamed["refusalCode"] == "invalid-input"
+    finally:
+        world.close()

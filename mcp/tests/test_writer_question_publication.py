@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from agents_remember.application import knowledge_write_route as write_body
 from agents_remember.application.knowledge_writer import (
     Owner,
     WriteRequest,
@@ -133,7 +134,7 @@ def test_loaded_settings_root_mismatch_refuses_raise_before_publication(
     world = build_world(tmp_path / "writer")
     port, path = setup_port(tmp_path / "questions")
     port.config.config_path.write_text("{}")
-    monkeypatch.setattr(knowledge_write_route, "load_config", lambda _path: port.config)
+    monkeypatch.setattr(write_body, "load_config", lambda _path: port.config)
     questions = knowledge_write_route.LeafQuestions(
         argparse.Namespace(config=str(port.config.config_path)), load_contract(world.contract)
     )

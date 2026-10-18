@@ -10,10 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agents_remember.errors import ContractPlaceError
 from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
 from agents_remember.worktrees.task_resolver import (
-    SERIES_CONTRACT_FILENAME,
-    is_archived_path,
+    iter_task_contracts,
     resolve_active_task_root,
     series_contract_path,
 )
@@ -103,11 +103,11 @@ class WorktreeContractReader:
         tasks_root = coordination_root / "tasks" / code_repository_name
         if not tasks_root.is_dir():
             return None
-        for contract_file in sorted(tasks_root.rglob(SERIES_CONTRACT_FILENAME)):
-            if is_archived_path(contract_file):
-                continue
+        for contract_file in iter_task_contracts(tasks_root):
             try:
                 contract = self.load_contract(contract_file)
+            except ContractPlaceError:
+                raise
             except (ContractError, OSError):
                 continue
             if contract.worktree_group.name == target:

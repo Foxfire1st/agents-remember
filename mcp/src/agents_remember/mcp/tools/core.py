@@ -76,6 +76,11 @@ def server_info_payload(
             "allowedRepoIds": list(config.allowed_repo_ids),
             "unusedProviderKeys": list(config.allowed_provider_ids),
             "unusedSettingsKeys": _unused_settings_keys(config),
+            **(
+                {"checkoutBinding": config.checkout_binding.as_payload()}
+                if config.checkout_binding is not None
+                else {}
+            ),
             **({"openUserSettings": open_settings} if open_settings is not None else {}),
             "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
             **(

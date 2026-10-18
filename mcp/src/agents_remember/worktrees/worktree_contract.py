@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import cast, get_args
 
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
-from agents_remember.errors import AgentsRememberError
+from agents_remember.errors import AgentsRememberError, ContractPlaceError
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.memory_mode import (
     MemoryMode,
@@ -37,6 +37,7 @@ from agents_remember.worktrees.leaf_refs import (
 )
 from agents_remember.worktrees.task_resolver import (
     TaskResolutionError,
+    canonical_contract_place,
     is_foreign_enclosure_contract,
     iter_leaf_enclosure_contracts,
     leaf_enclosure_path,
@@ -472,6 +473,7 @@ def load_contract(path: Path) -> WorktreeContract:
     if not observed_exists(path):
         raise ContractError(f"worktree contract does not exist: {path}")
     contract = parse_contract_text(observed_text(path), path=path)
+    _require_named_place(contract, path)
     if contract.unknown_cells:
         logger.warning(
             "worktree contract %s carries %d cell(s) outside their vocabulary: %s",
@@ -480,6 +482,35 @@ def load_contract(path: Path) -> WorktreeContract:
             "; ".join(contract.unknown_cells),
         )
     return contract
+
+
+def _require_named_place(contract: WorktreeContract, found_at: Path) -> None:
+    """Refuse a contract at a canonical place whose cell names another path (MIK-R83 rule 3).
+
+    Only a canonical place binds this: a contract handed in from a scratch
+    clone, a test fixture or a review bundle keeps loading as it did. At a
+    canonical place the cell is what makes the file authority, so a copy
+    beside its original is refused with both paths, never obeyed.
+    """
+
+    if not canonical_contract_place(found_at):
+        return
+    # MIK-R83 rule 3 stands without exception (Manager ruling on F11): the cell must name the file
+    # it was read from. A fixture that writes a master's path into an enclosure contract is a
+    # fixture to fix, not a rule to widen.
+    if _same_path(contract.contract_path, found_at):
+        return
+    raise ContractPlaceError(
+        found_at=found_at.as_posix(),
+        recorded=contract.contract_path.as_posix(),
+    )
+
+
+def _same_path(one: Path, other: Path) -> bool:
+    try:
+        return one.resolve() == other.resolve()
+    except OSError:
+        return one == other
 
 
 def parse_contract_text(text: str, *, path: Path) -> WorktreeContract:

@@ -1,4 +1,4 @@
-"""MIK-R25: the reviewer on Git trees -- four trees, pins, the tree view, reopen, legacy, archive.
+"""MIK-R25: the reviewer on Git trees -- four trees, pins, the tree view, reopen, legacy.
 
 The fixture is a coordination root holding one task and one leaf enclosure, a code repository and a
 converted memory repository (``main`` is the official line of both), and the leaf's two linked

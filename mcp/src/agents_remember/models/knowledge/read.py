@@ -216,6 +216,8 @@ class KnowledgeReadContext(KnowledgeModel):
     knowledge: SnapshotIdentity
     repository_root: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
     code_tree_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
+    code_state: Literal["commit", "working-tree"] | None = Field(default=None)
+    """Where the code tree was observed: the commit, or a captured working tree (MIK-R73 rule 7)."""
     task_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
 
     @model_validator(mode="after")
@@ -390,7 +392,14 @@ class KnowledgeReadCounts(KnowledgeModel):
     primary_items_remaining: int = Field(ge=0)
     distinct_source_locations_total: int = Field(ge=0)
     distinct_source_paths_total: int = Field(ge=0)
-    unresolved_anchor_total: int = Field(ge=0)
+    unresolved_anchor_total: int = Field(
+        ge=0,
+        description=(
+            "the number of selected items whose anchor was not read from the blob it was "
+            "recorded against; an item counts here only when its recorded blob could not be "
+            "read, so a resolved anchor is never counted"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_consistent_page_arithmetic(self) -> KnowledgeReadCounts:

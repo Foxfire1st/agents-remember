@@ -372,7 +372,7 @@ class NamingTests(unittest.TestCase):
     def test_memory_states_travel_with_the_answer(self) -> None:
         result = self._read([CODE_FILE])
         self.assertEqual(result["memoryState"], "converted")
-        self.assertEqual(result["codeState"], "head")
+        self.assertEqual(result["codeState"], "commit")
         self.assertTrue(result["codeTree"])
 
 
@@ -473,6 +473,44 @@ class StaleNamingTests(unittest.TestCase):
         self.assertTrue(named["id"].startswith("INV-"))
         self.assertEqual(named["kind"], "invariant")
         self.assertEqual(named["heading"], "Landing pair")
+
+    def test_an_uncommitted_edit_is_observed_at_the_working_tree(self) -> None:
+        """MIK-R73 rule 7: the states are measured on the bytes the caller sees.
+
+        The edit is made and left uncommitted: before the change the block said ``head`` and named
+        the record current at a tree that no longer holds the function. Afterwards the block states
+        ``working-tree``, names the captured tree, and the anchored record reads stale. The capture
+        writes nothing: HEAD, the index and the object store are byte-identical after the read.
+        """
+
+        from knowledge_writer_test_support import git as _git  # noqa: PLC0415
+
+        before = self._read([CODE_FILE])
+        self.assertEqual(before["codeState"], "commit")
+        head_before = _git(self.code, "rev-parse", "HEAD").strip()
+        index_before = (self.code / ".git" / "index").read_bytes()
+        objects_before = sorted(p.name for p in (self.code / ".git" / "objects").rglob("*"))
+
+        path = self.code / CODE_FILE
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "return (code, memory)", "return (memory, code)"
+            ),
+            encoding="utf-8",
+        )
+
+        edited = self._read([CODE_FILE])
+
+        self.assertEqual(edited["codeState"], "working-tree")
+        self.assertNotEqual(edited["codeTree"], before["codeTree"])
+        self.assertEqual(edited["files"][0]["cardState"], "stale")
+        self.assertEqual(edited["files"][0]["recordCounts"]["stale"], 1)
+        self.assertEqual(_git(self.code, "rev-parse", "HEAD").strip(), head_before)
+        self.assertEqual((self.code / ".git" / "index").read_bytes(), index_before)
+        self.assertEqual(
+            sorted(p.name for p in (self.code / ".git" / "objects").rglob("*")), objects_before
+        )
+        self.assertIn("pkg/landing.py", _git(self.code, "status", "--porcelain"))
 
     def test_a_current_card_names_no_record(self) -> None:
         result = self._read([CODE_FILE])

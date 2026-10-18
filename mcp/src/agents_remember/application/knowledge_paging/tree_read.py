@@ -99,6 +99,12 @@ from agents_remember.application.published_intent import (
     SelectedKnowledgeDataset,
     memory_tree_block,
 )
+from agents_remember.application.worktree_code_state import (
+    CODE_STATE_WORKING_TREE,
+    WorktreeCapture,
+    WorktreeCaptureError,
+    capture_worktree,
+)
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge_index import KnowledgeIndex
 from agents_remember.models.knowledge.continuation import KnowledgeContinuation
@@ -270,48 +276,40 @@ def read_tree_page(
         relative_locations=relative_locations,
     )
     resume = None
+    capture: WorktreeCapture | None = None
     if request.continuation is not None:
         resume = read_continuation(request.continuation, view=request.view)
         if isinstance(resume, PagingRefusal):
             return _refused(read, resume.code, resume.detail), None
-        policy, version = _POLICIES[resume.response]
-        refusal: PagingRefusal | None = request_binding_refusal(
-            resume,
-            memory_tree_id=tree.tree_key,
-            selection_policy=policy,
-            policy_version=version,
-        )
-        refusal = (
-            refusal
-            or _subject_refusal(request, resume, lambda named: _family_spelling(read, named)[0])
-            or ordering_refusal(resume, ordering_input=request.ordering_input)
-            or resolution_refusal(resume, code_tree_id=request.code_tree_id)
-        )
+        refusal, capture = _resume_refusal(read, request, resume)
         if refusal is not None:
             return _refused(read, refusal.code, refusal.detail), None
-        absent = _resumed_revision_absent(read, resume)
-        if absent is not None:
-            return _refused(read, "selector_absent", absent), None
-        read = _at_code_tree(read, resume.code_tree_id)
-        missing = _missing_code_tree(read, resume.code_tree_id)
-        if missing is not None:
-            return _refused(read, missing.code, missing.detail), None
+        read = _at_code_tree(
+            read,
+            resume.code_tree_id,
+            None if capture is None else capture.object_directory,
+        )
     # One shared naming resolver per answer, opened with the selection's
     # epoch: sizing (the admission measure) and projection (the answer)
     # share its caches, and projection revalidates the move. Refusals
     # above carry no resolver; a fresh absent seed still opens one (its
     # cost is one scan, its validation cannot fire in the same instant).
-    shared = NameResolver.open(
-        memory_root=read.tree.memory_root,
-        index_path=selected.database_path,
-        tree_key=read.tree.tree_key,
-        relative_locations=relative_locations,
-        selection=provenance,
-    )
-    read = replace(read, resolver=shared)
-    if resume is None:
-        return _fresh_read(read), shared
-    return _resumed_response(read, resume), shared
+    try:
+        shared = NameResolver.open(
+            memory_root=read.tree.memory_root,
+            index_path=selected.database_path,
+            tree_key=read.tree.tree_key,
+            relative_locations=relative_locations,
+            selection=provenance,
+        )
+        read = replace(read, resolver=shared)
+        if resume is None:
+            return _fresh_read(read), shared
+        return _resumed_response(read, resume), shared
+    finally:
+        # The captured blobs this page observed are readable until the page is written.
+        if capture is not None:
+            capture.close()
 
 
 def _fresh_read(read: _TreeRead) -> dict[str, Any]:
@@ -377,7 +375,93 @@ def _requested_subject(request: ToolReadRequest) -> ReadSubject:
     )
 
 
-def _at_code_tree(read: _TreeRead, code_tree_id: str | None) -> _TreeRead:
+def _resumed_working_tree(
+    read: _TreeRead, resume: KnowledgeContinuation
+) -> tuple[PagingRefusal | None, WorktreeCapture | None]:
+    """Capture the working tree a resumed walk observed again (MIK-R73 rule 7).
+
+    No capture outlives the page that made it, so a continuation captures the tree again. An
+    unchanged worktree yields the walk's tree id and the page continues at this new capture; a
+    changed one refuses the page, with the tree it walked and the tree it found, before any row of
+    the stale anchor set is served.
+    """
+
+    root = read.request.repository_root or read.workspace_root
+    if root is None:
+        return (
+            PagingRefusal(
+                "selected_input_unavailable",
+                "this walk observed a working tree and the resuming read names no code repository "
+                "root; name repositoryRoot to resume it, or start a new read",
+            ),
+            None,
+        )
+    try:
+        capture = capture_worktree(Path(root))
+    except WorktreeCaptureError as error:
+        return (
+            PagingRefusal(
+                "selected_input_unavailable",
+                f"{error}; the code changed since the first page; start the read again",
+            ),
+            None,
+        )
+    if capture.tree_id != resume.code_tree_id:
+        capture.close()
+        return (
+            PagingRefusal(
+                "selected_input_unavailable",
+                f"the walk captured the working tree {resume.code_tree_id} and the working tree is "
+                f"now {capture.tree_id}: the code changed since the first page; start the read again",
+            ),
+            None,
+        )
+    return None, capture
+
+
+def _resume_refusal(
+    read: _TreeRead, request: ToolReadRequest, resume: KnowledgeContinuation
+) -> tuple[PagingRefusal | None, WorktreeCapture | None]:
+    """Every binding a resumed walk must satisfy, and the capture a working-tree walk re-takes.
+
+    The checks keep the order the read always used: the selection's own bindings first, then the
+    requested subject's, then the walk's code tree -- which, for a working-tree walk, is captured
+    again here (MIK-R73 rule 7) before the page is pointed at it.
+    """
+
+    policy, version = _POLICIES[resume.response]
+    refusal: PagingRefusal | None = request_binding_refusal(
+        resume,
+        memory_tree_id=read.tree.tree_key,
+        selection_policy=policy,
+        policy_version=version,
+    )
+    refusal = (
+        refusal
+        or _subject_refusal(request, resume, lambda named: _family_spelling(read, named)[0])
+        or ordering_refusal(resume, ordering_input=request.ordering_input)
+        or resolution_refusal(resume, code_tree_id=request.code_tree_id)
+    )
+    if refusal is not None:
+        return refusal, None
+    absent = _resumed_revision_absent(read, resume)
+    if absent is not None:
+        return PagingRefusal("selector_absent", absent), None
+    capture: WorktreeCapture | None = None
+    if resume.code_state == CODE_STATE_WORKING_TREE:
+        refusal, capture = _resumed_working_tree(read, resume)
+        if refusal is not None:
+            return refusal, None
+    elif (missing := _missing_code_tree(read, resume.code_tree_id)) is not None:
+        return missing, None
+    return None, capture
+
+
+def _at_code_tree(
+    read: _TreeRead,
+    code_tree_id: str | None,
+    object_directory: Path | None = None,
+) -> _TreeRead:
     """The read at the walk's code tree: its objects read from the caller's root or the workspace.
 
     ``None`` resolves nothing: the walk's anchors and currentness are then read at no tree.
@@ -392,7 +476,7 @@ def _at_code_tree(read: _TreeRead, code_tree_id: str | None) -> _TreeRead:
     context = KnowledgeReadContext.model_validate(
         {**read.context.model_dump(), "code_tree_id": tree, "repository_root": root}
     )
-    code = None if tree is None or root is None else CodeTree(Path(root), tree)
+    code = None if tree is None or root is None else CodeTree(Path(root), tree, object_directory)
     return replace(read, context=context, code_tree=code)
 
 
@@ -558,6 +642,8 @@ def _view_response(
         policy_version=VIEW_POLICY_VERSION,
         manifest_digest=whole.manifest_digest,
         code_tree_id=read.context.code_tree_id,
+        index_state=read.tree.index_state,
+        code_state=read.context.code_state,
     )
     position = 0
     if resume is not None:

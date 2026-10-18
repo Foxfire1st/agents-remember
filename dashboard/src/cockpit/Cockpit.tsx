@@ -93,6 +93,14 @@ const RAIL_TRANSITION = { duration: 0.18 };
 // store subscriptions. Measured residual before this: a uniform ~150–250 ms reconcile per setView.
 // Cockpit wires the live SSE streams, then renders the presentational shell. The shell is split
 // out so the dev gallery (/dev/bench) renders the exact same surface against fixture state.
+function clearReaderHash(): void {
+  // MIK-R73 rule 9: drop the reader's shareable `#knowledge?…` address when the reader is left.
+  if (typeof window === 'undefined') return;
+  if (!parseReaderHash(window.location.hash)) return;
+  const { pathname, search } = window.location;
+  window.history.replaceState(window.history.state, '', pathname + search);
+}
+
 export function Cockpit() {
   useEffect(() => connectState(), []);
   useEffect(
@@ -142,7 +150,14 @@ interface CockpitShellState {
 }
 
 function useCockpitShellState(initialView: CockpitView): CockpitShellState {
-  const [view, setView] = useState<CockpitView>(() => parseReviewHash(window.location.hash) ? 'operations' : initialView);
+  const [view, setViewState] = useState<CockpitView>(() => parseReviewHash(window.location.hash) ? 'operations' : initialView);
+  // MIK-R73 rule 9: the reader's address lives in the URL hash (`#knowledge?…`), and the
+  // reader is never unmounted. Leaving the view clears the hash, so a later switch does not
+  // resurrect the address it was left on -- the way `#review` is cleared when it is left.
+  const setView = useCallback((next: CockpitView) => {
+    if (next !== 'knowledge') clearReaderHash();
+    setViewState(next);
+  }, []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notes, setNotes] = useState<NotesReaderTarget | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);

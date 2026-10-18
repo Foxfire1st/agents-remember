@@ -10,7 +10,14 @@ whether the file was reused, its path, its state (``complete`` or ``partial``) w
 and the build's counts and time. The index is a derived SQLite file, never a source of truth: the
 text files in Git are, and the read tools build or reuse the index of the tree they are asked about.
 
-Exit status: 0 for a complete index, 1 for a partial one, 2 when the tree cannot be read.
+A tree without ``knowledge/layout.json`` is not a converted memory tree: the command prints
+``state: "legacy-format"`` with the cutover lock's sentence and exits 2 (MIK-R73 rule 6), never
+``complete``. A duplicate record ID is by design a ``partial`` index rather than a refusal: the
+index must answer for a tree the validator would refuse, so it keeps the first file in path order
+and names the second file as the problem.
+
+Exit status: 0 for a complete index, 1 for a partial one, 2 when the tree cannot be read or is
+unconverted memory.
 """
 
 from __future__ import annotations
@@ -25,11 +32,18 @@ from agents_remember.memory.knowledge_index import (
     MemoryTreeError,
     default_cache_directory,
 )
+from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, legacy_format_refusal
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--memory-root", type=Path, help="A memory working tree to index.")
+    source.add_argument(
+        "--memory-root",
+        type=Path,
+        help="A memory working tree to index. A duplicate record ID makes the index partial, "
+        "naming the second file as the problem; a tree without knowledge/layout.json is "
+        "refused as legacy-format.",
+    )
     source.add_argument("--repository", type=Path, help="A memory repository to read a tree from.")
     parser.add_argument("--revision", help="The commit, tree or ref to index (with --repository).")
     cache = parser.add_mutually_exclusive_group(required=True)
@@ -62,6 +76,32 @@ def run(args: argparse.Namespace) -> int:
     with index:
         outcome = cache.last_outcome
         report = None if outcome is None else outcome.report
+        if not index.state.converted:
+            # MIK-R73 rule 6: an unconverted tree is never answered "complete".
+            print(
+                json.dumps(
+                    {
+                        "key": index.state.key,
+                        "path": str(index.database_path),
+                        "state": LEGACY_FORMAT_CODE,
+                        "converted": False,
+                        "refusal": str(
+                            legacy_format_refusal(
+                                args.memory_root if args.memory_root is not None else repository,
+                                operation="knowledge-index",
+                                subject=(
+                                    f"the memory tree {args.memory_root}"
+                                    if args.memory_root is not None
+                                    else f"the memory tree {repository} at {args.revision}"
+                                ),
+                            )
+                        ),
+                        "problems": [{"path": p, "detail": d} for p, d in index.state.problems],
+                    },
+                    indent=2,
+                )
+            )
+            return 2
         print(
             json.dumps(
                 {

@@ -99,15 +99,17 @@ def _register_orientation_tools(
         refresh: Any = _REMOVED_ARGUMENT,
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
-        """Name which knowledge governs up to 20 paths (MIK-R109).
+        """
+        Name which knowledge governs up to 20 paths (MIK-R109).
 
-        For each path (as strings): existence, governing card as a memory-worktree
-        location (or none), record counts by state, and action-asking records by ID,
-        kind, state and card heading. Overviews once per call, nearest first. No
-        text is returned: read files with your own tools. `refresh` was removed
-        from the ordinary contract: supplying it (true, false or null) is refused
-        as `argument-removed`, like object-form entries. Stateless; no continuation.
-        Leaf calls pass task_context. Longer explanation: docs/reference/mcp-tools.md."""
+        Per path: existence, its governing card with `cardStatus`, record counts by state,
+        and the action-asking records by ID, kind, state and heading. A card the route index
+        misses is still served, and the answer names `route_index_refresh`. No text is
+        returned: open the files yourself. `refresh` is removed, and supplying it is
+        `argument-removed`. Leaf calls pass `task_context`: source and cards come from its
+        worktrees, and `worktreeScope`, `sourceRoot` and `memoryRoot` name both. Longer
+        explanation: docs/reference/mcp-tools.md.
+        """
         return read_ar_files_payload(
             config,
             repo_id,

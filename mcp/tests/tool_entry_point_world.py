@@ -824,6 +824,9 @@ class EntryPointWorld:
                 "memoryRoot": absent_memory_root,
                 "codeRoot": self.coord.as_posix(),
             },
+            # MIK-R73 rule 1: a write with no contract and no authorization is refused before
+            # anything is read, so the sweep reaches the refusal branch hermetically.
+            "knowledge_write": {"authorizationRef": ""},
         }
 
     def prepare(self, tool: str) -> None:

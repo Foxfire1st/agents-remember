@@ -2,7 +2,7 @@
   "_provenance": {
     "recaptured": "review fix round R1 (bounded directory view, subtree pages, re-anchored label, pinnedCommit/codeSource)",
     "scratch": "memory f94bc410 converted by knowledge-convert (9f1c5de6), SCRATCH-AUTHORED curation 5cf57da6/879ff5df, census 1e3c8b1e; code 48f680d5",
-    "source": "notes/reports/260928-MIK-L29-evidence/served/*.json (run_reader.py over /tmp/mik-l29-real)",
+    "source": "notes/reports/260928-MIK-L29-evidence/served/*.json (run_reader.py over the capture root, written as the placeholder /placeholder/knowledge-reader-root)",
     "trimmed": [
       "path-worktrees-dir.prose.text and path-root.prose.text to 4000 chars",
       "path-root.references.items to the first 8",
@@ -720,7 +720,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -738,7 +738,7 @@
   "code-integrate": {
     "blob": "03ef71d6dd2d2fe7b06e5dbc3d4d61931199855d",
     "codeTree": {
-      "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+      "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
       "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
     },
     "language": "python",
@@ -751,7 +751,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -770,7 +770,7 @@
   "path-integrate-file": {
     "currentness": {
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "counts": {
@@ -1255,7 +1255,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -1296,7 +1296,7 @@
     ],
     "currentness": {
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "counts": {
@@ -1487,7 +1487,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -1510,7 +1510,7 @@
   "path-test-file": {
     "currentness": {
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "counts": {
@@ -1946,7 +1946,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -1982,7 +1982,7 @@
     ],
     "currentness": {
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "counts": {
@@ -4063,7 +4063,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -4233,7 +4233,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -4494,7 +4494,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -4617,7 +4617,7 @@
     "family": {
       "currentness": {
         "codeTree": {
-          "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+          "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
           "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
         },
         "unverifiableReason": null
@@ -4898,7 +4898,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -5308,7 +5308,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -5548,7 +5548,7 @@
     "invariant": {
       "currentness": {
         "codeTree": {
-          "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+          "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
           "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
         },
         "unverifiableReason": null
@@ -5787,7 +5787,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -6834,7 +6834,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -7100,7 +7100,7 @@
     "published": {
       "commit": "published",
       "converted": true,
-      "memoryRoot": "/tmp/mik-l29-real/coord/memory-repos/ar-agents-remember"
+      "memoryRoot": "/placeholder/knowledge-reader-root/coord/memory-repos/ar-agents-remember"
     },
     "repo": "agents-remember",
     "state": "options"
@@ -7240,7 +7240,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -7624,7 +7624,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -7922,7 +7922,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",
@@ -7973,7 +7973,7 @@
       "codeNote": "HEAD of the repository's code checkout",
       "codeSource": "checkout-head",
       "codeTree": {
-        "repositoryRoot": "/tmp/mik-l29-real/ws/agents-remember",
+        "repositoryRoot": "/placeholder/knowledge-reader-root/ws/agents-remember",
         "treeId": "5e8b3423b17b87861521ae0fa736f2f9ae1f3c22"
       },
       "commit": "published",

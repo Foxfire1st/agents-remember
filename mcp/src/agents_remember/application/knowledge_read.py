@@ -105,13 +105,14 @@ __all__ = [
 ROW_COUNT_TEMPLATE = "SELECT count(*) FROM {table}"
 
 
-def open_read_context(
+def open_read_context(  # noqa: PLR0913 -- the code source travels as its three named fields
     database_path: Path,
     repository_id: str,
     *,
     repository_root: Path | None = None,
     code_tree_id: str | None = None,
     task_ref: str | None = None,
+    code_state: Literal["commit", "working-tree"] | None = None,
 ) -> KnowledgeReadContext:
     """Resolve one read context from the identity the dataset at ``database_path`` actually holds.
 
@@ -138,6 +139,7 @@ def open_read_context(
         repository_root=None if repository_root is None else str(repository_root),
         code_tree_id=code_tree_id,
         task_ref=task_ref,
+        code_state=code_state,
     )
 
 

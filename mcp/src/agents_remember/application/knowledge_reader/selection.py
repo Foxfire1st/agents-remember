@@ -40,6 +40,10 @@ from agents_remember.application.published_intent import (
     converted_memory_tree,
     select_knowledge_dataset,
 )
+from agents_remember.application.worktree_code_state import (
+    WorktreeCapture,
+    hold_observed_code_tree,
+)
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
@@ -80,7 +84,7 @@ PUBLISHED: Final = "published"
 LEAF_PREFIX: Final = "leaf:"
 SelectionKind = Literal["published", "commit", "leaf"]
 _RECENT_COMMITS: Final = 40
-CodeSource = Literal["paired-code-commit", "checkout-head", "none"]
+CodeSource = Literal["paired-code-commit", "checkout-head", "checkout-working-tree", "none"]
 _ACCEPTED_NAMES: Final = (
     "accepted forms are a full or abbreviated memory commit name, a memory branch name, "
     "'published', or leaf:<scope>"
@@ -138,9 +142,18 @@ class ReaderSelection:
     code_note: str
     code_source: CodeSource = "none"
     pinned_commit: str | None = None
+    code_state: str | None = None
+    """``commit`` or ``working-tree``: the state the code tree was observed in (MIK-R73 rule 7)."""
+    code_capture: WorktreeCapture | None = None
+    """A held working-tree capture, alive until this selection is closed."""
+    coordination_root: Path | None = None
+    """The task plane whose requirement owner resolves record links, when available."""
 
     def close(self) -> None:
         self.index.close()
+        if self.code_capture is not None:
+            self.code_capture.close()
+            self.code_capture = None
 
     def __enter__(self) -> ReaderSelection:
         return self
@@ -170,6 +183,49 @@ class ReaderSelection:
             # N2: a working-tree selection whose state equals its HEAD commit can be shared pinned.
             "pinnedCommit": self.pinned_commit,
         }
+
+
+def selection_for_dataset(  # noqa: PLR0913 - dataset binding and requirement-owner context
+    *,
+    repository_id: str,
+    memory_root: Path,
+    database_path: Path,
+    tree_key: str,
+    code_tree: CodeTree | None = None,
+    coordination_root: Path | None = None,
+) -> ReaderSelection:
+    """Open the reader's selection over a dataset a caller already resolved (MIK-R73 rule 2).
+
+    ``knowledge_read`` selects its dataset from the caller's ``memoryRoot`` and verifies it against
+    that file; the reader's own ``open_selection`` resolves the tree from the process settings
+    instead, which is the dashboard's question and not this one. This constructor therefore takes
+    the dataset and the tree key the read already holds, so a mounted record view reads exactly the
+    tree the caller named. The caller closes it (``ReaderSelection.close`` closes the index).
+    """
+
+    root = memory_root.resolve()
+    # The commit the working tree is at, so a record's history rows have an epoch to be read at
+    # (MIK-R73 rule 2); a tree with no commit names none and the timeline says so.
+    revision = _rev_parse(root, "HEAD")
+    return ReaderSelection(
+        repository_id=repository_id,
+        commit=tree_key,
+        kind="published",
+        memory_repository=root,
+        memory_root=root,
+        revision=revision,
+        index=KnowledgeIndex(Path(database_path), expected_key=tree_key),
+        code_repository=root if code_tree is None else code_tree.repository,
+        code_tree=code_tree,
+        code_note=(
+            "no code tree was resolved for this read; anchor states are unverifiable"
+            if code_tree is None
+            else "the code tree this read resolved, observed for the caller"
+        ),
+        code_source="none" if code_tree is None else "checkout-head",
+        pinned_commit=None,
+        coordination_root=coordination_root,
+    )
 
 
 def open_selection(
@@ -233,7 +289,7 @@ def _directory_selection(
     index = KnowledgeIndex(selected.database_path, expected_key=tree.tree_key)
     head = _rev_parse(memory_root, "HEAD")
     clean = head is not None and _rev_parse(memory_root, "HEAD^{tree}") == tree.tree_key
-    code_tree, note = _checkout_code_tree(scope.code_root, kind)
+    code_tree, note, code_state, capture = _checkout_code_tree(scope.code_root, kind)
     return ReaderSelection(
         repository_id=repository_id,
         commit=spelled,
@@ -245,8 +301,17 @@ def _directory_selection(
         code_repository=scope.code_root,
         code_tree=code_tree,
         code_note=note,
-        code_source="none" if code_tree is None else "checkout-head",
+        code_source=(
+            "none"
+            if code_tree is None
+            else "checkout-working-tree"
+            if code_state == "working-tree"
+            else "checkout-head"
+        ),
         pinned_commit=head if clean else None,
+        code_state=code_state,
+        code_capture=capture,
+        coordination_root=config.coordination_root,
     )
 
 
@@ -284,21 +349,39 @@ def _commit_selection(
         code_note=note,
         code_source="none" if code_tree is None else "paired-code-commit",
         pinned_commit=commit,
+        coordination_root=config.coordination_root,
     )
 
 
-def _checkout_code_tree(code_root: Path, kind: SelectionKind) -> tuple[CodeTree | None, str]:
-    """``HEAD`` of the scope's code checkout: the tree L03's published-intent block measures at
-    (ruled 2026-09-30, N1). A leaf's uncommitted code is not in it, and the note says so."""
+def _checkout_code_tree(
+    code_root: Path, kind: SelectionKind
+) -> tuple[CodeTree | None, str, str | None, WorktreeCapture | None]:
+    """The code tree the caller sees, observed once and held for the read (MIK-R73 rule 7).
 
-    tree = _rev_parse(code_root, "HEAD^{tree}")
-    if tree is None:
-        return None, f"the code checkout {code_root} has no HEAD tree; states are unverifiable"
-    if kind == "leaf":
-        return CodeTree(code_root, tree), (
-            "HEAD of the leaf's code worktree; its uncommitted code is not included"
+    The commit when the checkout is clean; otherwise the working tree, captured with Git's
+    isolated mechanism into a scratch store that the selection holds until it is closed, so the
+    captured blobs are readable for exactly as long as the read that asked for them.
+    """
+
+    observed, capture = hold_observed_code_tree(code_root)
+    if observed is None:
+        return (
+            None,
+            f"the code checkout {code_root} has no HEAD tree; states are unverifiable",
+            None,
+            None,
         )
-    return CodeTree(code_root, tree), "HEAD of the repository's code checkout"
+    tree = CodeTree(code_root, observed.tree_id, observed.object_directory)
+    where = (
+        "the working tree of the leaf's code worktree, captured for this read"
+        if observed.code_state == "working-tree" and kind == "leaf"
+        else "the working tree of the repository's code checkout, captured for this read"
+        if observed.code_state == "working-tree"
+        else "HEAD of the leaf's code worktree"
+        if kind == "leaf"
+        else "HEAD of the repository's code checkout"
+    )
+    return tree, where, observed.code_state, capture
 
 
 def _paired_code_tree(

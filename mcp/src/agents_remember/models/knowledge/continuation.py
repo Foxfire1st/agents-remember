@@ -109,6 +109,11 @@ class KnowledgeContinuation(KnowledgeModel):
     code_tree_id: str | None = Field(
         default=None, pattern=_TREE_ID_PATTERN, serialization_alias="c", validation_alias="c"
     )
+    # Whether that tree was a commit or a captured working tree (MIK-R73 rule 7). A working-tree
+    # walk captures the tree again on every page, because no capture outlives the page that made it.
+    code_state: Literal["commit", "working-tree"] | None = Field(
+        default=None, serialization_alias="cs", validation_alias="cs"
+    )
     # Seeds queued after this one, when a full ``read_ar_files`` block collapsed its tail into one
     # continuation: the walk moves on to each in turn, from its first row.
     rest: tuple[dict[str, str], ...] = Field(

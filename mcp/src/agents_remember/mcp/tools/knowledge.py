@@ -35,12 +35,16 @@ import re
 import subprocess
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import apsw
 
+from agents_remember.application.knowledge_bootstrap_admission import (
+    BootstrapRefusal,
+    admit_bootstrap_context,
+)
 from agents_remember.application.knowledge_currentness import CodeTree
 from agents_remember.application.knowledge_file_diff import (
     held_paths,
@@ -67,11 +71,42 @@ from agents_remember.application.knowledge_paging.tree_read import (
 )
 from agents_remember.application.knowledge_proofs import tree_view_proofs
 from agents_remember.application.knowledge_read import open_read_context
+from agents_remember.application.knowledge_reader.selection import (
+    READ_FAILURES,
+    selection_for_dataset,
+)
+from agents_remember.application.knowledge_reader.truth import record_view
 from agents_remember.application.knowledge_reports import ReportWriteError, write_report
+from agents_remember.application.knowledge_routes_report import (
+    family_route_documents,
+    working_tree_files,
+)
 from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
+from agents_remember.application.knowledge_write_route import (
+    BLANK_AUTHORIZATION,
+    WaveTarget,
+    WriteSubmission,
+    crossing_write_report,
+    is_converted,
+    leaf_write_report,
+    load_leaf_contract,
+    read_handoff_document,
+    unconverted_write_refusal,
+    wave_write_report,
+)
+from agents_remember.application.knowledge_writer import WriteReport
 from agents_remember.application.published_intent import (
     SelectedKnowledgeDataset,
     select_knowledge_dataset,
+)
+from agents_remember.application.worktree_code_state import (
+    CODE_STATE_COMMIT,
+    CODE_STATE_WORKING_TREE,
+    WORKING_TREE_SELECTOR,
+    CodeState,
+    WorktreeCapture,
+    capture_worktree,
+    hold_observed_code_tree,
 )
 from agents_remember.kernel.git_command import (
     GitRunnerOptions,
@@ -79,12 +114,16 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.kernel.git_preparation import GitPreparationError
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import (
     INDEX_REPOSITORY_ID,
     IndexMismatchError,
+    KnowledgeIndex,
     MemoryTreeError,
 )
+from agents_remember.memory.knowledge_index.projection import text_uuid
+from agents_remember.memory_quality.knowledge_validator.parsed import parse_tree
 from agents_remember.memory_quality.knowledge_validator.report import ValidationReport
 from agents_remember.memory_quality.knowledge_validator.trees import (
     CodeDirectory,
@@ -111,9 +150,11 @@ __all__ = [
     "DiffToolRequest",
     "IntegrityCheckRequest",
     "ReadToolRequest",
+    "WriteToolRequest",
     "knowledge_diff_payload",
     "knowledge_integrity_check_payload",
     "knowledge_read_payload",
+    "knowledge_write_payload",
 ]
 
 # The two shapes a source-resolution half can take, and the bound on how long resolving one may
@@ -149,6 +190,10 @@ class ReadToolRequest:
     the repository's memory root). ``repository_id`` is not a wire argument: a memory tree's index
     has one constant namespace (:data:`INDEX_REPOSITORY_ID`), which the server supplies and every
     response states.
+
+    ``record_id`` is a record's text ID (``INV-…``, ``FAM-…``), accepted by the ``invariant`` and
+    ``family`` views beside the revision UUIDs (MIK-R73 rule 3): the UUIDs are derived from the
+    text IDs and are stored nowhere, so a caller may name either.
     """
 
     memory_root: str
@@ -158,6 +203,7 @@ class ReadToolRequest:
     continuation: str | None = None
     invariant_revision_id: str | None = None
     family_revision_id: str | None = None
+    record_id: str | None = None
     source_path: str | None = None
     repository_root: str | None = None
     code_tree_id: str | None = None
@@ -181,6 +227,147 @@ class DiffToolRequest:
     path: str | None = None
 
 
+def _record_view(
+    request: ReadToolRequest,
+    selected: SelectedKnowledgeDataset,
+    repository_id: str,
+    *,
+    workspace_root: str | None = None,
+    coordination_root: str | None = None,
+) -> dict[str, Any]:
+    """One record's truth view: its fields, its links with their states, and its history rows.
+
+    MIK-R73 rule 2. The reader computes the answer (:func:`record_view`), over the dataset this
+    read already selected and verified, so the mounted view and the dashboard's record view cannot
+    answer differently. The answer is bounded the way every answer is: the link lists and the
+    timeline carry their first rows and their totals, and the record's prose is named by its
+    location rather than carried (MIK-R109 rule 2).
+    """
+
+    if not request.record_id:
+        return _refused_read(
+            "record",
+            repository_id,
+            "invalid-input",
+            "the record view names a `recordId`: a record's text ID (INV-…, FAM-…, DEC-…, ASM-…)",
+        )
+    tree = selected.memory_tree
+    if tree is None:
+        return _refused_read(
+            "record",
+            repository_id,
+            "snapshot_unavailable",
+            "the selection names no converted memory tree, so no record can be read",
+        )
+    memory_root = Path(request.memory_root)
+    source = _observed_source_or_none(request, workspace_root)
+    code_tree = _code_tree_of(source)
+    try:
+        selection = selection_for_dataset(
+            repository_id=repository_id,
+            memory_root=memory_root,
+            database_path=selected.database_path,
+            tree_key=tree.tree_key,
+            code_tree=code_tree,
+            coordination_root=None if coordination_root is None else Path(coordination_root),
+        )
+    except READ_FAILURES as error:
+        return _refused_read(
+            "record",
+            repository_id,
+            "snapshot_unavailable",
+            f"the selected index could not be opened: {error}",
+        )
+    try:
+        found = record_view(selection, request.record_id)
+    except READ_FAILURES as error:
+        return _refused_read(
+            "record", repository_id, "unavailable", f"the record could not be read: {error}"
+        )
+    finally:
+        selection.close()
+        if source is not None:
+            source.close()
+    if found is None:
+        return _refused_read(
+            "record",
+            repository_id,
+            "selector_absent",
+            f"the selected tree holds no record {request.record_id}",
+        )
+    prose = found.pop("prose", None)
+    # MIK-R109 rule 2: the mounted answer names the record, its file and its heading; the record's
+    # own document stays in the reader's structure (and in the file it names), never in this answer.
+    record_document = found.get("record")
+    if isinstance(record_document, dict):
+        record_document.pop("document", None)
+    answer: dict[str, Any] = {
+        "ok": True,
+        "operation": "knowledge_read",
+        "view": "record",
+        "state": "view",
+        "repositoryId": repository_id,
+        "memoryRoot": memory_root.as_posix(),
+        "memoryTree": {"treeKey": tree.tree_key, "indexState": tree.index_state},
+        **found,
+    }
+    if isinstance(prose, dict):
+        # The prose file is named, never carried: this read names where a record is.
+        answer["prose"] = {
+            "path": prose.get("path"),
+            "state": prose.get("state"),
+        }
+    _bound_record_lists(answer)
+    return answer
+
+
+def _observed_source_or_none(
+    request: ReadToolRequest, workspace_root: str | None
+) -> _ObservedSource | None:
+    """The code source a record read assesses its links at, when one resolves.
+
+    A record read is a read of recorded knowledge first: a checkout that resolves no tree still
+    answers the record and reports its anchor states as unverifiable, naming why.
+    """
+
+    try:
+        return _observe_source(request, workspace_root)
+    except _NoCodeTreeError:
+        return None
+
+
+def _code_tree_of(source: _ObservedSource | None) -> CodeTree | None:
+    """The `CodeTree` a record read assesses links at, or ``None`` when nothing resolved."""
+
+    if source is None or source.repository_root is None or source.code_tree_id is None:
+        return None
+    return CodeTree(
+        Path(source.repository_root),
+        source.code_tree_id,
+        None if source.capture is None else source.capture.object_directory,
+    )
+
+
+def _bound_record_lists(answer: dict[str, Any]) -> None:
+    """Cap the record view's link lists and timeline, each with its total beside it."""
+
+    for key in ("outgoing", "incoming"):
+        rows = answer.get(key)
+        if not isinstance(rows, list):
+            continue
+        answer[f"{key}Count"] = len(rows)
+        if len(rows) > TOOL_ANSWER_LIST_MAX:
+            answer[key] = rows[:TOOL_ANSWER_LIST_MAX]
+            answer[f"{key}Truncated"] = True
+    timeline = answer.get("timeline")
+    if isinstance(timeline, dict) and isinstance(timeline.get("events"), list):
+        events = timeline["events"]
+        answer["timelineCount"] = len(events)
+        if len(events) > TOOL_ANSWER_LIST_MAX:
+            answer["timeline"] = {**timeline, "events": events[:TOOL_ANSWER_LIST_MAX]}
+            answer["timelineTruncated"] = True
+
+
 def _refused_read(view: str, repository_id: str, code: str, detail: str) -> dict[str, Any]:
     return {
         "ok": True,
@@ -190,6 +377,94 @@ def _refused_read(view: str, repository_id: str, code: str, detail: str) -> dict
         "refusalCode": code,
         "refusalDetail": detail,
     }
+
+
+# MIK-R73 rule 2: the tree views, and `record`, the truth view of one record.
+_ADMITTED_VIEWS: Final = ("source_context", "invariant", "family", "record")
+
+
+def _submission_refusal(request: ReadToolRequest) -> dict[str, Any] | None:
+    """The refusal a read earns before its tree is opened, or ``None``.
+
+    The view name, the admitted-ordering closure and the tree itself are checked here, in
+    that order. The ordering check runs **before** the tree is opened because the view
+    layer's own refusal is the answer the caller needs and the request model cannot carry the
+    unadmitted spelling to it: ``ViewRequest.ordering_input`` is a ``Literal``, so constructing
+    the request with a fifth ordering raises instead of refusing.
+    """
+
+    view, repository_id = request.view, request.repository_id
+    if view not in _ADMITTED_VIEWS:
+        return _refused_read(
+            view,
+            repository_id,
+            "unknown_view",
+            f"{view!r} is not one of {', '.join(_ADMITTED_VIEWS)}",
+        )
+    ordering_refusal = require_admitted_ordering_input(_ordering(request))
+    if ordering_refusal is not None:
+        return _refused_read(view, repository_id, ordering_refusal.code, ordering_refusal.detail)
+    unreadable = _memory_tree_refusal(request.memory_root, "knowledge_read")
+    return None if unreadable is None else _refused_read(view, repository_id, *unreadable)
+
+
+def _moved_read_refusal(
+    view: str, repository_id: str, moved: SelectionMovedError
+) -> dict[str, Any]:
+    """The refusal of a selection that moved between selecting and projecting (MIK-R02)."""
+
+    if moved.selection_commit == moved.current_commit:
+        detail = (
+            "the memory checkout changed between selection and projection "
+            f"(selection {moved.selection_commit}); reread"
+        )
+    else:
+        detail = (
+            "the memory checkout moved between selection and projection "
+            f"(selection {moved.selection_commit}, now {moved.current_commit}); reread"
+        )
+    return _refused_read(view, repository_id, "snapshot_unavailable", detail)
+
+
+def _record_seeded(
+    request: ReadToolRequest, selected: SelectedKnowledgeDataset
+) -> tuple[ReadToolRequest, tuple[str, str] | None]:
+    """Resolve a text-ID ``recordId`` to the revision UUID its view reads (MIK-R73 rule 3).
+
+    The UUIDs a read hands out are derived from the text IDs and stored nowhere, so a caller
+    may name either: the record's own text ID is resolved through this selection's index to
+    the seed of its current revision, and the rest of the read is unchanged. A record the tree
+    does not hold, or one of another kind, is ``selector_absent`` naming the ID (Failure) --
+    never an empty, complete view that looks like an answer.
+    """
+
+    if request.record_id is None:
+        return request, None
+    view = request.view
+    if view not in ("invariant", "family"):
+        return request, (
+            "unknown_view",
+            "recordId is read by the invariant and family views; name one of them",
+        )
+    tree = selected.memory_tree
+    tree_key = None if tree is None else tree.tree_key
+    try:
+        with KnowledgeIndex(selected.database_path, expected_key=tree_key) as index:
+            record = index.record(request.record_id).value
+    except (apsw.Error, OSError, ValueError, MemoryTreeError, IndexMismatchError) as error:
+        return request, (
+            "snapshot_unavailable",
+            f"recordId {request.record_id!r} could not be resolved: {error}",
+        )
+    if record is None or record.kind != view or record.revision is None:
+        return request, (
+            "selector_absent",
+            f"recordId {request.record_id!r} names no {view} this memory tree holds at a revision",
+        )
+    seed = text_uuid("revision", f"{record.id}@{record.revision}")
+    if view == "invariant":
+        return replace(request, invariant_revision_id=seed), None
+    return replace(request, family_revision_id=seed), None
 
 
 def _memory_tree_refusal(memory_root: str, operation: str) -> tuple[str, str] | None:
@@ -275,6 +550,64 @@ def _selection_refusal(path: str, error: BaseException) -> tuple[str, str]:
         "snapshot_unavailable",
         f"the selected memory tree could not be indexed: {error} (at {path})",
     )
+
+
+@dataclass
+class _ObservedSource:
+    """The code source one read observes, and any working-tree capture it must hold until it answers.
+
+    A capture is a scratch store holding the working tree's blobs: it has to outlive the whole read
+    (the page's anchors and currentness are observed while the answer is built) and be removed
+    afterwards, so the object that observed it owns its removal.
+    """
+
+    repository_root: str | None
+    code_tree_id: str | None
+    code_state: CodeState | None
+    capture: WorktreeCapture | None = None
+
+    def close(self) -> None:
+        if self.capture is not None:
+            self.capture.close()
+            self.capture = None
+
+
+def _observe_source(request: ReadToolRequest, workspace_root: str | None) -> _ObservedSource:
+    """Resolve the code source one read observes, capturing its working tree when it differs.
+
+    Three shapes, one rule -- the read answers at the bytes the caller sees (MIK-R73 rule 7):
+
+    * ``codeTreeId: "working-tree"`` with ``repositoryRoot``: capture that checkout and read it;
+    * a named tree and root: read exactly that tree, as before;
+    * a root alone (or the mount's workspace default): the commit when the checkout is clean, else
+      its captured working tree.
+
+    The capture is returned, not closed: the read that asked for it holds it while it observes.
+    """
+
+    named_tree = request.code_tree_id
+    root = request.repository_root
+    if named_tree == WORKING_TREE_SELECTOR:
+        target = root if root is not None else workspace_root
+        if target is None:
+            raise _NoCodeTreeError("the working-tree selector with no repository root")
+        capture = capture_worktree(Path(target))
+        return _ObservedSource(target, capture.tree_id, CODE_STATE_WORKING_TREE, capture)
+    if named_tree is not None and root is not None:
+        return _ObservedSource(root, named_tree, CODE_STATE_COMMIT)
+    if root is None:
+        if named_tree is not None or workspace_root is None:
+            return _ObservedSource(None, None, None)
+        # The mount's own default: it supplies a repository when it has one, and resolves nothing
+        # when it has none -- a workspace that is not a checkout is not a caller's mistake.
+        observed, capture = hold_observed_code_tree(Path(workspace_root))
+        if observed is None:
+            return _ObservedSource(None, None, None)
+        return _ObservedSource(workspace_root, observed.tree_id, observed.code_state, capture)
+    observed, capture = hold_observed_code_tree(Path(root))
+    if observed is None:
+        raise _NoCodeTreeError(root)
+    return _ObservedSource(root, observed.tree_id, observed.code_state, capture)
 
 
 def _source_resolution(
@@ -464,35 +797,9 @@ def _read_result(
     """
 
     repository_id, view = request.repository_id, request.view
-    if view not in (
-        "source_context",
-        "invariant",
-        "family",
-    ):
-        return (
-            _refused_read(
-                view,
-                repository_id,
-                "unknown_view",
-                f"{view!r} is not one of the three named query views",
-            ),
-            None,
-            None,
-        )
-    # The admitted-ordering closure is checked **before** the tree is opened, because the view
-    # layer's own refusal is the answer the caller needs and the request model cannot carry the
-    # unadmitted spelling to it: ``ViewRequest.ordering_input`` is a ``Literal``, so constructing the
-    # request with a fifth ordering raises instead of refusing.
-    ordering_refusal = require_admitted_ordering_input(_ordering(request))
-    if ordering_refusal is not None:
-        return (
-            _refused_read(view, repository_id, ordering_refusal.code, ordering_refusal.detail),
-            None,
-            None,
-        )
-    unreadable = _memory_tree_refusal(request.memory_root, "knowledge_read")
-    if unreadable is not None:
-        return (_refused_read(view, repository_id, *unreadable), None, None)
+    refusal = _submission_refusal(request)
+    if refusal is not None:
+        return (refusal, None, None)
     # The tree is opened inside the boundary, because every failure to index or read it is a fact
     # about the selection and not a programming error.
     try:
@@ -515,43 +822,49 @@ def _read_result(
             # same moved-selection refusal as the projection seam: no
             # mixed epoch is ever bound to rows.
             raise SelectionMovedError(before_commit, provenance.commit)
-        repository_root, code_tree_id = _source_resolution(request, workspace_root)
-        context = open_read_context(
-            selected.database_path,
-            repository_id,
-            repository_root=None if repository_root is None else Path(repository_root),
-            code_tree_id=code_tree_id,
-        )
-        # MIK-R02: a tree's pages are cut by the threshold.
-        body, shared = read_tree_page(
-            request,
-            selected,
-            context,
-            extras=_tree_extras(selected),
-            scope=TreeReadScope(workspace_root=workspace_root, provenance=provenance),
-        )
+        if view == "record":
+            # MIK-R73 rule 2: one record, its links with their states and its history, answered
+            # by the reader's own truth view over this exact dataset.
+            return (
+                _record_view(
+                    request,
+                    selected,
+                    repository_id,
+                    workspace_root=workspace_root,
+                    coordination_root=coordination_root,
+                ),
+                selected,
+                None,
+            )
+        seeded, seed_refusal = _record_seeded(request, selected)
+        if seed_refusal is not None:
+            return (_refused_read(view, repository_id, *seed_refusal), None, None)
+        request = seeded
+        source = _observe_source(request, workspace_root)
+        try:
+            context = open_read_context(
+                selected.database_path,
+                repository_id,
+                repository_root=None
+                if source.repository_root is None
+                else Path(source.repository_root),
+                code_tree_id=source.code_tree_id,
+                code_state=source.code_state,
+            )
+            # MIK-R02: a tree's pages are cut by the threshold.
+            body, shared = read_tree_page(
+                request,
+                selected,
+                context,
+                extras=_tree_extras(selected),
+                scope=TreeReadScope(workspace_root=workspace_root, provenance=provenance),
+            )
+        finally:
+            # The captured blobs are readable through the whole read and removed with it.
+            source.close()
         return body, selected, shared
     except SelectionMovedError as moved:
-        if moved.selection_commit == moved.current_commit:
-            detail = (
-                "the memory checkout changed between selection and projection "
-                f"(selection {moved.selection_commit}); reread"
-            )
-        else:
-            detail = (
-                "the memory checkout moved between selection and projection "
-                f"(selection {moved.selection_commit}, now {moved.current_commit}); reread"
-            )
-        return (
-            _refused_read(
-                view,
-                repository_id,
-                "snapshot_unavailable",
-                detail,
-            ),
-            None,
-            None,
-        )
+        return (_moved_read_refusal(view, repository_id, moved), None, None)
     except _SELECTION_FAILURES as error:
         return (
             _refused_read(view, repository_id, *_selection_refusal(request.memory_root, error)),
@@ -984,6 +1297,19 @@ def knowledge_integrity_check_payload(request: IntegrityCheckRequest) -> dict[st
     return _tool_payload("knowledge_integrity_check", result, answer=answer)
 
 
+def _compact_route_row(row: Any) -> Any:
+    """One family's route row without the uncovered path list: its count stands in the answer."""
+
+    if not isinstance(row, dict):
+        return row
+    state = row.get("state")
+    if not isinstance(state, dict) or "uncovered" not in state:
+        return row
+    kept = {key: value for key, value in state.items() if key != "uncovered"}
+    kept["uncoveredTotal"] = state.get("uncoveredTotal", len(state["uncovered"]))
+    return {**row, "state": kept}
+
+
 def _integrity_answer(full: Mapping[str, Any]) -> dict[str, Any]:
     """MIK-R110 rule 6: one integrity whole result answered within the default bound.
 
@@ -999,6 +1325,18 @@ def _integrity_answer(full: Mapping[str, Any]) -> dict[str, Any]:
         for key, value in full.items()
         if key not in ENVELOPE_STRIPPED_FIELDS and value is not None
     }
+    routes = full.get("routes")
+    if isinstance(routes, list):
+        # MIK-R73 rule 4 keeps the route rows in the answer and MIK-R110 rule 6 keeps the answer
+        # bounded: the rows travel compact (counts, not the uncovered path list, which the whole
+        # result and the `knowledge-routes` command keep in full), and past the entry cap only the
+        # first rows do.
+        compact = [_compact_route_row(row) for row in routes[:TOOL_ANSWER_STATUS_ENTRY_MAX]]
+        answer["routes"] = (
+            compact
+            if len(routes) <= TOOL_ANSWER_STATUS_ENTRY_MAX
+            else {"count": len(routes), "items": compact, "truncated": True}
+        )
     validation = full.get("validation")
     if isinstance(validation, dict):
         violations = validation.get("violations")
@@ -1095,14 +1433,26 @@ def _integrity_check_result(request: IntegrityCheckRequest) -> dict[str, Any]:
             f"the paired code checkout does not exist: {inputs.code_root}",
         )
     try:
+        tree = knowledge_tree_from_directory(inputs.memory_root)
+        parsed = parse_tree(tree)
         report = validate_tree(
-            knowledge_tree_from_directory(inputs.memory_root),
+            tree,
             bases=[
                 knowledge_tree_from_git(inputs.memory_root, base, label=f"base {base}")
                 for base in inputs.bases
             ],
             code=CodeDirectory(label=inputs.code_root.as_posix(), root=inputs.code_root),
         )
+        # MIK-R73 rule 4: every family of the validated tree, its routes, the
+        # mechanical suggestion and whether they differ -- the rows the
+        # `agents-remember knowledge-routes` command prints.
+        try:
+            working_files = working_tree_files(inputs.code_root)
+        except KnowledgeTreeReadError:
+            # A code root that is not a Git checkout has no working tree to suggest routes from;
+            # the validator's report still stands and each route row says so.
+            working_files = None
+        routes = family_route_documents(parsed, set(), working_files)
     except (OSError, KnowledgeTreeReadError, ValueError) as error:
         return _refused_check(
             memory_root,
@@ -1116,6 +1466,7 @@ def _integrity_check_result(request: IntegrityCheckRequest) -> dict[str, Any]:
         "codeRoot": inputs.code_root.as_posix(),
         "bases": list(inputs.bases),
         "validation": _validation_block(report),
+        "routes": routes,
     }
 
 
@@ -1146,3 +1497,206 @@ def _validation_block(report: ValidationReport) -> dict[str, Any]:
         "violations": [violation.to_document() for violation in listed],
         "violationsTruncated": len(listed) > MAX_LISTED_VIOLATIONS,
     }
+
+
+# --- knowledge_write: the mounted writer (MIK-R73 rule 1) ---------------------
+
+
+@dataclass(frozen=True)
+class WriteToolRequest:
+    """One ``knowledge_write`` call's arguments as one value.
+
+    ``contract_path`` names a leaf (or a master, with ``crossing``): the contract is the write
+    guard, and only the memory worktree it names can be written. ``handoff`` is the hand-off
+    document itself (with ``handoff_name``); ``handoff_path`` names one on disk instead. With
+    ``repo_id`` and ``wave`` in place of a contract the call writes a taskless wave, as
+    ``knowledge-bootstrap`` does.
+    """
+
+    contract_path: str | None = None
+    handoff: dict[str, Any] | None = None
+    handoff_name: str | None = None
+    handoff_path: str | None = None
+    authorization_ref: str = ""
+    commit: bool = False
+    crossing: str | None = None
+    repo_id: str | None = None
+    wave: str | None = None
+
+
+def _refused_write(code: str, detail: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "operation": "knowledge_write",
+        "state": "refused",
+        "refusalCode": code,
+        "refusalDetail": detail,
+    }
+
+
+def _write_submission(
+    request: WriteToolRequest,
+) -> tuple[WriteSubmission | None, dict[str, Any] | None]:
+    """The submission this call carries, or the refusal its inputs earn before anything runs."""
+
+    if request.handoff is not None and request.handoff_path is not None:
+        return None, _refused_write(
+            "invalid-input",
+            "name the hand-off once: `handoff` (the document) or `handoffPath`, never both",
+        )
+    if request.handoff is not None:
+        document: object = request.handoff
+        name = request.handoff_name or "handoff.json"
+    elif request.handoff_path is not None:
+        path = Path(request.handoff_path)
+        document = read_handoff_document(path)
+        if isinstance(document, str):
+            return None, _refused_write("invalid-input", document)
+        name = request.handoff_name or path.name
+    else:
+        return None, _refused_write(
+            "invalid-input",
+            "name the hand-off: `handoff` (the document, with `handoffName`) or `handoffPath`",
+        )
+    return (
+        WriteSubmission(
+            document=document,
+            handoff_path=name,
+            authorization_ref=request.authorization_ref,
+            commit=request.commit,
+        ),
+        None,
+    )
+
+
+def _wave_write(
+    request: WriteToolRequest, submission: WriteSubmission, config: McpRuntimeConfig
+) -> WriteReport | str:
+    """The taskless wave route: the admission ``knowledge-bootstrap`` runs, then its write."""
+
+    assert request.repo_id is not None and request.wave is not None
+    admitted = admit_bootstrap_context(config, request.repo_id)
+    if isinstance(admitted, BootstrapRefusal):
+        return f"knowledge_write refuses this wave ({admitted.code}): {admitted.detail}. {admitted.next_action}"
+    memory = admitted.admission.memory_worktree
+    if memory is None or not is_converted(memory):
+        line = "no memory root" if memory is None else memory.as_posix()
+        return (
+            f"knowledge_write refuses this wave: {line} is not a converted memory tree "
+            "(it holds no knowledge/layout.json)"
+        )
+    return wave_write_report(
+        WaveTarget(
+            memory_root=memory,
+            code_root=admitted.admission.code_worktree,
+            wave=request.wave,
+            task=admitted.admission.scope,
+            coordination_root=admitted.authority.coordination_root,
+        ),
+        submission,
+    )
+
+
+def _write_route(
+    request: WriteToolRequest, submission: WriteSubmission, config: McpRuntimeConfig
+) -> WriteReport | str:
+    """The report the named route produces, or the refusal that stopped it."""
+
+    if request.contract_path is not None:
+        contract = load_leaf_contract(request.contract_path)
+        if isinstance(contract, str):
+            return contract
+        if request.crossing:
+            return crossing_write_report(contract, request.crossing, submission)
+        if not is_converted(contract.memory_worktree):
+            return unconverted_write_refusal(contract)
+        return leaf_write_report(contract, submission, config)
+    if request.repo_id is not None and request.wave is not None:
+        return _wave_write(request, submission, config)
+    return (
+        "name a leaf by `contractPath`, or a taskless wave by `repoId` with `wave`: "
+        "a write is admitted only through the contract that names its memory worktree"
+    )
+
+
+def knowledge_write_payload(request: WriteToolRequest, config: McpRuntimeConfig) -> dict[str, Any]:
+    """The mounted `knowledge_write` answer: one envelope around one write outcome."""
+
+    return _tool_payload("knowledge_write", _write_answer(request, config))
+
+
+def _write_answer(request: WriteToolRequest, config: McpRuntimeConfig) -> dict[str, Any]:
+    """Plan or commit one knowledge write through the mounted tool (MIK-R73 rule 1).
+
+    The body is the same function the ``agents-remember knowledge-ingest`` and
+    ``knowledge-bootstrap`` commands run, so the tool can do nothing the command cannot: the same
+    contract guard, the same authorization reference, the same worklist checks and the same
+    refusals. Without ``commit`` it plans and writes nothing; with it, it writes files and commits
+    nothing to Git. The whole report is written as a caller-readable file (MIK-R108 rule 3) and the
+    answer holds the outcome, the counts, the problems and violations the caller must act on, and
+    the report's location.
+
+    Every refusal is one of this function's own returns, so the module keeps one envelope site per
+    handler: a refusal is a response document like any other, and the reason it refuses is the
+    ``state`` and ``refusalDetail`` the caller branches on.
+    """
+
+    submission, refusal = _write_submission(request)
+    if refusal is not None:
+        return refusal
+    assert submission is not None  # a refused submission always carries its refusal
+    if not request.authorization_ref.strip():
+        # The command refuses a blank authorization before a settings document, a
+        # contract or a byte is touched; the tool refuses it at the same place.
+        return _refused_write("invalid-input", BLANK_AUTHORIZATION)
+    report = _write_route(request, submission, config)
+    if isinstance(report, str):
+        return _refused_write("invalid-input", report)
+    document = report.to_document()
+    report_path, report_error = _write_report_path(document, config)
+    problems = [{"where": one["where"], "message": one["message"]} for one in document["problems"]]
+    violations = list(document["violations"])
+    answer = {
+        "ok": True,
+        "operation": "knowledge_write",
+        "state": document["state"],
+        "owner": document["owner"],
+        "memoryRoot": document["memoryRoot"],
+        "codeTree": document["codeTree"],
+        "authorization": document["authorization"],
+        "counts": {
+            "records": len(document["records"]),
+            "entries": len(document["entries"]),
+            "historyRows": len(document["historyRows"]),
+            "evidence": len(document["evidence"]),
+            "carried": len(document["carried"]),
+            "requirementEndpoints": len(document["requirementEndpoints"]),
+        },
+        "problems": problems[:TOOL_ANSWER_LIST_MAX],
+        "problemsTruncated": len(problems) > TOOL_ANSWER_LIST_MAX,
+        "violations": violations[:TOOL_ANSWER_LIST_MAX],
+        "violationsTruncated": len(violations) > TOOL_ANSWER_LIST_MAX,
+        "provisionalIds": document["provisionalIds"],
+        "plannedBeforeRefusal": document["plannedBeforeRefusal"],
+        "written": document["written"],
+        "removed": document["removed"],
+        "reportPath": report_path,
+        "reportError": report_error,
+    }
+    return answer
+
+
+def _write_report_path(
+    document: dict[str, Any], config: McpRuntimeConfig
+) -> tuple[str | None, str | None]:
+    """Where the whole write report landed, and why it did not when it could not be written.
+
+    A report that cannot be written is named in the answer beside the outcome instead of replacing
+    it: the write itself already happened or did not, and the caller must not lose that fact to a
+    filesystem error about the report.
+    """
+
+    try:
+        return write_report("knowledge-write", document, config=config).as_posix(), None
+    except ReportWriteError as error:
+        return None, f"the report cannot be written ({error.reason}); nothing about it is claimed"

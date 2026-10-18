@@ -449,7 +449,9 @@ async def test_the_read_family_refuses_a_fourth_view_before_it_touches_a_tree(
 
     sixth = await _call(server, "knowledge_read", {"memoryRoot": absent, "view": "timeline"})
     assert (sixth["state"], sixth["refusalCode"]) == ("refused", "unknown_view"), sixth
-    assert "three named query views" in sixth["refusalDetail"], sixth
+    # The refusal names the admitted set it is measured against: the three tree views and, since
+    # MIK-R73 rule 2, `record`.
+    assert "invariant, family, record" in sixth["refusalDetail"], sixth
 
     missing = await _call(server, "knowledge_read", {"memoryRoot": absent, "view": "family"})
     assert (missing["state"], missing["refusalCode"]) == (
@@ -495,6 +497,7 @@ async def test_the_registered_handlers_read_a_memory_tree_and_take_no_database_p
             "sourcePath",
             "repositoryRoot",
             "codeTreeId",
+            "recordId",
         },
         "knowledge_diff": {
             "memoryRoot",
@@ -508,6 +511,18 @@ async def test_the_registered_handlers_read_a_memory_tree_and_take_no_database_p
             "codeRoot",
             "baseCommits",
             "contractPath",
+        },
+        # MIK-R73 rule 1: the writer's own argument surface, mounted beside the reads.
+        "knowledge_write": {
+            "contractPath",
+            "handoff",
+            "handoffName",
+            "handoffPath",
+            "authorizationRef",
+            "commit",
+            "crossing",
+            "repoId",
+            "wave",
         },
     }
 
@@ -576,7 +591,14 @@ async def test_the_mounted_families_are_exactly_the_three_these_cases_drive(
     server = _knowledge_tool_server(tmp_path)
     mounted = tuple(tool.name for tool in await server.list_tools())
 
-    assert mounted == ("knowledge_read", "knowledge_diff", "knowledge_integrity_check")
+    # MIK-R73 rule 1 mounts the writer beside the reads: four families, and this module names
+    # each of them by name.
+    assert mounted == (
+        "knowledge_read",
+        "knowledge_diff",
+        "knowledge_integrity_check",
+        "knowledge_write",
+    )
     source = Path(__file__).read_text(encoding="utf-8")
     undriven = [name for name in mounted if f'"{name}"' not in source]
     assert not undriven, (

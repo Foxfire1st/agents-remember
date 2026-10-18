@@ -98,8 +98,10 @@
  },
  "ok": true,
  "page": {
+  "codeState": null,
   "codeTreeId": null,
   "enumerationComplete": false,
+  "indexState": "complete",
   "manifestDigest": "0a65d36482029cc72e680320e6ea3cd4cb74e18a4ac1d2759a308d6db3e95a8e",
   "memoryTreeId": "808094cd6be012bad72f33fba246ae3061ee69ae",
   "remaining": 25,

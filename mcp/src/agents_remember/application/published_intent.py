@@ -32,8 +32,12 @@ from agents_remember.application.knowledge_paging.scope_pages import (
     prepare_scope,
 )
 from agents_remember.application.knowledge_read import open_read_context
+from agents_remember.application.worktree_code_state import (
+    WorktreeCapture,
+    WorktreeCaptureError,
+    hold_observed_code_tree,
+)
 from agents_remember.kernel.coordination_context.models import CoordinationContext
-from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import (
@@ -99,6 +103,10 @@ class PublishedIntentSourcePair:
 
     repository_root: Path
     code_tree_id: str
+    code_state: str = "commit"
+    """``commit`` or ``working-tree``: where this route observed the code (MIK-R73 rule 7)."""
+    capture: WorktreeCapture | None = None
+    """The held working-tree capture this pair's tree is read through, closed by its reader."""
 
 
 @dataclass(frozen=True)
@@ -285,7 +293,24 @@ def published_intent_block(
 def read_published_intent(
     selection: PublishedIntentSelection, seeds: Sequence[KnowledgeReadSeed | _UnseedablePath]
 ) -> dict[str, Any]:
-    """Read pages through the index bound to the selected memory tree."""
+    """Read pages through the index bound to the selected memory tree.
+
+    A selection resolved against a dirty checkout holds that checkout's capture; the capture lives
+    for exactly this read, so it is released here, once, whichever way the read ends (MIK-R73
+    rule 7).
+    """
+
+    pair = selection.source_pair
+    try:
+        return _read_published_pages(selection, seeds)
+    finally:
+        if pair is not None and pair.capture is not None:
+            pair.capture.close()
+
+
+def _read_published_pages(
+    selection: PublishedIntentSelection, seeds: Sequence[KnowledgeReadSeed | _UnseedablePath]
+) -> dict[str, Any]:
     tree = selection.memory_tree
     if tree is None:
         return _unavailable_block(
@@ -330,7 +355,10 @@ def _tree_block(
     block["currentness"] = leaves.document(block["seeds"], scopes)
     pair = selection.source_pair
     if pair is not None:
-        block["currentness"]["treeScope"] = _TREE_SCOPE.format(tree=pair.code_tree_id)
+        block["currentness"]["treeScope"] = _TREE_SCOPES.get(
+            pair.code_state, _TREE_SCOPES["commit"]
+        ).format(tree=pair.code_tree_id)
+        block["currentness"]["codeState"] = pair.code_state
     return block
 
 
@@ -340,10 +368,11 @@ def _block_policy(seeds: Sequence[object]) -> str:
     It is decided by what was asked, not by what was answered: a tree block whose seeds are all
     paths was read by the family-complete leaf read (MIK-R01), even when every path was refused
     (``registration_absent``, an unseedable spelling). A block with an identity seed, which the
-    scope read answers, keeps the scope policy. Each page states its own policy in ``page``.
+    scope read answers, keeps the scope policy -- and so does a block with no seed at all, which
+    asked for no leaf (MIK-R73 rule 9).
     """
 
-    paths = all(isinstance(seed, PathSeed | _UnseedablePath) for seed in seeds)
+    paths = bool(seeds) and all(isinstance(seed, PathSeed | _UnseedablePath) for seed in seeds)
     return LEAF_POLICY_VERSION_LABEL if paths else KNOWLEDGE_READ_POLICY_VERSION
 
 
@@ -365,12 +394,16 @@ def _candidates(blocks: list[dict[str, Any] | PreparedScope | PreparedLeaf]) -> 
     ]
 
 
-# The currentness block's statement of which tree it observed (MIK-R03, L03 ruling Q1): the tree
-# this route resolved for the source it returns, which is a commit's tree.
-_TREE_SCOPE = (
-    "states observed at the committed code tree {tree} this read resolved; uncommitted "
-    "working-tree edits are not reflected"
-)
+# The currentness block's statement of which tree it observed (MIK-R03, L03 ruling Q1; MIK-R73
+# rule 7): the tree this route resolved, and whether that tree is a commit or the captured working
+# tree of the checkout the caller sees.
+_TREE_SCOPES = {
+    "commit": "states observed at the committed code tree {tree} this read resolved",
+    "working-tree": (
+        "states observed at the captured working tree {tree} of the code checkout this read "
+        "resolved"
+    ),
+}
 
 
 def _bind_index_state(block: dict[str, Any], selection: PublishedIntentSelection) -> dict[str, Any]:
@@ -403,15 +436,19 @@ def _source_pair(context: CoordinationContext) -> PublishedIntentSourcePair | No
     if root is None:
         return None
     try:
-        completed = run_git(root, ["rev-parse", "HEAD^{tree}"])
-    except (OSError, subprocess.SubprocessError):
+        observed, capture = hold_observed_code_tree(Path(root))
+    except (OSError, subprocess.SubprocessError, WorktreeCaptureError):
         return None
-    if completed.returncode != 0:
+    if observed is None:
         return None
-    tree_id = completed.stdout.strip()
-    if not _TREE_ID_PATTERN.match(tree_id):
-        return None
-    return PublishedIntentSourcePair(repository_root=root, code_tree_id=tree_id)
+    # MIK-R73 rule 7: the states are observed at the code the caller sees -- the commit when the
+    # checkout is clean, else its captured working tree, held until the read that asked is done.
+    return PublishedIntentSourcePair(
+        repository_root=observed.repository,
+        code_tree_id=observed.tree_id,
+        code_state=observed.code_state,
+        capture=capture,
+    )
 
 
 def _open_context(

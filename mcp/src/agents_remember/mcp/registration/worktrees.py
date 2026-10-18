@@ -58,9 +58,17 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         retry_provider_setup: bool = False,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Create or load a task contract with its code and memory worktrees. Answers the state
-        reached (started, would-start, blocked) and the next call with its arguments; the whole
-        result is in the log file. Poll worktree_status for progress. Reference: docs/reference/mcp-tools.md."""
+        """
+        Create or load a task contract with its code and memory worktrees.
+
+        Answers the state reached (started, would-start, blocked) and the next call with its
+        arguments; the whole result is in the log file. Poll worktree_status for progress. A
+        dry run changes no task document, no contract, no Git ref and no worktree, and the
+        call is recorded in the observer log like every tool call. It does not read the
+        dependencies a packet names: leaves start in parallel and are synchronised later, so
+        the order of landing is the manager's decision. Reference:
+        docs/reference/mcp-tools.md.
+        """
         return worktree_start_payload(
             config,
             TaskIdentity(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
@@ -149,6 +150,44 @@ class ToolLogSettings:
 
 
 @dataclass(frozen=True)
+class CheckoutBinding:
+    """What an undeclared linked-checkout process is bound to (MIK-R83 rule 7).
+
+    A process that loads this package from a linked worktree without declaring
+    an execution mode is bound to that worktree's disposable coordination root,
+    not the root its settings name. The same three facts are printed by the
+    command line and carried as a field by ``server_info`` and the dashboard's
+    served state, so no surface has to be asked separately.
+    """
+
+    worktree: str
+    disposable_root: str
+    configured_root: str | None
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "state": "disposable-coordination-root",
+            "worktree": self.worktree,
+            "coordinationRoot": self.disposable_root,
+            "configuredRoot": self.configured_root,
+            "remedy": (
+                "run the installed command for the configured root, or declare the test "
+                "mode for scratch work; --config does not change the binding"
+            ),
+        }
+
+    def sentence(self) -> str:
+        configured = self.configured_root or "none named by the given settings"
+        return (
+            f"agents-remember is loaded from the linked worktree {self.worktree} and bound "
+            f"to its disposable coordination root {self.disposable_root}; the configured "
+            f"root {configured} is not used, and --config does not change the binding. "
+            "Run the installed command for the configured root, or declare the test mode "
+            "for scratch work."
+        )
+
+
+@dataclass(frozen=True)
 class McpRuntimeConfig:
     config_path: Path
     coordination_root: Path
@@ -167,6 +206,9 @@ class McpRuntimeConfig:
     tool_log: ToolLogSettings = field(default_factory=ToolLogSettings)
     # MIK-R113 rule 4: the keys this file holds that are no longer read, as dotted names.
     unused_settings_keys: tuple[str, ...] = ()
+    # MIK-R83 rule 7: the disposable coordination root an undeclared linked
+    # checkout is bound to, with the configured root it did not use.
+    checkout_binding: CheckoutBinding | None = None
 
     @property
     def paseo_runtime(self) -> PaseoRuntimeSettings | None:
@@ -837,12 +879,42 @@ def _config_for_execution(config_path: str | Path) -> Path | McpRuntimeConfig:
         raise ConfigError(str(error)) from error
     if checkout is None:
         return require_config_path(config_path)
+    binding = CheckoutBinding(
+        worktree=checkout.checkout_root.as_posix(),
+        disposable_root=checkout.coordination_root.as_posix(),
+        configured_root=_configured_coordination_root(config_path),
+    )
+    # MIK-R83 rule 7: one line, on stderr, before the run answers from the
+    # disposable root. A silent empty world was the debt this ends.
+    print(binding.sentence(), file=sys.stderr)
     return _checkout_runtime_config(
         checkout_root=checkout.checkout_root,
         worktree_group=checkout.worktree_group,
         coordination_root=checkout.coordination_root,
         synthetic_config_path=checkout.synthetic_config_path,
+        binding=binding,
     )
+
+
+def _configured_coordination_root(config_path: str | Path) -> str | None:
+    """The root the given settings name, named but not used by a bound process.
+
+    It is only read for the sentence: a settings file that is absent, not JSON
+    or names no root contributes nothing, and the sentence says so rather than
+    inventing a root the caller never wrote.
+    """
+
+    if not config_path:
+        return None
+    path = Path(config_path)
+    try:
+        if not path.is_absolute() or not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    root = data.get("coordinationRoot") if isinstance(data, dict) else None
+    return str(root) if isinstance(root, str) and root else None
 
 
 def _read_config_mapping(path: Path) -> dict[str, Any]:
@@ -861,6 +933,7 @@ def _checkout_runtime_config(
     worktree_group: Path,
     coordination_root: Path,
     synthetic_config_path: Path,
+    binding: CheckoutBinding,
 ) -> McpRuntimeConfig:
     """Build the minimal non-authority config for an unpublished linked checkout."""
     repository = RepositoryScope(
@@ -878,4 +951,5 @@ def _checkout_runtime_config(
         benchmarks_enabled=False,
         dashboard=DashboardSettings(auto_start=False),
         orchestration=OrchestrationSettings(),
+        checkout_binding=binding,
     )

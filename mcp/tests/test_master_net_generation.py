@@ -427,6 +427,7 @@ def test_a_live_leaf_is_labelled_working_and_its_draft_stays_out_of_the_net(
     )
     (live_dir / "src" / "draft.py").write_text("# uncommitted draft\n", encoding="utf-8")
     series_root = master_fixture.config.coordination_root / "tasks" / REPO / MASTER
+    live_contract_path = _contract_path(series_root, "fixture-live")
     series = WorktreeContract(
         task_id="260921_TEST_MASTER_NET",
         task_name=MASTER,
@@ -435,7 +436,9 @@ def test_a_live_leaf_is_labelled_working_and_its_draft_stays_out_of_the_net(
         memory_mode="external",
         coordination_root=master_fixture.config.coordination_root,
         task_root=series_root,
-        contract_path=series_root / "series-contract.md",
+        # MIK-R83 rule 3 without exception: the leaf's cell names the leaf contract this file is,
+        # and the master it belongs to is named by parent_contract_path.
+        contract_path=live_contract_path,
         task_artifact=series_root / "task.md",
         worktree_group=master_fixture.config.workspace_root / "worktrees",
         code_repo_path=master_fixture.code_repo,
@@ -455,8 +458,8 @@ def test_a_live_leaf_is_labelled_working_and_its_draft_stays_out_of_the_net(
         kind="leaf",
         leaf_id="fixture-live",
         parent_task_name=MASTER,
+        parent_contract_path=series_root / "series-contract.md",
     )
-    live_contract_path = _contract_path(series_root, "fixture-live")
     live_contract_path.parent.mkdir(parents=True, exist_ok=True)
     write_contract(live_contract_path, series)
 

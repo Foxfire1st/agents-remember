@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -75,6 +75,10 @@ class ServerInfoResponse(ResponseModel):
     # open, the command that closes it and the command the user runs before an edit.
     openUserSettings: OpenUserSettingsPayload | None = None
     servingBuild: ServingBuildPayload
+    # MIK-R83 rule 7: present only in a process loaded from a linked checkout
+    # without a declared execution mode -- the disposable root it is bound to,
+    # the worktree it was loaded from, and the configured root it did not use.
+    checkoutBinding: dict[str, Any] | None = None
     # Both present only on a tool server that a role launch started for one agent: the name
     # under which the launch gave that agent this server, and the agent's binding.
     toolServer: str | None = None

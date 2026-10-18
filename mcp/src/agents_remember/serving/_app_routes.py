@@ -42,6 +42,14 @@ from agents_remember.serving.response_contract import (
 from agents_remember.serving.review_memory_watch import multiplex_review_memory
 from agents_remember.serving.served_state import ServedWorkspaceProjection, served_state_tail
 
+
+def _checkout_binding(runtime: _ServingRuntime) -> dict[str, object] | None:
+    """The disposable-root binding the process carries, as the state serves it (MIK-R83 rule 7)."""
+
+    binding = runtime.config.checkout_binding
+    return None if binding is None else binding.as_payload()
+
+
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
         McpRuntimeConfig,
@@ -72,6 +80,7 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
         served_state_tail(
             build=runtime.build,
             watcher_health=runtime.projector.watcher_health(),
+            checkout_binding=_checkout_binding(runtime),
         )
     )
     return JSONResponse(content=body, headers=headers)
@@ -162,6 +171,7 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
             runtime.projector,
             build=runtime.build,
             watcher_health=runtime.projector.watcher_health(),
+            checkout_binding=_checkout_binding(runtime),
         )
         async with contextlib.aclosing(
             multiplex_review_memory(

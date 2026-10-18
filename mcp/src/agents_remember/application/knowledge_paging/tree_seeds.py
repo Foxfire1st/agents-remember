@@ -1,9 +1,10 @@
 """Record seeds of a converted memory tree's reads: a seed the tree does not hold is refused.
 
-A read of a converted tree (MIK-R23 rule 6) addresses invariant and family revisions by the UUIDs the
-index projects for ``<ID>@<revision>``. At the cutover every remembered database-era revision ID
-names nothing, and so does a bare ``INV-…``; answering such a seed with an empty, complete view looks
-like a real answer that the tree holds nothing about it. So a seed the tree does not hold is refused
+A read of a converted tree (MIK-R23 rule 6) addresses invariant and family revisions by the
+UUIDs the index projects for ``<ID>@<revision>``. At the cutover every remembered database-era
+revision ID names nothing, and so does a bare ``INV-…``; answering such a seed with an empty,
+complete view looks like a real answer that the tree holds nothing about it. So a seed the tree
+does not hold is refused
 as ``selector_absent``, naming where current seeds come from (L37 ruling, P2 task 4). A database
 read is not touched: an unconverted dataset keeps its own answers.
 """
@@ -31,7 +32,7 @@ _PREFIXES: Final = {
 
 
 def absent_seed(index: KnowledgeIndex, name: str, named: str) -> str | None:
-    """Why the seed ``named`` (the parameter ``name``) names no revision the tree holds, or ``None``."""
+    """Why ``named`` (the parameter ``name``) names no revision the tree holds, or ``None``."""
 
     prefix, kind = _PREFIXES[name]
     text = index.text_id(named)

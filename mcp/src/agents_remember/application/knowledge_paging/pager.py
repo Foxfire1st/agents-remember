@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.application.knowledge_paging.threshold import (
     ENVELOPE_RESERVE_TOKENS,
@@ -89,13 +89,21 @@ class PageCut:
 
 @dataclass(frozen=True)
 class PageBinding:
-    """What a walk is bound to, stated on every page and carried by its continuation."""
+    """What a walk is bound to, stated on every page and carried by its continuation.
+
+    ``index_state`` is the derived index's own completeness (``complete`` or
+    ``partial``): a page read from a partial index is never presented as an
+    enumeration complete (MIK-R73 rule 6).
+    """
 
     memory_tree_id: str
     selection_policy: str
     policy_version: str
     manifest_digest: str
     code_tree_id: str | None = None
+    index_state: str = "complete"
+    code_state: Literal["commit", "working-tree"] | None = None
+    """``commit`` or ``working-tree``: where the walk's code tree was observed (MIK-R73 rule 7)."""
 
 
 RenderPage = Callable[[PageCut], dict[str, Any]]
@@ -219,12 +227,17 @@ def page_block(cut: PageCut, binding: PageBinding) -> dict[str, Any]:
         "selectionPolicyVersion": binding.policy_version,
         "manifestDigest": binding.manifest_digest,
         "codeTreeId": binding.code_tree_id,
+        # Where those states were observed: the commit, or a captured working tree (MIK-R73 rule 7).
+        "codeState": binding.code_state,
+        "indexState": binding.index_state,
         "start": cut.start,
         "rowsOnPage": cut.rows_on_page,
         "total": cut.total,
         "returned": cut.end,
         "remaining": cut.remaining,
-        "enumerationComplete": cut.complete,
+        # A partial index has not enumerated the tree, so no page of it may say
+        # the enumeration is complete (MIK-R73 rule 6).
+        "enumerationComplete": cut.complete and binding.index_state == "complete",
     }
     if cut.header_reference is not None:
         block["headerReference"] = dict(cut.header_reference)

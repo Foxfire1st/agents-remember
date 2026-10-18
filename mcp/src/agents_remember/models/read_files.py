@@ -51,11 +51,13 @@ class NamedFile(StrictResponseModel):
     path: str
     exists: bool | None = None
     card: str | None = None
+    cardStatus: Literal["found", "missing"] | None = None
     cardState: str | None = None
     recordCounts: dict[str, int] | None = None
     actionNeeded: list[NamedRecord] | None = None
     statesProblem: str | None = None
     indexComplete: bool | None = None
+    routeIndexStale: bool | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
 
@@ -80,8 +82,13 @@ class ReadArFilesResponse(ToolResponse):
     codeState: str | None = None
     codeTree: str | None = None
     memoryState: str | None = None
+    worktreeScope: Literal["leaf", "official-line"] | None = None
+    sourceRoot: str | None = None
+    memoryRoot: str | None = None
     files: list[NamedFile] | None = None
     overviews: list[str] | None = None
+    routeIndexStale: bool | None = None
+    routeIndexRefresh: str | None = None
     statesProblem: str | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None

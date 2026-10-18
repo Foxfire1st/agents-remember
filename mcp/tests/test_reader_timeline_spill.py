@@ -393,8 +393,10 @@ def test_truth_view_acquires_full_history_only_on_manifest_miss(
     selected.index.history_rows_about = history
     # Hold unrelated truth-view sections, not the defended caller/history acquisition,
     # producer, manifest/cache/digest, spill or continuation.
-    monkeypatch.setattr(truth, "summary_of", lambda _: {"id": record.id})
-    monkeypatch.setattr(truth, "_outgoing", lambda _: ([], None))
+    monkeypatch.setattr(
+        truth, "summary_of", lambda _: {"id": record.id, "title": "Timeline family"}
+    )
+    monkeypatch.setattr(truth, "_outgoing", lambda _selection, _record: ([], None))
     monkeypatch.setattr(truth, "_kind_part", lambda *_: ({}, ()))
     monkeypatch.setattr(truth, "Decisions", lambda _: None)
     monkeypatch.setattr(

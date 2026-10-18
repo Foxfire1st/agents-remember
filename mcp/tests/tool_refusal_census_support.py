@@ -236,6 +236,8 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
             "memoryRoot": absent_knowledge,
             "codeRoot": world.coord.as_posix(),
         },
+        # MIK-R73 rule 1: no contract and no authorization is refused before anything is read.
+        "knowledge_write": {"authorizationRef": ""},
     }
 
 

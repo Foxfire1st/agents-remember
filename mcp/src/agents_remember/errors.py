@@ -104,6 +104,30 @@ class AuthorityError(AgentsRememberError):
     """
 
 
+class ContractPlaceError(AgentsRememberError):
+    """A contract found at a canonical place names another path in its cell.
+
+    MIK-R83 rule 3: a contract is authority only where its own
+    ``series_contract_path`` cell names it. A copy placed beside its original,
+    or a contract moved without its cell, is refused when it is loaded from a
+    canonical place -- naming the file, both paths, and the two ways out -- so
+    no lookup silently obeys a copy. It is carried at this layer so every
+    caller that resolves a contract can pass the refusal through instead of
+    degrading it into "no contract".
+    """
+
+    status = "contract-place-mismatch"
+
+    def __init__(self, *, found_at: str, recorded: str) -> None:
+        self.found_at = found_at
+        self.recorded = recorded
+        super().__init__(
+            f"{self.status}: the contract {found_at} records series_contract_path "
+            f"{recorded}; a contract is used only where its own cell names it. "
+            f"Delete the copy, or correct the cell to {found_at}."
+        )
+
+
 class ConfiguredContractAuthorityError(AgentsRememberError):
     """A readable task contract contradicts configured repository authority.
 

@@ -43,7 +43,12 @@ __all__ = [
 ]
 
 PagingRefusalCode = Literal[
-    "continuation_unreadable", "continuation_binding_mismatch", "selected_input_unavailable"
+    "continuation_unreadable",
+    "continuation_binding_mismatch",
+    "selected_input_unavailable",
+    # A resumed walk whose recorded seed the tree no longer holds: the read is refused at the
+    # selector, before any row is projected (MIK-R02).
+    "selector_absent",
 ]
 
 _RESTART = "start a new read from the seed without a continuation"
@@ -79,6 +84,7 @@ def mint_continuation(
             position=position,
             threshold_tokens=KNOWLEDGE_PAGE_THRESHOLD_TOKENS,
             code_tree_id=binding.code_tree_id,
+            code_state=binding.code_state,
             rest=seeds[1:],
         )
     )

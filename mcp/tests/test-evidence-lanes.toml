@@ -4,6 +4,7 @@ schema_version = "ar-test-evidence-lanes/v1"
 [files]
 unit-regression = [
   "mcp/tests/test_abandoned_series_closeout.py",
+  "mcp/tests/test_agent_tool_surface_corrections.py",
   "mcp/tests/test_agentic_settings.py",
   "mcp/tests/test_agents_remember_quality.py",
   "mcp/tests/test_application_guards.py",

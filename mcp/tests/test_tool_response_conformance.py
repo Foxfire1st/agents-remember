@@ -199,7 +199,7 @@ def advertised_tool_names() -> set[str]:
 # 40 advertised tools, and the registry holds the same 40 names: every registered response
 # model belongs to an advertised tool, so no payload builder sits below the public surface.
 # (MIK-R109 rule 5 removed `resolve_context`; `context_packet` is the orientation read.)
-ROSTER_SIZE = 40
+ROSTER_SIZE = 41
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
@@ -212,7 +212,7 @@ ROSTER_SIZE = 40
 # (A `*_payload`-suffixed helper that only shapes a dict, such as the install compactor,
 # is not a handler: it never reaches the choke point.)
 TOOL_MODULE_COUNT = 13
-TOOL_HANDLER_COUNT = 42
+TOOL_HANDLER_COUNT = 43
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
