@@ -42,6 +42,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs, report_operatio
 from agents_remember.worktrees.modules.closeout_external import (
     GATE_NOT_APPLICABLE,
     candidate_gate_verdict,
+    closeout_changed_paths,
     external_closeout_commits,
     refuse_ungated_candidate,
     require_gated_recovery,
@@ -52,9 +53,7 @@ from agents_remember.worktrees.modules.closeout_lineage import (
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     branch_commit,
-    changed_worktree_paths,
     commit_date,
-    committed_changed_paths,
     head_commit,
     worktree_dirty,
 )
@@ -105,27 +104,6 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
-
-
-def closeout_changed_paths(contract) -> dict[str, list[str]]:
-    """Closeout worklist: working-tree changes plus the unverified committed range.
-
-    ``committed`` covers commits the task transports (merges, pre-committed
-    slices) that no previous closeout verified; ``working`` keeps the strict
-    dirty-tree tier. A path in both tiers counts as working.
-    """
-    if contract.kind == "series":
-        return {"all": [], "working": [], "committed": []}
-    working = changed_worktree_paths(contract.code_worktree)
-    committed = committed_changed_paths(
-        contract.code_worktree, contract.code_base_commit, contract.code_commit
-    )
-    committed_only = sorted(set(committed) - set(working))
-    return {
-        "all": sorted({*working, *committed_only}),
-        "working": working,
-        "committed": committed_only,
-    }
 
 
 def _bounded_paths(paths: list[str]) -> dict[str, object]:

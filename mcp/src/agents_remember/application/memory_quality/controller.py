@@ -110,6 +110,7 @@ from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding import (
     IdenticalChangesUnreadable,
     OnboardingTraceInputs,
+    entity_evidence_findings_for_candidate,
     identical_changes_from_run,
     onboarding_trace_gate_for_context,
 )
@@ -767,6 +768,12 @@ def _attach_curator_checklist(
         )
         repair_findings.extend(_with_gate(gate_findings, prepared.gate))
         report_only.extend(_needed_rows_dropped(gate_report_only, prepared.worklist, response))
+        # MIK-R178 rule 4: an entity row citing a path the code candidate lacks is actionable.
+        repair_findings.extend(
+            entity_evidence_findings_for_candidate(
+                scope.quality_context, scope.contract.code_worktree
+            )
+        )
     repair_findings.extend(_prepared_findings(prepared))
     checklist = write_curator_checklist(
         CuratorChecklist(

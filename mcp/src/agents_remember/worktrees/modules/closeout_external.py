@@ -40,6 +40,8 @@ from agents_remember.worktrees.knowledge_validation import PairedCode, memory_co
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
+    changed_worktree_paths,
+    committed_changed_paths,
     local_branch_ref,
     publish_tree_commit,
     require_ancestor,
@@ -50,8 +52,13 @@ from agents_remember.worktrees.modules.git import (
 )
 from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.modules.onboarding import (
+    entities_catalog_path,
+    entity_evidence_at_base,
+    entity_fingerprint_plan_problems,
+    entity_fingerprint_refresh_plan_for_context,
     refresh_entity_fingerprints_for_context,
     refresh_route_indexes_for_context,
+    route_index_refresh_problems,
 )
 from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
@@ -199,6 +206,67 @@ GATE_NOT_APPLICABLE = "not-applicable"
 """What :func:`candidate_gate_verdict` answers for a contract the gate does not govern."""
 
 
+def closeout_changed_paths(contract) -> dict[str, list[str]]:
+    """Closeout worklist: working-tree changes plus the unverified committed range.
+
+    ``committed`` covers commits the task transports (merges, pre-committed
+    slices) that no previous closeout verified; ``working`` keeps the strict
+    dirty-tree tier. A path in both tiers counts as working.
+    """
+    if contract.kind == "series":
+        return {"all": [], "working": [], "committed": []}
+    working = changed_worktree_paths(contract.code_worktree)
+    committed = committed_changed_paths(
+        contract.code_worktree, contract.code_base_commit, contract.code_commit
+    )
+    committed_only = sorted(set(committed) - set(working))
+    return {
+        "all": sorted({*working, *committed_only}),
+        "working": working,
+        "committed": committed_only,
+    }
+
+
+def candidate_memory_refresh_refusal(contract, code_tree: str) -> str | None:
+    """Every memory-refresh refusal the candidate and the memory worktree alone decide.
+
+    MIK-R178 rule 1: the closeout's candidate verdict, which the preview and the apply's
+    preflight both read, asks the memory refresh's own refusals over the accepted code candidate
+    tree and the memory worktree's tree. Both refresh legs are asked, because both can refuse on
+    nothing but those two trees: the entity leg (every row's evidence, an unsupported algorithm, a
+    missing fingerprint value -- rules 1-2) and the route-index leg (a cache or route overview it
+    cannot read or render -- L176-R1-F02). Asking only one leg leaves the other to fail after the
+    code commit, which is the half-landed leaf the requirement forbids. The checks read the
+    candidate by its id, so they depend on nothing the closeout writes later. ``None`` when the
+    refresh can run from this candidate; a refusal names its cause, row, path and step (rule 2).
+    """
+
+    context = replace(contract_context(contract), code_repository_root=contract.code_worktree)
+    changed_paths = closeout_changed_paths(contract)["all"]
+    try:
+        base_evidence = entity_evidence_at_base(
+            context.onboarding_root, contract.memory_base_commit
+        )
+        plan = entity_fingerprint_refresh_plan_for_context(
+            context, changed_paths, base_evidence=base_evidence
+        )
+        lines = entity_fingerprint_plan_problems(context, plan, code_tree=code_tree)
+        lines.extend(route_index_refresh_problems(context))
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            "the closeout's candidate verdict cannot ask the memory refresh: step "
+            f"candidate memory refresh preflight, {entities_catalog_path(context).as_posix()} "
+            f"against code candidate tree {code_tree} ({type(error).__name__}: {error})"
+        ) from error
+    if not lines:
+        return None
+    header = (
+        "external-memory closeout refuses this candidate before the code commit: the memory "
+        f"refresh cannot run from the code candidate tree {code_tree}"
+    )
+    return "\n".join([header, *(f"- {line}" for line in lines)])
+
+
 def _series_format_verdict(contract) -> str:
     """The format verdict for a series/master contract on external memory (MIK-R46 rule 1).
 
@@ -235,6 +303,11 @@ def candidate_gate_verdict(contract, code_tree: str) -> str | None:
     closing need not be applied to ask. The apply's preflight (:func:`refuse_ungated_candidate`)
     and the preview read this one verdict, so a preview cannot promise a closeout the apply
     refuses; the gate's memo makes the second of the two free.
+
+    MIK-R178 rule 1: the verdict also asks every refusal the closeout's memory refresh reaches
+    from the code candidate tree and the memory worktree's tree alone
+    (:func:`candidate_memory_refresh_refusal`), so a leaf that deletes a file an entity row cites
+    is stopped here, before the code commit, with the catalog file, the row and the path named.
     """
 
     repository = contract.memory_worktree
@@ -256,9 +329,12 @@ def candidate_gate_verdict(contract, code_tree: str) -> str | None:
         return GATE_NOT_APPLICABLE
     if not leaf_memory_converted(contract):
         return leaf_cutover_refusal(contract, "the closeout validator")
-    return leaf_gate_refusal(
+    gate = leaf_gate_refusal(
         contract, code_tree=code_tree, memory_tree=_exact_memory_tree(contract, repository)
     )
+    if gate is not None:
+        return gate
+    return candidate_memory_refresh_refusal(contract, code_tree)
 
 
 def refuse_ungated_candidate(contract, code_tree: str) -> None:
@@ -560,7 +636,12 @@ def _refresh_external_memory(
     report_operation_progress(
         args, "memory-refresh", current_command="refresh onboarding and route metadata"
     )
-    refreshed_entities = refresh_entity_fingerprints_for_context(context, change.changed_paths)
+    refreshed_entities = refresh_entity_fingerprints_for_context(
+        context,
+        change.changed_paths,
+        code_commit=change.commit,
+        memory_base_commit=contract.memory_base_commit,
+    )
     route_index_refresh = refresh_route_indexes_for_context(context)
     return _ExternalMemoryRefresh(
         [],

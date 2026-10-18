@@ -485,7 +485,11 @@ def _public_closeout(world: Gated) -> Any:
 
 def _public_preview(world: Gated) -> Any:
     """``closeout_result`` as a dry run: the function behind ``worktree_closeout_preview``. The
-    admission of a published enclosure and the settings are stubbed, as the fixture has none."""
+    admission of a published enclosure and the settings are stubbed, as the fixture has none.
+
+    ``closeout_external`` resolves the same context for the candidate verdict's memory-refresh
+    check (MIK-R178 rule 1), so it is stubbed at the same seam.
+    """
 
     contract = world.contract
     args = WorktreeArgs(
@@ -498,6 +502,7 @@ def _public_preview(world: Gated) -> Any:
         mock.patch.object(closeout, "_validate_closeout_source_state", return_value=contract),
         mock.patch.object(closeout, "require_ordinary_worktree"),
         mock.patch.object(closeout, "contract_context", return_value=context),
+        mock.patch.object(closeout_external, "contract_context", return_value=context),
         mock.patch.object(onboarding, "contract_context", return_value=context),
     ):
         return closeout.closeout_result(args, contract)
