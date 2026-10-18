@@ -257,6 +257,11 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
             "the settings model that defines these fields",
         ),
         SANDBOX + "layout.py": (1, "writes the `paseoRuntime` settings block of the sandbox"),
+        SANDBOX + "build_tool_calls.py": (
+            2,
+            "compares the sandbox's home/listen with the build's resolution under the server "
+            "environment and refuses a foreign host; starts no host",
+        ),
         SANDBOX + "build_roots.py": (
             5,
             "reports current shared host paths and values for the sandbox check",

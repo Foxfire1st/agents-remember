@@ -17,12 +17,15 @@ import subprocess
 import sys
 import unittest
 import warnings
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
 import pytest
+from agents_remember.kernel.primitives import paseo_authority
+from agents_remember.kernel.primitives.paseo_runtime_settings import PaseoRuntimeSettings
 from pnt_sandbox_test_support import (
     MARKER_NAME,
     PASEO_PROCESS_RECORD,
@@ -772,64 +775,275 @@ def test_launcher_provisions_from_the_compact_installs_named_report(tmp_path, mo
     assert started.paseo is False
 
 
-def test_foreign_package_admission_prevents_public_install_calls(tmp_path, monkeypatch):
-
+def _helper_under_test() -> Any:
+    """The tool-call helper as the tooling runs it: its own file, in the build's environment."""
     spec = importlib.util.spec_from_file_location(
         "public_build_calls",
         Path(__file__).resolve().parents[2] / "scripts/pnt_sandbox/build_tool_calls.py",
     )
     assert spec is not None and spec.loader is not None
-    client = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(client)
-    calls = []
-    info = {
-        "ok": True,
-        "coordinationRoot": str(tmp_path / "coordination"),
-        "workspaceRoot": str(tmp_path / "projects"),
-        "allowedRepoIds": ["sandbox-app"],
-        "allowedProviderIds": [],
-        "servingBuild": {"packageRoot": "/other/build/mcp/src/agents_remember"},
-    }
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _recording_session(answers: dict[str, Any], calls: list[str]) -> Any:
+    """A client session that records each tool name and answers it from ``answers``."""
 
     class Session:
-        def __init__(self, reader, writer):
+        def __init__(self, reader: Any, writer: Any) -> None:
             pass
 
-        async def __aenter__(self):
+        async def __aenter__(self) -> Any:
             return self
 
-        async def __aexit__(self, *args):
-            pass
+        async def __aexit__(self, *_: Any) -> None:
+            return None
 
-        async def initialize(self):
-            pass
+        async def initialize(self) -> None:
+            return None
 
-        async def call_tool(self, name, _arguments):
+        async def call_tool(self, name: str, _arguments: dict[str, Any]) -> Any:
             calls.append(name)
-            assert name == "server_info", "foreign source reached a mutating tool"
-            return SimpleNamespace(model_dump=lambda **kwargs: {"structuredContent": info})
+            assert name in answers, f"{name} was called with no answer prepared"
+            return SimpleNamespace(model_dump=lambda **_: {"structuredContent": answers[name]})
+
+    return Session
+
+
+def _recording_stream(started: list[Any]) -> Any:
+    """The stdio stream the helper opens, so a test sees whether a server was started."""
 
     @contextlib.asynccontextmanager
-    async def stream(*args, **kwargs):
+    async def stream(server: Any, errlog: Any = None) -> AsyncIterator[Any]:
+        started.append(server)
         yield None, None
 
-    monkeypatch.setattr(client, "ClientSession", Session)
-    monkeypatch.setattr(client, "stdio_client", stream)
+    return stream
+
+
+def _driving_request(tmp_path: Path) -> tuple[dict[str, Any], SandboxLayout]:
+    """A prepared sandbox and the request that drives its tool server."""
+    layout = SandboxLayout(tmp_path / "sandbox")
+    layout.run_dir.mkdir(parents=True)
+    layout.user_settings_file.parent.mkdir(parents=True)
+    layout.user_settings_file.write_text(
+        json.dumps(host_settings_document(layout, None)), encoding="utf-8"
+    )
+    expect = {
+        "coordinationRoot": layout.coordination.as_posix(),
+        "workspaceRoot": layout.projects.as_posix(),
+        "allowedRepoIds": [REPOSITORY_ID],
+        "packageRoot": (tmp_path / "candidate/mcp/src/agents_remember").as_posix(),
+    }
     request = {
-        "config": str(tmp_path / "settings.json"),
-        "cwd": str(tmp_path),
-        "serverLog": str(tmp_path / "server.log"),
-        "expect": {
-            "coordinationRoot": info["coordinationRoot"],
-            "workspaceRoot": info["workspaceRoot"],
-            "allowedRepoIds": ["sandbox-app"],
-            "packageRoot": str(tmp_path / "candidate/mcp/src/agents_remember"),
-        },
+        "sandbox": layout.root.as_posix(),
+        "hostPort": layout.paseo_port,
+        "config": layout.settings_file.as_posix(),
+        "cwd": layout.root.as_posix(),
+        "serverLog": (layout.run_dir / "tool-server.log").as_posix(),
+        "expect": expect,
         "calls": [{"name": "install", "tool": "runtime_install", "arguments": {}}],
     }
+    return request, layout
+
+
+def _admitted_info(request: dict[str, Any]) -> dict[str, Any]:
+    """What ``server_info`` answers for the sandbox the request names."""
+    return {
+        "ok": True,
+        "coordinationRoot": request["expect"]["coordinationRoot"],
+        "workspaceRoot": request["expect"]["workspaceRoot"],
+        "allowedRepoIds": request["expect"]["allowedRepoIds"],
+        "unusedProviderKeys": [],
+        "servingBuild": {"packageRoot": request["expect"]["packageRoot"]},
+    }
+
+
+def test_foreign_package_admission_prevents_public_install_calls(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, _layout = _driving_request(tmp_path)
+    info = {
+        **_admitted_info(request),
+        "servingBuild": {"packageRoot": "/other/build/mcp/src/agents_remember"},
+    }
+    calls: list[str] = []
+    started: list[Any] = []
+    monkeypatch.setattr(client, "ClientSession", _recording_session({"server_info": info}, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
     result = asyncio.run(client._run(request))
     assert result["ok"] is False and "package" in result["error"]
     assert calls == ["server_info"] and result["results"] == []
+
+
+def test_the_tool_server_receives_the_sandbox_environment(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, layout = _driving_request(tmp_path)
+    developer = {
+        "HOME": (tmp_path / "developer").as_posix(),
+        "XDG_CONFIG_HOME": (tmp_path / "developer/.config").as_posix(),
+        "PASEO_HOME": (tmp_path / "developer/.paseo").as_posix(),
+        "PASEO_LISTEN": "127.0.0.1:9786",
+        "PATH": os.environ.get("PATH", ""),
+    }
+    calls: list[str] = []
+    started: list[Any] = []
+    answers = {"server_info": _admitted_info(request), "runtime_install": {"ok": True}}
+    monkeypatch.setattr(client, "ClientSession", _recording_session(answers, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
+    with mock.patch.dict(os.environ, developer, clear=True):
+        report = asyncio.run(client._run(request))
+    assert report["ok"] is True, report["error"]
+    expected = sandbox_environment(developer, layout)
+    assert started and started[0].env == expected
+    assert expected["XDG_CONFIG_HOME"] == layout.config_home.as_posix()
+    assert not [name for name in started[0].env if name.startswith("PASEO_")]
+    assert report["host"] == {
+        "state": "sandbox",
+        "home": layout.paseo_home.as_posix(),
+        "listen": layout.paseo_listen,
+    }
+
+
+def test_a_resolved_host_outside_the_sandbox_is_refused_before_any_call(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, layout = _driving_request(tmp_path)
+    foreign = PaseoRuntimeSettings(
+        install_prefix=tmp_path / "developer/prefix",
+        home=tmp_path / "developer/paseo",
+        listen="127.0.0.1:9786",
+        providers={},
+        embed=(),
+    )
+    monkeypatch.setattr(paseo_authority, "load_shared_paseo_runtime", lambda _root: foreign)
+    calls: list[str] = []
+    started: list[Any] = []
+    monkeypatch.setattr(client, "ClientSession", _recording_session({}, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
+    report = asyncio.run(client._run(request))
+    assert report["ok"] is False
+    error = report["error"]
+    assert foreign.home.as_posix() in error and foreign.listen in error
+    assert layout.paseo_home.as_posix() in error and layout.paseo_listen in error
+    assert calls == [] and started == [] and report["results"] == []
+    assert report["host"] is None
+
+
+def test_a_request_that_names_no_sandbox_is_refused(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, _layout = _driving_request(tmp_path)
+    request.pop("sandbox")
+    calls: list[str] = []
+    started: list[Any] = []
+    monkeypatch.setattr(client, "ClientSession", _recording_session({}, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
+    report = asyncio.run(client._run(request))
+    assert report["ok"] is False and "names no sandbox" in report["error"]
+    assert calls == [] and started == [] and report["results"] == []
+
+
+def test_the_admission_refuses_a_server_with_configured_providers(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, layout = _driving_request(tmp_path)
+    info = {**_admitted_info(request), "unusedProviderKeys": ["grepai-memory"]}
+    calls: list[str] = []
+    started: list[Any] = []
+    monkeypatch.setattr(client, "ClientSession", _recording_session({"server_info": info}, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
+    report = asyncio.run(client._run(request))
+    assert report["ok"] is False and "providers configured" in report["error"]
+    assert calls == ["server_info"] and report["results"] == []
+    assert report["host"] == {
+        "state": "sandbox",
+        "home": layout.paseo_home.as_posix(),
+        "listen": layout.paseo_listen,
+    }
+
+
+def test_a_sandbox_whose_settings_select_another_host_is_refused(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, layout = _driving_request(tmp_path)
+    document = host_settings_document(layout, None)
+    foreign_home = (tmp_path / "developer/paseo").as_posix()
+    document["paseoRuntime"]["home"] = foreign_home
+    layout.user_settings_file.write_text(json.dumps(document), encoding="utf-8")
+    calls: list[str] = []
+    started: list[Any] = []
+    monkeypatch.setattr(client, "ClientSession", _recording_session({}, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
+    report = asyncio.run(client._run(request))
+    assert report["ok"] is False
+    assert foreign_home in report["error"] and layout.paseo_home.as_posix() in report["error"]
+    assert calls == [] and started == []
+
+    document["paseoRuntime"]["home"] = layout.paseo_home.as_posix()
+    document["paseoRuntime"]["listen"] = "127.0.0.1:9786"
+    layout.user_settings_file.write_text(json.dumps(document), encoding="utf-8")
+    refused = asyncio.run(client._run(request))
+    assert refused["ok"] is False
+    assert "127.0.0.1:9786" in refused["error"] and layout.paseo_listen in refused["error"]
+    assert calls == [] and started == []
+
+
+def test_a_host_outside_the_sandbox_refuses_in_the_unconfigured_phase(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, layout = _driving_request(tmp_path)
+    layout.user_settings_file.unlink()
+    foreign = PaseoRuntimeSettings(
+        install_prefix=tmp_path / "developer/prefix",
+        home=tmp_path / "developer/paseo",
+        listen="127.0.0.1:9786",
+        providers={},
+        embed=(),
+    )
+    monkeypatch.setattr(paseo_authority, "load_shared_paseo_runtime", lambda _root: foreign)
+    calls: list[str] = []
+    started: list[Any] = []
+    monkeypatch.setattr(client, "ClientSession", _recording_session({}, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
+    report = asyncio.run(client._run(request))
+    assert report["ok"] is False
+    assert foreign.home.as_posix() in report["error"] and foreign.listen in report["error"]
+    assert (
+        layout.paseo_home.as_posix() in report["error"] and layout.paseo_listen in report["error"]
+    )
+    assert calls == [] and started == [] and report["host"] is None
+
+
+def test_a_request_port_that_is_not_a_sandbox_port_is_refused(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, _layout = _driving_request(tmp_path)
+    request["hostPort"] = 9786
+    calls: list[str] = []
+    started: list[Any] = []
+    monkeypatch.setattr(client, "ClientSession", _recording_session({}, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
+    report = asyncio.run(client._run(request))
+    assert report["ok"] is False and "hostPort" in report["error"]
+    assert calls == [] and started == []
+
+
+def test_a_sandbox_that_records_no_host_yet_is_admitted_only_without_one(tmp_path, monkeypatch):
+    client = _helper_under_test()
+    request, layout = _driving_request(tmp_path)
+    layout.user_settings_file.unlink()
+    answers = {"server_info": _admitted_info(request), "runtime_install": {"ok": True}}
+    calls: list[str] = []
+    started: list[Any] = []
+    monkeypatch.setattr(client, "ClientSession", _recording_session(answers, calls))
+    monkeypatch.setattr(client, "stdio_client", _recording_stream(started))
+    report = asyncio.run(client._run(request))
+    assert report["ok"] is True, report["error"]
+    assert report["host"] == {"state": "no host configured"}
+    assert started[0].env["XDG_CONFIG_HOME"] == layout.config_home.as_posix()
+    assert not [name for name in started[0].env if name.startswith("PASEO_")]
+
+    layout.user_settings_file.write_text(
+        json.dumps(host_settings_document(layout, None)), encoding="utf-8"
+    )
+    monkeypatch.setattr(paseo_authority, "load_shared_paseo_runtime", lambda _root: None)
+    refused = asyncio.run(client._run(request))
+    assert refused["ok"] is False and layout.paseo_home.as_posix() in refused["error"]
 
 
 @pytest.mark.parametrize("fault", ["cut", "timeout", "malformed-json", "malformed-shape"])

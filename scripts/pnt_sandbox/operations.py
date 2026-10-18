@@ -210,6 +210,8 @@ class Operations:
         request.write_text(
             json.dumps(
                 {
+                    "sandbox": self.layout.root.as_posix(),
+                    "hostPort": self.layout.paseo_port,
                     "config": self.layout.settings_file.as_posix(),
                     "cwd": self.layout.root.as_posix(),
                     "serverLog": (self.layout.run_dir / "host-install-server.log").as_posix(),

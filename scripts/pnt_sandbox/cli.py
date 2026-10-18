@@ -14,6 +14,7 @@ from pathlib import Path
 from . import builder, commands
 from .layout import (
     DASHBOARD_PORT,
+    LIVE_PORTS,
     PASEO_PORT,
     SandboxLayout,
     SandboxRefusal,
@@ -26,7 +27,7 @@ from .operations import TOOLING_CHECKOUT, Operations, StepFailed, require_checko
 
 def _port(value: str) -> int:
     port = int(value)
-    if not 1 <= port <= 65535 or port in {9785, 9786}:
+    if not 1 <= port <= 65535 or port in LIVE_PORTS:
         raise argparse.ArgumentTypeError(
             "use a port from 1 to 65535 other than live ports 9785/9786"
         )

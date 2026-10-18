@@ -230,6 +230,8 @@ def _corpus_request(layout: SandboxLayout, ops: Operations, out: Out) -> dict[st
         if present:
             out(f"  {call['name']}: present")
     return {
+        "sandbox": layout.root.as_posix(),
+        "hostPort": layout.paseo_port,
         "config": layout.settings_file.as_posix(),
         "cwd": layout.root.as_posix(),
         "serverLog": (layout.run_dir / "tool-server.log").as_posix(),

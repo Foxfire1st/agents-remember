@@ -25,6 +25,9 @@ PASEO_VERSION = json.loads(
 LOOPBACK = "127.0.0.1"
 PASEO_PORT = 6820
 DASHBOARD_PORT = 9797
+# The ports of the developer's own services. No sandbox may use one: a sandbox process on
+# a live port would answer the developer's clients or take their place.
+LIVE_PORTS = frozenset({9785, 9786})
 # Configuration a harness applies to every session started below the folder that holds it. The
 # sandbox must not sit under such a folder (PNT-R11 item 6). The user's home is exempt: what a
 # harness keeps there is user-level configuration, which no sandbox location can avoid.

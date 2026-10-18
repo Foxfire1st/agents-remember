@@ -191,6 +191,33 @@ which host an agent's role tools address: Codex and Hermes hand a tool server on
 variables of their own, so without it in the definition the tool server of a sandbox agent reads
 the developer's settings file.
 
+## The tool server
+
+An agent drives a sandbox's tool server through this tooling's helper (`build_tool_calls.py`)
+with a request file: `sandbox` names the sandbox the request belongs to, `hostPort` its Paseo
+port, `config` the sandbox's MCP settings file, `expect` the roots the server must report, and
+`calls` the tools to call. The caller's environment is not the server's: the helper starts the
+server with `sandbox_environment` of that sandbox, so the caller's own `XDG_CONFIG_HOME`,
+`HOME`-derived settings and `PASEO_*` variables never reach it, and a request that names no
+sandbox is refused before anything starts.
+
+Before its first call the helper resolves the Paseo home and the listen address with the build's
+own code under that environment and compares them with the sandbox's own layout — home
+`<sandbox>/paseo/home`, listen `127.0.0.1:<hostPort>` — refusing, naming both, when they differ.
+A settings file inside the sandbox that points at another runtime, and a port that is not the
+sandbox's (or one of the live ports), are refused the same way: a helper run from an agent's
+shell cannot address another Paseo runtime. The server's environment is read back through the
+tooling's own judgment (`environment.foreign_variables`) before it is started, so a selector that
+still names another home or address refuses too.
+
+One case is admitted with no host: a fresh build, whose asset bootstrap runs before the sandbox
+writes its host settings. Then `host` in the report says `"no host configured"`, and no call
+reaches any Paseo home or address — the developer's defaults and a default home under `HOME`
+included — because the server's environment carries no selector and a call that needs a host
+fails inside the build without one. When a host is configured, `host` names it, next to `ok`,
+`packageRoot`, `results` and `error`. The sandbox must be started (`scripts/pnt-sandbox.py
+start`) for its host to answer at all.
+
 ## Pi
 
 The settings file gives the sandbox's Paseo runtime a provider entry for Pi that replaces Pi's
