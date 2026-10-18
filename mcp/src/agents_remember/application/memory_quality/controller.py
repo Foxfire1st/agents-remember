@@ -109,7 +109,10 @@ from agents_remember.worktrees.integration.closeout.curator_coherence import (
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding import (
+    IdenticalChangesUnreadable,
+    OnboardingTraceInputs,
     contract_memory_verified_commit,
+    identical_changes_from_run,
     onboarding_trace_gate_for_context,
     validate_memory_refresh_attestations,
 )
@@ -768,9 +771,12 @@ def _attach_curator_checklist(
             knowledge_review = curator_knowledge_review_summaries(coherence)
         gate_findings, gate_report_only = _onboarding_refresh_gate(
             scope,
-            (changed_paths, _gate_changed_paths(prepared.worklist, changed_paths)),
-            current_working_paths,
-            (accepted_no_impact, accepted_route_no_impact),
+            _OnboardingGateInputs(
+                changed=(changed_paths, _gate_changed_paths(prepared.worklist, changed_paths)),
+                working_paths=current_working_paths,
+                no_impact=(accepted_no_impact, accepted_route_no_impact),
+                worklist=prepared.worklist,
+            ),
             response,
         )
         repair_findings.extend(_with_gate(gate_findings, prepared.gate))
@@ -916,24 +922,60 @@ def _gate_changed_paths(
     return sorted({str(change["path"]) for change in document.get("changes") or ()})
 
 
+def _worklist_identical_changes(
+    worklist: tuple[dict[str, Any], str | None] | None,
+) -> tuple[dict[str, list[str]] | None, str]:
+    """The worklist run's identical-copy groups, or why they cannot be read (MIK-R177).
+
+    The gate groups its trace items exactly as ``worklist_onboarding`` does, from the same
+    document's ``identicalChanges``. A document that is absent or not ``complete`` names no groups,
+    and the gate refuses by name instead of judging ungrouped items.
+    """
+
+    if worklist is None:
+        return None, "no worklist run covers this leaf"
+    document = worklist[0]
+    state = document.get("state")
+    if state != "complete":
+        return None, f"the worklist run is {state!r}"
+    try:
+        groups = identical_changes_from_run(document)
+    except IdenticalChangesUnreadable as error:
+        return None, str(error)
+    return groups, ""
+
+
+@dataclass(frozen=True)
+class _OnboardingGateInputs:
+    """What one run hands its onboarding gate: its paths, its census flags, its worklist run.
+
+    ``changed`` is the census's changed paths (the Update History gate's) and the gate's own
+    (MIK-R30's); ``worklist`` is the run's own document, whose ``identicalChanges`` the gate groups
+    identical copies by (MIK-R177).
+    """
+
+    changed: tuple[list[str], list[str]]
+    working_paths: list[str]
+    no_impact: tuple[frozenset[str], frozenset[str]]
+    worklist: tuple[dict[str, Any], str | None] | None
+
+
 def _onboarding_refresh_gate(
     scope: MemoryScope,
-    changed: tuple[list[str], list[str]],
-    working_paths: list[str],
-    no_impact: tuple[frozenset[str], frozenset[str]],
+    inputs: _OnboardingGateInputs,
     response: dict[str, object],
 ) -> tuple[list[Any], list[Any]]:
     """The leaf's onboarding gate: its repair findings and its report-only findings.
 
     A converted tree (K_B or K_C holds the layout marker) runs MIK-R30's history-file gate: one
     repair finding per missing trace, unnecessary rows report-only, and ``onboardingTrace`` on the
-    response. An unconverted tree runs today's Update History gate, unchanged. ``changed`` is the
-    census's changed paths (the Update History gate's) and the gate's own (MIK-R30's).
+    response. An unconverted tree runs today's Update History gate, unchanged.
     """
 
     contract = scope.contract
     assert contract is not None
-    changed_paths, traced_paths = changed
+    changed_paths, traced_paths = inputs.changed
+    working_paths, no_impact, worklist = inputs.working_paths, inputs.no_impact, inputs.worklist
     memory_tree = scope.onboarding_root.parent
     trace_sides = leaf_onboarding_trace_sides(contract, memory_tree=memory_tree)
     if trace_sides is not None:
@@ -954,12 +996,33 @@ def _onboarding_refresh_gate(
                 ],
                 [],
             )
+        identical_changes, unreadable = _worklist_identical_changes(worklist)
+        if identical_changes is None:
+            return (
+                [
+                    {
+                        "check": CHECK_NAME,
+                        "code": INCOMPLETE_CODE,
+                        "path": "" if worklist is None or worklist[1] is None else worklist[1],
+                        "message": (
+                            "the onboarding trace gate cannot read the worklist's identical-copy "
+                            f"groups: {unreadable}. It judges no ungrouped items; recompute the "
+                            "leaf's worklist (knowledge_integrity_check, or this leaf's "
+                            "memory_quality_check) and rerun the gate"
+                        ),
+                    }
+                ],
+                [],
+            )
         trace, findings = onboarding_trace_gate_for_context(
             scope.quality_context,
             traced_paths,
             trace_sides,
-            working_paths=working_paths,
-            code_blobs=code_blobs,
+            OnboardingTraceInputs(
+                code_blobs=code_blobs,
+                identical_changes=identical_changes,
+                working_paths=working_paths,
+            ),
         )
         response["onboardingTrace"] = trace.brief()
         return list(findings), trace.report_only_findings()

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
-from agents_remember.application.knowledge_worklist import leaf_onboarding_trace_sides
+from agents_remember.application.knowledge_worklist import (
+    leaf_onboarding_trace_sides,
+    read_leaf_worklist,
+    worklist_path,
+)
 from agents_remember.application.knowledge_worklist.onboarding_trace import worktree_code_blobs
 from agents_remember.application.memory_quality.converted_base import (
     context_check_base,
@@ -83,6 +89,7 @@ from agents_remember.memory_quality.style.citations.source_index import (
     open_repository_index,
 )
 from agents_remember.memory_quality.style.citations.source_index_state import SourceIndexError
+from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
 from agents_remember.models.lifecycles.operation import CloseoutOperationInput
 from agents_remember.models.lifecycles.preparation import (
     PreparedCloseoutOutput,
@@ -123,8 +130,11 @@ from agents_remember.worktrees.knowledge_gate import (
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.modules.onboarding import (
+    IdenticalChangesUnreadable,
+    OnboardingTraceInputs,
     contract_memory_verified_commit,
     entity_fingerprint_refresh_plan_for_context,
+    identical_changes_from_run,
     parse_entity_fingerprint_rows,
     refresh_entity_fingerprints_for_context,
     refresh_onboarding_metadata_for_context,
@@ -351,6 +361,124 @@ def _raise_curator_refresh_required(failure: _CuratorRefreshFailure) -> None:
     )
 
 
+def _str_or_none(value: Any) -> str | None:
+    """``value`` when it is a non-empty string, else ``None`` (a pairing field a run must name)."""
+
+    return value if isinstance(value, str) and value else None
+
+
+def _identical_changes(
+    contract: WorktreeContract,
+    *,
+    candidate_tree: str,
+    memory_base: str | None,
+    onboarding_paths: Collection[str],
+) -> dict[str, list[str]]:
+    """The leaf run's identical-copy groups for **this** candidate, or a refusal naming why not.
+
+    MIK-R177: the closeout validator groups its trace items exactly as the leaf's worklist build
+    does, from the persisted run's ``identicalChanges`` (``knowledge-worklist.json`` beside the
+    series contract). The run must describe the candidate being certified: its code base commit,
+    its code candidate tree and its memory base commit must be this leaf's, and its group membership
+    must still match the cards on disk. A run that is absent, unreadable, not ``complete``,
+    malformed, stale or group-less is a named refusal; the validator never falls back to ungrouped
+    items, and it never judges a row against an item built from another candidate's groups.
+    """
+
+    path = worklist_path(contract)
+    where = (path if path is not None else Path("knowledge-worklist.json")).as_posix()
+    problem = f"{where} holds no persisted worklist run"
+    document = None
+    try:
+        document = read_leaf_worklist(contract.contract_path)
+    except (OSError, ValueError) as error:
+        problem = f"{where} cannot be read: {error}"
+    if document is not None:
+        state = document.get("state")
+        if state != "complete":
+            problem = f"{where} holds a worklist run that is {state!r}"
+        else:
+            try:
+                groups = identical_changes_from_run(document)
+            except IdenticalChangesUnreadable as error:
+                problem = f"{where} holds an unreadable identicalChanges map: {error}"
+            else:
+                stale = _pairing_mismatch(
+                    document.get("pairing"),
+                    candidate_tree=candidate_tree,
+                    base_commit=contract.code_base_commit,
+                    memory_base=memory_base,
+                ) or _card_mismatch(groups, onboarding_paths)
+                if stale is None:
+                    return groups
+                problem = f"{where} holds a run that does not describe this candidate: {stale}"
+    raise RuntimeError(
+        "external-memory closeout requires the leaf's worklist identical-copy groups for the "
+        "candidate being certified, so an onboarding row that binds a group of identical copies "
+        f"answers the gate: {problem}. Recompute the run for this candidate with "
+        "`agents-remember knowledge-worklist --contract "
+        f"{contract.contract_path.as_posix()}` and retry closeout; the validator judges no "
+        "ungrouped trace items and no other candidate's groups"
+    )
+
+
+def _pairing_mismatch(
+    pairing: Any, *, candidate_tree: str, base_commit: str, memory_base: str | None
+) -> str | None:
+    """Why a run's recorded pairing is not this candidate's, or ``None`` when it is (MIK-R177).
+
+    The worklist groups the changed paths of one exact candidate: its code base commit (B), its code
+    candidate tree (C) and the memory base commit (K_B) its coverage is read at. A run recorded
+    against another of those builds an item from another candidate's grouping.
+    """
+
+    if not isinstance(pairing, Mapping):
+        return "the run records no pairing"
+    base = pairing.get("base")
+    candidate = pairing.get("candidate")
+    memory = pairing.get("memoryBase")
+    recorded_base = base.get("commit") if isinstance(base, Mapping) else None
+    recorded_candidate = candidate.get("tree") if isinstance(candidate, Mapping) else None
+    recorded_memory = memory.get("commit") if isinstance(memory, Mapping) else None
+    if recorded_base != base_commit:
+        return f"its code base is {recorded_base!r}, this leaf's is {base_commit!r}"
+    if recorded_candidate != candidate_tree:
+        return (
+            f"its code candidate tree is {recorded_candidate!r}, "
+            f"this candidate's is {candidate_tree!r}"
+        )
+    if memory_base is not None and recorded_memory != memory_base:
+        return f"its memory base is {recorded_memory!r}, this leaf's is {memory_base!r}"
+    return None
+
+
+def _card_mismatch(
+    groups: Mapping[str, Sequence[str]], onboarding_paths: Collection[str]
+) -> str | None:
+    """Why a run's group membership is contradicted by a card now, or ``None`` (MIK-R177).
+
+    A valid group is its representative plus cardless members, so a member that has gained a card
+    after the run would be its own group in a fresh run. Reading the old group would answer the
+    wrong item, so the run is stale.
+    """
+
+    carded = {
+        path
+        for path in onboarding_paths
+        if path.startswith(f"{ONBOARDING_ROOT}/")
+        and (path.endswith(".md") or path.endswith(".json"))
+    }
+    for representative, members in groups.items():
+        for member in members:
+            if member == representative:
+                continue
+            if f"{ONBOARDING_ROOT}/{member}.md" in carded or (
+                f"{ONBOARDING_ROOT}/{member}.json" in carded
+            ):
+                return f"its group {representative!r} still lists carded source {member!r}"
+    return None
+
+
 def _realize_prepared_memory(
     request: PreparedMemoryCertificationRequest,
 ) -> PreparedMemoryCandidate:
@@ -396,8 +524,16 @@ def _realize_prepared_memory(
             context,
             change.changed_paths,
             trace_sides,
-            working_paths=change.working_paths,
-            code_blobs=code_blobs,
+            OnboardingTraceInputs(
+                code_blobs=code_blobs,
+                identical_changes=_identical_changes(
+                    current.contract,
+                    candidate_tree=request.candidate.codeView.codeTree,
+                    memory_base=_str_or_none(trace_sides.pairing.get("memoryBase")),
+                    onboarding_paths={*trace_sides.base, *trace_sides.candidate},
+                ),
+                working_paths=change.working_paths,
+            ),
         )
     else:
         validate_onboarding_refresh_plan_for_context(

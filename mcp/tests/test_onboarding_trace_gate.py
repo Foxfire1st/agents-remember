@@ -48,6 +48,7 @@ from agents_remember.models.knowledge_files.history import HistoryFile
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.modules.onboarding import (
+    OnboardingTraceInputs,
     onboarding_trace_gate_for_context,
     refresh_onboarding_metadata_for_context,
     refresh_route_overview_metadata_for_context,
@@ -248,6 +249,20 @@ def _worklist(leaf: Leaf) -> Any:
     return found[0]
 
 
+def _identical_changes(leaf: Leaf) -> dict[str, list[str]]:
+    """The leaf's worklist run's identical-copy groups, as both gate entries read them (MIK-R177)."""
+
+    return dict(_worklist(leaf)["identicalChanges"])
+
+
+def _trace_inputs(leaf: Leaf, changed: list[str], groups: dict[str, list[str]]) -> Any:
+    """The inputs both gate entries read beside the sides: candidate blobs and the groups."""
+
+    return OnboardingTraceInputs(
+        code_blobs=worktree_code_blobs(leaf.code, changed), identical_changes=groups
+    )
+
+
 def _by_subject(result: Any) -> dict[str, Any]:
     return {item.subject: item for item in result.items}
 
@@ -378,7 +393,7 @@ def test_a_missing_trace_is_one_named_repair_finding_and_the_closeout_refuses(le
     sides = leaf_onboarding_trace_sides(contract)
     assert sides is not None
     result, findings = onboarding_trace_gate_for_context(
-        leaf.context(), [A], sides, code_blobs=worktree_code_blobs(leaf.code, [A])
+        leaf.context(), [A], sides, _trace_inputs(leaf, [A], _identical_changes(leaf))
     )
     assert [finding["code"] for finding in findings] == [MISSING_CODE, MISSING_CODE]
     card = next(finding for finding in findings if finding["path"] == f"onboarding/{A}.md")
@@ -387,7 +402,7 @@ def test_a_missing_trace_is_one_named_repair_finding_and_the_closeout_refuses(le
     assert card["itemId"] == result.open_items[0].id
     with pytest.raises(RuntimeError, match="requires an onboarding trace") as refused:
         validate_onboarding_traces_for_context(
-            leaf.context(), [A], sides, code_blobs=worktree_code_blobs(leaf.code, [A])
+            leaf.context(), [A], sides, _trace_inputs(leaf, [A], _identical_changes(leaf))
         )
     assert f"onboarding/{A}.md" in str(refused.value)
     assert "onboarding/pkg/overview.md" in str(refused.value)
@@ -505,8 +520,9 @@ def test_mixed_formats_are_an_incomplete_side_never_a_vacuous_pass(leaf: Leaf) -
         sides = leaf_onboarding_trace_sides(contract)
         assert sides is not None and reason in str(sides.incomplete)
         with pytest.raises(RuntimeError, match=reason) as refusal:
+            # An incomplete run names no groups; the sides refuse before any group is read.
             validate_onboarding_traces_for_context(
-                leaf.context(), [A], sides, code_blobs=worktree_code_blobs(leaf.code, [A])
+                leaf.context(), [A], sides, _trace_inputs(leaf, [A], {})
             )
         assert ": :" not in str(refusal.value)
         found = recompute_leaf_worklist(contract)

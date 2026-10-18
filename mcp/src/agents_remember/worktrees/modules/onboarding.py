@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -968,24 +969,91 @@ def _require_onboarded_sources(
     return plan
 
 
+@dataclass(frozen=True)
+class OnboardingTraceInputs:
+    """What both gate entries read about a change, beside the memory sides (MIK-R53, MIK-R177).
+
+    ``code_blobs`` maps every changed source path to its blob at the code candidate (``None`` for a
+    deleted file). ``identical_changes`` is the leaf's worklist run's ``identicalChanges``: the gate
+    groups identical copies exactly as ``worklist_onboarding`` does, so an item a row answers in the
+    worklist is the item the gate raises. It carries no default, so no caller judges ungrouped
+    items where the worklist grouped identical copies. ``working_paths`` names the changed paths
+    that are uncommitted, which the missing-sidecar refusal reads; ``None`` keeps its strict legacy
+    meaning, every changed path treated as working.
+    """
+
+    code_blobs: Mapping[str, str | None]
+    identical_changes: Mapping[str, Sequence[str]]
+    working_paths: list[str] | None = None
+
+
+class IdenticalChangesUnreadable(ValueError):
+    """A worklist run's ``identicalChanges`` is not a group map (MIK-R177)."""
+
+
+def identical_changes_from_run(document: Mapping[str, Any]) -> dict[str, list[str]]:
+    """The run's ``identicalChanges`` as ordered source lists, or a named refusal (MIK-R177).
+
+    The one reader both gate entries use. A complete run's groups are
+    ``{representative source path: [source path, ...]}``; an entry that is not a list of non-empty
+    source paths is a malformed grouping input and is refused by name. Nothing is dropped, coerced
+    or replaced by a singleton, so a malformed group can never shorten itself into an ungrouped
+    item. A genuine empty mapping stays empty, and each group keeps the run's order.
+    """
+
+    groups = document.get("identicalChanges")
+    if not isinstance(groups, Mapping):
+        raise IdenticalChangesUnreadable("the run names no identicalChanges mapping")
+    parsed: dict[str, list[str]] = {}
+    for representative, members in groups.items():
+        if not isinstance(representative, str) or not representative:
+            raise IdenticalChangesUnreadable(
+                f"an identicalChanges key is not a source path: {representative!r}"
+            )
+        if not isinstance(members, (list, tuple)):
+            raise IdenticalChangesUnreadable(
+                f"identicalChanges[{representative!r}] is not a list of source paths: {members!r}"
+            )
+        if not all(isinstance(one, str) and one for one in members):
+            raise IdenticalChangesUnreadable(
+                f"identicalChanges[{representative!r}] holds a member that is not a source path: "
+                f"{list(members)!r}"
+            )
+        if not members:
+            raise IdenticalChangesUnreadable(
+                f"identicalChanges[{representative!r}] names no member"
+            )
+        if representative not in members:
+            raise IdenticalChangesUnreadable(
+                f"identicalChanges[{representative!r}] does not name its representative among its "
+                f"members: {list(members)!r}"
+            )
+        parsed[representative] = list(members)
+    return parsed
+
+
 def onboarding_trace_gate_for_context(
     context,
     changed_paths: list[str],
     sides: OnboardingTraceSides,
-    *,
-    working_paths: list[str] | None = None,
-    code_blobs: Mapping[str, str | None],
+    inputs: OnboardingTraceInputs,
 ) -> tuple[OnboardingTraceResult, list[dict[str, str]]]:
     """MIK-R30 on a converted tree, for the curator's memory-quality run: never raises.
 
     Returns the gate's result and its repair findings: one per missing trace (rule 6), one per
     unreadable input, and one for changed sources without onboarding (today's refusal, unchanged).
-    ``code_blobs`` maps every changed path to its blob at the code candidate (MIK-R53 rule 3).
+    ``inputs`` carries the candidate's blobs and the worklist's identical-copy groups (MIK-R177).
     """
-    result = onboarding_trace_result(context, changed_paths, sides, code_blobs=code_blobs)
+    result = onboarding_trace_result(
+        context,
+        changed_paths,
+        sides,
+        code_blobs=inputs.code_blobs,
+        source_groups=inputs.identical_changes,
+    )
     findings = result.repair_findings()
     try:
-        _require_onboarded_sources(context, changed_paths, working_paths)
+        _require_onboarded_sources(context, changed_paths, inputs.working_paths)
     except RuntimeError as error:
         findings.insert(
             0,
@@ -1003,13 +1071,21 @@ def validate_onboarding_traces_for_context(
     context,
     changed_paths: list[str],
     sides: OnboardingTraceSides,
-    *,
-    working_paths: list[str] | None = None,
-    code_blobs: Mapping[str, str | None],
+    inputs: OnboardingTraceInputs,
 ) -> OnboardingTraceResult:
-    """MIK-R30 on a converted tree, for the closeout validator: refuse naming every missing trace."""
-    _require_onboarded_sources(context, changed_paths, working_paths)
-    result = onboarding_trace_result(context, changed_paths, sides, code_blobs=code_blobs)
+    """MIK-R30 on a converted tree, for the closeout validator: refuse naming every missing trace.
+
+    ``inputs`` carries the blobs and the worklist's identical-copy groups, for the same reason as
+    in :func:`onboarding_trace_gate_for_context` (MIK-R177).
+    """
+    _require_onboarded_sources(context, changed_paths, inputs.working_paths)
+    result = onboarding_trace_result(
+        context,
+        changed_paths,
+        sides,
+        code_blobs=inputs.code_blobs,
+        source_groups=inputs.identical_changes,
+    )
     if not result.ok:
         raise RuntimeError(result.refusal())
     return result
