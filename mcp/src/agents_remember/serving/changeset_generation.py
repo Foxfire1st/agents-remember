@@ -1,8 +1,12 @@
-"""Filesystem generations for the existing change-set readers, without polling Git.
+"""Filesystem and Git observations for the change-set readers.
 
-Git still selects repositories, configuration origins and ignored directories. These
-observations only decide whether a previous native read can be reused. Incomplete
-observations never form a key; the caller then performs its ordinary uncached read.
+Git computes every diff this package serves; these observations only decide
+whether a previous read can be reused. MIK-R176@v2 removed the hand-rolled
+walks: a commit range is keyed by its commit ids
+(:meth:`RepositoryLayout.object_presence`), a working view is decided by Git's
+own ``status --porcelain=v2`` (:func:`working_generation`), and the object store
+is summarised by Git's own object census (:func:`count_objects`) rather than by
+walking and hashing its objects.
 """
 
 from __future__ import annotations
@@ -10,10 +14,10 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.kernel.git_command import GitRunnerOptions, git_environment, run_git
+from agents_remember.kernel.git_command import git_environment, run_git
 from agents_remember.kernel.git_reference_files import packed_references
 
 type Identity = tuple[int, ...]
@@ -45,7 +49,12 @@ def identity(path: Path) -> Identity:
 
 
 def tree_identity(root: Path, *, skip: frozenset[str] = frozenset()) -> str:
-    """Names and full file identities, including missing roots and directory changes."""
+    """Names and full file identities for a small named input, never a whole worktree.
+
+    Used for one file or one small directory a read names directly (a worktree
+    text, a repository locator, ``refs/replace``); the worktree and the object
+    store have their own Git-native signals.
+    """
     digest = hashlib.sha256()
     digest.update(repr(identity(root)).encode())
     if not root.is_dir():
@@ -82,45 +91,76 @@ def _locator_identity(path: Path) -> Identity:
     return stamp[:3] + stamp[6:9] if path.is_dir() else stamp
 
 
-@dataclass
-class ObjectGeneration:
-    """Adding objects cannot change old content; removing/replacing one revokes proof.
+def working_generation(root: Path) -> str:
+    """Git's own index-stat signal for a working view (MIK-R176 rule 5).
 
-    Loose objects and packs stay Git-owned. This observes their native file
-    metadata and raw-byte digests, including alternate stores, and never parses an object or a pack.
-    A removed/replaced object file forces the ordinary Git read and its refusal.
+    One ``git status --porcelain=v2`` child answers whether anything changed: Git
+    reports every staged, unstaged, renamed, deleted and untracked path from the
+    index's own stat cache, and no part of this module walks the worktree. Status
+    names each changed path but does not hash it, so each changed path's own
+    identity is folded in as well: two edits to one file carry the same status
+    letter while their counted lines differ.
     """
 
-    files: dict[Path, tuple[Identity, str]] = field(default_factory=dict)
-    revision: str = ""
+    result = run_git(
+        root,
+        [
+            "-c",
+            "diff.autoRefreshIndex=false",
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--untracked-files=all",
+        ],
+    )
+    if result.returncode:
+        raise OSError(result.stderr.strip())
+    digest = hashlib.sha256(result.stdout.encode("utf-8", "surrogateescape"))
+    records = result.stdout.split("\0")
+    cursor = 0
+    while cursor < len(records):
+        record = records[cursor]
+        cursor += 1
+        if record.startswith("? "):
+            path = record[2:]
+        elif record.startswith("1 "):
+            path = record.split(" ", 8)[-1]
+        elif record.startswith("u "):
+            path = record.split(" ", 10)[-1]
+        elif record.startswith("2 "):
+            path = record.split(" ", 9)[-1]
+            cursor += 1  # the source path follows its rename/copy record
+        else:
+            continue
+        digest.update(repr((path, identity(root / path))).encode())
+    return digest.hexdigest()
 
-    @property
-    def complete_revision(self) -> str:
-        """Absence proofs also observe additions, including a restored missing object."""
-        return hashlib.sha256(
-            repr(sorted((str(path), digest) for path, (_, digest) in self.files.items())).encode()
-        ).hexdigest()
 
-    def observe(self, directories: tuple[Path, ...]) -> str:
-        files: dict[Path, tuple[Identity, str]] = {}
-        for root in directories:
-            files[root] = (_locator_identity(root), "directory")
-            for parent, _, names in os.walk(root, onerror=_raise_walk_error):
-                for name in names:
-                    path = Path(parent) / name
-                    stamp = identity(path)
-                    old = self.files.get(path)
-                    digest = old[1] if old is not None and old[0] == stamp else _file_digest(path)
-                    if identity(path) != stamp:
-                        raise OSError(f"Git object file changed while observed: {path}")
-                    files[path] = (stamp, digest)
-        if not self.revision or any(
-            path not in files or not _same_object(stamp, files[path])
-            for path, stamp in self.files.items()
-        ):
-            self.revision = hashlib.sha256(repr(sorted(files.items())).encode()).hexdigest()
-        self.files = files
-        return self.revision
+def count_objects(root: Path) -> tuple[int, int, tuple[str, ...]]:
+    """Git's own object census for one repository (MIK-R176 rule 5).
+
+    ``count-objects -v`` reports loose and packed object counts and any alternate
+    store. It is Git's number, not our walk: no object file is read or hashed and
+    no directory of the store is walked. A capture adds objects, so a caller that
+    only needs to know that nothing was removed tolerates a rise; a fall revokes.
+    """
+
+    result = run_git(root, ["count-objects", "-v"])
+    if result.returncode:
+        raise OSError(result.stderr.strip())
+    fields: dict[str, str] = {}
+    alternates: list[str] = []
+    for line in result.stdout.splitlines():
+        key, _, value = line.partition(": ")
+        if key == "alternate":
+            alternates.append(value)
+        else:
+            fields[key] = value
+    return (
+        int(fields.get("count", "0")),
+        int(fields.get("in-pack", "0")),
+        tuple(sorted(alternates)),
+    )
 
 
 def _file_digest(path: Path) -> str:
@@ -133,17 +173,6 @@ def configuration_identity(path: Path) -> str:
         return _file_digest(path)
     except FileNotFoundError:
         return "absent"
-
-
-def _same_object(before: tuple[Identity, str], after: tuple[Identity, str]) -> bool:
-    # Native capture freshens loose objects/packs with utime. Compare their bytes,
-    # retaining replacement detection even when replacement content is identical.
-    old, new = before[0], after[0]
-    return old[:4] + old[6:10] == new[:4] + new[6:10] and before[1] == after[1]
-
-
-def _raise_walk_error(error: OSError) -> None:
-    raise error
 
 
 @dataclass(frozen=True)
@@ -184,6 +213,36 @@ class RepositoryLayout:
                 self.references((*references, *(("HEAD",) if working else ()))),
             )
         )
+
+    def object_presence(self, oid: str) -> str:
+        """A cheap proof that an object id is still available, without a store walk (MIK-R176).
+
+        A loose object is one file this names directly. Otherwise the pack index and
+        pack files are the only files that can hold it, and their identities change
+        when a pack is repacked or pruned. So a removed object revokes the answer and
+        an unchanged pack set keeps it, at the cost of a handful of stats instead of
+        walking and hashing every object file.
+        """
+
+        stamps: list[tuple[str, tuple[tuple[str, Identity], ...]]] = []
+        for directory in self.object_directories:
+            loose = directory / oid[:2] / oid[2:]
+            if loose.exists():
+                return repr(("loose", str(loose), identity(loose)))
+            packs = directory / "pack"
+            entries = (
+                tuple(
+                    sorted(
+                        (entry.name, identity(entry))
+                        for entry in packs.iterdir()
+                        if entry.name.endswith((".idx", ".pack"))
+                    )
+                )
+                if packs.is_dir()
+                else ()
+            )
+            stamps.append((str(directory), entries))
+        return repr(("packed", tuple(stamps)))
 
     def references(self, names: tuple[str, ...]) -> str:
         packed = packed_references(self.common)
@@ -319,70 +378,4 @@ def repository_layout(root: Path) -> RepositoryLayout:
             for path in paths
         ),
         _configuration_environment(),
-    )
-
-
-@dataclass(frozen=True)
-class WorkingManifest:
-    """Native directory exclusions and the directory/configuration inputs that govern them."""
-
-    skip: frozenset[str]
-    inputs: tuple[tuple[Path, Identity | str], ...]
-
-    def current(self) -> bool:
-        return all(
-            (configuration_identity(path) if isinstance(stamp, str) else identity(path)) == stamp
-            for path, stamp in self.inputs
-        )
-
-
-def working_manifest(layout: RepositoryLayout) -> WorkingManifest:
-    root = layout.root
-    tracked = _git_text(root, ["ls-files", "--cached", "-z"]).split("\0")
-    ancestors = {str(parent) for name in tracked if name for parent in Path(name).parents}
-    ignored = _git_text(
-        root, ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]
-    ).split("\0")
-    candidates = [
-        name.rstrip("/")
-        for name in ignored
-        if name.endswith("/") and name.rstrip("/") not in ancestors
-    ]
-    # ls-files can collapse a directory whose current *contents* are ignored.
-    # Only check-ignore's proof about the directory itself permits skipping it.
-    excluded = (
-        run_git(
-            root,
-            ["check-ignore", "-z", "--stdin"],
-            GitRunnerOptions(input_text="".join(name + "/\0" for name in candidates)),
-        )
-        if candidates
-        else None
-    )
-    if excluded is not None and excluded.returncode not in (0, 1):
-        raise OSError(excluded.stderr.strip())
-    skip = frozenset(
-        name.rstrip("/") for name in (excluded.stdout.split("\0") if excluded else ()) if name
-    ) | {".git"}
-    paths = {layout.git / "index", layout.common / "info/exclude", *layout.configuration}
-
-    # Every potentially governing .gitignore, including one created in a previously empty dir.
-    def visit(directory: Path) -> None:
-        # Directory identity sees late arrivals without reading excluded contents.
-        paths.add(directory)
-        paths.add(directory / ".gitignore")
-        with os.scandir(directory) as entries:
-            for entry in entries:
-                if entry.is_dir(follow_symlinks=False):
-                    path = Path(entry.path)
-                    if path.relative_to(root).as_posix() not in skip:
-                        visit(path)
-
-    visit(root)
-    return WorkingManifest(
-        skip,
-        tuple(
-            (path, configuration_identity(path) if path in layout.configuration else identity(path))
-            for path in sorted(paths)
-        ),
     )

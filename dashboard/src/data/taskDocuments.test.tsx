@@ -37,7 +37,10 @@ describe('task bodies belong to the store and exact document revision', () => {
     vi.stubGlobal('fetch', fetch);
     const resources = new TaskDocumentResources();
     const first = resources.load(reference, 'one');
-    expect(resources.load(reference, 'one')).toBe(first);
+    // One body fetch serves both readers; an owner's wait is its own (L174-R1-01).
+    const joined = resources.load(reference, 'one');
+    expect(joined).not.toBe(first);
+    expect(fetch).toHaveBeenCalledOnce();
     pending.resolve(answer('one', 'Whole document'));
     const complete = await first;
     expect(await resources.load(reference, 'one')).toBe(complete);

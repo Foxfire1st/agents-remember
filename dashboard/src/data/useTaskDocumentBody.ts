@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import type { TaskEntry, TaskSummary } from '../types/projection';
 
+import { isAbortedRead } from './abortableRead';
 import { taskBodyKey, type TaskBodyRecord, type TaskDocumentResources } from './taskDocuments';
 import { useDashboard } from './store';
 
@@ -178,7 +179,11 @@ export function useTaskDocumentBody(entry: TaskEntry | undefined): {
   useEffect(() => {
     if (!repository || !path || revision === undefined || active) return;
     let live = true;
-    void resources.load({ repository, path }, revision).then(
+    // A task switch (or a page that goes away) ends this body's request with it,
+    // so its bytes never arrive for a reader that is gone and leave no body in
+    // the store (MIK-R176 rule 1).
+    const controller = new AbortController();
+    void resources.load({ repository, path }, revision, '', controller.signal).then(
       (record) => {
         if (live)
           setSettled(
@@ -187,12 +192,13 @@ export function useTaskDocumentBody(entry: TaskEntry | undefined): {
               : { key, failed: true },
           );
       },
-      () => {
-        if (live) setSettled({ key, failed: true });
+      (cause: unknown) => {
+        if (live && !isAbortedRead(cause)) setSettled({ key, failed: true });
       },
     );
     return () => {
       live = false;
+      controller.abort();
     };
   }, [resources, repository, path, revision, key, active]);
   return {

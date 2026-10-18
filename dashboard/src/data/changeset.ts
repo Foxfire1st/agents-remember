@@ -9,6 +9,7 @@
 //   /api/changeset/file-diff?repo&scope&kind&path  -> BEFORE + AFTER content for one changed file (MergeView a/b)
 //   /api/changeset/master?repo&master              -> the master's accumulated change-set (dedup by path, sum counts)
 import { qs } from './files';
+import { isAbortedRead } from './abortableRead';
 import { type ReviewFailure, ReviewTransportError, reviewFailureToken } from './reviewTransport';
 import { dashboardStore } from './store';
 
@@ -145,14 +146,16 @@ function changeSetFailure(response: Response, body: ChangeSetRefusalBody | null)
 // therefore read whatever the status, exactly as the review client reads its own route
 // (`data/reviewTransport.ts`, same doctrine and the same `ReviewFailure`/token vocabulary), and the
 // thrown error stays a `FilesApiError` with the same `code`/`httpStatus`/message it always had.
-async function getChangeSetJson<T>(url: string): Promise<T> {
+async function getChangeSetJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   try {
     const resources = dashboardStore.getState();
     const cache = url.includes('/api/changeset/file-diff?')
       ? resources.changeSetFiles
       : resources.changeSets;
-    return await cache.load<T>(url, decodeChangeSetJson);
+    return await cache.load<T>(url, decodeChangeSetJson, url, signal);
   } catch (cause) {
+    // A read its page abandoned is not a network failure and is never shown as one.
+    if (isAbortedRead(cause)) throw cause;
     if (cause instanceof ReviewTransportError) throw cause;
     throw new ReviewTransportError({
       token: 'network',
@@ -197,8 +200,10 @@ export const peekChangeSet = (
 ): TaskChangeset | MasterChangeset | undefined =>
   dashboardStore.getState().changeSets.peek(listUrl(target));
 
-export const loadChangeSet = (target: ChangeSetAddress): Promise<TaskChangeset | MasterChangeset> =>
-  getChangeSetJson(listUrl(target));
+export const loadChangeSet = (
+  target: ChangeSetAddress,
+  signal?: AbortSignal,
+): Promise<TaskChangeset | MasterChangeset> => getChangeSetJson(listUrl(target), signal);
 
 export const taskChangeset = (repo: string, scope: string, base = ''): Promise<TaskChangeset> =>
   getChangeSetJson<TaskChangeset>(listUrl({ repo, scope }, base));

@@ -106,7 +106,10 @@ describe('bounded conditional page results', () => {
     );
     const one = cache.load('/one', decode, 'same facts');
     const refusal = one.catch((cause: unknown) => cause);
-    expect(cache.load('/one', decode, 'same facts')).toBe(one);
+    // One fetch serves both readers; an owner's wait is its own (L174-R1-01).
+    const joined = cache.load('/one', decode, 'same facts');
+    expect(joined).not.toBe(one);
+    expect(cache.retained.pending).toBe(1);
     const two = cache.load('/two', decode);
     const three = cache.load('/three', decode);
     expect(cache.retained.pending).toBe(2);

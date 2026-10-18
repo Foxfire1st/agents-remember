@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.serving.changeset_cache import Retention, cached_read
 from agents_remember.serving.changeset_reads import read_git as run_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -113,7 +114,15 @@ def recorded_committed_range(contract: WorktreeContract, *, memory: bool) -> Rec
             "range",
             kind=NOT_RECORDED,
         )
-    unresolvable = _unresolvable(repository, base, head)
+    # Validation is an observation, and rule 5 gives an id-keyed read no observation on a
+    # hit: the pair is fixed by its ids, so the check runs once per pair and its success is
+    # kept. A refusal is never kept, so a repository that gains the objects is seen at once.
+    unresolvable = cached_read(
+        ("recorded-commits", repository, base, head),
+        (),
+        lambda: _unresolvable(repository, base, head),
+        retention=Retention(keep=lambda value: value is None),
+    )
     if unresolvable is not None:
         raise RecordedEndpointAbsent(
             f"the recorded {side} committed range for leaf {_leaf(contract)} names "

@@ -13,6 +13,7 @@ import {
   loadChangeSet,
   peekChangeSet,
 } from '../../data/changeset';
+import { isAbortedRead } from '../../data/abortableRead';
 import { useIntentEntryGeneration } from '../../data/intentEntryRevalidation';
 import { type ReviewFailure, reviewProblemFromCause } from '../../data/review';
 import type { TaskEntry } from '../../types/projection';
@@ -92,18 +93,28 @@ export function ChangeSetButton({
   const { counters, unrecorded, leaves, generation } = changeSetRead(data);
   useEffect(() => {
     let live = true;
-    void loadChangeSet({
-      repo: target.repo,
-      scope: target.scope,
-      master: target.master,
-      leaf: target.leaf,
-      mode: target.mode,
-    }).then(
+    // A switch to another task aborts this page's read with its request: the
+    // browser's free connections belong to the task shown now, and an abandoned
+    // read leaves neither an error on the page nor an entry in the store.
+    const controller = new AbortController();
+    void loadChangeSet(
+      {
+        repo: target.repo,
+        scope: target.scope,
+        master: target.master,
+        leaf: target.leaf,
+        mode: target.mode,
+      },
+      controller.signal,
+    ).then(
       (next) => live && setSettled({ key, data: next }),
-      (cause: unknown) => live && setSettled({ key, problem: reviewProblemFromCause(cause) }),
+      (cause: unknown) => {
+        if (live && !isAbortedRead(cause)) setSettled({ key, problem: reviewProblemFromCause(cause) });
+      },
     );
     return () => {
       live = false;
+      controller.abort();
     };
   }, [key, revalidation, target.repo, target.scope, target.master, target.leaf, target.mode]);
   // An unrecorded range prints no total: `+0 −0` would present a zero of nothing as a measurement.

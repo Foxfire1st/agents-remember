@@ -32,6 +32,7 @@ exactly the uncommitted delta its name claims.
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
@@ -58,6 +59,7 @@ from agents_remember.serving.changeset_reads import (
     head_commit,
     working_text,
 )
+from agents_remember.serving.changeset_scheduler import _BoundedReads, _read_off_the_loop
 from agents_remember.serving.master_net_generation import (
     MASTER_NET_SCOPE,
     MasterEndpointAbsent,
@@ -726,6 +728,16 @@ def _file_response(config: McpRuntimeConfig, ref: ChangesetFileRef) -> Response:
     return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
 
 
+# The route family's own threads. Reading a change set can run Git for minutes, and the
+# server's default pool also carries every background loop's blocking work (MIK-R176 rule 3):
+# these reads may not take another route's threads.
+CHANGESET_READ_THREADS = 8
+# Reads admitted beyond the running threads wait in this queue; the sum is the family's
+# hard admission cap (L174-R1-03). A request past it gets an explicit refusal, and a queued
+# read whose client left never runs its work (L174-R1-02).
+CHANGESET_READ_PENDING = 8
+
+
 def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> ChangesetCache:
     """Register the read-only change-set routes. Must be called BEFORE the greedy static mount.
 
@@ -733,9 +745,20 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> Changes
     committed/working delta, ``master`` the series net, ``scope`` one active enclosure). ``leaf`` is
     qualified by ``master`` and requires a ``mode``; both ``leaf`` and ``master`` go through the
     JSONResponse 400/404 idiom rather than ``run_scoped``.
+
+    The blocking read runs in this route family's own bounded pool, never on the event loop's
+    shared default executor (MIK-R176 rule 3): a slow change-set read cannot take the threads of
+    another route, and one task's read cannot delay another's. The route notices a client that
+    went away and ends the read with the Git process it started (rule 4).
     """
 
     cache = ChangesetCache()
+    reads = _BoundedReads(
+        threads=CHANGESET_READ_THREADS,
+        pending=CHANGESET_READ_PENDING,
+        name="changeset-read",
+    )
+    weakref.finalize(app, reads.shutdown)
 
     # Two success shapes: the leaf view adds ``mode`` to the enclosure view's body, and the
     # ``leaf`` selector is what picks between them.
@@ -744,24 +767,36 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> Changes
         response_model=ComparisonChangeSet | LeafChangeSet | TaskChangeSet,
         responses=CHANGESET_READ_RESPONSES,
     )
-    def api_changeset_task(
+    async def api_changeset_task(
         ref: Annotated[ChangesetTaskRef, Depends()], request: Request
     ) -> Response:
         conflict = _comparison_mode_refusal(ref.comparison, "mode" in request.query_params)
         if conflict is not None:
             return conflict
-        return cache.response(request, lambda: _task_response(config, ref))
+        return await _read_off_the_loop(
+            request,
+            reads,
+            lambda cancellation: cache.response(
+                request, lambda: _task_response(config, ref), abandoned=cancellation
+            ),
+        )
 
     @app.get(
         "/api/changeset/file-diff", response_model=FileDiff, responses=CHANGESET_READ_RESPONSES
     )
-    def api_changeset_file_diff(
+    async def api_changeset_file_diff(
         ref: Annotated[ChangesetFileRef, Depends()], request: Request
     ) -> Response:
         conflict = _comparison_mode_refusal(ref.comparison, "mode" in request.query_params)
         if conflict is not None:
             return conflict
-        return cache.response(request, lambda: _file_response(config, ref))
+        return await _read_off_the_loop(
+            request,
+            reads,
+            lambda cancellation: cache.response(
+                request, lambda: _file_response(config, ref), abandoned=cancellation
+            ),
+        )
 
     # An unknown master (no series contract) degrades to empty lists rather than refusing. A
     # master the contract names but whose code endpoints are missing is refused by name instead
@@ -769,19 +804,24 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> Changes
     @app.get(
         "/api/changeset/master", response_model=MasterChangeSet, responses=CHANGESET_READ_RESPONSES
     )
-    def api_changeset_master(
+    async def api_changeset_master(
         ref: Annotated[MasterChangesetRef, Depends()], request: Request
     ) -> Response:
-        return cache.response(
+        return await _read_off_the_loop(
             request,
-            lambda: _master_json(
-                lambda: master_changeset(
-                    config,
-                    ref.repo,
-                    ref.master,
-                    include_leaves=ref.include_leaves,
-                    pins=_pins_from_master_ref(ref),
-                )
+            reads,
+            lambda cancellation: cache.response(
+                request,
+                lambda: _master_json(
+                    lambda: master_changeset(
+                        config,
+                        ref.repo,
+                        ref.master,
+                        include_leaves=ref.include_leaves,
+                        pins=_pins_from_master_ref(ref),
+                    )
+                ),
+                abandoned=cancellation,
             ),
         )
 

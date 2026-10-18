@@ -20,6 +20,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { isAbortedRead } from './abortableRead';
 import { qs } from './files';
 import {
   type ReviewFailure,
@@ -113,6 +114,9 @@ export function useIntentReviewSummary(
   useEffect(() => {
     const seq = ++reads.current;
     let mounted = true;
+    // Leaving this task ends its summary read with the request, not with a late
+    // answer dropped after arrival (MIK-R176 rule 1).
+    const controller = new AbortController();
     const apply = (next: IntentSummaryRead) => {
       if (mounted && reads.current === seq) setRead({ key, read: next });
     };
@@ -122,14 +126,19 @@ export function useIntentReviewSummary(
         summaryUrl(repo, master, leaf),
         decodeReviewJson,
         facts,
+        controller.signal,
       )
       .then(
         (result) => apply(summaryRead(result)),
-        (cause: unknown) => apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }),
+        (cause: unknown) => {
+          if (!isAbortedRead(cause))
+            apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) });
+        },
       );
 
     return () => {
       mounted = false;
+      controller.abort();
     };
   }, [repo, master, leaf, key, facts]);
   if (read?.key === key) return read.read;

@@ -58,6 +58,20 @@ def world(tmp_path, monkeypatch):
         yield fixture, client, children
 
 
+def _reads(children):
+    """Git children that compute, apart from the freshness checks (MIK-R176 rule 5).
+
+    A working view is decided by ``git status`` and the object store by Git's own
+    ``count-objects`` census; neither computes a summary. Every other child is the
+    resolution/computation the tests pin.
+    """
+    return [
+        child
+        for child in children
+        if "--untracked-files=all" not in child and child[:1] != ["count-objects"]
+    ]
+
+
 def _settled(client):
     # Native first resolution can create its comparison record/pins and indexes.
     # Only a complete stable before/after generation is retained.
@@ -82,7 +96,7 @@ def test_native_counted_bytes_and_conditional_return_use_zero_git(world, monkeyp
     assert first.json()["state"] == "counted" and len(counted) == 1
     children.clear()
     again = client.get(ROUTE, params=PARAMS, headers={"If-None-Match": first.headers["etag"]})
-    assert again.status_code == 304 and not again.content and not children
+    assert again.status_code == 304 and not again.content and not _reads(children)
     assert len(counted) == 1
     expected = native.read_review_intent_summary(fixture.config, REPO, MASTER, LEAF)
     assert first.json() == expected.model_dump(mode="json", exclude_none=True)
@@ -115,7 +129,7 @@ def test_native_input_changes_invalidate_then_settle_without_more_git(world, sou
     _settled(client)
     children.clear()
     assert client.get(ROUTE, params=PARAMS).content == changed.content
-    assert not children
+    assert not _reads(children)
 
 
 def test_closed_native_record_and_lost_object_keep_the_owners_refusal(world):
@@ -124,7 +138,7 @@ def test_closed_native_record_and_lost_object_keep_the_owners_refusal(world):
     fixture.contract(live=False)
     first = _settled(client)
     children.clear()
-    assert client.get(ROUTE, params=PARAMS).content == first.content and not children
+    assert client.get(ROUTE, params=PARAMS).content == first.content and not _reads(children)
     object_id = git(fixture.memory, "rev-parse", f"{fixture.memory_base}^{{tree}}")
     object_path = fixture.memory / ".git/objects" / object_id[:2] / object_id[2:]
     object_path.unlink()
@@ -140,7 +154,7 @@ def test_derived_index_timestamp_touch_reuses_but_changed_bytes_are_reopened(wor
     index = next((fixture.config.coordination_root / "runtime/knowledge-index").glob("*.sqlite"))
     os.utime(index, None)
     children.clear()
-    assert client.get(ROUTE, params=PARAMS).content == first.content and not children
+    assert client.get(ROUTE, params=PARAMS).content == first.content and not _reads(children)
     index.write_bytes(b"unreadable derived index")
     result = client.get(ROUTE, params=PARAMS)
     assert result.status_code == 200 and children
@@ -156,7 +170,7 @@ def test_no_contract_and_invalid_address_keep_native_refusals(world):
         first = client.get(ROUTE, params=params)
         assert first.json() == expected.model_dump(mode="json", exclude_none=True)
         children.clear()
-        assert client.get(ROUTE, params=params).content == first.content and not children
+        assert client.get(ROUTE, params=params).content == first.content and not _reads(children)
 
 
 def test_unreadable_index_observation_uses_native_read_each_time(world, monkeypatch):
@@ -229,7 +243,7 @@ def test_first_refused_revalidation_is_free_and_restored_objects_are_seen(world,
             again = client.get(
                 ROUTE, params=PARAMS, headers={"If-None-Match": refused.headers["etag"]}
             )
-            assert again.status_code == 304 and not children
+            assert again.status_code == 304 and not _reads(children)
     path.write_bytes(data)
     path.chmod(mode)
     restored = client.get(ROUTE, params=PARAMS)
@@ -246,9 +260,11 @@ def test_unchanged_intent_inputs_do_not_walk_unrelated_master_files(world, monke
     original = changeset_generation.os.scandir
     scans = []
 
-    def counted(path):
+    def counted(path, *args, **kwargs):
+        if isinstance(path, int):
+            return original(path, *args, **kwargs)
         scans.append(Path(path))
-        return original(path)
+        return original(path, *args, **kwargs)
 
     monkeypatch.setattr(changeset_generation.os, "scandir", counted)
     observed = []
@@ -260,7 +276,7 @@ def test_unchanged_intent_inputs_do_not_walk_unrelated_master_files(world, monke
         children.clear()
         scans.clear()
         assert client.get(ROUTE, params=PARAMS).status_code == 200
-        assert not children
+        assert not _reads(children)
         assert not any(path.is_relative_to(fixture.task_root / "notes") for path in scans)
         observed.append(len(scans))
     assert observed[0] == observed[1]

@@ -1,3 +1,4 @@
+import { abortedRead, withAbort } from './abortableRead';
 import { BoundedCache } from './boundedCache';
 
 interface Kept {
@@ -6,13 +7,24 @@ interface Kept {
   facts: string;
 }
 
-/** Store-owned HTTP results. Revalidation never retains handlers or a failed read. */
+interface PendingRead {
+  facts: string;
+  controller: AbortController;
+  promise: Promise<unknown>;
+  waiters: number;
+}
+
+/**
+ * Store-owned HTTP results. Revalidation never retains handlers or a failed read.
+ *
+ * A fetch belongs to the store, not to the reader that started it (L174-R1-01): the
+ * owner's signal ends only that owner's wait. The request stops when the last waiter
+ * leaves, and the entry is removed at that moment so an immediate replacement starts a
+ * fresh fetch instead of joining an already-aborted one.
+ */
 export class ConditionalReads {
   private readonly values: BoundedCache<string, Kept>;
-  private readonly pending = new Map<
-    string,
-    { facts: string; controller: AbortController; promise: Promise<unknown> }
-  >();
+  private readonly pending = new Map<string, PendingRead>();
 
   constructor(
     private readonly capacity: number,
@@ -26,24 +38,46 @@ export class ConditionalReads {
     return kept?.facts === facts ? (kept.value as T) : undefined;
   }
 
-  load<T>(url: string, decode: (response: Response) => Promise<T>, facts = url): Promise<T> {
-    const pending = this.pending.get(url);
-    if (pending?.facts === facts) return pending.promise as Promise<T>;
-    pending?.controller.abort();
-    this.pending.delete(url);
-    if (this.pending.size >= this.capacity) {
-      const oldest = this.pending.entries().next().value;
-      if (oldest) {
-        oldest[1].controller.abort();
-        this.pending.delete(oldest[0]);
-      }
+  load<T>(
+    url: string,
+    decode: (response: Response) => Promise<T>,
+    facts = url,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    if (signal?.aborted) return Promise.reject(abortedRead());
+    let entry = this.pending.get(url);
+    if (entry && entry.facts !== facts) {
+      this.stop(url);
+      entry = undefined;
     }
-    const controller = new AbortController();
-    const promise = this.read(url, facts, controller.signal, decode).finally(() => {
-      if (this.pending.get(url)?.controller === controller) this.pending.delete(url);
-    });
-    this.pending.set(url, { facts, controller, promise });
-    return promise;
+    if (!entry) {
+      if (this.pending.size >= this.capacity) {
+        const oldest = this.pending.keys().next().value;
+        if (oldest !== undefined) this.stop(oldest);
+      }
+      const controller = new AbortController();
+      const started: PendingRead = { facts, controller, waiters: 0, promise: Promise.resolve() };
+      started.promise = this.read(url, facts, controller.signal, decode).finally(() => {
+        if (this.pending.get(url) === started) this.pending.delete(url);
+      });
+      this.pending.set(url, started);
+      entry = started;
+    }
+    const joined = entry;
+    joined.waiters += 1;
+    const leave = () => {
+      joined.waiters -= 1;
+      if (joined.waiters <= 0) this.stop(url, joined);
+    };
+    return withAbort(joined.promise as Promise<T>, signal).finally(leave);
+  }
+
+  /** End one fetch and forget it at once, so nobody joins an aborted request. */
+  private stop(url: string, only?: PendingRead): void {
+    const entry = this.pending.get(url);
+    if (!entry || (only !== undefined && entry !== only)) return;
+    this.pending.delete(url);
+    entry.controller.abort();
   }
 
   private async read<T>(

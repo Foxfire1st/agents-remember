@@ -14,6 +14,7 @@ from agents_remember.serving.changeset_cache import (
     ObjectStoreRead,
     ReadInput,
     RepositoryRead,
+    Retention,
     cached_read,
     observe_inputs,
 )
@@ -71,8 +72,13 @@ class IntentSummaryCache:
             # Repositories were already consumed by resolution. A newly discovered
             # repository requires another complete read. Index bytes are observed by
             # the callback before counting, so normal cold reads count only once.
-            retain_when=lambda _: all(
-                not isinstance(source, RepositoryRead) or source in initial for source in actual
+            retention=Retention(
+                keep=lambda _: all(
+                    not isinstance(source, RepositoryRead) or source in initial for source in actual
+                ),
+                # A refused summary may settle while Git cannot describe the working
+                # view; a counted one may not (L174-R1-04).
+                unknown=lambda result: result.state == "unavailable",
             ),
             additional_inputs=lambda: actual,
         )

@@ -29,12 +29,14 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, overload
+from threading import Event
+from typing import Any, Literal, overload
 
 from agents_remember.kernel.git_closeout_publication import (
     _CLOSEOUT_PUBLICATION_AUTHORITY,
@@ -370,7 +372,8 @@ def _run_git(
         {"input": stdin_input} if stdin_input is not None else {"stdin": subprocess.DEVNULL}
     )
     argv = _git_argv(repo_root, args, execution.work_dir)
-    if not execution.new_session:
+    cancellation = _GIT_CANCELLATION.get()
+    if not execution.new_session and cancellation is None:
         result = subprocess.run(
             argv,
             cwd=execution.work_dir,
@@ -384,10 +387,10 @@ def _run_git(
             **stdin_kwargs,  # type: ignore[arg-type]
         )
     else:
-        # A new session owns its process group, so a timeout stops the command with
-        # the children it started (MIK-R152 rule 6). ``subprocess.run`` kills only
-        # the direct child; here the group goes first and the error still reads as
-        # the timeout every caller already handles.
+        # A new session owns its process group, so a timeout -- or a client that
+        # went away -- stops the command with the children it started. ``subprocess.run``
+        # kills only the direct child; here the group goes first and the error still
+        # reads as the timeout every caller already handles.
         process = subprocess.Popen(
             argv,
             cwd=execution.work_dir,
@@ -400,16 +403,9 @@ def _run_git(
             env=execution.environment,
             start_new_session=True,
         )
-        try:
-            output, error_output = process.communicate(
-                input=stdin_input if stdin_input is not None else None,
-                timeout=execution.timeout,
-            )
-        except subprocess.TimeoutExpired:
-            with suppress(ProcessLookupError, PermissionError, OSError):
-                os.killpg(process.pid, signal.SIGKILL)
-            output, error_output = process.communicate()
-            raise subprocess.TimeoutExpired(argv, execution.timeout, output, error_output) from None
+        output, error_output = _wait_process(
+            process, stdin_input, execution.timeout, cancellation, argv
+        )
         code = process.returncode
         result = subprocess.CompletedProcess(argv, code, output, error_output)
     # A failure is never kept: a missing object created later in the request must
@@ -417,6 +413,62 @@ def _run_git(
     if memo is not None and key is not None and result.returncode == 0:
         memo[key] = result
     return result
+
+
+def _kill_process_group(process: subprocess.Popen) -> None:
+    """End one Git child with the process group it started (the runner's only kill).
+
+    ``_wait_process`` calls this for a timeout and for an abandoned read, so the
+    runner has one child/process-group kill owner (L174-R1-08).
+    """
+
+    with suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
+def _wait_process(
+    process: subprocess.Popen,
+    stdin_input: str | bytes | None,
+    timeout: float | None,
+    cancellation: Event | None,
+    argv: list[str],
+) -> tuple[Any, Any]:
+    """Wait for one Git child, ending it on its timeout or when its reader abandoned it.
+
+    Without a cancellation this is ``communicate`` with the caller's timeout. With one,
+    the wait is polled: the process group is killed as soon as the reader goes away, and
+    the child's own timeout still applies when it never does.
+    """
+
+    if cancellation is None:
+        try:
+            return process.communicate(
+                input=stdin_input if stdin_input is not None else None, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            assert timeout is not None
+            _kill_process_group(process)
+            output, error_output = process.communicate()
+            raise subprocess.TimeoutExpired(argv, timeout, output, error_output) from None
+    deadline = None if timeout is None else time.monotonic() + timeout
+    sent = False
+    while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            assert timeout is not None
+            _kill_process_group(process)
+            output, error_output = process.communicate()
+            raise subprocess.TimeoutExpired(argv, timeout, output, error_output)
+        remaining = 0.05 if deadline is None else min(0.05, deadline - time.monotonic())
+        try:
+            return process.communicate(
+                input=None if sent else stdin_input,
+                timeout=remaining,
+            )
+        except subprocess.TimeoutExpired:
+            sent = True
+        if cancellation.is_set():
+            _kill_process_group(process)
+            return process.communicate()
 
 
 def _read_git_bytes(root: Path, args: list[str]) -> bytes:
@@ -456,6 +508,23 @@ _BLOB_READS: ContextVar[dict[tuple[str, str], bytes] | None] = ContextVar(
 _OBJECT_LOOKUPS: ContextVar[
     dict[tuple[str, str, tuple[str, ...], tuple[tuple[str, str], ...], bool], object] | None
 ] = ContextVar("git_object_lookups", default=None)
+
+# A read the client abandoned must not outlive its client (MIK-R176 rule 4). The
+# serving layer sets one cancellation Event around an abandoned read's work; the
+# runner then checks it while the child runs and stops the child with the process
+# group it started. Outside such a block the runner behaves exactly as before.
+_GIT_CANCELLATION: ContextVar[Event | None] = ContextVar("git_cancellation", default=None)
+
+
+@contextmanager
+def cancellable_git_commands(cancellation: Event) -> Iterator[None]:
+    """Within the block, setting ``cancellation`` kills a running Git child and its group."""
+
+    token = _GIT_CANCELLATION.set(cancellation)
+    try:
+        yield
+    finally:
+        _GIT_CANCELLATION.reset(token)
 
 
 @contextmanager
