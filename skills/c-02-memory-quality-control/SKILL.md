@@ -36,7 +36,6 @@ resolved by `c-08-ar-coordination-context-resolver` or MCP `context_packet`.
 | Task start (when requested) | drift reporting via `context_packet`/`memory_quality_check` | Qualify existing onboarding before planning against it. |
 | Curator handoff | complete `c-05-create-or-update-onboarding-files` checks + `memory_quality_check` | Maintain affected sidecars, overviews, indexes, and entity entries for this change, then run the full memory-quality operation and repair or escalate every curator-actionable finding. |
 | Checklist requires it | `curator_coherence` | Publish the coherence authority for the exact checklist result the curator produced. |
-| Targeted style repair | `history_order_fix.py` | Fix an identified ordering issue only after the report names it. |
 
 Diagnostics are evidence. A code-quality or test diagnostic does not become an
 automatic closeout or integration gate, while the curator's complete
@@ -105,8 +104,7 @@ undocumented historical files from flooding the report.
 
 ### 3. Understand Drift Classifications
 
-**On converted memory** (the tree holds the knowledge layout marker), the checks below that read the legacy card
-format report `not-applicable-converted`:
+**On converted memory** (the tree holds the knowledge layout marker), currentness is measured from anchors:
 - currentness comes from anchors instead: the `knowledge.converted` check runs the knowledge validator, and stale
   carried sidecar references refuse at every commit and landing route and report only at a sync merge (MIK-R53
   `merge_reports`); repair them with `citation_fix` or curator re-authoring before closeout;
@@ -124,37 +122,7 @@ that changes a source file must change that file's card or record why not. Nothi
 repaired by this check: `citation_fix` re-records anchors that only moved, and a curator
 re-authors a stale one.
 
-The rest of this section describes unconverted memory.
-
-Primary drift detection supports sidecar Markdown onboarding under the resolved
-external-memory onboarding root. It classifies file-level onboarding, root repo overviews, route-local
-overviews, and repo entity catalogs when those artifacts carry supported
-`doc_type` metadata. It may also classify inline onboarding blocks when storage
-settings resolve a source path to `inline`.
-
-For file-level sidecars, the `c-02-memory-quality-control` skill compares the source file against the recorded
-`lastVerifiedCommitHash`, then checks that same source path for staged or
-unstaged local changes.
-
-For repo and route-local overviews, the `c-02-memory-quality-control` skill compares the recorded `sourceRoute`
-against the recorded commit, then checks that same route for staged or
-unstaged local changes.
-
-For repo entity catalogs, the `c-02-memory-quality-control` skill reconciles `## Entity Inventory` headings against
-`## Entity Fingerprints` rows. Missing fingerprint tables, inventory entries
-without matching rows, orphaned fingerprint rows, unsupported algorithms,
-missing fingerprints, missing evidence paths, or fingerprint mismatches are
-actionable maintenance.
-
-Supported classifications are:
-
-1. up to date
-2. drifted
-3. missing verification
-4. missing
-5. orphaned
-6. disabled
-7. unsupported
+Old-format memory is refused; convert it by the procedure of MIK-R46 rule 6.
 
 ### 4. Hand Off Drift Maintenance
 
@@ -276,12 +244,7 @@ replaces the closeout transaction that owns the real code and memory commits.
 
 ### 8. Use Targeted Style Fixers Only After Findings
 
-When `memory_quality_check` reports update-history ordering findings, use the
-dedicated fixer rather than hand-writing one-off scripts:
-
-```text
-python -m agents_remember.memory_quality.style.update_history.history_order_fix --onboarding-root "<resolved-onboarding-root>"
-```
+Use `citation_fix` for mechanically moved converted anchors after the report names them.
 
 Run `memory_quality_check` again after the fixer. If a finding is not
 mechanically fixable, update the affected onboarding by hand and rerun the
@@ -298,7 +261,6 @@ check.
 4. The `c-02-memory-quality-control` skill hands maintenance work to the `c-05-create-or-update-onboarding-files` skill instead of writing onboarding content.
 5. Stale onboarding may remain directional evidence until refreshed or
    disproven, but that trust level must be made explicit.
-6. Missing verification metadata is itself actionable drift.
 7. Orphaned onboarding should be surfaced clearly rather than left to
    accumulate silently.
 8. Generated quality reports belong under the resolved coordination/temp root,

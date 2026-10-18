@@ -1,22 +1,7 @@
-"""The memory-quality run on a converted memory tree (MIK-R24 rule 5).
+"""Validate converted knowledge and report reference currentness and landing changes.
 
-A converted card has no metadata table, no Update History and no citation tables, so the checks that
-read those have nothing to check: each reports ``not-applicable-converted`` and passes. Currentness
-comes from anchors instead, so the integrity slot runs :func:`converted_knowledge_check`:
-
-* the knowledge validator (MIK-R22) over the whole tree against the code working tree -- its refusing
-  violations are findings. Its comparison base is the memory worktree's ``HEAD``; when ``HEAD`` is
-  unconverted (the converting leaf, a line that has crossed) it is ``HEAD``'s conversion (MIK-R24
-  rule 7), supplied by the caller through :data:`KnowledgeBasePort` from the one converted-base
-  cache, so a carried anchor whose file the candidate deleted or moved is reported
-  (``R22.6-carried-stale``) and never refused as if it were newly written;
-* its report-only findings and every stale reference (:mod:`.reference_state`) are report-only: a
-  stale reference is refreshed through the onboarding gate (MIK-R30), never failed here.
-* what the landing cuts from a card and adds beside the knowledge (:mod:`.landing_report`,
-  MIK-R120): every card or overview under ``onboarding/`` shortened against the comparison base,
-  and every path added outside ``onboarding/``, ``knowledge/`` and ``system/`` -- report-only,
-  never a refusal and never actionable.
-"""
+Refusing validator violations are findings; stale references and landing changes
+are report-only. The comparison base is supplied by the converted-base cache."""
 
 from __future__ import annotations
 
@@ -47,27 +32,7 @@ _BASE_DEPENDENT_RULE: Final = "R22.6-anchor-path"
 KnowledgeBasePort = Callable[[Path, KnowledgeTree], tuple[KnowledgeTree | None, str | None]]
 """``(memory root, candidate) -> (K_B as the candidate is compared with it, or why it cannot be
 built)``. This layer cannot reach the converted-base cache; the application binds it."""
-NOT_APPLICABLE: Final = "not-applicable-converted"
 # The checks that read the legacy card format; the names are the checks' own CHECK_NAME values.
-LEGACY_FORMAT_CHECKS: Final = frozenset(
-    {
-        "style.update_history.history_order",
-        "style.citations.range_resolution",
-        "style.citations.claim_reopen",
-    }
-)
-
-
-def not_applicable_on_converted(check: str) -> dict[str, Any]:
-    """The result of a legacy-format check on a converted tree: nothing to read, nothing wrong."""
-
-    return {
-        "ok": True,
-        "check": check,
-        "status": NOT_APPLICABLE,
-        "findingCount": 0,
-        "findings": [],
-    }
 
 
 def _committed_base(memory_root: Path) -> tuple[KnowledgeTree, ...]:

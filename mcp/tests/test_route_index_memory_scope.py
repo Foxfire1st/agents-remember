@@ -87,7 +87,7 @@ def test_public_full_prepares_repo_and_leaf_once_but_subset_never_builds(tmp_pat
             controller, "build_route_indexes", wraps=controller.build_route_indexes
         ) as build,
     ):
-        subset, whole = call(checks=["style.citations.range_resolution"])
+        subset, whole = call(checks=["style.document_shape.diff_markers"])
         assert "routeIndexCacheBuild" not in whole
         assert "routeIndexCacheBuild" not in subset
         assert not cache.exists()

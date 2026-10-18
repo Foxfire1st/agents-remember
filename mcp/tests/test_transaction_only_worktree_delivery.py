@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import shlex
 from contextlib import ExitStack, contextmanager
@@ -33,7 +34,6 @@ from agents_remember.models.lifecycles.operation import LifecycleOperationRecove
 from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
 from agents_remember.worktrees import git_worktree_manager
 from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
-from agents_remember.worktrees.integration.closeout.certification import execution as selected
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules import git as git_owner
@@ -138,11 +138,6 @@ def _forbid_acceptance_tools():
             memory_quality,
             "run_memory_quality_phase",
             side_effect=AssertionError("transaction called memory quality"),
-        ),
-        mock.patch.object(
-            selected,
-            "execute_selected_closeout",
-            side_effect=AssertionError("transaction called selected certification"),
         ),
         mock.patch.object(
             coherence,
@@ -1067,6 +1062,7 @@ def _effective_closeout_input() -> EffectiveCloseoutInput:
     )
 
 
+@pytest.mark.usefixtures("worktree_services")
 def test_recloseout_after_a_sync_records_the_memory_head_as_content_commit(tmp_path):
     """Closeout -> sync -> closeout records the live memory head, not the stale record.
 
@@ -1237,3 +1233,78 @@ def test_cache_refresh_repairs_malformed_forged_and_reordered_data_from_git(tmp_
         assert leaf.cache_path.read_text(encoding="utf-8") == ledger_to_text(leaf.canonical), name
         assert leaf.git_state() == before_git, name
         leaf.assert_content_unchanged()
+
+
+@pytest.mark.parametrize("name", ("repository-certification-profile", "worktrees-c09"))
+def test_l56_required_references_separate_requested_dagger_from_ordinary_closeout(name):
+    """R56 rule 5: certification is requested, not an automatic closeout gate."""
+    root = Path(__file__).resolve().parents[2]
+    text = (root / f"docs/reference/{name}.md").read_text(encoding="utf-8")
+    assert "Requested certification runs through Dagger and commits nothing" in text
+    assert "Ordinary closeout runs no gate but the invariant gate" in text
+    assert "closeout Gates 1\u20134" not in text
+    assert "Closeout reconstructs the exact staged candidate" not in text
+
+
+RETIRED_PUBLICATION_CLAIMS = (
+    "prepared closeout",
+    "Prepared code commits",
+    "Prepared memory commits",
+)
+
+
+def test_l56_publication_code_pins_both_live_commit_hook_mechanisms():
+    """Remove retired policy claims without weakening live hook guarantees (the module)."""
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "mcp/src/agents_remember/worktrees/modules/git.py").read_text(encoding="utf-8")
+    assert "commit-tree" in text and "reference-transaction" in text
+    assert "pre-commit" in text
+    for obsolete in RETIRED_PUBLICATION_CLAIMS:
+        assert obsolete not in text
+
+
+def test_l56_closeout_skill_names_the_live_hook_guarantee_without_prepared_policy():
+    """Remove retired policy claims without weakening live hook guarantees (the skill text).
+
+    The skill states the two guarantees a landing reader acts on -- the pre-commit check that
+    refuses a failing landing and the reference-transaction hook on a branch move -- and names no
+    retired prepared policy. It carries no copy of the module's plumbing names.
+    """
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "skills/c-12-closeout/SKILL.md").read_text(encoding="utf-8")
+    assert "pre-commit" in text and "reference-transaction" in text
+    for obsolete in RETIRED_PUBLICATION_CLAIMS:
+        assert obsolete not in text
+
+
+def test_l56_renderer_prose_names_only_surviving_content_routes_and_exact_backfill():
+    root = Path(__file__).resolve().parents[2] / "mcp/src/agents_remember"
+    tree = ast.parse((root / "kernel/memory_attribution.py").read_text(encoding="utf-8"))
+    renderer = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "render_memory_content_message"
+    )
+    text = ast.get_docstring(renderer)
+    assert text is not None
+    assert "three memory-content routes" in text
+    assert "direct landing" in text and "baseline adoption" in text
+    assert "Carryover commits nothing" in text
+    assert "kernel/memory_backfill.py" in text and "original commit's tree" in text
+    assert "prepared memory-content leg" not in text
+    assert "body is kept byte for byte" in text and "own final" in text
+
+
+@pytest.mark.parametrize(
+    "path,obsolete",
+    (
+        ("observer/projection.py", "histogram + a bounded leaderboard"),
+        ("serving/projections/snapshots.py", "git-free sidecar staleness"),
+        ("serving/change_watcher.py", "sidecar staleness / route coverage / ledgers"),
+        ("serving/projections/projection_store.py", "Staleness/coverage/ledger panels"),
+    ),
+)
+def test_l56_reader_prose_names_surviving_analytics_without_stamp_age_descriptors(path, obsolete):
+    root = Path(__file__).resolve().parents[2] / "mcp/src/agents_remember"
+    text = (root / path).read_text(encoding="utf-8")
+    assert obsolete not in text

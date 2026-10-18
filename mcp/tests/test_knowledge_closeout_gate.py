@@ -19,7 +19,6 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from agents_remember.application import prepared_certification
 from agents_remember.application.knowledge_gate import (
     GATE_PREDICATES,
     GateContext,
@@ -37,14 +36,13 @@ from agents_remember.application.knowledge_worklist.leaf import (
     leaf_worklist,
     recompute_leaf_worklist,
 )
-from agents_remember.errors import CertificationContractError, CuratorCoherenceError
+from agents_remember.errors import CuratorCoherenceError
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory_quality.knowledge_validator.commit_route import GitKnowledgeValidation
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history import FamilyRow, HistoryFile
 from agents_remember.worktrees import direct_landing as route
 from agents_remember.worktrees.integration.closeout import curator_coherence
-from agents_remember.worktrees.integration.closeout.certification import execution
 from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationSources,
@@ -56,7 +54,6 @@ from agents_remember.worktrees.knowledge_gate import (
     landing_gate_refusal,
     leaf_gate_refusal,
     leaf_memory_converted,
-    prepared_closeout_refusal,
 )
 from agents_remember.worktrees.modules import closeout_external, integration_gate, record_landing
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
@@ -1159,7 +1156,6 @@ def test_an_unconverted_leaf_is_refused_at_every_route_before_anything_moves(wor
     assert not checkout_memory_converted(world.memory)
     main = git(world.memory, "rev-parse", "main")
     request = LandingGateRequest(world.memory, head, (main,), world.code, world.code_base)
-    assert prepared_closeout_refusal(world.contract) is None  # gap 3 touches converted memory only
     # An unconverted direct landing is refused before capture: no gate, nothing written.
 
     series = _series(world)
@@ -1183,21 +1179,6 @@ def test_an_unconverted_leaf_is_refused_at_every_route_before_anything_moves(wor
 # --------------------------------------------------------------------------------------------------
 # Rulings round (2026-09-30T14:38:47+02:00): gaps 2, 3 and 4
 # --------------------------------------------------------------------------------------------------
-
-
-def test_the_prepared_closeout_path_fails_closed_on_converted_memory(world: Gated) -> None:
-    """Gap 3: it cannot close the history file, so it refuses by name until it can."""
-
-    codes = []
-    with pytest.raises(CertificationContractError) as entry:
-        execution.execute_selected_closeout(world.contract, cast(Any, None), cast(Any, None))
-    codes.append(entry.value.findings[0]["code"])
-    request = cast(Any, SimpleNamespace(handoff=SimpleNamespace(contract=world.contract)))
-    with pytest.raises(CertificationContractError) as realize:
-        prepared_certification._realize_prepared_memory(request)
-    codes.append(realize.value.findings[0]["code"])
-    assert codes == ["prepared-closeout-knowledge-history-unclosable"] * 2
-    assert "cannot set closed: true" in str(realize.value.findings[0]["observed"])
 
 
 def test_the_gate_memo_reuses_a_verdict_only_for_the_identical_inputs(

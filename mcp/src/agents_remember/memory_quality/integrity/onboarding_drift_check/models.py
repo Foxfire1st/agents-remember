@@ -31,31 +31,15 @@ class DriftSummaryPacket(TypedDict):
     unreadableSidecars: NotRequired[list[str]]
 
 
-CLASSIFICATIONS = (
-    "up to date",
-    "drifted",
-    "missing verification",
-    "missing",
-    "orphaned",
-    "disabled",
-    "unsupported",
-)
-ACTIONABLE_CLASSIFICATIONS = {
-    "drifted",
-    "missing verification",
-    "missing",
-    "orphaned",
-    "unsupported",
-}
-INLINE_START_MARKER = "@ar-onboarding"
-INLINE_END_MARKER = "@ar-onboarding-end"
-GIT_BLOB_SET_ALGORITHM = "git-blob-set-v1"
 SIDECAR_DOC_TYPES = {
     "file-level-onboarding",
     "repo-overview",
     "route-local-overview",
     "repo-entity-catalog",
 }
+
+INLINE_START_MARKER = "@ar-onboarding"
+INLINE_END_MARKER = "@ar-onboarding-end"
 COMMON_BLOCK_DELIMITERS = {
     "/*": "*/",
     "<!--": "-->",
@@ -65,20 +49,6 @@ COMMON_BLOCK_DELIMITERS = {
     "{-": "-}",
     "(*": "*)",
 }
-
-
-@dataclass
-class DriftRow:
-    onboarding_file: str
-    source_file: str
-    repository: str
-    storage_mode: str
-    last_verified_hash: str
-    last_verified_date: str
-    classification: str
-    trust: str
-    affected_sections: str
-    note: str
 
 
 @dataclass

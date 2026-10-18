@@ -114,7 +114,6 @@ const stampAnalytics = (analytics: Analytics | null): void => {
   const at = Date.now();
   const collections: (readonly object[] | undefined)[] = [
     analytics.driftSnapshots,
-    analytics.stalestSidecars,
     analytics.setupSummaries,
     analytics.setupProgress,
     analytics.toolReports,

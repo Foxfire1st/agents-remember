@@ -1,16 +1,17 @@
 """MIK-R177: the gate groups identical copies as the worklist does.
 
-Rule 1 (one construction): the memory-quality gate and the closeout validator build their
-``onboarding_trace`` items with the worklist run's own ``identicalChanges`` groups, from that
-document -- the same groups ``worklist_onboarding`` passes. A gate entry that cannot read the
-groups refuses by name and never falls back to ungrouped items.
+Rule 1 (one construction): the memory-quality gate builds its ``onboarding_trace`` items with the
+worklist run's own ``identicalChanges`` groups, from that document -- the same groups
+``worklist_onboarding`` passes. A gate entry that cannot read the groups refuses by name and never
+falls back to ungrouped items. MIK-R56 rules 1 and 4 retire the certified closeout, so the closeout
+validator this file also covered is gone with it and its cases are removed here; the grouped
+construction it shared is the one the gate keeps.
 
 Rule 2 (nothing else changes): a source without copies yields the same single-source item as
 before, and the worklist, the item contract and the writer stay as they are.
 
 Rule 3 (proof): L56's shape -- ten identical copies deleted at C, one carded owner -- answered by
-one row binding every copy, satisfies the worklist, the memory-quality gate and the closeout
-validator alike. The empty-group case is the pre-change behavior: the same row leaves the gate's
+one row binding every copy, satisfies the worklist and the memory-quality gate alike. The empty-group case is the pre-change behavior: the same row leaves the gate's
 singleton item open, which is the mismatch this leaf removes.
 """
 
@@ -23,7 +24,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-import pytest
 from agents_remember.application.knowledge_worklist import (
     leaf_onboarding_trace_sides,
     leaf_worklist,
@@ -35,13 +35,11 @@ from agents_remember.application.knowledge_writer import Owner, WriteRequest, wr
 from agents_remember.application.knowledge_writer.report import WriteReport
 from agents_remember.application.memory_quality import controller
 from agents_remember.application.memory_scope import MemoryScope
-from agents_remember.application.prepared_certification import _identical_changes
 from agents_remember.kernel.coordination_context.models import StorageSettings
 from agents_remember.models.knowledge_files.history import HistoryFile, OnboardingTraceRow
 from agents_remember.worktrees.modules.onboarding import (
     OnboardingTraceInputs,
     onboarding_trace_gate_for_context,
-    validate_onboarding_traces_for_context,
 )
 from agents_remember.worktrees.modules.onboarding_trace import (
     CHECK_NAME,
@@ -219,27 +217,6 @@ def _gate(
     )
 
 
-def _validator(
-    world: World,
-    contract: WorktreeContract,
-    changed: list[str],
-    groups: Mapping[str, list[str]],
-    working: list[str],
-) -> OnboardingTraceResult:
-    """The closeout validator's entry, over the same sides and blobs."""
-
-    return validate_onboarding_traces_for_context(
-        _context(world),
-        changed,
-        _sides(world, contract),
-        OnboardingTraceInputs(
-            code_blobs=worktree_code_blobs(world.code, changed),
-            identical_changes=groups,
-            working_paths=working,
-        ),
-    )
-
-
 def _answered_group(world: World, contract: WorktreeContract) -> tuple[list[str], dict[str, Any]]:
     """The group deleted at C, and the worklist run plus the two rows the writer wrote for it."""
 
@@ -259,10 +236,10 @@ def _by_subject(result: OnboardingTraceResult) -> dict[str, TraceItem]:
 # -- rule 1 and rule 3: one construction, and the proof ------------------------------------------
 
 
-def test_one_row_binding_every_copy_answers_the_worklist_the_gate_and_the_closeout(
+def test_one_row_binding_every_copy_answers_the_worklist_and_the_gate(
     tmp_path: Path,
 ) -> None:
-    """L56's shape: the ten-copy card the worklist closes is the card both gate entries close."""
+    """L56's shape: the ten-copy card the worklist closes is the card the memory-quality gate closes."""
 
     world = build_world(tmp_path)
     contract = _grouped_leaf(world)
@@ -292,7 +269,6 @@ def test_one_row_binding_every_copy_answers_the_worklist_the_gate_and_the_closeo
         _trace_item(known, subject)["id"],
         _trace_item(known, OVERVIEW_SUBJECT)["id"],
     }
-    assert _validator(world, contract, changed, groups, []).ok  # the closeout validator agrees
 
 
 def test_an_empty_group_is_the_old_singleton_item_and_the_row_does_not_answer_it(
@@ -314,9 +290,6 @@ def test_an_empty_group_is_the_old_singleton_item_and_the_row_does_not_answer_it
     assert item.id != _trace_item(known, subject)["id"]
     assert not result.ok and item.row == row.id and not item.row_answers
     assert [finding["code"] for finding in findings] == [MISSING_CODE]
-    with pytest.raises(RuntimeError, match="requires an onboarding trace") as refused:
-        _validator(world, contract, changed, {}, [])
-    assert f"onboarding/{SKILL}.md" in str(refused.value)
 
 
 def test_the_quality_run_refuses_by_name_when_the_worklist_run_names_no_groups(
@@ -340,9 +313,8 @@ def test_the_quality_run_refuses_by_name_when_the_worklist_run_names_no_groups(
         return controller._onboarding_refresh_gate(
             scope,
             controller._OnboardingGateInputs(
-                changed=(changed, changed),
+                traced_paths=changed,
                 working_paths=[],
-                no_impact=(frozenset(), frozenset()),
                 worklist=worklist,
             ),
             response,
@@ -366,133 +338,11 @@ def test_the_quality_run_refuses_by_name_when_the_worklist_run_names_no_groups(
     assert finding["code"] == INCOMPLETE_CODE and "no worklist run" in finding["message"]
 
 
-def _binding(document: Mapping[str, Any]) -> dict[str, Any]:
-    """The closeout's candidate binding, as a run records its own: C's tree and K_B's commit."""
-
-    pairing = document["pairing"]
-    return {
-        "candidate_tree": pairing["candidate"]["tree"],
-        "memory_base": pairing["memoryBase"]["commit"],
-    }
-
-
-def _read_groups(
-    contract: WorktreeContract, document: Mapping[str, Any], world: World
-) -> dict[str, list[str]]:
-    """The closeout reader over the run in ``document`` and this leaf's current cards."""
-
-    sides = _sides(world, contract)
-    return _identical_changes(
-        contract,
-        onboarding_paths={*sides.base, *sides.candidate},
-        **_binding(document),
-    )
-
-
-def test_the_closeout_reads_the_persisted_runs_groups_and_refuses_without_them(
-    tmp_path: Path,
-) -> None:
-    """The closeout validator's groups come from the persistent run beside the series contract."""
-
-    world = build_world(tmp_path)
-    contract = _grouped_leaf(world)
-    path = world.task_root / "knowledge-worklist.json"
-    path.unlink(missing_ok=True)
-    sides = _sides(world, contract)
-    paths = {*sides.base, *sides.candidate}
-    with pytest.raises(RuntimeError, match=GROUPS) as missing:
-        _identical_changes(
-            contract, candidate_tree="0" * 40, memory_base=None, onboarding_paths=paths
-        )
-    assert "knowledge-worklist.json" in str(missing.value)
-    assert "judges no ungrouped trace items" in str(missing.value)
-    persisted = leaf_worklist(contract)
-    assert persisted is not None and path.is_file()
-    assert _read_groups(contract, persisted, world) == dict(persisted["identicalChanges"])
-    path.write_text(json.dumps({"state": "incomplete", "items": []}), encoding="utf-8")
-    with pytest.raises(RuntimeError, match="'incomplete'"):
-        _identical_changes(
-            contract, candidate_tree="0" * 40, memory_base=None, onboarding_paths=paths
-        )
-
-
-def test_the_closeout_refuses_a_run_from_another_candidate_by_name(tmp_path: Path) -> None:
-    """L175-F01: a complete run whose candidate moved is named stale, never read as current."""
-
-    world = build_world(tmp_path)
-    contract = _grouped_leaf(world)
-    subject = f"onboarding:{SKILL}"
-    # A legitimate complete run of this leaf before the copies are deleted: they equal B, so no
-    # change at C and no groups at all.
-    write(world.code, {path: BODY for path in GROUP})
-    stale = leaf_worklist(contract)
-    assert stale is not None and stale["state"] == "complete"
-    assert stale["identicalChanges"] == {}
-    # The candidate moves: the ten copies are deleted, so a fresh run groups them as one absent set.
-    for path in GROUP:
-        (world.code / path).unlink()
-    fresh = leaf_worklist(contract, persist=False)
-    assert fresh is not None and len(fresh["identicalChanges"]) == 1
-    changed = sorted({str(change["path"]) for change in fresh["changes"]})
-    report = _writer(world, [_row(subject), _row(OVERVIEW_SUBJECT)], fresh)
-    assert report.state == "written", report.render()
-    row = _stored_row(world, subject)
-    assert len(row.sources or ()) == 10
-    # The persisted run is still the old, complete, valid one: the closeout must refuse it by name
-    # rather than build the singleton and reject the conforming row.
-    persisted = json.loads((world.task_root / "knowledge-worklist.json").read_text("utf-8"))
-    assert persisted["identicalChanges"] == {}
-    sides = _sides(world, contract)
-    paths = {*sides.base, *sides.candidate}
-    with pytest.raises(RuntimeError, match="does not describe this candidate") as stale_refusal:
-        _identical_changes(
-            contract,
-            candidate_tree=fresh["pairing"]["candidate"]["tree"],
-            memory_base=fresh["pairing"]["memoryBase"]["commit"],
-            onboarding_paths=paths,
-        )
-    assert "its code candidate tree is" in str(stale_refusal.value)
-    assert fresh["pairing"]["candidate"]["tree"] in str(stale_refusal.value)
-    assert "Recompute the run for this candidate" in str(stale_refusal.value)
-    # The current run, persisted, is bound to this candidate and closes the same row in all three.
-    assert leaf_worklist(contract) is not None
-    groups = _read_groups(contract, fresh, world)
-    assert groups == dict(fresh["identicalChanges"])
-    result, findings = _gate(world, contract, changed, groups, [])
-    assert findings == [] and result.ok
-    assert _validator(world, contract, changed, groups, []).ok
-
-
-def test_the_closeout_refuses_a_group_a_card_now_contradicts_by_name(tmp_path: Path) -> None:
-    """L175-F01: a card appearing on a grouped copy after the run changes its membership."""
-
-    world = build_world(tmp_path)
-    contract = _grouped_leaf(world)
-    run = leaf_worklist(contract)
-    assert run is not None
-    (representative, members) = next(iter(run["identicalChanges"].items()))
-    assert representative == SKILL and len(members) == 10
-    # A member outside a dot directory: the memory tree walk skips dot directories on both sides.
-    carded = next(path for path in members if path != SKILL and not path.startswith("."))
-    _card(world, carded)  # the curator adds a card to one of the copies after the run
-    sides = _sides(world, contract)
-    with pytest.raises(RuntimeError, match="still lists carded source") as refusal:
-        _identical_changes(
-            contract,
-            candidate_tree=run["pairing"]["candidate"]["tree"],
-            memory_base=run["pairing"]["memoryBase"]["commit"],
-            onboarding_paths={*sides.base, *sides.candidate},
-        )
-    assert carded in str(refusal.value) and SKILL in str(refusal.value)
-
-
 def test_each_gate_refuses_a_malformed_group_by_name(tmp_path: Path) -> None:
-    """L175-F02: a malformed entry is named by both consumers, never dropped into a singleton."""
+    """L175-F02: a malformed entry is named by the gate's reader, never dropped into a singleton."""
 
     world = build_world(tmp_path)
     contract = _grouped_leaf(world)
-    sides = _sides(world, contract)
-    paths = {*sides.base, *sides.candidate}
     path = world.task_root / "knowledge-worklist.json"
     persisted = leaf_worklist(contract)
     assert persisted is not None and path.is_file()
@@ -510,33 +360,16 @@ def test_each_gate_refuses_a_malformed_group_by_name(tmp_path: Path) -> None:
         groups, reason = controller._worklist_identical_changes((document, path.as_posix()))
         assert groups is None, malformed
         assert expected in reason, (malformed, reason)
-        with pytest.raises(RuntimeError, match=expected):
-            _identical_changes(
-                contract,
-                candidate_tree=run["pairing"]["candidate"]["tree"],
-                memory_base=run["pairing"]["memoryBase"]["commit"],
-                onboarding_paths=paths,
-            )
 
 
-def test_a_run_with_no_groups_is_a_valid_empty_map_for_both_gate_entries(tmp_path: Path) -> None:
+def test_a_run_with_no_groups_is_a_valid_empty_map_for_the_gate(tmp_path: Path) -> None:
     """L175-F02: a genuine empty group map stays valid; only a malformed entry refuses."""
 
     world = build_world(tmp_path)
     contract = _single_source_leaf(world)
     run = leaf_worklist(contract)
     assert run is not None and run["identicalChanges"] == {}
-    sides = _sides(world, contract)
     assert controller._worklist_identical_changes((run, "knowledge-worklist.json")) == ({}, "")
-    assert (
-        _identical_changes(
-            contract,
-            candidate_tree=run["pairing"]["candidate"]["tree"],
-            memory_base=run["pairing"]["memoryBase"]["commit"],
-            onboarding_paths={*sides.base, *sides.candidate},
-        )
-        == {}
-    )
 
 
 # -- rule 2: nothing else changes -----------------------------------------------------------------
@@ -560,7 +393,7 @@ def _single_source_leaf(world: World) -> WorktreeContract:
     return _rebased(world, code_head, git(world.memory, "rev-parse", "HEAD"))
 
 
-def test_a_single_source_card_is_the_same_item_in_the_worklist_and_both_gate_entries(
+def test_a_single_source_card_is_the_same_item_in_the_worklist_and_the_gate(
     tmp_path: Path,
 ) -> None:
     """A source without copies keeps the one-item construction it has today."""
@@ -581,4 +414,3 @@ def test_a_single_source_card_is_the_same_item_in_the_worklist_and_both_gate_ent
     result, findings = _gate(world, contract, changed, dict(known["identicalChanges"]), changed)
     assert findings == [] and result.ok
     assert _by_subject(result)[subject].sources == (CODE_FILE,)
-    assert _validator(world, contract, changed, {}, changed).ok

@@ -207,7 +207,6 @@ type AbsorbingPaths<Mirror, Path extends string> = [NonNullable<Mirror>] extends
         : never;
 
 const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, 'projection'>, string> = {
-  'projection.metrics.stalenessHistogram': 'buckets are named by the reducer, not by the mirror',
   'projection.analytics.driftSnapshots[].counts': 'drift categories come from the drift report',
   'projection.analytics.setupSummaries[].resultCounts': 'result buckets come from the setup action',
   'projection.analytics.engineProcesses[].retryArgs': "the retry call's own kwargs",
@@ -527,7 +526,7 @@ describe('the mirror declares everything the server sends', () => {
   });
 
   it('carries exactly the metrics fields the mirror models, and no others', () => {
-    expect(Object.keys(served.metrics).sort()).toEqual(['ignoredHostAgents', 'stalenessHistogram']);
+    expect(Object.keys(served.metrics).sort()).toEqual(['ignoredHostAgents']);
   });
 });
 

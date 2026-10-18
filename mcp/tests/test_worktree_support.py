@@ -27,7 +27,6 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
     write_ledger,
 )
-from agents_remember.memory import baseline as adopt_baseline
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
@@ -60,7 +59,6 @@ from curator_coherence_test_support import (
     write_curator_task_topology,
 )
 
-drift = adopt_baseline.drift
 TEST_CERTIFICATION_PROFILE_REFERENCE = Path("mcp/certification-profile-v1.json")
 
 

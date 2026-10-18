@@ -1,31 +1,12 @@
-"""CLI adapter: check a leaf's memory citations or regenerate their ranges.
+"""Check converted references or regenerate their ranges inside the admitted memory root.
 
-    agents-remember memory-citations --repo <id> --contract <contract>
-        [--build-index | --fix]
+    agents-remember memory-citations --repo <id> --contract <contract> [--fix]
 
-``--contract`` names the leaf enclosure whose memory worktree is rewritten, exactly as the
-worktree verbs do. For ``--fix`` it may be omitted on the configured memory root while that
-root has no attributed baseline (the pre-baseline bootstrap admission, MIK-R45 rule 2); in
-every other case a call without a contract refuses and names the leaf route. There is no
-argument list that names the official memory repo.
-
-``--exclude GLOB`` adds a caller-supplied pattern to this call's exclusion register, on top of
-the register every call already honours (the memory layer's ``onboarding.pathRules.exclude``
-and the code repo's ``.gitignore``). The register's rule set is reported in the result, so a
-reader can see which patterns produced the population.
-
-THE THREE MODES DO DIFFERENT WORK AND ARE NOT INTERCHANGEABLE.
-
-    (none)          report. Nothing is written.
-    --build-index   build or validate one complete dirty-snapshot source index before a
-                    curator wave. Independent document commands reuse it.
-    --fix           regenerate the range of every citation ALREADY in the anchored format that
-                fails, from its anchor. With --document, also normalise passing ranges in
-                that one document so no curator-authored line number survives.
-
-Exit status is the gate's: 0 when nothing is left to do, 1 when anything remains. What
-remains is a work order per DOCUMENT, so a parallel dispatch of curator agents takes one
-each, with every location in the tree that holds the anchor printed beside it.
+``--fix`` accepts repeated ``--document`` selections and ``--dry-run``. Without a
+contract, only the configured root's pre-baseline fixer admission applies.
+Old-format memory is refused and must convert through knowledge-convert or the
+crossing sync. The command prints the whole result; exit status is 0 on success
+and 1 when work remains or the operation is refused.
 """
 
 from __future__ import annotations
@@ -38,7 +19,6 @@ from agents_remember.application.memory_tools import (
     CitationOperationScope,
     citation_check_tool,
     citation_fix_tool,
-    citation_source_index_build_tool,
 )
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.kernel.primitives.runtime_config import (
@@ -65,12 +45,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "directory, as the other subcommands do.",
     )
     parser.add_argument(
-        "--build-index",
-        action="store_true",
-        help="Build or validate the reusable immutable code-source index before a curator "
-        "wave. Cannot be combined with a document or write mode.",
-    )
-    parser.add_argument(
         "--fix",
         action="store_true",
         help="Rewrite the ranges that can be regenerated from their anchors. With "
@@ -86,28 +60,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "relative to the onboarding root. Repeat for more than one document: one call "
         "checks or repairs them all. A curator wave shares one memory worktree, so a "
         "tree-wide --fix can rewrite another curator's document mid-edit. A name matching "
-        "no document is refused rather than checking nothing. On converted memory --fix takes "
-        "--document alone (those cards and their sidecars); on unconverted memory it comes with "
-        "--expected-snapshot. Several --document flags need --fix.",
-    )
-    parser.add_argument(
-        "--expected-snapshot",
-        default=None,
-        help="Open exactly this snapshot from the explicit prebuild without walking or "
-        "statting the source tree. This asserts the source wave stayed frozen; it never "
-        "uses HEAD as a proxy for dirty or untracked content, and a missing or mismatched "
-        "generation is refused rather than rebuilt.",
-    )
-    parser.add_argument(
-        "--exclude",
-        action="append",
-        default=None,
-        metavar="GLOB",
-        help="Add a code-root-relative path glob to this call's exclusion register, on top of "
-        "the register every call already honours (settings.json onboarding.pathRules.exclude "
-        "and the code repo's .gitignore). Repeat for more than one pattern. The name is "
-        "deliberately --exclude rather than --ignore: it narrows the candidate population, it "
-        "does not reimplement Git's ignore rules.",
+        "no document is refused rather than checking nothing. --fix takes --document alone "
+        "(those cards and their sidecars). Several --document flags need --fix.",
     )
     parser.add_argument(
         "--dry-run",
@@ -117,20 +71,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    build_index = getattr(args, "build_index", False)
-    expected_snapshot = getattr(args, "expected_snapshot", None)
     named = getattr(args, "document", None) or []
-    caller_excludes = tuple(getattr(args, "exclude", None) or ())
-    selected_modes = sum((build_index, args.fix))
-    if selected_modes > 1:
-        print("--build-index and --fix are different operations; pass one.")
-        return 1
-    if build_index and (named or args.dry_run or expected_snapshot is not None):
-        print(
-            "--build-index is repository-wide and cannot use --document, --dry-run, or "
-            "--expected-snapshot. Build once, then pass its snapshot to document commands."
-        )
-        return 1
     if len(named) > 1 and not args.fix:
         print("several --document flags name cards for one call and need --fix.")
         return 1
@@ -145,23 +86,13 @@ def run(args: argparse.Namespace) -> int:
         operation_scope = CitationOperationScope(
             document=document,
             documents=documents,
-            expected_snapshot=expected_snapshot,
-            excludes=caller_excludes,
         )
         config = load_config(args.config if args.config else discover_config(Path.cwd()))
     except (ValueError, ConfigDiscoveryError, ConfigError) as error:
         print(str(error))
         return 1
     try:
-        if build_index:
-            assert args.contract is not None  # guarded above: only --fix runs unscoped
-            payload = citation_source_index_build_tool(
-                config,
-                repo_id=args.repo,
-                contract_path=args.contract,
-                operation_scope=operation_scope,
-            )
-        elif args.fix:
+        if args.fix:
             payload = citation_fix_tool(
                 config,
                 repo_id=args.repo,

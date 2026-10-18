@@ -24,7 +24,6 @@ from agents_remember.observer.projection import (
     TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
     LedgerNode,
     RouteCoverageNode,
-    SidecarStaleNode,
     WorkspaceProjection,
     task_documents_body_bytes,
 )
@@ -46,7 +45,6 @@ from agents_remember.serving.projections.projection_inputs import (
 from agents_remember.serving.projections.snapshots import (
     read_ledger,
     read_route_coverage,
-    read_sidecar_staleness,
 )
 
 if TYPE_CHECKING:
@@ -60,7 +58,7 @@ LATEST_METRICS = "latest-metrics.json"
 PROVIDER_REFRESH_TTL_SECONDS = 10.0
 # Repo-surface TTL: this walk opens+parses every onboarding document across EVERY managed
 # repo (8 memory repos, thousands of markdown files) — py-spy measured it as the dominant slice
-# of the projection tick at the old 15 s TTL. Staleness/coverage/ledger panels tolerate minutes
+# of the projection tick at the old 15 s TTL. Coverage/ledger panels tolerate minutes
 # of lag; the tick budget does not tolerate the walk.
 REPO_SURFACE_REFRESH_TTL_SECONDS = 120.0
 # Guardrail: the projection ticks every 1s, so a per-tick over-budget warning would be pure spam.
@@ -77,7 +75,7 @@ _last_task_payload_warn: dict[str, datetime] = {}
 @dataclass(frozen=True)
 class _RepoSurfaceCacheEntry:
     at: datetime
-    value: tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]
+    value: tuple[list[RouteCoverageNode], list[LedgerNode]]
 
 
 _repo_surface_cache: dict[tuple[tuple[str, str, str], ...], _RepoSurfaceCacheEntry] = {}
@@ -190,7 +188,6 @@ def project_and_write(
         now=moment,
         given=AnalyticalInputs(
             drift_snapshots=inputs.drift_snapshots,
-            sidecar_staleness=inputs.sidecar_staleness,
             setup_summaries=inputs.setup_summaries,
             setup_progress=inputs.setup_progress,
             route_coverage=inputs.route_coverage,
@@ -240,40 +237,36 @@ def _warn_if_task_documents_payload_over_budget(
 
 
 def _gather_repo_surfaces(
-    config: McpRuntimeConfig, moment: datetime
-) -> tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]:
-    """Per-repo analytical surfaces (sidecar staleness, route coverage, ledger).
+    config: McpRuntimeConfig,
+) -> tuple[list[RouteCoverageNode], list[LedgerNode]]:
+    """Per-repo analytical surfaces (route coverage, ledger).
 
     These walk each managed repo's onboarding/memory roots, so they are gathered
     per ``RepositoryScope`` rather than once under the coordination root.
     """
-    sidecar_staleness: list[SidecarStaleNode] = []
     route_coverage: list[RouteCoverageNode] = []
     ledgers: list[LedgerNode] = []
     for scope in config.repositories.values():
         if scope.memory_root is None:
             continue
         onboarding_root = scope.memory_root / "onboarding"
-        sidecar_staleness.extend(
-            read_sidecar_staleness(onboarding_root, repository=scope.repo_id, now=moment)
-        )
         route_coverage.extend(read_route_coverage(onboarding_root, repository=scope.repo_id))
         ledger = read_ledger(scope.memory_root, code_root=scope.path)
         if ledger is not None:
             ledgers.append(ledger)
-    return sidecar_staleness, route_coverage, ledgers
+    return route_coverage, ledgers
 
 
 def _gather_repo_surfaces_cached(
     config: McpRuntimeConfig, moment: datetime
-) -> tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]]:
+) -> tuple[list[RouteCoverageNode], list[LedgerNode]]:
     key = _repo_surface_cache_key(config)
     entry = _repo_surface_cache.get(key)
     if entry is not None:
         age = (moment - entry.at).total_seconds()
         if 0 <= age < REPO_SURFACE_REFRESH_TTL_SECONDS:
             return entry.value
-    value = _gather_repo_surfaces(config, moment)
+    value = _gather_repo_surfaces(config)
     _repo_surface_cache[key] = _RepoSurfaceCacheEntry(at=moment, value=value)
     return value
 

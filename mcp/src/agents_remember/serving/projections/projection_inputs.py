@@ -31,7 +31,6 @@ from agents_remember.observer.projection import (
     RouteCoverageNode,
     SetupProgressNode,
     SetupSummaryNode,
-    SidecarStaleNode,
     ToolReportNode,
 )
 from agents_remember.observer.task_entries import TaskDocumentSource
@@ -241,7 +240,6 @@ class ProjectionInputs:
     enclosures: list[EnclosureNode]
     providers: list[ProviderNode]
     drift_snapshots: list[DriftSnapshotNode]
-    sidecar_staleness: list[SidecarStaleNode]
     setup_summaries: list[SetupSummaryNode]
     setup_progress: list[SetupProgressNode]
     route_coverage: list[RouteCoverageNode]
@@ -291,7 +289,7 @@ _REPO_SURFACES_TTL_SECONDS = 120.0
 
 RepoSurfaceReader = Callable[
     ["McpRuntimeConfig", datetime],
-    tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]],
+    tuple[list[RouteCoverageNode], list[LedgerNode]],
 ]
 
 
@@ -328,7 +326,6 @@ class ProjectionInputState:
         self._engine_process_facts: list[EngineProcessFacts] = []
         self._engine_start_progress: list[dict[str, Any]] = []
         self._attention_dismissals: dict[str, AttentionDismissalRecord] = {}
-        self._sidecar_staleness: list[SidecarStaleNode] = []
         self._route_coverage: list[RouteCoverageNode] = []
         self._ledgers: list[LedgerNode] = []
         self._surfaces_at: datetime | None = None
@@ -423,14 +420,12 @@ class ProjectionInputState:
         # when their TTL lapses, and every other pass retains them unread. A noop tick
         # therefore reaches no surface reader at all.
         if pass_.refresh.kind == ProjectionRefreshKind.FULL or self._surfaces_stale(now):
-            sidecars, routes, ledgers = readers.repo_surfaces(config, now)
-            self._sidecar_staleness = sidecars
+            routes, ledgers = readers.repo_surfaces(config, now)
             self._route_coverage = routes
             self._ledgers = ledgers
             self._surfaces_at = now
         else:
-            sidecars, routes, ledgers = (
-                self._sidecar_staleness,
+            routes, ledgers = (
                 self._route_coverage,
                 self._ledgers,
             )
@@ -439,7 +434,6 @@ class ProjectionInputState:
             enclosures=self._enclosures,
             providers=self._providers,
             drift_snapshots=self._drift_snapshots,
-            sidecar_staleness=sidecars,
             setup_summaries=self._setup_summaries,
             setup_progress=self._setup_progress,
             route_coverage=routes,

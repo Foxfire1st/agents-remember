@@ -605,14 +605,6 @@
         "state": "complete"
       }
     ],
-    "stalestSidecars": [
-      {
-        "ageSeconds": 3628800,
-        "lastVerifiedDate": "2026-05-02",
-        "onboardingFile": "/memory/ar-agents-remember/onboarding/observer/projection.md",
-        "repository": "agents-remember"
-      }
-    ],
     "toolReports": [
       {
         "ageSeconds": 640,
@@ -1982,10 +1974,6 @@
   ],
   "generatedAt": "2026-06-14T09:01:00+00:00",
   "metrics": {
-    "stalenessHistogram": {
-      "aging": 2,
-      "fresh": 10
-    },
     "ignoredHostAgents": 0
   },
   "providers": [

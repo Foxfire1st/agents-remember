@@ -16,13 +16,12 @@ from agents_remember.application.memory_quality.controller import (
     start_memory_quality_request,
 )
 from agents_remember.application.memory_tools import (
-    DEFAULT_CARRYOVER_MESSAGES,
     DEFAULT_CITATION_OPERATION_SCOPE,
     DEFAULT_MEMORY_BRANCHES,
-    CarryoverCommitMessages,
     CarryoverSelection,
     CitationOperationScope,
     MemoryBranches,
+    _carryover_legacy_refusal,
     citation_fix_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
@@ -40,11 +39,10 @@ from agents_remember.models.memory import (
     MemoryQualitySyncRequest,
 )
 from agents_remember.models.tools.tool_answer import (
-    ENVELOPE_STRIPPED_FIELDS,
     TOOL_ANSWER_LIST_MAX,
     TOOL_ANSWER_STATUS_ENTRY_MAX,
 )
-from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE
+from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, is_legacy_format_refusal
 
 from .base import _tool_payload
 
@@ -179,7 +177,6 @@ _CITATION_STATUS_KEYS = (
     "refusedCount",
 )
 _CITATION_CONVERTED_ENTRY_KEYS = ("stale", "unreadableSidecars", "refused")
-_CITATION_UNCONVERTED_ENTRY_KEYS = ("declined", "refusedDocuments")
 
 
 def _carry_legacy_refusal(full: Mapping[str, Any], answer: dict[str, Any]) -> None:
@@ -233,17 +230,8 @@ def _citation_fix_answer(full: Mapping[str, Any]) -> dict[str, Any]:
             "refused": refused,
         }
     else:
-        entries = {
-            "declined": full.get("declined"),
-            "refusedDocuments": full.get("refusedDocuments"),
-        }
-        if full.get("findingsRemaining") is not None:
-            answer["findingsRemaining"] = full["findingsRemaining"]
-    for key in (
-        _CITATION_CONVERTED_ENTRY_KEYS
-        if full.get("status") == "converted"
-        else _CITATION_UNCONVERTED_ENTRY_KEYS
-    ):
+        entries = {}
+    for key in _CITATION_CONVERTED_ENTRY_KEYS:
         rows = entries.get(key)
         if isinstance(rows, list) and rows:
             answer[key] = [_slim_citation_entry(row) for row in rows[:TOOL_ANSWER_STATUS_ENTRY_MAX]]
@@ -330,80 +318,6 @@ def _bounded_citation_fix(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(authoring, dict):
         bounded["authoring"] = _bounded_lists(authoring, _AUTHORING_LISTS)
     return bounded
-
-
-# MIK-R112 retired `citation_migrate` as a registered tool (no response
-# model), so the MCP payload builder is gone with it; the status projection
-# below stays for the builder-level row proofs and any future rewiring.
-_MIGRATE_ORDER_KEYS = ("document", "cardPath", "itemCount", "codes")
-_MIGRATE_ITEM_KEYS = ("line", "code", "message")
-
-
-def _slim_migrate_order(order: Any) -> Any:
-    """One declined work order as a slim entry: document, codes, first rows.
-
-    The status-answer ruling caps the answer at the default bound: each order
-    keeps its document, its codes, and its first nested rows slimmed to line,
-    code, and message, with the item count beside them. The full rows stay in
-    the whole result the log records.
-    """
-
-    if not isinstance(order, dict):
-        return order
-    slimmed: dict[str, Any] = {
-        key: order[key] for key in _MIGRATE_ORDER_KEYS if order.get(key) is not None
-    }
-    items = order.get("items")
-    if isinstance(items, list):
-        slimmed["items"] = [
-            {key: item.get(key) for key in _MIGRATE_ITEM_KEYS}
-            for item in items[:TOOL_ANSWER_STATUS_ENTRY_MAX]
-            if isinstance(item, dict)
-        ]
-    return slimmed
-
-
-def _migrate_answer(full: Mapping[str, Any]) -> dict[str, Any]:
-    """MIK-R110 rule 7: one migration whole result answered within the default bound.
-
-    The outcome, the conversion counts, and the first declined work orders
-    slimmed to document, codes, and first rows, with the declined count and
-    the source generation beside them. The envelope fields stay with the
-    whole result, as on every other projection. The complete decline list is
-    that migration's contract and lives in the whole result the log records.
-    """
-
-    answer = {
-        key: value
-        for key, value in full.items()
-        if key not in ENVELOPE_STRIPPED_FIELDS and value is not None
-    }
-    orders = full.get("workOrders")
-    if isinstance(orders, list):
-        slimmed = [_slim_migrate_order(order) for order in orders[:TOOL_ANSWER_STATUS_ENTRY_MAX]]
-        answer["workOrders"] = (
-            {"count": len(orders), "items": slimmed, "truncated": True}
-            if len(orders) > TOOL_ANSWER_STATUS_ENTRY_MAX
-            else slimmed
-        )
-    elif isinstance(orders, dict):
-        items = orders.get("items")
-        if isinstance(items, list):
-            answer["workOrders"] = {
-                **orders,
-                "items": [
-                    _slim_migrate_order(order) for order in items[:TOOL_ANSWER_STATUS_ENTRY_MAX]
-                ],
-                "truncated": bool(len(items) > TOOL_ANSWER_STATUS_ENTRY_MAX),
-            }
-    source = full.get("sourceIndex")
-    if isinstance(source, dict):
-        answer["sourceIndex"] = {
-            key: source[key]
-            for key in ("path", "snapshotId", "state")
-            if source.get(key) is not None
-        }
-    return answer
 
 
 def route_index_refresh_payload(
@@ -519,13 +433,19 @@ def compact_carryover_payload(full: dict[str, Any], report_path: str | None) -> 
     its own survives beside the boundary: a capped list would recount there
     and lose the total.
     """
-    compact = {key: value for key, value in full.items() if key not in {"candidates", "carried"}}
+    compact = {
+        key: value
+        for key, value in full.items()
+        if key not in {"candidates", "carried", "conversion", "publication"}
+    }
     decisions: dict[str, list[str]] = {}
     for candidate in full.get("candidates", []):
         decisions.setdefault(str(candidate.get("decision")), []).append(
             str(candidate.get("source_path"))
         )
     compact["decisions"] = decisions
+    if isinstance(full.get("publication"), str):
+        compact["next"] = {"summary": full["publication"]}
     if "carried" in full:
         compact["carriedPaths"] = [
             str(candidate.get("source_path")) for candidate in full["carried"]
@@ -541,10 +461,17 @@ def memory_carryover_plan_payload(
 ) -> dict[str, Any]:
     # A plan is a read and files no per-call report (rule 6); the answer is the plan with
     # no ``reportPath`` key. Only the mutating apply files its report (not adjudicated here).
-    full = memory_carryover_plan_tool(config, selection)
+    try:
+        full = memory_carryover_plan_tool(config, selection)
+    except RuntimeError as error:
+        if not is_legacy_format_refusal(str(error)):
+            raise
+        full = _carryover_legacy_refusal(str(error), operation="memory_carryover_plan")
+    # Derived decision facts belong to the validated/logged whole as well as its answer.
     return _tool_payload(
         "memory_carryover_plan",
-        compact_carryover_payload(full, None),
+        {**full, **(answer := compact_carryover_payload(full, None))},
+        answer=answer,
     )
 
 
@@ -554,19 +481,18 @@ def memory_carryover_apply_payload(
     *,
     intent_note: str,
     include_review_required: list[str] | None = None,
-    messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
     full = memory_carryover_apply_tool(
         config,
         selection,
         intent_note=intent_note,
         include_review_required=include_review_required,
-        messages=messages,
     )
     report_path = write_tool_report(
         config.coordination_root, "memory_carryover_apply", full, label="apply"
     )
     return _tool_payload(
         "memory_carryover_apply",
-        compact_carryover_payload(full, report_path.as_posix()),
+        {**full, **(answer := compact_carryover_payload(full, report_path.as_posix()))},
+        answer=answer,
     )

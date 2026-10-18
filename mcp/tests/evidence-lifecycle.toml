@@ -164,6 +164,8 @@ consumers = [
   "mcp/tests/test_capsule_replay_integrity.py",
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_capsule_serving_surface.py",
+  "mcp/tests/test_carryover_apply_transaction.py",
+  "mcp/tests/test_carryover_document_units.py",
   "mcp/tests/test_catalog_selection.py",
   "mcp/tests/test_causal_failure_localization.py",
   "mcp/tests/test_causal_quality_preflight.py",
@@ -176,12 +178,8 @@ consumers = [
   "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_checkpoint_landing.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
-  "mcp/tests/test_citation_cache_reclamation.py",
-  "mcp/tests/test_citation_document_transaction.py",
   "mcp/tests/test_citation_fix_documents.py",
-  "mcp/tests/test_citation_index_resilience.py",
   "mcp/tests/test_citation_migrate_registration.py",
-  "mcp/tests/test_citation_source_index_membership.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_kept_line_branch_deletion.py",
@@ -213,6 +211,7 @@ consumers = [
   "mcp/tests/test_context_providers.py",
   "mcp/tests/test_controlplane_store_durability.py",
   "mcp/tests/test_conversion_cost_scans.py",
+  "mcp/tests/test_converted_carryover.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
@@ -251,10 +250,8 @@ consumers = [
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_family_route_conditions.py",
   "mcp/tests/test_file_size_detector.py",
-  "mcp/tests/test_final_catalog_plan_attestation.py",
   "mcp/tests/test_final_codex_certificate.py",
   "mcp/tests/test_final_codex_models.py",
-  "mcp/tests/test_final_full_memory_coherence_certification.py",
   "mcp/tests/test_fixture_recorded_paths.py",
   "mcp/tests/test_fresh_user_harness.py",
   "mcp/tests/test_gate_certificate_authority.py",
@@ -383,12 +380,8 @@ consumers = [
   "mcp/tests/test_memory_backfill.py",
   "mcp/tests/test_memory_branch_authority.py",
   "mcp/tests/test_memory_citation_agreement.py",
-  "mcp/tests/test_memory_citation_fix.py",
-  "mcp/tests/test_memory_citation_fix_scopes.py",
   "mcp/tests/test_memory_citation_grammars.py",
-  "mcp/tests/test_memory_citation_resolution.py",
   "mcp/tests/test_memory_document_shape.py",
-  "mcp/tests/test_memory_incremental_scope_compiler.py",
   "mcp/tests/test_memory_ledger.py",
   "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_memory_opt_out_refused_routes.py",
@@ -416,7 +409,6 @@ consumers = [
   "mcp/tests/test_observer_projection_attention.py",
   "mcp/tests/test_observer_projection_snapshot.py",
   "mcp/tests/test_onboarding_trace_gate.py",
-  "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_own_writes.py",
   "mcp/tests/test_pacer_healing.py",
   "mcp/tests/test_paseo_agent_tools.py",
@@ -721,7 +713,6 @@ consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_change_kinds.py",
@@ -763,7 +754,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_certification_plan_authority.py",
   "mcp/tests/test_certification_rail_registry.py",
-  "mcp/tests/test_closeout_certification_recovery.py",
 ]
 
 [[artifact]]
@@ -793,24 +783,6 @@ consumers = [
 ]
 
 [[artifact]]
-path = "mcp/tests/closeout_fixture_test_support.py"
-kind = "shared-support"
-authority = "internal-canonical"
-owner = "closeout-liveness-test-port"
-category = "integration"
-fidelity = "local-composition"
-cadence = "affected"
-source_version_or_generator = "typed closeout and lifecycle fixture composition"
-introduced_by = "260824-closeout-liveness-recovery"
-lifetime = "permanent"
-permanence_rationale = "The helper owns the shared closeout repository topology used by eighteen lifecycle suites."
-replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_and_memory_without_acceptance_tools"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_operation_certification_selection.py",
-]
-
-[[artifact]]
 path = "mcp/tests/closeout_input_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"
@@ -832,7 +804,6 @@ consumers = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_lifecycle_operations.py",
-  "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
@@ -868,7 +839,7 @@ source_version_or_generator = "typed task-topology, attestation, and explicit-ju
 introduced_by = "260828-MCAR-L02"
 lifetime = "permanent"
 permanence_rationale = "Closeout fixtures need one shared input author that preserves the production canonical writer and exact validation boundary."
-replacement_contract = "node:mcp/tests/test_final_full_memory_coherence_certification.py::test_final_certification_refuses_without_current_coherence"
+replacement_contract = "node:mcp/tests/test_tool_answer_rows_packaging.py::test_coherence_paths_derive_the_row_cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_abandoned_series_closeout.py",
@@ -881,6 +852,7 @@ consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_bootstrap_converted_onboarding.py",
   "mcp/tests/test_capsule_launch_wiring.py",
+  "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_kept_line_branch_deletion.py",
@@ -897,6 +869,7 @@ consumers = [
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_context_packet_slim.py",
+  "mcp/tests/test_converted_carryover.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_curator_coherence_closed_out.py",
@@ -937,7 +910,6 @@ consumers = [
   "mcp/tests/test_memory_quality_coherence_takeover.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_no_grant_closeout_parity.py",
-  "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_pause_stop_only_end_to_end.py",
   "mcp/tests/test_post_integration_cleanup_guidance.py",
   "mcp/tests/test_provider_current_state.py",
@@ -946,7 +918,6 @@ consumers = [
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_reader_task_context_protocol.py",
   "mcp/tests/test_removed_stores.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
@@ -1317,7 +1288,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -1341,7 +1311,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -1365,7 +1334,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -1389,7 +1357,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -1413,7 +1380,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -1437,7 +1403,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -1461,7 +1426,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -1485,7 +1449,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -1592,6 +1555,8 @@ consumers = [
   "mcp/tests/test_capsule_replay_integrity.py",
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_capsule_serving_surface.py",
+  "mcp/tests/test_carryover_apply_transaction.py",
+  "mcp/tests/test_carryover_document_units.py",
   "mcp/tests/test_catalog_selection.py",
   "mcp/tests/test_causal_failure_localization.py",
   "mcp/tests/test_causal_quality_preflight.py",
@@ -1604,12 +1569,8 @@ consumers = [
   "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_checkpoint_landing.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
-  "mcp/tests/test_citation_cache_reclamation.py",
-  "mcp/tests/test_citation_document_transaction.py",
   "mcp/tests/test_citation_fix_documents.py",
-  "mcp/tests/test_citation_index_resilience.py",
   "mcp/tests/test_citation_migrate_registration.py",
-  "mcp/tests/test_citation_source_index_membership.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_kept_line_branch_deletion.py",
@@ -1641,6 +1602,7 @@ consumers = [
   "mcp/tests/test_context_providers.py",
   "mcp/tests/test_controlplane_store_durability.py",
   "mcp/tests/test_conversion_cost_scans.py",
+  "mcp/tests/test_converted_carryover.py",
   "mcp/tests/test_converted_onboarding_drift.py",
   "mcp/tests/test_crap_calculator.py",
   "mcp/tests/test_cross_master_concurrency.py",
@@ -1679,10 +1641,8 @@ consumers = [
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_family_route_conditions.py",
   "mcp/tests/test_file_size_detector.py",
-  "mcp/tests/test_final_catalog_plan_attestation.py",
   "mcp/tests/test_final_codex_certificate.py",
   "mcp/tests/test_final_codex_models.py",
-  "mcp/tests/test_final_full_memory_coherence_certification.py",
   "mcp/tests/test_fixture_recorded_paths.py",
   "mcp/tests/test_fresh_user_harness.py",
   "mcp/tests/test_gate_certificate_authority.py",
@@ -1811,12 +1771,8 @@ consumers = [
   "mcp/tests/test_memory_backfill.py",
   "mcp/tests/test_memory_branch_authority.py",
   "mcp/tests/test_memory_citation_agreement.py",
-  "mcp/tests/test_memory_citation_fix.py",
-  "mcp/tests/test_memory_citation_fix_scopes.py",
   "mcp/tests/test_memory_citation_grammars.py",
-  "mcp/tests/test_memory_citation_resolution.py",
   "mcp/tests/test_memory_document_shape.py",
-  "mcp/tests/test_memory_incremental_scope_compiler.py",
   "mcp/tests/test_memory_ledger.py",
   "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_memory_opt_out_refused_routes.py",
@@ -1844,7 +1800,6 @@ consumers = [
   "mcp/tests/test_observer_projection_attention.py",
   "mcp/tests/test_observer_projection_snapshot.py",
   "mcp/tests/test_onboarding_trace_gate.py",
-  "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_own_writes.py",
   "mcp/tests/test_pacer_healing.py",
   "mcp/tests/test_paseo_agent_tools.py",
@@ -2118,7 +2073,6 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_read_boundary_controls.py",
   "mcp/tests/test_lifecycle_operations.py",
-  "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
@@ -2145,7 +2099,7 @@ source_version_or_generator = "exact repository gate admission, publication and 
 introduced_by = "260831-CCR-L30"
 lifetime = "permanent"
 permanence_rationale = "One fixture builds isolated Git candidates and real retained report bytes for gate consumer and retention proofs."
-replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::test_unchanged_interruption_reuses_the_original_exact_certificates"
+replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::test_retained_report_inventory_refuses_mismatched_evidence_before_any_source_read"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
@@ -2157,7 +2111,6 @@ consumers = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_lifecycle_operations.py",
-  "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
@@ -2334,7 +2287,6 @@ consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_change_kinds.py",
   "mcp/tests/test_review_closeout_result_block_through_real_tool.py",
@@ -2451,7 +2403,6 @@ consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_change_kinds.py",
@@ -2521,6 +2472,7 @@ replacement_contract = "node:mcp/tests/test_knowledge_writer.py::test_a_decision
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agent_tool_surface_corrections.py",
+  "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_generated_copy_worklist.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
@@ -2537,7 +2489,6 @@ consumers = [
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_onboarding_gate.py",
   "mcp/tests/test_read_ar_files.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
   "mcp/tests/test_tool_entry_point_sweep.py",
@@ -2832,7 +2783,6 @@ consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_family_context.py",
   "mcp/tests/test_review_family_context_population.py",
@@ -2898,7 +2848,6 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundary.py",
   "mcp/tests/test_knowledge_read_boundary_controls.py",
   "mcp/tests/test_lifecycle_operations.py",
-  "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
@@ -3052,7 +3001,6 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_route_index_memory_scope.py",
   "mcp/tests/test_tool_answer_guard.py",
   "mcp/tests/test_tool_answer_log.py",
@@ -3083,7 +3031,6 @@ consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_paseo_role_answers_l111.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
   "mcp/tests/test_tool_answer_table.py",
@@ -3117,7 +3064,6 @@ consumers = [
   "mcp/tests/test_landing_state_refusals.py",
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_read_ar_files.py",
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_task_document_copies_l111.py",
   "mcp/tests/test_tool_answer_log.py",
@@ -3164,7 +3110,6 @@ permanence_rationale = "A tool's failure path is only observable where the envel
 replacement_contract = "contract:tool-refusal-census-cases"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_refusal_conformance.py",
 ]
 
@@ -3210,12 +3155,14 @@ consumers = [
   "mcp/tests/test_atomic_master_review_scope.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_live_gate.py",
   "mcp/tests/test_closeout_projection_source_classification.py",
   "mcp/tests/test_closeout_queue.py",
+  "mcp/tests/test_converted_carryover.py",
   "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_family_history_judgments.py",
   "mcp/tests/test_integration_branch_authority.py",
@@ -3229,12 +3176,12 @@ consumers = [
   "mcp/tests/test_legacy_refusal_envelope.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
+  "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_mik_r53_judgment_rows.py",
   "mcp/tests/test_mik_r53_onboarding_gate.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_no_grant_closeout_parity.py",
-  "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_pause_stop_only_end_to_end.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_review_block_state_values_through_real_tools.py",

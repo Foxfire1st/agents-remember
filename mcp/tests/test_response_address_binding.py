@@ -28,13 +28,9 @@ where the mechanism lives and where the next regression will be cheapest to see.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
 from unittest import mock
 
 from agents_remember.application.tool_response import bound_next_step
-from agents_remember.memory_quality.style.citations import migration
-from agents_remember.memory_quality.style.citations.drafts import Result
-from agents_remember.memory_quality.style.citations.work_order import Item
 from agents_remember.models.base import NextStep
 from agents_remember.models.worktree import WorktreeCloseoutApplyResponse
 from agents_remember.worktrees.modules import closeout as closeout_module
@@ -43,10 +39,6 @@ from agents_remember.worktrees.modules.closeout import (
     _refreshed_onboarding_paths,
 )
 from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutcome
-from test_tool_refusal_conformance import refusal_axes
-
-if TYPE_CHECKING:
-    from agents_remember.memory_quality.style.citations import source_index
 
 OWN = "/coord/tasks/repo/own-master/enclosures/own-leaf/series-contract.md"
 # The product sets BOTH spellings to the contract FILE -- measured on a real `worktree_status`
@@ -171,122 +163,6 @@ def test_the_refreshed_onboarding_census_names_every_entry_it_counts() -> None:
     # `count 19 / 2 paths / 17 blanks` shape cannot be reproduced by this payload again.
     assert _bounded_paths(old) == {"count": 1, "sample": ["mcp/src/a.py"]}
     assert _bounded_paths(old)["count"] != len(old)
-
-
-class _StubIndex:
-    """The one method `payload` calls on the source index: its telemetry block.
-
-    `payload` reads the index only for `telemetry()`; everything else it reports comes from the
-    `Result` it is handed. A stub here is therefore not a double of the behaviour under test --
-    it removes the one dependency that would make this case an integration test, and the case
-    still executes the builder's own decision line.
-    """
-
-    def telemetry(self, *, post_fix_recheck: bool = False) -> dict[str, object]:
-        return {"postFixRecheck": post_fix_recheck}
-
-
-def _migration_payload(*, declined: int = 0, remaining: int = 0, dry_run: bool):
-    """Call the real `migration.payload` and return what it produced.
-
-    `Result` is the builder's own input type and its fields default to zero, so the two facts
-    `ok` is read off -- `declined` and `remaining` -- are set explicitly and nothing else is
-    synthesised.
-    """
-
-    result = Result(declined=[_declined_item() for _ in range(declined)], remaining=remaining)
-    return migration.payload(
-        Path("/coord/memory/onboarding"),
-        Path("/coord/repo"),
-        result,
-        # `payload` reads exactly one member of the index -- `telemetry()` -- so this double is
-        # partial BY DESIGN: building a real `RepositoryIndex` would require a live leased
-        # snapshot (database handle, lock file, cache paths, metrics) and would turn this case
-        # into an integration test of the source index rather than of the migration's `ok`.
-        cast("source_index.RepositoryIndex", _StubIndex()),
-        dry_run=dry_run,
-    )
-
-
-def _declined_item():
-    """One decline, in the shape `work_order.counted`/`orders` read."""
-
-    return Item(
-        document="onboarding/a.md",
-        line=1,
-        kind="table-row",
-        code="ambiguous-anchor",
-        tier=1,
-        action="review",
-        message="one extent",
-    )
-
-
-def test_a_migration_preview_reports_its_outcome_instead_of_a_bare_not_ok() -> None:
-    """`T64`: two previews of one family answered the same question with opposite `ok` values.
-
-    `citation_migrate(dry_run=True)` returned ``ok: false`` while its sibling `citation_fix`
-    previewed the equivalent shape as ``ok: true``, so a caller could not tell "nothing to
-    migrate" from "the operation did not happen". The old ``ok`` folded two questions together
-    ("did anything change" and "did the call succeed"); the builder now answers the second and
-    declares the first separately, in ``state``, ``outcome`` and ``findingsRemaining``.
-
-    **This case CALLS the builder.** An earlier form of it grepped
-    ``inspect.getsource(migration.payload)`` for the three literals, which pinned the text and
-    not the behaviour: forcing ``blocked = True`` left every case in this leaf green while every
-    preview reported ``ok:false`` (the reviewer's M12). What is asserted here is the value the
-    builder produces, so that mutation is red by construction.
-    """
-
-    planned = _migration_payload(dry_run=True)
-    assert planned["ok"] is True, (
-        "a dry run that declined nothing did what it set out to do; ok:false here is the "
-        "pre-repair shape T64 recorded"
-    )
-    assert planned["state"] == "planned"
-    assert planned["outcome"] == "planned"
-    assert planned["dryRun"] is True
-    assert planned["findingsRemaining"] is None, (
-        "a dry run re-measures nothing, so it must not report a number a reader could mistake "
-        "for the post-migration tree"
-    )
-
-    converted = _migration_payload(remaining=0, dry_run=False)
-    assert converted["ok"] is True
-    assert converted["state"] == "converted"
-    assert converted["findingsRemaining"] == 0
-
-    declined = _migration_payload(declined=1, dry_run=True)
-    assert declined["ok"] is False, "a decline is the ONE thing a dry run may report as a refusal"
-    assert declined["state"] == "refused"
-    assert declined["declinedCount"] == 1
-
-    still_open = _migration_payload(remaining=3, dry_run=False)
-    assert still_open["ok"] is False, "a real run that left work behind did not finish"
-    assert still_open["findingsRemaining"] == 3
-
-    # THE DRY-RUN CLAUSE, and it is the one that matters most: a preview is read off `declined`
-    # alone. `remaining` is the POST-write re-measurement -- `migrate_onboarding_root` only fills
-    # it on the non-dry branch, and `findingsRemaining` above already reports `None` on a dry run
-    # precisely because nothing was re-measured. A builder that read `remaining` while previewing
-    # would answer `ok:false, state:"planned"` for the input a preview most often has, which is
-    # `T64`'s symptom returning through the other fact the old `ok` folded in. The reviewer's M17
-    # drops only the `not dry_run` guard, and this row is what catches it.
-    preview_with_remaining = _migration_payload(remaining=3, dry_run=True)
-    assert preview_with_remaining["ok"] is True, (
-        "a preview must not read `remaining`: it is a post-write measurement, and reading it "
-        "here reports a plan as a failure"
-    )
-    assert preview_with_remaining["state"] == "planned"
-    assert preview_with_remaining["findingsRemaining"] is None
-
-    # The pre-repair shape is still recognisable as unmarked, so the pin that recorded it was
-    # about a real shape rather than about a payload nobody ever emitted.
-    assert refusal_axes({"ok": False, "operation": "citation_migrate", "dryRun": True}) == (
-        False,
-        False,
-        False,
-    )
 
 
 def _closed_payload_stub(index: int = 0) -> tuple[str, dict]:

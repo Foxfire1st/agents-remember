@@ -17,16 +17,21 @@ from agents_remember.memory_quality.converted_check import (
     KnowledgeBasePort,
     converted_knowledge_check,
 )
-from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
+from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops import (
+    current_branch_name,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
-    ACTIONABLE_CLASSIFICATIONS,
     DriftSummaryPacket,
+)
+from agents_remember.memory_quality.integrity.onboarding_drift_check.report import (
+    resolve_report_path,
 )
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTreeReadError
 from agents_remember.memory_quality.reference_state import (
     STALE_REFERENCE_CHECK,
     is_converted_memory,
 )
+from agents_remember.worktrees.cutover_lock import legacy_format_refusal
 
 #: The converted-tree result names what it measured (MIK-R44 rule 2).
 CONVERTED_BASIS = "converted-references"
@@ -74,55 +79,12 @@ def run_drift_summary(
             output=output,
         )
 
-    rows = [
-        row
-        for path in drift.discover_onboarding_files(context.onboarding_root)
-        for row in drift.classify_sidecar_onboarding_units(
-            path,
-            code_repository_root,
-            context.onboarding_root,
-            context.storage,
-        )
-    ]
-    rows.extend(
-        drift.classify_inline_source(path, code_repository_root)
-        for path in drift.discover_inline_onboarding_sources(
-            code_repository_root,
-            context.storage,
-        )
-    )
-    rows.sort(key=lambda row: (row.source_file, row.onboarding_file))
-    output = output or DriftSummaryOutput()
-    report_path = output.report_path or drift.resolve_report_path(
-        None,
-        context.coordination_root,
-        context.temp_root,
-        code_repository_root,
-        context.memory_root,
-    )
-    if output.write_report:
-        drift.write_markdown_report(
-            rows,
-            report_path,
-            code_repository_root,
-            context.onboarding_root,
-        )
-        _write_drift_snapshot(code_repository_root, context, rows, report_path=report_path)
-    # Without an explicit report-producing caller, a read files nothing at all (rule 6):
-    # no temp markdown report and no observer snapshot. Readers of the snapshot directory
-    # tolerate its absence (prune/surface/watch all skip a missing dir), so no consumer
-    # contract requires reads to produce it.
-    serialized_rows = [_row_to_dict(row, context.onboarding_root) for row in rows]
-    packet = summarize_rows(
-        serialized_rows,
-        report_path=report_path.as_posix(),
-        detail_limit=detail_limit,
-    )
-    if output.include_rows:
-        packet["rows"] = serialized_rows
-    if not output.write_report:
-        packet.pop("reportPath", None)
-    return packet
+    return {
+        "status": "error",
+        "error": legacy_format_refusal(
+            memory_root, operation="the drift check", subject=f"memory root {memory_root}"
+        ),
+    }
 
 
 def _violation_sample(finding: dict[str, Any]) -> dict[str, Any]:
@@ -188,7 +150,7 @@ def _run_converted_summary(
         "reportOnlyCount": len(report_only),
         "unreadableSidecars": list(result["unreadableSidecars"]),
     }
-    report_path = output.report_path or drift.resolve_report_path(
+    report_path = output.report_path or resolve_report_path(
         None,
         context.coordination_root,
         context.temp_root,
@@ -274,7 +236,7 @@ def _write_converted_snapshot(
     """
 
     states = packet.get("states", {})
-    branch = drift.current_branch_name(code_repository_root)
+    branch = current_branch_name(code_repository_root)
     payload = {
         "schema": DRIFT_SNAPSHOT_SCHEMA,
         "repository": code_repository_root.name,
@@ -295,85 +257,6 @@ def _write_converted_snapshot(
             *packet.get("actionableSample", []),
             *packet.get("violationSample", []),
         ],
-    }
-    snapshot_path = drift_snapshot_path(
-        context.coordination_root,
-        repository=code_repository_root.name,
-        branch=branch,
-    )
-    # The snapshot is a dashboard convenience: a write error must never fail the drift run
-    # that produced it.
-    with suppress(OSError):
-        atomic_write_text(snapshot_path, json.dumps(payload, indent=2, default=str) + "\n")
-
-
-def summarize_rows(
-    rows: list[dict[str, Any]],
-    *,
-    report_path: str = "",
-    detail_limit: int = 10,
-) -> DriftSummaryPacket:
-    actionable = [
-        row for row in rows if str(row.get("classification", "")) in ACTIONABLE_CLASSIFICATIONS
-    ]
-    return {
-        "status": "checked",
-        "count": len(rows),
-        "actionableCount": len(actionable),
-        "reportPath": report_path,
-        "actionableSample": actionable[:detail_limit],
-    }
-
-
-def _row_to_dict(row: Any, onboarding_root: Path) -> dict[str, Any]:
-    return {
-        "onboarding_file": drift.rel(row.onboarding_file, onboarding_root),
-        "storage_mode": row.storage_mode,
-        "source_file": row.source_file,
-        "repository": row.repository,
-        "last_verified_hash": row.last_verified_hash,
-        "last_verified_date": row.last_verified_date,
-        "classification": row.classification,
-        "trust": row.trust,
-        "affected_sections": row.affected_sections,
-        "note": row.note,
-    }
-
-
-def _write_drift_snapshot(
-    code_repository_root: Path,
-    context: Any,
-    rows: list[Any],
-    *,
-    report_path: Path | None = None,
-) -> None:
-    """Persist the drift result as a durable JSON snapshot for the observer (slice 3b, b1).
-
-    Best-effort: the dashboard snapshot must never fail the drift run that produced
-    it, so write errors are swallowed. The reducer reads this snapshot with a
-    staleness age instead of re-classifying drift (which is git-per-sidecar).
-    """
-    branch = drift.current_branch_name(code_repository_root)
-    classification_counts = drift.counts(rows)
-    serialized_rows = [_row_to_dict(row, context.onboarding_root) for row in rows]
-    payload = {
-        "schema": DRIFT_SNAPSHOT_SCHEMA,
-        "repository": code_repository_root.name,
-        "branch": branch,
-        "checkedAt": datetime.now(UTC).isoformat(),
-        "sourceRoot": code_repository_root.resolve().as_posix(),
-        "memoryRoot": Path(context.memory_root).resolve().as_posix(),
-        **({"reportPath": report_path.as_posix()} if report_path is not None else {}),
-        "counts": classification_counts,
-        "actionableCount": sum(
-            count
-            for name, count in classification_counts.items()
-            if name in ACTIONABLE_CLASSIFICATIONS
-        ),
-        "actionableFingerprint": _actionable_fingerprint(
-            [row for row in serialized_rows if row["classification"] in ACTIONABLE_CLASSIFICATIONS]
-        ),
-        "rows": serialized_rows,
     }
     snapshot_path = drift_snapshot_path(
         context.coordination_root,

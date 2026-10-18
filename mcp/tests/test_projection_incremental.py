@@ -70,7 +70,7 @@ class ProjectionIncrementalTests(unittest.TestCase):
 
             def count_surfaces(cfg: McpRuntimeConfig, moment: datetime) -> tuple:
                 calls["surfaces"] += 1
-                return ([], [], [])
+                return ([], [])
 
             readers = ProjectionReaders(
                 repo_surfaces=count_surfaces,
@@ -128,7 +128,7 @@ class ProjectionIncrementalTests(unittest.TestCase):
             config = _config(root)
 
             readers = ProjectionReaders(
-                repo_surfaces=lambda cfg, moment: ([], [], []),
+                repo_surfaces=lambda cfg, moment: ([], []),
                 landing_state=None,
             )
             state = ProjectionInputState()
@@ -173,7 +173,7 @@ class ProjectionIncrementalTests(unittest.TestCase):
 
             def count_surfaces(cfg: McpRuntimeConfig, moment: datetime) -> tuple:
                 calls["surfaces"] += 1
-                return ([], [], [])
+                return ([], [])
 
             readers = ProjectionReaders(
                 repo_surfaces=count_surfaces,

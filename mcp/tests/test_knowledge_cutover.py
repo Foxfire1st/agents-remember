@@ -26,20 +26,17 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
-from agents_remember.application import prepared_certification
 from agents_remember.application import published_intent as published_intent_module
 from agents_remember.application.knowledge_gate import KnowledgeGate
 from agents_remember.application.memory_quality import controller
 from agents_remember.application.published_intent import resolve_published_intent
 from agents_remember.cli.knowledge_write_route import unconverted_write_refusal
-from agents_remember.errors import CertificationContractError
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory_quality.knowledge_validator.commit_route import GitKnowledgeValidation
 from agents_remember.models.knowledge_files.shapes import HandoffOrigin
 from agents_remember.worktrees import cutover_lock, sync_transaction
 from agents_remember.worktrees import direct_landing as route
 from agents_remember.worktrees.cutover_lock import CUTOVER_LOCK_CODE, converted_memory_location
-from agents_remember.worktrees.integration.closeout.certification import execution
 from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationSources,
@@ -48,7 +45,6 @@ from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusa
 from agents_remember.worktrees.knowledge_gate import (
     landing_gate_refusal,
     leaf_gate_refusal,
-    prepared_closeout_lock,
 )
 from agents_remember.worktrees.modules import closeout_external, integration_gate, record_landing
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -208,7 +204,6 @@ _ROUTES: dict[str, Callable[[_Probe], str | None]] = {
         p.world.contract, code_tree=p.candidate.code, memory_tree=p.candidate.memory
     ),
     "closeout commit": _closeout,
-    "prepared closeout": lambda p: prepared_closeout_lock(p.world.contract),
     "direct landing": _direct,
     "record landing": lambda p: record_landing._knowledge_gate_refusal(
         p.world.contract, p.world.code_base, p.head
@@ -250,18 +245,6 @@ def test_every_route_refuses_unconverted_memory_with_or_without_converted_memory
         assert "code legacy-format" in refusal, (name, refusal)
         assert "agents-remember knowledge-convert" in refusal, (name, refusal)
         assert "holds no converted memory yet" in refusal, (name, refusal)
-
-
-def test_the_prepared_closeout_refuses_by_the_lock_at_both_entry_points(tmp_path: Path) -> None:
-    world = _unconverted(tmp_path)
-    request = cast(Any, SimpleNamespace(handoff=SimpleNamespace(contract=world.contract)))
-    for enter in (
-        lambda: execution.execute_selected_closeout(world.contract, cast(Any, None), None),  # type: ignore[arg-type]
-        lambda: prepared_certification._realize_prepared_memory(request),
-    ):
-        with pytest.raises(CertificationContractError) as refused:
-            enter()
-        assert refused.value.findings[0]["code"] == CUTOVER_LOCK_CODE
 
 
 def test_a_converted_worktree_locks_too_and_an_unanswered_probe_refuses(tmp_path: Path) -> None:

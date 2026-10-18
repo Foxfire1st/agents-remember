@@ -81,16 +81,21 @@ def _drift_context(root: Path) -> SimpleNamespace:
     code = root / "code"
     code.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q"], cwd=code, check=True)
-    onboarding = root / "onboarding"
-    onboarding.mkdir(parents=True, exist_ok=True)
     memory = root / "memory"
-    memory.mkdir(parents=True, exist_ok=True)
+    onboarding = memory / "onboarding"
+    onboarding.mkdir(parents=True, exist_ok=True)
+    (memory / "knowledge").mkdir()
+    (memory / "knowledge/layout.json").write_text(
+        '{"schema":"ar-memory-layout/v2","conversion":"1"}\n'
+    )
     return SimpleNamespace(
         onboarding_root=onboarding,
         memory_root=memory,
         coordination_root=root,
         temp_root=root / "temp",
-        storage=None,
+        topology="external",
+        code_repository_root=code,
+        ledger_path=None,
         code_repository_name="repo",
     )
 
@@ -110,21 +115,14 @@ def test_drift_summary_read_files_no_temp_report(tmp_path: Path) -> None:
 
 
 def test_base_payload_omits_drift_report_without_filing(tmp_path: Path) -> None:
-    memory = tmp_path / "memory"
-    memory.mkdir(parents=True, exist_ok=True)
-    code = tmp_path / "code"
-    code.mkdir(parents=True, exist_ok=True)
-    context = SimpleNamespace(
-        memory_root=memory,
-        code_repository_name="repo",
-        topology="external",
-        code_repository_root=code,
-        onboarding_root=tmp_path / "onboarding",
-        ledger_path=None,
+    context = _drift_context(tmp_path)
+    summary = run_drift_summary(
+        code_repository_root=context.code_repository_root,
+        context=context,
+        output=DriftSummaryOutput(write_report=False),
     )
-    context.onboarding_root.mkdir(parents=True, exist_ok=True)
-    assert "drift_report" not in base_payload(context, [], None)
-    assert base_payload(context, [], tmp_path / "drift.md").get("drift_report") is not None
+    assert "drift_report" not in base_payload(context, summary, None)
+    assert base_payload(context, summary, tmp_path / "drift.md").get("drift_report") is not None
 
 
 def test_drift_check_refusal_files_nothing(tmp_path: Path) -> None:

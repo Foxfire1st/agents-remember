@@ -67,21 +67,15 @@ from agents_remember.worktrees.modules.models import (
 from agents_remember.worktrees.modules.onboarding import (
     ENTITY_FINGERPRINT_ALGORITHM,
     compute_git_blob_set_fingerprint,
-    contract_memory_verified_commit,
     entity_fingerprint_refresh_plan,
     entity_fingerprint_refresh_plan_for_context,
     markdown_table_cells,
     normalized_table_cell,
-    onboarding_metadata_row,
     onboarding_refresh_plan,
     onboarding_refresh_plan_for_context,
     parse_entity_fingerprint_rows,
     refresh_entity_fingerprints_for_context,
-    refresh_onboarding_metadata,
-    refresh_onboarding_metadata_for_context,
     sidecar_onboarding_path,
-    validate_onboarding_refresh_plan,
-    validate_onboarding_refresh_plan_for_context,
 )
 from agents_remember.worktrees.modules.pause import pause_result
 from agents_remember.worktrees.modules.record_landing import record_landing_result
@@ -127,7 +121,6 @@ __all__ = [
     "compute_git_blob_set_fingerprint",
     "contract_context",
     "contract_has_worktree_changes",
-    "contract_memory_verified_commit",
     "contract_next_args",
     "contract_payload",
     "current_branch",
@@ -146,7 +139,6 @@ __all__ = [
     "markdown_table_cells",
     "next_guidance",
     "normalized_table_cell",
-    "onboarding_metadata_row",
     "onboarding_refresh_plan",
     "onboarding_refresh_plan_for_context",
     "parse_entity_fingerprint_rows",
@@ -156,8 +148,6 @@ __all__ = [
     "prepare_providers_for_start",
     "record_landing_result",
     "refresh_entity_fingerprints_for_context",
-    "refresh_onboarding_metadata",
-    "refresh_onboarding_metadata_for_context",
     "remove_empty_dir",
     "require_clean",
     "resolve_context",
@@ -167,8 +157,6 @@ __all__ = [
     "status_result",
     "sync_result",
     "validate_integrate_contract",
-    "validate_onboarding_refresh_plan",
-    "validate_onboarding_refresh_plan_for_context",
     "worktree_dirty",
 ]
 

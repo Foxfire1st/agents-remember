@@ -19,7 +19,6 @@ from unittest.mock import patch
 from agents_remember.application.memory_tools import (
     CitationOperationScope,
     citation_fix_tool,
-    citation_source_index_build_tool,
 )
 from agents_remember.application.tool_response import complete_tool_response
 from agents_remember.kernel.primitives.runtime_config import (
@@ -27,10 +26,6 @@ from agents_remember.kernel.primitives.runtime_config import (
     RepositoryScope,
 )
 from agents_remember.mcp.tools.memory import _citation_fix_answer
-from agents_remember.memory_quality.style.citations.resolution import Trees
-from agents_remember.memory_quality.style.citations.source_index import (
-    open_repository_index,
-)
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.tools.tool_answer import bound_for
 from test_worktree_support import git, open_external_contract_fixture
@@ -155,14 +150,6 @@ def _run_fix(
         "agents_remember.worktrees.integration.configured_contract_authority.load_config",
         return_value=configured,
     ):
-        # The real workflow builds the frozen source generation first; the
-        # fixer enumerates tree-wide candidates from the published index.
-        citation_source_index_build_tool(
-            scoped,
-            repo_id=contract.repo_name,
-            contract_path=contract.contract_path.as_posix(),
-            operation_scope=CitationOperationScope(),
-        )
         return citation_fix_tool(
             scoped,
             repo_id=contract.repo_name,
@@ -197,13 +184,6 @@ def _run_documents_scope() -> dict[str, Any]:
         _write_anchor_sidecar(onboarding, "pkg/a.py", "pkg/real.py")
         _write_anchor_sidecar(onboarding, "pkg/b.py", "pkg/real.py")
         _write_converted_layout(contract.memory_worktree)
-        with open_repository_index(
-            Trees(
-                code_root=contract.code_worktree,
-                memory_root=contract.memory_worktree,
-            )
-        ) as index:
-            snapshot = index.snapshot_id
         git(contract.memory_worktree, "add", "-A")
         return _run_fix(
             scoped,
@@ -211,7 +191,6 @@ def _run_documents_scope() -> dict[str, Any]:
             contract,
             CitationOperationScope(
                 documents=("pkg/a.py.md", "pkg/b.py.md"),
-                expected_snapshot=snapshot,
             ),
         )
 

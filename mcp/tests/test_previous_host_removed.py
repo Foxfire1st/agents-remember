@@ -56,10 +56,7 @@ ALLOWED_IDENTIFIERS: dict[str, tuple[str, ...]] = {
         SRC + "certification/lifecycle_admission.py",
         SRC + "certification/lifecycle_models.py",
     ),
-    "priorCatalog": (
-        SRC + "certification/lifecycle_admission.py",
-        "mcp/tests/test_closeout_certification_recovery.py",
-    ),
+    "priorCatalog": (SRC + "certification/lifecycle_admission.py",),
     "priorCatalogDigest": (
         SRC + "certification/lifecycle_admission.py",
         SRC + "certification/lifecycle_models.py",

@@ -1,6 +1,6 @@
 # Converted Card Workflow
 
-Use this workflow instead of `file-level-onboarding-workflow.md` when the memory tree is **converted**: it holds
+Use this workflow when the memory tree is **converted**: it holds
 `knowledge/layout.json` (MIK-R21 rule 1). Every agents-remember memory line is converted from the cutover on; an
 unconverted line is only read until it crosses (MIK-R24 rules 8 and 9).
 
@@ -177,7 +177,6 @@ The row is written through the writer (`knowledge-ingest`, the hand-off's `histo
 - A metadata table, a `## Update History` entry, `lastVerifiedCommitHash` / `lastVerifiedCommitDate`, or a citation
   table left in place after the fixer has run.
 - Hand-written or hand-edited sidecar anchors, or a reference number you allocated yourself.
-- `memory_carryover_apply`. It writes the legacy format and refuses a converted target.
 
-Route indexes (`overview.index.json`) are uncommitted caches. Regenerate them with `route_index_refresh`, scoped to
+c-11 carryover selects pairs/records, validates, commits nothing; leaf rows close out. Route indexes (`overview.index.json`) are uncommitted caches. Regenerate them with `route_index_refresh`, scoped to
 this leaf's contract.

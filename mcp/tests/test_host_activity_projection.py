@@ -118,7 +118,7 @@ def test_idle_heartbeats_do_not_read_activity_or_launch_another_snapshot(tmp_pat
     publish(home)
     bridge = Mock(return_value={"publication": {"bootId": "boot-a"}})
     state = ProjectionInputState(host_activity_reconcile=bridge, host_supervisor_armed=lambda: True)
-    readers = ProjectionReaders(repo_surfaces=lambda _config, _now: ([], [], []))
+    readers = ProjectionReaders(repo_surfaces=lambda _config, _now: ([], []))
     observer = config.coordination_root / "logs" / "observer"
     state.read(
         config,
@@ -147,7 +147,7 @@ def test_periodic_full_and_degraded_wakes_retain_host_without_reads(tmp_path: Pa
         host_activity_reconcile=Mock(return_value={"publication": {"bootId": "boot-a"}}),
         host_supervisor_armed=lambda: True,
     )
-    readers = ProjectionReaders(repo_surfaces=lambda _config, _now: ([], [], []))
+    readers = ProjectionReaders(repo_surfaces=lambda _config, _now: ([], []))
     observer = config.coordination_root / "logs" / "observer"
     state.read(
         config, readers, observer_root=observer, pass_=RefreshPass(NOW, ProjectionRefresh.full())

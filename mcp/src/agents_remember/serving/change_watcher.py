@@ -27,8 +27,8 @@ watched root                              readers it feeds
 (``<obs>`` = ``<coord>/logs/observer``.) Deliberately NOT watched -- heartbeat-covered
 blind spots:
 
-* the per-repo memory roots (sidecar staleness / route coverage / ledgers): they sit
-  behind ``REPO_SURFACE_REFRESH_TTL_SECONDS`` (15s) already, and their onboarding trees
+* the per-repo memory roots (route coverage / ledgers): they sit
+  behind ``REPO_SURFACE_REFRESH_TTL_SECONDS`` already, and their onboarding trees
   are large, so their freshness bound is TTL + heartbeat;
 * landing state: an in-memory 30s git-derived refresher with no file signal;
 * the entire ``worktrees/`` tree: the checkouts are ~50k dirs (recursive watching would

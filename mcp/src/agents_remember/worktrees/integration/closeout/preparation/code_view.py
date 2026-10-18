@@ -25,9 +25,6 @@ from agents_remember.models.lifecycles.preparation import (
     require_prepared_output_matches_intent,
 )
 from agents_remember.models.lifecycles.prepared_memory import PreparedCodeExecutionView
-from agents_remember.worktrees.integration.closeout.certification.execution import (
-    CloseoutCertificationHandoff,
-)
 from agents_remember.worktrees.integration.closeout.certification.observation import refuse
 from agents_remember.worktrees.integration.closeout.certification.selection import load_typed
 from agents_remember.worktrees.integration.closeout.preparation_selection import (
@@ -37,17 +34,11 @@ from agents_remember.worktrees.integration.closeout.preparation_selection import
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
 )
-from agents_remember.worktrees.modules.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
-)
 from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-from .code_execution import observe_code_output, prepare_code_output
-from .code_output import current_code_preparation
 from .policy import observe_git_preparation_policy
 from .private_execution import private_git_binding
-from .selected import SelectedCloseoutPreparation
 
 
 @dataclass(frozen=True)
@@ -60,36 +51,6 @@ class _PreparedCodeViewBuild:
     output: PreparedCloseoutOutput
     output_reference: CertificateObjectReference
     raw: bytes
-
-
-def observe_prepared_code_view(handoff: CloseoutCertificationHandoff) -> PreparedCodeExecutionView:
-    """Read only this generation's named output; no creation, adoption or ledger fiction."""
-    state = handoff.record.preparation
-    if state is None or state.legs[0].output is None:
-        refuse("prepared-code-view-unavailable", "journal-selected code output", state)
-    intent = selected_preparation_intents(handoff.contract, handoff.record)[0]
-    selected = current_code_preparation(
-        SelectedCloseoutPreparation(handoff, intent, state.legs[0].intent)
-    )
-    objects = certificate_store(selected.handoff.contract.worktree_group)
-    output = load_typed(objects, state.legs[0].output, PreparedCloseoutOutput)
-    require_prepared_output_matches_intent(output, intent)
-    raw = observe_code_output(selected)
-    pair = resolve_memory_candidate_pair(selected.handoff.contract)
-    view = _build_prepared_code_view(
-        _PreparedCodeViewBuild(
-            pair=pair,
-            operation_key=selected.handoff.record.operationKey,
-            generation=selected.handoff.record.generation,
-            intent=intent,
-            intent_reference=selected.reference,
-            output=output,
-            output_reference=state.legs[0].output,
-            raw=raw,
-        )
-    )
-    current_code_preparation(selected)
-    return view
 
 
 def observe_selected_prepared_code_view(
@@ -221,11 +182,3 @@ def _build_prepared_code_view(
     return PreparedCodeExecutionView.model_validate(
         {**payload, "viewDigest": canonical_sha256(payload)}
     )
-
-
-def prepare_code_view(
-    handoff: CloseoutCertificationHandoff,
-) -> tuple[CloseoutCertificationHandoff, PreparedCodeExecutionView]:
-    """Finish allowed private commands and return a newly proved physical execution view."""
-    selected, _, _ = prepare_code_output(handoff)
-    return selected.handoff, observe_prepared_code_view(selected.handoff)

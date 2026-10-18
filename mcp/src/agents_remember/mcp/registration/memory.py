@@ -5,7 +5,6 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.application.memory_tools import (
-    CarryoverCommitMessages,
     CarryoverSelection,
     CitationOperationScope,
     MemoryBranches,
@@ -74,11 +73,9 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         *,
         document: str | None = None,
         documents: list[str] | None = None,
-        expected_snapshot: str | None = None,
         dry_run: bool = False,
-        exclude: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Repair moved citation anchors in a leaf memory worktree. Pass repo_id and contract_path, with documents for a batch or document for one card; preview with dry_run. Renames, deletions and ambiguous anchors remain curator work. Longer explanation: docs/tool-details.md."""
+        """Repair moved citation anchors in a leaf memory worktree. Pass repo_id and contract_path, with documents for a batch or document for one card; preview with dry_run. Renames, deletions and ambiguous anchors remain curator work. Old-format memory is refused: convert before repair. Converted repairs author sidecar references; full lists are in logged detail. Longer explanation: docs/tool-details.md."""
         return citation_fix_payload(
             config,
             repo_id,
@@ -86,8 +83,6 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
             operation_scope=CitationOperationScope(
                 document=document,
                 documents=tuple(documents) if documents is not None else None,
-                expected_snapshot=expected_snapshot,
-                excludes=tuple(exclude or ()),
             ),
             dry_run=dry_run,
         )
@@ -169,7 +164,7 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         old_base: str,
         replace_existing: bool = False,
     ) -> dict[str, Any]:
-        """Plan richer onboarding from a source branch into the open external-memory leaf; review before apply. More: docs/tool-details.md."""
+        """Plan converted pairs/records at equal versions; observe official-code anchors, review conflicts. Curator authors history; no commit/report. More: docs/tool-details.md."""
         return memory_carryover_plan_payload(
             config,
             CarryoverSelection(
@@ -195,11 +190,8 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         intent_note: str,
         replace_existing: bool = False,
         include_review_required: list[str] | None = None,
-        memory_commit_message: str = "Carry over landed branch memory",
     ) -> dict[str, Any]:
-        """Apply an approved plan inside the exact ordinary recovery leaf, committing attributed memory
-        content and refreshing the ledger cache. Mutating and approval-gated; requires intent_note. Close and integrate
-        the leaf normally afterward."""
+        """Apply converted pairs/records; reanchor, index, validate. Refusal restores bytes; skip edited targets, retry safely. No commit/history carry; curator authors rows before closeout. Requires intent_note. More: docs/tool-details.md."""
         return memory_carryover_apply_payload(
             config,
             CarryoverSelection(
@@ -213,5 +205,4 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
             ),
             intent_note=intent_note,
             include_review_required=include_review_required,
-            messages=CarryoverCommitMessages(memory=memory_commit_message),
         )

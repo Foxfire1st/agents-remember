@@ -296,7 +296,7 @@ def dismissal_sources(tmp_path, monkeypatch):
         paths[kind].parent.mkdir(parents=True, exist_ok=True)
         paths[kind].write_text(json.dumps(payload))
 
-    readers = inputs.ProjectionReaders(repo_surfaces=lambda _config, _now: ([], [], []))
+    readers = inputs.ProjectionReaders(repo_surfaces=lambda _config, _now: ([], []))
     store = AttentionDismissalStore(observer_root(config))
 
     def refresh(state, refresh=None):

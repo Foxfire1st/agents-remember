@@ -1,38 +1,28 @@
-"""Every memory-content producer attributes the code commit it was written against.
+"""MIK-R56: three memory-content routes, one renderer and one historical rewriter.
 
-A memory commit that names no code commit contributes no ledger row, and a projected ledger
-cannot tell that apart from a commit whose producer kept the old shape: the pairing is simply
-gone. So the producer surface has to be total rather than mostly converted, and this module holds
-the two things that make it total -- the census of producers, and the one renderer they all reach
--- together with the two producers outside the closeout routes, driven through their real public
-operations on real repositories.
-
-The census is the master's 2026-09-13T22:05 decision, re-derived from source at 5bb124d4. It
-corrects that decision in one place. ``worktrees/queue/closeout_recovery.py`` is NOT a
-memory-content producer: its commit sites are the recovery route's code leg (``:209``) and its
-ledger legs (``:278``, ``:357``), and ``resume_external_commits`` only proves an already-journaled
-memory commit. The recovery route's memory-content commit, when it still owes one, is created by
-``worktrees/modules/closeout_external.py`` -- the same producer the first attempt uses. The
-producer the census missed is ``worktrees/integration/closeout/preparation/memory_output.py``,
-whose prepared memory-content intent is published to the live memory ref by
-``.../preparation/finalization.py``.
+Closeout, direct landing and baseline adoption create attributed memory content. Carryover
+writes into the recovery worktree without committing; the unreachable prepared route is gone.
+Backfill is separately bound to its exact path and the original commit's tree: it rewrites
+history, not content. An unlisted renderer caller or a returned retired name fails the census.
 """
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from agents_remember.application.memory_tools import (
-    CarryoverCommitMessages,
     CarryoverSelection,
     MemoryBranches,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
     memory_carryover_apply_tool,
 )
+from agents_remember.kernel import memory_backfill
 from agents_remember.kernel.memory_attribution import (
     CODE_COMMIT_TRAILER_KEY,
     parse_code_commit_trailer,
@@ -51,20 +41,133 @@ from test_worktree_support import git, init_repo
 CODE_ONE = "1" * 40
 CODE_TWO = "2" * 40
 
-# The five producers, and the shared renderer entry each one calls. The two closeout-shaped
-# producers go through the model method, which delegates to the one renderer; every other
-# producer reaches the renderer directly, because it has no EffectiveCloseoutInput to hand.
+# Exact source paths, not package/pattern exemptions. Backfill is not a content route.
 _PRODUCERS = {
-    "worktrees/modules/closeout_external.py": "memory_content_message(",
-    "worktrees/integration/direct_landing/direct_landing_execution.py": "memory_content_message(",
-    "worktrees/integration/closeout/preparation/memory_output.py": (
-        "render_memory_content_message("
-    ),
-    "memory/carryover.py": "render_memory_content_message(",
-    "memory/baseline.py": "render_memory_content_message(",
+    "worktrees/modules/closeout_external.py": "memory_content_message",
+    "worktrees/integration/direct_landing/direct_landing_execution.py": "memory_content_message",
+    "memory/baseline.py": "render_memory_content_message",
 }
+_SHARED_RENDERER = "models/closeout/input.py"
+_HISTORY_REWRITER = "kernel/memory_backfill.py"
 _ONE_MODULE = "kernel/memory_attribution.py"
 _KEY_NAME = "CODE_COMMIT_TRAILER_KEY"
+_REMOVED_NAMES = {
+    "execute_selected_closeout",
+    "prepare_closeout_certification",
+    "select_initial_certification",
+    "certification_continuation",
+    "prepared_memory_certification",
+    "prepared_closeout_refusal",
+    "prepared_closeout_lock",
+    "PREPARED_CLOSEOUT_UNCLOSABLE",
+    "_require_legacy_format_target",
+}
+
+
+def _renderer_binding(
+    expression: ast.AST | None, aliases: dict[str, str], modules: set[str], entries: set[str]
+) -> str | None:
+    if isinstance(expression, ast.Name):
+        return aliases.get(expression.id, expression.id if expression.id in entries else None)
+    if isinstance(expression, ast.Attribute) and expression.attr in entries:
+        return expression.attr
+    if (
+        isinstance(expression, ast.Call)
+        and isinstance(expression.func, ast.Name)
+        and expression.func.id == "getattr"
+        and len(expression.args) >= 2
+    ):
+        member = expression.args[1]
+        if (
+            isinstance(member, ast.Constant)
+            and isinstance(member.value, str)
+            and member.value in entries
+        ):
+            return member.value
+        owner = expression.args[0]
+        if isinstance(owner, ast.Name) and owner.id in modules:
+            assert isinstance(member, ast.Constant), "unresolved renderer binding"
+    return None
+
+
+def _assignment_renderer_aliases(
+    tree: ast.AST, aliases: dict[str, str], modules: set[str], entries: set[str]
+) -> None:
+    assignments = [item for item in ast.walk(tree) if isinstance(item, (ast.Assign, ast.AnnAssign))]
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for assignment in assignments:
+            entry = _renderer_binding(assignment.value, aliases, modules, entries)
+            if entry is None:
+                continue
+            targets = (
+                assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
+            )
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in aliases:
+                    aliases[target.id] = entry
+                    changed = True
+        if not changed:
+            break
+
+
+def _renderer_calls(tree: ast.AST, entries: set[str]) -> set[str]:
+    imports = [item for item in ast.walk(tree) if isinstance(item, (ast.Import, ast.ImportFrom))]
+    aliases = {
+        node.asname or node.name: node.name
+        for item in imports
+        for node in item.names
+        if node.name in entries
+    }
+    modules = {
+        node.asname or node.name.split(".")[-1]
+        for item in imports
+        for node in item.names
+        if node.name.endswith("memory_attribution")
+    }
+    _assignment_renderer_aliases(tree, aliases, modules, entries)
+    return {
+        called
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        if (called := _renderer_binding(node.func, aliases, modules, entries)) is not None
+    }
+
+
+def _assert_source_census(contents: dict[str, str]) -> None:
+    """Observe actual calls (including imported aliases); reject retired bindings/literals."""
+
+    reached: dict[str, set[str]] = {}
+    removed: dict[str, list[str]] = {}
+    entries = {"render_memory_content_message", "memory_content_message"}
+    pattern = re.compile(r"\b(" + "|".join(sorted(_REMOVED_NAMES)) + r")\b")
+    for name, text in contents.items():
+        tree = ast.parse(text, filename=name)
+        called = _renderer_calls(tree, entries)
+        if called:
+            reached[name] = called
+        for node in ast.walk(tree):
+            token = (
+                node.id
+                if isinstance(node, ast.Name)
+                else node.attr
+                if isinstance(node, ast.Attribute)
+                else node.name
+                if isinstance(
+                    node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.alias)
+                )
+                else node.value
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                else ""
+            )
+            if found := pattern.findall(token):
+                removed.setdefault(name, []).extend(found)
+    expected = {path: {entry} for path, entry in _PRODUCERS.items()}
+    expected.update(
+        {path: {"render_memory_content_message"} for path in (_SHARED_RENDERER, _HISTORY_REWRITER)}
+    )
+    assert reached == expected, f"actual producer census: {reached!r}; expected: {expected!r}"
+    assert not removed, removed
 
 
 def _production_source() -> Path:
@@ -119,24 +222,70 @@ def test_the_attribution_key_is_named_and_rendered_in_exactly_one_module() -> No
 
 
 def test_every_census_producer_reaches_the_shared_renderer() -> None:
-    """The census itself: five producers, and each one routes its message through the renderer.
-
-    This is a source census rather than a behavioural case because one of the five -- the
-    prepared memory-content leg -- has no public entry point yet: its route
-    (``certification/execution.execute_selected_closeout``) is wired in
-    ``build_default_worktree_services`` but has no production caller, so nothing can be published
-    through it to observe. The other four are covered end to end elsewhere: worktree closeout and
-    direct landing in ``test_transaction_only_worktree_delivery`` and ``test_direct_landing``,
-    carryover and baseline adoption in this module.
-    """
+    """Three content routes plus their model renderer and exact historical rewriter."""
 
     root = _production_source()
-    reached = {
-        name: entry in (root / name).read_text(encoding="utf-8")
-        for name, entry in _PRODUCERS.items()
+    contents = {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(root.rglob("*.py"))
     }
+    _assert_source_census(contents)
+    # Actual copied source is rejected outside the named path, without changing production.
+    copied = {**contents, "memory/copied_producer.py": contents["memory/baseline.py"]}
+    with pytest.raises(AssertionError, match="actual"):
+        _assert_source_census(copied)
+    # A returned name alone must fail even if it adds no new trailer call.
+    returned = {**contents, "memory/returned_route.py": "def execute_selected_closeout(): pass\n"}
+    with pytest.raises(AssertionError, match="execute_selected_closeout"):
+        _assert_source_census(returned)
 
-    assert reached == dict.fromkeys(_PRODUCERS, True), reached
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        "from agents_remember.kernel.memory_attribution import render_memory_content_message\n"
+        "alias = render_memory_content_message\nalias('extra', '1' * 40)\n",
+        "from agents_remember.kernel import memory_attribution as trailers\n"
+        "alias = getattr(trailers, 'render_memory_content_message')\nalias('extra', '1' * 40)\n",
+        "from agents_remember.kernel import memory_attribution as trailers\n"
+        "getattr(trailers, 'render_memory_content_message')('extra', '1' * 40)\n",
+    ],
+)
+def test_census_rejects_indirect_additional_renderer_callers(binding):
+    root = _production_source()
+    contents = {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(root.rglob("*.py"))
+    }
+    _assert_source_census(contents)
+    with pytest.raises(AssertionError, match="actual producer census"):
+        _assert_source_census({**contents, "memory/indirect_producer.py": binding})
+
+
+def test_the_named_history_rewriter_replays_the_original_tree(tmp_path: Path) -> None:
+    """The one exact-path exemption creates its object from the replaced commit's tree."""
+
+    repo = tmp_path / "memory"
+    init_repo(repo)
+    (repo / "card.md").write_text("original content\n", encoding="utf-8")
+    git(repo, "add", "card.md")
+    git(repo, "commit", "-q", "-m", "original memory")
+    original = git(repo, "rev-parse", "HEAD")
+    parents = git(repo, "show", "-s", "--format=%P", original).split()
+    # A changed checkout and index cannot supply the rewriter's content.
+    (repo / "card.md").write_text("different candidate\n", encoding="utf-8")
+    git(repo, "add", "card.md")
+    state = git(repo, "status", "--porcelain"), git(repo, "write-tree")
+    rebuilt = memory_backfill._rebuild(repo, original, parents, CODE_ONE)
+    assert git(repo, "rev-parse", f"{rebuilt}^{{tree}}") == git(
+        repo, "rev-parse", f"{original}^{{tree}}"
+    )
+    assert git(repo, "show", "-s", "--format=%P|%an|%ae|%at|%cn|%ce|%ct", rebuilt) == git(
+        repo, "show", "-s", "--format=%P|%an|%ae|%at|%cn|%ce|%ct", original
+    )
+    assert _attribution(repo, rebuilt) == f"Code-Commit: {CODE_ONE}"
+    assert git(repo, "rev-parse", "HEAD") == original
+    assert (git(repo, "status", "--porcelain"), git(repo, "write-tree")) == state
 
 
 def test_the_one_renderer_keeps_the_callers_body_verbatim_and_its_trailer_final() -> None:
@@ -285,7 +434,6 @@ def test_carryover_apply_refuses_unconverted_memory_with_the_conversion_step(tmp
         fixture.cfg,
         selection,
         intent_note="carry the landed branch memory",
-        messages=CarryoverCommitMessages(memory="Carry over landed branch memory\n"),
     )
     assert result.get("ok") is False, result
     assert result.get("code") == "legacy-format", result
@@ -303,14 +451,12 @@ def test_carryover_apply_refuses_unconverted_memory_with_the_conversion_step(tmp
     ) == before
 
 
-def test_carryover_never_writes_converted_memory_and_takes_the_cutover_lock(tmp_path) -> None:
-    """MIK-R46 rules 1 and 2 (was L37 review R1, F2).
+def test_carryover_takes_the_unconverted_memory_cutover_lock(tmp_path) -> None:
+    """MIK-R46 rules 1 and 2: the retained unconverted side still writes nothing.
 
-    Carryover copies legacy-format onboarding Markdown and commits it with no format check and no
-    validator, so a converted target is refused, naming the file writer. An unconverted target is
-    refused by the cutover lock with the one ``legacy-format`` message -- whether or not its
-    memory repository holds converted memory elsewhere -- naming the crossing sync when it does.
-    Neither refusal writes anything.
+    The cutover lock returns the one legacy-format refusal whether or not this memory
+    repository holds converted memory elsewhere, naming the crossing sync when it does.
+    Only the obsolete converted-target refusal half is retired under MIK-R56.
     """
 
     fixture, contract, old_base, _official_head, source_memory = _carryover_world(tmp_path)
@@ -334,7 +480,6 @@ def test_carryover_never_writes_converted_memory_and_takes_the_cutover_lock(tmp_
             fixture.cfg,
             selection,
             intent_note="carry the landed branch memory",
-            messages=CarryoverCommitMessages(memory="Carry over landed branch memory\n"),
         )
         after = (
             git(memory_worktree, "rev-parse", "HEAD"),
@@ -344,25 +489,6 @@ def test_carryover_never_writes_converted_memory_and_takes_the_cutover_lock(tmp_
         assert result.get("ok") is False, result
         assert result.get("code") == "legacy-format", result
         return result
-
-    def refused() -> str:
-        before = (
-            git(memory_worktree, "rev-parse", "HEAD"),
-            git(memory_worktree, "status", "--porcelain"),
-        )
-        with pytest.raises(RuntimeError) as raised:
-            memory_carryover_apply_tool(
-                fixture.cfg,
-                selection,
-                intent_note="carry the landed branch memory",
-                messages=CarryoverCommitMessages(memory="Carry over landed branch memory\n"),
-            )
-        after = (
-            git(memory_worktree, "rev-parse", "HEAD"),
-            git(memory_worktree, "status", "--porcelain"),
-        )
-        assert after == before
-        return str(raised.value)
 
     def convert(checkout: Path) -> None:
         (checkout / "knowledge").mkdir(exist_ok=True)
@@ -378,10 +504,6 @@ def test_carryover_never_writes_converted_memory_and_takes_the_cutover_lock(tmp_
     assert "branch converted-line" in str(locked.get("detail", "")) and "crossing sync" in str(
         locked.get("detail", "")
     ), locked
-
-    convert(memory_worktree)
-    converted = refused()
-    assert "refuses a converted target" in converted and "file writer" in converted, converted
 
 
 def test_baseline_attributes_its_memory_content_commit_to_the_code_source_branch(

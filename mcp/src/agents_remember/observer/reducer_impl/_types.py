@@ -23,7 +23,6 @@ from agents_remember.observer.projection import (
     RouteCoverageNode,
     SetupProgressNode,
     SetupSummaryNode,
-    SidecarStaleNode,
     ToolReportNode,
 )
 from agents_remember.observer.task_entries import TaskDocumentSource
@@ -48,32 +47,13 @@ class WorkspaceStructure:
 
 @dataclass(frozen=True)
 class AnalyticalInputs:
-    """The pre-image of :class:`Analytics` (slice 3b): what the analytical surfaces are built
-    from, and nothing else.
+    """Independent analytics plus native task sources and host activity snapshots.
 
-    Broad because ``Analytics`` is broad. It publishes eleven independent surfaces. Eight
-    fields map to one surface by name (``drift_snapshots`` -> ``driftSnapshots``,
-    ``route_coverage`` -> ``routeCoverage``, ``ledgers`` -> ``ledgers``, ...); five more produce
-    the three DERIVED surfaces -- ``sidecar_staleness`` + ``stalest_limit`` ->
-    ``stalestSidecars``, ``engine_process_facts`` + ``engine_start_progress`` ->
-    ``engineProcesses``, ``attention_dismissals`` -> ``attentionQueue``.
-
-    So there is no sub-concept left to split out. The surfaces are independent cockpit panels
-    with nothing binding any subset of them, which means a grouping here would have to be a
-    grouping of ``Analytics`` itself -- a change to the projection contract the dashboard
-    reads, not a tidy-up. The one field that DID break the name has been moved:
-    ``active_worktree_groups`` is structural and now lives in :class:`WorkspaceStructure`.
-
-    Optional as a set, not one by one: a caller wanting only the structural tree (the 3a
-    contract) passes none of them. Several feed more than one surface -- ``setup_progress``
-    alone is read by the Engine Room join, the analytics rollup and the attention queue -- so
-    the whole set is threaded to each builder rather than re-selected per call. One also leaves
-    through a second door: ``sidecar_staleness`` is counted into
-    ``WorkspaceProjection.metrics``.
+    The task-entry producer owns task membership/state/counts. Retained analytics
+    and derived engine/attention surfaces share the same already-read inputs.
     """
 
     drift_snapshots: list[DriftSnapshotNode] = field(default_factory=list)
-    sidecar_staleness: list[SidecarStaleNode] = field(default_factory=list)
     setup_summaries: list[SetupSummaryNode] = field(default_factory=list)
     setup_progress: list[SetupProgressNode] = field(default_factory=list)
     route_coverage: list[RouteCoverageNode] = field(default_factory=list)
@@ -85,4 +65,3 @@ class AnalyticalInputs:
     engine_process_facts: list[EngineProcessFacts] = field(default_factory=list)
     engine_start_progress: list[dict[str, Any]] = field(default_factory=list)
     attention_dismissals: dict[str, AttentionDismissalRecord] = field(default_factory=dict)
-    stalest_limit: int = 10

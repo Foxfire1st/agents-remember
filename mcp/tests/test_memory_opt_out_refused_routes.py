@@ -63,7 +63,6 @@ from agents_remember.worktrees.knowledge_gate import (
     direct_gate_verdict,
     leaf_cutover_refusal,
     leaf_gate_refusal,
-    prepared_closeout_refusal,
 )
 from agents_remember.worktrees.modules import (
     cleanup,
@@ -1045,8 +1044,6 @@ def test_knowledge_gates_refuse_instead_of_nothing_to_judge(
     assert (cutover is not None and STATUS in cutover) or "disabled" in (cutover or "")
     gate = leaf_gate_refusal(contract, code_tree="a" * 40, memory_tree="b" * 40)
     assert gate is not None and "disabled" in gate
-    prepared = prepared_closeout_refusal(contract)
-    assert prepared is not None and "disabled" in prepared
     verdict = direct_gate_verdict(contract, code_commit="a" * 40, memory_tree="b" * 40)
     assert verdict.applies is True
     assert verdict.refusal is not None and "disabled" in verdict.refusal

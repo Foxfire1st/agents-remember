@@ -20,22 +20,12 @@ from contextlib import suppress
 from pathlib import Path
 from unittest import mock
 
-from agents_remember.errors import CertificationContractError
-from agents_remember.kernel.git_command import (
-    admit_private_git_preparation,
-    preparation_command,
-    run_git,
-    run_git_preparation,
-)
-from agents_remember.kernel.git_preparation import (
-    PrivateGitPreparationBinding,
-    PrivateGitPreparationCapability,
-)
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.baseline import _publish_validated_tree
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
-from agents_remember.worktrees.direct_landing import _publish_provisional_code_commit
-from agents_remember.worktrees.integration.closeout.preparation import (
-    private_execution as preparation,
+from agents_remember.worktrees.direct_landing import (
+    _provisional_code_commit,
+    _publish_provisional_code_commit,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
     DirectLandingPublicationRefused,
@@ -356,32 +346,19 @@ class TrailerFactTests(unittest.TestCase):
 
 
 class RouteCoverageTests(unittest.TestCase):
-    def test_the_prepared_commit_carries_no_skip(self) -> None:
-        """MIK-R152 rules 1+7: the prepared commit runs the hook; no flag, setting
-        or policy publishes past it."""
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "logical"
-            private = Path(tmp) / "private"
-            root.mkdir()
-            private.mkdir()
-            for policy in ("ordinary", "strict-code-no-verify"):
-                binding = PrivateGitPreparationBinding(
-                    logical_root=root,
-                    logical_ref="refs/heads/main",
-                    expected_logical_commit="0" * 40,
-                    common_directory=root / ".git",
-                    private_root=private,
-                    parent_commit="0" * 40,
-                    admitted_tree="0" * 40,
-                    message="m",
-                    hook_policy=policy,  # type: ignore[arg-type]
-                    operation_key="op",
-                    generation=1,
-                    intent_digest="0" * 64,
-                )
-                plan = preparation_command(binding, "commit")
-                self.assertNotIn("--no-verify", plan.args)
+    def test_remaining_routes_carry_no_skip(self) -> None:
+        """R152 rules1+7: neither actual route can publish past a failing hook."""
+        harness = RemainingRouteProductionTests()
+        for route in ("ordinary", "direct"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as tmp:
+                repo = harness._repo(Path(tmp), "code")
+                _hook(repo, FAIL_HOOK)
+                head = _git(repo, "rev-parse", "HEAD")
+                with self.assertRaises(
+                    (LandingCommitCheckRefusal, DirectLandingPublicationRefused)
+                ):
+                    harness._publish(repo, route)
+                self.assertEqual(_git(repo, "rev-parse", "HEAD"), head)
 
     def test_the_provisional_path_runs_the_hook_before_the_move(self) -> None:
         """MIK-R152 rule 1: the classic direct landing judges the tree before a
@@ -852,259 +829,215 @@ class RoundOneFindingTests(unittest.TestCase):
             passed = run_landing_commit_check(repo, tree=tree, timeout_s=30)
             self.assertIn("got-eof", passed.log.read_text(encoding="utf-8"))
 
-    def test_prepared_failures_keep_whole_output_with_time(self) -> None:
-        """F10: a prepared failure persists its whole output and elapsed time, not hashes."""
+    def test_publication_failures_keep_whole_output_with_time(self) -> None:
+        """F10: actual remaining-route refusals carry the whole hook output/time log."""
+        harness = RemainingRouteProductionTests()
+        for route in ("ordinary", "direct"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as tmp:
+                repo = harness._repo(Path(tmp), "memory")
+                _hook(repo, FAIL_HOOK)
+                with self.assertRaises(
+                    (LandingCommitCheckRefusal, DirectLandingPublicationRefused)
+                ) as refused:
+                    harness._publish(repo, route)
+                error = harness._refusal(refused.exception)
+                assert error.log is not None
+                body = error.log.read_text(encoding="utf-8")
+                self.assertIn("[gate] result: ruff FAIL", body)
+                self.assertIn("ruff found one unused import", body)
+                self.assertRegex(body, r"elapsed: \d+\.\d+s")
+                self.assertEqual(error.step, "ruff")
+                self.assertIn("ruff", str(refused.exception))
+                self.assertIn(error.log.as_posix(), str(refused.exception))
 
-        with tempfile.TemporaryDirectory() as tmp:
-            log = Path(tmp) / "hook.log"
-            result = subprocess.CompletedProcess(
-                args=["git", "commit"],
-                returncode=1,
-                stdout="[gate] result: unit FAIL\nruff found one unused import\n",
-                stderr="",
-            )
-            pointer = preparation._write_preparation_hook_log(log, result, 1.5)
-            body = log.read_text(encoding="utf-8")
-            self.assertIn("[gate] result: unit FAIL", body)
-            self.assertIn("ruff found one unused import", body)
-            self.assertIn("elapsed: 1.500s", body)
-            self.assertIn("failing-step: unit", body)
-            self.assertIn("failing-step=unit", pointer)
-            self.assertIn("elapsed=1.500s", pointer)
-            self.assertIn(log.as_posix(), pointer)
 
+class RemainingRouteProductionTests(unittest.TestCase):
+    """Option A: prepared-route safety is exercised on actual remaining publications."""
 
-class PreparedLegProductionTests(unittest.TestCase):
-    """F08/F10: both prepared legs answer through the production commit path.
-
-    Each leg is a real admitted preparation (create + materialize) on its own
-    repository. The tests drive the exact per-leg sequence the closeout uses
-    for a commit (unrunnable gate, snapshot, real run, log write, changed
-    check, refusal) and assert the response code, the written log with its
-    pointer, and the unmoved ref.
-    """
-
-    def _admit(self, root: Path, name: str) -> tuple[Path, PrivateGitPreparationCapability]:
+    def _repo(self, root: Path, name: str) -> Path:
         repo = root / name
         _init(repo)
-        (repo / "source.txt").write_text("candidate\n", encoding="utf-8")
-        _git(repo, "add", "source.txt")
-        tree = _git(repo, "write-tree")
-        parent = _git(repo, "rev-parse", "HEAD")
-        common = Path(_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-        binding = PrivateGitPreparationBinding(
-            repo,
-            "refs/heads/main",
-            parent,
-            common,
-            root / f"{name}-output",
-            parent,
-            tree,
-            "prepared output",
-            "ordinary",
-            "operation-1",
-            1,
-            "a" * 64,
-        )
-        capability = admit_private_git_preparation(binding, authorize=lambda _binding: None)
-        run_git_preparation(capability, "create")
-        run_git_preparation(capability, "materialize")
-        return repo, capability
+        _stage(repo, "source.txt", "candidate\n")
+        return repo
 
-    def _hooks_dir(self, capability: PrivateGitPreparationCapability) -> Path:
-        private_root = capability.binding.private_root
-        common = run_git(
-            private_root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]
-        ).stdout.strip()
-        hooks = Path(common) / "hooks"
-        hooks.mkdir(parents=True, exist_ok=True)
-        return hooks
+    def _publish(self, repo: Path, route: str) -> str:
+        tree = _write_tree(repo)
+        before = _admitted(repo)
+        if route == "ordinary":
+            return publish_tree_commit(repo, "remaining route", tree=tree, before=before)
+        provisional = _provisional_code_commit(repo, tree, before.head, "remaining route")
+        _publish_provisional_code_commit(repo, before, provisional, tree)
+        return _git(repo, "rev-parse", "HEAD")
 
-    def _pointer_log(self, pointer: str) -> Path:
-        match = re.search(r"log=(\S+)", pointer)
-        assert match is not None, pointer
-        return Path(match.group(1))
+    def _refusal(self, error: BaseException) -> LandingCommitCheckRefusal:
+        actual = error.__cause__ if isinstance(error, DirectLandingPublicationRefused) else error
+        assert isinstance(actual, LandingCommitCheckRefusal), actual
+        return actual
 
-    def test_both_legs_refuse_an_unrunnable_hook_with_log_and_pointer(self) -> None:
-        """F08: both prepared legs refuse a nonexecutable hook with a log, moving no ref.
+    def _index(self, repo: Path) -> bytes:
+        path = _git(repo, "rev-parse", "--path-format=absolute", "--git-path", "index")
+        return Path(path).read_bytes()
 
-        Drives the exact commit function the closeout calls for every prepared
-        leg, on a real admitted code preparation and a real admitted memory
-        preparation.
-        """
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+    def test_both_routes_refuse_an_unrunnable_hook_with_log_and_pointer(self) -> None:
+        for route in ("ordinary", "direct"):
             for leg in ("code", "memory"):
-                with self.subTest(leg=leg):
-                    repo, capability = self._admit(root, leg)
-                    hooks = self._hooks_dir(capability)
-                    hook = hooks / "pre-commit"
-                    hook.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-                    hook.chmod(0o644)
-                    private_root = capability.binding.private_root
-                    logical_head = run_git(repo, ["rev-parse", "HEAD"]).stdout.strip()
-                    head = run_git(private_root, ["rev-parse", "HEAD"]).stdout.strip()
-                    with self.assertRaises(CertificationContractError) as refused:
-                        preparation._commit_prepared_leg(capability)
-                    findings = refused.exception.findings
-                    self.assertEqual(findings[0]["code"], "private-preparation-hook-unrunnable")
-                    observed = str(findings[0]["observed"])
-                    self.assertIn("not executable", observed)
-                    log = self._pointer_log(observed)
-                    body = log.read_text(encoding="utf-8")
+                with self.subTest(route=route, leg=leg), tempfile.TemporaryDirectory() as tmp:
+                    repo = self._repo(Path(tmp), leg)
+                    hook = _hook(repo, PASS_HOOK, executable=False)
+                    head, index = _git(repo, "rev-parse", "HEAD"), self._index(repo)
+                    with self.assertRaises(
+                        (LandingCommitCheckRefusal, DirectLandingPublicationRefused)
+                    ) as refused:
+                        self._publish(repo, route)
+                    error = self._refusal(refused.exception)
+                    self.assertEqual(error.reason, "unrunnable")
+                    self.assertIn("not executable", str(error))
+                    self.assertIn(hook.name, str(error))
+                    assert error.log is not None
+                    self.assertIn(error.log.as_posix(), str(refused.exception))
+                    body = error.log.read_text(encoding="utf-8")
                     self.assertIn("not executable", body)
                     self.assertRegex(body, r"elapsed: \d+\.\d+s")
-                    self.assertEqual(
-                        run_git(private_root, ["rev-parse", "HEAD"]).stdout.strip(), head
-                    )
-                    self.assertEqual(
-                        run_git(repo, ["rev-parse", "HEAD"]).stdout.strip(), logical_head
-                    )
+                    self.assertEqual(_git(repo, "rev-parse", "HEAD"), head)
+                    self.assertEqual(self._index(repo), index)
 
     def test_timeout_persists_partial_output_with_pointer(self) -> None:
-        """F10: a prepared leg's timeout keeps partial output, time and pointer.
-
-        Drives the exact commit function the closeout calls, with a hanging
-        hook and a one-second settings bound: the partial-output log is
-        written, the timeout carries its pointer, and nothing is published.
-        """
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            repo, capability = self._admit(root, "code")
-            system = repo / "system"
-            system.mkdir(exist_ok=True)
-            (system / "settings.json").write_text(
-                '{"orchestration": {"landing": {"commitCheckTimeoutSeconds": 1}}}',
-                encoding="utf-8",
-            )
-            hooks = self._hooks_dir(capability)
-            (hooks / "pre-commit").write_text(
-                "#!/bin/sh\necho hook started\nsleep 30\n", encoding="utf-8"
-            )
-            (hooks / "pre-commit").chmod(0o755)
-            private_root = capability.binding.private_root
-            logical_head = run_git(repo, ["rev-parse", "HEAD"]).stdout.strip()
-            head = run_git(private_root, ["rev-parse", "HEAD"]).stdout.strip()
-            with self.assertRaises(preparation._PreparedLegHookTimeout) as timed_out:
-                preparation._commit_prepared_leg(capability)
-            pointer = timed_out.exception.hook_pointer
-            self.assertIsInstance(timed_out.exception.__cause__, subprocess.TimeoutExpired)
-            log = self._pointer_log(pointer)
-            self.assertIn("timeout", pointer)
-            body = log.read_text(encoding="utf-8")
-            self.assertIn("hook started", body)
-            self.assertIn("exit=timeout", body)
-            self.assertRegex(body, r"elapsed: \d+\.\d+s")
-            self.assertIn("nothing was published", str(timed_out.exception))
-            self.assertEqual(run_git(private_root, ["rev-parse", "HEAD"]).stdout.strip(), head)
-            self.assertEqual(run_git(repo, ["rev-parse", "HEAD"]).stdout.strip(), logical_head)
-
-    def test_failing_hook_commit_persists_the_whole_output_log(self) -> None:
-        """F10: a prepared leg's failing commit persists whole output, step and pointer.
-
-        Drives the exact commit function the closeout calls on a real admitted
-        memory preparation: the commit runs, the whole hook output with the
-        failing step and elapsed time is persisted, and nothing is published.
-        (The closeout refuses the returned nonzero result with that step and
-        pointer; the three-line refusal raise is pinned by
-        test_prepared_failures_keep_whole_output_with_time.)
-        """
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            repo, capability = self._admit(root, "memory")
-            hooks = self._hooks_dir(capability)
-            (hooks / "pre-commit").write_text(
-                "#!/bin/sh\n"
-                "echo '[gate] result: unit FAIL'\n"
-                "echo '[gate] ruff found one unused import' >&2\n"
-                "exit 1\n",
-                encoding="utf-8",
-            )
-            (hooks / "pre-commit").chmod(0o755)
-            private_root = capability.binding.private_root
-            logical_head = run_git(repo, ["rev-parse", "HEAD"]).stdout.strip()
-            head = run_git(private_root, ["rev-parse", "HEAD"]).stdout.strip()
-            result, pointer = preparation._commit_prepared_leg(capability)
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("failing-step=unit", pointer)
-            log = self._pointer_log(pointer)
-            body = log.read_text(encoding="utf-8")
-            self.assertIn("[gate] result: unit FAIL", body)
-            self.assertIn("ruff found one unused import", body)
-            self.assertRegex(body, r"elapsed: \d+\.\d+s")
-            self.assertEqual(run_git(private_root, ["rev-parse", "HEAD"]).stdout.strip(), head)
-            self.assertEqual(run_git(repo, ["rev-parse", "HEAD"]).stdout.strip(), logical_head)
-
-    def test_passing_hook_commit_publishes_the_admitted_tree(self) -> None:
-        """Both legs' commit publishes exactly the admitted tree on a pass."""
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            for leg in ("code", "memory"):
-                with self.subTest(leg=leg):
-                    repo, capability = self._admit(root, leg)
-                    hooks = self._hooks_dir(capability)
-                    (hooks / "pre-commit").write_text(
-                        "#!/bin/sh\necho '[gate] result: unit PASS'\nexit 0\n", encoding="utf-8"
-                    )
-                    (hooks / "pre-commit").chmod(0o755)
-                    private_root = capability.binding.private_root
-                    logical_head = run_git(repo, ["rev-parse", "HEAD"]).stdout.strip()
-                    head = run_git(private_root, ["rev-parse", "HEAD"]).stdout.strip()
-                    result, pointer = preparation._commit_prepared_leg(capability)
-                    self.assertEqual(result.returncode, 0)
-                    self.assertNotIn("failing-step=", pointer)
-                    published = run_git(private_root, ["rev-parse", "HEAD"]).stdout.strip()
-                    self.assertNotEqual(published, head)
-                    self.assertEqual(
-                        run_git(
-                            private_root, ["rev-parse", f"{published}^{{tree}}"]
-                        ).stdout.strip(),
-                        capability.binding.admitted_tree,
-                    )
-                    self.assertEqual(
-                        run_git(repo, ["rev-parse", "HEAD"]).stdout.strip(), logical_head
-                    )
-
-    def test_prepared_legs_refuse_an_unrunnable_hook(self) -> None:
-        """F08: both prepared legs refuse a present nonexecutable hook before committing."""
-
-        with tempfile.TemporaryDirectory() as tmp:
-            for leg in ("code", "memory"):
-                repo = Path(tmp) / leg
-                _init(repo)
-                head = _git(repo, "rev-parse", "HEAD")
-                _hook(repo, "#!/bin/sh\nexit 0\n", executable=False)
-                log = Path(tmp) / f"{leg}-hook.log"
-                with self.assertRaises(CertificationContractError) as refused:
-                    preparation._refuse_unrunnable_preparation_hook(repo, log)
-                findings = refused.exception.findings
-                self.assertEqual(findings[0]["code"], "private-preparation-hook-unrunnable")
-                observed = str(findings[0]["observed"])
-                self.assertIn("not executable", observed)
-                self.assertIn(f"log={log.as_posix()}", observed)
-                body = log.read_text(encoding="utf-8")
-                self.assertIn("not executable", body)
+        for route in ("ordinary", "direct"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as tmp:
+                repo = self._repo(Path(tmp), "code")
+                system = repo / "system"
+                system.mkdir()
+                (system / "settings.json").write_text(
+                    '{"orchestration": {"landing": {"commitCheckTimeoutSeconds": 1}}}',
+                    encoding="utf-8",
+                )
+                _hook(repo, "#!/bin/sh\necho hook started\nsleep 30\n")
+                head, index = _git(repo, "rev-parse", "HEAD"), self._index(repo)
+                with self.assertRaises(
+                    (LandingCommitCheckRefusal, DirectLandingPublicationRefused)
+                ) as refused:
+                    self._publish(repo, route)
+                error = self._refusal(refused.exception)
+                self.assertEqual(error.reason, "timeout")
+                self.assertIn("nothing was published", str(error))
+                assert error.log is not None
+                self.assertIn(error.log.as_posix(), str(refused.exception))
+                body = error.log.read_text(encoding="utf-8")
+                self.assertIn("hook started", body)
+                self.assertIn("timeout", body)
                 self.assertRegex(body, r"elapsed: \d+\.\d+s")
                 self.assertEqual(_git(repo, "rev-parse", "HEAD"), head)
-            present = Path(tmp) / "present"
-            _init(present)
-            _hook(present, "#!/bin/sh\nexit 0\n")
-            self.assertIsNone(
-                preparation._refuse_unrunnable_preparation_hook(
-                    present, Path(tmp) / "present-hook.log"
+                self.assertEqual(self._index(repo), index)
+
+    def test_failing_hook_commit_persists_the_whole_output_log(self) -> None:
+        for route in ("ordinary", "direct"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as tmp:
+                repo = self._repo(Path(tmp), "memory")
+                _hook(
+                    repo,
+                    "#!/bin/sh\necho '[gate] result: unit FAIL'\n"
+                    "echo '[gate] ruff found one unused import' >&2\nexit 1\n",
                 )
-            )
-            absent = Path(tmp) / "absent"
-            _init(absent)
-            self.assertIsNone(
-                preparation._refuse_unrunnable_preparation_hook(
-                    absent, Path(tmp) / "absent-hook.log"
+                head, index = _git(repo, "rev-parse", "HEAD"), self._index(repo)
+                with self.assertRaises(
+                    (LandingCommitCheckRefusal, DirectLandingPublicationRefused)
+                ) as refused:
+                    self._publish(repo, route)
+                error = self._refusal(refused.exception)
+                self.assertEqual(error.reason, "failed")
+                self.assertEqual(error.step, "unit")
+                assert error.log is not None
+                self.assertIn(error.log.as_posix(), str(refused.exception))
+                self.assertIn("unit", str(refused.exception))
+                body = error.log.read_text(encoding="utf-8")
+                self.assertIn("[gate] result: unit FAIL", body)
+                self.assertIn("ruff found one unused import", body)
+                self.assertRegex(body, r"elapsed: \d+\.\d+s")
+                self.assertEqual(_git(repo, "rev-parse", "HEAD"), head)
+                self.assertEqual(self._index(repo), index)
+
+    def test_passing_hook_commit_publishes_the_admitted_tree(self) -> None:
+        for route in ("ordinary", "direct"):
+            for leg in ("code", "memory"):
+                with self.subTest(route=route, leg=leg), tempfile.TemporaryDirectory() as tmp:
+                    repo = self._repo(Path(tmp), leg)
+                    _hook(repo, PASS_HOOK)
+                    tree, head = _write_tree(repo), _git(repo, "rev-parse", "HEAD")
+                    published = self._publish(repo, route)
+                    self.assertNotEqual(published, head)
+                    self.assertEqual(_git(repo, "rev-parse", f"{published}^{{tree}}"), tree)
+                    fact = commit_check_fact(_git(repo, "log", "-1", "--format=%B"))
+                    self.assertIsNotNone(fact)
+                    assert fact is not None
+                    self.assertEqual(fact[0], tree)
+                    self.assertTrue(fact[1].endswith("pre-commit"))
+
+    def test_remaining_routes_refuse_an_unrunnable_hook(self) -> None:
+        for route in ("ordinary", "direct"):
+            for mode in ("nonexecutable", "missing-interpreter", "present", "absent"):
+                with self.subTest(route=route, mode=mode), tempfile.TemporaryDirectory() as tmp:
+                    repo = self._repo(Path(tmp), "code")
+                    head, index = _git(repo, "rev-parse", "HEAD"), self._index(repo)
+                    if mode != "absent":
+                        _hook(
+                            repo,
+                            "#!/no/such/interpreter\n"
+                            if mode == "missing-interpreter"
+                            else PASS_HOOK,
+                            executable=mode != "nonexecutable",
+                        )
+                    if mode in ("present", "absent"):
+                        self.assertNotEqual(self._publish(repo, route), head)
+                    else:
+                        with self.assertRaises(
+                            (LandingCommitCheckRefusal, DirectLandingPublicationRefused)
+                        ) as refused:
+                            self._publish(repo, route)
+                        error = self._refusal(refused.exception)
+                        self.assertEqual(
+                            error.reason,
+                            "failed" if mode == "missing-interpreter" else "unrunnable",
+                        )
+                        if mode == "missing-interpreter":
+                            assert error.log is not None
+                            self.assertRegex(error.log.read_text(), r"cannot (?:run|exec)")
+                        self.assertIn("pre-commit", str(refused.exception))
+                        assert error.log is not None
+                        self.assertIn(error.log.as_posix(), str(refused.exception))
+                        self.assertRegex(error.log.read_text(), r"elapsed: \d+\.\d+s")
+                        self.assertEqual(_git(repo, "rev-parse", "HEAD"), head)
+                        self.assertEqual(self._index(repo), index)
+
+    def test_tracked_change_between_pass_and_publish_refuses(self) -> None:
+        for route in ("ordinary", "direct"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as tmp:
+                repo = self._repo(Path(tmp), "code")
+                _hook(repo, PASS_HOOK)
+                head, index = _git(repo, "rev-parse", "HEAD"), self._index(repo)
+                real_check = run_landing_commit_check
+
+                def pass_then_edit(*args, bound_check=real_check, bound_repo=repo, **kwargs):
+                    checked = bound_check(*args, **kwargs)
+                    (bound_repo / "source.txt").write_text("changed after pass\n")
+                    return checked
+
+                owner = (
+                    "agents_remember.worktrees.modules.landing_commit_check"
+                    if route == "ordinary"
+                    else "agents_remember.worktrees.direct_landing"
                 )
-            )
+                with (
+                    mock.patch(owner + ".run_landing_commit_check", side_effect=pass_then_edit),
+                    self.assertRaises(
+                        (LandingCommitCheckRefusal, DirectLandingPublicationRefused)
+                    ) as refused,
+                ):
+                    self._publish(repo, route)
+                error = self._refusal(refused.exception)
+                self.assertEqual(error.reason, "changed")
+                self.assertIn("source.txt", error.changed_paths)
+                self.assertEqual(_git(repo, "rev-parse", "HEAD"), head)
+                self.assertEqual(self._index(repo), index)
 
 
 def _pid_alive(pid: int) -> bool:

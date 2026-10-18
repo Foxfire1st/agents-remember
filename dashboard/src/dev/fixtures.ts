@@ -235,20 +235,6 @@ export const GALLERY: GalleryEntry[] = [
             rows: [{ codeCommit: 'abc1234def56', memoryCommit: 'fed4321cba98' }],
           },
         ],
-        stalestSidecars: [
-          {
-            onboardingFile: 'observer/reducer.py.md',
-            repository: 'agents-remember',
-            lastVerifiedDate: '2026-05-20',
-            ageSeconds: 2_160_000,
-          },
-          {
-            onboardingFile: 'serving/events.py.md',
-            repository: 'agents-remember',
-            lastVerifiedDate: '2026-06-01',
-            ageSeconds: 1_120_000,
-          },
-        ],
         attentionQueue: [
           {
             id: 'actionable-drift:agents-remember',

@@ -67,7 +67,6 @@ from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
 from agents_remember.memory_quality.converted_check import CONVERTED_BASE_RULE
-from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
     run_drift_summary,
 )
@@ -198,10 +197,6 @@ def test_converted_trees_take_the_converted_branch_and_skip_legacy_discovery(
     _write_card(memory, "pkg/beta.py", [_stale_anchor()])
     _commit(memory)
 
-    def _unread(_root: Path) -> list[Path]:
-        raise AssertionError("legacy discovery must not run on a converted tree")
-
-    monkeypatch.setattr(drift, "discover_onboarding_files", _unread)
     packet = _summarize(code_repository_root=code, context=_context(memory, tmp_path))
 
     assert packet["status"] == "checked", packet

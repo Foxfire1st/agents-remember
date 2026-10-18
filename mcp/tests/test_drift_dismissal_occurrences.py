@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -18,10 +18,12 @@ from agents_remember.controlplane.attention_dismissals import (
 from agents_remember.kernel.git_command import GitRunnerOptions, run_git
 from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
-from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftRow
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
-    _write_drift_snapshot,
+    run_drift_summary,
 )
+from agents_remember.memory_quality.reference_state import git_blob_id
+from agents_remember.models.knowledge_files.anchor_content import content_identity
+from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.observer.projection import Analytics, WorkspaceProjection
 from agents_remember.observer.reducer import AnalyticalInputs, build_attention_queue
 from agents_remember.serving import app as serving_app
@@ -86,7 +88,7 @@ def drift_source(tmp_path):
     def refresh(state, domain=None):
         result = state.read(
             config,
-            inputs.ProjectionReaders(repo_surfaces=lambda _config, _now: ([], [], [])),
+            inputs.ProjectionReaders(repo_surfaces=lambda _config, _now: ([], [])),
             observer_root=store.root,
             pass_=inputs.RefreshPass(now=NOW, refresh=domain or inputs.ProjectionRefresh.full()),
         )
@@ -102,9 +104,18 @@ def drift_source(tmp_path):
 
 
 def test_legacy_snapshot_fingerprint_uses_all_actionable_rows_and_no_clock(tmp_path):
+    """M3-L56-L168-CALLER-PINS-01: migrate the legacy pin to real converted production.
+
+    Keep this case identity and every original fingerprint assertion. No retired
+    writer/provider is aliased back: run_drift_summary reads actual converted files
+    and publishes the snapshot through its retained production path.
+    """
     code = tmp_path / "code"
     code.mkdir()
     run_git(code, ["init", "--initial-branch=main"])
+    source = code / "one.py"
+    source.write_text("print('one')\n")
+    assert run_git(code, ["add", "one.py"]).returncode == 0
     assert (
         run_git(
             code,
@@ -125,33 +136,68 @@ def test_legacy_snapshot_fingerprint_uses_all_actionable_rows_and_no_clock(tmp_p
         coordination_root=tmp_path,
         memory_root=tmp_path / "memory",
         onboarding_root=tmp_path / "memory/onboarding",
+        temp_root=tmp_path / "temp",
     )
-    row = DriftRow(
-        onboarding_file="one.md",
-        source_file="one.py",
-        repository="code",
-        storage_mode="sidecar",
-        last_verified_hash="abc",
-        last_verified_date="2026-10-14",
-        classification="drifted",
-        trust="stale",
-        affected_sections="all",
-        note="changed",
+    (context.memory_root / "knowledge").mkdir(parents=True)
+    context.onboarding_root.mkdir(parents=True)
+    (context.memory_root / "knowledge/layout.json").write_text(
+        canonical_text({"conversion": "1", "schema": "ar-memory-layout/v2"})
     )
-    rows = [row, replace(row, onboarding_file="two.md", source_file="two.py")]
+    row = {
+        "kind": "code",
+        "anchor": {"blob": "0" * 40, "locator": {"kind": "file"}, "content": "sha256:" + "0" * 64},
+    }
+    document: dict[str, Any] = {
+        "schema": "ar-onboarding-file/v1",
+        "path": "one.py",
+        "realizes": [],
+        "references": {"1": {"targets": [row]}, "2": {"targets": [row]}},
+    }
+    sidecar = context.onboarding_root / "one.py.json"
+    card = context.onboarding_root / "one.py.md"
+    sidecar.write_text(canonical_text(document))
+    card.write_text("# one.py\n\nSee [1] and [2].\n")
     path = drift_snapshot_path(tmp_path, repository="code", branch="main")
-    _write_drift_snapshot(code, context, rows)
+    result = run_drift_summary(code_repository_root=code, context=context, detail_limit=1)
+    assert result.get("basis") == "converted-references"
     first = json.loads(path.read_text())
-    _write_drift_snapshot(code, context, list(reversed(rows)))
+    assert first["counts"] == {"current": 0, "stale": 2, "violation": 0}
+    # Reverse the map's incidental input order, keeping the same reference slots/targets.
+    reordered = json.loads(canonical_text(document))
+    reordered["references"] = dict(reversed(list(document["references"].items())))
+    sidecar.write_text(json.dumps(reordered, indent=2) + "\n")
+    run_drift_summary(code_repository_root=code, context=context, detail_limit=1)
     again = json.loads(path.read_text())
     assert first["actionableFingerprint"] == again["actionableFingerprint"]
-    _write_drift_snapshot(
-        code, context, [row, replace(rows[1], note="different actionable finding")]
-    )
+    # Change the complete second finding beyond the unchanged first sampled row.
+    document["references"]["3"] = document["references"].pop("2")
+    sidecar.write_text(canonical_text(document))
+    card.write_text("# one.py\n\nSee [1] and [3].\n")
+    run_drift_summary(code_repository_root=code, context=context, detail_limit=1)
     changed = json.loads(path.read_text())
     assert first["counts"] == changed["counts"]
+    assert first["rows"] == changed["rows"]
     assert first["actionableFingerprint"] != changed["actionableFingerprint"]
-    _write_drift_snapshot(code, context, [*rows, replace(row, classification="up to date")])
+    document["references"] = {
+        "1": {"targets": [row]},
+        "2": {"targets": [row]},
+        "4": {
+            "targets": [
+                {
+                    "kind": "code",
+                    "anchor": {
+                        "blob": git_blob_id(source.read_bytes()),
+                        "locator": {"kind": "file"},
+                        "content": content_identity(source.read_bytes()),
+                    },
+                }
+            ]
+        },
+    }
+    sidecar.write_text(canonical_text(document))
+    card.write_text("# one.py\n\nSee [1], [2] and [4].\n")
+    run_drift_summary(code_repository_root=code, context=context, detail_limit=1)
+    assert json.loads(path.read_text())["counts"] == {"current": 1, "stale": 2, "violation": 0}
     assert json.loads(path.read_text())["actionableFingerprint"] == first["actionableFingerprint"]
 
 

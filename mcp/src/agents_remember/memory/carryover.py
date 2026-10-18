@@ -1,81 +1,74 @@
 #!/usr/bin/env python3
-"""Carry landed branch onboarding into an ordinary external-memory recovery leaf.
-
-Requires Python 3.14 and git.
-"""
+"""Carry converted branch memory into an open recovery leaf, without committing."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
-from dataclasses import asdict, dataclass
+from contextlib import ExitStack, contextmanager, suppress
+from dataclasses import dataclass, fields
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any
 
+from agents_remember.application.knowledge_currentness.observe import CodeTree, open_code_tree
 from agents_remember.kernel.authority import require_repo
-from agents_remember.kernel.coordination_context.models import StorageSettings
-from agents_remember.kernel.git_command import GitRunnerOptions, run_git
-from agents_remember.kernel.memory_attribution import render_memory_content_message
-from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
-from agents_remember.kernel.memory_ledger import LEDGER_RELATIVE_PATH
-from agents_remember.kernel.onboarding_doc import (
-    discover_route_overviews,
-    route_contains_changed_path,
+from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
+    RepositoryScope,
+    load_config,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
-from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.memory.carryover_apply import (
+    _changed_paths,
+    _conflicts,
+    _Tree,
+    apply_converted,
+)
 from agents_remember.memory.carryover_authority import required_target_storage
-from agents_remember.memory_quality.integrity.onboarding_drift_check.entities import (
-    parse_entity_fingerprint_rows,
+from agents_remember.memory.carryover_documents import (
+    compare_document_pair,
+    document_selection,
+    fresh_document_payloads,
+    load_document_unit,
+    memory_only_evidence,
+    observe_document_anchors,
+    require_converted_formats,
 )
-from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops import (
-    compute_git_blob_set_fingerprint,
+from agents_remember.memory.carryover_evidence import (
+    changed_paths,
+    ensure_clean,
+    evidence_for_path,
+    head_commit,
+    memory_merge_base,
 )
-from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
-    GIT_BLOB_SET_ALGORITHM,
+from agents_remember.memory.carryover_records import (
+    RecordContext,
+    plan_record_dependencies,
+    record_payloads,
 )
-from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
-from agents_remember.models.memory_content_excludes import (
-    MEMORY_CONTENT_EXCLUDES,
+from agents_remember.memory.knowledge_index import (
+    IndexMismatchError,
+    KnowledgeIndex,
+    build_index,
+    default_cache_directory,
+    directory_snapshot,
 )
-from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
+from agents_remember.memory_quality.knowledge_validator import knowledge_tree_from_git
 from agents_remember.worktrees.integration.integration_branch_authority import (
     RepositoryCheckoutRequest,
     require_ordinary_repository_checkout,
     require_ordinary_worktree,
 )
-from agents_remember.worktrees.modules.git import (
-    commit_if_dirty,
-    ensure_git_identity,
-    repository_identity,
-)
+from agents_remember.worktrees.modules.git import repository_identity
 from agents_remember.worktrees.worktree_contract import load_contract
 
 PROVEN_EVIDENCE = {"exact-landed-commit", "patch-id-match", "final-content-match"}
-MEMORY_CONTENT_PATHS = (".", f":(exclude){LEDGER_RELATIVE_PATH}")
 FILE_SIDECAR_KIND = "file-sidecar"
 ROUTE_OVERVIEW_KIND = "route-overview"
 ENTITY_CATALOG_KIND = "entity-catalog"
 MEMORY_ONLY_DOC_KIND = "memory-only-doc"
-# Selection key for the entity catalog in include_review_required: a stable
-# token instead of "entities.md" so it can never collide with a code path.
 ENTITY_CATALOG_KEY = "entity-catalog"
 ENTITY_CATALOG_REL = "entities.md"
-VERIFIED_HASH_PATTERN = re.compile(
-    r"\|\s*lastVerifiedCommitHash\s*\|\s*`?([0-9a-fA-F]{7,40})`?\s*\|"
-)
-
-
-@dataclass(frozen=True)
-class CarryoverCandidate:
-    source_path: str
-    branch_onboarding: str
-    target_onboarding: str
-    evidence: str
-    decision: str
-    reason: str
-    target_exists: bool
-    kind: str = FILE_SIDECAR_KIND
 
 
 @dataclass(frozen=True)
@@ -96,736 +89,299 @@ class CarryoverRequest:
 class CarryoverApplyOptions:
     intent_note: str
     include_review_required: list[str] | None = None
-    memory_commit_message: str = "Carry over landed branch memory"
 
 
 def request_from_args(args: argparse.Namespace) -> CarryoverRequest:
-    return CarryoverRequest(
-        config_path=args.config_path,
-        target_contract_path=args.contract_path,
-        code_repository_root=args.code_repository_root,
-        official_code_ref=args.official_code_ref,
-        source_code_ref=args.source_code_ref,
-        old_base=args.old_base,
-        target_memory=args.target_memory,
-        source_memory=args.source_memory,
-        code_repository_name=args.code_repository_name,
-        replace_existing=args.replace_existing,
-    )
-
-
-def require_git(repo: Path, args: list[str], *, input_text: str | None = None) -> str:
-    result = run_git(
-        repo,
-        args,
-        GitRunnerOptions(input_text=input_text),
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
-    return result.stdout.strip()
-
-
-def head_commit(repo: Path, ref: str) -> str:
-    return require_git(repo, ["rev-parse", ref])
-
-
-def commit_date(repo: Path, commit: str) -> str:
-    return require_git(repo, ["show", "-s", "--format=%cI", commit])
-
-
-def ensure_clean(repo: Path, label: str, *pathspecs: str) -> None:
-    status = require_git(repo, ["status", "--porcelain", "--", *pathspecs])
-    if status:
-        raise RuntimeError(f"{label} is not clean:\n{status}")
-
-
-def has_changes(repo: Path, *pathspecs: str) -> bool:
-    return bool(require_git(repo, ["status", "--porcelain", "--", *pathspecs]))
-
-
-def changed_paths(repo: Path, base_ref: str, head_ref: str) -> set[str]:
-    output = require_git(
-        repo, ["diff", "--name-only", "--diff-filter=ACMRT", base_ref, head_ref, "--"]
-    )
-    return {line.strip().replace("\\", "/") for line in output.splitlines() if line.strip()}
-
-
-def path_exists_at_ref(repo: Path, ref: str, source_path: str) -> bool:
-    return run_git(repo, ["cat-file", "-e", f"{ref}:{source_path}"]).returncode == 0
-
-
-def blob_at_ref(repo: Path, ref: str, source_path: str) -> str | None:
-    result = run_git(repo, ["show", f"{ref}:{source_path}"])
-    if result.returncode != 0:
-        return None
-    return result.stdout
-
-
-def path_commits(repo: Path, base_ref: str, head_ref: str, source_path: str) -> list[str]:
-    output = require_git(repo, ["log", "--format=%H", f"{base_ref}..{head_ref}", "--", source_path])
-    return [line.strip() for line in output.splitlines() if line.strip()]
-
-
-def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
-    return run_git(repo, ["merge-base", "--is-ancestor", ancestor, descendant]).returncode == 0
-
-
-def patch_id(repo: Path, base_ref: str, head_ref: str, source_path: str) -> str | None:
-    diff_text = require_git(repo, ["diff", base_ref, head_ref, "--", source_path])
-    if not diff_text.strip():
-        return None
-    result = run_git(
-        repo,
-        ["patch-id", "--stable"],
-        GitRunnerOptions(input_text=diff_text),
-    )
-    if result.returncode != 0 or not result.stdout.strip():
-        return None
-    return result.stdout.split()[0]
-
-
-def evidence_for_path(
-    repo: Path, base_ref: str, official_ref: str, source_ref: str, source_path: str
-) -> tuple[str, str]:
-    if not path_exists_at_ref(repo, official_ref, source_path):
-        return "not-landed", "source path is not present on official code ref"
-    path_commit_list = path_commits(repo, base_ref, source_ref, source_path)
-    if path_commit_list and all(
-        is_ancestor(repo, commit, official_ref) for commit in path_commit_list
-    ):
-        # Only the strongest proof when EVERY source-branch commit touching this
-        # path has landed on the official ref. A single landed commit is not
-        # enough: a later, unlanded commit to the same path would otherwise be
-        # silently carried over as if it had landed.
-        return (
-            "exact-landed-commit",
-            f"all {len(path_commit_list)} source branch commit(s) touching this path "
-            "are ancestors of official code ref",
-        )
-    source_patch = patch_id(repo, base_ref, source_ref, source_path)
-    official_patch = patch_id(repo, base_ref, official_ref, source_path)
-    if source_patch and official_patch and source_patch == official_patch:
-        return (
-            "patch-id-match",
-            "old-base-to-source-branch patch matches old-base-to-official patch",
-        )
-    if blob_at_ref(repo, source_ref, source_path) == blob_at_ref(repo, official_ref, source_path):
-        return (
-            "final-content-match",
-            "source branch and official source content match at the selected refs",
-        )
-    return (
-        "same-path-changed",
-        "official and source branch changed this path but no equivalence was proven",
-    )
+    values = {
+        field.name: getattr(args, field.name)
+        for field in fields(CarryoverRequest)
+        if field.name != "target_contract_path"
+    }
+    return CarryoverRequest(target_contract_path=args.contract_path, **values)
 
 
 def onboarding_path(memory_root: Path, source_path: str) -> Path:
     return memory_root / "onboarding" / f"{source_path}.md"
 
 
+@contextmanager
+def _record_context(request: CarryoverRequest):
+    # Existing derived index, disposable only: no persistent new store or memory write.
+    with TemporaryDirectory(prefix="ar-carryover-index-") as temporary, ExitStack() as stack:
+        indexes = []
+        try:
+            cache = default_cache_directory(load_config(request.config_path).coordination_root)
+            for number, memory in enumerate((request.source_memory, request.target_memory)):
+                snapshot = directory_snapshot(memory)
+                cached = cache / f"{snapshot.key}.sqlite"
+                index = None
+                if cached.is_file():
+                    # A cache that does not serve this tree is not reused.
+                    with suppress(IndexMismatchError):
+                        index = KnowledgeIndex(cached, expected_key=snapshot.key)
+                if index is None:
+                    destination = Path(temporary) / f"{number}.sqlite"
+                    build_index(snapshot, destination)
+                    index = KnowledgeIndex(destination, expected_key=snapshot.key)
+                indexes.append(stack.enter_context(index))
+        except (ValueError, OSError, RuntimeError) as error:
+            yield None, str(error)
+            return
+        yield RecordContext(request.source_memory, request.target_memory, *indexes), None
+
+
 @dataclass(frozen=True)
-class CarryoverRefs:
-    """The two states of the world a carryover compares, and the base they diverged from.
-
-    The code repository plus the landed and source refs inside it, and the target and source
-    memory trees. Every candidate builder judges one path against exactly this pair of
-    sides; the pair is constant for a whole plan, so it is the plan's frame, not per-call
-    arguments that could be assembled from two different plans.
-    """
-
-    code_repository_root: Path
-    official_ref: str
-    source_ref: str
-    old_base: str
-    target_memory: Path
-    source_memory: Path
+class _PlanFrame:
+    request: CarryoverRequest
+    code: Any
+    context: RecordContext | None
+    index_error: str | None
+    memory_base: Any
 
 
-@dataclass(frozen=True)
-class MemoryOnlyDoc:
-    """One onboarding doc that changed only in branch memory: the branch copy, its target
-    counterpart, its path relative to the onboarding root, and the source path it documents."""
-
-    branch_doc: Path
-    target_file: Path
-    rel: str
-    source_path: str
-
-
-def candidate_for_path(
-    refs: CarryoverRefs,
-    source_path: str,
-    *,
-    replace_existing: bool,
-) -> CarryoverCandidate:
-    branch_onboarding = onboarding_path(refs.source_memory, source_path)
-    target_onboarding = onboarding_path(refs.target_memory, source_path)
-    target_exists = target_onboarding.exists()
-    evidence, reason = evidence_for_path(
-        refs.code_repository_root, refs.old_base, refs.official_ref, refs.source_ref, source_path
-    )
-    decision = (
-        "auto-carry"
-        if evidence in PROVEN_EVIDENCE
-        else "review-required"
-        if evidence == "same-path-changed"
-        else "reject"
-    )
-    if not branch_onboarding.exists():
-        decision = "reject"
-        reason = "source branch onboarding does not exist"
-    elif (
-        target_exists
-        and branch_onboarding.read_text(encoding="utf-8")
-        != target_onboarding.read_text(encoding="utf-8")
-        and not replace_existing
-    ):
-        decision = "review-required"
-        reason = (
-            "target onboarding already exists with different content; "
-            "use --replace-existing after review"
-        )
-    return CarryoverCandidate(
-        source_path=source_path,
-        branch_onboarding=branch_onboarding.as_posix(),
-        target_onboarding=target_onboarding.as_posix(),
-        evidence=evidence,
-        decision=decision,
-        reason=reason,
-        target_exists=target_exists,
-    )
-
-
-def overview_candidates(
-    *,
-    target_memory: Path,
-    source_memory: Path,
-    landed_paths: list[str],
-) -> list[CarryoverCandidate]:
-    """Route-overview carryover candidates for routes covering landed paths.
-
-    Overviews are model-authored aggregates, so a differing body is always
-    ``review-required`` regardless of per-path evidence; identical branch and
-    official content auto-carries for metadata re-verification only. Candidate
-    identity is the normalized code route ('.' for the repo root), matching the
-    ``include_review_required`` selection contract.
-    """
-    candidates: list[CarryoverCandidate] = []
-    for route, rel in discover_route_overviews(source_memory / "onboarding"):
-        covered = sorted(
-            path for path in landed_paths if route_contains_changed_path(route, [path])
-        )
-        if not covered:
-            continue
-        branch_file = source_memory / "onboarding" / rel
-        target_file = target_memory / "onboarding" / rel
-        target_exists = target_file.exists()
-        identical = target_exists and branch_file.read_text(
-            encoding="utf-8"
-        ) == target_file.read_text(encoding="utf-8")
-        candidates.append(
-            CarryoverCandidate(
-                source_path=route,
-                branch_onboarding=branch_file.as_posix(),
-                target_onboarding=target_file.as_posix(),
-                evidence="route-covers-landed-paths",
-                decision="auto-carry" if identical else "review-required",
-                reason=(
-                    "branch and target route overview content match; metadata re-verification only"
-                    if identical
-                    else "route overview body differs from target; model re-review "
-                    f"required (covers landed: {', '.join(covered[:5])})"
-                ),
-                target_exists=target_exists,
-                kind=ROUTE_OVERVIEW_KIND,
+def _candidate(frame: _PlanFrame, relative: str, seed: dict[str, Any]):
+    request = frame.request
+    code = frame.code
+    context = frame.context
+    index_error = frame.index_error
+    kind, decision = seed["kind"], seed["decision"]
+    result = {
+        **seed,
+        "branch_onboarding": str(request.source_memory / relative),
+        "target_onboarding": str(request.target_memory / relative),
+        "target_exists": False,
+    }
+    try:
+        pair = compare_document_pair(request.source_memory, request.target_memory, relative)
+        result.update(pair=pair.to_document(), target_exists=pair.target_exists)
+        unit = load_document_unit(request.source_memory, relative)
+        anchors = observe_document_anchors(unit.document, unit.paths[1], code)
+        result["anchors"] = anchors
+        if kind == MEMORY_ONLY_DOC_KIND:
+            result["evidence"], result["decision"], result["reason"] = memory_only_evidence(
+                request.target_memory,
+                relative,
+                anchors,
+                frame.memory_base,
             )
+        if result["decision"] != "reject" and anchors["problems"]:
+            result.update(decision="review-required", reason="; ".join(anchors["problems"]))
+        if pair.target_exists and pair.differing_paths and not request.replace_existing:
+            payloads = fresh_document_payloads(request.source_memory, relative, code, reviewed=True)
+            resumable = all(
+                not (request.target_memory / path).exists()
+                or (
+                    (request.target_memory / path).is_file()
+                    and (request.target_memory / path).read_bytes() == data
+                )
+                for path, data in payloads.items()
+            )
+            if not resumable and result["decision"] != "reject":
+                result.update(
+                    decision="review-required",
+                    reason="target document/sidecar differs; use replace_existing after review",
+                )
+        if context is None:
+            result.update(
+                records=dict(
+                    needed=[],
+                    conflicts=[dict(state="index-incomplete", reason=index_error)],
+                    history=[],
+                )
+            )
+        else:
+            records = plan_record_dependencies(context, unit.document).to_document()
+            result["records"] = records
+        if result["records"]["conflicts"] and result["decision"] != "reject":
+            result.update(
+                decision="review-required",
+                reason="; ".join(item["reason"] for item in result["records"]["conflicts"]),
+            )
+    except (ValueError, OSError, RuntimeError) as error:
+        result.update(
+            decision="review-required" if decision != "reject" else "reject", reason=str(error)
         )
-    return candidates
+    return result
 
 
-def object_id_at_ref(repo: Path, ref: str, source_path: str) -> str | None:
-    """Git object id of a file blob or directory tree at a ref; None if absent.
-
-    The repo-root route ('.') resolves to the commit's root tree because
-    ``<ref>:.`` is not valid rev syntax.
-    """
-    target = f"{ref}^{{tree}}" if source_path in {"", "."} else f"{ref}:{source_path}"
-    result = run_git(repo, ["rev-parse", target])
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def verified_commit_of(doc: Path) -> str | None:
-    match = VERIFIED_HASH_PATTERN.search(doc.read_text(encoding="utf-8"))
-    return match.group(1) if match else None
-
-
-def memory_merge_base(target_memory: Path, source_memory: Path) -> str | None:
-    source_head = run_git(source_memory, ["rev-parse", "HEAD"])
-    if source_head.returncode != 0:
-        return None
-    result = run_git(target_memory, ["merge-base", "HEAD", source_head.stdout.strip()])
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def _memory_only_evidence(
-    refs: CarryoverRefs,
-    doc: MemoryOnlyDoc,
-    mem_base: str | None,
-) -> tuple[str, str, str]:
-    """(evidence, decision, reason) for one memory-only doc candidate."""
-    code_repository_root = refs.code_repository_root
-    official_ref = refs.official_ref
-    target_memory = refs.target_memory
-    branch_doc = doc.branch_doc
-    target_file = doc.target_file
-    rel = doc.rel
-    source_path = doc.source_path
-    if object_id_at_ref(code_repository_root, official_ref, source_path) is None:
-        return "not-landed", "reject", "source path is not present on official code ref"
-    verified = verified_commit_of(branch_doc)
-    if verified is None:
-        return (
-            "unverifiable",
-            "review-required",
-            "branch doc has no resolvable lastVerifiedCommitHash; model re-review required",
-        )
-    verified_object = object_id_at_ref(code_repository_root, verified, source_path)
-    if verified_object is None:
-        return (
-            "unverifiable",
-            "review-required",
-            f"verification commit {verified[:12]} or its source object is not "
-            "resolvable in the code repository; model re-review required",
-        )
-    if verified_object != object_id_at_ref(code_repository_root, official_ref, source_path):
-        return (
-            "source-diverged",
-            "review-required",
-            "source content changed between the branch verification commit and the "
-            "official ref; model re-review required",
-        )
-    base_blob = blob_at_ref(target_memory, mem_base, f"onboarding/{rel}") if mem_base else None
-    target_text = target_file.read_text(encoding="utf-8") if target_file.exists() else None
-    if mem_base is None or base_blob != target_text:
-        return (
-            "target-memory-moved",
-            "review-required",
-            "target memory changed this doc independently since the memory "
-            "merge-base (or no merge-base is resolvable); model re-review required",
-        )
-    return (
-        "memory-only-reverification-valid",
-        "auto-carry",
-        "source content at the branch verification commit matches the official ref "
-        "and target memory has not changed this doc since the merge-base",
+def build_plan_for_request(request: CarryoverRequest) -> dict[str, Any]:
+    version = require_converted_formats(
+        request.source_memory, request.target_memory, "memory_carryover_plan"
     )
-
-
-def memory_only_doc_candidates(
-    refs: CarryoverRefs,
-    *,
-    existing: set[str],
-) -> list[CarryoverCandidate]:
-    """Candidates for onboarding docs changed only in branch memory.
-
-    Closeout can legitimately improve docs whose source path is outside the
-    code diff (e.g. re-verifying a pre-existing drift), which the diff-derived
-    candidate builders structurally cannot see. Auto-carry needs two proofs:
-    the source object at the branch doc's verification commit must match the
-    official ref, and target memory must not have changed the doc since the
-    memory merge-base — a parallel official change is always review-required.
-    """
-    target_memory = refs.target_memory
-    source_onboarding = refs.source_memory / "onboarding"
-    if not source_onboarding.is_dir():
-        return []
-    route_by_rel = {rel: route for route, rel in discover_route_overviews(source_onboarding)}
-    mem_base = memory_merge_base(target_memory, refs.source_memory)
-    candidates: list[CarryoverCandidate] = []
-    for branch_doc in sorted(source_onboarding.rglob("*.md")):
-        if not branch_doc.is_file():
-            continue
-        rel = branch_doc.relative_to(source_onboarding).as_posix()
-        if rel == ENTITY_CATALOG_REL:
-            continue
-        source_path = route_by_rel.get(rel, rel[: -len(".md")])
-        if source_path in existing:
-            continue
-        target_file = target_memory / "onboarding" / rel
-        if target_file.exists() and target_file.read_text(encoding="utf-8") == branch_doc.read_text(
-            encoding="utf-8"
-        ):
-            continue
-        evidence, decision, reason = _memory_only_evidence(
-            refs,
-            MemoryOnlyDoc(
-                branch_doc=branch_doc,
-                target_file=target_file,
-                rel=rel,
-                source_path=source_path,
-            ),
-            mem_base,
-        )
-        candidates.append(
-            CarryoverCandidate(
-                source_path=source_path,
-                branch_onboarding=branch_doc.as_posix(),
-                target_onboarding=target_file.as_posix(),
+    official = head_commit(request.code_repository_root, request.official_code_ref)
+    source = head_commit(request.code_repository_root, request.source_code_ref)
+    base = head_commit(request.code_repository_root, request.old_base)
+    official_changed = changed_paths(request.code_repository_root, base, official)
+    source_changed = changed_paths(request.code_repository_root, base, source)
+    code = open_code_tree(CodeTree(request.code_repository_root, official))
+    candidates, seen = [], set()
+    memory_base = memory_merge_base(request.target_memory, request.source_memory)
+    base_files = (
+        knowledge_tree_from_git(request.target_memory, memory_base).files if memory_base else None
+    )
+    with _record_context(request) as (context, index_error):
+        frame = _PlanFrame(request, code, context, index_error, base_files)
+        for path in sorted(source_changed):
+            relative = f"onboarding/{path}.md"
+            evidence, reason = evidence_for_path(
+                request.code_repository_root, base, official, source, path
+            )
+            if path not in official_changed:
+                evidence, reason = "not-landed", "source path did not change on official code ref"
+            decision = (
+                "auto-carry"
+                if evidence in PROVEN_EVIDENCE
+                else "review-required"
+                if evidence == "same-path-changed"
+                else "reject"
+            )
+            seed = dict(
+                source_path=path,
+                kind=FILE_SIDECAR_KIND,
                 evidence=evidence,
                 decision=decision,
                 reason=reason,
-                target_exists=target_file.exists(),
-                kind=MEMORY_ONLY_DOC_KIND,
             )
-        )
-    return candidates
-
-
-def entity_catalog_candidate(
-    *, target_memory: Path, source_memory: Path
-) -> CarryoverCandidate | None:
-    """Review-required candidate when the branch entity catalog differs.
-
-    The catalog is a single model-authored aggregate covering many entities,
-    so it is never auto-carried and never merged entry-by-entry; an identical
-    catalog yields no candidate because it has no per-doc verification
-    metadata to bump. Selected via the stable ``entity-catalog`` key.
-    """
-    branch_catalog = source_memory / "onboarding" / ENTITY_CATALOG_REL
-    if not branch_catalog.exists():
-        return None
-    target_catalog = target_memory / "onboarding" / ENTITY_CATALOG_REL
-    target_exists = target_catalog.exists()
-    if target_exists and target_catalog.read_text(encoding="utf-8") == branch_catalog.read_text(
-        encoding="utf-8"
-    ):
-        return None
-    return CarryoverCandidate(
-        source_path=ENTITY_CATALOG_KEY,
-        branch_onboarding=branch_catalog.as_posix(),
-        target_onboarding=target_catalog.as_posix(),
-        evidence="entity-catalog-differs",
-        decision="review-required",
-        reason=(
-            "entity catalog body differs from target; whole-file carry after "
-            "model review (fingerprints are validated against the official ref "
-            "on apply)"
-        ),
-        target_exists=target_exists,
-        kind=ENTITY_CATALOG_KIND,
-    )
-
-
-def build_plan_for_request(request: CarryoverRequest) -> dict[str, object]:
-    code_repository_root = request.code_repository_root.resolve()
-    target_memory = request.target_memory.resolve()
-    source_memory = request.source_memory.resolve()
-    official_head = head_commit(code_repository_root, request.official_code_ref)
-    source_head = head_commit(code_repository_root, request.source_code_ref)
-    old_base = head_commit(code_repository_root, request.old_base)
-    official_changed = changed_paths(code_repository_root, old_base, request.official_code_ref)
-    source_changed = changed_paths(code_repository_root, old_base, request.source_code_ref)
-    refs = CarryoverRefs(
-        code_repository_root=code_repository_root,
-        official_ref=request.official_code_ref,
-        source_ref=request.source_code_ref,
-        old_base=old_base,
-        target_memory=target_memory,
-        source_memory=source_memory,
-    )
-    candidates = [
-        candidate_for_path(refs, source_path, replace_existing=request.replace_existing)
-        for source_path in sorted(source_changed)
-        if source_path in official_changed
-    ]
-    absent_paths = sorted(
-        source_path for source_path in source_changed if source_path not in official_changed
-    )
-    for source_path in absent_paths:
-        if source_path in {candidate.source_path for candidate in candidates}:
-            continue
-        candidates.append(
-            CarryoverCandidate(
-                source_path=source_path,
-                branch_onboarding=onboarding_path(source_memory, source_path).as_posix(),
-                target_onboarding=onboarding_path(target_memory, source_path).as_posix(),
-                evidence="not-landed",
-                decision="reject",
-                reason="source path did not change on official code ref",
-                target_exists=onboarding_path(target_memory, source_path).exists(),
+            candidates.append(_candidate(frame, relative, seed))
+            seen.add(relative)
+        onboarding = request.source_memory / "onboarding"
+        for markdown in sorted(onboarding.rglob("*.md")):
+            relative = markdown.relative_to(request.source_memory).as_posix()
+            if relative in seen:
+                continue
+            key, kind, pair = document_selection(
+                request.source_memory,
+                request.target_memory,
+                relative,
+                source_changed & official_changed,
             )
-        )
-    candidates.extend(
-        overview_candidates(
-            target_memory=target_memory,
-            source_memory=source_memory,
-            landed_paths=sorted(source_changed & official_changed),
-        )
-    )
-    candidates.extend(
-        memory_only_doc_candidates(
-            refs, existing={candidate.source_path for candidate in candidates}
-        )
-    )
-    catalog_candidate = entity_catalog_candidate(
-        target_memory=target_memory, source_memory=source_memory
-    )
-    if catalog_candidate is not None:
-        candidates.append(catalog_candidate)
+            if kind in {MEMORY_ONLY_DOC_KIND, ENTITY_CATALOG_KIND} and pair.identical:
+                continue
+            decision = "auto-carry" if pair.identical else "review-required"
+            evidence = (
+                "route-covers-landed-paths"
+                if kind == ROUTE_OVERVIEW_KIND
+                else "entity-catalog-differs"
+                if kind == ENTITY_CATALOG_KIND
+                else "memory-only"
+            )
+            reason = (
+                "identical pair" if pair.identical else "whole document/sidecar review required"
+            )
+            seed = dict(
+                source_path=key, kind=kind, evidence=evidence, decision=decision, reason=reason
+            )
+            candidates.append(_candidate(frame, relative, seed))
     counts: dict[str, int] = {}
     for candidate in candidates:
-        counts[candidate.decision] = counts.get(candidate.decision, 0) + 1
-    return {
-        "state": "would-carryover",
-        "code_repository_name": request.code_repository_name,
-        "code_repository_root": code_repository_root.as_posix(),
-        "official_code_ref": request.official_code_ref,
-        "official_code_head": official_head,
-        "source_code_ref": request.source_code_ref,
-        "source_code_head": source_head,
-        "old_base": old_base,
-        "target_memory": target_memory.as_posix(),
-        "source_memory": source_memory.as_posix(),
-        "replace_existing": bool(request.replace_existing),
-        "counts": counts,
-        "candidates": [asdict(candidate) for candidate in candidates],
-    }
+        counts[candidate["decision"]] = counts.get(candidate["decision"], 0) + 1
+    return dict(
+        state="would-carryover",
+        code_repository_name=request.code_repository_name,
+        code_repository_root=str(request.code_repository_root),
+        official_code_ref=request.official_code_ref,
+        official_code_head=official,
+        source_code_ref=request.source_code_ref,
+        source_code_head=source,
+        old_base=base,
+        target_memory=str(request.target_memory),
+        source_memory=str(request.source_memory),
+        conversion=version,
+        replace_existing=request.replace_existing,
+        counts=counts,
+        candidates=candidates,
+        publication="The recovery leaf curator answers the worklist with its own rows; closeout commits the judged tree.",
+    )
 
 
-def build_plan(args: argparse.Namespace) -> dict[str, object]:
+def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     return build_plan_for_request(request_from_args(args))
 
 
-def metadata_row(text: str, field: str, value: str, *, code: bool = False) -> tuple[str, bool]:
-    rendered = f"`{value}`" if code else value
-    pattern = re.compile(rf"(\|\s*{re.escape(field)}\s*\|\s*)`?[^|`]*`?(\s*\|)")
-    updated, count = pattern.subn(rf"\g<1>{rendered}\g<2>", text, count=1)
-    return updated, count > 0
-
-
-def refresh_onboarding_metadata(path: Path, verified_commit: str, verified_date: str) -> None:
-    text = path.read_text(encoding="utf-8")
-    text, hash_found = metadata_row(text, "lastVerifiedCommitHash", verified_commit, code=True)
-    text, date_found = metadata_row(text, "lastVerifiedCommitDate", verified_date)
-    if not hash_found or not date_found:
-        raise RuntimeError(f"{path.as_posix()} is missing onboarding verification metadata")
-    path.write_text(text, encoding="utf-8")
-
-
 def selected_candidates(
-    plan: dict[str, object], include_review_required: set[str]
-) -> list[dict[str, object]]:
-    selected = []
-    candidates = plan["candidates"]
-    assert isinstance(candidates, list)
-    for candidate in candidates:
-        assert isinstance(candidate, dict)
-        if candidate["decision"] == "auto-carry" or (
+    plan: dict[str, Any], include_review_required: set[str]
+) -> list[dict[str, Any]]:
+    return [
+        candidate
+        for candidate in plan["candidates"]
+        if candidate["decision"] == "auto-carry"
+        or (
             candidate["decision"] == "review-required"
             and candidate["source_path"] in include_review_required
-        ):
-            selected.append(candidate)
-    return selected
-
-
-def _refresh_target_route_indexes(
-    request: CarryoverRequest,
-    official_head: str,
-    storage: StorageSettings,
-) -> dict[str, object]:
-    """Regenerate recovery-leaf route indexes after carrying onboarding.
-
-    ``overview.index.json`` files are derived artifacts: they are regenerated on
-    the target side, never copied from the source. ``build_route_indexes``
-    uses Git and configured path-rule authority. Regeneration only runs when
-    the code repository is a clean checkout of the official ref; otherwise the
-    skip is reported instead of indexing a different code state.
-    """
-    code_root = request.code_repository_root.resolve()
-    if head_commit(code_root, "HEAD") != official_head or has_changes(code_root):
-        return {
-            "state": "skipped",
-            "reason": "code repository is not a clean checkout of the official ref; "
-            "check out the official ref and rerun carryover, or regenerate via "
-            "route_index_refresh",
-        }
-    onboarding_root = request.target_memory.resolve() / "onboarding"
-    if not onboarding_root.is_dir():
-        return {
-            "state": "skipped",
-            "reason": "target memory has no onboarding directory",
-        }
-    result = build_route_indexes(
-        code_root=code_root,
-        onboarding_root=onboarding_root,
-        repository=request.code_repository_name,
-        storage=storage,
-        dry_run=False,
-    )
-    return {"state": "refreshed", **result.to_dict()}
-
-
-def _validate_entity_fingerprints(
-    code_repository_root: Path, official_ref: str, catalog: Path
-) -> dict[str, object]:
-    """Recompute every catalog fingerprint row against the official code ref.
-
-    Fingerprints are derived values: a carried catalog is validated against
-    the official ref instead of being trusted as copied. Mismatches are
-    reported, not blocking — the reviewer selected the carry, and the next
-    memory quality check keeps them visible.
-    """
-    mismatches: list[dict[str, str]] = []
-    errors: list[dict[str, str]] = []
-    rows = parse_entity_fingerprint_rows(catalog)
-    for row in rows:
-        if row.algorithm != GIT_BLOB_SET_ALGORITHM:
-            errors.append(
-                {"entity": row.entity, "reason": f"unsupported algorithm {row.algorithm!r}"}
-            )
-            continue
-        try:
-            computed = compute_git_blob_set_fingerprint(
-                code_repository_root, row.evidence_paths, ref=official_ref
-            )
-        except RuntimeError as error:
-            errors.append({"entity": row.entity, "reason": str(error)})
-            continue
-        if computed != row.fingerprint:
-            mismatches.append(
-                {"entity": row.entity, "recorded": row.fingerprint, "computed": computed}
-            )
-    state = "validated" if not mismatches and not errors else "mismatch"
-    return {"state": state, "rows": len(rows), "mismatches": mismatches, "errors": errors}
+        )
+    ]
 
 
 def _apply_carryover_for_request(
-    request: CarryoverRequest,
-    *,
-    authority: McpRuntimeConfig,
-    options: CarryoverApplyOptions,
-) -> dict[str, object]:
-    cleaned_note = options.intent_note.replace("\n", " ").strip()
-    if not cleaned_note:
+    request: CarryoverRequest, *, authority: McpRuntimeConfig, options: CarryoverApplyOptions
+) -> dict[str, Any]:
+    cleaned = options.intent_note.replace("\n", " ").strip()
+    if not cleaned:
         raise RuntimeError("apply requires an intent_note describing the requested carryover")
-    target_memory = request.target_memory.resolve()
+    require_converted_formats(
+        request.source_memory, request.target_memory, "memory_carryover_apply"
+    )
     configured = _require_carryover_authority(request, authority)
-    _require_legacy_format_target(request, configured)
     require_ordinary_repository_checkout(
         RepositoryCheckoutRequest(
             coordination_root=authority.coordination_root,
             repo_name=request.code_repository_name,
             code_repository=configured.path,
             memory_repository=configured.memory_root,
-            checkout=target_memory,
+            checkout=request.target_memory,
             side_name="memory",
             operation="memory_carryover_apply",
         )
     )
     plan = build_plan_for_request(request)
-    ensure_clean(target_memory, "target memory", *MEMORY_CONTENT_PATHS)
-    target_storage = required_target_storage(target_memory)
-    official_head = str(plan["official_code_head"])
-    official_date = commit_date(request.code_repository_root.resolve(), official_head)
-    included_review_required = set(options.include_review_required or [])
-    carried = []
-    entity_fingerprint_validation: dict[str, object] = {
-        "state": "skipped",
-        "reason": "entity catalog was not carried",
-    }
-    for candidate in selected_candidates(plan, included_review_required):
-        source = Path(str(candidate["branch_onboarding"]))
-        target = Path(str(candidate["target_onboarding"]))
-        if not source.exists():
-            raise RuntimeError(
-                f"selected candidate is missing source branch onboarding: {source.as_posix()}"
-            )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
-        if candidate["kind"] == ENTITY_CATALOG_KIND:
-            # The catalog has no per-doc verification metadata table; its
-            # integrity check is the fingerprint validation instead.
-            entity_fingerprint_validation = _validate_entity_fingerprints(
-                request.code_repository_root.resolve(),
-                request.official_code_ref,
-                target,
-            )
-        else:
-            refresh_onboarding_metadata(target, official_head, official_date)
-        carried.append(candidate)
-    route_index_refresh: dict[str, object] = {
-        "state": "skipped",
-        "reason": "no onboarding was carried over",
-    }
-    if carried:
-        route_index_refresh = _refresh_target_route_indexes(
-            request,
-            official_head,
-            target_storage,
-        )
-    if not carried or not has_changes(target_memory, *MEMORY_CONTENT_PATHS):
-        return {
-            **plan,
-            "state": "nothing-to-carryover",
-            "carried": carried,
-            "route_index_refresh": route_index_refresh,
-            "ledger_cache": refresh_memory_cache(
-                target_memory, repo_name=request.code_repository_name
-            ),
-        }
-    # The caller's message is committed verbatim, with the attribution appended at the commit
-    # site by the one renderer rather than by editing the string the caller supplied: carryover's
-    # commit message is a public argument, so its body may be several paragraphs and its own last
-    # paragraph may itself be ``Key: value`` lines. The cache derives the pair from this commit.
-    prepare_memory_cache(target_memory)
-    ensure_git_identity(target_memory)
-    memory_content_commit = commit_if_dirty(
-        target_memory,
-        render_memory_content_message(options.memory_commit_message, official_head),
-        exclude_paths=MEMORY_CONTENT_EXCLUDES,
+    storage = required_target_storage(request.target_memory)
+    included = set(options.include_review_required or [])
+    code = open_code_tree(CodeTree(request.code_repository_root, plan["official_code_head"]))
+    payloads, selected, skipped = {}, [], []
+    before, head = (
+        _Tree.read(request.target_memory),
+        knowledge_tree_from_git(request.target_memory, "HEAD"),
     )
-    return {
-        **plan,
-        "state": "carried-over",
-        "intent_note": cleaned_note,
-        "carried": carried,
-        "route_index_refresh": route_index_refresh,
-        "entity_fingerprint_validation": entity_fingerprint_validation,
-        "memory_content_commit": memory_content_commit,
-        "ledger_cache": refresh_memory_cache(target_memory, repo_name=request.code_repository_name),
-    }
-
-
-CONVERTED_TARGET = (
-    "memory_carryover_apply refuses a converted target: it copies legacy-format onboarding "
-    "Markdown and commits it with no format check and no knowledge validator, so on memory that "
-    "holds knowledge/layout.json it would commit the old format into converted memory (MIK-R24 "
-    "rule 9). A converted line is curated through the file writer (knowledge-ingest on the leaf's "
-    "memory worktree) until carryover is adapted to converted memory"
-)
-
-
-def _require_legacy_format_target(request: CarryoverRequest, configured: RepositoryScope) -> None:
-    """Carryover writes legacy-format memory only, and only on unconverted lines -- which every
-    route now refuses (MIK-R46 rule 1).
-
-    A converted target is refused, naming the file writer. An unconverted target is refused by
-    the cutover lock with the one ``legacy-format`` message naming the conversion, exactly as
-    the closeout that would land the carried memory refuses it.
-    """
-
-    target = request.target_memory.resolve()
-    if (target / LAYOUT_MARKER_PATH).is_file():
-        raise RuntimeError(CONVERTED_TARGET)
-    contract = load_contract(request.target_contract_path)
-    refusal = cutover_lock_refusal(
-        configured.memory_root,
-        operation="memory_carryover_apply",
-        line=f"{contract.leaf_id or contract.task_name} ({target.as_posix()})",
-    )
-    if refusal is not None:
-        raise RuntimeError(refusal)
+    changed = _changed_paths(request.target_memory)
+    with _record_context(request) as (context, error):
+        for candidate in selected_candidates(plan, included):
+            relative = (
+                Path(candidate["branch_onboarding"]).relative_to(request.source_memory).as_posix()
+            )
+            try:
+                unit = load_document_unit(request.source_memory, relative)
+                if context is None:
+                    raise ValueError(f"record index unavailable: {error}")
+                records = plan_record_dependencies(context, unit.document)
+                prepared = fresh_document_payloads(
+                    request.source_memory,
+                    relative,
+                    code,
+                    reviewed=candidate["source_path"] in included,
+                )
+                prepared.update(record_payloads(context, records))
+                conflicts = _conflicts(before, head, prepared, changed)
+                if conflicts:
+                    skipped.append(
+                        {**candidate, "decision": "target-edited", "target_edited_paths": conflicts}
+                    )
+                    continue
+                for path, data in prepared.items():
+                    if path in payloads and payloads[path] != data:
+                        raise ValueError(f"selected payloads disagree at {path}")
+                    payloads[path] = data
+                selected.append(candidate)
+            except (OSError, ValueError, RuntimeError) as error:
+                return {
+                    **plan,
+                    "state": "refused",
+                    "reason": str(error),
+                    "written_paths": [],
+                    "carried": [],
+                }
+    result = apply_converted(request, plan, selected, payloads, storage)
+    result.update(intent_note=cleaned, target_edited=skipped + result.get("target_edited", []))
+    return result
 
 
 def _require_carryover_authority(

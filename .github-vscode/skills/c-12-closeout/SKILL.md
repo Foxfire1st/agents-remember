@@ -396,12 +396,12 @@ call once the cause is gone, any number of times; each repeat judges the memory 
 then.
 
 Hook behavior belongs to every publication route: no landing publishes without the
-repository's own commit check (MIK-R152). The ordinary closeout and direct-landing
+repository's own commit check (MIK-R152). No publication route passes --no-verify.
+The ordinary closeout and direct-landing
 commits written through `publish_tree_commit` stage the exact tree and run the `pre-commit`
 hook Git would run for a commit in that worktree before the commit object is written; a
-failing check refuses the landing, gives the index back, and moves no ref. The prepared
-closeout runs the same hook through `git commit` itself on both legs; there is no
-`--no-verify` anywhere. A passed check is recorded on the commit as a `Commit-Check-Pass`
+failing check refuses the landing, gives the index back, and moves no ref. A passed
+check is recorded on the commit as a `Commit-Check-Pass`
 trailer, which the integration's master-line move reads. The mandatory invariant gate and
 knowledge validator remain the publication checks. A `reference-transaction` hook still
 runs when a branch moves through a Git ref transaction.

@@ -21,7 +21,6 @@ from agents_remember.observer.projection import (
     RouteCoverageNode,
     SetupProgressNode,
     SetupSummaryNode,
-    SidecarStaleNode,
     TaskDocNode,
     ToolReportNode,
     WorkspaceProjection,
@@ -30,7 +29,6 @@ from agents_remember.observer.reducer import (
     build_analytics,
     enclosure_actions,
     project_workspace,
-    staleness_histogram,
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
@@ -50,7 +48,6 @@ __all__ = [
     "RouteCoverageNode",
     "SetupProgressNode",
     "SetupSummaryNode",
-    "SidecarStaleNode",
     "TaskDocNode",
     "ToolReportNode",
     "Trust",
@@ -61,5 +58,4 @@ __all__ = [
     "now_iso",
     "observer_root",
     "project_workspace",
-    "staleness_histogram",
 ]

@@ -15,7 +15,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
@@ -34,10 +33,7 @@ from agents_remember.kernel.memory_cache import (
 from agents_remember.kernel.memory_init import DEFAULT_BRANCH_CONFIG_KEY
 from agents_remember.kernel.memory_ledger import LEDGER_RELATIVE_PATH
 from agents_remember.kernel.memory_mode import Topology, require_supported_topology
-from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
-    ACTIONABLE_CLASSIFICATIONS,
-    CLASSIFICATIONS,
     DriftSummaryPacket,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
@@ -62,7 +58,6 @@ from agents_remember.worktrees.modules.contract_reader import WorktreeContractRe
 from agents_remember.worktrees.modules.git import (
     _require_git_with_index,
     branch_commit,
-    commit_if_dirty,
     ensure_git_identity,
     has_changes,
     local_branch_ref,
@@ -139,8 +134,8 @@ def run_drift(
     pass an explicit path (or leave the default) and keep full behavior.
 
     The legacy classification is not run here for any tree: `run_drift_summary`
-    measures a converted tree from `converted_knowledge_check` and keeps today's
-    behavior for an unconverted one. The memory layer imports nothing from the
+    measures a converted tree from `converted_knowledge_check` and refuses
+    unconverted memory. The memory layer imports nothing from the
     application layer; the optional converted comparison base stays with the
     application callers that own a contract.
     """
@@ -160,14 +155,6 @@ def run_drift(
             raise RuntimeError("drift measurement produced no report")
         return summary, None
     return summary, Path(report)
-
-
-def drift_summary(rows: list[drift.DriftRow]) -> dict[str, int]:
-    return drift.counts(rows)
-
-
-def actionable_rows(rows: list[drift.DriftRow]) -> list[drift.DriftRow]:
-    return [row for row in rows if row.classification in drift.ACTIONABLE_CLASSIFICATIONS]
 
 
 def current_branch(repo: Path) -> str:
@@ -562,22 +549,8 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
         f"[adopt-{context.code_repository_name}-memory-baseline] Adopt external memory content",
         code_source_commit,
     )
-    if is_converted_memory(context.memory_root):
-        # The first baseline of a converted tree is validated before it is made:
-        # the adoption stages the content, validates the staged tree with no bases
-        # paired with the attributed code commit, and commits exactly that tree.
-        # Cache preparation runs inside, after the entry state is captured, so a
-        # refusal or an exception gives back the ignore line and the index.
-        memory_content_commit = _adopt_validated_converted_tree(
-            context, code_source_commit, message
-        )
-    else:
-        prepare_memory_cache(context.memory_root)
-        memory_content_commit = commit_if_dirty(
-            context.memory_root,
-            message,
-            exclude_paths=MEMORY_CONTENT_EXCLUDES,
-        )
+    # Validate the staged converted tree before publishing its attributed baseline.
+    memory_content_commit = _adopt_validated_converted_tree(context, code_source_commit, message)
     return {
         "state": "adopted-baseline",
         "memoryContentCommit": memory_content_commit,
@@ -611,52 +584,8 @@ class BaselineValidationRefused(RuntimeError):
     """The staged converted tree failed pre-commit validation; the index is already restored."""
 
 
-def _legacy_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
-    """The legacy classification counts from the summary's own serialized rows."""
-
-    return {
-        name: sum(1 for row in rows if row.get("classification") == name)
-        for name in CLASSIFICATIONS
-    }
-
-
-def _legacy_actionable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [row for row in rows if str(row.get("classification", "")) in ACTIONABLE_CLASSIFICATIONS]
-
-
-def base_payload(
-    context, summary: DriftSummaryPacket | list, report: Path | None
-) -> dict[str, object]:
-    ledger = ledger_status(context.memory_root)
-    if isinstance(summary, dict) and summary.get("basis") == CONVERTED_BASIS:
-        return _converted_base_payload(context, summary, report, ledger)
-    rows = [row for row in summary.get("rows", [])] if isinstance(summary, dict) else list(summary)
-    actionable = _legacy_actionable(rows)
-    state = "ready"
-    if ledger.get("state") == "derived" and ledger.get("lastMemoryContentCommit"):
-        state = "already-adopted"
-    elif (
-        ledger.get("state") == "unavailable"
-        and run_git(context.memory_root, ["rev-parse", "--verify", "HEAD"]).returncode == 0
-    ):
-        state = "unavailable"
-    elif actionable:
-        state = "blocked-drift"
-    return {
-        "state": state,
-        "code_repository_name": context.code_repository_name,
-        "topology": context.topology,
-        "code_repository_root": context.code_repository_root.as_posix(),
-        "memory_root": context.memory_root.as_posix(),
-        "onboarding_root": context.onboarding_root.as_posix(),
-        "ledger_path": context.ledger_path.as_posix() if context.ledger_path is not None else None,
-        **({"drift_report": report.as_posix()} if report is not None else {}),
-        "drift": {
-            "counts": _legacy_counts(rows),
-            "actionable": len(actionable),
-        },
-        "ledger": ledger,
-    }
+def base_payload(context, summary: DriftSummaryPacket, report: Path | None) -> dict[str, object]:
+    return _converted_base_payload(context, summary, report, ledger_status(context.memory_root))
 
 
 def _converted_base_payload(
@@ -841,34 +770,16 @@ def baseline_adopt(
             "memory Git history is unavailable; restore readable history before adoption"
         )
         return 2, payload
-    if summary.get("basis") == CONVERTED_BASIS:
-        return _baseline_adopt_converted(
-            context,
-            payload,
-            _ConvertedAdoptOptions(
-                accept_drift=accept_drift,
-                source_branch=source_branch,
-                work_branch=work_branch,
-                dry_run=dry_run,
-            ),
-        )
-    if _legacy_actionable([row for row in summary.get("rows", [])]) and not accept_drift:
-        payload["message"] = (
-            "actionable drift blocks adoption; refresh onboarding with the c-05-create-or-update-onboarding-files skill or rerun with --accept-drift"
-        )
-        return 2, payload
-    if dry_run:
-        payload["state"] = "would-adopt"
-    else:
-        resolved_source_branch = source_branch or current_branch(context.code_repository_root)
-        result = adopt_initial_baseline(
-            context, resolved_source_branch, work_branch or resolved_source_branch
-        )
-        payload["state"] = "adopted"
-        payload["bootstrap"] = result
-        payload["ledger"] = ledger_status(context.memory_root)
-    payload["accepted_drift"] = bool(accept_drift)
-    return 0, payload
+    return _baseline_adopt_converted(
+        context,
+        payload,
+        _ConvertedAdoptOptions(
+            accept_drift=accept_drift,
+            source_branch=source_branch,
+            work_branch=work_branch,
+            dry_run=dry_run,
+        ),
+    )
 
 
 @dataclass(frozen=True)

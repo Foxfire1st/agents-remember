@@ -55,11 +55,6 @@ MCP_SRC = REPOSITORY_ROOT / "mcp" / "src"
 if MCP_SRC.as_posix() not in sys.path:
     sys.path.insert(0, MCP_SRC.as_posix())
 
-from agents_remember.memory_quality.style.citations.source_index_state import (
-    MAX_SOURCE_BYTES,
-    MAX_SOURCE_FILE_BYTES,
-)
-
 
 def _load(module_name: str) -> ModuleType:
     """Load one flat harness module by path.
@@ -125,11 +120,6 @@ class FreshUserFixtureShapeTests(unittest.TestCase):
             vendored_tree=True,
         )
         measured = sizes(fixture.code_repo)
-        self.assertGreater(
-            measured["src/generated-blob.bin"],
-            MAX_SOURCE_FILE_BYTES,
-            "the fixture's whole point is a source file over the shipped per-file cap",
-        )
         self.assertEqual(measured["src/generated-blob.bin"], fresh_user_fixture.OVERSIZED_BYTES)
         self.assertIn("vendor/lib.py", measured)
         self.assertIn(".gitignore", measured)
@@ -159,13 +149,6 @@ class FreshUserFixtureShapeTests(unittest.TestCase):
         )
         measured = sizes(fixture.code_repo)
         self.assertNotIn("vendor/lib.py", measured)
-        total = sum(measured.values())
-        self.assertLessEqual(
-            max(measured.values(), default=0),
-            MAX_SOURCE_FILE_BYTES,
-            "the default-path fixture must stay inside the per-file cap",
-        )
-        self.assertLess(total, MAX_SOURCE_BYTES)
         self.assertEqual(fixture.spear_branch, "main")
 
     def test_the_fixture_owns_everything_under_its_own_run_root(self) -> None:

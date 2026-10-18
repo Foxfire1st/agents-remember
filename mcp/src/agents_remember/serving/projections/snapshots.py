@@ -1,10 +1,9 @@
-"""File-surface readers for the projection (data surfaces 1-3, 5, 6, 8, 10-12).
+"""File-surface readers for the projection (data surfaces 1-3, 5, 6, 8, 10, 12).
 
 3a reads the surfaces the *named* state tree needs: provider current-state
 (surface 1) and worktree enclosures (the contract, surface 6, plus the group
-layout, surface 5). 3b adds the analytical surfaces -- drift read from the
-persisted JSON snapshot (never re-classified here -- that is git-per-sidecar),
-git-free sidecar staleness (11), provider setup summaries (2) and progress (3),
+layout, surface 5). 3b adds the analytical surfaces -- converted drift counts read from the
+persisted JSON snapshot (never re-classified here), provider setup summaries (2) and progress (3),
 route-index coverage (10), the tool-report feed (12), and memory-ledger currency
 (8). Every reader reuses the producing subsystem's own parser rather than
 re-parsing.
@@ -53,7 +52,6 @@ from agents_remember.serving.projections.snapshots_impl._analytics import (
     read_route_coverage,
     read_setup_progress_nodes,
     read_setup_summaries,
-    read_sidecar_staleness,
     read_start_progress_entries,
     read_tool_reports,
 )
@@ -126,7 +124,6 @@ __all__ = [
     "read_route_coverage",
     "read_setup_progress_nodes",
     "read_setup_summaries",
-    "read_sidecar_staleness",
     "read_start_progress_entries",
     "read_task_document_body",
     "read_task_documents",

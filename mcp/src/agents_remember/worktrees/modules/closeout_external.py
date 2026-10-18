@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -40,23 +40,18 @@ from agents_remember.worktrees.knowledge_validation import PairedCode, memory_co
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
-    PublicationHooks,
     local_branch_ref,
     publish_tree_commit,
     require_ancestor,
     require_git,
     require_readable_commit,
-    stage_worktree_content,
     worktree_candidate_tree,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.modules.onboarding import (
-    contract_memory_verified_commit,
     refresh_entity_fingerprints_for_context,
-    refresh_onboarding_metadata,
     refresh_route_indexes_for_context,
-    refresh_route_overview_metadata_for_context,
 )
 from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
@@ -88,19 +83,12 @@ def external_closeout_commits(
                 code_commit=change.commit,
                 memory_commit=recovered.memoryContentCommit,
             )
-        converted = leaf_memory_converted(contract)
-        if not converted:
-            # MIK-R09 rule 6: unconverted memory in a repository that holds converted memory is never
-            # stamped or committed; it crosses through the crossing sync first.
+        if not leaf_memory_converted(contract):
             locked = leaf_cutover_refusal(contract, "the closeout")
             if locked is not None:
                 raise RuntimeError(locked)
         refresh = _refresh_external_memory(contract, args, change)
-        closing = None
-        if converted:
-            # MIK-R07 rule 7 / MIK-R09 rule 3: the memory commit that publishes the leaf closes its
-            # history file, creating it with no rows when the leaf wrote none.
-            closing = close_owner_history(contract.memory_worktree, _owner(contract))
+        closing = close_owner_history(contract.memory_worktree, _owner(contract))
         memory_commit, created = _commit_memory_content(
             contract,
             args,
@@ -476,10 +464,8 @@ def _commit_memory_content(
                 written = ignore.read_bytes() if ignore.is_file() else None
                 if written != unignored:
                     preparations.append(HistoryClosing(ignore, unignored, written))
-        judged = None
-        if closing is not None:
-            judged = _exact_memory_tree(contract, repository)
-            _refuse_ungated_memory(contract, code_commit, judged)
+        judged = _exact_memory_tree(contract, repository)
+        _refuse_ungated_memory(contract, code_commit, judged)
         # The gate can take a minute: the checkout is compared with what was admitted as soon as
         # it has answered, before anything more is prepared or an intent is recorded, and again
         # below on the very snapshot the publication is bound to.
@@ -489,8 +475,7 @@ def _commit_memory_content(
             assert admitted.head is not None
             return admitted.head, False
         prepare_memory_cache(repository)
-        if judged is not None:
-            _require_judged_tree(repository, judged)
+        _require_judged_tree(repository, judged)
         report_operation_progress(
             args, "memory-commit", current_command="commit verified memory content"
         )
@@ -499,20 +484,19 @@ def _commit_memory_content(
             leg="memory",
             repository=repository,
             expected_output_tree=judged,
-            use_current_candidate=judged is None,
+            use_current_candidate=False,
         )
         assert intent.before is not None
         require_admitted_tip(repository, admitted, snapshot=intent.before)
         # With a judged tree the commit is that tree object, not the working tree again: a file
         # written after the check above is not committed, does not refuse the closeout and stays
         # an uncommitted change. The publication stages, publishes and, on any refusal,
-        # gives the index back. Unconverted memory has no gate: it stages the worktree's content.
+        # gives the index back. Unconverted memory refuses before this publication.
         committed = publish_tree_commit(
             repository,
             effective_input.memory_content_message(code_commit),
             tree=judged,
             before=intent.before,
-            hooks=PublicationHooks(stage=_worktree_stager(repository)) if judged is None else None,
         )
     except BaseException as error:
         skipped = _restore_preparations(*preparations)
@@ -525,16 +509,6 @@ def _commit_memory_content(
         raise
     prove_git_commit(args, intent, repository=repository, commit=committed)
     return committed, True
-
-
-def _worktree_stager(repository: Path) -> Callable[[], str]:
-    """Stage the memory worktree's content (the ungated route) and name the tree staged."""
-
-    def stage() -> str:
-        stage_worktree_content(repository, exclude_paths=MEMORY_CONTENT_EXCLUDES)
-        return require_git(repository, ["write-tree"])
-
-    return stage
 
 
 def _restore_preparations(*preparations: HistoryClosing | None) -> list[str]:
@@ -586,22 +560,12 @@ def _refresh_external_memory(
     report_operation_progress(
         args, "memory-refresh", current_command="refresh onboarding and route metadata"
     )
-    refreshed_onboarding = refresh_onboarding_metadata(
-        contract,
-        change,
-    )
-    refreshed_route_overviews = refresh_route_overview_metadata_for_context(
-        context,
-        change,
-        memory_tree=contract.memory_worktree,
-        memory_verified_commit=contract_memory_verified_commit(contract),
-    )
     refreshed_entities = refresh_entity_fingerprints_for_context(context, change.changed_paths)
     route_index_refresh = refresh_route_indexes_for_context(context)
     return _ExternalMemoryRefresh(
-        refreshed_onboarding,
+        [],
         refreshed_entities,
-        refreshed_route_overviews,
+        [],
         route_index_refresh,
     )
 

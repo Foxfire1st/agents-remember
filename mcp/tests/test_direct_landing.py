@@ -591,8 +591,8 @@ class DirectLandingTests(unittest.TestCase):
         self.assertEqual(git(code, "rev-parse", "HEAD"), created)
         self.assertEqual(git(code, "rev-parse", f"{created}^{{tree}}"), preview["candidateTree"])
         self.assertEqual(
-            git(code, "show", "-s", "--format=%s", created),
-            "direct work",
+            git(code, "show", "-s", "--format=%B", created),
+            f"direct work\nCommit-Check-Pass: tree={preview['candidateTree']} hook=none",
         )
         self.assertEqual(git(code, "status", "--porcelain"), "")
         memory_commit = landed["memoryContentCommit"]

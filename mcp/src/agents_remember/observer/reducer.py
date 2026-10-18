@@ -22,11 +22,7 @@ from agents_remember.observer.reducer_impl._attention import (
     build_attention_queue,
 )
 from agents_remember.observer.reducer_impl._metrics import (
-    _STALENESS_BUCKETS,
-    _staleness_bucket,
-    _stalest,
     build_analytics,
-    staleness_histogram,
 )
 from agents_remember.observer.reducer_impl._processes import (
     _DECISIVE_SETUP_EDGE_STATES,
@@ -109,7 +105,6 @@ def project_workspace(
         activeWorktreeGroups=sorted(structure.active_worktree_groups),
         closeoutQueues=given.closeout_queues,
         metrics=Metrics(
-            stalenessHistogram=staleness_histogram(given.sidecar_staleness),
             ignoredHostAgents=given.host_activity.ignored_agents,
         ),
         analytics=analytics,
@@ -164,7 +159,6 @@ __all__ = [
     "_SETUP_DONE",
     "_SETUP_FAILED",
     "_SEVERITY_RANK",
-    "_STALENESS_BUCKETS",
     "_START_PHASE",
     "AnalyticalInputs",
     "WorkspaceStructure",
@@ -196,8 +190,6 @@ __all__ = [
     "_setup_attention",
     "_setup_facts",
     "_source_files",
-    "_staleness_bucket",
-    "_stalest",
     "_start_attention",
     "_start_process_node",
     "_str_list",
@@ -207,5 +199,4 @@ __all__ = [
     "build_engine_processes",
     "enclosure_actions",
     "project_workspace",
-    "staleness_histogram",
 ]

@@ -75,7 +75,6 @@ from agents_remember.worktrees.modules.onboarding import (
     entity_fingerprint_refresh_plan,
     onboarding_refresh_plan,
     route_index_refresh_plan_for_context,
-    route_overview_metadata_refresh_plan,
 )
 from agents_remember.worktrees.modules.state_refusals import closeout_queue_refusal
 from agents_remember.worktrees.queue.closeout_preview import (
@@ -249,14 +248,10 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
             "unsupported": [],
         }
     )
-    route_overview_refresh: RouteOverviewRefreshPlan = (
-        route_overview_metadata_refresh_plan(contract, changed_paths)
-        if external_leaf
-        else {
-            "required": [],
-            "missing_metadata": [],
-        }
-    )
+    route_overview_refresh: RouteOverviewRefreshPlan = {
+        "required": [],
+        "missing_metadata": [],
+    }
     route_index_refresh: dict[str, Any] = (
         route_index_refresh_plan_for_context(_closeout_contract_context(contract))
         if external_leaf

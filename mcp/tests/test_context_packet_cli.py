@@ -20,9 +20,6 @@ from unittest.mock import patch
 from agents_remember.application.context_packet import run_drift_summary as _run_drift_summary
 from agents_remember.cli.context_packet import main
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
-from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
-    summarize_rows,
-)
 
 
 def _init_repo(path: Path) -> None:
@@ -103,17 +100,3 @@ class ContextPacketCliTests(unittest.TestCase):
             # And the delivered packet obeys it: at most three actionable rows.
             drift = packet.get("drift") or {}
             self.assertLessEqual(len(drift.get("actionableSample") or []), 3)
-
-    def test_drift_actionable_sample_obeys_detail_limit(self) -> None:
-        # Pure boundary control: five actionable rows capped at three, counts intact.
-        rows = [
-            {"classification": "drifted", "source_file": f"s{i}", "onboarding_file": f"o{i}"}
-            for i in range(5)
-        ] + [
-            {"classification": "clean", "source_file": "s5", "onboarding_file": "o5"},
-            {"classification": "clean", "source_file": "s6", "onboarding_file": "o6"},
-        ]
-        packet = summarize_rows(rows, report_path="r", detail_limit=3)
-        self.assertEqual(packet.get("count"), 7)
-        self.assertEqual(packet.get("actionableCount"), 5)
-        self.assertEqual(len(packet.get("actionableSample") or []), 3)

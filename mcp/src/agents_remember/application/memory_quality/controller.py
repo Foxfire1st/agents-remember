@@ -101,7 +101,6 @@ from agents_remember.worktrees.cutover_lock import cutover_lock_refusal
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     ValidatedCuratorCoherence,
     all_assessment_subject_ids,
-    curator_coherence_no_impact,
     curator_coherence_paths,
     curator_coherence_subject_assessment_state,
     require_current_curator_coherence,
@@ -111,12 +110,9 @@ from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding import (
     IdenticalChangesUnreadable,
     OnboardingTraceInputs,
-    contract_memory_verified_commit,
     identical_changes_from_run,
     onboarding_trace_gate_for_context,
-    validate_memory_refresh_attestations,
 )
-from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
 from agents_remember.worktrees.modules.onboarding_trace import CHECK_NAME, INCOMPLETE_CODE
 
 _CAPACITY_GUIDANCE = (
@@ -514,10 +510,6 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
             code_repository_root=quality_code_root,
             context=quality_context,
             detail_limit=execution.detail_limit,
-            unstamped_code_commit=(
-                None if scope.prepared_code_view is not None else scope.unstamped_code_commit
-            ),
-            retained_code_history_commits=scope.prepared_code_history_commits,
             report_path=(scope.curator_report_path if execution.publish_curator_report else None),
             include_rows=execution.publish_curator_report,
             write_report=not execution.publish_curator_report,
@@ -758,23 +750,17 @@ def _attach_curator_checklist(
         current_working_paths = _current_working_code_paths(
             scope, prepared.census.scope.working_paths
         )
-        accepted_no_impact = frozenset()
-        accepted_route_no_impact = frozenset()
         try:
             coherence = require_current_curator_coherence(scope.contract)
         except CuratorCoherenceError:
             pass
         else:
-            no_impact = curator_coherence_no_impact(coherence)
-            accepted_no_impact = no_impact.content_sources
-            accepted_route_no_impact = no_impact.source_routes
             knowledge_review = curator_knowledge_review_summaries(coherence)
         gate_findings, gate_report_only = _onboarding_refresh_gate(
             scope,
             _OnboardingGateInputs(
-                changed=(changed_paths, _gate_changed_paths(prepared.worklist, changed_paths)),
+                traced_paths=_gate_changed_paths(prepared.worklist, changed_paths),
                 working_paths=current_working_paths,
-                no_impact=(accepted_no_impact, accepted_route_no_impact),
                 worklist=prepared.worklist,
             ),
             response,
@@ -947,16 +933,14 @@ def _worklist_identical_changes(
 
 @dataclass(frozen=True)
 class _OnboardingGateInputs:
-    """What one run hands its onboarding gate: its paths, its census flags, its worklist run.
+    """What one run hands its onboarding gate: its paths and its worklist run.
 
-    ``changed`` is the census's changed paths (the Update History gate's) and the gate's own
-    (MIK-R30's); ``worklist`` is the run's own document, whose ``identicalChanges`` the gate groups
-    identical copies by (MIK-R177).
+    ``traced_paths`` is the gate's own changed set (MIK-R30's); ``worklist`` is the run's own
+    document, whose ``identicalChanges`` the gate groups identical copies by (MIK-R177).
     """
 
-    changed: tuple[list[str], list[str]]
+    traced_paths: list[str]
     working_paths: list[str]
-    no_impact: tuple[frozenset[str], frozenset[str]]
     worklist: tuple[dict[str, Any], str | None] | None
 
 
@@ -969,13 +953,13 @@ def _onboarding_refresh_gate(
 
     A converted tree (K_B or K_C holds the layout marker) runs MIK-R30's history-file gate: one
     repair finding per missing trace, unnecessary rows report-only, and ``onboardingTrace`` on the
-    response. An unconverted tree runs today's Update History gate, unchanged.
+    response. Missing converted sides are incomplete; unconverted public inputs refuse upstream.
     """
 
     contract = scope.contract
     assert contract is not None
-    changed_paths, traced_paths = inputs.changed
-    working_paths, no_impact, worklist = inputs.working_paths, inputs.no_impact, inputs.worklist
+    traced_paths = inputs.traced_paths
+    working_paths, worklist = inputs.working_paths, inputs.worklist
     memory_tree = scope.onboarding_root.parent
     trace_sides = leaf_onboarding_trace_sides(contract, memory_tree=memory_tree)
     if trace_sides is not None:
@@ -1026,33 +1010,14 @@ def _onboarding_refresh_gate(
         )
         response["onboardingTrace"] = trace.brief()
         return list(findings), trace.report_only_findings()
-    verified = contract_memory_verified_commit(contract)
-    try:
-        validate_memory_refresh_attestations(
-            scope.quality_context,
-            changed_paths,
-            working_paths=working_paths,
-            body_gate=OnboardingBodyGateEvidence(
-                memory_tree=memory_tree,
-                memory_verified_commit=verified,
-                accepted_no_impact=no_impact[0],
-            ),
-            route_body_gate=OnboardingBodyGateEvidence(
-                memory_tree=memory_tree,
-                memory_verified_commit=verified,
-                accepted_no_impact=no_impact[1],
-            ),
-        )
-    except RuntimeError as error:
-        return [
-            {
-                "check": "memory-refresh-attestations",
-                "code": "memory-refresh-attestation-failed",
-                "path": "",
-                "message": str(error),
-            }
-        ], []
-    return [], []
+    return [
+        {
+            "check": CHECK_NAME,
+            "code": INCOMPLETE_CODE,
+            "path": "",
+            "message": "the onboarding trace gate has no converted memory sides",
+        }
+    ], []
 
 
 def _checklist_finding_sets(

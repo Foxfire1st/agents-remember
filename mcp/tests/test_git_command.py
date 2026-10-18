@@ -24,7 +24,6 @@ import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -37,11 +36,9 @@ from agents_remember.kernel.git_command import (
     GitRunnerOptions,
     admit_private_git_preparation,
     inspect_git_preparation,
-    preparation_command,
     read_git_blobs_bytes,
     read_git_commit_bytes,
     run_git,
-    run_git_preparation,
     run_git_with_index,
     shared_blob_reads,
 )
@@ -67,6 +64,7 @@ from agents_remember.worktrees.modules.git import (
     publish_tree_commit,
     worktree_candidate_tree,
 )
+from agents_remember.worktrees.modules.git_message import _cleaned_message
 from agents_remember.worktrees.modules.landing_commit_check import LandingCommitCheckRefusal
 from agents_remember_test_support.testing.git_command import _commit, _init
 
@@ -540,7 +538,7 @@ class PublishTreeCommitGuardTests(unittest.TestCase):
                         continue
                     stored += 1
                     expected = self._message(repo)
-                    cleaned = git_owner._cleaned_message(repo, message)
+                    cleaned = _cleaned_message(repo, message)
                     self.assertEqual(cleaned.encode(), expected, message)
                     if message is messages[0]:
                         publish_tree_commit(repo, message, tree=tree, before=_admitted(repo))
@@ -948,8 +946,33 @@ class PrivateGitPreparationTests(unittest.TestCase):
 
     def _materialize(self) -> PrivateGitPreparationCapability:
         capability = admit_private_git_preparation(self.binding, authorize=self.authorize)
-        self.assertEqual(run_git_preparation(capability, "create").returncode, 0)
-        self.assertEqual(run_git_preparation(capability, "materialize").returncode, 0)
+        # Real fixture setup, not the retired production command dispatcher.
+        self.assertEqual(
+            run_git(
+                self.repo,
+                [
+                    "worktree",
+                    "add",
+                    "--detach",
+                    "--no-checkout",
+                    str(self.binding.private_root),
+                    self.parent,
+                ],
+            ).returncode,
+            0,
+        )
+        self.assertEqual(
+            run_git(
+                self.binding.private_root,
+                [
+                    "read-tree",
+                    "--reset",
+                    "-u",
+                    self.binding.admitted_tree,
+                ],
+            ).returncode,
+            0,
+        )
         return capability
 
     def _unchanged_logical(self) -> None:
@@ -957,48 +980,11 @@ class PrivateGitPreparationTests(unittest.TestCase):
         self.assertEqual((self.common / "index").read_bytes(), self.before_index)
         self.assertEqual((self.repo / "source.txt").read_text(), "candidate\n")
 
-    def test_exact_private_commit_preserves_logical_state_and_normal_hook_policy(self) -> None:
-        log = self.common / "hook-invocations"
-        for hook in ("pre-commit", "commit-msg", "prepare-commit-msg", "post-commit"):
-            path = self.common / "hooks" / hook
-            path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{hook}' >> '{log}'\n", encoding="utf-8")
-            path.chmod(0o755)
-        for policy, expected in (
-            # MIK-R152 rule 7: the retired spelling stays loadable for journaled
-            # intents but never skips the hook; both policies run all four hooks.
-            (
-                "strict-code-no-verify",
-                ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"],
-            ),
-            ("ordinary", ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"]),
-        ):
-            with self.subTest(policy=policy):
-                self.binding = replace(
-                    self.binding, private_root=self.root / policy, hook_policy=policy
-                )
-                if log.exists():
-                    log.unlink()
-                capability = self._materialize()
-                command = preparation_command(self.binding, "commit")
-                with patch.object(subprocess, "run", wraps=subprocess.run) as spawned:
-                    self.assertEqual(run_git_preparation(capability, "commit").returncode, 0)
-                self.assertIn(list(command.argv), [call.args[0] for call in spawned.call_args_list])
-                self.assertEqual(command.cwd, self.binding.private_root)
-                observed = inspect_git_preparation(capability)
-                self.assertEqual(observed.state, "committed")
-                self.assertEqual(observed.tree, self.binding.admitted_tree)
-                self.assertEqual(observed.parents, (self.parent,))
-                self.assertIsNotNone(observed.raw_commit)
-                self.assertEqual(log.read_text().splitlines(), expected)
-                with self.assertRaisesRegex(GitPreparationError, "not admitted from committed"):
-                    run_git_preparation(capability, "commit")
-                self.assertEqual(log.read_text().splitlines(), expected)
-                self._unchanged_logical()
-        self.assertGreater(len(self.authorizations), 12)
-
     def test_raw_commit_readback_preserves_crlf_and_opaque_signature_header(self) -> None:
         capability = self._materialize()
-        self.assertEqual(run_git_preparation(capability, "commit").returncode, 0)
+        self.assertEqual(
+            run_git(self.binding.private_root, ["commit", "-m", self.binding.message]).returncode, 0
+        )
         original = inspect_git_preparation(capability)
         assert original.raw_commit is not None and original.head is not None
         headers = original.raw_commit.split(b"\n\n", 1)[0]
@@ -1030,10 +1016,10 @@ class PrivateGitPreparationTests(unittest.TestCase):
         capability = self._materialize()
         forged = PrivateGitPreparationCapability(self.binding, self.authorize, object())
         with self.assertRaisesRegex(GitPreparationError, "not admitted"):
-            run_git_preparation(forged, "commit")
+            inspect_git_preparation(forged)
         self.cancelled = True
         with self.assertRaisesRegex(RuntimeError, "cancelled"):
-            run_git_preparation(capability, "commit")
+            inspect_git_preparation(capability)
         self.assertEqual(
             run_git(self.binding.private_root, ["rev-parse", "HEAD"]).stdout.strip(), self.parent
         )
@@ -1046,13 +1032,13 @@ class PrivateGitPreparationTests(unittest.TestCase):
             run_git(private, ["update-index", "--assume-unchanged", "source.txt"]).returncode, 0
         )
         with self.assertRaisesRegex(GitPreparationError, "hidden source flags"):
-            run_git_preparation(capability, "commit")
+            inspect_git_preparation(capability)
         self.assertEqual(
             run_git(private, ["update-index", "--no-assume-unchanged", "source.txt"]).returncode, 0
         )
         (private / "source.txt").write_text("tampered!\n", encoding="utf-8")
         with self.assertRaisesRegex(GitPreparationError, "bytes differ"):
-            run_git_preparation(capability, "commit")
+            inspect_git_preparation(capability)
         self.assertEqual(run_git(private, ["rev-parse", "HEAD"]).stdout.strip(), self.parent)
         self._unchanged_logical()
 
@@ -1069,35 +1055,18 @@ class PrivateGitPreparationTests(unittest.TestCase):
         original_pointer = dot_git.read_bytes()
         dot_git.write_bytes((other / ".git").read_bytes())
         with self.assertRaisesRegex(GitPreparationError, "backlink changed"):
-            run_git_preparation(capability, "commit")
+            inspect_git_preparation(capability)
         dot_git.write_bytes(original_pointer)
         self.assertEqual(
             run_git(self.repo, ["commit", "-m", "foreign logical update"]).returncode, 0
         )
         moved = run_git(self.repo, ["rev-parse", "HEAD"]).stdout.strip()
         with self.assertRaisesRegex(GitPreparationError, "logical Git preparation binding changed"):
-            run_git_preparation(capability, "commit")
+            inspect_git_preparation(capability)
         self.assertEqual(run_git(self.repo, ["rev-parse", "HEAD"]).stdout.strip(), moved)
         self.assertEqual(
             run_git(self.binding.private_root, ["rev-parse", "HEAD"]).stdout.strip(), self.parent
         )
-
-    def test_failed_hook_returns_original_failure_and_does_not_retry(self) -> None:
-        self.binding = replace(self.binding, hook_policy="ordinary")
-        capability = self._materialize()
-        hook = self.common / "hooks" / "pre-commit"
-        log = self.common / "failed-hook-count"
-        hook.write_text(
-            f"#!/bin/sh\necho called >> '{log}'\necho original-refusal >&2\nexit 1\n",
-            encoding="utf-8",
-        )
-        hook.chmod(0o755)
-        result = run_git_preparation(capability, "commit")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("original-refusal", result.stderr)
-        self.assertEqual(log.read_text().splitlines(), ["called"])
-        self.assertEqual(inspect_git_preparation(capability).state, "materialized")
-        self._unchanged_logical()
 
 
 if __name__ == "__main__":

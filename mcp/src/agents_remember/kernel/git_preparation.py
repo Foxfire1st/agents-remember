@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Literal
 
-PreparationAction = Literal["create", "materialize", "commit"]
 PreparationState = Literal["absent", "created", "materialized", "committed"]
 _PREPARATION_AUTHORITY = object()
 

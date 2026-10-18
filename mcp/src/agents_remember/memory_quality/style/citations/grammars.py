@@ -119,8 +119,6 @@ SCRIPT_LEAVES = frozenset({"identifier", "shorthand_property_identifier_pattern"
 SCRIPT_DEFAULTED = frozenset({"assignment_pattern", "object_assignment_pattern"})
 SCRIPT_WRAPPERS = frozenset({"ambient_declaration", "export_statement"})
 
-Spans = dict[str, list[tuple[int, int]]]
-
 
 @dataclass(frozen=True)
 class Binding:
@@ -137,17 +135,6 @@ class Binding:
     span: tuple[int, int]
     declaration: int
     test_case: bool = False
-
-
-@dataclass(frozen=True)
-class CallLiteral:
-    """One direct quoted argument, its syntax identity, and its call's line extent."""
-
-    text: str
-    start: int
-    end: int
-    argument_start_byte: int
-    argument_end_byte: int
 
 
 def grammar_of(path: str) -> str | None:
@@ -204,34 +191,6 @@ def typescript_anchor_identifier(text: str) -> str | None:
     return None
 
 
-def call_argument_literals(path: str, lines: list[str]) -> tuple[CallLiteral, ...]:
-    """Every direct string argument and the call it belongs to, in document order."""
-    grammar = grammar_of(path)
-    if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT}:
-        return ()
-    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
-    found: list[CallLiteral] = []
-    for node in _walk(tree.root_node):
-        if node.type not in {"string", "template_string"} or node.parent is None:
-            continue
-        arguments = node.parent
-        call = arguments.parent
-        if arguments.type != "arguments" or call is None or call.type != "call_expression":
-            continue
-        text = "" if node.text is None else node.text.decode("utf-8", errors="replace")
-        start, end = _span(call)
-        found.append(
-            CallLiteral(
-                text=text,
-                start=start,
-                end=end,
-                argument_start_byte=node.start_byte,
-                argument_end_byte=node.end_byte,
-            )
-        )
-    return tuple(found)
-
-
 @cache
 def language(grammar: str) -> Language:
     """The loaded grammar, built once. A failure to load is fatal, never a fallback."""
@@ -245,22 +204,6 @@ def language(grammar: str) -> Language:
             f"citation check parses rather than guesses, and will not answer for a "
             f"language whose grammar is missing."
         ) from error
-
-
-def definitions(path: str, lines: list[str]) -> Spans:
-    """Every name ``path`` binds, and the line span of the construct that binds it.
-
-    A language with no grammar binds nothing, which drops the file to occurrence matching
-    -- the stated ceiling, not a parse failure. A construct CONTAINING a syntax error is
-    skipped while its file's sound constructs are kept, so a file written for another
-    dialect degrades to occurrence matching for the broken part alone.
-
-    The span is the WIDENED one, so a decorated definition's extent covers its decorator. A
-    caller that needs the declaration's own first line as well reads :func:`bindings`.
-    """
-    return {
-        name: [binding.span for binding in items] for name, items in bindings(path, lines).items()
-    }
 
 
 def bindings(path: str, lines: Sequence[str]) -> dict[str, list[Binding]]:

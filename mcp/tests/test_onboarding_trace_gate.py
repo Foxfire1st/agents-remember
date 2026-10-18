@@ -40,19 +40,12 @@ from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
 from agents_remember.memory_quality.reference_state import fix_references
-from agents_remember.memory_quality.style.update_history.history_order_fix import (
-    fix_onboarding_root,
-)
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.models.knowledge_files.history import HistoryFile
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
-from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.modules.onboarding import (
     OnboardingTraceInputs,
     onboarding_trace_gate_for_context,
-    refresh_onboarding_metadata_for_context,
-    refresh_route_overview_metadata_for_context,
-    validate_onboarding_traces_for_context,
 )
 from agents_remember.worktrees.modules.onboarding_trace import (
     ITEM_KIND,
@@ -250,9 +243,12 @@ def _worklist(leaf: Leaf) -> Any:
 
 
 def _identical_changes(leaf: Leaf) -> dict[str, list[str]]:
-    """The leaf's worklist run's identical-copy groups, as both gate entries read them (MIK-R177)."""
+    """The leaf's worklist run's identical-copy groups, as the gate reads them (MIK-R177).
 
-    return dict(_worklist(leaf)["identicalChanges"])
+    An incomplete run names no groups; the sides refuse before any group is read.
+    """
+
+    return dict(_worklist(leaf).get("identicalChanges") or {})
 
 
 def _trace_inputs(leaf: Leaf, changed: list[str], groups: dict[str, list[str]]) -> Any:
@@ -400,12 +396,10 @@ def test_a_missing_trace_is_one_named_repair_finding_and_the_closeout_refuses(le
     assert "no onboarding row answers onboarding:pkg/a.py" in card["message"]
     assert "knowledge/history/260928-MIK-L98.json" in card["message"]
     assert card["itemId"] == result.open_items[0].id
-    with pytest.raises(RuntimeError, match="requires an onboarding trace") as refused:
-        validate_onboarding_traces_for_context(
-            leaf.context(), [A], sides, _trace_inputs(leaf, [A], _identical_changes(leaf))
-        )
-    assert f"onboarding/{A}.md" in str(refused.value)
-    assert "onboarding/pkg/overview.md" in str(refused.value)
+    assert not result.ok
+    assert "requires an onboarding trace" in result.refusal()
+    assert f"onboarding/{A}.md" in result.refusal()
+    assert "onboarding/pkg/overview.md" in result.refusal()
 
 
 def test_the_writers_mechanical_anchor_update_is_not_a_trace(leaf: Leaf) -> None:
@@ -519,12 +513,11 @@ def test_mixed_formats_are_an_incomplete_side_never_a_vacuous_pass(leaf: Leaf) -
         contract = load_contract(leaf.contract())
         sides = leaf_onboarding_trace_sides(contract)
         assert sides is not None and reason in str(sides.incomplete)
-        with pytest.raises(RuntimeError, match=reason) as refusal:
-            # An incomplete run names no groups; the sides refuse before any group is read.
-            validate_onboarding_traces_for_context(
-                leaf.context(), [A], sides, _trace_inputs(leaf, [A], {})
-            )
-        assert ": :" not in str(refusal.value)
+        result, _findings = onboarding_trace_gate_for_context(
+            leaf.context(), [A], sides, _trace_inputs(leaf, [A], _identical_changes(leaf))
+        )
+        assert not result.ok and reason in result.refusal()
+        assert ": :" not in result.refusal()
         found = recompute_leaf_worklist(contract)
         assert found is not None and found[1] is not None
         persisted = json.loads(Path(found[1]).read_text(encoding="utf-8"))
@@ -688,22 +681,6 @@ def test_the_conversion_itself_counts_for_nothing_at_the_converting_leaf(tmp_pat
     assert onboarding_trace_sides(request) is None
 
 
-def test_converted_trees_get_no_verification_stamps_and_no_history_sort(leaf: Leaf) -> None:
-    change = VerifiedChange(
-        commit="c" * 40,
-        commit_date="2026-09-29T00:00:00+00:00",
-        changed_paths=[A],
-        working_paths=[A],
-    )
-    card = leaf.memory / f"onboarding/{A}.md"
-    before = card.read_bytes()
-    assert refresh_onboarding_metadata_for_context(leaf.context(), change) == []
-    assert refresh_route_overview_metadata_for_context(leaf.context(), change) == []
-    assert card.read_bytes() == before
-    fixed = fix_onboarding_root(leaf.memory / "onboarding")
-    assert fixed["status"] == "not-applicable-converted" and fixed["filesChecked"] == 0
-
-
 # --------------------------------------------------------------------------------------------------
 # Enforcement where the gate runs today: the curator's memory-quality run
 # --------------------------------------------------------------------------------------------------
@@ -775,7 +752,6 @@ def _run_controller(leaf: Leaf, changed: tuple[str, ...]) -> tuple[dict[str, Any
             "require_current_curator_coherence",
             side_effect=CuratorCoherenceError("absent", "none recorded"),
         ),
-        mock.patch.object(controller, "validate_memory_refresh_attestations", legacy),
         mock.patch.object(controller, "_without_proof", return_value=None),
         mock.patch.object(controller, "recompute_leaf_worklist", return_value=None),
         mock.patch.object(controller, "_attach_coherence_readiness"),

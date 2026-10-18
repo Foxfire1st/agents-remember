@@ -1,6 +1,6 @@
 """MIK-R110 rules 5-7: the packaging rows' cases derived through the real tool paths.
 
-``route_index_refresh``, ``drift_check``, ``citation_migrate``,
+``route_index_refresh``, ``drift_check``,
 ``memory_init``, ``memory_baseline_status``, ``memory_baseline_adopt``,
 ``memory_carryover_plan``, ``memory_carryover_apply``,
 ``knowledge_integrity_check``, and ``curator_coherence`` (status, prepare,
@@ -25,9 +25,6 @@ from unittest.mock import patch
 
 import pytest
 from agents_remember.application.memory_tools import (
-    CarryoverSelection,
-    CitationOperationScope,
-    citation_migrate_tool,
     drift_check_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
@@ -49,7 +46,6 @@ from agents_remember.mcp.tools.knowledge import (
 )
 from agents_remember.mcp.tools.memory import (
     _drift_answer,
-    _migrate_answer,
     _route_index_answer,
     compact_carryover_payload,
 )
@@ -70,7 +66,7 @@ from curator_coherence_test_support import (
 )
 from knowledge_index_test_support import commit_all, init_repository, write_review_tree
 from review_curator_fixture_support import build_recorded_fixture
-from test_memory_attribution_producers import _carryover_world
+from test_converted_carryover import _converted_world
 from test_worktree_support import git, init_repo, open_external_contract_fixture
 from tool_answer_l110_rows import (
     assert_answer_survives_the_guard,
@@ -93,7 +89,7 @@ _ROW_CASE_ROOT_PREFIX = "rowcase-ambient-width-fixed-for-row-bounds-"
 @contextlib.contextmanager
 def _fixed_width_case_root() -> Iterator[Path]:
     """A hermetic fixture root of authored, constant width under /tmp."""
-    root = Path(tempfile.mkdtemp(prefix=_ROW_CASE_ROOT_PREFIX, dir="/tmp"))
+    root = Path(tempfile.mkdtemp(prefix=_ROW_CASE_ROOT_PREFIX, dir=tempfile.gettempdir()))
     try:
         yield root
     finally:
@@ -290,71 +286,6 @@ class DriftProductionTests(unittest.TestCase):
             self.assertLessEqual(1500, 2 * measured)
 
 
-class MigrateProductionTests(unittest.TestCase):
-    def test_converted_and_declined_paths_derive_the_row_cases(self) -> None:
-        """A real migration converts legacy rows and declines the unresolvable.
-
-        MIK-R112 retired ``citation_migrate`` as a registered tool, so there
-        is no delivery path to survive; the row proof below carries the
-        projection (ten work orders, count, truncation) and its bound.
-        """
-
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            contract, configured, scoped = _scoped_pair(root)
-            package = contract.code_worktree / "pkg"
-            package.mkdir(parents=True, exist_ok=True)
-            (package / "real.py").write_text("def run():\n    return 1\n", encoding="utf-8")
-            onboarding = contract.memory_worktree / "onboarding"
-            onboarding.mkdir(parents=True, exist_ok=True)
-            (onboarding / "good.md").write_text(
-                "# Good\n\n"
-                "| Finding | Citations | Source Path |\n"
-                "| --- | --- | --- |\n"
-                "| Does things. | `run` (L1-L2) | [real.py](pkg/real.py) |\n",
-                encoding="utf-8",
-            )
-            with patch(
-                "agents_remember.worktrees.integration.configured_contract_authority.load_config",
-                return_value=configured,
-            ):
-                converted = citation_migrate_tool(
-                    scoped,
-                    repo_id=contract.repo_name,
-                    contract_path=contract.contract_path.as_posix(),
-                    dry_run=False,
-                    operation_scope=CitationOperationScope(),
-                )
-                for index in range(25):
-                    (onboarding / f"lost-{index:02d}.md").write_text(
-                        "# Lost\n\n"
-                        "| Finding | Citations | Source Path |\n"
-                        "| --- | --- | --- |\n"
-                        f"| Does things. | `run` (L1-L2) | [missing-{index:02d}.py](pkg/missing-{index:02d}.py) |\n",
-                        encoding="utf-8",
-                    )
-                declined = citation_migrate_tool(
-                    scoped,
-                    repo_id=contract.repo_name,
-                    contract_path=contract.contract_path.as_posix(),
-                    dry_run=False,
-                    operation_scope=CitationOperationScope(),
-                )
-        with self.subTest("ordinary"):
-            self.assertTrue(converted["ok"])
-            assert_production_answer(self, "citation_migrate", converted)
-        with self.subTest("largest"):
-            shaped = _migrate_answer(declined)
-            self.assertFalse(shaped["ok"])
-            orders = shaped["workOrders"]
-            self.assertEqual(orders["count"], 25)
-            self.assertEqual(len(orders["items"]), 10)
-            self.assertTrue(orders["truncated"])
-            measured = assert_production_answer(self, "citation_migrate", shaped)
-            self.assertLessEqual(measured, 1500)
-            self.assertLessEqual(1500, 2 * measured)
-
-
 class InitBaselineProductionTests(unittest.TestCase):
     def test_init_and_baseline_paths_derive_the_row_cases(self) -> None:
         """A real init scaffolds, status reads ready, adopt records the ledger."""
@@ -389,27 +320,14 @@ class CarryoverProductionTests(unittest.TestCase):
         """A real carryover plan and apply over the landed-branch world."""
 
         with _fixed_width_case_root() as root, _case_xdg(root):
-            fixture, contract, old_base, _official_head, source_memory = _carryover_world(root)
-            selection = CarryoverSelection(
-                repo_id=contract.repo_name,
-                contract_path=contract.contract_path.as_posix(),
-                source_memory=source_memory,
-                official_code_ref="official",
-                source_code_ref="source",
-                old_base=old_base,
-            )
+            fixture, _contract, selection = _converted_world(root)
             planned = memory_carryover_plan_tool(fixture.cfg, selection)
             planned_report = write_tool_report(
                 fixture.cfg.coordination_root, "memory_carryover_plan", planned, label="plan"
             )
             planned_answer = compact_carryover_payload(planned, planned_report.as_posix())
-            # MIK-R46 rule 1 removes the apply half of this test: memory_carryover_apply
-            # refuses unconverted memory with the one legacy-format message, and it refuses
-            # a converted target too (it copies legacy Markdown with no format check and no
-            # validator) -- pinned by test_carryover_apply_refuses_unconverted_memory_with_the_
-            # conversion_step and test_carryover_never_writes_converted_memory_and_takes_the_
-            # cutover_lock; what carryover does on converted memory is MIK-R56. Only the plan
-            # derives row cases here.
+            # MIK-R56's converted pair replaces the retired legacy-only plan fixture.
+            # Unconverted apply refusal and the cutover lock stay in their unchanged assertions.
         with self.subTest("plan"):
             measured = assert_production_answer(self, "memory_carryover_plan", planned_answer)
             self.assertLessEqual(500, 2 * measured)
@@ -482,71 +400,84 @@ class IntegrityProductionTests(unittest.TestCase):
 
 @pytest.mark.evidence_unit
 @pytest.mark.usefixtures("worktree_services")
-def test_coherence_paths_derive_the_row_cases(tmp_path: Path) -> None:
+def test_coherence_paths_derive_the_row_cases() -> None:
     """Real status, prepare, publish, and validate answers fit the coherence row."""
 
-    recorded = build_recorded_fixture(tmp_path)
-    kinds = ("source-change", "new-card", "removed-anchor")
-    candidates = [
-        {
-            "sourceFile": f"pkg/candidate-{index:04d}.py",
-            "onboardingFile": f"onboarding/pkg/candidate-{index:04d}.py.md",
-            "classification": kinds[index % len(kinds)],
-        }
-        for index in range(40)
-    ]
-    write_curator_evidence(
-        recorded.contract, caller_ref=recorded.sprint, source_candidates=candidates
-    )
-    prepared = curator_coherence_action(
-        recorded.contract,
-        CuratorCoherenceRequest(
-            action="prepare", contract_path=recorded.contract.contract_path.as_posix()
-        ),
-    )
-    assert_production_answer(None, "curator_coherence", prepared)
-    assert_answer_survives_the_guard("curator_coherence", prepared, prepared)
+    parent = Path(tempfile.gettempdir())
+    # Author the actual fixture width, not answer padding or an ambient TMPDIR-dependent floor.
+    stem = "coherence-row-cases-converted-memory-publication-evidence-"
+    padding = max(0, 160 - len(os.fsencode(parent)) - 1 - len(stem) - 8)
+    root = Path(tempfile.mkdtemp(prefix=stem + "x" * padding, dir=parent))
+    try:
+        with (
+            _case_xdg(root),
+        ):
+            recorded = build_recorded_fixture(root)
+            kinds = ("source-change", "new-card", "removed-anchor")
+            candidates = [
+                {
+                    "sourceFile": f"pkg/candidate-{index:04d}.py",
+                    "onboardingFile": f"onboarding/pkg/candidate-{index:04d}.py.md",
+                    "classification": kinds[index % len(kinds)],
+                }
+                for index in range(40)
+            ]
+            write_curator_evidence(
+                recorded.contract, caller_ref=recorded.sprint, source_candidates=candidates
+            )
+            prepared = curator_coherence_action(
+                recorded.contract,
+                CuratorCoherenceRequest(
+                    action="prepare", contract_path=recorded.contract.contract_path.as_posix()
+                ),
+            )
+            assert_production_answer(None, "curator_coherence", prepared)
+            assert_answer_survives_the_guard("curator_coherence", prepared, prepared)
 
-    evidence = recorded.contract.task_root / "evidence.md"
-    evidence.write_text("# fixture evidence\n\nthe record this judgment cites\n", encoding="utf-8")
-    judgments = [
-        CuratorCoherenceJudgment(
-            sourceFile=candidate["sourceFile"],
-            onboardingFile=candidate["onboardingFile"],
-            classification=candidate["classification"],
-            disposition="reconciled",
-            rationale="The fixture candidate has one explicit reconciliation judgment.",
-            evidenceRef="task:evidence.md",
-        )
-        for candidate in candidates
-    ]
-    published = curator_coherence_action(
-        recorded.contract,
-        CuratorCoherenceRequest(
-            action="publish",
-            contract_path=recorded.contract.contract_path.as_posix(),
-            semantic_requirement_revision="MIK-R110@v1",
-            delivery_attempt="L110-A001",
-            judgments=judgments,
-            caller=DeclaredCaller(role="architect", task_document_ref=recorded.sprint),
-            **prepared_publish_inputs(prepared),
-        ),
-    )
-    measured = assert_production_answer(None, "curator_coherence", published)
-    assert 2 * measured >= 850, f"coherence bound slack: {measured}"
-    assert_answer_survives_the_guard("curator_coherence", published, published)
+            evidence = recorded.contract.task_root / "evidence.md"
+            evidence.write_text(
+                "# fixture evidence\n\nthe record this judgment cites\n", encoding="utf-8"
+            )
+            judgments = [
+                CuratorCoherenceJudgment(
+                    sourceFile=candidate["sourceFile"],
+                    onboardingFile=candidate["onboardingFile"],
+                    classification=candidate["classification"],
+                    disposition="reconciled",
+                    rationale="The fixture candidate has one explicit reconciliation judgment.",
+                    evidenceRef="task:evidence.md",
+                )
+                for candidate in candidates
+            ]
+            published = curator_coherence_action(
+                recorded.contract,
+                CuratorCoherenceRequest(
+                    action="publish",
+                    contract_path=recorded.contract.contract_path.as_posix(),
+                    semantic_requirement_revision="MIK-R110@v1",
+                    delivery_attempt="L110-A001",
+                    judgments=judgments,
+                    caller=DeclaredCaller(role="architect", task_document_ref=recorded.sprint),
+                    **prepared_publish_inputs(prepared),
+                ),
+            )
+            measured = assert_production_answer(None, "curator_coherence", published)
+            assert 2 * measured >= 850, f"coherence bound slack: {measured}"
+            assert_answer_survives_the_guard("curator_coherence", published, published)
 
-    status = curator_coherence_action(
-        recorded.contract,
-        CuratorCoherenceRequest(
-            action="status", contract_path=recorded.contract.contract_path.as_posix()
-        ),
-    )
-    assert_production_answer(None, "curator_coherence", status)
-    validated = curator_coherence_action(
-        recorded.contract,
-        CuratorCoherenceRequest(
-            action="validate", contract_path=recorded.contract.contract_path.as_posix()
-        ),
-    )
-    assert_production_answer(None, "curator_coherence", validated)
+            status = curator_coherence_action(
+                recorded.contract,
+                CuratorCoherenceRequest(
+                    action="status", contract_path=recorded.contract.contract_path.as_posix()
+                ),
+            )
+            assert_production_answer(None, "curator_coherence", status)
+            validated = curator_coherence_action(
+                recorded.contract,
+                CuratorCoherenceRequest(
+                    action="validate", contract_path=recorded.contract.contract_path.as_posix()
+                ),
+            )
+            assert_production_answer(None, "curator_coherence", validated)
+    finally:
+        shutil.rmtree(root)

@@ -132,16 +132,13 @@ one call: pass `documents` with every onboarding-relative file, or `document` fo
 file (a list of one). A call that names both is refused, and so is an empty list; a
 call that names more documents than one leaf may hold changed files with cards is
 refused before anything is read. A named document that does not exist is a refusal
-of that document and does not stop the others. Pass `expected_snapshot` to assert a
-previously built immutable source generation. `exclude`
-adds caller-supplied, code-root-relative path globs for THIS call only, narrowing the
-acquisition beyond the register every call already honours: the memory layer's
-settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore.
+of that document and does not stop the others. Old-format memory is refused:
+convert it with knowledge-convert or the crossing sync before repair.
 The answer is a status -- whether the step went well, with the counts (rewritten,
 stale, unreadable, refused) -- and the whole result with every list is in the log's
 detail file. On converted memory it authors the cards' citation rows into sidecar
-references and re-records moved anchors; a document then needs no expected_snapshot
-and scopes the run to those cards.
+references and re-records moved anchors; document selection scopes the run to those
+cards.
 
 
 ## `context_packet`

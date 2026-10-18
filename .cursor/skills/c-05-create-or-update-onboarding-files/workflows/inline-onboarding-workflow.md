@@ -2,7 +2,7 @@
 
 Use this workflow when file-level onboarding is stored inline inside the source file rather than as a mirrored markdown file.
 
-The semantic content still comes from `file-level-onboarding-template.md`. This workflow only adds storage-specific rules for syntax, placement, digesting, and fallback behavior.
+The semantic content follows the converted-card workflow. This workflow only adds storage-specific rules for syntax, placement, digesting, and fallback behavior.
 
 ## Goal
 

@@ -49,7 +49,6 @@ from agents_remember.worktrees.scheduling_mode import (
     commanded_sprint_masters,
     effective_execution_nature,
 )
-from agents_remember.worktrees.source_lineage import require_current_source_lineage
 from agents_remember.worktrees.task_resolver import (
     series_contract_path,
     slugify,
@@ -342,21 +341,6 @@ def require_parent_series(
         authority.sprint_branch,
     )
     return series
-
-
-def atomic_leaf_parent(contract: WorktreeContract, *, operation: str) -> WorktreeContract | None:
-    """Resolve the exact atomic owner before deferring leaf-wide acceptance."""
-    if contract.kind != "leaf":
-        return None
-    topology = TaskDocumentTopology(contract.coordination_root)
-    owner = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
-    if topology.resolve(owner).document.kind != "master":
-        return None
-    require_ordinary_worktree(contract, operation=operation)
-    parent = require_parent_series(contract, operation=operation)
-    if parent is not None:
-        require_current_source_lineage(contract, operation=operation)
-    return parent
 
 
 def require_sync_worktree(contract: WorktreeContract) -> None:

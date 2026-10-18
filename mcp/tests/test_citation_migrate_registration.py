@@ -1,15 +1,8 @@
-"""`citation_migrate` lives on as an application operation and CLI subcommand.
-
-Recorded defect (S0 of `260915-CAPS-L21`): ``application/memory_tools.citation_migrate_tool``
-existed with exactly one caller, the ``memory-citations --migrate`` CLI subcommand, and no MCP
-registration. The repair registered it as an MCP tool; MIK-R112 removes the tool again while
-the function stays until MIK-R65 removes the legacy path, so the wiring pin below now covers
-``citation_fix`` (which stays a tool) and the application-level migration reachability that
-the CLI still needs.
-"""
+"""Retired citation migration stays absent; converted fixer wiring stays intact."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import sys
 import tempfile
@@ -20,10 +13,8 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.application.memory_tools import (
-    CitationOperationScope,
-    citation_migrate_tool,
-)
+from agents_remember.application import memory_tools
+from agents_remember.cli import memory_citations
 from agents_remember.errors import AuthorityError, ConfiguredContractAuthorityError
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
@@ -31,6 +22,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.mcp.registration.memory import register_memory_tools
 from agents_remember.mcp.tools import PUBLIC_TOOLS, citation_fix_payload
+from agents_remember.memory_quality import check, converted_check
 from agents_remember.models.tools.tool_registry import (
     TOOL_RESPONSE_MODELS,
 )
@@ -58,7 +50,7 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
     """The tool is gone; the sibling wiring pin stays."""
 
     def test_the_tool_is_not_registered_advertised_or_modelled(self) -> None:
-        """MIK-R112 removed the `citation_migrate` tool; the function stays till MIK-R65."""
+        """MIK-R112 removed the tool; MIK-R65 also removes its legacy application path."""
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             config = _config(tmp, code_root=tmp / "code", memory_root=tmp / "memory")
@@ -70,6 +62,54 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
         self.assertNotIn("citation_migrate", names)
         self.assertNotIn("citation_migrate", PUBLIC_TOOLS)
         self.assertNotIn("citation_migrate", TOOL_RESPONSE_MODELS)
+        self.assertFalse(hasattr(memory_tools, "citation_migrate_tool"))
+        self.assertFalse(hasattr(memory_tools, "citation_source_index_build_tool"))
+        self.assertFalse(hasattr(converted_check, "LEGACY_FORMAT_CHECKS"))
+        self.assertFalse(hasattr(converted_check, "not_applicable_on_converted"))
+        retired = (
+            "changed_lines.py",
+            "update_history",
+            "citations/candidate/git_source.py",
+            "citations/claim_change_router.py",
+            "citations/claim_reopen.py",
+            "citations/deterministic_projection.py",
+            "citations/documents/transaction.py",
+            "citations/drafts.py",
+            "citations/editing.py",
+            "citations/exclusion_register.py",
+            "citations/citation_index_settings.py",
+            "citations/fixer.py",
+            "citations/migration.py",
+            "citations/old_form.py",
+            "citations/prose.py",
+            "citations/provenance.py",
+            "citations/range_resolution.py",
+            "citations/repair.py",
+            "citations/resolution.py",
+            "citations/source_index.py",
+            "citations/source_index_database.py",
+            "citations/source_index_state.py",
+            "citations/structures.py",
+            "citations/symbol_index.py",
+            "citations/work_order.py",
+        )
+        style = MCP_SRC / "agents_remember/memory_quality/style"
+        for relative in retired:
+            if relative == "update_history":
+                self.assertEqual(list((style / relative).rglob("*.py")), [], relative)
+            else:
+                self.assertFalse((style / relative).exists(), relative)
+        self.assertEqual(len(check.STYLE_CHECKS), 3)
+        self.assertTrue(all("citations" not in name for name in check.AVAILABLE_CHECKS))
+        schema = next(
+            tool for tool in asyncio.run(server.list_tools()) if tool.name == "citation_fix"
+        )
+        self.assertNotIn("expected_snapshot", schema.inputSchema["properties"])
+        self.assertNotIn("exclude", schema.inputSchema["properties"])
+        parser = argparse.ArgumentParser()
+        memory_citations.add_arguments(parser)
+        options = {option for action in parser._actions for option in action.option_strings}
+        self.assertFalse({"--build-index", "--expected-snapshot", "--exclude"} & options)
 
     def test_citation_tools_name_a_configured_contract_authority_refusal(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -118,59 +158,6 @@ class CitationMigrateRegistrationTests(unittest.TestCase):
                             dry_run=True,
                         )
                     self.assertIs(raised.exception, error)
-
-
-class CitationMigrateReachesTheMigrationTests(unittest.TestCase):
-    """One real call through the tool reaches ``migration.migrate_onboarding_root``."""
-
-    def test_the_tool_invokes_the_migration_over_the_leaf_memory_onboarding_root(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            tmp = Path(raw).resolve()
-            coordination = tmp / "coord"
-            memory_worktree = coordination / "worktrees" / "memory"
-            code_worktree = coordination / "worktrees" / "code"
-            (memory_worktree / "onboarding").mkdir(parents=True)
-            code_worktree.mkdir(parents=True)
-            contract_path = coordination / "tasks" / "enclosures" / "leaf" / "series-contract.md"
-            contract_path.parent.mkdir(parents=True)
-            contract_path.write_text("placeholder", encoding="utf-8")
-            config = _config(tmp, code_root=code_worktree, memory_root=memory_worktree)
-
-            scope = mock.Mock()
-            scope.repo_id = "agents-remember"
-            scope.onboarding_root = memory_worktree / "onboarding"
-            scope.code_root = code_worktree
-            scope.cache_authority = None
-
-            with (
-                mock.patch(
-                    "agents_remember.application.memory_tools._leaf_memory_writer_scope",
-                    return_value=scope,
-                ) as guarded,
-                mock.patch(
-                    "agents_remember.application.memory_tools.migration.migrate_onboarding_root",
-                    return_value={"operation": "citation_migrate", "declinedCount": 0},
-                ) as migration,
-            ):
-                result = citation_migrate_tool(
-                    config,
-                    repo_id="agents-remember",
-                    contract_path=str(contract_path),
-                    dry_run=False,
-                    operation_scope=CitationOperationScope(),
-                )
-
-            # The write guard runs FIRST and names the operation it is guarding, so the
-            # migration can never be reached on a path that skipped the enclosure check.
-            self.assertEqual(guarded.call_args.kwargs["operation"], "citation_migrate")
-            migration.assert_called_once()
-            args, kwargs = migration.call_args
-            self.assertEqual(args[0], scope.onboarding_root)
-            self.assertEqual(args[1].code_root, code_worktree)
-            self.assertEqual(args[1].memory_root, memory_worktree)
-            self.assertEqual(kwargs["only"], None)
-            self.assertEqual(kwargs["dry_run"], False)
-        self.assertEqual(result["repoId"], "agents-remember")
 
 
 if __name__ == "__main__":

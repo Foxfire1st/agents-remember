@@ -5,7 +5,7 @@ import { useDashboard } from "../data/store";
 import { Panel } from "../grammar/Panel";
 
 // The memory mirror (mc2 harvest #2 — "a 1-to-1 mirror of the code"): a coverage/drift segmented
-// bar per repo + ledger currency + the stalest-sidecar leaderboard. All read from the slice-3b
+// bar per repo + ledger currency. All read from the slice-3b
 // analytics nodes — no reducer work. Ages are server-anchored (`snapshotStaleSeconds`/`ageSeconds`)
 // and advanced locally between emissions (the 260703-L15 change gate — data/servedAges.ts).
 const sizing = css({ flex: "1" });
@@ -18,7 +18,6 @@ const row = css({
   fontSize: "0.78rem",
 });
 const actionable = css({ color: "amber" });
-const file = css({ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
 const sub = css({
   margin: "0.7rem 0 0.3rem",
   fontSize: "0.72rem",
@@ -55,12 +54,8 @@ const SEG_BG: Record<string, string> = {
   unsupported: css({ background: "alarm" }),
 };
 
-function hasMemoryAnalytics(
-  drift: unknown[],
-  ledgers: unknown[],
-  stalest: unknown[],
-): boolean {
-  return drift.length === 0 && ledgers.length === 0 && stalest.length === 0;
+function hasMemoryAnalytics(drift: unknown[], ledgers: unknown[]): boolean {
+  return drift.length === 0 && ledgers.length === 0;
 }
 
 export function MemoryMirror() {
@@ -68,9 +63,8 @@ export function MemoryMirror() {
   const nowMs = useNowMs();
   const drift = analytics?.driftSnapshots ?? [];
   const ledgers = analytics?.ledgers ?? [];
-  const stalest = analytics?.stalestSidecars ?? [];
 
-  if (hasMemoryAnalytics(drift, ledgers, stalest)) {
+  if (hasMemoryAnalytics(drift, ledgers)) {
     return (
       <Panel testid="memory-mirror" title="Memory mirror" className={sizing}>
         <p className="muted">No memory analytics yet.</p>
@@ -125,21 +119,6 @@ export function MemoryMirror() {
         </>
       ) : null}
 
-      {stalest.length > 0 ? (
-        <>
-          <h3 className={sub}>Stalest sidecars</h3>
-          <ul className={list}>
-            {stalest.slice(0, 6).map((sidecar) => (
-              <li key={`${sidecar.repository}:${sidecar.onboardingFile}`} className={row}>
-                <span className={file}>{sidecar.onboardingFile}</span>
-                <span className="muted">
-                  {fmtWait(servedAgeSeconds(sidecar, sidecar.ageSeconds, nowMs))}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
     </Panel>
   );
 }

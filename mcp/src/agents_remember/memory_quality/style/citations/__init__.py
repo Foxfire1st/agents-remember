@@ -1,1 +1,1 @@
-"""Citation resolution for memory documents: ranges in bounds, anchors where claimed."""
+"""Shared citation parsing, symbol bindings, and terminal cache fencing."""

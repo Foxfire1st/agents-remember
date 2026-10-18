@@ -37,14 +37,12 @@ sys.path.insert(0, str(MCP_TESTS))
 from agents_remember.application import memory_tools
 from agents_remember.application.memory_tools import (
     CitationOperationScope,
-    _citation_fix_status,
 )
 from agents_remember.cli import memory_citations
 from agents_remember.mcp.registration.memory import register_memory_tools
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.convert import convert_memory
 from agents_remember.memory.conversion.inputs import memory_from_directory, write_changed
-from agents_remember.memory_quality.style.citations import fixer, source_index
 from agents_remember.models.lifecycles.curator_coherence import MAX_CURATOR_SOURCE_CANDIDATES
 from knowledge_conversion_test_support import (
     APP,
@@ -53,7 +51,6 @@ from knowledge_conversion_test_support import (
     code_repository,
     memory_repository,
 )
-from test_memory_citation_fix import TreeCase
 
 # Git commit hashes seed the cards' verification stamps, so two fixture trees built by the
 # same test differ unless Git's clock is fixed. The fixer never writes a stamp: with a
@@ -94,11 +91,6 @@ class DocumentListRefusalTests(unittest.TestCase):
         too_many = (*full, "one-more.md")
         with (
             mock.patch.object(Path, "rglob", side_effect=AssertionError("refusal read memory")),
-            mock.patch.object(
-                source_index,
-                "open_repository_index",
-                side_effect=AssertionError("refusal acquired the source index"),
-            ),
             self.assertRaises(ValueError) as caught,
         ):
             CitationOperationScope(documents=too_many)
@@ -109,7 +101,6 @@ class DocumentListRefusalTests(unittest.TestCase):
     def test_the_bound_is_the_constant_with_no_second_number(self) -> None:
         consumers = [
             MCP_SRC / "agents_remember/application/memory_tools.py",
-            MCP_SRC / "agents_remember/memory_quality/style/citations/fixer.py",
             MCP_SRC / "agents_remember/mcp/registration/memory.py",
             MCP_SRC / "agents_remember/cli/memory_citations.py",
         ]
@@ -131,145 +122,6 @@ class DocumentListRefusalTests(unittest.TestCase):
     # old-format path, which now refuses with the one legacy-format message before any
     # snapshot check; on converted memory a document list needs no snapshot (MIK-R110
     # rule 2, _converted_citation_fix handles each card alone).
-
-
-class UnconvertedListFixTests(TreeCase):
-    """One call with several cards on unconverted memory."""
-
-    def _three_cards(self) -> None:
-        self.tree.history()
-        self.tree.source(
-            "kernel/gone.py",
-            "def build_route_indexes():\n    return 1\n\n\ndef persist():\n    return 2\n",
-        )
-        stamp = self.tree.stamp()
-        self.tree.source("kernel/indexes.py", "def build_route_indexes():\n    return 1\n")
-        self.tree.source("kernel/store.py", "def persist():\n    return 2\n")
-        self.tree.remove_source("kernel/gone.py")
-        self.tree.card(
-            "kernel/a.py",
-            "| The census. | `build_route_indexes` | kernel/gone.py:1-2 |",
-            stamp=stamp,
-        )
-        self.tree.card(
-            "kernel/b.py",
-            "| The write path. | `persist` | kernel/gone.py:5-6 |",
-            stamp=stamp,
-        )
-        self.tree.card(
-            "kernel/c.py",
-            "| Elsewhere. | `persist` | kernel/gone.py:5-6 |",
-            stamp=stamp,
-        )
-
-    def _card_bytes(self) -> dict[str, bytes]:
-        return {
-            path.relative_to(self.tree.onboarding).as_posix(): path.read_bytes()
-            for path in sorted(self.tree.onboarding.rglob("*.md"))
-            if path.is_file()
-        }
-
-    def _snapshot(self) -> str:
-        return self.tree.source_snapshot_id()
-
-    def test_a_list_leaves_the_same_bytes_as_one_call_per_card(self) -> None:
-        with _frozen_git():
-            self._three_cards()
-            listed = fixer.fix_onboarding_root(
-                self.tree.onboarding,
-                self.tree.code,
-                only=["kernel/a.py.md", "kernel/b.py.md"],
-                expected_snapshot=self._snapshot(),
-            )
-            listed_bytes = self._card_bytes()
-        self.assertTrue(listed["ok"], listed["declined"])
-        self.setUp()
-        with _frozen_git():
-            self._three_cards()
-            snapshot = self._snapshot()
-            for name in ("kernel/a.py.md", "kernel/b.py.md"):
-                single = fixer.fix_onboarding_root(
-                    self.tree.onboarding,
-                    self.tree.code,
-                    only=name,
-                    expected_snapshot=snapshot,
-                )
-                self.assertTrue(single["ok"], single["declined"])
-            self.assertEqual(self._card_bytes(), listed_bytes)
-
-    def test_a_dry_run_list_writes_nothing(self) -> None:
-        self._three_cards()
-        before = self._card_bytes()
-        preview = fixer.fix_onboarding_root(
-            self.tree.onboarding,
-            self.tree.code,
-            dry_run=True,
-            only=["kernel/a.py.md", "kernel/b.py.md"],
-            expected_snapshot=self._snapshot(),
-        )
-        self.assertEqual(self._card_bytes(), before)
-        self.assertEqual(preview["documentsWritten"], 0)
-
-    def test_a_card_outside_the_list_is_untouched(self) -> None:
-        self._three_cards()
-        before = self.tree.card_text("kernel/c.py.md")
-        result = fixer.fix_onboarding_root(
-            self.tree.onboarding,
-            self.tree.code,
-            only=["kernel/a.py.md", "kernel/b.py.md"],
-            expected_snapshot=self._snapshot(),
-        )
-        self.assertTrue(result["ok"], result["declined"])
-        self.assertEqual(self.tree.card_text("kernel/c.py.md"), before)
-
-    def test_one_refused_document_does_not_stop_the_others(self) -> None:
-        self._three_cards()
-        result = fixer.fix_onboarding_root(
-            self.tree.onboarding,
-            self.tree.code,
-            only=["kernel/missing.py.md", "kernel/a.py.md"],
-            expected_snapshot=self._snapshot(),
-        )
-        self.assertFalse(result["ok"])
-        self.assertEqual(
-            [one["document"] for one in result["refusedDocuments"]], ["kernel/missing.py.md"]
-        )
-        self.assertEqual(result["refusedDocuments"][0]["code"], "document_not_found")
-        self.assertIn("kernel/indexes.py", self.tree.row("kernel/a.py.md"))
-
-    def test_a_clean_list_matches_a_clean_card_apart_from_the_count(self) -> None:
-        self.tree.source("kernel/store.py", "def persist():\n    return 1\n")
-        stamp_holder: list[str] = []
-        self.tree.history()
-        stamp_holder.append(self.tree.stamp())
-        self.tree.card(
-            "kernel/a.py",
-            "| The write path. | `persist` | kernel/store.py:1-2 |",
-            stamp=stamp_holder[0],
-        )
-        self.tree.card(
-            "kernel/b.py",
-            "| The write path again. | `persist` | kernel/store.py:1-2 |",
-            stamp=stamp_holder[0],
-        )
-        snapshot = self._snapshot()
-        listed = fixer.fix_onboarding_root(
-            self.tree.onboarding,
-            self.tree.code,
-            only=["kernel/a.py.md", "kernel/b.py.md"],
-            expected_snapshot=snapshot,
-        )
-        single = fixer.fix_onboarding_root(
-            self.tree.onboarding, self.tree.code, only="kernel/a.py.md", expected_snapshot=snapshot
-        )
-        listed_status = _citation_fix_status(listed, document_count=2)
-        single_status = _citation_fix_status(single, document_count=1)
-        self.assertTrue(listed["ok"], listed["declined"])
-        self.assertTrue(single["ok"], single["declined"])
-        self.assertEqual(single_status["documentCount"], 1)
-        self.assertEqual(listed_status["documentCount"], 2)
-        for key in ("rewrittenCount", "staleCount", "unreadableCount", "refusedCount"):
-            self.assertEqual(listed_status[key], single_status[key], key)
 
 
 def _convert(memory: Path, code: CodeFixture) -> None:
@@ -438,12 +290,8 @@ class CitationFixCommandTests(unittest.TestCase):
             repo="demo",
             contract="contract.md",
             config=None,
-            build_index=False,
             fix=False,
-            migrate=False,
             document=["a.md", "b.md"],
-            expected_snapshot=None,
-            exclude=None,
             dry_run=False,
         )
         self.assertEqual(memory_citations.run(namespace), 1)
@@ -452,13 +300,9 @@ class CitationFixCommandTests(unittest.TestCase):
         namespace = argparse.Namespace(
             repo="demo",
             contract="contract.md",
-            config=None,
-            build_index=False,
+            config="fixture-settings.json",
             fix=True,
-            migrate=False,
             document=["a.md", "b.md"],
-            expected_snapshot=None,
-            exclude=None,
             dry_run=True,
         )
         payload = {

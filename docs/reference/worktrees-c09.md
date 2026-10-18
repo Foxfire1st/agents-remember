@@ -2,7 +2,7 @@
 
 The `c-09-git-worktree-manager` skill owns worktree creation, exact enclosure addressability,
 integration, terminal archival, and cleanup. The `c-12-closeout` skill owns validated immutable
-closeout input, approval, acceptance, and code-then-memory commit order. The accepted Git pair,
+closeout input, approval, and code-then-memory commit order. The accepted Git pair,
 its ancestry, and recorded refs supply transaction authority. `memory.md` is an ignored cache
 computed from memory commit trailers; its bytes and rows never authorize or block the transaction.
 
@@ -95,6 +95,19 @@ or invent queue replan/drain controls. Unrelated sprints and repositories keep
 their own projection revisions.
 
 ## Closeout And Recovery
+
+Requested certification runs through Dagger and commits nothing. The repository certification
+profile and its loader govern that explicitly requested work, not ordinary closeout.
+Ordinary closeout runs no gate but the invariant gate: it judges the exact code/memory pair
+and publishes the authorized Git transaction without running certification Gates 1–4,
+code-quality checks, test suites, or independent review. Missing certification profiles or
+results do not block this transaction.
+
+The shared publication owner writes the judged tree with `git commit-tree` under the admitted
+parent and moves the branch by an expected-old ref transaction. Its per-worktree lock,
+conflict/ref refusals, index preservation, and recoverable per-leg evidence remain unchanged.
+Commit hooks do not run through `commit-tree`; a `reference-transaction` hook still runs
+when the branch moves and may refuse that ref transaction.
 
 The manager publishes a complete closeout-door generation; the orchestrator admits only the exact
 first-ready generation from a current `valid-built` projection. `worktree_closeout_apply` validates

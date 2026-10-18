@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from agents_remember.kernel.onboarding_doc import normalize_route
 from agents_remember.kernel.primitives.gate_policy import coerce_decision_role
 from agents_remember.kernel.primitives.gate_vocab import coerce_gate_kind
 from agents_remember.kernel.primitives.identity import stable_provider_id
@@ -43,12 +42,3 @@ def test_known_decision_role_passes_through() -> None:
 def test_unknown_decision_role_is_refused_by_name() -> None:
     with pytest.raises(ValueError, match="unknown decision role 'mangaer'"):
         coerce_decision_role("mangaer")
-
-
-def test_normalize_route_root_forms() -> None:
-    for raw in ("", ".", "<repo-root>", "/", "`.`"):
-        assert normalize_route(raw) == "."
-
-
-def test_normalize_route_strips_slashes_and_backticks() -> None:
-    assert normalize_route("`mcp/src/`") == "mcp/src"

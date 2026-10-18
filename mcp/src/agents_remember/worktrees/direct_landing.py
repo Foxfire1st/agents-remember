@@ -111,6 +111,9 @@ from agents_remember.worktrees.integration.direct_landing.direct_landing_errors 
 from agents_remember.worktrees.integration.direct_landing.direct_landing_execution import (
     execute_or_require_direct_landing_recovery,
 )
+from agents_remember.worktrees.integration.direct_landing.direct_landing_memory_facts import (
+    _memory_facts,
+)
 from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
     DirectLandingRuntime,
     direct_landing_record,
@@ -167,6 +170,7 @@ from agents_remember.worktrees.modules.git import (
     current_branch,
     ensure_git_identity,
     head_commit,
+    require_checked_publication_tree,
     require_git,
     stage_tree,
     staged_publication_tree,
@@ -174,6 +178,8 @@ from agents_remember.worktrees.modules.git import (
 )
 from agents_remember.worktrees.modules.landing_commit_check import (
     LandingCommitCheckRefusal,
+    commit_check_fact,
+    message_with_commit_check_trailer,
     run_landing_commit_check,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
@@ -702,7 +708,7 @@ def _provisional_code_commit(checkout: Path, tree: str, head: str, message: str)
     except RuntimeError:
         signing = ""
     sign = ["-S"] if signing.strip() == "true" else []
-    text = message if message.endswith("\n") else message + "\n"
+    text = message_with_commit_check_trailer(checkout, message, tree)
     written = run_git(
         checkout,
         ["commit-tree", tree, "-p", head, *sign],
@@ -746,17 +752,27 @@ def _publish_provisional_code_commit(
             f"the branch moved from {before.head} to {tip or 'nothing'} after this "
             "landing admitted it; preview again before landing, nothing was committed",
         )
-    # MIK-R152: the repository's own pre-commit hook judges the staged tree before the
-    # ref moves. The provisional commit object is dangling until the move, so a refused
-    # check publishes nothing; its hash is journaled without a pass trailer, and the
-    # integration proves such a commit by running the check itself (rule 8).
+    # The prospective trailer is part of the journaled provisional identity. Its
+    # hook and tree must match the actual pass before any ref names the object.
     with staged_publication_tree(checkout, tree):
         try:
-            run_landing_commit_check(checkout, tree=tree)
+            checked = run_landing_commit_check(checkout, tree=tree)
+            require_checked_publication_tree(checkout, tree, checked=checked)
         except LandingCommitCheckRefusal as refused:
             raise DirectLandingPublicationRefused(
                 "direct-landing-commit-check-failed", str(refused)
             ) from refused
+        if require_git(checkout, ["rev-parse", f"{provisional}^{{tree}}"]) != tree:
+            raise DirectLandingPublicationRefused(
+                "direct-landing-code-tree-mismatch",
+                "the provisional commit differs from the judged tree; nothing was committed",
+            )
+        fact = commit_check_fact(require_git(checkout, ["log", "-1", "--format=%B", provisional]))
+        if fact is not None and fact != (tree, checked.hook):
+            raise DirectLandingPublicationRefused(
+                "direct-landing-commit-check-moved",
+                "the provisional check fact differs from the actual hook pass; nothing was committed",
+            )
     moved = run_git(checkout, ["update-ref", before.headRef, provisional, tip])
     if moved.returncode != 0:
         raise DirectLandingError(
@@ -1086,36 +1102,6 @@ def _verify_code_commit(contract, code_commit: str, candidate_tree: str | None) 
             "re-gate the new candidate before landing",
         )
     return committed_tree
-
-
-def _memory_facts(contract) -> dict[str, object]:
-    """Read the external-memory repository and ref facts for the landing."""
-    if contract.memory_mode != "external":
-        return {"memoryMode": contract.memory_mode}
-    if contract.memory_repo_path is None:
-        raise DirectLandingError(
-            "direct-landing-memory-authority-missing",
-            "external-memory direct landing requires the configured memory repository",
-        )
-    try:
-        memory_head = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
-    except (OSError, RuntimeError) as exc:
-        raise DirectLandingError(
-            "direct-landing-memory-evidence-unreadable",
-            "direct landing cannot read the accepted memory ref",
-            observed=public_failure_evidence(
-                stage="direct-memory-proof",
-                side="memory",
-                name=contract.memory_work_branch,
-                error_type=type(exc).__name__,
-                observed={"state": "unreadable"},
-            ),
-        ) from exc
-    return {
-        "memoryMode": "external",
-        "memoryBranch": contract.memory_work_branch,
-        "memoryHead": memory_head,
-    }
 
 
 def _direct_landing_preview(

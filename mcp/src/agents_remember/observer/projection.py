@@ -146,11 +146,10 @@ class ProviderNode(BaseModel):
 
 
 class Metrics(BaseModel):
-    """Workspace verification-age distribution; task counts belong to task entries."""
+    """Workspace host-observation diagnostics; task counts belong to task entries."""
 
     model_config = ConfigDict(extra="forbid")
 
-    stalenessHistogram: dict[str, int] = Field(default_factory=dict)
     ignoredHostAgents: int = 0
 
 
@@ -176,23 +175,6 @@ class DriftSnapshotNode(BaseModel):
     memoryRoot: str | None = None
     reportPath: str | None = None
     snapshotStaleSeconds: float | None = None
-
-
-class SidecarStaleNode(BaseModel):
-    """One onboarding sidecar's verification age (slice 3b, surface 11; git-free).
-
-    Read from the sidecar's table metadata (``lastVerifiedCommitDate``) with no git
-    -- the always-on complement to the drift snapshot. The projection carries only
-    the *stalest* bounded sample (a leaderboard); the full distribution is the
-    ``Metrics.stalenessHistogram`` rollup.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    onboardingFile: str
-    repository: str
-    lastVerifiedDate: str
-    ageSeconds: float | None = None
 
 
 class SetupSummaryNode(BaseModel):
@@ -603,9 +585,8 @@ class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 
     Kept apart from the structural task/enclosure/provider tree so the
-    client-agnostic core stays small. Large raw inventories are deliberately *not*
-    here -- drift rows stay in the snapshot file, the full sidecar list collapses to
-    the histogram + a bounded leaderboard -- so the served projection stays lean.
+    client-agnostic core stays small. Converted drift counts, provider setup/progress,
+    route coverage, tool reports and memory-ledger currency describe the retained analytics.
 
     ``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*
     surfaces here: the reducer composes them from the structural tree + these signals (not
@@ -615,7 +596,6 @@ class Analytics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     driftSnapshots: list[DriftSnapshotNode] = Field(default_factory=list)
-    stalestSidecars: list[SidecarStaleNode] = Field(default_factory=list)
     setupSummaries: list[SetupSummaryNode] = Field(default_factory=list)
     setupProgress: list[SetupProgressNode] = Field(default_factory=list)
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)

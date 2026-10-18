@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -41,14 +40,6 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     DriftSummaryOutput,
     run_drift_summary,
 )
-from agents_remember.memory_quality.style.citations import (
-    migration,
-    source_index,
-)
-from agents_remember.memory_quality.style.citations.exclusion_register import (
-    validate_caller_excludes,
-)
-from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
 from agents_remember.models.knowledge_files.records import RECORD_MODELS
 from agents_remember.models.lifecycles.curator_coherence import MAX_CURATOR_SOURCE_CANDIDATES
@@ -71,24 +62,16 @@ from agents_remember.worktrees.worktree_contract import load_contract
 
 @dataclass(frozen=True)
 class CitationOperationScope:
-    """One owned memory document and the prevalidated source generation it uses.
-
-    An expected snapshot is an explicit frozen-wave lease, not a freshness detector. The
-    operator builds and validates once, freezes source, and passes the returned id to every
-    independent document operation. A source edit requires a new freeze/build; Git HEAD is
-    intentionally not consulted because it cannot represent dirty or untracked content.
-    """
+    """The converted cards one citation operation owns."""
 
     document: str | None = None
     documents: tuple[str, ...] | None = None
-    expected_snapshot: str | None = None
-    excludes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # Structural shape only: both/empty/bound are refused here, before anything is read,
         # for every operation. Whether the operation takes a list is the operation's own
         # validation at its call (``allow_documents``): only ``citation_fix`` passes it.
-        self.validate(document_alone=True, allow_documents=True)
+        self.validate(allow_documents=True)
 
     @property
     def selected_documents(self) -> tuple[str, ...] | None:
@@ -103,27 +86,11 @@ class CitationOperationScope:
             return self.documents
         return None
 
-    def validate(self, *, document_alone: bool = False, allow_documents: bool = False) -> None:
-        """Enforce the indivisible document-plus-generation frozen-wave contract.
+    def validate(self, *, allow_documents: bool = False) -> None:
+        """Refuse both selectors, empty or oversized lists, and lists outside citation_fix.
 
-        The caller's own excludes ride with the scope because they scope the same acquisition
-        the document and the frozen generation do: which bytes this one operation reads. They
-        are validated here, before any work tree is resolved, so a pattern that cannot mean
-        anything is refused at the call rather than during a tree walk.
-
-        ``document_alone`` admits one document with no frozen generation. That is the converted
-        memory's form (L37 ruling of 2026-10-01T10:06:02): a converted card is authored against
-        the code working tree and reads no source index, so a curator names one card and nothing
-        else. Construction validates in that form, because the tree's format is unknown until the
-        leaf is resolved; every legacy operation then validates strictly before it does any work.
-
-        ``documents`` names several cards for one ``citation_fix`` call (MIK-R110 rule 2):
-        ``document`` stays and means a list of one. Naming both, or naming an empty list, is
-        refused; so is a list longer than one leaf may hold changed files with cards
-        (``MAX_CURATOR_SOURCE_CANDIDATES``, taken from that constant, no second number).
-        Only ``citation_fix`` takes the list: every other operation validates with
-        ``allow_documents`` false and refuses it, so a list can never silently narrow a
-        check, a migration or an index build to its members.
+        The document bound is the leaf's changed-card bound (MIK-R110 rule 2).
+        Validation happens before the memory tree is resolved.
         """
 
         if self.document is not None and self.documents is not None:
@@ -148,16 +115,6 @@ class CitationOperationScope:
                     f"one call (one leaf's changed files with cards); this call names "
                     f"{len(self.documents)}. Split the wave across calls."
                 )
-        selected = self.selected_documents
-        if document_alone and selected is not None and self.expected_snapshot is None:
-            validate_caller_excludes(self.excludes)
-            return
-        source_index.validate_operation_scope(
-            selected,
-            self.expected_snapshot,
-            leased_index=False,
-        )
-        validate_caller_excludes(self.excludes)
 
 
 DEFAULT_CITATION_OPERATION_SCOPE = CitationOperationScope()
@@ -340,25 +297,6 @@ def _pre_baseline_official_scope(
     return scope
 
 
-def _citation_trees(
-    scope: MemoryScope,
-    caller_excludes: Sequence[str] = (),
-) -> Trees:
-    """The citation operation's trees, carrying the caller's own excludes for this call.
-
-    One construction point for all four citation operations, so a caller-supplied exclude
-    cannot be honoured by one of them and silently dropped by another. The settings-derived
-    register and the caps come from the memory layer's ``system/settings.json`` through
-    :class:`Trees` itself.
-    """
-    return Trees(
-        code_root=scope.code_root,
-        memory_root=scope.onboarding_root.parent,
-        cache_authority=scope.cache_authority,
-        caller_excludes=validate_caller_excludes(caller_excludes),
-    )
-
-
 def citation_check_tool(
     config: McpRuntimeConfig,
     *,
@@ -373,7 +311,7 @@ def citation_check_tool(
     one document beside three tree-wide results under one ``ok``. Scope belongs where every
     check under it is scoped.
 
-    Read-only, so unlike the fix and migrate tools this does not refuse the official memory
+    Read-only, so unlike the fix tool this does not refuse the official memory
     repo -- reading it is legitimate; only writing it is not.
     """
     operation_scope.validate()
@@ -400,27 +338,6 @@ def citation_check_tool(
     }
 
 
-def citation_source_index_build_tool(
-    config: McpRuntimeConfig,
-    *,
-    repo_id: str,
-    contract_path: str,
-    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
-) -> dict[str, Any]:
-    """Build or validate the reusable source snapshot selected by a leaf contract.
-
-    A caller that adds excludes is asserting a *narrower* population than the register alone,
-    because the source is frozen while a curator wave runs and one document may need a tree
-    another document still cites.
-    """
-    operation_scope.validate()
-    scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
-    return {
-        "repoId": scope.repo_id,
-        **source_index.build_repository_index(_citation_trees(scope, operation_scope.excludes)),
-    }
-
-
 def citation_fix_tool(
     config: McpRuntimeConfig,
     *,
@@ -429,23 +346,18 @@ def citation_fix_tool(
     dry_run: bool = False,
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
 ) -> dict[str, Any]:
-    """Regenerate ranges in one leaf, optionally against an explicit frozen generation.
+    """Regenerate converted references in one leaf's memory worktree.
 
-    ``caller_excludes`` narrows the acquisition for THIS call only: a curator repairing one
-    document may need a vendored or generated tree out of the way without editing the shared
-    register every other document reads.
-
-    On converted memory one document needs no frozen generation (``--document`` alone); on
-    unconverted memory a document still comes with its snapshot. ``documents`` names
-    several cards for one call (MIK-R110 rule 2); each is handled exactly as a call
-    naming it alone handles it.
+    ``documents`` names several cards for one call (MIK-R110 rule 2); each is
+    handled exactly as a call naming it alone handles it. Old-format memory
+    is refused before any authoring or reference repair.
 
     Two admissions: a leaf enclosure contract (the ordinary write route), or no contract on
     the configured memory root while that root has no attributed baseline (the pre-baseline
     bootstrap admission, MIK-R45 rule 2). In every other case a call without a contract
     refuses and names the leaf route.
     """
-    operation_scope.validate(document_alone=True, allow_documents=True)
+    operation_scope.validate(allow_documents=True)
     if contract_path is None:
         scope = _pre_baseline_official_scope(config, repo_id=repo_id, operation="citation_fix")
         memory_root = scope.onboarding_root.parent
@@ -540,23 +452,14 @@ def _citation_fix_status(full: dict[str, Any], *, document_count: int) -> dict[s
     detail file holding the rest.
     """
 
-    if full.get("status") == "converted":
-        authoring = full.get("authoring")
-        refused = authoring.get("refused") if isinstance(authoring, dict) else None
-        return {
-            "documentCount": document_count,
-            "rewrittenCount": len(full.get("rewrittenSidecars") or []),
-            "staleCount": len(full.get("stale") or []),
-            "unreadableCount": len(full.get("unreadableSidecars") or []),
-            "refusedCount": len(refused or []),
-        }
-    refused_documents = full.get("refusedDocuments") or []
+    authoring = full.get("authoring")
+    refused = authoring.get("refused") if isinstance(authoring, dict) else None
     return {
         "documentCount": document_count,
-        "rewrittenCount": int(full.get("claimsRepaired") or 0),
-        "staleCount": int(full.get("declinedCount") or 0),
-        "unreadableCount": 0,
-        "refusedCount": len(refused_documents),
+        "rewrittenCount": len(full.get("rewrittenSidecars") or []),
+        "staleCount": len(full.get("stale") or []),
+        "unreadableCount": len(full.get("unreadableSidecars") or []),
+        "refusedCount": len(refused or []),
     }
 
 
@@ -675,40 +578,6 @@ def _converted_single_citation_fix(
         memory_root, code_root, dry_run=dry_run, only=sidecar, exclude=refused_sidecars
     )
     return {**fixed, "ok": fixed["ok"] and not authoring["refused"], "authoring": authoring}
-
-
-def citation_migrate_tool(
-    config: McpRuntimeConfig,
-    *,
-    repo_id: str,
-    contract_path: str,
-    dry_run: bool = False,
-    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
-) -> dict[str, Any]:
-    """Convert a memory tree to the anchored citation format, inside one leaf's worktree.
-
-    Same guard as ``citation_fix_tool`` and for a stronger reason: this rewrites the SHAPE of
-    every evidence table in the tree, which is not a diff any closeout could review if it
-    landed in a repository the session does not own.
-    """
-    operation_scope.validate()
-    scope = _leaf_memory_writer_scope(
-        config,
-        repo_id=repo_id,
-        contract_path=contract_path,
-        operation="citation_migrate",
-    )
-    trees = _citation_trees(scope, operation_scope.excludes)
-    return {
-        "repoId": scope.repo_id,
-        **migration.migrate_onboarding_root(
-            scope.onboarding_root,
-            trees,
-            dry_run=dry_run,
-            only=operation_scope.document,
-            expected_snapshot=operation_scope.expected_snapshot,
-        ),
-    }
 
 
 def route_index_refresh_tool(
@@ -924,17 +793,6 @@ class CarryoverSelection:
     replace_existing: bool = False
 
 
-@dataclass(frozen=True)
-class CarryoverCommitMessages:
-    """The recovery-leaf onboarding commit message."""
-
-    memory: str = "Carry over landed branch memory"
-
-
-DEFAULT_CARRYOVER_MESSAGES = CarryoverCommitMessages()
-"""The standard carryover commit subjects, used when the caller supplies none."""
-
-
 def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
     payload = baseline.baseline_status(_baseline_request(config, repo))
@@ -1024,12 +882,17 @@ def memory_carryover_plan_tool(
     selection: CarryoverSelection,
 ) -> dict[str, Any]:
     request = _carryover_request(config, selection)
+    carryover.require_converted_formats(
+        request.source_memory, request.target_memory, "memory_carryover_plan"
+    )
     carryover._require_carryover_authority(request, config)
     payload = carryover.build_plan_for_request(request)
     return {"ok": True, "operation": "memory_carryover_plan", **payload}
 
 
-def _carryover_legacy_refusal(detail: str) -> dict[str, Any]:
+def _carryover_legacy_refusal(
+    detail: str, *, operation: str = "memory_carryover_apply"
+) -> dict[str, Any]:
     """The typed refusal for a carryover the rule-1 lock reports by raising.
 
     The short message carries the refusal once for the answer guard; the full rule-2
@@ -1037,19 +900,19 @@ def _carryover_legacy_refusal(detail: str) -> dict[str, Any]:
     """
 
     short = (
-        "memory_carryover_apply did not run: the target memory is unconverted "
+        f"{operation} did not run: carryover memory is unconverted "
         "(no knowledge/layout.json); convert it first."
     )
     return {
         "ok": False,
-        "operation": "memory_carryover_apply",
+        "operation": operation,
         "state": "refused",
         "code": LEGACY_FORMAT_CODE,
         "message": short,
         "detail": detail.strip(),
         "nextAction": (
-            "convert the target memory first (agents-remember knowledge-convert "
-            "MEMORY_ROOT --code CODE_REPOSITORY), then rerun memory_carryover_apply; "
+            "convert the unconverted memory first (agents-remember knowledge-convert "
+            f"MEMORY_ROOT --code CODE_REPOSITORY), then rerun {operation}; "
             "memory_baseline_status reports the same repository's state"
         ),
         "nextStep": {
@@ -1065,7 +928,6 @@ def memory_carryover_apply_tool(
     *,
     intent_note: str,
     include_review_required: list[str] | None = None,
-    messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
     try:
         payload = carryover._apply_carryover_for_request(
@@ -1074,14 +936,17 @@ def memory_carryover_apply_tool(
             options=carryover.CarryoverApplyOptions(
                 intent_note=intent_note,
                 include_review_required=include_review_required,
-                memory_commit_message=messages.memory,
             ),
         )
     except RuntimeError as error:
         if not is_legacy_format_refusal(str(error)):
             raise
         return _carryover_legacy_refusal(str(error))
-    return {"ok": True, "operation": "memory_carryover_apply", **payload}
+    return {
+        "ok": payload.get("state") != "refused",
+        "operation": "memory_carryover_apply",
+        **payload,
+    }
 
 
 def _baseline_request(config: McpRuntimeConfig, repo: RepositoryScope) -> baseline.BaselineRequest:

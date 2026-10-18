@@ -46,7 +46,7 @@
     },
     "Analytics": {
       "additionalProperties": false,
-      "description": "The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.\n\nKept apart from the structural task/enclosure/provider tree so the\nclient-agnostic core stays small. Large raw inventories are deliberately *not*\nhere -- drift rows stay in the snapshot file, the full sidecar list collapses to\nthe histogram + a bounded leaderboard -- so the served projection stays lean.\n\n``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*\nsurfaces here: the reducer composes them from the structural tree + these signals (not\nfrom an input file), so a structural-only caller can still see them populated.",
+      "description": "The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.\n\nKept apart from the structural task/enclosure/provider tree so the\nclient-agnostic core stays small. Converted drift counts, provider setup/progress,\nroute coverage, tool reports and memory-ledger currency describe the retained analytics.\n\n``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*\nsurfaces here: the reducer composes them from the structural tree + these signals (not\nfrom an input file), so a structural-only caller can still see them populated.",
       "properties": {
         "attentionQueue": {
           "items": {
@@ -95,13 +95,6 @@
             "$ref": "#/$defs/SetupSummaryNode"
           },
           "title": "Setupsummaries",
-          "type": "array"
-        },
-        "stalestSidecars": {
-          "items": {
-            "$ref": "#/$defs/SidecarStaleNode"
-          },
-          "title": "Stalestsidecars",
           "type": "array"
         },
         "toolReports": {
@@ -1913,19 +1906,12 @@
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Workspace verification-age distribution; task counts belong to task entries.",
+      "description": "Workspace host-observation diagnostics; task counts belong to task entries.",
       "properties": {
         "ignoredHostAgents": {
           "default": 0,
           "title": "Ignoredhostagents",
           "type": "integer"
-        },
-        "stalenessHistogram": {
-          "additionalProperties": {
-            "type": "integer"
-          },
-          "title": "Stalenesshistogram",
-          "type": "object"
         }
       },
       "title": "Metrics",
@@ -2432,43 +2418,6 @@
         "action"
       ],
       "title": "SetupSummaryNode",
-      "type": "object"
-    },
-    "SidecarStaleNode": {
-      "additionalProperties": false,
-      "description": "One onboarding sidecar's verification age (slice 3b, surface 11; git-free).\n\nRead from the sidecar's table metadata (``lastVerifiedCommitDate``) with no git\n-- the always-on complement to the drift snapshot. The projection carries only\nthe *stalest* bounded sample (a leaderboard); the full distribution is the\n``Metrics.stalenessHistogram`` rollup.",
-      "properties": {
-        "ageSeconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ageseconds"
-        },
-        "lastVerifiedDate": {
-          "title": "Lastverifieddate",
-          "type": "string"
-        },
-        "onboardingFile": {
-          "title": "Onboardingfile",
-          "type": "string"
-        },
-        "repository": {
-          "title": "Repository",
-          "type": "string"
-        }
-      },
-      "required": [
-        "onboardingFile",
-        "repository",
-        "lastVerifiedDate"
-      ],
-      "title": "SidecarStaleNode",
       "type": "object"
     },
     "SourceLineageEdge": {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
@@ -20,6 +21,11 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationSnapshot
 from agents_remember.worktrees.modules import capture_index
+from agents_remember.worktrees.modules.git_message import _cleaned_message
+from agents_remember.worktrees.modules.git_text import (
+    _nul_records,
+    _transport_safe_git_diagnostic,
+)
 from agents_remember.worktrees.modules.models import CommitPublicationRefusal
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -29,12 +35,6 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 # branch -f, branch -D, worktree remove --force, push origin --delete) ran through
 # it. With GIT_DIR exported those landed in whatever repository GIT_DIR named. The
 # helpers below now call the one guarded runner; nothing else about them changed.
-
-
-def _transport_safe_git_diagnostic(text: str) -> str:
-    """Render surrogateescaped Git bytes without leaking invalid Unicode to MCP."""
-
-    return text.encode("utf-8", errors="backslashreplace").decode("utf-8")
 
 
 def require_git(repo: Path, args: list[str]) -> str:
@@ -349,15 +349,30 @@ class _IndexShape:
     top: Path
     tree: str
     tags: dict[str, str]
+    index_path: Path | None = None
+    index_bytes: bytes | None = None
+    index_mode: int = 0o644
+    index_times: tuple[int, int] | None = None
 
 
 def _index_shape(repo: Path) -> _IndexShape:
     """Read the index's shape. It runs in the top-level directory, where ``ls-files`` lists all."""
 
     top = Path(require_git(repo, ["rev-parse", "--show-toplevel"]))
+    index = Path(require_git(top, ["rev-parse", "--path-format=absolute", "--git-path", "index"]))
+    found = index.stat() if index.exists() else None
+    raw = index.read_bytes() if found is not None else None
+    mode = found.st_mode & 0o777 if found is not None else 0o644
+    times = (found.st_atime_ns, found.st_mtime_ns) if found is not None else None
     listing = _nul_records(_nul_git(top, ["ls-files", "-v", "-z"]))
     return _IndexShape(
-        top, require_git(top, ["write-tree"]), {row[2:]: row[0] for row in listing if len(row) > 2}
+        top,
+        require_git(top, ["write-tree"]),
+        {row[2:]: row[0] for row in listing if len(row) > 2},
+        index,
+        raw,
+        mode,
+        times,
     )
 
 
@@ -473,6 +488,26 @@ def _give_index_back(shape: _IndexShape) -> None:
     it into one. Git records the regular file mode for it until the path is added.
     """
 
+    if shape.index_path is not None:
+        # Git's index cache/stat bytes are part of what the caller gave us;
+        # reconstructing entries alone loses them after a hook rewrites a file.
+        lock = shape.index_path.with_name(shape.index_path.name + ".lock")
+        handle = lock.open("xb")  # Never acquire or remove another actor's lock.
+        try:
+            with handle:
+                if shape.index_bytes is not None:
+                    handle.write(shape.index_bytes)
+            if shape.index_bytes is None:
+                shape.index_path.unlink(missing_ok=True)
+            else:
+                lock.chmod(shape.index_mode)
+                if shape.index_times is not None:
+                    # Preserve Git's racy-clean boundary, not only index bytes.
+                    os.utime(lock, ns=shape.index_times)
+                lock.replace(shape.index_path)
+        finally:
+            lock.unlink(missing_ok=True)
+        return
     _retarget_index(shape, shape.tree)
     listed = set(_nul_records(_nul_git(shape.top, ["ls-files", "-z"])))
     intended = sorted(shape.tags.keys() - listed)
@@ -579,155 +614,6 @@ def _refuse_unfinished_action(repo: Path) -> None:
                 f"{marker.name} exists in {marker.parent}: {action} is unfinished in this "
                 "worktree, so nothing was published; finish or abort it and rerun the closeout"
             )
-
-
-_CLEANUP_MODES = ("default", "whitespace", "scissors", "strip", "verbatim")
-_SCISSORS = " ------------------------ >8 ------------------------\n"
-_AUTO_COMMENT_CANDIDATES = "#;@!$%^&|:"
-_AS_GIT_COMMIT = "so nothing was published (git commit refuses it too)"
-
-
-def _cleaned_message(repo: Path, message: str) -> str:
-    """The message as ``git commit -m`` stores it, or a refusal where that command aborts.
-
-    These are the steps of ``git commit -m`` in Git 2.54 (``builtin/commit.c``), and the tests
-    compare the result with a real ``git commit -m`` for every mode and comment setting. The
-    message ends with a newline. Unless ``commit.cleanup`` is ``verbatim`` its whitespace is
-    cleaned (:func:`_stripspace`); without an editor ``default`` and ``scissors`` do no more than
-    ``whitespace``. A true ``commit.verbose`` cuts the message at the scissors line. ``strip``
-    drops the lines that begin with the comment string: ``core.commentChar`` or
-    ``core.commentString``, whichever is set last, and for ``auto`` the character Git selects
-    (:func:`_auto_comment_character`).
-
-    Git aborts the commit for an invalid mode, for a message that is empty after these steps (only
-    blank and ``Signed-off-by`` lines; under ``verbatim`` only a message of no bytes) and for an
-    ``auto`` with no free character. Each of them is refused here, before anything is touched.
-    """
-
-    settings = _message_settings(repo)
-    mode = settings.get("cleanup", "default")
-    if mode not in _CLEANUP_MODES:
-        raise CommitPublicationRefusal(
-            f"Invalid cleanup mode {mode} (commit.cleanup), {_AS_GIT_COMMIT}"
-        )
-    cleaning = mode != "verbatim"
-    text = message if not message or message.endswith("\n") else f"{message}\n"
-    if cleaning:
-        text = _stripspace(text)
-    comment = settings.get("comment", "#")
-    if comment.lower() == "auto":
-        comment = _auto_comment_character(text)
-    if _commit_verbose(repo):
-        text = text[: _scissors_start(text, comment)]
-    if cleaning:
-        text = _stripspace(text, comment if mode == "strip" else None)
-    lines = text.split("\n")
-    if not text or (
-        cleaning and all(line.startswith("Signed-off-by: ") or not line for line in lines)
-    ):
-        raise CommitPublicationRefusal(f"the commit message is empty, {_AS_GIT_COMMIT}")
-    return text
-
-
-def _message_settings(repo: Path) -> dict[str, str]:
-    """``commit.cleanup`` and the comment string as Git reads them: the value set last wins."""
-
-    pattern = r"^(commit\.cleanup|core\.comment(char|string))$"
-    found = run_git(repo, ["config", "-z", "--get-regexp", pattern])
-    settings: dict[str, str] = {}
-    for entry in _nul_records(found.stdout):
-        key, _, value = entry.partition("\n")
-        settings["cleanup" if key == "commit.cleanup" else "comment"] = value
-    return settings
-
-
-def _commit_verbose(repo: Path) -> bool:
-    """Whether ``commit.verbose`` is on, which makes ``git commit`` cut at the scissors line."""
-
-    found = run_git(repo, ["config", "--type=bool-or-int", "--get", "commit.verbose"])
-    if found.returncode not in (0, 1):
-        detail = _transport_safe_git_diagnostic(found.stderr.strip())
-        raise CommitPublicationRefusal(f"{detail}, {_AS_GIT_COMMIT}")
-    value = found.stdout.strip()
-    return value == "true" or (value.isdigit() and int(value) > 0)
-
-
-def _stripspace(text: str, comment: str | None = None) -> str:
-    """Git's ``strbuf_stripspace``: the cleaning ``git commit`` and ``git stripspace`` share.
-
-    Trailing whitespace leaves every line (Git counts space, tab, carriage return and newline),
-    runs of empty lines become one, empty lines at both ends go, and the text ends with a newline.
-    With ``comment`` the lines that begin with it are dropped. It is done here and not by
-    ``git stripspace`` because the shared runner reads Git's output as text, which would turn a
-    carriage return inside a line into a newline.
-    """
-
-    lines: list[str] = []
-    gap = False
-    for raw in text.removesuffix("\n").split("\n") if text else []:
-        if comment is not None and raw.startswith(comment):
-            continue
-        line = raw.rstrip(" \t\r")
-        if line and gap and lines:
-            lines.append("")
-        gap = not line
-        if line:
-            lines.append(line)
-    return "".join(f"{line}\n" for line in lines)
-
-
-def _scissors_start(text: str, comment: str) -> int:
-    """Where Git cuts ``text`` at the scissors line of ``comment`` (``wt_status_locate_end``)."""
-
-    cut = f"{comment}{_SCISSORS}"
-    if text.startswith(cut):
-        return 0
-    found = text.find(f"\n{cut}")
-    return len(text) if found < 0 else found + 1
-
-
-def _auto_comment_character(text: str) -> str:
-    """The character ``core.commentChar=auto`` selects for ``text`` (``adjust_comment_line_char``).
-
-    ``#`` when the message holds none. Otherwise the first of Git's candidates that begins no line
-    before the tail Git ignores (:func:`_ignored_tail_start`). Git aborts the commit when every
-    candidate is in use.
-    """
-
-    if "#" not in text:
-        return "#"
-    end = _ignored_tail_start(text)
-    used = {text[0]} | {text[at + 1] for at in range(end - 1) if text[at] in "\n\r"}
-    free = [candidate for candidate in _AUTO_COMMENT_CANDIDATES if candidate not in used]
-    if not free:
-        raise CommitPublicationRefusal(
-            "core.commentChar is auto and every character Git could select begins a line of the "
-            f"commit message, {_AS_GIT_COMMIT}"
-        )
-    return free[0]
-
-
-def _ignored_tail_start(text: str) -> int:
-    """Where the tail begins that Git ignores when it selects (``ignored_log_message_bytes``).
-
-    The tail is the trailing run of ``#`` lines and empty lines, with an old ``Conflicts:`` block
-    and its tab-indented paths, and everything from a ``#`` scissors line on. The branches follow
-    Git's function one for one, including that a run beginning at the first byte is not a tail.
-    """
-
-    end = _scissors_start(text, "#")
-    tail, line, conflicts = 0, 0, False
-    while line < end:
-        if text.startswith("#", line, end) or text[line] == "\n":
-            tail = tail or line
-        elif text.startswith("Conflicts:\n", line):
-            tail, conflicts = tail or line, True
-        elif conflicts and text[line] == "\t":
-            pass
-        elif tail:
-            tail, conflicts = 0, False
-        line = text.find("\n", line) + 1 or len(text)
-    return tail or end
 
 
 def _write_commit(repo: Path, message: str, tree: str, parent: str) -> tuple[str, str]:
@@ -863,10 +749,7 @@ def publish_tree_commit(
     This function writes through ``commit-tree`` and runs the hook itself because no Git
     commit hook runs for a ``commit-tree`` object. The knowledge gate
     and validator have run before it is called. This describes the ordinary closeout and direct
-    landing callers of this primitive, not the prepared closeout's independent policies. Prepared
-    code commits run the hook through ``git commit`` itself (``--no-verify`` is gone);
-    prepared memory commits use ordinary Git
-    hook behavior. The ``reference-transaction`` hook
+    landing callers of this primitive. The ``reference-transaction`` hook
     still runs for this primitive's ref transaction, and its refusal retains Git's own text.
     """
 
@@ -934,6 +817,19 @@ def publish_tree_commit(
 def _refuse_unadmitted_index(
     repo: Path, staged: str, *, checked: CommitCheckPass, give_back: Callable[[], None]
 ) -> None:
+    """Restore the ordinary publication index when the checked state moved."""
+    from agents_remember.worktrees.modules.landing_commit_check import (  # noqa: PLC0415
+        LandingCommitCheckRefusal,
+    )
+
+    try:
+        require_checked_publication_tree(repo, staged, checked=checked)
+    except LandingCommitCheckRefusal:
+        give_back()
+        raise
+
+
+def require_checked_publication_tree(repo: Path, staged: str, *, checked: CommitCheckPass) -> None:
     """Refuse where tracked state moved after the check passed (MIK-R152 rule 3).
 
     The commit object is written from the admitted tree hash, so hook bytes can
@@ -967,7 +863,6 @@ def _refuse_unadmitted_index(
         if current == admitted:
             return
         changed = tuple(_changed_paths(admitted, current))
-    give_back()
     raise LandingCommitCheckRefusal(
         "changed",
         checked=CheckedTree(repo=repo, tree=staged, hook=checked.hook),
@@ -1030,12 +925,6 @@ def _nul_git(repo: Path, args: list[str]) -> str:
         detail = result.stderr.strip() or f"git {' '.join(args)} failed"
         raise RuntimeError(_transport_safe_git_diagnostic(detail))
     return result.stdout
-
-
-def _nul_records(raw: str) -> list[str]:
-    """The NUL-delimited records of one ``-z`` read. No record of these commands is empty."""
-
-    return [record for record in raw.split("\0") if record]
 
 
 def changed_worktree_paths(repo: Path) -> list[str]:

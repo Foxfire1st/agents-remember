@@ -235,8 +235,8 @@ _INSTALL_ORDINARY_CASE = {
     },
     "reportPath": f"{_CASE_ROOT}/report.json",
     "summary": {
-        "copiedFiles": 122,
-        "createdDirs": 173,
+        "copiedFiles": 120,
+        "createdDirs": 171,
         "dependencyRuns": 0,
         "removedPaths": 0,
         "replacedLinks": 0,
@@ -306,8 +306,8 @@ _INSTALL_LARGEST_CASE = {
     },
     "reportPath": f"{_CASE_ROOT}/report.json",
     "summary": {
-        "copiedFiles": 122,
-        "createdDirs": 172,
+        "copiedFiles": 120,
+        "createdDirs": 170,
         "dependencyRuns": 0,
         "removedPaths": 0,
         "replacedLinks": 0,

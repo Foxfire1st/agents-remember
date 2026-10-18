@@ -669,8 +669,6 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
             "require_current_curator_coherence",
             side_effect=CuratorCoherenceError("absent", "none recorded"),
         ),
-        mock.patch.object(controller, "validate_memory_refresh_attestations"),
-        mock.patch.object(controller, "contract_memory_verified_commit", return_value=""),
         mock.patch.object(controller, "_attach_coherence_readiness"),
         mock.patch.object(controller, "_attach_final_full_catalog"),
     ):

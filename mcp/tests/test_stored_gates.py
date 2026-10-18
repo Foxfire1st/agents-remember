@@ -29,17 +29,14 @@ from agents_remember.controlplane.records import (
     decide_gate,
 )
 from agents_remember.controlplane.store import GateStore
-from agents_remember.errors import CertificationContractError
 from agents_remember.kernel.primitives.gate_policy import DEFAULT_GATE_POLICY
 from agents_remember.kernel.primitives.gate_vocab import STORED_GATE_WAY_OUT, GateKind
 from agents_remember.kernel.primitives.observer_paths import observer_logs_root
-from agents_remember.models.lifecycles.operation import CloseoutOperationInput
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.worktrees import direct_landing
 from agents_remember.worktrees.activation.atomic_series_activation import (
     AtomicSeriesActivationError,
 )
-from agents_remember.worktrees.integration.closeout.preparation import finalization
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
     DirectLandingError,
 )
@@ -193,31 +190,9 @@ def _direct_landing_claim(root: Path) -> dict[str, object]:
     return {"text": str(refused.value), **vars(refused.value)}
 
 
-def _finalization(root: Path, *, claim: bool) -> dict[str, object]:
-    _store(root, _open_gate("closeout-approval"))
-    operation = CloseoutOperationInput.model_validate(
-        {
-            "kind": "closeout",
-            "configPath": (root / "settings.json").as_posix(),
-            "contractPath": (root / "contract.json").as_posix(),
-            "effectiveInput": {
-                "route": "worktree",
-                "contractKind": "series",
-                "memoryMode": "disabled",
-                "code": {"state": "not-applicable", "reason": "series snapshot"},
-                "memory": {"state": "not-applicable", "reason": "disabled"},
-            },
-            "approvalNote": "The developer approved this closeout.",
-        }
-    )
-    bundle: Any = SimpleNamespace(handoff=SimpleNamespace(contract=_contract(root)))
-    record: Any = SimpleNamespace(input=operation, operationKey="c" * 64)
-    with pytest.raises(CertificationContractError) as refused:
-        finalization._approval(bundle, record, claim=claim)
-    return {
-        "text": str(refused.value),
-        "findings": [dict(finding) for finding in refused.value.findings],
-    }
+def _closeout_gate_refusal(root: Path, *, claim: bool) -> dict[str, object]:
+    """Exercise the stored-gate read/claim refusals on L56's surviving closeout route."""
+    return _closeout_claim(root) if claim else _closeout_early_read(root)
 
 
 def _integration(root: Path) -> dict[str, object]:
@@ -262,8 +237,8 @@ REFUSALS: dict[str, Callable[[Path], dict[str, object]]] = {
     "closeout-claim": _closeout_claim,
     "closeout-preview": _closeout_preview,
     "direct-landing": _direct_landing_claim,
-    "finalization-read": lambda root: _finalization(root, claim=False),
-    "finalization-claim": lambda root: _finalization(root, claim=True),
+    "closeout-gate-read": lambda root: _closeout_gate_refusal(root, claim=False),
+    "closeout-gate-claim": lambda root: _closeout_gate_refusal(root, claim=True),
     "integration": _integration,
     "integration-dry-run": _integration_dry_run,
 }
@@ -362,13 +337,13 @@ def test_a_direct_landing_refused_by_a_stored_gate_keeps_its_status(tmp_path: Pa
 
 
 @pytest.mark.parametrize("claim", [False, True])
-def test_a_finalization_refused_by_a_stored_gate_keeps_its_code(
-    tmp_path: Path, claim: bool
-) -> None:
-    (finding,) = _finalization(tmp_path, claim=claim)["findings"]  # type: ignore[misc]
+def test_a_closeout_refused_by_a_stored_gate_keeps_its_reason(tmp_path: Path, claim: bool) -> None:
+    fields = _closeout_gate_refusal(tmp_path, claim=claim)
 
-    assert finding["code"] == "finalization-approval-refused"
-    assert finding["observed"] == f"closeout-approval gate 01H is open. {STORED_GATE_WAY_OUT}"
+    assert fields["text"] == (
+        "closeout blocked by gate enforcement: closeout-approval gate 01H is open. "
+        f"{STORED_GATE_WAY_OUT}"
+    )
 
 
 def test_an_integration_refused_by_a_stored_handover_gate_names_no_next_tool(

@@ -104,7 +104,6 @@ REPOSITORY_TEST_INPUT_CONSUMERS: dict[Path, frozenset[Path]] = {
             Path("mcp/tests/test_lifecycle_playthrough_end_to_end.py"),
             Path("mcp/tests/test_mcp_stdio_transport.py"),
             Path("mcp/tests/test_memory_attribution_producers.py"),
-            Path("mcp/tests/test_operation_certification_selection.py"),
             Path("mcp/tests/test_pause_stop_only_end_to_end.py"),
             Path("mcp/tests/test_provider_current_state.py"),
             Path("mcp/tests/test_quality_diagnostics.py"),

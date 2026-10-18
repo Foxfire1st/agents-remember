@@ -1,9 +1,15 @@
 # Repository Certification Profiles
 
 A repository certification profile is the repository-owned authority for the concrete work in
-closeout Gates 1–4. Agents Remember owns the meanings and fixed order of those gates; each
-repository owns its commands, runtimes, selectors, artifacts, result decoder, and sandbox adapter.
-Gate 5 remains the Agents Remember memory/coherence gate and is not configurable here.
+requested certification Gates 1–4. Agents Remember owns the meanings and fixed order of those
+gates; each repository owns its commands, runtimes, selectors, artifacts, result decoder, and
+sandbox adapter. Requested certification runs through Dagger and commits nothing.
+
+Ordinary closeout runs no gate but the invariant gate. It publishes the judged code/memory pair
+as an authorized Git transaction, without invoking certification, code-quality checks, test
+suites, or independent review. A missing profile or certification result does not block that
+transaction. The profile and its loader remain authority for explicitly requested certification,
+not a second closeout route; memory invariants are not configurable through this profile.
 
 The MCP authority settings select one exact file:
 
@@ -50,6 +56,9 @@ Version 1 requires one unambiguous selection for each purpose and altitude:
 
 Selections reference rail identities. They do not copy rail commands. A repeated purpose/mode
 pair is ambiguous and fails admission.
+
+The `closeout` purpose names a certification selection, not an automatic invocation by the
+ordinary closeout transaction.
 
 ## Version 1 document shape
 
@@ -196,7 +205,7 @@ recognizes those rail names.
 
 ## Execution and evidence
 
-Closeout reconstructs the exact staged candidate in a disposable sandbox, loads the profile from
+Requested certification reconstructs the exact staged candidate in a disposable sandbox, loads the profile from
 that candidate, and freezes the profile source hash, semantic digest, selected plan, adapter, and
 decoder in the admission manifest. The sandbox adapter exports only the profile-declared bounded
 artifact inventory. A passing terminal result requires every selected artifact marked `required`;
@@ -228,7 +237,7 @@ filename fallback.
 
 ## Onboarding checklist
 
-Before declaring a repository ready for code closeout:
+Before declaring a repository ready for requested code certification:
 
 1. Inspect its documented build, static checks, suite, suite-dependent checks, and clean-room
    scenarios. Resolve a real semantic ambiguity with the repository owner; do not infer commands
@@ -237,8 +246,9 @@ Before declaring a repository ready for code closeout:
 3. Compile every required selection and repair all admission findings.
 4. Add `certificationProfile` to that repository's MCP authority settings entry and restart the
    MCP/harness because repository authority settings are read at boot.
-5. Run focused repository verification for its adapter and decoder before the first lifecycle
-   closeout.
+5. Run focused repository verification for its adapter and decoder before the first requested
+   certification.
 
 Older tasks and repositories without a profile remain readable and onboardable. They simply have
-no code-certification authority and fail closed if a later operation would need one.
+no code-certification authority and fail closed if requested certification would need one;
+ordinary invariant-gated closeout does not require a profile.

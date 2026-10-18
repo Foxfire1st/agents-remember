@@ -14,7 +14,6 @@ import time
 import unittest
 from contextlib import redirect_stdout, suppress
 from pathlib import Path
-from unittest import mock
 
 import test_knowledge_validator_routes as validator_tests
 import test_landing_commit_check as landing_tests
@@ -23,89 +22,45 @@ from agents_remember.application.worktree_services import (
     bind_worktree_services,
     build_default_worktree_services,
 )
-from agents_remember.errors import CertificationContractError
 from agents_remember.kernel.memory_attribution import render_memory_content_message
-from agents_remember.worktrees.integration.closeout.certification.execution import (
-    CloseoutCertificationHandoff,
-)
-from agents_remember.worktrees.integration.closeout.preparation import (
-    private_execution as preparation,
-)
-from agents_remember.worktrees.integration.closeout.preparation.selected import (
-    SelectedCloseoutPreparation,
-)
 from agents_remember.worktrees.services import reset_worktree_services
 from agents_remember.worktrees.sync_transaction_state import SyncOperationRecord, SyncOperationStore
 from agents_remember.worktrees.worktree_contract import load_contract
 from test_worktree_sync import SyncFixture, commit_file, git
 
 
-class PreparedMutationLogTests(unittest.TestCase):
-    def test_both_legs_keep_mutation_log_in_refusal_and_command_terminal(self) -> None:
-        """F10: the real mutated-tree refusal and its caller retain the same whole-output log."""
-        with tempfile.TemporaryDirectory() as tmp:
+class RemainingRouteMutationLogTests(unittest.TestCase):
+    def test_remaining_routes_keep_mutation_log_in_refusal(self) -> None:
+        """F10: actual callers retain the mutation path, whole output/time and log pointer."""
+        harness = landing_tests.RemainingRouteProductionTests()
+        for route in ("ordinary", "direct"):
             for leg in ("code", "memory"):
-                with self.subTest(leg=leg):
-                    harness = landing_tests.PreparedLegProductionTests()
-                    repo, capability = harness._admit(Path(tmp), leg)
-                    hook = harness._hooks_dir(capability) / "pre-commit"
-                    hook.write_text(
+                with self.subTest(route=route, leg=leg), tempfile.TemporaryDirectory() as tmp:
+                    repo = harness._repo(Path(tmp), leg)
+                    landing_tests._hook(
+                        repo,
                         "#!/bin/sh\necho mutation-stdout\necho mutation-stderr >&2\n"
                         "printf 'hook edit\\n' > source.txt\nexit 1\n",
-                        encoding="utf-8",
                     )
-                    hook.chmod(0o755)
-                    heads = [
-                        git(root, "rev-parse", "HEAD")
-                        for root in (repo, capability.binding.private_root)
-                    ]
-                    owner = mock.Mock(
-                        workerPid=os.getpid(),
-                        workerLease="a" * 64,
-                        workerProcessFingerprint="b" * 64,
-                    )
-                    selected_leg = mock.Mock()
-                    owner.preparation.legs = (selected_leg,)
-                    selected = SelectedCloseoutPreparation(
-                        CloseoutCertificationHandoff(mock.Mock(), owner, mock.Mock(), mock.Mock()),
-                        mock.Mock(),
-                        mock.Mock(),
-                    )
-                    # Only the surrounding journal selection is a fixture. The production
-                    # caller, admitted capability, Git commit, repository hook, log and
-                    # mutation guard all run unchanged.
-                    with (
-                        mock.patch.object(preparation, "_selected_leg", return_value=selected_leg),
-                        mock.patch.object(preparation, "_capability", return_value=capability),
-                        mock.patch.object(
-                            preparation, "begin_preparation_command", return_value=owner
-                        ),
-                        mock.patch.object(
-                            preparation, "_terminal_record", return_value=selected
-                        ) as terminal,
-                        self.assertRaises(CertificationContractError) as refused,
-                    ):
-                        preparation._run_once(selected, "commit", lambda current: current)
-                    finding = refused.exception.findings[0]
-                    self.assertEqual(finding["code"], "private-preparation-hook-changed-tree")
-                    observed = str(finding["observed"])
-                    self.assertIn("source.txt", observed)
-                    log = harness._pointer_log(observed)
-                    output = log.read_text(encoding="utf-8")
+                    head, index = git(repo, "rev-parse", "HEAD"), harness._index(repo)
+                    with self.assertRaises(
+                        (
+                            landing_tests.LandingCommitCheckRefusal,
+                            landing_tests.DirectLandingPublicationRefused,
+                        )
+                    ) as refused:
+                        harness._publish(repo, route)
+                    error = harness._refusal(refused.exception)
+                    self.assertEqual(error.reason, "changed")
+                    self.assertIn("source.txt", str(refused.exception))
+                    assert error.log is not None
+                    self.assertIn(error.log.as_posix(), str(refused.exception))
+                    output = error.log.read_text(encoding="utf-8")
                     self.assertIn("mutation-stdout", output)
                     self.assertIn("mutation-stderr", output)
                     self.assertRegex(output, r"elapsed: \d+\.\d+s")
-                    retained = terminal.call_args.args[2]
-                    self.assertEqual(retained.outcome, "unknown")
-                    self.assertIn(f"log={log.as_posix()}", retained.detail)
-                    self.assertIn("source.txt", retained.detail)
-                    self.assertEqual(
-                        [
-                            git(root, "rev-parse", "HEAD")
-                            for root in (repo, capability.binding.private_root)
-                        ],
-                        heads,
-                    )
+                    self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+                    self.assertEqual(harness._index(repo), index)
 
 
 class MaintenanceHookWitnessTests(unittest.TestCase):

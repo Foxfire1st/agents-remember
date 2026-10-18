@@ -101,14 +101,6 @@ ALLOWED_MODULES: Final[dict[str, tuple[str, str]]] = {
         CONNECT_READ_ONLY,
         "the cleanup survey's read-only content probe",
     ),
-    "memory_quality/style/citations/source_index_database.py": (
-        CONNECT,
-        "the citation source index, which is not a knowledge database",
-    ),
-    "memory_quality/style/citations/source_index.py": (
-        MOVE,
-        "the citation source index: its finished file is moved into place",
-    ),
 }
 # The three modules of the derived index. Whatever path a caller hands them, they never touch a
 # file that carries the name of a retired dataset.

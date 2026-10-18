@@ -82,11 +82,11 @@ def render_memory_content_message(body: str, code_commit: str) -> str:
     it. A producer therefore never edits the message string it was given; it renders the
     commit message with this function at the commit site.
 
-    Called by every memory-content producer: ``EffectiveCloseoutInput.memory_content_message``
-    (worktree closeout and, through it, the closeout recovery route when it still owes its
-    memory commit), the direct-landing memory leg, the prepared memory-content leg, and the
-    memory carryover and baseline-adoption routes. A producer that has no code commit to
-    name writes no trailer at all rather than a fabricated one.
+    Called by the three memory-content routes: worktree closeout (including recovery when it
+    still owes memory) and direct landing use ``EffectiveCloseoutInput.memory_content_message``;
+    baseline adoption calls directly. Carryover commits nothing: its recovery leaf publishes its judged tree.
+    The historical rewriter ``kernel/memory_backfill.py`` preserves the original commit's tree.
+    No code counterpart means no fabricated trailer.
     """
 
     return f"{body}\n\n{CODE_COMMIT_TRAILER_KEY}: {code_commit}"

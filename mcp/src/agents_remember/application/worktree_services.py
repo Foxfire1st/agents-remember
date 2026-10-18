@@ -14,9 +14,6 @@ from agents_remember.application.memory_quality.converted_base import (
     leaf_base_port,
     leaf_base_request_for_context,
 )
-from agents_remember.application.prepared_certification import (
-    PreparedMemoryCertificationAdapter,
-)
 from agents_remember.application.review_artifact_cleanup import ReviewArtifactCleanup
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory.conversion.crossing_port import GitKnowledgeCrossing
@@ -31,9 +28,6 @@ from agents_remember.memory_quality.style.citations import (
 )
 from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.providers import provider_setup as provider_setup_api
-from agents_remember.worktrees.integration.closeout.preparation.continuation import (
-    PreparedCloseoutContinuation,
-)
 from agents_remember.worktrees.services import (
     LeafAgentArchivePort,
     ProviderSetupRequestSpec,
@@ -227,8 +221,6 @@ def build_default_worktree_services(
         memory_quality=MemoryQualityAdapter(),
         citation_guard=CitationGuardAdapter(),
         certification_memory_rails=CertificationMemoryRailsAdapter(),
-        certification_continuation=PreparedCloseoutContinuation(),
-        prepared_memory_certification=PreparedMemoryCertificationAdapter(),
         knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),
         knowledge_crossing=GitKnowledgeCrossing(),
         knowledge_worklist=LeafWorklistRecompute(),

@@ -171,7 +171,7 @@ class PathDirectedRefreshTests(unittest.TestCase):
     def _readers(self, world: _World) -> ProjectionReaders:
         def count_surfaces(cfg: McpRuntimeConfig, moment: datetime) -> tuple:
             world.calls["surfaces"] += 1
-            return ([], [], [])
+            return ([], [])
 
         return ProjectionReaders(
             repo_surfaces=count_surfaces,

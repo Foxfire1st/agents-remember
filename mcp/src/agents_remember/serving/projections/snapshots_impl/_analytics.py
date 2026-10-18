@@ -1,4 +1,4 @@
-"""Analytical file-surface readers: drift, sidecars, setup, routes, tools, ledger.
+"""Analytical file-surface readers: drift, setup, routes, tools, ledger.
 
 The observers' slice-3b readers plus the shared ledger-window enrichment used by
 the engine-process facts and the official ledger surface. Every reader reuses
@@ -16,10 +16,6 @@ from agents_remember.controlplane.attention_dismissals import AttentionObservati
 from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import LedgerError, LedgerRow, load_ledger
-from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
-    discover_onboarding_files,
-    parse_table_metadata,
-)
 from agents_remember.observer.projection import (
     LEDGER_WINDOW,
     DriftSnapshotNode,
@@ -28,7 +24,6 @@ from agents_remember.observer.projection import (
     RouteCoverageNode,
     SetupProgressNode,
     SetupSummaryNode,
-    SidecarStaleNode,
     ToolReportNode,
 )
 from agents_remember.observer.reducer_impl._attention import observe_setup, observe_start
@@ -138,34 +133,6 @@ def read_drift_snapshots(
                 healthy=node.actionableCount == 0,
                 fingerprint=node.actionableFingerprint,
             )
-    return nodes
-
-
-def read_sidecar_staleness(  # pragma: no cover
-    onboarding_root: Path, *, repository: str, now: datetime
-) -> list[SidecarStaleNode]:
-    """Surface 11 (git-free): each supported sidecar's verification age.
-
-    Reuses the drift package's discovery + table-metadata parse -- no git, no
-    classification, just the age of the ``lastVerifiedCommitDate`` stamp.
-    """
-    if not onboarding_root.is_dir():
-        return []
-    nodes: list[SidecarStaleNode] = []
-    for path in discover_onboarding_files(onboarding_root):
-        try:
-            metadata = parse_table_metadata(path)
-        except (OSError, UnicodeDecodeError):
-            continue
-        stamp = metadata.get("lastVerifiedCommitDate", "")
-        nodes.append(
-            SidecarStaleNode(
-                onboardingFile=path.relative_to(onboarding_root).as_posix(),
-                repository=repository,
-                lastVerifiedDate=stamp,
-                ageSeconds=age_seconds(stamp, now) if stamp else None,
-            )
-        )
     return nodes
 
 

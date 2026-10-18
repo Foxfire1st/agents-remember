@@ -38,21 +38,11 @@ from pathlib import Path
 from threading import Event
 from typing import Any, Literal, overload
 
-from agents_remember.kernel.git_closeout_publication import (
-    _CLOSEOUT_PUBLICATION_AUTHORITY,
-    GitCloseoutPublicationBinding,
-    GitCloseoutPublicationCapability,
-    GitCloseoutPublicationError,
-    GitCloseoutPublicationObservation,
-    GitCloseoutPublicationResult,
-)
 from agents_remember.kernel.git_object_memo_keys import _memo_cat_file, _memo_rev_parse
 from agents_remember.kernel.git_preparation import (
     _PREPARATION_AUTHORITY,
     ExistingGitPreparationBinding,
-    GitPreparationCommandError,
     GitPreparationError,
-    PreparationAction,
     PrivateGitPreparationBinding,
     PrivateGitPreparationCapability,
     PrivateGitPreparationObservation,
@@ -109,15 +99,6 @@ GIT_BULK_REMOTE_TIMEOUT_SECONDS = 1800
 # escape sequences. Command-line options win over every one of them.
 DIFF_PREFIX_OPTIONS = ("--src-prefix=a/", "--dst-prefix=b/")
 PARSED_DIFF_OPTIONS = ("--no-color", "--no-ext-diff", *DIFF_PREFIX_OPTIONS)
-
-
-@dataclass(frozen=True)
-class GitCommandPlan:
-    """Exact runner input and complete argv for the caller's durable command intent."""
-
-    cwd: Path
-    args: tuple[str, ...]
-    argv: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -222,9 +203,9 @@ def run_git(
     selector back, because the names it accepts are checked against that same list.
 
     ``options.new_session`` starts the command alone in its process group, so a timeout stops
-    the command with the children it started (MIK-R152 rule 6: a landing's commit hook runs
-    inside ``git commit``, and killing git alone would orphan it). It exists for exactly one
-    command family: the prepared closeout's commit, whose hook no outer runner watches.
+    the command with the children it started. Callers that own a command's descendants can
+    use it under their bound; the landing hook runner separately owns its hook's process group
+    (MIK-R152 rule 6).
 
     ``safe.directory`` names ``repo_root`` and not the ``*`` the benchmark runner used.
     That is narrower, not weaker: it is the exact tree every one of these commands
@@ -1061,149 +1042,12 @@ def inspect_git_preparation(
         capability.require_authority()
 
 
-def preparation_command(
-    binding: PrivateGitPreparationBinding, action: PreparationAction
-) -> GitCommandPlan:
-    """Describe the sole allowed command for a journal to persist before execution."""
-    binding.validate()
-    if action == "create":
-        root = binding.logical_root
-        args = [
-            "worktree",
-            "add",
-            "--detach",
-            "--no-checkout",
-            binding.private_root.as_posix(),
-            binding.parent_commit,
-        ]
-    elif action == "materialize":
-        root = binding.private_root
-        args = ["read-tree", "--reset", "-u", binding.admitted_tree]
-    elif action == "commit":
-        root = binding.private_root
-        # MIK-R152: the commit hook always runs. ``strict-code-no-verify`` is kept as a
-        # journal-compatibility spelling only and never skips it: ``git commit`` runs the
-        # hook Git would run for a commit in this worktree, and the caller guards the
-        # tree the hook judged against the tree the commit records (rule 3).
-        args = ["commit"]
-        args.extend(["-m", binding.message])
-    else:
-        raise GitPreparationError("unknown private preparation action")
-    return GitCommandPlan(root, tuple(args), tuple(_git_argv(root, args, root)))
-
-
-def run_git_preparation(
-    capability: PrivateGitPreparationCapability,
-    action: PreparationAction,
-    *,
-    commit_timeout_s: float | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Perform one admitted command once, with exact before/after readback.
-
-    Timeouts propagate; callers must retain the durable intent and inspect its one named
-    output. An existing committed output is observation-only and can never be recommitted.
-    Normal identity, signing, prepare-commit-msg and post-commit semantics remain Git-owned.
-
-    ``commit_timeout_s`` bounds only the commit action, alone in its process group so the
-    bound stops the commit hook with its children (MIK-R152 rule 6); other actions keep
-    the local bound.
-    """
-    before = inspect_git_preparation(capability)
-    binding = capability.binding
-    required = {"create": "absent", "materialize": "created", "commit": "materialized"}
-    if action not in required or before.state != required[action]:
-        raise GitPreparationError(
-            f"private preparation action {action!r} is not admitted from {before.state}"
-        )
-    command = preparation_command(binding, action)
-    capability.require_authority()
-    if action == "commit" and commit_timeout_s is not None:
-        result = run_git(
-            command.cwd,
-            list(command.args),
-            GitRunnerOptions(timeout=commit_timeout_s, new_session=True),
-        )
-    else:
-        result = run_git(command.cwd, list(command.args))
-    try:
-        after = inspect_git_preparation(capability)
-        expected = {"create": "created", "materialize": "materialized", "commit": "committed"}
-        if result.returncode == 0 and after.state != expected[action]:
-            raise GitPreparationError(
-                "successful Git command did not produce its exact private state"
-            )
-    except GitPreparationError as error:
-        raise GitPreparationCommandError(str(error), result) from error
-    return result
-
-
-def _observe_closeout_publication(
-    binding: GitCloseoutPublicationBinding,
-) -> GitCloseoutPublicationObservation:
-    current = _preparation_output(
-        binding.root, ["rev-parse", "--verify", binding.logical_ref]
-    ).strip()
-    if current not in (binding.expected_old_commit, binding.prepared_commit):
-        raise GitCloseoutPublicationError(
-            "named closeout ref is outside its original old/new publication states"
-        )
-    _require_logical_git_root(binding.root, binding.common_directory, binding.logical_ref, current)
-    binding.require_prepared_bytes(read_git_commit_bytes(binding.root, binding.prepared_commit))
-    entries = _preparation_tree_entries(binding.root, binding.prepared_tree)
-    if (
-        binding.allow_memory_cache
-        and binding.prepared_commit != binding.expected_old_commit
-        and "memory.md" in entries
-    ):
-        raise GitCloseoutPublicationError("new memory publication includes the derived cache")
-    _require_preparation_index(
-        binding.root,
-        entries,
-        allow_memory_cache=binding.allow_memory_cache,
-    )
-    _require_logical_git_root(binding.root, binding.common_directory, binding.logical_ref, current)
-    state = (
-        "existing"
-        if binding.expected_old_commit == binding.prepared_commit
-        else "new"
-        if current == binding.prepared_commit
-        else "old"
-    )
-    return GitCloseoutPublicationObservation(state, current, binding.prepared_tree)
-
-
-def admit_git_closeout_publication(
-    binding: GitCloseoutPublicationBinding,
-    *,
-    authorize: Callable[[GitCloseoutPublicationBinding], None],
-) -> GitCloseoutPublicationCapability:
-    """Admit one actual closeout journal/approval owner, never integration authority."""
-    capability = GitCloseoutPublicationCapability(
-        binding, authorize, _CLOSEOUT_PUBLICATION_AUTHORITY
-    )
-    inspect_git_closeout_publication(capability)
-    return capability
-
-
-def inspect_git_closeout_publication(
-    capability: GitCloseoutPublicationCapability,
-) -> GitCloseoutPublicationObservation:
-    """Reprove only the named old/new ref and its already-materialized candidate."""
-    capability.require_authority()
-    try:
-        return _observe_closeout_publication(capability.binding)
-    except GitPreparationError as error:
-        raise GitCloseoutPublicationError(str(error)) from error
-    finally:
-        capability.require_authority()
-
-
 def ref_compare_and_swap_args(
     ref: str, new_commit: str, expected_old_commit: str, *, reason: str | None = None
 ) -> list[str]:
     """The one expected-old ref move every closeout publication uses.
 
-    The queued closeout journals it (:func:`closeout_publication_command`); the ordinary closeout
+    No queued publication command survives to journal it: the ordinary closeout
     and direct landing run it straight after they build their commit from the judged tree. Git
     refuses the move when the ref no longer names ``expected_old_commit``.
     """
@@ -1214,42 +1058,3 @@ def ref_compare_and_swap_args(
         new_commit,
         expected_old_commit,
     ]
-
-
-def closeout_publication_command(binding: GitCloseoutPublicationBinding) -> GitCommandPlan:
-    """Describe the one expected-old CAS for the caller's durable publication intent."""
-    binding.validate()
-    if binding.expected_old_commit == binding.prepared_commit:
-        raise GitCloseoutPublicationError("existing closeout output is observation-only")
-    args = ref_compare_and_swap_args(
-        binding.logical_ref, binding.prepared_commit, binding.expected_old_commit
-    )
-    return GitCommandPlan(
-        binding.root, tuple(args), tuple(_git_argv(binding.root, args, binding.root))
-    )
-
-
-def publish_git_closeout_ref(
-    capability: GitCloseoutPublicationCapability,
-) -> GitCloseoutPublicationResult:
-    """CAS one ref once; this neither materializes files nor promises cross-repo atomicity.
-
-    A timeout remains the upper journal owner's unknown command. Already-new and
-    no-op existing states return read-only evidence with no command. A failed after
-    proof retains an available actual command result on the typed refusal.
-    """
-    before = inspect_git_closeout_publication(capability)
-    if before.state != "old":
-        return GitCloseoutPublicationResult(before, before, None)
-    command = closeout_publication_command(capability.binding)
-    capability.require_authority()
-    result = run_git(command.cwd, list(command.args))
-    try:
-        after = inspect_git_closeout_publication(capability)
-        if result.returncode == 0 and after.state != "new":
-            raise GitCloseoutPublicationError(
-                "successful closeout CAS did not retain the prepared ref"
-            )
-    except GitCloseoutPublicationError as error:
-        raise GitCloseoutPublicationError(str(error), command=result) from error
-    return GitCloseoutPublicationResult(before, after, result)

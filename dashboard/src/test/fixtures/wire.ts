@@ -194,7 +194,6 @@ const BASE_ATTENTION: AttentionItem = {
  */
 export const EMPTY_ANALYTICS: Analytics = {
   driftSnapshots: [],
-  stalestSidecars: [],
   setupSummaries: [],
   setupProgress: [],
   routeCoverage: [],
@@ -287,7 +286,7 @@ export function projection<O extends Partial<WorkspaceProjection> = NoOverrides>
     providers: [],
     activeWorktreeGroups: [],
     ...rest,
-    metrics: metrics ?? { ignoredHostAgents: 0, stalenessHistogram: {} },
+    metrics: metrics ?? { ignoredHostAgents: 0 },
     analytics: analytics(analyticsOver),
   };
 }

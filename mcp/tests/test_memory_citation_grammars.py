@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
-from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -15,79 +12,15 @@ PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.memory_quality.style.citations import extents, grammars, model
-from test_memory_citation_fix import TreeCase
+from agents_remember.memory_quality.style.citations import extents, grammars
 from tree_sitter import Parser
 
 
 def spans(path: str, source: str) -> dict[str, list[tuple[int, int]]]:
-    return grammars.definitions(path, source.splitlines())
-
-
-class TypeScriptPureMoveTests(TreeCase):
-    """L6-R16, both directions: the grammar is what turns this decline into a repair.
-
-    One tree, one move. ``RailRow`` is DECLARED in one file and MENTIONED in another, and
-    the citation points at the file it left. With the TypeScript grammar the mention is not
-    a candidate, so the declaration resolves uniquely and ``--fix`` repoints the claim; with
-    the grammar withdrawn both files are mentions, nothing resolves uniquely, and the claim
-    is handed to the curator with both locations named.
-
-    The cited file is deleted by the move and the card is stamped at the commit that still
-    held the declaration there, so a relocation has to prove continuity as well: the anchor
-    was a DEFINITION in the cited file, and the tree-wide match must be a DEFINITION too.
-    """
-
-    def moved(self) -> None:
-        self.tree.history()
-        self.tree.source(
-            "dashboard/src/rail.tsx",
-            "export class RailRow {\n  render() {\n    return null;\n  }\n}\n",
-        )
-        stamp = self.tree.stamp()
-        self.tree.source(
-            "dashboard/src/rail/RailRow.tsx",
-            'import { useState } from "react";\n\n'
-            "export class RailRow {\n  render() {\n    return null;\n  }\n}\n",
-        )
-        self.tree.source(
-            "dashboard/src/panels/FlowTab.tsx",
-            'import { RailRow } from "../rail/RailRow";\n\n'
-            "export const FlowTab = () => new RailRow();\n",
-        )
-        self.tree.remove_source("dashboard/src/rail.tsx")
-        self.tree.card(
-            "dashboard/src/panels/FlowTab.tsx",
-            "| The rail row owns its own render. | `RailRow` | dashboard/src/rail.tsx:1-4 |",
-            stamp=stamp,
-        )
-
-    def withdrawn(self) -> AbstractContextManager[Any]:
-        """The tree exactly as it was before this leaf: no grammar reads ``.tsx``."""
-        remaining = {
-            suffix: grammar
-            for suffix, grammar in grammars.SUFFIX_GRAMMARS.items()
-            if grammar not in {grammars.TSX, grammars.TYPESCRIPT, grammars.JAVASCRIPT}
-        }
-        return mock.patch.dict(grammars.SUFFIX_GRAMMARS, remaining, clear=True)
-
-    def test_with_the_grammar_the_move_is_repaired_onto_the_declaration(self) -> None:
-        self.moved()
-
-        result = self.tree.fix()
-
-        self.assertEqual(self.sources(result), "dashboard/src/rail/RailRow.tsx:3-7")
-        self.assertEqual(result["declinedCount"], 0)
-        self.assert_check_clean()
-
-    def test_without_the_grammar_the_same_move_is_declined(self) -> None:
-        self.moved()
-
-        with self.withdrawn():
-            result = self.tree.fix()
-
-        self.assertEqual(result["claimsRepaired"], 0)
-        self.assertEqual(self.declined(result)["code"], "anchor_ambiguous")
+    return {
+        name: [binding.span for binding in items]
+        for name, items in grammars.bindings(path, source.splitlines()).items()
+    }
 
 
 class TestCaseDefinitionTests(unittest.TestCase):
@@ -278,65 +211,10 @@ for path, source in (
     ("k.tsx", "export const Row = () => null;\\n"),
     ("k.js", "export function main() {}\\n"),
 ):
-    if not grammars.definitions(path, source.splitlines()):
+    if not grammars.bindings(path, source.splitlines()):
         raise SystemExit(f"{path} parsed to nothing with egress blocked")
 print("ok")
 '''
-
-
-class TypeScriptAnchorGrammarTests(unittest.TestCase):
-    """R32 modes 1, 2, 3 and 5, plus the nearby shapes that stay negative."""
-
-    def test_a_url_does_not_lose_its_double_slash_during_quote_matching(self) -> None:
-        anchor = model.Anchor(kind=model.QUOTE, text="https://example.invalid/a")
-
-        self.assertTrue(model.occurs_in(anchor, 'const url = "https://example.invalid/a";'))
-
-
-class TypeScriptInterfacePoolRepairTests(TreeCase):
-    """R32 mode 4: pooled members repair to their defining interface file.
-
-    The card is stamped at the commit where the same interface still declared every pooled
-    member, so the relocation proves the members were DEFINITIONS there and are DEFINITIONS
-    at their new file.
-    """
-
-    def test_three_interface_members_in_another_file_repair_as_one_claim(self) -> None:
-        self.tree.history()
-        self.tree.source("dashboard/src/panels/old.ts", "export const keep = true;\n")
-        self.tree.source(
-            "dashboard/src/panels/gone.ts",
-            "export interface PanelProps {\n"
-            "  title: string;\n"
-            "  onSelect(): void;\n"
-            "  disabled?: boolean;\n"
-            "}\n",
-        )
-        stamp = self.tree.stamp()
-        self.tree.source(
-            "dashboard/src/types/panel.ts",
-            "export interface PanelProps {\n"
-            "  title: string;\n"
-            "  onSelect(): void;\n"
-            "  disabled?: boolean;\n"
-            "}\n",
-        )
-        self.tree.remove_source("dashboard/src/panels/gone.ts")
-        self.tree.card(
-            "dashboard/src/panels/view.tsx",
-            "| Panel inputs are shared. | `title`; `onSelect`; `disabled` "
-            "| dashboard/src/panels/gone.ts:1-4 |",
-            stamp=stamp,
-        )
-
-        result = self.tree.fix()
-
-        self.assertEqual(result["claimsRepaired"], 1, result["declined"])
-        self.assertEqual(result["declinedCount"], 0, result["declined"])
-        self.assertEqual(
-            self.sources(result),
-            "dashboard/src/types/panel.ts:2-4",
-        )
 
 
 if __name__ == "__main__":

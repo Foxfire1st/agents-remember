@@ -33,7 +33,6 @@ export interface Analytics {
   routeCoverage: RouteCoverageNode[];
   setupProgress: SetupProgressNode[];
   setupSummaries: SetupSummaryNode[];
-  stalestSidecars: SidecarStaleNode[];
   toolReports: ToolReportNode[];
 }
 
@@ -333,7 +332,6 @@ export interface LifecycleWorkerObservation {
 
 export interface Metrics {
   ignoredHostAgents: number;
-  stalenessHistogram: Record<string, number>;
 }
 
 export interface ProjectionInvalidationResult {
@@ -423,13 +421,6 @@ export interface SetupSummaryNode {
   resultCounts: Record<string, number>;
   snapshotStaleSeconds?: number;
   state?: string;
-}
-
-export interface SidecarStaleNode {
-  ageSeconds?: number;
-  lastVerifiedDate: string;
-  onboardingFile: string;
-  repository: string;
 }
 
 export interface SourceLineageEdge {

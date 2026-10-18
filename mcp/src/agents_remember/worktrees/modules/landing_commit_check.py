@@ -36,6 +36,7 @@ from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS,
 )
 from agents_remember.kernel.git_command import git_environment
+from agents_remember.worktrees.modules.landing_commit_check_pipes import _pipe_write_end_holders
 from agents_remember.worktrees.modules.models import PATH_SAMPLE_LIMIT, CommitPublicationRefusal
 
 #: The trailer a landing commit carries for MIK-R152 rule 8:
@@ -125,7 +126,10 @@ class LandingCommitCheckRefusal(CommitPublicationRefusal):
         super().__init__(str(self))
 
     def __str__(self) -> str:
-        line = f"the repository's commit check failed for {self.repo}: "
+        line = (
+            f"the repository's commit check failed for {self.repo} "
+            f"(hook {self.hook or 'pre-commit'}): "
+        )
         if self.reason == "changed":
             paths = ", ".join(self.changed_paths[:PATH_SAMPLE_LIMIT])
             line += (
@@ -154,7 +158,7 @@ class LandingCommitCheckRefusal(CommitPublicationRefusal):
             )
         else:
             line += "the hook ended with a failure; nothing was published"
-        if self.step is not None and self.reason == "failed":
+        if self.step is not None and self.reason in {"failed", "changed"}:
             line += f"; failing step: {self.step}"
         if self.log is not None:
             line += f"; hook log: {self.log.as_posix()}"
@@ -972,15 +976,6 @@ def _judge_hook_result(
             log=log,
             escaped_survivors=outcome.escaped_survivors,
         )
-    if outcome.returncode != 0:
-        if restore_index is not None:
-            restore_index()
-        raise LandingCommitCheckRefusal(
-            "failed",
-            checked=checked,
-            step=_last_failing_step(_log_tail_text(log), hook_path=resolve_commit_check_hook(repo)),
-            log=log,
-        )
     after_tree = _index_tree(repo, env=env)
     after_raw = _diff_head_raw(repo, env=env, against=_diff_base_ref(repo))
     after_blobs = worktree_blob_map(repo, env=env)
@@ -989,6 +984,17 @@ def _judge_hook_result(
         and set(after_raw.splitlines()) == set(before.diff_head.splitlines())
         and after_blobs == before.blobs
     ):
+        if outcome.returncode != 0:
+            if restore_index is not None:
+                restore_index()
+            raise LandingCommitCheckRefusal(
+                "failed",
+                checked=checked,
+                step=_last_failing_step(
+                    _log_tail_text(log), hook_path=resolve_commit_check_hook(repo)
+                ),
+                log=log,
+            )
         return
     missing = _recover_isolation_stash(repo, before)
     if restore_index is not None:
@@ -1008,7 +1014,11 @@ def _judge_hook_result(
     raise LandingCommitCheckRefusal(
         "changed",
         checked=checked,
-        step=None,
+        step=(
+            _last_failing_step(_log_tail_text(log), hook_path=resolve_commit_check_hook(repo))
+            if outcome.returncode != 0
+            else None
+        ),
         log=log,
         changed_paths=tuple(changed),
     )
@@ -1036,40 +1046,6 @@ def _changed_paths(before: TreeSnapshot, after: TreeSnapshot) -> list[str]:
     if not paths and after.index_tree != before.index_tree:
         return ["the index"]
     return sorted(paths)
-
-
-def _pipe_write_end_holders(pipe_inode: int) -> list[int]:
-    """Live PIDs holding the pipe's write end open, other than this process.
-
-    The hook output pipe is private to one run: only the hook subtree inherits
-    its write end. A descendant that escaped the process group (new session)
-    survives the group kill still holding it; the inode names exactly those
-    processes. Best effort: unreadable entries are skipped, never fatal.
-    """
-    holders: list[int] = []
-    me = os.getpid()
-    proc = Path("/proc")
-    if not proc.is_dir():
-        return holders
-    with suppress(OSError):
-        entries = list(proc.glob("[0-9]*"))
-    for entry in entries:
-        try:
-            pid = int(entry.name)
-        except ValueError:
-            continue
-        if pid == me:
-            continue
-        try:
-            fds = list((entry / "fd").iterdir())
-        except OSError:
-            continue
-        for fd in fds:
-            with suppress(OSError):
-                if os.readlink(fd) == f"pipe:[{pipe_inode}]":
-                    holders.append(pid)
-                    break
-    return sorted(set(holders))
 
 
 def _holder_alive(pid: int) -> bool:

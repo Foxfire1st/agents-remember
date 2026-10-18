@@ -17,7 +17,6 @@ from pathlib import Path
 
 from agents_remember import memory_quality
 from agents_remember.memory_quality.check import run_memory_quality_check
-from agents_remember.memory_quality.style.citations.resolution import Trees
 
 FORBIDDEN_PREFIXES = (
     "agents_remember.worktrees.integration.closeout",
@@ -61,4 +60,4 @@ def test_memory_quality_public_api_imports_with_no_closeout_in_existence() -> No
     """The pure quality surface loads with no contract, door or operation record."""
 
     assert run_memory_quality_check is not None
-    assert Trees is not None
+    assert memory_quality is not None

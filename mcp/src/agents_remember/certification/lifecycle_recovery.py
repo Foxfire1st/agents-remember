@@ -10,22 +10,15 @@ from agents_remember.certification.certificate_authority import (
     compile_finalization_authority,
     validate_finalization_currentness,
 )
-from agents_remember.certification.certificate_invalidation import (
-    CertificateInputChange,
-    plan_certificate_reuse,
-)
 from agents_remember.certification.certificate_models import (
     CreationProvenance,
     FinalizationCurrentInputs,
     GateCertificate,
     GateCertificateIdentity,
-    GateFiveSemanticInputs,
 )
 from agents_remember.certification.digests import content_digest
 from agents_remember.certification.lifecycle_admission import CompiledLifecycleAdmission
 from agents_remember.certification.lifecycle_models import (
-    CertificationRecoveryRecord,
-    CertificationRecoverySemanticEnvelope,
     FinalizationBoundaryObservation,
     FinalizationJournalState,
     FinalizationLeg,
@@ -49,37 +42,6 @@ class _RefusalEvidence:
     detail: str
     expected: object
     observed: object
-
-
-def compile_certification_recovery_record(
-    admission: CompiledLifecycleAdmission,
-    certificates: Sequence[GateCertificate],
-    changes: Sequence[CertificateInputChange],
-    *,
-    provenance: CreationProvenance,
-    gate_five_inputs: GateFiveSemanticInputs | None = None,
-) -> CertificationRecoveryRecord:
-    """Journal the exact R21 reuse decision without searching for another candidate."""
-
-    chain = tuple(certificates)
-    ordered_changes = tuple(sorted(changes, key=content_digest))
-    reuse = plan_certificate_reuse(
-        admission.certification,
-        chain,
-        ordered_changes,
-        gate_five_inputs=gate_five_inputs,
-    )
-    envelope = CertificationRecoverySemanticEnvelope(
-        lifecycleAdmissionDigest=admission.lifecycle.admissionDigest,
-        admittedCertificates=tuple(item.identity for item in chain),
-        inputChanges=ordered_changes,
-        reusePlan=reuse,
-    )
-    return CertificationRecoveryRecord(
-        semanticEnvelope=envelope,
-        recoveryDigest=content_digest(envelope),
-        provenance=provenance,
-    )
 
 
 def compile_lifecycle_finalization(
@@ -291,7 +253,6 @@ def _refuse(
 __all__ = [
     "FinalizationBoundaryInputs",
     "authorize_finalization_leg",
-    "compile_certification_recovery_record",
     "compile_lifecycle_finalization",
     "revalidate_certificate_authority",
     "validate_lifecycle_finalization_currentness",

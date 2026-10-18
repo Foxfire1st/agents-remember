@@ -24,9 +24,6 @@ EdgeClass = Literal[
     "route-index-dependency",
 ]
 
-MANIFEST_SCHEMA = "memory-dependency-scope/v1"
-SNAPSHOT_SCHEMA = "memory-dependency-snapshot/v1"
-
 
 def canonical_digest(value: object) -> str:
     """Return SHA-256 over the repository's canonical JSON spelling."""
@@ -148,40 +145,6 @@ class ScopeCandidateIdentity(_StrictModel):
         return canonical_digest(self.canonical_value())
 
 
-class ScopeNode(_StrictModel):
-    """One content-addressed source, memory, task, route, or index node."""
-
-    nodeId: str = Field(min_length=1)
-    contentDigest: Sha256
-    authorityNamespace: str = Field(min_length=1)
-    validatorVersion: str = Field(min_length=1)
-    reasons: tuple[str, ...] = Field(min_length=1)
-
-    @field_validator("nodeId")
-    @classmethod
-    def _canonical_node_id(cls, value: str) -> str:
-        if value in {"task:normative-intent", "task:semantic-topology"}:
-            return value
-        namespace, separator, relative = value.partition(":")
-        if (
-            separator != ":"
-            or namespace not in {"code", "memory"}
-            or not relative
-            or relative.startswith("/")
-            or "\\" in relative
-            or any(part in {"", ".", ".."} for part in relative.split("/"))
-        ):
-            raise ValueError("scope nodes must use canonical code, memory, or task identities")
-        return value
-
-    @field_validator("reasons")
-    @classmethod
-    def _canonical_reasons(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if tuple(sorted(set(value))) != value or any(not reason.strip() for reason in value):
-            raise ValueError("node reasons must be nonblank, unique, and sorted")
-        return value
-
-
 class ScopeEdge(_StrictModel):
     """One owner-declared reverse edge from a changed input to its dependent."""
 
@@ -202,51 +165,6 @@ class ScopeEdge(_StrictModel):
         return value
 
 
-class EdgeClassEvidence(_StrictModel):
-    edgeClass: EdgeClass
-    authorityNamespace: str = Field(min_length=1)
-    extractorVersion: str = Field(min_length=1)
-    validatorVersion: str = Field(min_length=1)
-    observedEdgeCount: int = Field(ge=0)
-    evidenceDigest: Sha256
-
-
-class SourceIndexObservation(_StrictModel):
-    """The existing citation index owner's exact immutable generation."""
-
-    owner: Literal["agents-remember.citation-source-index"] = (
-        "agents-remember.citation-source-index"
-    )
-    schemaVersion: Literal[8] = 8
-    snapshotId: Sha256
-    codeRoot: str
-    memoryRoot: str
-    candidateDigest: Sha256
-    validatorVersion: Literal["citation-source-index/v8"] = "citation-source-index/v8"
-
-    @field_validator("codeRoot", "memoryRoot")
-    @classmethod
-    def _absolute_root(cls, value: str) -> str:
-        path = Path(value)
-        if not path.is_absolute() or path.as_posix() != value or ".." in path.parts:
-            raise ValueError("source-index roots must be normalized absolute POSIX paths")
-        return value
-
-
-class DependencySnapshot(_StrictModel):
-    """One immutable owner-produced dependency population bound to a candidate."""
-
-    schema_: Literal["memory-dependency-snapshot/v1"] = Field(
-        default=SNAPSHOT_SCHEMA, alias="schema"
-    )
-    candidateDigest: Sha256
-    sourceIndex: SourceIndexObservation
-    nodes: tuple[ScopeNode, ...]
-    edges: tuple[ScopeEdge, ...]
-    edgeEvidence: tuple[EdgeClassEvidence, ...]
-    snapshotDigest: Sha256
-
-
 class CheckerScopePolicy(_StrictModel):
     checker: str = Field(min_length=1)
     mode: Literal["incremental", "full-only"]
@@ -255,34 +173,13 @@ class CheckerScopePolicy(_StrictModel):
     reason: str = Field(min_length=1)
 
 
-class ScopeManifest(_StrictModel):
-    """Deterministic selected closure and its reuse/certification readiness."""
-
-    schema_: Literal["memory-dependency-scope/v1"] = Field(default=MANIFEST_SCHEMA, alias="schema")
-    candidateDigest: Sha256
-    checkerRegistryVersion: Sha256
-    sourceIndex: SourceIndexObservation
-    changedRoots: tuple[str, ...]
-    selectedNodes: tuple[ScopeNode, ...]
-    selectedEdges: tuple[ScopeEdge, ...]
-    checkerPolicies: tuple[CheckerScopePolicy, ...]
-    fullOnlyCheckers: tuple[str, ...]
-    incrementalReady: bool
-    manifestDigest: Sha256
-
-
 __all__ = [
     "CheckerScopePolicy",
-    "DependencySnapshot",
     "EdgeClass",
-    "EdgeClassEvidence",
     "GitPathChange",
     "GitTreeDelta",
     "ScopeCandidateIdentity",
     "ScopeEdge",
-    "ScopeManifest",
-    "ScopeNode",
-    "SourceIndexObservation",
     "TaskObservationPair",
     "canonical_digest",
 ]

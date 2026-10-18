@@ -35,9 +35,7 @@ from agents_remember.application.review_tree_comparison import (
 from agents_remember.application.worktree_tool_requests import LandedCommits
 from agents_remember.cli.knowledge_ingest import EXIT_REFUSED
 from agents_remember.cli.knowledge_ingest import run as run_knowledge_ingest
-from agents_remember.errors import CertificationContractError
 from agents_remember.mcp.tools.memory import citation_fix_payload
-from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.memory import MemoryQualitySyncRequest
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import (
@@ -45,16 +43,8 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
     observe_atomic_series,
 )
 from agents_remember.worktrees.cutover_lock import (
-    CUTOVER_LOCK_CODE,
     is_legacy_format_refusal,
     legacy_format_refusal,
-)
-from agents_remember.worktrees.integration.closeout.certification.execution import (
-    execute_selected_closeout,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
 )
 from agents_remember.worktrees.knowledge_gate import converted_memory, landing_gate_refusal
 from agents_remember.worktrees.modules.record_landing import (
@@ -925,48 +915,6 @@ def test_knowledge_ingest_legacy_refusal_preserves_all_state(
         == frame_before[4]
     )
     assert leaf.contract_path.read_bytes() == frame_before[5]
-
-
-def test_prepared_certification_legacy_refusal_preserves_all_state(
-    tmp_path: Path,
-) -> None:
-    """L46-R1-B05: the certified (prepared) closeout refuses legacy, moving nothing.
-
-    This is the distinct prepared owner
-    (`PreparedMemoryCertificationAdapter`'s `execute_selected_closeout` entry):
-    its guard (`prepared_closeout_refusal`, then its own
-    `prepared_closeout_lock`) precedes every read and write, so the public
-    entry raises the cutover refusal and every ref, workdir file, index entry
-    and contract byte is unchanged.
-    """
-
-    fixture = QueueFixture(
-        tmp_path / "world", atomic_b=True, memory_mode="external", converted=False
-    )
-    series = load_contract(fixture.tasks / "master-b" / "series-contract.md")
-    memory_repo = series.memory_repo_path
-    code_worktree = series.code_worktree
-    assert memory_repo is not None and code_worktree is not None
-    # The guards under test precede every record/store read, so the store is
-    # the real operation path while the record is never consulted: the public
-    # entry refuses on the contract alone.
-    store = LifecycleOperationStore(operation_record_path(series.worktree_group, "closeout"))
-    record = LifecycleOperationRecord.model_construct()
-    frame_before = (
-        _repo_frame(fixture.code, memory_repo),
-        _clean_index(fixture.code, memory_repo, code_worktree),
-        _byte_tree(code_worktree),
-        series.contract_path.read_bytes(),
-    )
-    with pytest.raises(CertificationContractError) as refused:
-        execute_selected_closeout(series, record, store)
-    findings = refused.value.findings
-    assert findings and findings[0].get("code") == CUTOVER_LOCK_CODE, findings
-    assert "legacy-format" in json.dumps(findings, default=str), findings
-    assert _repo_frame(fixture.code, memory_repo) == frame_before[0]
-    assert _clean_index(fixture.code, memory_repo, code_worktree) == frame_before[1]
-    assert _byte_tree(code_worktree) == frame_before[2]
-    assert series.contract_path.read_bytes() == frame_before[3]
 
 
 def test_completed_master_integration_legacy_refusal_preserves_all_state(

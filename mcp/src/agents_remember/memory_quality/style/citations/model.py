@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
 
 from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.memory_quality.style.document_shape import inline_scan
@@ -32,7 +31,6 @@ NO_CITATION_MARKERS = frozenset({"", "-", "\u2013", "\u2014", "n/a"})
 
 IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 HEADING_MARK = "#"
-QUOTE_PAIRS = {'"': '"', "\u201c": "\u201d"}
 QUOTE_PATTERN = re.compile(r'"((?:\\.|[^"\\])+)"|\u201c((?:\\.|[^\u201d\\])+)\u201d')
 SOURCE_PATTERN = re.compile(r"(?P<path>\S+):(?P<start>\d+)(?:-(?P<end>\d+))?")
 
@@ -47,90 +45,6 @@ class Anchor:
 
     kind: str
     text: str
-
-    @property
-    def written(self) -> str:
-        if self.kind == QUOTE:
-            escaped = self.text.replace("\\", "\\\\").replace('"', '\\"')
-            return f'"{escaped}"'
-        return f"`{self.text}`"
-
-
-def documents_in(onboarding_root: Path, only: str | None = None) -> list[Path]:
-    """Every document to walk, or just the one named -- refusing a name that matches nothing.
-
-    The scope exists because a curator wave shares one memory worktree: a tree-wide ``--fix``
-    rewrites documents anywhere in it, so one curator's run can rewrite another's document
-    mid-edit. Scoping the DOCUMENT set is the fix; repository-wide anchor completeness comes
-    from the shared immutable source index rather than another source-tree parse.
-
-    An unmatched name RAISES rather than yielding an empty walk. A filter that matches
-    nothing and then reports clean is the defect this master found six times over -- a gate
-    reporting success over a scope nobody stated.
-    """
-    root = onboarding_root.resolve()
-    if only is None:
-        return [
-            _document_for(root, path.relative_to(root).as_posix())
-            for path in sorted(root.rglob("*.md"))
-            if path.is_file()
-        ]
-    return [_document_for(root, only)]
-
-
-def _document_for(root: Path, only: str) -> Path:
-    """Resolve one canonical current document for both full and selected walks."""
-    relative = PurePosixPath(only)
-    if (
-        not only
-        or relative.is_absolute()
-        or relative.suffix != ".md"
-        or relative.as_posix() != only
-        or any(part in {"", ".", ".."} for part in only.split("/"))
-    ):
-        raise ValueError(
-            f"--document {only!r} must be one canonical relative .md path under {root}"
-        )
-    lexical = root.joinpath(*relative.parts)
-    try:
-        selected = lexical.resolve(strict=True)
-    except (OSError, RuntimeError, ValueError) as error:
-        raise ValueError(f"--document {only!r} names no document under {root}") from error
-    if selected != lexical or root not in selected.parents or not selected.is_file():
-        raise ValueError(
-            f"--document {only!r} must name one regular canonical document confined under {root}"
-        )
-    return selected
-
-
-def normalised(text: str) -> str:
-    """``text`` with every run of whitespace collapsed, so a wrapped quote still matches."""
-    return " ".join(text.split())
-
-
-def quote_normalised(text: str) -> str:
-    """Quoted-anchor source with only a leading TypeScript line-comment mark removed."""
-    lines = [re.sub(r"^\s*//\s?", "", line) for line in text.splitlines()]
-    return normalised("\n".join(lines))
-
-
-def whole_identifier(symbol: str) -> re.Pattern[str]:
-    """``symbol`` as a complete identifier -- ``SERVED`` never inside ``SERVED_LIFECYCLE``."""
-    return re.compile(rf"(?<![A-Za-z0-9_$]){re.escape(symbol)}(?![A-Za-z0-9_$])")
-
-
-def occurs_in(anchor: Anchor, body: str) -> bool:
-    """Whether the anchor's text is inside ``body``, by the rule its kind implies.
-
-    The one rule the whole check turns on, so it lives beside the grammar it implements:
-    the range generator has to satisfy exactly what the checker tests for, and two copies
-    of "does this range hold this anchor" would eventually disagree.
-    """
-    if anchor.kind == SYMBOL:
-        return whole_identifier(anchor.text).search(body) is not None
-    if anchor.kind == HEADING:
-        return any(line.strip() == anchor.text for line in body.splitlines())
-    return normalised(anchor.text) in quote_normalised(body)
 
 
 @dataclass(frozen=True)
@@ -254,44 +168,3 @@ def citations_in(text: str) -> tuple[tuple[Citation, ...], tuple[str, ...]]:
             Citation(text=written, path=match.group("path"), start=start, end=max(start, end))
         )
     return tuple(found), tuple(malformed)
-
-
-def skip_quoted(text: str, index: int) -> int:
-    """The index just past the quoted literal opening at ``index``, or just past the mark."""
-    closing = QUOTE_PAIRS[text[index]]
-    cursor = index + 1
-    while cursor < len(text):
-        if text[cursor] == "\\":
-            cursor += 2
-            continue
-        if text[cursor] == closing:
-            return cursor + 1
-        cursor += 1
-    return index + 1
-
-
-def matching(text: str, opener: int, spans: list[tuple[int, int]], closer: str) -> int | None:
-    """The index of the bracket closing the one at ``opener``, or ``None``.
-
-    Code spans and quoted literals are stepped over whole, so a bracket inside
-    ``"exit(1)"`` or inside ``` `f(x)` ``` does not change the depth.
-    """
-    depth = 0
-    index = opener
-    while index < len(text):
-        span_end = inline_scan.enclosing_span_end(index, spans)
-        if span_end is not None:
-            index = span_end
-            continue
-        character = text[index]
-        if character in QUOTE_PAIRS:
-            index = skip_quoted(text, index)
-            continue
-        if character == text[opener]:
-            depth += 1
-        elif character == closer:
-            depth -= 1
-            if depth == 0:
-                return index
-        index += 1
-    return None

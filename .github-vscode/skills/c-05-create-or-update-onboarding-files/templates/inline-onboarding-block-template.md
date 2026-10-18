@@ -2,7 +2,7 @@
 
 Use this companion template when file-level onboarding is stored inline instead of as a mirrored markdown file.
 
-It reuses the same semantic content model as `file-level-onboarding-template.md`. Only storage, comment syntax, placement, verification metadata, and digesting differ.
+It reuses the converted-card workflow’s semantic content model. Only storage, comment syntax, placement, verification metadata, and digesting differ.
 
 ```text
 <host-language block comment start>

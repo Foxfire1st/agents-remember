@@ -22,7 +22,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     resolve_storage_for_source,
 )
 from agents_remember.kernel.git_command import run_git
-from agents_remember.memory_quality.integrity.onboarding_drift_check.drift import (
+from agents_remember.memory_quality.integrity.onboarding_drift_check.inline import (
     extract_inline_onboarding_block,
 )
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader

@@ -50,7 +50,13 @@ def git(root: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=False,
-        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(root), "GIT_CONFIG_NOSYSTEM": "1"},
+        env={
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "HOME": str(root),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_AUTHOR_DATE": "2026-10-01T00:00:00+00:00",
+            "GIT_COMMITTER_DATE": "2026-10-01T00:00:00+00:00",
+        },
     )
     if result.returncode != 0:
         raise AssertionError(f"fixture git {' '.join(args)} failed: {result.stderr.strip()}")

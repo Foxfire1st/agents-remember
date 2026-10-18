@@ -80,7 +80,6 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [
     "GATE_UNBOUND",
-    "PREPARED_CLOSEOUT_UNCLOSABLE",
     "ClosingReceiptError",
     "HistoryClosing",
     "checkout_memory_converted",
@@ -100,8 +99,6 @@ __all__ = [
     "leaf_line",
     "leaf_memory_converted",
     "parent_memory_tip",
-    "prepared_closeout_lock",
-    "prepared_closeout_refusal",
     "require_readable_closings",
     "settle_direct_closing",
 ]
@@ -203,48 +200,6 @@ def _leaf_gate_applies(contract: WorktreeContract, memory_tree: str) -> tuple[bo
         return converted_memory(repository, memory_tree, official_ref), None
     except RuntimeError as error:  # an unreadable probe, or an invalid official branch cell
         return True, str(error)
-
-
-PREPARED_CLOSEOUT_UNCLOSABLE = "prepared-closeout-knowledge-history-unclosable"
-
-
-def prepared_closeout_refusal(contract: WorktreeContract) -> str | None:
-    """Why the certified (prepared) closeout must refuse this leaf, or ``None`` (L09 ruling, gap 3).
-
-    That path binds its memory commit to the exact curator-attested candidate, so it cannot write
-    ``closed: true`` into the leaf's history file (MIK-R07 rule 7, MIK-R09 rule 3). On converted
-    memory it therefore fails closed, naming why, until it can close the file; unconverted memory is
-    untouched. A probe Git cannot answer refuses as well.
-    """
-
-    if is_disabled_contract(contract):
-        return opt_out_detail_for_contract(contract, "the certified (prepared) closeout")
-    try:
-        if not leaf_memory_converted(contract):
-            return None
-    except RuntimeError as error:
-        return str(error)
-    return (
-        "the certified (prepared) closeout binds its memory commit to the curator-attested "
-        "candidate, so it cannot set closed: true in the leaf's history file (MIK-R07 rule 7, "
-        "MIK-R09 rule 3); on converted memory it refuses until it can -- close the leaf out through "
-        "the worktree closeout commit, which closes the file and validates the exact tree"
-    )
-
-
-def prepared_closeout_lock(contract: WorktreeContract) -> str | None:
-    """The cutover lock on the certified (prepared) closeout of unconverted memory (rule 6).
-
-    ``None`` for converted memory (:func:`prepared_closeout_refusal` decides it, and names a probe
-    Git cannot answer) and for a repository that holds no converted memory.
-    """
-
-    try:
-        if leaf_memory_converted(contract):
-            return None
-    except RuntimeError:
-        return None  # prepared_closeout_refusal refuses the unreadable probe by name
-    return leaf_cutover_refusal(contract, "the certified (prepared) closeout")
 
 
 def leaf_gate_refusal(

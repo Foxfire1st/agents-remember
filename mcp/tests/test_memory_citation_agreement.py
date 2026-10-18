@@ -30,7 +30,6 @@ from __future__ import annotations
 import ast
 import os
 import re
-import shutil
 import sys
 import tempfile
 import tomllib
@@ -45,14 +44,7 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.memory_quality.style.citations import (
-    cells,
-    fixer,
-    model,
-    range_resolution,
-    source_index,
-)
-from agents_remember.memory_quality.style.citations.resolution import Trees
+from agents_remember.memory_quality.style.citations import cells, model
 from agents_remember.memory_quality.style.document_shape import inline_scan
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -287,206 +279,7 @@ def live_onboarding_root() -> Path | None:
     return None
 
 
-class World:
-    """A code tree and the memory tree that documents it, both under one temporary root.
-
-    The shape is the product's, not this module's: the memory tree is a Git-visible directory with
-    an ``onboarding`` child, the code tree holds the sources its citations name, and the checks run
-    through ``check_onboarding_root`` / ``fix_onboarding_root`` -- the same entry points the
-    ``memory_quality_check`` and ``citation_fix`` tools dispatch through. Nothing here reaches the
-    real repositories, the network, or a container.
-    """
-
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self.code = root / "code"
-        self.memory = root / "memory"
-        self.onboarding = self.memory / "onboarding"
-        (self.code / "mcp").mkdir(parents=True)
-        (self.onboarding / "mcp").mkdir(parents=True)
-
-    def source(self, relative: str, body: str) -> Path:
-        path = self.code / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
-        return path
-
-    def card(self, source_path: str, rows: list[str], *prose: str) -> Path:
-        header = [
-            f"# {source_path}",
-            "",
-            "| Field | Value |",
-            "| --- | --- |",
-            f"| path | `{source_path}` |",
-            "",
-            "## References",
-            "",
-            "| Finding | Anchor | Source |",
-            "| --- | --- | --- |",
-            *rows,
-            "",
-            *prose,
-            "",
-        ]
-        path = self.onboarding / f"{source_path}.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(header), encoding="utf-8")
-        return path
-
-    def check(self) -> dict[str, object]:
-        return range_resolution.check_onboarding_root(self.onboarding, self.code)
-
-    def fix(self, *, dry_run: bool = False) -> dict[str, object]:
-        return fixer.fix_onboarding_root(self.onboarding, self.code, dry_run=dry_run)
-
-    def trees(self) -> Trees:
-        return Trees(code_root=self.code, memory_root=self.memory)
-
-    @staticmethod
-    def filler(count: int) -> list[str]:
-        """``count`` numbered assignment lines -- filler that a parser reads as definitions."""
-        return [f"filler{index} = {index}" for index in range(1, count + 1)]
-
-    def clean(self) -> None:
-        """Remove the world AND the citation cache slot its source census was built in.
-
-        The slot is keyed by the hash of the two roots, so the index this run built is reachable
-        only through those roots -- leaving it would leave a 100-plus MB sqlite file in the shared
-        cache named after a directory that no longer exists (T73/T85: clean up after yourself).
-        """
-        slot = source_index.cache_paths(self.trees()).slot
-        shutil.rmtree(self.root, ignore_errors=True)
-        shutil.rmtree(slot, ignore_errors=True)
-
-
-class WorldCase(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory(prefix="tsip-l7-agree-")
-        self.addCleanup(self._tmp.cleanup)
-        self.world = World(Path(self._tmp.name))
-        self.addCleanup(self.world.clean)
-
-
-class DefinitionOutsideCitedRangeTests(WorldCase):
-    """T52: the range says where the construct is, and the construct is somewhere else.
-
-    The fixture is the measured shape reduced to its smallest form: a construct at lines 20-21, a
-    CALL to it inside lines 5-12, and a claim citing 5-12 for the construct's name. The membership
-    test is satisfied by the call, so the claim reads current while pointing at the wrong lines.
-    """
-
-    CITED = "mcp/sample.py:5-12"
-    CORRECT = "mcp/sample.py:20-21"
-
-    def build(self, *, calls: int = 1, definitions: int = 1) -> None:
-        body = self.world.filler(40)
-        for index in range(calls):
-            body[9 + index] = "    target_construct()"
-        for index in range(definitions):
-            body[19 + index * 10] = "def target_construct():"
-            if index * 10 + 20 < len(body):
-                body[20 + index * 10] = "    return 1"
-        self.world.source("mcp/sample.py", "\n".join(body) + "\n")
-
-    def codes(self, result: dict[str, object]) -> list[str]:
-        return sorted(
-            {str(one["code"]) for one in result["findings"]}  # type: ignore[index]
-            | {str(one["code"]) for one in result["reportOnlyFindings"]}  # type: ignore[index]
-        )
-
-    def test_the_moved_range_is_reported_and_stays_a_report(self) -> None:
-        """The blind spot: green membership, definition 150 lines away, one report-only finding.
-
-        Both halves matter. ``findingCount`` must stay ZERO -- this class is reported, never gated,
-        so turning a membership-clean tree red is not the repair -- and the population counter must
-        be ONE, because a report nobody counts is a report nobody reads.
-        """
-        self.build()
-        self.world.card("mcp/sample.py", [f"| describes it | `target_construct` | {self.CITED} |"])
-        result = self.world.check()
-        self.assertEqual(self.codes(result), ["citation_anchor_definition_outside_range"])
-        self.assertEqual(result["findingCount"], 0)
-        self.assertEqual(result["reportOnlyFindingCount"], 1)
-        self.assertEqual(result["definitionsOutsideCitedRanges"], 1)
-
-    def test_a_corrected_range_clears_it(self) -> None:
-        """The positive control's other half: the same world, the range written where it belongs."""
-        self.build()
-        self.world.card(
-            "mcp/sample.py", [f"| describes it | `target_construct` | {self.CORRECT} |"]
-        )
-        result = self.world.check()
-        self.assertEqual(self.codes(result), [])
-        self.assertEqual(result["reportOnlyFindingCount"], 0)
-        self.assertEqual(result["definitionsOutsideCitedRanges"], 0)
-
-    def test_an_ambiguous_anchor_is_not_reported(self) -> None:
-        """A name defined twice has no single construct the range could be about.
-
-        Without this the check would guess which definition a range meant, which is how a checker
-        invents findings. The second definition is dropped far below the first so the fixture is
-        the ONLY difference between this case and the firing one.
-        """
-        self.build(definitions=2)
-        self.world.card("mcp/sample.py", [f"| describes it | `target_construct` | {self.CITED} |"])
-        result = self.world.check()
-        self.assertEqual(self.codes(result), [])
-        self.assertEqual(result["definitionsOutsideCitedRanges"], 0)
-
-    def test_a_non_symbol_anchor_has_no_definition_to_be_outside_of(self) -> None:
-        """The ``anchor.kind != SYMBOL`` guard, pinned from the side that can reach it.
-
-        The guard cannot fail INDEPENDENTLY of the conditions beside it: a heading anchor resolves
-        through ``extents.heading_extents_in`` and a quoted-literal anchor through
-        ``extended_quotes``, so neither is ever returned with ``kind == DEFINITION`` and
-        :func:`defined_extents` is empty for both -- which the ``len(definitions) != 1`` test
-        already refuses. Pinning the guard's own line would therefore be a case that passes for a
-        reason other than the one it names. What CAN be pinned is the fact the guard rests on, and
-        that is what this case does: the same tree, the same cited range, one anchor of each other
-        kind, and the check silent for both -- while the symbol anchor in the same table fires.
-        """
-        self.build()
-        heading, quote = "`# References`", '"target_construct"'
-        self.world.card(
-            "mcp/sample.py",
-            [
-                f"| heading anchor | {heading} | {self.CITED} |",
-                f"| literal anchor | {quote} | {self.CITED} |",
-            ],
-        )
-        self.assertEqual([one.kind for one in self.anchors_of(heading)], [model.HEADING])
-        self.assertEqual([one.kind for one in self.anchors_of(quote)], [model.QUOTE])
-        result = self.world.check()
-        self.assertEqual(
-            result["definitionsOutsideCitedRanges"],
-            0,
-            "a heading or literal anchor must never reach the definition comparison",
-        )
-        # The literal anchor is HELD by the cited range (the construct's name occurs there as a
-        # call), so the only finding on the row is the heading's -- and the class this case is
-        # about contributes nothing, which is the fact the SYMBOL guard rests on.
-        self.assertEqual(self.codes(result), ["citation_anchor_absent_from_range"])
-        self.assertNotIn(
-            "citation_anchor_definition_outside_range",
-            self.codes(result),
-            "a non-symbol anchor reached the definition comparison",
-        )
-
-    @staticmethod
-    def anchors_of(anchor_text: str) -> tuple[model.Anchor, ...]:
-        return model.anchors_in(anchor_text)[0]
-
-    def test_without_the_call_the_older_class_still_owns_the_row(self) -> None:
-        """One defect, one finding: with nothing inside the range spelling the name, the range
-        check's own ``citation_anchor_absent_from_range`` reports it and this class stays silent."""
-        self.build(calls=0)
-        self.world.card("mcp/sample.py", [f"| describes it | `target_construct` | {self.CITED} |"])
-        result = self.world.check()
-        self.assertEqual(self.codes(result), ["citation_anchor_absent_from_range"])
-        self.assertEqual(result["definitionsOutsideCitedRanges"], 0)
-
-
-class EscapedPipeAnchorTests(WorldCase):
+class EscapedPipeAnchorTests(unittest.TestCase):
     """T57: GFM's ``\\|`` escape is not unescaped where cell text becomes anchor text.
 
     A literal pipe inside a table cell must be escaped, so an anchor naming a TypeScript union or
@@ -551,9 +344,9 @@ class EscapedPipeAnchorTests(WorldCase):
         body = 'x = "a | b"\n'
         escaped = cells.parse_row(1, r'"a \| b"', "x.py:1-1").anchors
         self.assertEqual([one.text for one in escaped], ["a | b"])
-        self.assertTrue(model.occurs_in(escaped[0], body), "the unescaped literal must match")
+        self.assertIn(escaped[0].text, body, "the unescaped literal must match")
         naive = model.anchors_in(r'"a \| b"')[0]
-        self.assertFalse(model.occurs_in(naive[0], body), "the raw literal must not match")
+        self.assertNotIn(naive[0].text, body, "the raw literal must not match")
 
     def test_the_bound_a_second_backslash_puts_on_the_escape(self) -> None:
         r"""The documented bound, pinned so it is a stated limit rather than a surprise.
@@ -580,122 +373,6 @@ class EscapedPipeAnchorTests(WorldCase):
         for spelling in (r"`launchFailures \| setTurnEnded`", r"`launchFailures | setTurnEnded`"):
             self.assertEqual(model.anchors_in(cells.unescaped(spelling))[0], ())
             self.assertEqual(model.anchors_in(cells.unescaped(spelling))[1], 1)
-
-
-class WrappedCitationPopulationTests(WorldCase):
-    """T58: the population the fixer can only count, derived by enumeration and pinned both ways.
-
-    The detector is proven by planting the shape in a temporary document, so the zero it reports
-    on the corpus is a measured zero rather than an instrument that never fires. The corpus itself
-    is enumerated by walking the repository's markdown, which is the population -- not the
-    checker's finding list, and not the fixer's own counter.
-    """
-
-    WRAPPED_DOCUMENT: str = "\n".join(
-        [
-            "# a card",
-            "",
-            "The claim names the construct and cites the range it used to occupy,",
-            "cit:([`target_construct`],",
-            "mcp/sample.py:5-12) and the paragraph continues here.",
-            "",
-        ]
-    )
-
-    @staticmethod
-    def wrapped_constructs(lines: list[str]) -> int:
-        """Every ``cit:`` whose opening parenthesis and closing one are on different lines."""
-        return sum(
-            1
-            for index, line in enumerate(lines)
-            for _opened, closed in fixer.cit_bounds(line)
-            if closed is None
-            and any(
-                ")" in later
-                for later in lines[index + 1 : index + 4]
-                if "cit:(" in line or later.strip()
-            )
-        )
-
-    def test_the_detector_fires_on_the_planted_shape(self) -> None:
-        """Without this the corpus zero below would be an instrument that cannot see anything."""
-        planted = self.world.onboarding / "mcp" / "planted.py.md"
-        planted.write_text(self.WRAPPED_DOCUMENT, encoding="utf-8")
-        self.assertEqual(
-            self.wrapped_constructs(self.WRAPPED_DOCUMENT.splitlines()),
-            1,
-            "the detector must find the wrapped construct it is pointed at",
-        )
-
-    def test_a_one_line_construct_is_not_counted(self) -> None:
-        single = "cit:([`target_construct`], mcp/sample.py:5-12) all on one line."
-        self.assertEqual(self.wrapped_constructs([single]), 0)
-
-    def test_the_repository_carries_none(self) -> None:
-        """The repository's own markdown, enumerated. Zero is the current truth and the pin."""
-        found = 0
-        scanned = 0
-        for path in sorted(REPOSITORY_ROOT.glob("**/*.md")):
-            if not path.is_file() or ".git" in path.parts or "node_modules" in path.parts:
-                continue
-            scanned += 1
-            found += self.wrapped_constructs(
-                path.read_text(encoding="utf-8", errors="replace").splitlines()
-            )
-        self.assertGreater(scanned, 100, "the enumeration must actually walk the repository")
-        self.assertEqual(found, 0, f"{found} wrapped cit: construct(s) in the repository")
-
-    def test_the_live_memory_tree_matches_the_pins(self) -> None:
-        """Both live populations the fixer's own counter cannot close, on the MASTER memory tree.
-
-        The tree every number is measured against is named at the head of this module: the master
-        memory work branch at the tip this leaf lands, checked out into a disposable worktree and
-        named by ``AR_ONBOARDING_ROOT``, paired with the code checkout the suite runs in. Round 1
-        of this leaf measured the OFFICIAL checkout instead and every figure moved, which is
-        ``T65``'s defect and the reason the pairing is written down rather than assumed.
-
-        This case SKIPS when ``AR_ONBOARDING_ROOT`` names no tree, so a green run of the lane is
-        not evidence that the pins hold; it is evidence that nothing contradicted them here.
-
-        ``T58`` is derived by ENUMERATION of the documents (the same detector the synthetic cases
-        prove fires) rather than from ``claimsNotOnOneLine``, because that counter is the fixer's
-        own and a case that reads its subject's counter cannot falsify it.
-        """
-        root = live_onboarding_root()
-        if root is None:
-            self.skipTest("AR_ONBOARDING_ROOT names no memory tree on this machine")
-        result = range_resolution.check_onboarding_root(root, REPOSITORY_ROOT)
-        self.assertEqual(
-            result["definitionsOutsideCitedRanges"],
-            T52_DEFINITION_OUTSIDE_RANGE,
-            "T52: the definition-outside-range population moved",
-        )
-        self.assertEqual(
-            len(
-                [
-                    one
-                    for one in result["reportOnlyFindings"]
-                    if one["code"] == "citation_anchor_definition_outside_range"
-                ]
-            ),
-            T52_DEFINITION_OUTSIDE_RANGE,
-            "the counter and the row list must agree",
-        )
-        self.assertEqual(
-            result["findingCount"], T52_ENFORCED_POPULATION, "T52: the ENFORCED population moved"
-        )
-        wrapped = 0
-        documents = 0
-        for path in sorted(root.glob("**/*.md")):
-            if not path.is_file():
-                continue
-            count = self.wrapped_constructs(
-                path.read_text(encoding="utf-8", errors="replace").splitlines()
-            )
-            wrapped += count
-            documents += bool(count)
-        self.assertEqual(wrapped, T58_WRAPPED_CITATIONS, "T58: wrapped cit: population moved")
-        self.assertEqual(documents, T58_WRAPPED_DOCUMENTS, "T58: wrapped documents moved")
 
 
 class BudgetAgreementTests(unittest.TestCase):

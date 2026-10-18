@@ -1,77 +1,60 @@
 ---
 name: c-11-memory-carryover-from-branch
-description: "Carry richer onboarding from a source branch into a dedicated recovery leaf after the corresponding code landed, then close and integrate that leaf normally."
+description: "Carry converted onboarding into a recovery leaf after its code lands; the curator answers its worklist, then normal closeout publishes."
 ---
 
 # c-11-memory-carryover-from-branch Memory Carryover From Branch
 
-Use this skill when a protected official code branch receives delayed or batched merges, while a developer has accumulated richer onboarding on another branch. The source branch may be a personal workbench branch, an individual feature branch, or a handpicked branch processed as part of a larger reconciliation pass.
+Carryover is selective memory reconciliation, not a Git merge. It proves which source-branch code changes landed, then carries their richer onboarding into the exact open external-memory recovery leaf. Its clean code worktree must stand at the selected official tip. It never writes an official checkout or moves protected refs.
 
-The `c-11-memory-carryover-from-branch` skill is not a Git merge. It is a selective memory reconciliation step. It proves which source-branch code changes are represented in the official branch, then carries only the corresponding onboarding into an open, external-memory recovery leaf and refreshes verification metadata against the official code commit. That leaf still closes and integrates through the normal journaled code-and-memory lifecycle; carryover never writes an official integration checkout directly.
-
-## MCP Tools
-
-Use the Agents Remember MCP memory carryover tools as the normal installed
-runtime entry point:
+## Plan, then apply
 
 ```text
 memory_carryover_plan(repo_id="<repo-id>", contract_path="<open-recovery-leaf-contract>", source_memory="<source-memory-repo>", official_code_ref="<official-ref>", source_code_ref="<source-ref>", old_base="<base-ref-or-sha>")
 memory_carryover_apply(repo_id="<repo-id>", contract_path="<open-recovery-leaf-contract>", source_memory="<source-memory-repo>", official_code_ref="<official-ref>", source_code_ref="<source-ref>", old_base="<base-ref-or-sha>", intent_note="<developer intent>")
 ```
 
-Start a dedicated recovery leaf from the landed code-and-memory source pair, then run
-`memory_carryover_plan` against that leaf. Use `memory_carryover_apply` only after reviewing
-the candidate report. Apply mutates only the recovery leaf's ordinary memory worktree; it
-does not move code or protected memory refs. Close and integrate the recovery leaf normally.
-The skill tree is instruction-only; installed and development workflows use the MCP/package
-route.
+Start the recovery leaf from the landed code/memory pair. Plan is read-only and files no report. Review its candidates before an approval-gated apply. Both memory trees must hold valid `knowledge/layout.json` markers with the same conversion-format version; otherwise nothing further is read. Unconverted memory is refused: use `agents-remember knowledge-convert MEMORY_ROOT --code CODE_REPOSITORY` for first conversion, or the crossing sync (`worktree_sync` with `merge-memory`) from a converted line.
 
-## Candidate Kinds
+## Candidate units and selection
 
-Candidates are kind-tagged; `include_review_required` selects each by its selection key.
+Markdown and its JSON sidecar are compared, selected and written **together**. `include_review_required` keeps these selection keys:
 
-- `file-sidecar`: per-file onboarding for a code path in the diff; key = the source path.
-- `route-overview`: route overview whose route covers a landed path (GitHub #56); key = the normalized route (`.` for the repo root).
-- `memory-only-doc`: a sidecar or overview changed only in branch memory while its source path is outside the code diff (e.g. a pre-existing drift re-verified mid-task); key = the doc's source path or route.
-- `entity-catalog`: the repo entity catalog (`onboarding/entities.md`); key = the literal `entity-catalog`. Always review-required when differing — whole-file carry, no entry-level merging. On carry, every `git-blob-set-v1` fingerprint row is recomputed against the official code ref and the apply result reports `entity_fingerprint_validation` (`validated` / `mismatch` / `skipped`, with per-entity detail); fingerprints are derived values and are validated, never trusted as copied.
+- `file-sidecar`: a code path in the diff; key = that path.
+- `route-overview`: an overview covering landed paths; key = the normalized route (`.` for root). A differing body needs review.
+- `memory-only-doc`: a document changed only in memory; key = its source path or route.
+- `entity-catalog`: `onboarding/entities.md` and its sidecar; key = `entity-catalog`. A differing catalog needs whole-unit review, not entry-level merging.
 
-## Evidence Tiers
+Existing different target onboarding needs `replace_existing=true` or explicit review-required inclusion. Neither permits overwriting unrelated uncommitted edits or differing held records.
 
-- `exact-landed-commit`: every commit that touched the source path on the source branch is an ancestor of the official code ref — a single landed commit is not enough, so a later unlanded commit to the same path cannot be carried as landed.
-- `patch-id-match`: the old-base-to-source-branch patch for the source path matches the old-base-to-official patch.
-- `final-content-match`: the source file content at the source branch ref matches the content at the official ref.
-- `same-path-changed`: both branches changed the same source path, but the `c-11-memory-carryover-from-branch` skill did not prove equivalent code.
-- `not-landed`: the source path changed on the source branch but not on the official branch (or, for `memory-only-doc`, does not exist on the official ref).
+## Code evidence and anchors
 
-`memory-only-doc` candidates use their own evidence values:
+- `exact-landed-commit`: **every** source commit touching the path is an official ancestor; one landed commit is not enough.
+- `patch-id-match`: old-base-to-source and old-base-to-official patches match.
+- `final-content-match`: source and official file content match.
+- `same-path-changed`: both changed it without equivalent-code proof; review-required.
+- `not-landed`: the code did not land; reject, never carry.
 
-- `memory-only-reverification-valid` (auto-carry): the source object at the branch doc's `lastVerifiedCommitHash` matches the official ref AND target recovery-leaf memory has not changed the doc since the memory merge-base.
-- `source-diverged`, `target-memory-moved`, `unverifiable` (review-required): the source moved under the doc; target recovery-leaf memory changed it independently (or no merge-base resolves, e.g. the source memory is not a git checkout sharing history); or the branch doc's verification commit cannot be resolved.
+Only proven code tiers auto-carry. Every sidecar anchor is observed at the **official code commit**, never the source or an ambient checkout. Current anchors follow the code evidence; content unchanged at a moved blob/line is re-recorded at apply. Stale, unresolved or unreadable anchors require review with the entries/references and failure named; a failed Git read is never current.
 
-Only proven tiers are auto-carry candidates. Same-path overlap is review-required by default because another developer may have changed the same file independently.
+A memory-only document auto-carries only as `memory-only-anchors-current`: it has anchors, every anchor is current, and the target has not changed either unit member since the memory merge base. No anchors, no merge base, or an independently changed target needs review.
 
-## Output States
+## Records and history
 
-- `would-carryover`: dry-run plan with candidate decisions.
-- `carried-over`: a recovery-leaf memory-content commit was created with `Code-Commit` attribution to the selected official code commit.
-- `nothing-to-carryover`: no selected candidate changed target recovery-leaf memory.
-- `blocked`: apply was requested without approval, an open recovery-leaf contract, a clean exact landed code base, or required candidate data.
+Each candidate lists missing records named by its sidecar (`realizes`, `proves`, record-reference targets) and their transitive record links. Apply carries the source JSON and paired Markdown. A held record with different bytes is **never overwritten**: `record-differs` makes the candidate review-required; the curator changes it through the writer.
 
-Apply refreshes the ignored `memory.md` consumer cache from memory commit trailers. It never
-stages or commits that cache, and missing or malformed cache data does not block carryover.
-When no content changes, it retains the actual memory commit; a new official code SHA does not
-cause a synthetic mapping-only commit. Regeneration does not rewrite historical attribution.
+History files are never carried. The plan lists source rows for carried subjects as reading aids, not as the recovery leaf's answers. The recovery leaf's curator authors its own rows through the writer and answers the recomputed worklist before publishing.
 
-Carryover commits only on the worktree named by the selected recovery-leaf contract. It
-never writes or force-moves memory `main`, a sprint super, or an atomic integration ref.
-Protected-ref movement remains the recovery leaf's separate journaled integration.
+## Apply and recovery
 
-## Boundaries
+Apply writes selected units/missing records, regenerates route indexes and validates the **exact worktree tree** against the leaf's memory base, paired with official code, using the writer's `writer_reports` treatment. On refusal it returns violations and restores the pre-apply memory bytes, including existing edits. It creates no commit and does not refresh a ledger cache; `memory_commit_message` is not an apply argument.
 
-1. The `c-11-memory-carryover-from-branch` skill must not copy source branch memory for code that did not land.
-2. The `c-11-memory-carryover-from-branch` skill must derive the consumer ledger cache from target memory history, never copy source cache rows or treat them as authority.
-3. The `c-11-memory-carryover-from-branch` skill must refresh carried onboarding metadata to the official code commit, not the source branch commit.
-4. The `c-11-memory-carryover-from-branch` skill must not auto-carry same-path-only evidence.
-5. The `c-11-memory-carryover-from-branch` skill must not overwrite existing different recovery-leaf onboarding unless `replace_existing=true` or explicit review-required inclusion is used.
-6. The `c-02-memory-quality-control` skill remains the branch-accuracy drift detector; the `c-11-memory-carryover-from-branch` skill only imports richer memory whose code validity has been proven or explicitly approved.
-7. Apply requires an open external-memory leaf whose clean code worktree is exactly at the selected landed code tip; no official-checkout or contract-free apply route exists.
+- `would-carryover`: the read-only plan.
+- `carried-into-worktree`: validated uncommitted content; written paths and recomputed worklist summary are returned.
+- `nothing-to-carryover`: no selected payload needs writing; the whole tree still validates.
+
+Retry skips files already equal to the intended payload. A different uncommitted target is `target-edited`, never overwritten. After interruption, retry skips completed writes and validates the whole tree; a refusal names carried paths differing from memory `HEAD`.
+
+The recovery leaf closes and integrates normally. Its closeout makes the one memory commit from the tree its invariant gate judged, attributed to the leaf's code commit (the official tip). `carryover-pending` still means landed memory has not reached its line: cleanup/finalization wait for that normal recovery publication.
+
+See `docs/guides/carryover-from-branch.md`. The skill tree is instruction-only; installed and development workflows use the existing MCP/package route.

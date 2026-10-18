@@ -126,24 +126,18 @@ NAMED_EXCEPTIONS = {
     ),
 }
 # Not a knowledge database: the citation source index of the memory-quality checks.
-OTHER_DATABASES = {
-    "memory_quality/style/citations/source_index_database.py::create",
-    "memory_quality/style/citations/source_index_database.py::open",
-}
+OTHER_DATABASES: set[str] = set()
 # The exceptions that open a file which already exists; each must open it read-only.
 READ_ONLY_EXCEPTIONS = {
     "memory/knowledge/connection.py::open_read_only_database",
     "memory/conversion/legacy_db.py::export_database",
     "application/dataset_copy_survey.py::sqlite_table_names",
-    "memory_quality/style/citations/source_index_database.py::open",
 }
 # What else of a SQLite module production names outside a type annotation. None of these opens.
 OTHER_ATTRIBUTES_ALLOWED = {
     "apsw.Error": "the error class of every apsw failure",
     "apsw.SQLITE_OPEN_READONLY": "the flag of a read-only open",
     "apsw.SQLITE_OPEN_URI": "lets the read-only content probe name its file as a URI",
-    "sqlite3.DatabaseError": "an error class the citation source index reports",
-    "sqlite3.IntegrityError": "an error class the citation source index reports",
 }
 # A module name computed at run time cannot be checked, so each module that imports one is named.
 # None of them may spell a SQLite module's name in any string.
@@ -158,10 +152,10 @@ COMPUTED_IMPORTS_ALLOWED = {
 # A production module may name a database file only here; a copy of a dataset needs such a name.
 SQLITE_FILE_NAMES_ALLOWED = {
     "application/knowledge_proofs.py": "the scratch derived index of a tree read without a cache",
+    "memory/carryover.py": "scratch derived indexes of the source and target trees of a carry-over plan",
     "kernel/memory_init.py": "tests whether a root holds legacy memory",
     "memory/conversion/inputs.py": "the legacy reader's scratch copy of an unconverted tree's file",
     "memory/knowledge_index/cache.py": "the derived index's file suffix",
-    "memory_quality/style/citations/source_index.py": "the citation source index, not knowledge",
 }
 _RETIRED_NAMES = ("knowledge.sqlite", "knowledge-candidate.sqlite", "snapshot.sqlite")
 NAMES_ALLOWED = {
@@ -202,6 +196,7 @@ HELPER_CALLERS: dict[str, dict[str, str]] = {
         "memory/knowledge_index/__init__.py": _RE_EXPORT,
         "memory/knowledge_index/cache.py": "builds the index file of a tree key into the cache",
         "application/knowledge_proofs.py": "builds a scratch index of a tree read without a cache",
+        "memory/carryover.py": "scratch derived indexes of the source and target trees of a carry-over plan",
     },
     "export_database": {"memory/conversion/convert.py": "the conversion reads the legacy database"},
     "sqlite_table_names": {
@@ -211,10 +206,6 @@ HELPER_CALLERS: dict[str, dict[str, str]] = {
     "memory_from_git": {
         "memory/conversion/base.py": "the converted base of a comparison",
         "memory/conversion/crossing_port.py": "the three memory commits of a crossing sync",
-    },
-    # The citation index's ``Database`` class, pinned by its module.
-    "source_index_database": {
-        "memory_quality/style/citations/source_index.py": "builds and reads the citation index",
     },
     # The package this guard lives in: production never reaches into it to switch the guard off.
     "agents_remember_test_support": {},

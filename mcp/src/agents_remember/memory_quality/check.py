@@ -1,18 +1,6 @@
-"""Run the registered memory-layer quality checks.
+"""Run the surviving document-shape checks and converted knowledge validator.
 
-Every ``STYLE_CHECKS`` entry receives ``StyleCheckInputs`` so tree-only, code-aware, and
-history-aware checks share one gate path. A required input that is unavailable must appear
-in that check's result rather than produce an empty success.
-
-On a converted memory tree (``knowledge/layout.json``, MIK-R24 rule 5) the checks that read the
-legacy card format -- metadata-based drift, Update History order and citation tables -- have nothing
-to read and say so; the drift slot runs :func:`converted_knowledge_check` instead: the knowledge
-validator (MIK-R22) plus the stale-reference report, which is report-only.
-
-``reportOnlyFindings`` are surfaced and counted but do not affect ``ok``. Use them only
-for ranked review output, never to soften an enforcing invariant. Detail samples may be
-bounded; total counts remain exact.
-"""
+Report-only findings are surfaced and counted but do not affect ok."""
 
 from __future__ import annotations
 
@@ -23,28 +11,18 @@ from typing import Any
 
 from agents_remember.memory_quality.converted_check import (
     CONVERTED_KNOWLEDGE_CHECK,
-    LEGACY_FORMAT_CHECKS,
     KnowledgeBasePort,
     converted_knowledge_check,
-    not_applicable_on_converted,
-)
-from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
-    DriftSummaryOutput,
-    run_drift_summary,
 )
 from agents_remember.memory_quality.landing_report import LandingBasePort
 from agents_remember.memory_quality.reference_state import is_converted_memory
-from agents_remember.memory_quality.style.citations import claim_reopen, range_resolution
-from agents_remember.memory_quality.style.citations.source_index_state import SourceIndexError
 from agents_remember.memory_quality.style.document_shape import (
     diff_markers,
     entity_catalog_alignment,
     tables,
 )
-from agents_remember.memory_quality.style.update_history import history_order
 
 DRIFT_CHECK_NAME = "integrity.onboarding_drift_check.summary"
-SOURCE_INDEX_UNAVAILABLE_STATUS = "citation-source-index-unavailable"
 FINDING_KEYS = ("findings", "reportOnlyFindings")
 # Matches the drift check's own `detail_limit` default, for the same reason.
 REPORT_ONLY_SAMPLE_LIMIT = 50
@@ -52,18 +30,9 @@ REPORT_ONLY_SAMPLE_LIMIT = 50
 
 @dataclass(frozen=True)
 class StyleCheckInputs:
-    """What a style check may read: the memory tree, and the code tree when there is one.
-
-    ``code_repository_root`` is ``None`` only for a caller that has no code checkout to
-    resolve against -- the two callers in the product (``memory_quality_check`` and the
-    closeout gate) both take it from the repository they are closing out. A check that needs
-    it and does not get it says so in its own result rather than passing quietly.
-    """
+    """The onboarding tree the surviving document-shape checks read."""
 
     onboarding_root: Path
-    code_repository_root: Path | None = None
-    unstamped_code_commit: str | None = None
-    retained_code_history_commits: tuple[str, ...] = ()
 
 
 CheckRunner = Callable[[StyleCheckInputs], dict[str, Any]]
@@ -75,19 +44,9 @@ def onboarding_only(runner: Callable[[Path], dict[str, Any]]) -> CheckRunner:
 
 
 STYLE_CHECKS: dict[str, CheckRunner] = {
-    claim_reopen.CHECK_NAME: lambda inputs: claim_reopen.check_onboarding_root(
-        inputs.onboarding_root,
-        inputs.code_repository_root,
-        unstamped_code_commit=inputs.unstamped_code_commit,
-        retained_code_history_commits=inputs.retained_code_history_commits,
-    ),
     diff_markers.CHECK_NAME: onboarding_only(diff_markers.check_onboarding_root),
     entity_catalog_alignment.CHECK_NAME: onboarding_only(
         entity_catalog_alignment.check_onboarding_root
-    ),
-    history_order.CHECK_NAME: onboarding_only(history_order.check_onboarding_root),
-    range_resolution.CHECK_NAME: lambda inputs: range_resolution.check_onboarding_root(
-        inputs.onboarding_root, inputs.code_repository_root
     ),
     tables.CHECK_NAME: onboarding_only(tables.check_onboarding_root),
 }
@@ -95,19 +54,9 @@ INTEGRITY_CHECKS = (DRIFT_CHECK_NAME,)
 AVAILABLE_CHECKS = (*INTEGRITY_CHECKS, *STYLE_CHECKS)
 DEFAULT_STYLE_CHECKS = tuple(STYLE_CHECKS)
 DEFAULT_CONTEXT_CHECKS = (*INTEGRITY_CHECKS, *DEFAULT_STYLE_CHECKS)
-# Closeout first checks entity-catalog structure, then citations, before the code commit and the
-# strict test wrapper. Those are working-tree semantics, so they need no commit to clear and a
-# failure rejects in seconds instead of after the expensive suite. The curator runs the same
-# `memory_quality_check` during the leaf; the gate is its fallback, so findings here are the
-# exception, not the rule. The post-commit phase repeats citations without temporary provenance
-# and runs drift, document shape, and history order over the single ordinary metadata refresh.
-# Repeating citations proves every temporarily based, unstamped card received a real code-commit
-# stamp before memory commits.
-BEFORE_METADATA_REFRESH_CHECKS = (
-    entity_catalog_alignment.CHECK_NAME,
-    range_resolution.CHECK_NAME,
-    claim_reopen.CHECK_NAME,
-)
+# The pre-commit phase checks the entity catalogue; the post-commit phase checks
+# converted knowledge and the surviving document-shape rules.
+BEFORE_METADATA_REFRESH_CHECKS = (entity_catalog_alignment.CHECK_NAME,)
 AFTER_METADATA_REFRESH_CHECKS = DEFAULT_CONTEXT_CHECKS
 
 
@@ -144,7 +93,7 @@ def run_memory_quality_check(
         check, result = (
             _converted_check(selected_check, onboarding_root, drift_context)
             if converted
-            else (selected_check, run_check(selected_check, onboarding_root, drift_context))
+            else (selected_check, run_check(selected_check, onboarding_root))
         )
         check_results[check] = {
             key: value for key, value in result.items() if key not in FINDING_KEYS
@@ -169,11 +118,8 @@ def run_memory_quality_check(
 def _converted_check(
     check: str, onboarding_root: Path, drift_context: DriftCheckContext | None
 ) -> tuple[str, dict[str, Any]]:
-    """One check on a converted tree (MIK-R24 rule 5): legacy-format checks do not apply, and the
-    drift slot runs the knowledge validator plus the stale-reference report."""
+    """The drift slot runs the converted validator and stale-reference report."""
 
-    if check in LEGACY_FORMAT_CHECKS:
-        return check, not_applicable_on_converted(check)
     if check == DRIFT_CHECK_NAME:
         if drift_context is None:
             raise ValueError(f"{DRIFT_CHECK_NAME} requires drift context")
@@ -183,137 +129,17 @@ def _converted_check(
             base=drift_context.knowledge_base,
             landing_base=drift_context.landing_base,
         )
-    return check, run_check(check, onboarding_root, drift_context)
+    return check, run_check(check, onboarding_root)
 
 
 def run_check(
     check: str,
     onboarding_root: Path,
-    drift_context: DriftCheckContext | None,
 ) -> dict[str, Any]:
-    """Run one check, turning an unusable source index into a REPORTED check result.
-
-    The quality surface cannot be bricked: when the citation source index cannot be acquired at
-    all -- past its hard stop, over its file-count cap, a malformed settings block, an
-    unreadable checkout -- the checks that need it return an actionable finding naming the
-    cause and the next step, exactly as the drift check already degrades. The raw exception
-    must never escape to a client as a bare tool error, because that turns the surface that
-    *describes* memory into the surface that blocks it.
-    """
-    try:
-        return _run_check(check, onboarding_root, drift_context)
-    except SourceIndexError as error:
-        return source_index_unavailable_result(check, error)
-
-
-def _run_check(
-    check: str,
-    onboarding_root: Path,
-    drift_context: DriftCheckContext | None,
-) -> dict[str, Any]:
+    """Run one surviving document-shape check."""
     if check in STYLE_CHECKS:
-        return STYLE_CHECKS[check](
-            StyleCheckInputs(
-                onboarding_root=onboarding_root,
-                code_repository_root=(
-                    None if drift_context is None else drift_context.code_repository_root
-                ),
-                unstamped_code_commit=(
-                    None if drift_context is None else drift_context.unstamped_code_commit
-                ),
-                retained_code_history_commits=(
-                    () if drift_context is None else drift_context.retained_code_history_commits
-                ),
-            )
-        )
-    if check == DRIFT_CHECK_NAME:
-        if drift_context is None:
-            raise ValueError(f"{DRIFT_CHECK_NAME} requires drift context")
-        return run_drift_quality_check(drift_context)
+        return STYLE_CHECKS[check](StyleCheckInputs(onboarding_root=onboarding_root))
     raise ValueError(f"unknown memory quality check: {check}")
-
-
-def source_index_unavailable_result(check: str, error: SourceIndexError) -> dict[str, Any]:
-    """The reported state one check carries when the citation source index cannot be acquired."""
-    return {
-        "ok": False,
-        "check": check,
-        "status": SOURCE_INDEX_UNAVAILABLE_STATUS,
-        "findingCount": 1,
-        "findings": [
-            {
-                "check": check,
-                "severity": "error",
-                "code": "citation_source_index_unavailable",
-                "message": str(error),
-                "nextStep": (
-                    "the citation index reported why it could not be acquired; exclude the named "
-                    "paths through onboarding.pathRules.exclude, or move the bound deliberately "
-                    "through onboarding.citationIndex, and run the check again"
-                ),
-            }
-        ],
-    }
-
-
-def run_drift_quality_check(drift_context: DriftCheckContext) -> dict[str, Any]:
-    packet = run_drift_summary(
-        code_repository_root=drift_context.code_repository_root,
-        context=drift_context.context,
-        detail_limit=drift_context.detail_limit,
-        output=DriftSummaryOutput(
-            report_path=drift_context.report_path,
-            include_rows=drift_context.include_rows,
-            write_report=drift_context.write_report,
-        ),
-    )
-    if packet.get("status") != "checked":
-        return {
-            "ok": False,
-            "check": DRIFT_CHECK_NAME,
-            "status": packet.get("status", "error"),
-            "findingCount": 1,
-            "findings": [
-                {
-                    "check": DRIFT_CHECK_NAME,
-                    "severity": "error",
-                    "code": "onboarding_drift_check_failed",
-                    "message": str(packet.get("error", "drift check failed")),
-                }
-            ],
-        }
-    findings = [drift_row_to_finding(row) for row in packet.get("actionableSample", [])]
-    # `.get` throughout: `count`/`reportPath`/`actionableCount` only accompany a `checked`
-    # status, which the guard above has established but the type cannot carry across it.
-    result = {
-        "ok": packet.get("actionableCount", 0) == 0,
-        "check": DRIFT_CHECK_NAME,
-        "status": packet["status"],
-        "checkedCount": packet.get("count"),
-        "reportPath": packet.get("reportPath"),
-        "findingCount": packet.get("actionableCount"),
-        "sampleCount": len(findings),
-        "findings": findings,
-    }
-    if drift_context.include_rows:
-        result["rows"] = packet.get("rows", [])
-    return result
-
-
-def drift_row_to_finding(row: dict[str, Any]) -> dict[str, Any]:
-    classification = str(row.get("classification", "unknown"))
-    code = "onboarding_drift_" + classification.replace(" ", "_").replace("-", "_")
-    return {
-        "check": DRIFT_CHECK_NAME,
-        "path": row.get("onboarding_file", ""),
-        "sourceFile": row.get("source_file", ""),
-        "severity": "warning",
-        "code": code,
-        "message": row.get("note", ""),
-        "classification": classification,
-        "trust": row.get("trust", ""),
-        "affectedSections": row.get("affected_sections", ""),
-    }
 
 
 def normalize_checks(
