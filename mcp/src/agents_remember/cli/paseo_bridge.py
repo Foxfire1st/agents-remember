@@ -51,6 +51,10 @@ BRIDGE_TIMEOUT = "paseo_bridge_timeout"
 BRIDGE_UNAVAILABLE = "paseo_bridge_unavailable"
 BRIDGE_INVALID_REPLY = "paseo_bridge_invalid_reply"
 BRIDGE_REFUSED = "paseo_call_failed"
+# agent-send: the connection was lost while the message was being sent, so the host may
+# have taken it. What the product does with that is MIK-R171 rule 3.
+SEND_OUTCOME_UNKNOWN = "paseo_send_outcome_unknown"
+
 # agent-create: the agent exists without its first message and its closed session cannot be
 # opened again, so no repeat of the call can deliver the message.
 AGENT_WITHOUT_MESSAGE_LOST = "paseo_agent_without_message_lost"

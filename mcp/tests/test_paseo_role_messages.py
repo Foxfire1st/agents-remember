@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import os
 import unittest
 import uuid
@@ -11,13 +12,17 @@ from pathlib import Path
 from typing import Any, get_args
 from unittest.mock import patch
 
-from agents_remember.cli import paseo_role_tools, role_launch_receipts
+from agents_remember.cli import paseo_role_tools, role_held_messages, role_launch_receipts
 from agents_remember.cli.paseo_role_tools import send_role_message, sender_line, starting_agent
+from agents_remember.cli.role_held_messages import HeldMessage
 from agents_remember.models.role_agents import (
     RoleMessageCall,
     RoleMessageRefusal,
+    RoleMessageResponse,
     RoleMessageStatus,
 )
+from agents_remember.observer.host_activity import HOST_ACTIVITY_FILE
+from agents_remember.serving.projections.host_activity import activity_directory
 from agents_remember.worktrees import role_reports
 from test_paseo_launch import runtime_config
 from test_paseo_role_tools import (
@@ -50,6 +55,7 @@ class RoleMessageTests(RoleToolsTestCase):
                     path.symlink_to(self.root)
                 else:
                     path.write_text("over budget")
+                self.runtime.agents[reviewer]["status"] = "idle"
                 with patch.object(role_reports, "MAX_COLLECTION_BYTES", 1):
                     result = self.message(binding("worker", worker), agent_id=reviewer)
                 self.assertEqual(result["status"], "accepted")
@@ -61,10 +67,12 @@ class RoleMessageTests(RoleToolsTestCase):
                 self.assertEqual(
                     self.receipt(worker_request)["reportCollection"]["state"], "failed"
                 )
+                self.runtime.agents[worker]["status"] = "idle"
                 unaffected = self.message(binding("reviewer", reviewer), agent_id=worker)
                 self.assertEqual(unaffected["status"], "accepted")
                 canonical = Path(reviewer_record["workspace"]["taskReportRoot"])
                 self.assertEqual((canonical / "report.md").read_text(), "reviewer result")
+                self.runtime.agents[worker]["status"] = "idle"
                 with patch.object(
                     role_reports,
                     "_file_digest",
@@ -221,6 +229,7 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertEqual(self.received(one), [])
         with self.subTest("one live agent of the role is the recipient"):
             self.runtime.agents[one].update(status="closed", archivedAt="2026-10-02T03:00:00.000Z")
+            self.runtime.agents[two]["status"] = "idle"
             result = self.message(worker, role="architect")
             self.assertEqual((result["status"], result["recipientAgentId"]), ("accepted", two))
         with self.subTest("the host cannot be asked which agents are live"):
@@ -454,52 +463,63 @@ class RoleMessageTests(RoleToolsTestCase):
             self.refusal(self.message(caller, agent_id=worker), "recipient-not-found")
         del caller_request
 
-    def test_a_running_turn_is_never_cancelled(self) -> None:
-        _request, worker = self.started(status="running")
-        with self.subTest("the running turn takes the message up"):
-            result = self.message(self.architect, agent_id=worker)
-            self.assertEqual((result["status"], result["taken"]), ("accepted", "steered"))
-            self.assertEqual(
-                result["detail"],
-                "The recipient's running turn took the message up; nothing was cancelled.",
-            )
-            self.assertNotIn("warning", result)
-            self.assertEqual(len(self.received(worker)), 1)
-        with self.subTest("the host cannot hand a message to this recipient's running turn"):
-            self.runtime.agents[worker].update(steers=False, received=[])
-            result = self.message(self.architect, agent_id=worker, text="held-in-turn")
-            self.assertEqual(result["status"], "held")
-            self.assertEqual(result["heldReason"], "recipient-in-turn")
-            self.assertIn("nothing has to be sent again", result["detail"])
-            self.assertEqual(
-                (self.received(worker), self.runtime.agents[worker]["status"]), ([], "running")
-            )
-        with self.subTest("the host cancelled the turn all the same: the result says so"):
-            self.runtime.agents[worker].update(steers=True, taken="replaced")
+    def test_a_running_turn_is_steered_or_held_by_its_provider_and_never_cut_off(self) -> None:
+        """MIK-R171@v2 rule 2: a steer only into the turn of a provider known to take one."""
+
+        for role, steers, expected in (("worker", True, "steered"), ("reviewer", False, "held")):
+            with self.subTest(f"the provider takes a steer: {steers}"):
+                _request, worker = self.started(role, status="running")
+                self.runtime.agents[worker].update(steers=steers, status="running", received=[])
+                result = self.message(self.architect, agent_id=worker, text="held-in-turn")
+                self.assertEqual(result["status"], expected if expected == "held" else "accepted")
+                self.assertNotIn("cancelled", json.dumps(result))
+                if expected == "steered":
+                    self.assertEqual(result["taken"], "steered")
+                    self.assertIn("nothing was replaced", result["detail"])
+                    self.assertEqual(len(self.received(worker)), 1)
+                    continue
+                self.assertEqual(result["heldReason"], "recipient-in-turn")
+                self.assertIn("nothing has to be sent again", result["detail"])
+                self.assertEqual(
+                    (self.received(worker), self.runtime.agents[worker]["status"]),
+                    ([], "running"),
+                )
+
+    def test_a_refused_send_is_held_and_no_answer_names_a_cancellation(self) -> None:
+        """MIK-R171 rules 2 and 3: no answer names a cancellation, and a refusal is held."""
+
+        _request, worker = self.started(status="idle")
+        with self.subTest("the held message and the new one go in one delivery, in order"):
+            self.runtime.agents[worker].update(status="running", received=[])
+            self.message(self.architect, agent_id=worker, text="held-in-turn")
+            self.runtime.agents[worker].update(status="idle", received=[])
             result = self.message(self.architect, agent_id=worker, text="after-turn")
             self.assertEqual(result["status"], "accepted")
-            self.assertIn("cancelled the recipient's running turn", result["warning"])
-            # The held message and the new one went in one delivery, in order.
+            self.assertEqual(result["taken"], "started")
+            self.assertNotIn("cancelled", json.dumps(result))
             (combined,) = self.received(worker)
             self.assertTrue(combined.index("held-in-turn") < combined.index("after-turn"))
+            self.assertEqual(combined.count("after-turn"), 1)
         with self.subTest("the host does not accept the message"):
+            self.runtime.agents[worker].update(status="idle", received=[])
             self.runtime.calls.clear()
             for _attempt in range(4):
                 self.runtime.fail("agent-send", "paseo_call_failed", "Active turn changed")
             result = self.message(self.architect, agent_id=worker, text="still-held")
             self.assertEqual(result["status"], "held")
             self.assertIn("Active turn changed", result["detail"])
+            self.assertNotIn("cancelled", json.dumps(result))
             self.assertEqual(
                 [command for command, _p in self.runtime.calls],
                 ["agent-send", "agent-send", "agent-state", "agent-send", "agent-send"],
             )
         with self.subTest("a turn that changed under the send is tried once more"):
-            self.runtime.agents[worker].update(taken=None, received=[])
+            self.runtime.agents[worker].update(status="idle", received=[])
             self.runtime.calls.clear()
             self.runtime.fail("agent-send", "paseo_call_failed", "Active turn changed")
             self.assertEqual(self.message(self.architect, agent_id=worker)["status"], "accepted")
             self.assertEqual(len(self.received(worker)), 1)
-            # Both attempts carry the one id of the combined delivery: the host records it once.
+            # Both attempts carry the one id of the delivery: the host records it once.
             attempts = [
                 payload for command, payload in self.runtime.calls if command == "agent-send"
             ]
@@ -507,6 +527,9 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertEqual(attempts[0], attempts[1])
             self.assertEqual(self.message_ids(worker), [attempts[0]["messageId"]])
         with self.subTest("each message has an id of its own"):
+            _request, worker = self.started("reviewer", status="idle")
+            self.message(self.architect, agent_id=worker)
+            self.runtime.agents[worker]["status"] = "idle"
             self.message(self.architect, agent_id=worker)
             first, second = self.message_ids(worker)
             self.assertNotEqual(first, second)
@@ -550,7 +573,7 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertEqual(result["status"], "permission-pending")
             self.assertEqual(result["permission"], "a tool")
         with self.subTest("once the permission is answered the held messages deliver in order"):
-            self.runtime.agents[worker].update(pendingPermissions=[])
+            self.runtime.agents[worker].update(pendingPermissions=[], status="idle")
             result = self.message(self.architect, agent_id=worker, text="fourth")
             self.assertEqual(result["status"], "accepted")
             received = self.received(worker)
@@ -566,7 +589,7 @@ class RoleMessageTests(RoleToolsTestCase):
                 < received[0].index("fourth")
             )
         with self.subTest("a recipient in a turn is held, not refused"):
-            self.runtime.agents[worker].update(steers=False, received=[])
+            self.runtime.agents[worker].update(steers=False, status="running", received=[])
             result = self.message(self.architect, agent_id=worker)
             self.assertEqual(result["status"], "held")
             self.assertEqual(result["heldReason"], "recipient-in-turn")
@@ -668,16 +691,19 @@ class RoleMessageTests(RoleToolsTestCase):
             )
             self.assertEqual((list(self.runtime.agents), self.received(worker)), (agents, []))
         with self.subTest("the host cannot be reached for the resume"):
+            # MIK-R171 rule 3: the message is held with the reason, not refused and lost.
             self.runtime.fail("agent-resume", "paseo_daemon_unreachable", "connection refused")
-            self.refusal(self.message(self.architect, agent_id=worker), "host-unreachable")
+            self.runtime.fail("agent-resume", "paseo_daemon_unreachable", "connection refused")
+            result = self.message(self.architect, agent_id=worker)
+            self.assertEqual((result["status"], result["heldReason"]), ("held", "host-unreachable"))
+            self.assertIn("held, not lost", result["detail"])
+            self.assertEqual(self.received(worker), [])
         with self.subTest("a taskless recipient has no task scope to check"):
             _architect, other = self.started("architect", status="closed")
             result = self.message(binding("worker"), agent_id=other)
             self.assertEqual((result["status"], result["resumed"]), ("accepted", True))
 
-    def test_a_caller_without_a_binding_or_a_runtime_and_an_unreachable_host_are_refused(
-        self,
-    ) -> None:
+    def test_a_caller_without_a_binding_or_a_runtime_is_refused(self) -> None:
         _request, worker = self.started(status="idle")
         self.runtime.calls.clear()
         self.refusal(self.message(None, agent_id=worker), "caller-has-no-binding")
@@ -695,35 +721,263 @@ class RoleMessageTests(RoleToolsTestCase):
             self.refusal(unconfigured, "no-paseo-runtime-configured")["detail"],
         )
         self.assertEqual(self.runtime.calls, [])
-        failures = {
-            "paseo_daemon_unreachable": "cannot be reached",
-            "paseo_bridge_timeout": "It is not known whether the message was delivered.",
-            "paseo_bridge_invalid_reply": "paseo_bridge_invalid_reply",
-        }
-        for code, said in failures.items():
+
+    def test_a_host_that_does_not_answer_holds_the_message_and_delivers_it_once(self) -> None:
+        """MIK-R171 rules 3 and 7: a delay, not a loss; and the waiting copy keeps its id."""
+
+        _request, worker = self.started(status="idle")
+        for code in (
+            "paseo_daemon_unreachable",
+            "paseo_bridge_timeout",
+            "paseo_bridge_invalid_reply",
+        ):
             with self.subTest(code):
-                self.runtime.fail("agent-send", code)
-                result = self.refusal(
-                    self.message(self.architect, agent_id=worker), "host-unreachable"
-                )
-                self.assertIn(said, result["detail"])
-        self.assertEqual(self.received(worker), [])
-        uncertain = "not known whether the message was delivered"
-        with self.subTest("the connection was lost while the message was being sent"):
-            # The host may have taken the message: the refusal says that this is not known.
-            lost = f"The connection was lost while the message was being sent; it is {uncertain}."
-            for message, after in ((lost, False), ("", True)):
                 self.runtime.agents[worker].update(status="idle", received=[])
-                self.runtime.fail("agent-send", "paseo_send_outcome_unknown", message, after)
-                result = self.refusal(
-                    self.message(self.architect, agent_id=worker), "host-unreachable"
+                # The attempt fails, and so does the drain behind it: the host is still down.
+                self.runtime.fail("agent-send", code)
+                self.runtime.fail("agent-send", code)
+
+                result = self.message(self.architect, agent_id=worker)
+
+                self.assertEqual(
+                    (result["status"], result["heldReason"]), ("held", "host-unreachable")
                 )
-                self.assertEqual(result["detail"].count(uncertain), 1)
+                self.assertIn("held, not lost", result["detail"])
+                self.assertIn(code, result["detail"])
+                self.assertTrue(result["heldMessageId"])
+                self.assertEqual(self.received(worker), [])
+                # The waiting message is the attempt's own id: an answering host records
+                # one copy of it, not two.
+                located = paseo_role_tools._locate_recipient_store(
+                    self.config, RoleMessageCall(text="lookup", agent_id=worker), worker
+                )
+                assert located is not None
+                store = json.loads(
+                    (
+                        Path(located[2]) / ".ar-product" / "held-messages" / f"{worker}.json"
+                    ).read_text()
+                )
+                self.assertEqual(
+                    [row["attemptedMessageId"] for row in store["messages"]],
+                    [result["heldMessageId"]],
+                )
+
+                with self.subTest("the message arrives once when the host answers"):
+                    self.runtime.agents[worker].update(status="idle", received=[])
+                    sent: list[str] = []
+
+                    def record(
+                        payload: dict[str, Any],
+                        _sent: list[str] = sent,
+                        _original: Any = self.runtime._agent_send,
+                    ) -> dict[str, Any]:
+                        _sent.append(payload["messageId"])
+                        return _original(payload)
+
+                    with patch.object(self.runtime, "_agent_send", side_effect=record):
+                        role_held_messages.sweep_held_messages(self.config)
+
+                    self.assertEqual(len(self.received(worker)), 1)
+                    self.assertIn("held, not lost", result["detail"])
+                    self.assertEqual(sent, [result["heldMessageId"]])
+
+    def test_an_unknown_send_outcome_is_not_delivered_twice(self) -> None:
+        """MIK-R171 rules 3 and 7: the host may have the message; the resend reuses its id."""
+
+        request, worker = self.started(status="idle")
+        sent: set[str] = set()
+        copies: list[str] = []
+
+        def dedup(payload: dict[str, Any]) -> dict[str, Any]:
+            if payload["messageId"] in sent:
+                # The host records one message id once: the resend adds no second copy.
+                return {"delivery": {"delivered": True, "taken": "started", "turnId": TURN}}
+            sent.add(payload["messageId"])
+            copies.append(payload["text"])
+            self.runtime.agents[worker].setdefault("received", []).append(
+                (payload["messageId"], payload["text"])
+            )
+            return {"delivery": {"delivered": True, "taken": "started", "turnId": TURN}}
+
+        with patch.object(self.runtime, "_agent_send", side_effect=dedup):
+            # The host took the message twice over -- a timeout and the connection lost
+            # while sending -- and neither answer came back.
+            for _attempt in (1, 2):
+                self.runtime.fail(
+                    "agent-send",
+                    "paseo_send_outcome_unknown",
+                    "The connection to the Paseo daemon was lost while the message was sent.",
+                    True,
+                )
+            result = self.message(self.architect, agent_id=worker, text="unknown outcome")
+
+            self.assertEqual((result["status"], result["heldReason"]), ("held", "host-unreachable"))
+            self.assertIn("not known whether the message was delivered", result["detail"])
+            self.assertEqual(len(copies), 1)
+
+            with self.subTest("the host answers and the waiting copy is the one id"):
+                role_held_messages.sweep_held_messages(self.config)
+
+        self.assertEqual(len(self.received(worker)), 1)
+        self.assertEqual(sorted(sent), [result["heldMessageId"]])
+        workspace = Path(self.receipt(request)["workspace"]["path"])
+        self.assertEqual(role_held_messages.waiting_total(workspace, worker), 0)
+
+    def test_a_delivery_that_takes_held_messages_answers_ok(self) -> None:
+        """MIK-R171 rules 4 and 7: no validation error follows a delivery.
+
+        A call that takes held messages with it once answered with the turn id, which the
+        response model forbids, so the call raised after the host had taken everything.
+        """
+
+        _request, worker = self.started(status="idle")
+        self.runtime.agents[worker]["pendingPermissions"] = [{"name": "Bash"}]
+        self.assertEqual(
+            self.message(self.architect, agent_id=worker, text="first")["status"], "held"
+        )
+        self.runtime.agents[worker]["pendingPermissions"] = []
+
+        result = self.message(self.architect, agent_id=worker, text="second")
+
+        self.assertEqual(result["status"], "accepted")
+        self.assertNotIn("turnId", result)
+        # The registered tool's own model accepts the answer: a delivery always answers ok.
+        answer = RoleMessageResponse.model_validate(result)
+        self.assertTrue(answer.ok)
+        self.assertEqual((answer.status, answer.recipientAgentId), ("accepted", worker))
+        received = self.received(worker)
+        self.assertEqual(len(received), 1)
+        self.assertEqual([received[0].count(text) for text in ("first", "second")], [1, 1])
+
+    def test_a_held_batch_preserves_the_reported_replacement_and_warning(self) -> None:
+        _request, worker = self.started(status="idle")
+        self.runtime.agents[worker]["pendingPermissions"] = [{"name": "fixture-tool"}]
+        first = self.message(self.architect, agent_id=worker, text="earlier held message")
+        self.assertEqual(first["status"], "held")
+        self.runtime.agents[worker].update(pendingPermissions=[], status="running", steers=True)
+
+        def replacing_send(payload: dict[str, Any]) -> dict[str, Any]:
+            reply = self.agent_send(payload)
+            if reply["delivery"].get("delivered"):
+                reply["delivery"].update(taken="replaced", turnId="replacement-turn")
+            return reply
+
+        self.runtime._agent_send = replacing_send
+        self.runtime.calls.clear()
+        result = self.message(self.architect, agent_id=worker, text="trigger message")
+
+        answer = RoleMessageResponse.model_validate(result)
+        self.assertEqual((answer.ok, answer.status, answer.taken), (True, "accepted", "replaced"))
+        self.assertIn("replaced the recipient's running turn", result["warning"])
+        self.assertIn("that turn did not continue", result["warning"])
+        line = sender_line(starting_agent(self.config, self.architect))
+        self.assertEqual(
+            self.received(worker),
+            [f"{line}\nearlier held message\n\n{line}\ntrigger message"],
+        )
+        self.assertEqual([cmd for cmd, _payload in self.runtime.calls].count("agent-send"), 1)
+
+    def test_the_hosts_own_activity_record_holds_a_message_the_snapshot_calls_idle(self) -> None:
+        """L171-F07: the second view decides too - a published turn is never sent into."""
+
+        _request, worker = self.started(status="idle")
+        directory = activity_directory(self.config)
+        assert directory is not None
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / HOST_ACTIVITY_FILE).write_text(
+            json.dumps(
+                {
+                    "bootId": "boot-1",
+                    "complete": True,
+                    "agents": {
+                        worker: {"state": "in-turn", "eventAt": "2026-10-17T05:27:00+00:00"}
+                    },
+                    "ignoredEvents": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.message(self.architect, agent_id=worker, text="held by the host record")
+
+        self.assertEqual((result["status"], result["heldReason"]), ("held", "recipient-in-turn"))
+        self.assertEqual(self.received(worker), [])
+        self.assertNotIn("cancelled", json.dumps(result))
+        with self.subTest("a provider known to steer gets the steer the record asks for"):
+            _other, steerer = self.started("reviewer", status="idle")
+            self.runtime.agents[steerer].update(steers=True, received=[])
+            (directory / HOST_ACTIVITY_FILE).write_text(
+                json.dumps(
+                    {
+                        "bootId": "boot-1",
+                        "complete": True,
+                        "agents": {
+                            steerer: {"state": "in-turn", "eventAt": "2026-10-17T05:27:00+00:00"}
+                        },
+                        "ignoredEvents": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            steered = self.message(self.architect, agent_id=steerer, text="into the turn")
+            self.assertEqual((steered["status"], steered["taken"]), ("accepted", "steered"))
+            self.assertEqual(len(self.received(steerer)), 1)
+        with self.subTest("the same record says the turn ended: the queue delivers it"):
+            (directory / HOST_ACTIVITY_FILE).write_text(
+                json.dumps(
+                    {
+                        "bootId": "boot-1",
+                        "complete": True,
+                        "agents": {
+                            worker: {"state": "idle", "eventAt": "2026-10-17T05:28:00+00:00"}
+                        },
+                        "ignoredEvents": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            located = paseo_role_tools._locate_recipient_store(
+                self.config, RoleMessageCall(text="lookup", agent_id=worker), worker
+            )
+            assert located is not None
+            outcome = role_held_messages.drain_held(self.config, located[0], located[1])
+            self.assertEqual(outcome["outcome"], "delivered")
             self.assertEqual(len(self.received(worker)), 1)
-        with self.subTest("a host that was not reached at all delivered nothing"):
-            self.runtime.fail("agent-send", "paseo_daemon_unreachable", "connection refused")
-            result = self.refusal(self.message(self.architect, agent_id=worker), "host-unreachable")
-            self.assertNotIn(uncertain, result["detail"])
+
+    def test_a_copy_the_recipient_already_holds_is_not_sent_again(self) -> None:
+        """L171-F02: the recipient's own timeline settles at-most-once, on any host."""
+
+        request, worker = self.started(status="idle")
+        # The host took an earlier send but never answered it: the copy is in the
+        # recipient's timeline, and the store keeps the id that send used.
+        self.runtime.agents[worker].update(timeline=["unanswered-id"], received=[])
+        folder = str(self.receipt(request)["workspace"]["path"])
+        held_answer = role_held_messages.hold_message(
+            folder,
+            worker,
+            HeldMessage(
+                sender_line="manager",
+                sender_agent_id=self.architect.agent_id,
+                text="the host may already hold this",
+                reason="host-unreachable",
+                attempted_message_id="unanswered-id",
+            ),
+        )
+        self.assertEqual(held_answer["heldMessageId"], "unanswered-id")
+        located = paseo_role_tools._locate_recipient_store(
+            self.config, RoleMessageCall(text="lookup", agent_id=worker), worker
+        )
+        assert located is not None
+        self.runtime.calls.clear()
+
+        result = role_held_messages.drain_held(self.config, located[0], located[1])
+
+        self.assertEqual(result["outcome"], "delivered")
+        # No send happened: the timeline already carried the message.
+        self.assertEqual([c for c, _p in self.runtime.calls if c == "agent-send"], [])
+        self.assertEqual(self.received(worker), [])
+        wrote = [entry for entry in (result.get("deliveries") or [])]
+        self.assertEqual([entry.get("taken") for entry in wrote], ["already-there"])
 
     def test_a_wait_returns_the_outcome_of_the_turn_that_consumed_the_message(self) -> None:
         _request, worker = self.started(status="idle")
@@ -788,7 +1042,9 @@ class RoleMessageTests(RoleToolsTestCase):
             self.assertIn("archived", result["detail"])
 
     def test_a_wait_follows_the_message_into_the_turn_that_consumes_it(self) -> None:
-        _request, worker = self.started(status="running")
+        # A message starts a turn only when the recipient runs none (MIK-R171 rule 2), so the
+        # wait follows the turn this message started.
+        _request, worker = self.started(status="idle")
         done = {
             "state": "ended",
             "outcome": "finished",
@@ -809,12 +1065,12 @@ class RoleMessageTests(RoleToolsTestCase):
 
         self.assertEqual(
             (result["status"], result["taken"], result["text"], result["waitedSeconds"]),
-            ("turn-finished", "steered", "DONE-C", 160),
+            ("turn-finished", "started", "DONE-C", 160),
         )
         (message_id,) = self.message_ids(worker)
         self.assertEqual(
-            [(wait["turnId"], wait["steered"], wait["messageId"]) for wait in self.waited()],
-            [(turn, True, message_id) for turn in (TURN, TURN, "turn-8", "turn-8")],
+            [(wait["turnId"], wait.get("steered"), wait["messageId"]) for wait in self.waited()],
+            [(turn, None, message_id) for turn in (TURN, TURN, "turn-8", "turn-8")],
         )
         # The wait followed a later turn: the text is that turn's, with no reservation.
         self.assertEqual(
@@ -822,29 +1078,10 @@ class RoleMessageTests(RoleToolsTestCase):
             "The recipient's turn finished; text is its final text. A finished turn is not AR "
             "acceptance of any requirement.",
         )
-        with self.subTest("the text is the running turn's: the result says what it rests on"):
-            running = {**done, "text": "The plan.", "laterTurn": False}
-            result = self.message_with([running], worker, status="running")
-            self.assertEqual(
-                (result["ok"], result["status"], result["taken"], result["text"]),
-                (True, "turn-finished", "steered", "The plan."),
-            )
-            self.assertEqual(
-                result["detail"],
-                "The recipient's turn finished; text is its final text. The recipient was "
-                "mid-turn when the message arrived, and this is the text of that turn: if it does "
-                "not answer the message, the reply comes in the recipient's next turn and must be "
-                "read later. A finished turn is not AR acceptance of any requirement.",
-            )
-            # A turn that failed or was cancelled returned no text to qualify.
-            failed = {**running, "outcome": "failed", "text": None, "error": "usage limit"}
-            result = self.message_with([failed], worker, status="running")
-            self.assertEqual(result["status"], "turn-failed")
-            self.assertNotIn("mid-turn", result["detail"])
         with self.subTest("the turn that consumed the message cannot be told: no text"):
             undecided = {"state": "undecided", "reason": "no turn followed"}
             for waits in ([undecided], [{"state": "running", "turnId": "turn-8"}, undecided]):
-                self.runtime.agents[worker].update(status="running", received=[])
+                self.runtime.agents[worker].update(status="idle", received=[])
                 self.runtime.calls.clear()
                 self.waits = list(waits)
                 self.clock = 0.0
@@ -858,10 +1095,6 @@ class RoleMessageTests(RoleToolsTestCase):
                 )
                 self.assertNotIn("text", result)
                 self.assertEqual(len(self.received(worker)), 1)
-        with self.subTest("a turn the host began for the message is not a turn it was handed to"):
-            self.runtime.agents[worker].update(taken="replaced")
-            self.message_with([done], worker, status="running")
-            self.assertEqual([("steered" in wait) for wait in self.waited()], [False])
         with self.subTest("the send could not name the turn: the wait names none"):
             self.runtime.agents[worker].update(taken=None)
             self.replace(paseo_role_tools, "bridge_call", self.runtime_that_names_no_turn)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from functools import partial
@@ -143,26 +144,65 @@ async def _held_delivery_loop(runtime: _ServingRuntime) -> None:
     The dashboard runs without a model, and a start of the product starts this loop with
     it. While it does not run, messages stay held and are delivered when it runs again.
     A failed sweep never kills the loop; the store keeps everything that still waits.
+
+    Two cadences since MIK-R171 rule 1. Every ``HELD_TURN_END_TICK_SECONDS`` the host's
+    activity record is read, and a recipient whose turn it reports ended is drained at
+    once: a message held for a recipient in a turn does not wait for another message.
+    Every ``HELD_DELIVERY_SWEEP_SECONDS`` the sweep runs as the fallback, visiting the
+    receipts that hold messages first. Both are the same bounded work as before: the
+    turn-end tick reads one small publication and touches only queued receipts.
     """
 
     from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
         HELD_DELIVERY_SWEEP_SECONDS,
-        sweep_held_messages,
+        HELD_TURN_END_TICK_SECONDS,
     )
 
+    ledger = runtime.background_ledger
+    seen: dict[str, str] = {}
+    next_sweep = 0.0
     while True:
-        # One accounted unit per delivery sweep (MIK-R81 rule 1, F01): the worker
-        # thread's own CPU is the unit; the loop's wait is never measured.
+        # One accounted unit per tick (MIK-R81 rule 1, F01): the worker thread's own CPU is
+        # the unit; the loop's wait is never measured.
         try:
+            sweep = time.monotonic() >= next_sweep
+            if sweep:
+                next_sweep = time.monotonic() + HELD_DELIVERY_SWEEP_SECONDS
             await _to_thread_owned(
                 OWNER_HELD_DELIVERY,
-                runtime.background_ledger,
-                sweep_held_messages,
+                ledger,
+                _held_delivery_tick,
                 runtime.config,
+                seen,
+                sweep=sweep,
             )
         except Exception:
             logger.exception("held-message delivery sweep failed; retrying next interval")
-        await asyncio.sleep(HELD_DELIVERY_SWEEP_SECONDS)
+        await asyncio.sleep(HELD_TURN_END_TICK_SECONDS)
+
+
+def _held_delivery_tick(config: McpRuntimeConfig, seen: dict[str, str], *, sweep: bool) -> None:
+    """One tick of the held-message delivery: the turn ends, and the sweep as fallback.
+
+    The host's activity record decides which recipients just ended a turn, and those are
+    drained first (MIK-R171 rule 1); the sweep then visits everything the queue names and
+    the receipts no holder named. Both are bounded: one small publication and the
+    receipts a holder published, then the sweep's own per-tick census budget.
+    """
+
+    from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
+        deliver_ended_turns,
+        sweep_held_messages,
+    )
+    from agents_remember.serving.projections.host_activity import (  # noqa: PLC0415
+        turn_ended_agents,
+    )
+
+    ended = turn_ended_agents(config, seen)
+    if ended:
+        deliver_ended_turns(config, ended)
+    if sweep:
+        sweep_held_messages(config)
 
 
 async def _malloc_trim_loop(ledger: BackgroundLedger | None = None) -> None:

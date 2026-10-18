@@ -24,6 +24,11 @@ from agents_remember.cli.role_held_messages import (
     _reset_sweep_cursor,
 )
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
+from agents_remember.observer.host_activity import HOST_ACTIVITY_FILE
+from agents_remember.serving.projections.host_activity import (
+    activity_directory,
+    turn_ended_agents,
+)
 
 read_receipt = receipts_module._read_receipt
 """Read one execution receipt in these proofs."""
@@ -52,10 +57,36 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         assert located is not None
         return manager, worker, located
 
-    def open_worker(self, worker) -> None:
-        """Let the host take messages for one worker again."""
+    def end_turn(self, worker) -> None:
+        """The recipient's turn ends, so its next message can be sent (MIK-R171 rule 2)."""
 
-        self.runtime.agents[worker]["pendingPermissions"] = []
+        self.runtime.agents[worker]["status"] = "idle"
+
+    def drain_all(self, worker, located, *, limit: int = 12) -> list[dict[str, Any]]:
+        """Drain one recipient, each delivery's turn ending before the next one starts.
+
+        A message never joins a running turn (MIK-R171 rule 2), so a queue of several
+        messages, or one message the host splits, takes one delivery per turn end.
+        """
+
+        results: list[dict[str, Any]] = []
+        for _ in range(limit):
+            outcome = held.drain_held(self.config, located[0], located[1])
+            results.append(outcome)
+            held.apply_drain_to_receipt(located[0], outcome)
+            if outcome.get("outcome") != "partially-delivered":
+                return results
+            self.end_turn(worker)
+        raise AssertionError(f"the queue did not drain in {limit} deliveries: {results}")
+
+    def open_worker(self, worker) -> None:
+        """Let the host take messages for one worker again, its turn ended (MIK-R171 rule 1).
+
+        A message is never sent into a running turn (rule 2), so a recipient is only sent to
+        while it runs none.
+        """
+
+        self.runtime.agents[worker].update(pendingPermissions=[], status="idle")
 
     def test_a_restart_after_store_admission_delivers_without_a_retry(self) -> None:
         manager = binding("manager")
@@ -126,6 +157,7 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
                 self.assertRaises(RuntimeError),
             ):
                 held.drain_held(self.config, located[0], located[1])
+            self.end_turn(worker)
             self.message(manager, agent_id=worker, text="later batch member")
             with patch.object(held, "STALE_CLAIM_SECONDS", 0):
                 outcome = held.drain_held(self.config, located[0], located[1])
@@ -212,54 +244,44 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         self.assertEqual(sum("audit must survive deletion" in t for t in self.received(worker)), 1)
 
     def test_a_split_recovery_keeps_the_part_id_on_a_deduping_host(self) -> None:
-        # The sealed split boundary: two parts go out, the second part's removal
-        # never runs, a later message arrives, and recovery resends the survivor
-        # under its original part id so a deduping host takes it once.
-        manager, worker, located = self.hold_open_worker("A" * 120)
-        self.message(manager, agent_id=worker, text="B" * 120)
+        # The sealed split boundary: a delivery goes out, its removal never runs, and
+        # recovery resends the survivor under its original part id so a deduping host
+        # takes it once. A message never joins a running turn (MIK-R171 rule 2), so the
+        # queue delivers one part per turn end.
+        _manager, worker, located = self.hold_open_worker("A" * 120)
         self.open_worker(worker)
         real_send = held._send_once
-        real_remove = held._remove_ids
-        seen: set[str] = set()
         accepted: list[dict[str, Any]] = []
-        removals = {"count": 0}
+        seen: set[str] = set()
 
         class Stopped(BaseException):
             pass
 
         def dedup_limit(config, payload):
-            if len(payload["text"].encode()) > 256:
-                return {"delivered": False, "refused": "busy", "detail": "declared fixture cap"}
             accepted.append({"id": payload["messageId"], "text": payload["text"]})
             if payload["messageId"] in seen:
-                return {"delivered": True, "taken": "steered", "turnId": "dedup"}
+                return {"delivered": True, "taken": "started", "turnId": "dedup"}
             seen.add(payload["messageId"])
             return real_send(config, payload)
 
-        def stop_second(*args, **kwargs):
-            removals["count"] += 1
-            if removals["count"] == 2:
-                raise Stopped("stop after host took second part, before removing its text")
-            return real_remove(*args, **kwargs)
+        def stop_first(*args, **kwargs):
+            raise Stopped("stop after the host took the part, before removing its text")
 
         with patch.object(held, "_send_once", side_effect=dedup_limit):
             with (
-                patch.object(held, "_remove_ids", side_effect=stop_second),
+                patch.object(held, "_remove_ids", side_effect=stop_first),
                 self.assertRaises(Stopped),
             ):
                 held.drain_held(self.config, located[0], located[1])
-            self.message(manager, agent_id=worker, text="later C")
             with patch.object(held, "STALE_CLAIM_SECONDS", 0):
                 result = held.drain_held(self.config, located[0], located[1])
             held.apply_drain_to_receipt(located[0], result)
-            more = held.drain_held(self.config, located[0], located[1])
-            held.apply_drain_to_receipt(located[0], more)
 
         received = [text.split("\n")[-1] for text in self.received(worker)]
-        self.assertEqual(received, ["A" * 120, "B" * 120, "later C"])
-        part_b = [entry["id"] for entry in accepted if entry["text"].split("\n")[-1] == "B" * 120]
-        self.assertEqual(len(part_b), 2)
-        self.assertEqual(part_b[0], part_b[1])
+        self.assertEqual(received, ["A" * 120])
+        part_a = [entry["id"] for entry in accepted if entry["text"].split("\n")[-1] == "A" * 120]
+        self.assertEqual(len(part_a), 2)
+        self.assertEqual(part_a[0], part_a[1])
 
     def test_six_messages_split_into_the_minimum_three_deliveries(self) -> None:
         # The sealed minimum-partition boundary: six equal messages on a host
@@ -286,7 +308,8 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
             return answer
 
         with patch.object(held, "_send_once", side_effect=limited):
-            result = held.drain_held(self.config, located[0], located[1])
+            results = self.drain_all(worker, located)
+        result = results[-1]
 
         self.assertEqual(result["outcome"], "delivered")
         self.assertEqual(len(accepted), 3)
@@ -323,7 +346,8 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
             return answer
 
         with patch.object(held, "_send_once", side_effect=limited):
-            result = held.drain_held(self.config, located[0], located[1])
+            results = self.drain_all(worker, located)
+        result = results[-1]
 
         self.assertEqual(result["outcome"], "delivered")
         self.assertEqual(len(accepted), 2)
@@ -377,6 +401,9 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
             self.assertNotIn("withdrawnHeldMessageId", replacement)
             self.assertEqual(replacement["heldReason"], "held-behind-waiting")
             self.assertIn("committed to delivery", replacement["detail"])
+            # The replacement started a turn; it ends before this delivery goes out
+            # (MIK-R171 rule 2: no message joins a running turn).
+            self.end_turn(worker)
             return original(config, payload)
 
         with patch.object(held, "_send_once", side_effect=concurrent):
@@ -389,6 +416,7 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         )
         self.assertEqual(held.waiting_total(located[2], worker), 1)
         held.apply_drain_to_receipt(located[0], outcome)
+        self.end_turn(worker)
         again = held.drain_held(self.config, located[0], located[1])
         held.apply_drain_to_receipt(located[0], again)
         self.assertEqual(
@@ -452,12 +480,18 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
             return original(config, payload)
 
         with patch.object(held, "_send_once", side_effect=limit):
-            outcome = held.drain_held(self.config, located[0], located[1])
+            outcomes = self.drain_all(worker, located)
+        outcome = outcomes[-1]
 
         self.assertEqual(outcome["outcome"], "delivered")
-        # One refused combined delivery, then one admitted part per message.
-        self.assertEqual(len(calls), 3)
-        self.assertNotEqual(calls[1]["messageId"], calls[2]["messageId"])
+        # One refused combined delivery, then one admitted part per message, the second
+        # waiting for the first part's turn to end (MIK-R171 rule 2).
+        self.assertEqual(len(calls), 4)
+        # The combined delivery is refused by the host's size limit; each part then goes out
+        # in a turn of its own, so the second part waits for the first part's turn to end and
+        # its retry is refused as busy in between (MIK-R171 rule 2).
+        self.assertNotEqual(calls[1]["messageId"], calls[3]["messageId"])
+        self.assertEqual(calls[2]["messageId"], calls[3]["messageId"])
         self.assertEqual(
             [text.split("\n")[-1] for text in self.received(worker)], ["A" * 120, "B" * 120]
         )
@@ -517,6 +551,7 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         held.apply_drain_to_receipt(located[0], outcome)
         self.assertEqual(held.waiting_total(located[2], worker), 1)
 
+        self.end_turn(worker)
         resumed = held.drain_held(self.config, located[0], located[1])
         held.apply_drain_to_receipt(located[0], resumed)
 
@@ -527,6 +562,62 @@ class HeldQueueRecoveryTests(RoleToolsTestCase):
         self.assertEqual(held.waiting_total(located[2], worker), 0)
         lines = (read_receipt(located[0]) or {}).get("heldMessageLines") or []
         self.assertEqual([line["how"] for line in lines], ["delivered", "delivered"])
+
+    def test_a_queue_with_a_host_unreachable_row_behind_an_ordinary_one_drains(self) -> None:
+        """L171-F01: the part ends before a row the host may already hold.
+
+        The order a drain can face is [ordinary, attempted]: the ordinary rows go in the
+        order they were held, and the attempted row goes alone under its own id, with no
+        assertion between them stopping the drain.
+        """
+
+        manager, worker, located = self.hold_open_worker("ordinary")
+        sender = manager.agent_id
+        held.hold_message(
+            located[2],
+            worker,
+            HeldMessage(
+                sender_line="manager",
+                sender_agent_id=sender,
+                text="the host may already hold this one",
+                reason="host-unreachable",
+                attempted_message_id="attempted-1",
+            ),
+        )
+        self.open_worker(worker)
+
+        results = self.drain_all(worker, located)
+
+        self.assertEqual(results[-1]["outcome"], "delivered")
+        self.assertEqual(
+            [text.split("\n")[-1] for text in self.received(worker)],
+            ["ordinary", "the host may already hold this one"],
+        )
+        sends = [payload for command, payload in self.runtime.calls if command == "agent-send"]
+        # The attempted row travelled alone, under the id its unanswered send used.
+        self.assertEqual(sends[-1]["messageId"], "attempted-1")
+        self.assertNotIn("ordinary", sends[-1]["text"])
+        self.assertEqual(held.waiting_total(located[2], worker), 0)
+
+    def test_a_ready_drain_that_pauses_writes_one_line_with_the_recipient_and_reason(self) -> None:
+        """L171-F04: a paused drain is a failed drain and writes its line."""
+
+        _manager, worker, located = self.hold_open_worker("paused by an unanswered host")
+
+        paused = held._DrainPause(
+            {"outcome": "still-held", "detail": "the host did not answer the readiness check"}
+        )
+        with (
+            patch.object(held, "_check_drain_readiness", side_effect=paused),
+            self.assertLogs("agents_remember.cli.role_held_messages", level="WARNING") as logs,
+        ):
+            swept = held.sweep_held_messages(self.config)
+
+        written = " ".join(logs.output)
+        self.assertIn(worker, written)
+        self.assertIn("the host did not answer the readiness check", written)
+        self.assertEqual((swept["delivered"], swept["stillHeld"]), (0, 1))
+        self.assertEqual(held.waiting_total(located[2], worker), 1)
 
 
 class HeldSweepBoundsTests(RoleToolsTestCase):
@@ -576,6 +667,32 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
             encoding="utf-8",
         )
         return agent_id, path, str(folder)
+
+    def test_a_queued_receipt_past_the_first_slice_is_reached_within_bounded_ticks(self) -> None:
+        """L171-F03: the queue is visited in a rotating slice, not a pinned prefix."""
+
+        for size in (33, 65):
+            with self.subTest(queue=size):
+                _reset_sweep_cursor()
+                targets: list[tuple[str, Any, str]] = []
+                for index in range(size):
+                    crafted = self.craft_recipient(f"q{size}-{index:03d}")
+                    targets.append(crafted)
+                    if index < held.SWEEP_MAX_DRAINS_PER_TICK:
+                        # The receipts ahead of the target stay held on a permission.
+                        self.runtime.agents[crafted[0]]["pendingPermissions"] = [{"name": "Bash"}]
+                target_agent, _target_path, _folder = targets[-1]
+                ticks = 0
+                while not self.received(target_agent) and ticks < 4:
+                    held.sweep_held_messages(self.config)
+                    ticks += 1
+                self.assertEqual(len(self.received(target_agent)), 1)
+                self.assertLessEqual(ticks, 2 + size // held.SWEEP_MAX_DRAINS_PER_TICK)
+                # The receipts ahead of the slice stay held on their permission; only the
+                # ones the sweep reached after it could take their message.
+                for position, (created, _path, _dir) in enumerate(targets):
+                    if position < held.SWEEP_MAX_DRAINS_PER_TICK:
+                        self.assertEqual(self.received(created), [])
 
     def test_zero_input_cycles_do_no_drain_work(self) -> None:
         for _ in range(3):
@@ -676,6 +793,117 @@ class HeldSweepBoundsTests(RoleToolsTestCase):
         second = held.sweep_held_messages(self.config)
         self.assertEqual((second["swept"], second["delivered"], second["stillHeld"]), (0, 0, 0))
         self.assertEqual(first["delivered"], 0)
+
+
+class TurnEndDeliveryTests(HeldQueueRecoveryTests):
+    """MIK-R171 rules 1 and 5: the host's own record of a turn end delivers the queue."""
+
+    def publish_activity(self, agents: dict[str, str], *, state: str = "idle") -> None:
+        """Write the host's activity record for the given agents at the given times."""
+
+        directory = activity_directory(self.config)
+        assert directory is not None, "the fixture host has a Paseo home"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / HOST_ACTIVITY_FILE).write_text(
+            json.dumps(
+                {
+                    "bootId": "boot-1",
+                    "complete": True,
+                    "agents": {
+                        agent_id: {"state": state, "eventAt": event_at}
+                        for agent_id, event_at in agents.items()
+                    },
+                    "ignoredEvents": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def folder_of(self, agent_id: str) -> tuple[Path, Path]:
+        """The receipt path and working folder of one recipient with a store."""
+
+        located = tools._locate_recipient_store(
+            self.config, tools.RoleMessageCall(text="lookup", agent_id=agent_id), agent_id
+        )
+        assert located is not None
+        return located[0], Path(located[2])
+
+    def test_a_turn_end_delivers_what_waits_without_another_message(self) -> None:
+        manager = binding("manager")
+        worker = self.start(manager, "worker")["agentId"]
+        self.runtime.agents[worker]["pendingPermissions"] = [{"name": "Bash"}]
+        answer = self.message(manager, agent_id=worker, text="held until the turn ends")
+        self.assertEqual(answer["status"], "held")
+        self.assertEqual(self.received(worker), [])
+        receipt_path, folder = self.folder_of(worker)
+
+        # The prompt is answered and the turn ends. Nothing is sent to the worker: only the
+        # host's own record of the turn end drives the delivery.
+        self.runtime.agents[worker].update(pendingPermissions=[], status="idle")
+        self.publish_activity({worker: "2026-10-17T05:27:09+00:00"})
+
+        seen: dict[str, str] = {}
+        self.assertEqual(turn_ended_agents(self.config, seen), [worker])
+        # One turn end is handed over once, not on every look.
+        self.assertEqual(turn_ended_agents(self.config, seen), [])
+        delivered = held.deliver_ended_turns(self.config, [worker])
+
+        self.assertEqual((delivered["swept"], delivered["delivered"]), (1, 1))
+        received = self.received(worker)
+        self.assertEqual(len(received), 1)
+        self.assertTrue(received[0].endswith("held until the turn ends"))
+        self.assertEqual(held.waiting_total(folder, worker), 0)
+        self.assertEqual(held.held_queue_receipts(self.config), [])
+        lines = (read_receipt(receipt_path) or {}).get("heldMessageLines") or []
+        self.assertEqual([line["how"] for line in lines], ["delivered"])
+
+    def test_a_turn_end_holds_the_message_while_a_permission_still_waits(self) -> None:
+        manager = binding("manager")
+        worker = self.start(manager, "worker")["agentId"]
+        self.runtime.agents[worker]["pendingPermissions"] = [{"name": "Bash"}]
+        self.assertEqual(
+            self.message(manager, agent_id=worker, text="still waiting")["status"], "held"
+        )
+        self.publish_activity({worker: "2026-10-17T05:27:09+00:00"})
+
+        delivered = held.deliver_ended_turns(self.config, [worker])
+
+        self.assertEqual((delivered["delivered"], delivered["stillHeld"]), (0, 1))
+        self.assertEqual(self.received(worker), [])
+        self.assertEqual(held.waiting_total(self.folder_of(worker)[1], worker), 1)
+
+    def test_a_failed_drain_writes_one_line_with_the_recipient_and_the_reason(self) -> None:
+        _manager, worker, located = self.hold_open_worker("the store cannot be drained")
+        self.open_worker(worker)
+
+        with (
+            patch.object(held, "drain_held", side_effect=RuntimeError("the store is unreadable")),
+            self.assertLogs("agents_remember.cli.role_held_messages", level="WARNING") as logs,
+        ):
+            swept = held.sweep_held_messages(self.config)
+
+        self.assertEqual((swept["swept"], swept["stillHeld"], swept["delivered"]), (1, 1, 0))
+        written = " ".join(logs.output)
+        self.assertIn(worker, written)
+        self.assertIn("the store is unreadable", written)
+        self.assertEqual(held.waiting_total(located[2], worker), 1)
+
+    def test_a_receipt_count_equals_the_messages_its_store_holds(self) -> None:
+        manager, worker, located = self.hold_open_worker("counted once")
+        self.assertEqual((read_receipt(located[0]) or {}).get("heldWaiting"), 1)
+
+        self.assertEqual(
+            self.message(manager, agent_id=worker, text="counted twice")["status"], "held"
+        )
+        self.assertEqual((read_receipt(located[0]) or {}).get("heldWaiting"), 2)
+        self.assertEqual(held.waiting_total(located[2], worker), 2)
+
+        self.open_worker(worker)
+        held.apply_drain_to_receipt(
+            located[0], held.drain_held(self.config, located[0], located[1])
+        )
+        self.assertEqual((read_receipt(located[0]) or {}).get("heldWaiting"), 0)
+        self.assertEqual(held.waiting_total(located[2], worker), 0)
 
 
 if __name__ == "__main__":

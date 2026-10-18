@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,30 +21,17 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from agents_remember.application.role_launch_context import (
-    LEAF_ROLES,
     TASKLESS_ROLES,
-    resolve_role_launch_context,
     selection_binding,
 )
 from agents_remember.cli.investigator_receipts import (
-    investigator_message_capacity,
     open_investigator_receipts,
 )
-from agents_remember.cli.paseo_bridge import (
-    BRIDGE_REFUSED,
-    BRIDGE_TIMEOUT,
-    PaseoBridgeFailure,
-    bridge_call,
-)
-from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
 from agents_remember.cli.paseo_status import read_agent
-from agents_remember.cli.role_activity import resume_role_agent
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_TOOL,
-    _verify_leaf_revival_scope,
 )
 from agents_remember.cli.role_launch_receipts import (
-    EXECUTIONS_DIRECTORY,
     _read_receipt,
     _receipt_path,
     _taskless_execution_receipts,
@@ -64,11 +51,10 @@ from agents_remember.cli.role_message_files import (
     utc_stem,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.role_agents import MAX_WAIT_SECONDS, RoleMessageCall
+from agents_remember.models.role_agents import RoleMessageCall
 from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.observer.tool_events import call_target_role
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 if TYPE_CHECKING:
@@ -76,7 +62,6 @@ if TYPE_CHECKING:
     from agents_remember.cli.paseo_launch import StartingAgent
 
 
-SEND_OUTCOME_UNKNOWN = "paseo_send_outcome_unknown"
 # How many executions of a selection are asked about when a role is addressed. More than that
 # are never chosen among: the address is refused as ambiguous.
 _CANDIDATE_LIMIT = 24
@@ -138,12 +123,6 @@ class _Refused(Exception):
             "nextAction": self.next_action,
             **self.fields,
         }
-
-
-def sender_line(sender: StartingAgent) -> str:
-    """The line that opens every delivered message."""
-
-    return f"From {sender.role} · {sender.subject} · agent {sender.agent_id}"
 
 
 def _ref_key(reference: Any) -> str | None:
@@ -284,64 +263,6 @@ def _refuse_over_limit(call: RoleMessageCall, limit: int) -> None:
     )
 
 
-def _carry_resolved_target_role(call: RoleMessageCall, recipient: _Recipient) -> None:
-    """Name the addressed role for the river from the resolved recipient.
-
-    The payload builder only sees the call, whose ``role`` is absent when the
-    recipient is addressed by agent id. The durable receipt that resolved the
-    recipient already records its role, so the completed event carries that
-    actual role for both addressing forms. Nothing is guessed: when the
-    receipt names no role and the call names none, the event stays literal
-    (no ``targetRole``). Refused calls never reach this point.
-    """
-    role = recipient.receipt.get("role")
-    if not isinstance(role, str) or not role:
-        role = call.role
-    if isinstance(role, str) and role:
-        call_target_role.set(role)
-
-
-def _resolve_recipient(
-    config: McpRuntimeConfig, call: RoleMessageCall, binding: AgentBinding
-) -> _Recipient:
-    by_selection = call.role is not None
-    if (call.agent_id is not None) == by_selection:
-        raise _not_found(
-            "Name the recipient either with agent_id, or with role plus the task references its "
-            "class requires (sprint_document_ref, master_document_ref, task_document_ref); not "
-            "both and not neither. No other argument names a recipient."
-        )
-    recipient = (
-        _recipient_by_selection(config, call, binding)
-        if by_selection
-        else _recipient_by_id(config, call)
-    )
-    if recipient.agent_id == binding.agent_id:
-        raise _not_found("The recipient this resolves to is the calling agent itself.")
-    if recipient.receipt.get("status") in _UNFINISHED_START_STATUSES:
-        # Until its start has answered, an agent may not have its first message; a message
-        # that reaches it first would take that message's place.
-        raise _Refused(
-            "recipient-busy",
-            f"Agent {recipient.agent_id} is not ready for a message: its start has not finished "
-            f"(execution status {recipient.receipt.get('status')}).",
-            "Send the message again once the start of that agent has answered running. A start "
-            f"that answered unknown is repeated with {ROLE_START_TOOL} by the agent that made it.",
-            recipientAgentId=recipient.agent_id,
-        )
-    return recipient
-
-
-def _not_found(detail: str, **fields: Any) -> _Refused:
-    return _Refused(
-        "recipient-not-found",
-        detail,
-        "Address a role agent that this AR line launched: by the agent id a start returned, or "
-        "by its role and task references.",
-        **fields,
-    )
-
-
 def _archived_for(caller_role: str, recipient_role: str, agent_id: str) -> _Refused:
     """The archived refusal, naming a start only its caller may make (rule 9)."""
     return _Refused(
@@ -391,120 +312,11 @@ def _archived_with_successor(config: McpRuntimeConfig, parties: _MessageParties)
     return _archived_for(binding.role, _recipient_role(recipient), recipient.agent_id)
 
 
-def _recipient_by_id(config: McpRuntimeConfig, call: RoleMessageCall) -> _Recipient:
-    """The execution of this line whose receipt records exactly this agent id."""
-
-    agent_id = call.agent_id or ""
-    if not _is_minted_id(agent_id):
-        # The runtime resolves id prefixes and titles; only an id AR minted is passed to it.
-        raise _not_found(
-            f"{agent_id!r} is not an agent id: AR agent ids are UUIDs. A role name or a title is "
-            "never an id; address a role with role and task references instead."
-        )
-    found: dict[str, Any] | None = None
-    for path, receipt in _line_receipts(config):
-        if receipt.get("agentId") == agent_id:
-            found = receipt
-            if path.parent.name != "history":
-                break
-    if found is None:
-        raise _not_found(
-            f"No role execution of this AR line records agent {agent_id}.",
-            recipientAgentId=agent_id,
-        )
-    return _Recipient(agent_id, found)
-
-
-def _is_minted_id(value: str) -> bool:
-    try:
-        return str(uuid.UUID(value)) == value
-    except ValueError:
-        return False
-
-
-def _line_receipts(config: McpRuntimeConfig) -> Iterator[tuple[Path, dict[str, Any]]]:
-    """Every readable execution receipt of this line, current ones and archived ones."""
-
-    coordination = config.coordination_root
-    roots = [coordination / "notes" / "reports" / EXECUTIONS_DIRECTORY]
-    roots.extend(sorted((coordination / "tasks").glob(f"**/notes/reports/{EXECUTIONS_DIRECTORY}")))
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob("*.json")):
-            if "message-bindings" in path.relative_to(root).parts:
-                continue
-            receipt = _readable_receipt(path)
-            if receipt is not None:
-                yield path, receipt
-
-
 def _readable_receipt(path: Path) -> dict[str, Any] | None:
     try:
         return _read_receipt(path)
     except HTTPException:
         return None
-
-
-def _recipient_by_selection(
-    config: McpRuntimeConfig, call: RoleMessageCall, binding: AgentBinding
-) -> _Recipient:
-    """The live agent of the selection's executions; several live agents are never chosen among.
-
-    A task-bound selection has one current execution; its agent is the recipient when it is live,
-    and otherwise the most recent earlier execution whose agent is live. A taskless role can have
-    several live agents; then the recipient is ambiguous. Of a taskless role every execution that
-    is not already stopped or rejected is asked about; when there are more of those than are
-    asked about, the address is ambiguous as well. The caller's own execution is no candidate:
-    a role address means another agent of that role.
-    """
-
-    try:
-        selection = RoleSelection.model_validate(
-            {
-                "role": call.role,
-                "sprintDocumentRef": call.sprint_document_ref,
-                "masterDocumentRef": call.master_document_ref,
-                "taskDocumentRef": call.task_document_ref,
-            }
-        )
-        resolve_role_launch_context(config, selection)
-        receipts = _selection_receipts(config, selection)
-    except (ValidationError, ValueError, TaskDocumentRefError, HTTPException) as error:
-        detail = error.detail if isinstance(error, HTTPException) else error
-        raise _not_found(f"The recipient selection cannot be resolved: {detail}") from error
-    taskless = selection.role in TASKLESS_ROLES
-    own = [r for r in receipts if r.get("agentId") == binding.agent_id]
-    receipts = [r for r in receipts if r.get("agentId") != binding.agent_id]
-    if taskless:
-        # An execution already stopped or rejected has no live agent to ask about.
-        receipts = [r for r in receipts if r.get("status") not in _NO_AGENT_STATUSES]
-    live, archived = _live_agents(config, receipts[:_CANDIDATE_LIMIT], first_only=not taskless)
-    cut = taskless and len(receipts) > _CANDIDATE_LIMIT
-    if len(live) > 1 or cut:
-        ids = [recipient.agent_id for recipient in live]
-        listed = f"{len(ids)} live {selection.role} agents match: {', '.join(ids)}."
-        if cut:
-            listed = (
-                f"{len(receipts)} {selection.role} executions are not known to be stopped; only "
-                f"the {_CANDIDATE_LIMIT} most recent were asked about, so the list was cut. Of "
-                f"those, {len(ids)} are live{': ' + ', '.join(ids) if ids else ''}."
-            )
-        raise _Refused(
-            "recipient-ambiguous",
-            f"{listed} The tool never picks one.",
-            "Send the message again addressed to the recipient by agent_id.",
-            candidateAgentIds=ids,
-        )
-    if live:
-        return live[0]
-    if archived is not None:
-        # By role there is no live agent to name instead: no live agent of the
-        # selection exists, so the gated refusal stands (rule 9 names the
-        # successor only where one is live).
-        raise _archived_for(binding.role, selection.role, archived)
-    other = " other than the calling agent" if own else ""
-    raise _not_found(f"No live {selection.role} agent{other} is recorded for this selection.")
 
 
 def _live_agents(
@@ -673,15 +485,6 @@ def _discard_copies(attachments: list[Any]) -> None:
                 continue
 
 
-def _discard_message_files(path: Path, attachments: list[Any]) -> None:
-    """Remove what one message wrote after a refusal before any delivery attempt."""
-    for target in [path, *(Path(record.copy) for record in attachments if record.copy)]:
-        try:
-            target.unlink(missing_ok=True)
-        except OSError:
-            continue
-
-
 def _keep_refused_file(path: Path, refused: _Refused) -> None:
     """Keep a refused delivery's file and name it in the refusal (rule 2)."""
     final = path
@@ -765,120 +568,6 @@ def _store_message(
     )
 
 
-def _deliver(
-    config: McpRuntimeConfig,
-    call: RoleMessageCall,
-    parties: _MessageParties,
-    *,
-    limit: int,
-) -> dict[str, Any]:
-    sender = parties.sender
-    recipient = parties.recipient
-    line = sender_line(sender)
-    message_id = str(uuid.uuid4())
-    recipient_role = _recipient_role(recipient, call)
-    recipient_task = _recipient_subject(config, recipient)
-    scope = _message_scope(config, parties)
-    when = datetime.now(UTC)
-    stem = utc_stem(sender.role, sender.agent_id, recipient_role, recipient.agent_id, when=when)
-    attachments = _prepare_attachments(call, parties, scope, stem)
-    link_warning = _ensure_sender_link(config, parties)
-    recipient_warning = _ensure_recipient_link(config, parties)
-    if recipient_warning:
-        link_warning = (
-            f"{link_warning} {recipient_warning}".strip() if link_warning else recipient_warning
-        )
-    path, digest, payload = _store_message(
-        call,
-        parties,
-        _MessageDraft(scope.folder, line, stem, when, message_id, recipient_role, recipient_task),
-        attachments,
-    )
-    resumed = False
-    attempted = False
-    try:
-        with investigator_message_capacity(config, recipient.receipt):
-            attempted = True
-            delivery = _send(config, payload)
-            if delivery.get("refused") == "closed":
-                _resume(config, parties)
-                resumed = True
-                # A resumed session waits for its tool servers, as its first launch does.
-                tool_server = recipient.receipt.get("toolServer")
-                waits = isinstance(tool_server, dict) and tool_server.get("applied") is True
-                delivery = _send(config, {**payload, "afterResume": True} if waits else payload)
-    except HTTPException as error:
-        _discard_message_files(path, attachments)
-        raise _Refused(
-            "investigator-capacity",
-            str(error.detail),
-            "Close or archive one Investigator execution on this selection before starting another turn.",
-            recipientAgentId=recipient.agent_id,
-        ) from error
-    except _Refused as refused:
-        if not attempted:
-            _discard_message_files(path, attachments)
-            raise
-        _keep_refused_file(path, refused)
-        raise
-    if delivery.get("delivered") is not True:
-        refusal = _delivery_refusal(config, parties, delivery)
-        _keep_refused_file(path, refusal)
-        raise refusal
-    taken = delivery.get("taken")
-    turn_id = delivery.get("turnId")
-    result: dict[str, Any] = {
-        "ok": True,
-        "status": "accepted",
-        "detail": (
-            "The recipient's running turn took the message up; nothing was cancelled."
-            if taken == "steered"
-            else "The recipient started a turn with the message."
-        ),
-        "recipientAgentId": recipient.agent_id,
-        "senderLine": line,
-        "taken": "steered" if taken == "steered" else "started",
-        "messageFile": path.as_posix(),
-        "messageFileSha256": digest,
-        **({"resumed": True} if resumed else {}),
-        **(
-            {
-                "warning": "The Paseo runtime cancelled the recipient's running turn to deliver "
-                "this message although it was asked to hand the message to that turn."
-            }
-            if taken == "replaced"
-            else {}
-        ),
-        **({"warning": link_warning} if link_warning else {}),
-    }
-    if not call.wait:
-        return result
-    waited = wait_for_turn(
-        config,
-        SentMessage(
-            recipient.agent_id,
-            message_id,
-            turn_id if isinstance(turn_id, str) and turn_id else None,
-            steered=taken == "steered",
-        ),
-        min(max(1, call.timeout_seconds), MAX_WAIT_SECONDS),
-    )
-    _file_long_reply(
-        _FiledMessage(
-            scope.folder,
-            sender,
-            recipient_role,
-            recipient.agent_id,
-            recipient_task,
-            message_id,
-        ),
-        limit,
-        waited,
-        result,
-    )
-    return {**result, **waited}
-
-
 def _file_long_reply(
     filed: _FiledMessage,
     limit: int,
@@ -945,120 +634,3 @@ def _file_long_reply(
     waited["messageFileSha256"] = digest
     result["messageFile"] = path.as_posix()
     result["messageFileSha256"] = digest
-
-
-def _send(config: McpRuntimeConfig, payload: dict[str, Any]) -> dict[str, Any]:
-    """One delivery attempt; a turn that changed under the send is tried once more."""
-
-    for attempt in (1, 2):
-        try:
-            reply = bridge_call(config, "agent-send", payload)
-        except PaseoBridgeFailure as error:
-            if error.code == BRIDGE_REFUSED:
-                if attempt == 1:
-                    continue
-                return {"delivered": False, "refused": "busy", "detail": str(error)}
-            # A call that ran out of time, or lost its connection while the message was being
-            # sent, may have delivered it.
-            uncertain = (
-                " It is not known whether the message was delivered."
-                if error.code in {BRIDGE_TIMEOUT, SEND_OUTCOME_UNKNOWN}
-                and "not known whether" not in str(error)
-                else ""
-            )
-            raise _host_unreachable(f"{error.code}: {error}{uncertain}") from error
-        delivery = reply.get("delivery")
-        if not isinstance(delivery, dict):
-            raise _host_unreachable("The Paseo bridge returned an unreadable delivery answer.")
-        return delivery
-    raise AssertionError("unreachable")
-
-
-def _resume(config: McpRuntimeConfig, parties: _MessageParties) -> None:
-    """Resume the recipient's closed session, under the scope check a Revive applies."""
-
-    recipient = parties.recipient
-    binding = parties.binding
-    receipt = recipient.receipt
-    recipient_role = _recipient_role(recipient)
-    if receipt.get("role") in LEAF_ROLES:
-        try:
-            selection = RoleSelection.model_validate(receipt.get("selection"))
-            _verify_leaf_revival_scope(
-                config, resolve_role_launch_context(config, selection), receipt
-            )
-        except (ValidationError, ValueError, TaskDocumentRefError) as error:
-            raise _Refused(
-                "scope-check-failed",
-                str(error),
-                "The recipient's task scope changed since its launch. "
-                + _start_again_next_action(binding.role, recipient_role, "for the current scope"),
-                recipientAgentId=recipient.agent_id,
-            ) from error
-    outcome = resume_role_agent(config, receipt)
-    reading = outcome.reading
-    if not reading.reachable:
-        raise _host_unreachable(str(reading.unreachable_reason))
-    if not reading.found:
-        raise _not_found(
-            f"The host has no agent {recipient.agent_id}.", recipientAgentId=recipient.agent_id
-        )
-    if reading.archived:
-        raise _archived_with_successor(config, parties)
-    if outcome.refusal is not None or reading.session_closed:
-        if _may_start_role(binding.role, recipient_role):
-            relaunch = f"A new agent comes only from a new {ROLE_START_TOOL}."
-        else:
-            relaunch = (
-                "A new agent comes only from a new start, which your role may not make: "
-                "ask the parent to start it."
-            )
-        raise _Refused(
-            "recipient-cannot-be-resumed",
-            outcome.refusal or "The host left the recipient's session closed.",
-            "Nothing was relaunched. Tell your parent with role_message on agents-remember-task; "
-            "without a parent, tell the developer in your own chat. " + relaunch,
-            recipientAgentId=recipient.agent_id,
-        )
-
-
-def _delivery_refusal(
-    config: McpRuntimeConfig,
-    parties: _MessageParties,
-    delivery: dict[str, Any],
-) -> _Refused:
-    recipient = parties.recipient
-    agent_id = recipient.agent_id
-    reason = delivery.get("refused")
-    detail = str(delivery.get("detail") or "")
-    if reason == "busy" and delivery.get("permissionPending") is True:
-        # The host answers a pending permission with a denial when it delivers a message.
-        name = delivery.get("permission")
-        named = f" ({name})" if isinstance(name, str) and name else ""
-        return _Refused(
-            "recipient-busy",
-            f"Agent {agent_id} waits for a permission decision{named}. A message would answer "
-            "it with a denial, so the message was not delivered.",
-            "The developer answers the permission in the recipient's chat; send the message "
-            "again afterwards.",
-            recipientAgentId=agent_id,
-            **({"permission": name} if named else {}),
-        )
-    if reason == "busy":
-        return _Refused(
-            "recipient-busy",
-            f"Agent {agent_id} is busy and the message was not delivered: {detail}",
-            "Send the message again later; the recipient's turn was left running.",
-            recipientAgentId=agent_id,
-        )
-    if reason == "archived":
-        return _archived_with_successor(config, parties)
-    if reason == "closed":
-        return _Refused(
-            "recipient-cannot-be-resumed",
-            f"The session of agent {agent_id} closed again before the message was delivered.",
-            "Send the message again; if it repeats, tell your parent with role_message on "
-            "agents-remember-task; without a parent, tell the developer in your own chat.",
-            recipientAgentId=agent_id,
-        )
-    return _not_found(f"The host has no agent {agent_id}.", recipientAgentId=agent_id)

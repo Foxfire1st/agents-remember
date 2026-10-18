@@ -21,18 +21,29 @@ Delivery: one process delivers (``drain_held`` under the store file's lock, so n
 deliveries to one recipient run at once). Everything held for a recipient goes in one
 delivery, in the order taken, each under the line naming its sender; a further message
 is held behind what waits even when the host could take it at that moment. The store
-shares only the generic file lock with the rest of the product. How the product learns a prompt was answered, a turn ended, or a start
-finished is one read of the agent before each drain; the dashboard sweep runs that
-read every ``HELD_DELIVERY_SWEEP_SECONDS``.
+shares only the generic file lock with the rest of the product. How the product learns
+that a prompt was answered, a turn ended, or a start finished is one read of the agent
+before each drain; the dashboard sweep runs that read every
+``HELD_DELIVERY_SWEEP_SECONDS``.
+
+Two things make a waiting message reachable without another message being sent to the
+recipient (MIK-R171 rule 1). Every holder names its receipt in one small bounded queue
+(``note_held_receipt``), and the sweep drains that queue before it walks the receipts,
+so a receipt that holds messages is visited ahead of the others. And the dashboard reads
+the host's own activity record: the agents whose turn it reports ended are drained
+directly (``deliver_ended_turns``) within ``HELD_TURN_END_TICK_SECONDS``, while the
+sweep stays the fallback for everything the record does not show.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import tempfile
 import uuid
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -41,6 +52,8 @@ from typing import Any
 
 from agents_remember.cli.paseo_bridge import (
     BRIDGE_REFUSED,
+    BRIDGE_TIMEOUT,
+    SEND_OUTCOME_UNKNOWN,
     PaseoBridgeFailure,
     bridge_call,
 )
@@ -55,6 +68,7 @@ from agents_remember.cli.role_launch_receipts import (
 )
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.serving.projections.host_activity import agent_in_turn
 
 # The store schema every file of one recipient carries.
 HELD_STORE_SCHEMA = "ar-held-messages/v1"
@@ -67,6 +81,24 @@ MAX_HELD_RECORD_LINES = 30
 HELD_DELIVERY_SWEEP_SECONDS = 15.0
 # A claim older than this is retried: the process that claimed it never delivered.
 STALE_CLAIM_SECONDS = 120.0
+# How often the dashboard reads the host's activity record for a turn end (MIK-R171
+# rule 1): one stat, and one small file read when it changed.
+HELD_TURN_END_TICK_SECONDS = 3.0
+# At most this many recipients are drained for a turn end per tick.
+HELD_TURN_END_MAX_DRAINS = 32
+
+# The queue of receipts that hold messages (MIK-R171 rule 1). Every holder names its
+# receipt in one small file; the sweep drains that file's receipts before it walks the
+# rest, so a receipt with waiting messages is visited ahead of the others. It is a
+# runtime working surface and never the record: an entry is dropped when its receipt
+# holds nothing, when it is older than HELD_QUEUE_MAX_AGE_SECONDS, and beyond
+# HELD_QUEUE_MAX_ENTRIES; losing it costs one later sweep visit, never a message.
+HELD_QUEUE_SCHEMA = "ar-held-message-queue/v1"
+HELD_QUEUE_FILE = "held-message-queue.json"
+HELD_QUEUE_MAX_ENTRIES = 512
+HELD_QUEUE_MAX_AGE_SECONDS = 24 * 60 * 60
+
+logger = logging.getLogger(__name__)
 
 _END_DELIVERED = "delivered"
 _END_NOT_DELIVERED = "not-delivered-archived-or-gone"
@@ -123,19 +155,110 @@ def _read_store_file(path: Path, agent_id: str) -> dict[str, Any]:
 
 
 def _write_store_file(path: Path, store: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     store["updatedAt"] = _now_iso()
-    body = (json.dumps(store, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    _write_json_atomic(path, store)
+
+
+def held_queue_path(config: McpRuntimeConfig) -> Path:
+    """The one file that names the receipts holding messages (MIK-R171 rule 1)."""
+
+    return config.coordination_root / "temp" / HELD_QUEUE_FILE
+
+
+def _write_json_atomic(path: Path, body: dict[str, Any]) -> None:
+    """Replace one small product file whole; a reader sees the old body or the new one."""
+
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    payload = (json.dumps(body, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
-            stream.write(body)
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         Path(temporary).replace(path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
+
+
+def _read_queue(path: Path) -> dict[str, str]:
+    """The queue as receipt path to the time it was named; unreadable reads as empty."""
+
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(body, dict) or body.get("schema") != HELD_QUEUE_SCHEMA:
+        return {}
+    entries = body.get("entries")
+    if not isinstance(entries, dict):
+        return {}
+    return {
+        key: value
+        for key, value in entries.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
+
+def _live_queue(entries: dict[str, str], now: datetime | None = None) -> dict[str, str]:
+    """The entries still worth a visit: recent enough, oldest first, at most the bound."""
+
+    moment = now or datetime.now(UTC)
+    recent: list[tuple[str, str]] = []
+    for path, stamped in entries.items():
+        try:
+            age = (moment - datetime.fromisoformat(stamped)).total_seconds()
+        except ValueError:
+            continue
+        if age <= HELD_QUEUE_MAX_AGE_SECONDS:
+            recent.append((stamped, path))
+    recent.sort()
+    return {path: stamped for stamped, path in recent[-HELD_QUEUE_MAX_ENTRIES:]}
+
+
+def _update_queue(config: McpRuntimeConfig, change: Callable[[dict[str, str]], bool]) -> None:
+    """Apply one change to the queue under its lock; a failure costs only a later visit."""
+
+    path = held_queue_path(config)
+    try:
+        with exclusive_file_lock(path, "held-message queue"):
+            entries = _live_queue(_read_queue(path))
+            if change(entries) is False:
+                return
+            _write_json_atomic(path, {"schema": HELD_QUEUE_SCHEMA, "entries": entries})
+    except (OSError, ValueError) as error:
+        # The store already holds the message; the queue only orders the sweep's visits.
+        logger.warning("The held-message queue %s could not be written: %s", path, error)
+
+
+def note_held_receipt(config: McpRuntimeConfig, receipt_path: Path) -> None:
+    """Name one receipt that holds messages, so a sweep visits it before the others."""
+
+    def note(entries: dict[str, str]) -> bool:
+        entries[receipt_path.as_posix()] = _now_iso()
+        return True
+
+    _update_queue(config, note)
+
+
+def forget_held_receipt(config: McpRuntimeConfig, receipt_path: Path) -> None:
+    """Forget one receipt that holds nothing now; an absent entry changes nothing."""
+
+    def forget(entries: dict[str, str]) -> bool:
+        return entries.pop(receipt_path.as_posix(), None) is not None
+
+    _update_queue(config, forget)
+
+
+def held_queue_receipts(config: McpRuntimeConfig) -> list[Path]:
+    """The receipts that hold messages, the oldest visit first (MIK-R171 rule 1).
+
+    Reading is lock-free: the queue is replaced whole, so a reader sees one complete
+    body. Stale and surplus entries are left out here and dropped by the next write.
+    """
+
+    return [Path(path) for path in _live_queue(_read_queue(held_queue_path(config)))]
 
 
 def waiting_total(workspace_path: str | Path, agent_id: str) -> int:
@@ -198,13 +321,21 @@ class HeldStoreFull(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class HeldMessage:
-    """One message taken into the store: who sent what text, and why it waits."""
+    """One message taken into the store: who sent what text, and why it waits.
+
+    ``attempted_message_id`` is the host id of a send the host did not answer (a refusal
+    as host-unreachable, a timeout or an unknown outcome;
+    MIK-R171 rules 2 and 3). The waiting message keeps that id, so its later delivery
+    goes out under an id the host may already record, and a host that records a message
+    id once delivers it at most once.
+    """
 
     sender_line: str
     sender_agent_id: str
     text: str
     reason: str
     permission: str | None = None
+    attempted_message_id: str | None = None
 
 
 def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage) -> dict[str, Any]:
@@ -214,23 +345,30 @@ def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage
     with exclusive_file_lock(path, "held-message store"):
         store = _read_store_file(path, agent_id)
         messages = store["messages"]
+        attempted = message.attempted_message_id
+        if attempted and any(row.get("id") == attempted for row in messages):
+            # The same attempt is taken twice (a repeat after a stop): one waiting copy.
+            mine, total = waiting_counts(store, message.sender_agent_id)
+            return {"heldMessageId": attempted, "waitingMine": mine, "waitingTotal": total}
         if len(messages) >= MAX_HELD_PER_RECIPIENT:
             raise HeldStoreFull(
                 f"Agent {agent_id} already holds {len(messages)} messages, the bound for one "
                 "recipient; none was dropped to make room."
             )
-        message_id = str(uuid.uuid4())
-        messages.append(
-            {
-                "id": message_id,
-                "senderLine": message.sender_line,
-                "senderAgentId": message.sender_agent_id,
-                "text": message.text,
-                "takenAt": _now_iso(),
-                "reason": message.reason,
-                **({"permission": message.permission} if message.permission else {}),
-            }
-        )
+        message_id = attempted or str(uuid.uuid4())
+        row: dict[str, Any] = {
+            "id": message_id,
+            "senderLine": message.sender_line,
+            "senderAgentId": message.sender_agent_id,
+            "text": message.text,
+            "takenAt": _now_iso(),
+            "reason": message.reason,
+        }
+        if message.permission:
+            row["permission"] = message.permission
+        if attempted:
+            row["attemptedMessageId"] = attempted
+        messages.append(row)
         _write_store_file(path, store)
         mine, total = waiting_counts(store, message.sender_agent_id)
     return {"heldMessageId": message_id, "waitingMine": mine, "waitingTotal": total}
@@ -676,6 +814,12 @@ def _resume_for_drain(batch: _DrainBatch) -> None:
         )
 
 
+def _host_reports_a_turn(config: McpRuntimeConfig, agent_id: str) -> bool:
+    """Whether the host's activity publication says this agent is in a turn (rule 2)."""
+
+    return agent_in_turn(config, agent_id)
+
+
 def _confirmed(batch: _DrainBatch) -> list[dict[str, Any]]:
     """The claimed rows still committed to this batch; pauses when the claim moved on.
 
@@ -795,24 +939,64 @@ def _part_text_bytes(part: list[dict[str, Any]]) -> int:
     return len(combined_text(part).encode("utf-8"))
 
 
+def _attempted_id(row: dict[str, Any]) -> str | None:
+    """The host message id an unanswered send used for this waiting message, if any."""
+
+    value = row.get("attemptedMessageId")
+    return value if isinstance(value, str) and value else None
+
+
 def _send_part(batch: _DrainBatch, part: list[dict[str, Any]]) -> dict[str, Any]:
     """Send one part of a batch, reopening a closed session once before giving up.
 
-    The part's send id derives from its member messages, never from a split
-    counter: any later drain that resends the same members recomputes the same
-    id, so a host that deduplicates identical ids settles the resend.
+    The part's send id derives from its member messages, never from a split counter: any
+    later drain that resends the same members recomputes the same id, so a host that
+    records a message id delivers the resend at most once. A message the host may already
+    hold from an unanswered send goes alone, under that send's own id (MIK-R171 rule 3).
     """
 
-    payload = {
+    payload: dict[str, Any] = {
         "agentId": batch.agent_id,
         "text": combined_text(part),
-        "messageId": combined_message_id(part),
+        "messageId": (len(part) == 1 and _attempted_id(part[0])) or combined_message_id(part),
     }
+    if _host_reports_a_turn(batch.config, batch.agent_id):
+        # MIK-R171@v2 rule 2: the host's own activity record is a read of the recipient's state
+        # just before the send, and the bridge decides with it - steer for a provider known to
+        # take one, hold for every other.
+        payload["turnReportedByHost"] = True
+    assert len(part) == 1 or not any(_attempted_id(row) for row in part), (
+        "a message the host may already hold goes alone"
+    )
+    attempted = _attempted_id(part[0]) if len(part) == 1 else None
+    if attempted is not None and _host_already_holds(batch.config, batch.agent_id, attempted):
+        # The recipient's timeline already carries this message: it is recorded as
+        # delivered with no send, so the delivery is at most once on any host, not only
+        # on one that deduplicates by message id (MIK-R171 rule 3).
+        return {"delivered": True, "taken": "already-there", "turnId": None}
     delivery = _send_once(batch.config, payload)
     if delivery.get("refused") == "closed":
         _resume_for_send(batch)
         delivery = _send_once(batch.config, payload)
     return delivery
+
+
+def _host_already_holds(config: McpRuntimeConfig, agent_id: str, message_id: str) -> bool:
+    """Whether the recipient's timeline already carries the message this id was sent under.
+
+    The host's own record decides, not the sender's intention: an unanswered send may have
+    been taken, and a copy the recipient already holds is not sent again (MIK-R171 rule 3).
+    A timeline this call cannot read answers "not there", so the send still goes out under
+    the same id, and a host that records ids keeps it at most once.
+    """
+
+    try:
+        answer = bridge_call(
+            config, "agent-has-message", {"agentId": agent_id, "messageId": message_id}
+        )
+    except PaseoBridgeFailure:
+        return False
+    return answer.get("present") is True
 
 
 def _greedy_prefix(rows: list[dict[str, Any]], budget: int) -> list[dict[str, Any]]:
@@ -865,75 +1049,25 @@ def _deliver_waiting(batch: _DrainBatch) -> dict[str, Any]:
     probe_max: int | None = None
     whole_refused = False
     while rest:
-        if probe_max is not None:
-            piece = rest[: max(probe_max, 1)]
-        elif budget is not None and whole_refused:
-            piece = _greedy_prefix(rest, budget)
-        else:
-            piece = rest
+        piece = _next_piece(rest, budget, probe_max, whole_refused)
         delivery = _send_part(batch, piece)
         if delivery.get("delivered") is True:
-            budget = max(_part_text_bytes(piece), budget or 0)
+            budget = max(_commit_part(batch, piece, delivery, ended, deliveries), budget or 0)
             probe_max = None
             whole_refused = False
-            _stage_pending_lines(batch.folder, batch.agent_id, piece, _END_DELIVERED)
-            removed = _remove_ids(
-                batch.folder,
-                batch.agent_id,
-                {row["id"] for row in piece},
-                batch.claim,
-                clear_claim=False,
-            )
-            ended.extend(removed)
-            deliveries.append(
-                {
-                    "messageId": combined_message_id(piece),
-                    "taken": delivery.get("taken"),
-                    "turnId": delivery.get("turnId"),
-                    "ids": [row["id"] for row in piece],
-                }
-            )
             rest = rest[len(piece) :]
             continue
-        if delivery.get("refused") in {"archived", "not-found"}:
-            if ended:
-                apply_drain_to_receipt(
-                    batch.path,
-                    {"outcome": "delivered", "ended": ended, "how": _END_DELIVERED},
-                )
-            missing = end_waiting_as(batch.folder, batch.agent_id)
-            return {
-                "outcome": "recipient-gone",
-                "detail": "The recipient is archived or gone; its waiting messages end as not delivered.",
-                "ended": missing,
-                "how": _END_NOT_DELIVERED,
-            }
-        if delivery.get("refused") == "busy" and len(piece) > 1:
+        refused = delivery.get("refused")
+        if refused in {"archived", "not-found"}:
+            return _recipient_gone(batch, ended)
+        if refused == "host-unreachable":
+            return _host_did_not_answer(batch, delivery, ended, deliveries)
+        if refused == "busy" and len(piece) > 1:
             if probe_max is None and len(piece) == len(rest):
                 whole_refused = True
             probe_max = len(piece) - 1
             continue
-        _release_claim(batch.folder, batch.agent_id, batch.claim)
-        if ended:
-            return {
-                "outcome": "partially-delivered",
-                "detail": (
-                    f"{len(ended)} of the waiting messages were delivered in "
-                    f"{len(deliveries)} deliveries; the rest stay held: "
-                    f"{delivery.get('detail') or 'the host cannot take a message now.'}"
-                ),
-                "ended": ended,
-                "how": _END_DELIVERED,
-                "deliveries": deliveries,
-                "permissionPending": delivery.get("permissionPending"),
-                "permission": delivery.get("permission"),
-            }
-        return {
-            "outcome": "still-held",
-            "detail": str(delivery.get("detail") or "The host cannot take a message now."),
-            "permissionPending": delivery.get("permissionPending"),
-            "permission": delivery.get("permission"),
-        }
+        return _still_held(batch, delivery, ended, deliveries)
     _release_claim(batch.folder, batch.agent_id, batch.claim)
     return {
         "outcome": "delivered",
@@ -947,6 +1081,136 @@ def _deliver_waiting(batch: _DrainBatch) -> dict[str, Any]:
         "deliveries": deliveries,
         "messageId": batch.claim,
     }
+
+
+def _next_piece(
+    rest: list[dict[str, Any]], budget: int | None, probe_max: int | None, whole_refused: bool
+) -> list[dict[str, Any]]:
+    """The part to attempt next: one unanswered send, a probe, a chunk, or the whole rest."""
+
+    if _attempted_id(rest[0]) is not None:
+        # The host may already hold this one from an unanswered send: it goes alone,
+        # under that send's id, and nothing joins it (MIK-R171 rule 3).
+        return rest[:1]
+    if probe_max is not None:
+        piece = rest[: max(probe_max, 1)]
+    elif budget is not None and whole_refused:
+        piece = _greedy_prefix(rest, budget)
+    else:
+        piece = rest
+    # A row the host may already hold goes alone, so the part ends before it and the
+    # rows ahead of it are delivered in the order they were held (MIK-R171 rule 3).
+    # Stopping here, rather than asserting later, is what lets a queue that grew a
+    # host-unreachable row behind an ordinary one drain at all.
+    boundary = next(
+        (index for index, row in enumerate(piece) if _attempted_id(row) is not None), len(piece)
+    )
+    return piece[:boundary] or rest[:1]
+
+
+def _commit_part(
+    batch: _DrainBatch,
+    piece: list[dict[str, Any]],
+    delivery: dict[str, Any],
+    ended: list[dict[str, Any]],
+    deliveries: list[dict[str, Any]],
+) -> int:
+    """Record one part the host took: stage its ends, remove its texts, count its bytes."""
+
+    _stage_pending_lines(batch.folder, batch.agent_id, piece, _END_DELIVERED)
+    ended.extend(
+        _remove_ids(
+            batch.folder,
+            batch.agent_id,
+            {row["id"] for row in piece},
+            batch.claim,
+            clear_claim=False,
+        )
+    )
+    deliveries.append(
+        {
+            "messageId": (len(piece) == 1 and _attempted_id(piece[0]))
+            or combined_message_id(piece),
+            "taken": delivery.get("taken"),
+            "turnId": delivery.get("turnId"),
+            "ids": [row["id"] for row in piece],
+        }
+    )
+    return _part_text_bytes(piece)
+
+
+def _recipient_gone(batch: _DrainBatch, ended: list[dict[str, Any]]) -> dict[str, Any]:
+    """The outcome when the host says the recipient is archived or gone."""
+
+    if ended:
+        apply_drain_to_receipt(
+            batch.path,
+            {"outcome": "delivered", "ended": ended, "how": _END_DELIVERED},
+        )
+    missing = end_waiting_as(batch.folder, batch.agent_id)
+    return {
+        "outcome": "recipient-gone",
+        "detail": "The recipient is archived or gone; its waiting messages end as not delivered.",
+        "ended": missing,
+        "how": _END_NOT_DELIVERED,
+    }
+
+
+def _partially_delivered(
+    ended: list[dict[str, Any]], deliveries: list[dict[str, Any]], reason: str
+) -> dict[str, Any]:
+    """The outcome when some waiting messages went out and the rest stay held."""
+
+    return {
+        "outcome": "partially-delivered",
+        "detail": (
+            f"{len(ended)} of the waiting messages were delivered in "
+            f"{len(deliveries)} deliveries; the rest stay held: {reason}"
+        ),
+        "ended": ended,
+        "how": _END_DELIVERED,
+        "deliveries": deliveries,
+    }
+
+
+def _host_did_not_answer(
+    batch: _DrainBatch,
+    delivery: dict[str, Any],
+    ended: list[dict[str, Any]],
+    deliveries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The outcome when the host did not answer: a delay, never a loss (rule 3)."""
+
+    _release_claim(batch.folder, batch.agent_id, batch.claim)
+    reason = str(delivery.get("detail") or "The Paseo runtime did not answer.")
+    logger.warning(
+        "Held messages for agent %s wait: the host did not answer (%s).",
+        batch.agent_id,
+        reason,
+    )
+    if ended:
+        return _partially_delivered(ended, deliveries, reason)
+    return {"outcome": "host-unreachable", "detail": reason}
+
+
+def _still_held(
+    batch: _DrainBatch,
+    delivery: dict[str, Any],
+    ended: list[dict[str, Any]],
+    deliveries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The outcome when the host answered busy: what is left stays held."""
+
+    _release_claim(batch.folder, batch.agent_id, batch.claim)
+    reason = str(delivery.get("detail") or "The host cannot take a message now.")
+    logger.warning("Held messages for agent %s stay held: %s.", batch.agent_id, reason)
+    held = {
+        "permissionPending": delivery.get("permissionPending"),
+        "permission": delivery.get("permission"),
+    }
+    if ended:
+        return {**_partially_delivered(ended, deliveries, reason), **held}
+    return {"outcome": "still-held", "detail": reason, **held}
 
 
 def _resume_for_send(batch: _DrainBatch) -> None:
@@ -969,21 +1233,49 @@ def _resume_for_send(batch: _DrainBatch) -> None:
 
 
 def _send_once(config: McpRuntimeConfig, payload: dict[str, Any]) -> dict[str, Any]:
-    """One combined delivery, tried once more when a turn changed under the send."""
+    """One combined delivery, tried once more when a turn changed under the send.
 
-    for _attempt in (1, 2):
+    A refusal the host answered as busy is its admission answer, and the batch stays
+    held. A call the bridge could not finish -- a timeout, a lost connection, an
+    unreadable answer -- is not busy: it is returned as ``host-unreachable``, so the
+    caller keeps the message held for that named reason instead of reporting the host's
+    admission (MIK-R171 rules 3 and 5).
+    """
+
+    for attempt in (1, 2):
         try:
             reply = bridge_call(config, "agent-send", payload)
         except PaseoBridgeFailure as error:
-            if error.code == BRIDGE_REFUSED and _attempt == 1:
+            if error.code == BRIDGE_REFUSED and attempt == 1:
                 continue
-            return {"delivered": False, "refused": "busy", "detail": str(error)}
+            if error.code == BRIDGE_REFUSED:
+                return {"delivered": False, "refused": "busy", "detail": str(error)}
+            # A call that ran out of time, or lost its connection while the message was
+            # being sent, may have delivered it; the sender is told that (rule 3).
+            uncertain = (
+                " It is not known whether the message was delivered."
+                if error.code in {BRIDGE_TIMEOUT, SEND_OUTCOME_UNKNOWN}
+                and "not known whether" not in str(error)
+                else ""
+            )
+            return {
+                "delivered": False,
+                "refused": "host-unreachable",
+                "detail": f"{error.code}: {error}{uncertain}",
+            }
         delivery = reply.get("delivery")
         if isinstance(delivery, dict):
             return delivery
-        return {"delivered": False, "refused": "unknown", "detail": "Unreadable delivery answer."}
+        return {
+            "delivered": False,
+            "refused": "host-unreachable",
+            "detail": "The Paseo bridge returned an unreadable delivery answer.",
+        }
     raise AssertionError("unreachable")
 
+
+_sweep_queue_cursor = {"index": 0}
+"""Where the next sweep tick starts in the queue of receipts that hold messages."""
 
 SWEEP_MAX_DRAINS_PER_TICK = 32
 """At most this many recipients drain in one sweep tick (rule 4a)."""
@@ -1066,8 +1358,9 @@ _sweep_walks: dict[str, dict[str, _CandidateWalk]] = {}
 
 
 def _reset_sweep_cursor() -> None:
-    """Forget the sweep walks (tests start every pass from the beginning)."""
+    """Forget the sweep walks and the queue slice (tests start every pass from the beginning)."""
 
+    _sweep_queue_cursor["index"] = 0
     for walks in _sweep_walks.values():
         for walk in walks.values():
             walk.close()
@@ -1110,6 +1403,9 @@ def sweep_held_messages(config: McpRuntimeConfig) -> dict[str, Any]:
 
     The dashboard runs this on its own tick without a model (rule 4a); a start of the
     product makes sure that tick runs. While it does not run, messages stay held.
+    The receipts the holders named in the queue are drained first, so a receipt that
+    holds messages is visited before the walk reaches it (MIK-R171 rule 1); the walk is
+    the fallback for anything the queue does not name.
     One tick pulls at most ``SWEEP_MAX_RECEIPT_READS_PER_TICK`` candidate paths
     from the resumable walks and reads at most that many receipts, draining at
     most ``SWEEP_MAX_DRAINS_PER_TICK`` of them, so the per-tick census work
@@ -1120,26 +1416,99 @@ def sweep_held_messages(config: McpRuntimeConfig) -> dict[str, Any]:
     were recorded when they closed.
     """
 
-    swept = 0
-    delivered = 0
-    still_held = 0
+    tally = {"swept": 0, "delivered": 0, "stillHeld": 0}
     reads = 0
+    visited: set[str] = set()
+    queue = list(held_queue_receipts(config))
+    start = _sweep_queue_cursor["index"] % len(queue) if queue else 0
+    # The queue is visited in a slice that starts where the last tick stopped, so a
+    # receipt beyond the first SWEEP_MAX_DRAINS_PER_TICK is reached within a bounded
+    # number of ticks even while the receipts ahead of it stay held (MIK-R171 rule 1).
+    ordered = queue[start:] + queue[:start]
+    for path in ordered[:SWEEP_MAX_DRAINS_PER_TICK]:
+        reads += 1
+        visited.add(path.as_posix())
+        if _tally_drain(config, path, tally) in {None, "delivered"}:
+            # Nothing waits there now: a delivered receipt needs no further visit.
+            forget_held_receipt(config, path)
+        if tally["swept"] >= SWEEP_MAX_DRAINS_PER_TICK:
+            break
+    if queue:
+        _sweep_queue_cursor["index"] = (start + min(len(queue), SWEEP_MAX_DRAINS_PER_TICK)) % len(
+            queue
+        )
     for walk in _sweep_walks_for(config):
         for key in walk.take(SWEEP_MAX_RECEIPT_READS_PER_TICK - reads):
             reads += 1
-            outcome = _sweep_receipt(config, Path(key))
-            if outcome is None:
+            if key in visited:
+                # Already visited this tick from the queue; one receipt is drained once.
                 continue
-            swept += 1
-            if outcome == "delivered":
-                delivered += 1
-            else:
-                still_held += 1
-            if swept >= SWEEP_MAX_DRAINS_PER_TICK:
+            _tally_drain(config, Path(key), tally)
+            if tally["swept"] >= SWEEP_MAX_DRAINS_PER_TICK:
                 break
-        if swept >= SWEEP_MAX_DRAINS_PER_TICK:
+        if tally["swept"] >= SWEEP_MAX_DRAINS_PER_TICK:
             break
-    return {"swept": swept, "delivered": delivered, "stillHeld": still_held}
+    return tally
+
+
+def _tally_drain(config: McpRuntimeConfig, path: Path, tally: dict[str, int]) -> str | None:
+    """Drain one receipt and count it; ``None`` when it has nothing to drain."""
+
+    outcome = _sweep_receipt(config, path)
+    if outcome is None:
+        return None
+    tally["swept"] += 1
+    if outcome == "delivered":
+        tally["delivered"] += 1
+    else:
+        tally["stillHeld"] += 1
+    return outcome
+
+
+def deliver_ended_turns(config: McpRuntimeConfig, agent_ids: Iterable[str]) -> dict[str, Any]:
+    """Deliver what waits for the recipients whose turn the host reports ended (rule 1).
+
+    The host's activity record is the driver: the dashboard reads the agents whose turn
+    just ended and hands their ids here. Only receipts a holder named in the queue are
+    candidates, so this reads at most ``HELD_TURN_END_MAX_DRAINS`` receipts and builds no
+    census; a recipient the queue does not name is left to the sweep, which stays the
+    fallback. Nothing is sent to the recipient and the delivery does not depend on
+    another message reaching it.
+    """
+
+    ended = {agent_id for agent_id in agent_ids if agent_id}
+    tally = {"swept": 0, "delivered": 0, "stillHeld": 0}
+    if not ended:
+        return tally
+    for path in held_queue_receipts(config):
+        if tally["swept"] >= HELD_TURN_END_MAX_DRAINS:
+            break
+        receipt = _readable_queued_receipt(path)
+        if receipt is None:
+            continue
+        if _receipt_agent(receipt) not in ended:
+            continue
+        if _tally_drain(config, path, tally) in {None, "delivered"}:
+            # Nothing waits there now: a delivered receipt needs no further visit.
+            forget_held_receipt(config, path)
+    return tally
+
+
+def _readable_queued_receipt(path: Path) -> dict[str, Any] | None:
+    """One queued receipt as read now; a receipt that is gone stops being queued."""
+
+    try:
+        return _read_receipt(path)
+    except ValueError:
+        return None
+
+
+def _receipt_agent(receipt: dict[str, Any]) -> str | None:
+    """The agent id one receipt records, when it records one."""
+
+    execution = receipt.get("execution")
+    agent_id = execution.get("agentId") if isinstance(execution, dict) else None
+    return agent_id if isinstance(agent_id, str) and agent_id else None
 
 
 def _receipt_needs_drain(receipt: dict[str, Any] | None) -> bool:
@@ -1165,14 +1534,20 @@ def _sweep_receipt(config: McpRuntimeConfig, path: Path) -> str | None:
 
     try:
         receipt = _read_receipt(path)
-    except ValueError:
+    except ValueError as error:
+        logger.warning("A held-message sweep could not read receipt %s: %s.", path, error)
         return None
     if not _receipt_needs_drain(receipt):
         return None
     assert receipt is not None, "a drainable receipt was read"
     try:
         result = drain_held(config, path, receipt)
-    except Exception:
+    except Exception as error:
+        # One line with the recipient and the reason (MIK-R171 rule 5): a sweep that
+        # fails is never silent, and the store keeps everything that still waits.
+        logger.warning(
+            "A held-message drain of agent %s failed: %r.", _receipt_agent(receipt), error
+        )
         _refresh_waiting_count(path)
         return "still-held"
     outcome = result.get("outcome")
@@ -1182,6 +1557,16 @@ def _sweep_receipt(config: McpRuntimeConfig, path: Path) -> str | None:
     if outcome in {"recipient-gone", "seat-lost", "partially-delivered"}:
         _record_sweep_outcome(path, result)
     else:
+        if outcome != "nothing-waiting" and "permissionPending" not in result:
+            # A drain that paused - the host unreachable, the resume unconfirmed, the
+            # store unclaimed or unreadable - is a failed drain and writes one line with
+            # the recipient and the reason (MIK-R171 rule 5). A busy answer and a
+            # permission wait already wrote theirs where they were seen.
+            logger.warning(
+                "A held-message drain of agent %s did not deliver: %s.",
+                _receipt_agent(receipt),
+                result.get("detail") or outcome or "the drain did not complete",
+            )
         _refresh_waiting_count(path)
     return "still-held"
 
@@ -1328,6 +1713,11 @@ def _recount_waiting(receipt: dict[str, Any]) -> None:
     with exclusive_file_lock(path, "held-message store"):
         try:
             store = _read_store_file(path, agent_id)
-        except ValueError:
+        except ValueError as error:
+            # The count is left as it stands rather than published as zero: a store that
+            # cannot be read is not a store that holds nothing (MIK-R171 rule 5).
+            logger.warning(
+                "The held-message count of agent %s could not be refreshed: %s.", agent_id, error
+            )
             return
         receipt["heldWaiting"] = len(store.get("messages", []))

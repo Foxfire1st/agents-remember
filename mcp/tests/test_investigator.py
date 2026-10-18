@@ -266,8 +266,12 @@ class InvestigatorTests(RoleToolsTestCase):
                         caller, completed["agentId"], opened, selection, state
                     )
                     # A running recipient consumes its existing slot, as does exact Start replay.
-                    steered = self.message(caller, agent_id=opened[1]["agentId"])
-                    self.assertEqual(steered["taken"], "steered")
+                    # MIK-R171 rule 2: the message is held rather than sent into its turn.
+                    held_in_turn = self.message(caller, agent_id=opened[1]["agentId"])
+                    self.assertEqual(
+                        (held_in_turn["status"], held_in_turn["heldReason"]),
+                        ("held", "recipient-in-turn"),
+                    )
                     replay = self.start(
                         caller,
                         "investigator",
@@ -310,7 +314,7 @@ class InvestigatorTests(RoleToolsTestCase):
                                 "admittedAfterRelease": admitted,
                                 "persistedOpenCount": 8,
                                 "followingStartRefused": ninth,
-                                "existingOpenSteering": steered,
+                                "existingOpenHeldInTurn": held_in_turn,
                             }
                         )
                     )
@@ -343,7 +347,7 @@ class InvestigatorTests(RoleToolsTestCase):
             )
             self.assertEqual(requested["agents"][0]["agentId"], created["agentId"])
 
-    def test_old_start_binding_address_report_and_replay_preserve_recorded_paths(self):
+    def test_old_start_binding_address_report_and_replay_preserve_recorded_paths(self):  # noqa: PLR0915
         request_id = uuid.uuid4()
         call = RoleStartCall(role="system-specialist", request_id=request_id)
         result = start_role(self.config, call, environment=self.architect.environment())
@@ -368,9 +372,13 @@ class InvestigatorTests(RoleToolsTestCase):
         path.unlink()
         self.runtime.agents[result["agentId"]]["labels"]["ar.role"] = "system-specialist"
         before = old_path.read_bytes()
+        # The holder runs no turn when the message arrives (MIK-R171 rule 2), so the message
+        # is delivered rather than held.
+        self.runtime.agents[result["agentId"]]["status"] = "idle"
         response = self.message(self.architect, role="system-specialist")
         self.assertEqual(response["recipientAgentId"], result["agentId"])
         self.assertIn("investigator", response["warning"])
+        self.runtime.agents[result["agentId"]]["status"] = "idle"
         self.assertEqual(
             self.message(self.architect, role="investigator")["recipientAgentId"],
             result["agentId"],

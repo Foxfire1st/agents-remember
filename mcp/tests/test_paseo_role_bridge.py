@@ -296,12 +296,15 @@ class RoleBridgeScriptTestCase(unittest.TestCase):
 
 
 class AgentSendScriptTests(RoleBridgeScriptTestCase):
-    def send(self, after_resume: Any = None, **scenario: Any) -> dict[str, Any]:
+    def send(
+        self, after_resume: Any = None, *, turn_reported: bool = False, **scenario: Any
+    ) -> dict[str, Any]:
         payload = {
             "agentId": AGENT_ID,
             "text": "From architect\nreport your plan",
             "messageId": MESSAGE_ID,
             **({} if after_resume is None else {"afterResume": after_resume}),
+            **({"turnReportedByHost": True} if turn_reported else {}),
         }
         return self.call("agent-send", payload, **scenario)["delivery"]
 
@@ -378,65 +381,68 @@ class AgentSendScriptTests(RoleBridgeScriptTestCase):
         with self.subTest("a refusal for another reason says nothing of a permission"):
             self.assertNotIn("permissionPending", self.send(holds=agent("initializing")))
 
-    def test_an_idle_agent_starts_a_turn_and_a_running_turn_takes_the_message_up(self) -> None:
-        options = {"messageId": MESSAGE_ID, "activeTurnBehavior": "steer"}
-        other_turn = {"turnId": "turn-8", "startedAt": "2026-10-02T01:05:00.000Z"}
-        cases: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = {
-            "an idle agent": (
-                agent("idle"),
-                {"status": "running", "activeTurn": TURN},
-                {"delivered": True, "taken": "started", "turnId": "turn-7"},
-            ),
-            "a running turn takes it up": (
-                agent("running", activeTurn=TURN),
-                {},
-                {"delivered": True, "taken": "steered", "turnId": "turn-7"},
-            ),
-            "the turn that took it up has ended already": (
-                agent("running", activeTurn=TURN),
-                {"status": "idle", "activeTurn": None},
-                {"delivered": True, "taken": "steered", "turnId": None},
-            ),
-            "the runtime replaced the running turn all the same": (
-                agent("running", activeTurn=TURN),
-                {"activeTurn": other_turn},
-                {"delivered": True, "taken": "replaced", "turnId": "turn-8"},
-            ),
-        }
-        for label, (held, after, delivery) in cases.items():
-            with self.subTest(label):
-                self.assertEqual(self.send(holds=held, afterSend=after), delivery)
-                # Always with the steer behaviour, and with the caller's message id.
-                self.assertEqual(
-                    self.recorded("send"),
-                    [
-                        {
-                            "via": "send",
-                            "id": AGENT_ID,
-                            "text": "From architect\nreport your plan",
-                            "options": options,
-                        }
-                    ],
-                )
+    def test_an_idle_agent_starts_a_turn_and_a_steer_goes_only_to_a_provider_that_takes_one(
+        self,
+    ) -> None:
+        """MIK-R171@v2 rule 2: read the state, steer a known-steering provider, hold the rest."""
 
-    def test_a_provider_without_steering_is_refused_as_busy_and_its_turn_left_alone(self) -> None:
-        running = agent("running", activeTurn=TURN, provider="relayed")
-        providers = {"relayed": {"extends": "acp", "command": ["relayed", "acp"]}}
-
-        delivery = self.send(holds=running, providers=providers)
-
-        self.assertEqual((delivery["delivered"], delivery["refused"]), (False, "busy"))
-        self.assertIn(
-            "cannot hand a message to a running turn of this provider", delivery["detail"]
+        delivery = self.send(
+            holds=agent("idle"), afterSend={"status": "running", "activeTurn": TURN}
         )
-        self.assertEqual(self.recorded(), [READ])
+
+        self.assertEqual(delivery, {"delivered": True, "taken": "started", "turnId": "turn-7"})
+        self.assertEqual(
+            self.recorded("send"),
+            [
+                {
+                    "via": "send",
+                    "id": AGENT_ID,
+                    "text": "From architect\nreport your plan",
+                    "options": {"messageId": MESSAGE_ID},
+                }
+            ],
+        )
+        with self.subTest("a provider known to steer gets the steer into its running turn"):
+            steerer = agent("running", activeTurn=TURN, provider="steering")
+            delivery = self.send(holds=steerer)
+            self.assertEqual((delivery["delivered"], delivery["taken"]), (True, "steered"))
+            self.assertEqual(
+                self.recorded("send")[-1]["options"],
+                {"messageId": MESSAGE_ID, "activeTurnBehavior": "steer"},
+            )
+        with self.subTest("the host's own record of a turn counts as the read"):
+            delivery = self.send(holds=agent("idle", provider="steering"), turn_reported=True)
+            self.assertEqual((delivery["delivered"], delivery["taken"]), (True, "steered"))
+            self.assertEqual(
+                self.recorded("send")[-1]["options"],
+                {"messageId": MESSAGE_ID, "activeTurnBehavior": "steer"},
+            )
+
+    def test_a_running_turn_is_steered_or_held_by_the_provider_and_never_cut_off(self) -> None:
+        for label, (provider, providers) in {
+            "a steering provider": ("steering", {}),
+            "a provider without steering": (
+                "relayed",
+                {"relayed": {"extends": "acp", "command": ["relayed", "acp"]}},
+            ),
+        }.items():
+            with self.subTest(label):
+                running = agent("running", activeTurn=TURN, provider=provider)
+                delivery = self.send(holds=running, providers=providers)
+                if label == "a steering provider":
+                    self.assertEqual((delivery["delivered"], delivery["taken"]), (True, "steered"))
+                    continue
+                self.assertEqual((delivery["delivered"], delivery["refused"]), (False, "busy"))
+                self.assertIn("not one that takes a steer", delivery["detail"])
+                # Nothing was sent, so the turn goes on untouched.
+                self.assertEqual(self.recorded(), [READ])
         with self.subTest("the same provider is sent to while it is idle"):
             idle = agent("idle", provider="relayed")
-            delivery = self.send(holds=idle, providers=providers, afterSend={"status": "running"})
+            delivery = self.send(holds=idle, afterSend={"status": "running"})
             self.assertEqual((delivery["delivered"], delivery["taken"]), (True, "started"))
         with self.subTest("a send the runtime refuses is a refused call"):
             with self.assertRaises(PaseoBridgeFailure) as raised:
-                self.send(holds=agent("idle"), sendError="Active turn changed before steering")
+                self.send(holds=agent("idle"), sendError="Active turn changed")
             self.assertEqual(raised.exception.code, "paseo_call_failed")
 
     def test_a_failure_around_the_send_says_what_is_known_of_the_delivery(self) -> None:
@@ -446,11 +452,9 @@ class AgentSendScriptTests(RoleBridgeScriptTestCase):
             self.assertEqual(raised.exception.code, "paseo_send_outcome_unknown")
             self.assertIn("not known whether the message was delivered", str(raised.exception))
         with self.subTest("the runtime accepted the message and the lookup afterwards fails"):
-            cases = {"started": agent("idle"), "steered": agent("running", activeTurn=TURN)}
-            for taken, held in cases.items():
-                delivery = self.send(holds=held, lookupFailsAfterSend=True)
-                self.assertEqual(delivery, {"delivered": True, "taken": taken, "turnId": None})
-                self.assertEqual(len(self.recorded("send")), 1)
+            delivery = self.send(holds=agent("idle"), lookupFailsAfterSend=True)
+            self.assertEqual(delivery, {"delivered": True, "taken": "started", "turnId": None})
+            self.assertEqual(len(self.recorded("send")), 1)
 
 
 MESSAGE = sent("From architect\nreport your plan")

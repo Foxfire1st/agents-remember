@@ -208,7 +208,7 @@ class RoleMessageResponse(ToolResponse):
     recipientAgentId: str | None = None
     candidateAgentIds: list[str] | None = None
     senderLine: str | None = None
-    taken: Literal["started", "steered"] | None = None
+    taken: Literal["started", "steered", "replaced"] | None = None
     resumed: bool | None = None
     text: str | None = None
     textTruncated: bool | None = None

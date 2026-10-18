@@ -34,6 +34,63 @@ def activity_directory(config: McpRuntimeConfig) -> Path | None:
     return runtime.home / AR_HOME_DIRECTORY if runtime is not None else None
 
 
+# The published states that mean no turn runs: the host writes one when a turn ends.
+_NO_TURN_STATES = frozenset({"idle", "ended"})
+# How many agent stamps one caller keeps between looks; the memory of a reader, bounded.
+_TURN_END_SEEN_LIMIT = 4096
+
+
+def agent_in_turn(config: McpRuntimeConfig, agent_id: str) -> bool:
+    """Whether the host's own activity record says this agent is in a turn now.
+
+    A message is never sent into a running turn (MIK-R171 rule 2), and the agent snapshot
+    a bridge reads can lag a turn that the host itself has already published. This is the
+    second view the send decision weighs: a complete publication that names the agent as
+    ``in-turn`` holds the message, and the publication is the same record rule 1's turn
+    end is read from, so the two decisions cannot disagree about one turn.
+    """
+
+    directory = activity_directory(config)
+    if directory is None:
+        return False
+    publication = _read_publication(directory / HOST_ACTIVITY_FILE)
+    if publication is None or not publication.complete:
+        return False
+    activity = publication.agents.get(agent_id)
+    return activity is not None and activity.state == "in-turn"
+
+
+def turn_ended_agents(config: McpRuntimeConfig, seen: dict[str, str]) -> list[str]:
+    """The agents whose turn the host's activity record reports ended since the last look.
+
+    This is the driver MIK-R171 rule 1 names: a state of ``idle`` or ``ended`` means no
+    turn runs, and its ``eventAt`` is when the turn ended. ``seen`` carries each agent's
+    stamp between looks, so one turn end is handed over once. The record is read as it
+    is, without the boot reconciliation the projection does: a delivery needs the latest
+    word only, and nothing here is sent or resumed.
+    """
+
+    directory = activity_directory(config)
+    if directory is None:
+        return []
+    publication = _read_publication(directory / HOST_ACTIVITY_FILE)
+    if publication is None or not publication.complete:
+        return []
+    ended: list[str] = []
+    for agent_id, activity in publication.agents.items():
+        if activity.state not in _NO_TURN_STATES:
+            continue
+        stamp = activity.eventAt.isoformat() if activity.eventAt is not None else ""
+        if stamp and seen.get(agent_id) == stamp:
+            continue
+        if stamp:
+            if len(seen) >= _TURN_END_SEEN_LIMIT:
+                seen.clear()
+            seen[agent_id] = stamp
+        ended.append(agent_id)
+    return ended
+
+
 class HostActivityInput:
     """One retained boot identity; neither a timer nor a second host-state store."""
 

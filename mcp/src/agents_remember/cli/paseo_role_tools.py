@@ -25,6 +25,7 @@ carried out is a refusal that names its one reason.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import suppress
@@ -56,6 +57,7 @@ from agents_remember.cli.paseo_bridge import (
     BRIDGE_REFUSED,
     BRIDGE_TIMEOUT,
     RUNTIME_NOT_CONFIGURED,
+    SEND_OUTCOME_UNKNOWN,
     PaseoBridgeFailure,
     bridge_call,
     require_bridge_runtime,
@@ -74,6 +76,7 @@ from agents_remember.cli.role_held_messages import (
     apply_drain_to_receipt,
     drain_held,
     hold_message,
+    note_held_receipt,
     sender_terminal_lines,
     waiting_total,
     withdraw_message,
@@ -132,6 +135,7 @@ from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_ro
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.tool_events import call_target_role
+from agents_remember.serving.projections.host_activity import agent_in_turn
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.role_reports import (
     RoleReportCollectionError,
@@ -141,8 +145,6 @@ from agents_remember.worktrees.role_reports import (
 # How long a start waits for another start of the same tool server to end: one agent issues
 # its starts side by side, and the launch path runs them one at a time.
 LOCK_WAIT_SECONDS = 60
-# The bridge's code for a connection lost while a message was being sent.
-SEND_OUTCOME_UNKNOWN = "paseo_send_outcome_unknown"
 # How many executions of a selection are asked about when a role is addressed. More than that
 # are never chosen among: the address is refused as ambiguous.
 _CANDIDATE_LIMIT = 24
@@ -151,6 +153,8 @@ _NO_AGENT_STATUSES = frozenset({"stopped", "rejected"})
 # The receipt statuses of a start that has not answered yet, or answered without a result.
 _UNFINISHED_START_STATUSES = frozenset({"starting", "unknown"})
 _PROJECTS = "Projects"
+
+logger = logging.getLogger(__name__)
 
 # Who may start what (PNT-R06 item 4); a role that is not listed may start none.
 MAY_START: dict[str, tuple[str, ...]] = {
@@ -997,12 +1001,54 @@ def _deliver_or_hold(send: _MessageSend) -> dict[str, Any]:
             if located is None:
                 raise
             permission = undelivered.fields.get("permission")
+            attempted = undelivered.fields.get("attemptedMessageId")
             return _hold_for_seat(
                 send,
                 reason=str(undelivered.fields["holdReason"]),
                 permission=permission if isinstance(permission, str) else None,
+                attempted_message_id=attempted if isinstance(attempted, str) else None,
+            )
+        if undelivered.refusal == "host-unreachable" and located is not None:
+            # A host that did not answer delays the message, it does not lose it
+            # (MIK-R171 rule 3): the waiting copy keeps the id of the attempt, so the
+            # delivery under rule 1 goes out under an id the host may already record.
+            return _hold_for_seat(
+                send,
+                reason="host-unreachable",
+                detail=undelivered.detail,
+                attempted_message_id=_filed_message_id(send),
             )
         raise
+
+
+def _name_replacement(result: dict[str, Any], taken: str | None) -> None:
+    """Name a replaced running turn plainly, the gap v2 rule 2 states in its text.
+
+    A provider known to steer may still have its turn replaced at that moment, and a turn may
+    begin between the read and the send. The delivery is real either way, and the answer says
+    so rather than reporting a delivery that hides what happened to the turn.
+    """
+
+    if taken == "replaced":
+        result["taken"] = "replaced"
+        result["warning"] = (
+            "The Paseo runtime replaced the recipient's running turn to take the message: the "
+            "message is delivered, and that turn did not continue because it was cancelled."
+        )
+
+
+def _host_reports_a_turn(config: McpRuntimeConfig, agent_id: str) -> bool:
+    """Whether the host's activity publication says this agent is in a turn (rule 2)."""
+
+    return agent_in_turn(config, agent_id)
+
+
+def _filed_message_id(send: _MessageSend) -> str | None:
+    """The id this send used at the host, when the message was filed before it went out."""
+
+    filed = send.filed
+    value = filed.get("messageId") if isinstance(filed, dict) else None
+    return value if isinstance(value, str) and value else None
 
 
 def _hold_for_unresolved(
@@ -1028,9 +1074,20 @@ def _hold_for_unresolved(
 
 
 def _hold_for_seat(
-    send: _MessageSend, *, reason: str, permission: str | None = None
+    send: _MessageSend,
+    *,
+    reason: str,
+    permission: str | None = None,
+    detail: str = "",
+    attempted_message_id: str | None = None,
 ) -> dict[str, Any]:
-    """Queue one message for its recipient and drain what waits (MIK-R100 rules 4/4a/4b)."""
+    """Queue one message for its recipient and drain what waits (MIK-R100 rules 4/4a/4b).
+
+    ``attempted_message_id`` names the host message id of a send that reached the host
+    and was not answered for this message (a lost connection, a timeout, a turn the
+    runtime replaced): the waiting copy keeps it, so a later delivery goes out under an
+    id the host may already record and is delivered at most once (MIK-R171 rule 3).
+    """
 
     located = send.located
     assert located is not None, "held for a recipient without a store"
@@ -1051,6 +1108,7 @@ def _hold_for_seat(
                 text=text,
                 reason=reason,
                 permission=permission,
+                attempted_message_id=attempted_message_id,
             ),
         )
     except HeldStoreFull as full:
@@ -1063,6 +1121,7 @@ def _hold_for_seat(
         ) from full
     except ValueError as error:
         raise _not_found(str(error), recipientAgentId=send.recipient.agent_id) from error
+    note_held_receipt(send.config, path)
     _note_waiting(path, taken["waitingTotal"])
     try:
         drain = drain_held(send.config, path, _receipt)
@@ -1097,7 +1156,7 @@ def _hold_for_seat(
         taken,
         reason=final_reason,
         permission=final_permission,
-        detail=str(drain.get("detail") or ""),
+        detail=str(drain.get("detail") or "") or detail,
     )
 
 
@@ -1167,13 +1226,8 @@ def _held_then_delivered(
             "recipientAgentId": send.recipient.agent_id,
             "senderLine": line,
             "taken": "steered" if taken_word == "steered" else "started",
-            **({"turnId": turn_id} if isinstance(turn_id, str) else {}),
         }
-        if taken_word == "replaced":
-            result["warning"] = (
-                "The Paseo runtime cancelled the recipient's running turn to deliver "
-                "this message although it was asked to hand the message to that turn."
-            )
+        _name_replacement(result, taken_word)
     if send.collection is not None:
         result["reportCollection"] = send.collection
     if send.withdrawn is not None:
@@ -1237,6 +1291,7 @@ def _held_answer(
         "start-unfinished": "the recipient's start has not finished",
         "permission-pending": "the recipient waits for a permission decision",
         "recipient-in-turn": "the recipient is in a turn the host cannot write into",
+        "host-unreachable": "the Paseo runtime did not answer; the message is held, not lost",
     }.get(reason, detail or reason)
     if reason == "permission-pending":
         # Rule 4a names the permission as the host names it, or "not supplied":
@@ -1601,6 +1656,19 @@ def _deliver(
         # The whole text from body and the records or copies of attach ride in the file;
         # the delivered text names it so the recipient can read it (MIK-R117 rule 3).
         payload["text"] += f"\n{file_line(Path(filed['path']), str(filed['sha256']))}"
+    # MIK-R171 rule 2, second view: the host's own activity record is read before the
+    # send, because the agent snapshot can lag a turn the host has already published.
+    # When either view says a turn runs, nothing is sent and the message is held.
+    if _host_reports_a_turn(config, recipient.agent_id):
+        raise _Refused(
+            "recipient-busy",
+            f"Agent {recipient.agent_id} is in a turn the host's own activity record reports. "
+            "The message was not sent; the product holds it and delivers it when that turn "
+            "ends.",
+            "Nothing has to be sent again. The queue delivers it after the turn ends.",
+            recipientAgentId=recipient.agent_id,
+            holdReason="recipient-in-turn",
+        )
     resumed = False
     try:
         with investigator_message_capacity(config, recipient.receipt):
@@ -1627,7 +1695,7 @@ def _deliver(
         "ok": True,
         "status": "accepted",
         "detail": (
-            "The recipient's running turn took the message up; nothing was cancelled."
+            "The recipient's running turn took the message up; nothing was replaced."
             if taken == "steered"
             else "The recipient started a turn with the message."
         ),
@@ -1635,15 +1703,8 @@ def _deliver(
         "senderLine": line,
         "taken": "steered" if taken == "steered" else "started",
         **({"resumed": True} if resumed else {}),
-        **(
-            {
-                "warning": "The Paseo runtime cancelled the recipient's running turn to deliver "
-                "this message although it was asked to hand the message to that turn."
-            }
-            if taken == "replaced"
-            else {}
-        ),
     }
+    _name_replacement(result, taken)
     if filed is not None:
         result["messageFile"] = filed["path"]
         result["messageFileSha256"] = filed["sha256"]

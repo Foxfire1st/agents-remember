@@ -647,15 +647,13 @@ class AgentCommandScriptTests(unittest.TestCase):
             "mcpServers": servers,
         }
         # The message id is the same on every run of the call: the runtime delivers a message id
-        # once, also to two calls that run at the same time. The steer behaviour keeps the
-        # runtime from cancelling a turn that runs by then.
+        # once, also to two calls that run at the same time. No active-turn behaviour is asked
+        # for: a newly created agent runs no turn, and the only behaviours the client route
+        # offers can end one (MIK-R171 rule 2).
         sent = {
             "via": "send",
             "id": AGENT_ID,
-            "options": {
-                "messageId": "ar-role-launch:request-1:first-message",
-                "activeTurnBehavior": "steer",
-            },
+            "options": {"messageId": "ar-role-launch:request-1:first-message"},
             "message": {
                 "bytes": len(b"first message"),
                 "sha256": hashlib.sha256(b"first message").hexdigest(),

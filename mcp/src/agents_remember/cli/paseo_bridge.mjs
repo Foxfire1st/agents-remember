@@ -133,7 +133,8 @@
 //   ends with the agent's reply (at most 3,000 characters of it), and {state: 'unreplied'} when
 //   the last turn ended without one, which is what a cancelled turn leaves behind.
 //
-//   agent-send  {agentId: string, text: string, messageId: string, afterResume?: boolean}
+//   agent-send  {agentId: string, text: string, messageId: string, afterResume?: boolean,
+//                turnReportedByHost?: boolean}
 //            -> {serverId, delivery: {delivered: true, taken: 'started' | 'steered' | 'replaced',
 //                                     turnId: string | null}
 //                        | {delivered: false, refused: 'not-found' | 'archived' | 'closed' | 'busy',
@@ -162,6 +163,13 @@
 //            caller has just resumed the agent's session and that the agent has tool servers:
 //            the command then waits TOOL_SERVER_START_MS before it looks at the agent, for the
 //            reason given under `agent-create`.
+//
+//   agent-has-message  {agentId: string, messageId: string}
+//            -> {serverId, present: boolean}
+//            Reads the agent's timeline and says whether a user message carrying this client
+//            message id is already in it. A held message whose send the host did not answer is
+//            reconciled with this record before it is sent again, so the delivery is at most
+//            once even on a host that does not deduplicate (MIK-R171 rule 3).
 //
 //   agent-wait  {agentId: string, messageId?: string, turnId?: string, steered?: boolean,
 //                waitMs?: number}
@@ -235,6 +243,7 @@ const COMMANDS = {
   'agents-live': listLiveAgents,
   'agent-resume': resumeAgent,
   'agent-send': sendToAgent,
+  'agent-has-message': agentHasMessage,
   'agent-wait': waitForAgent
 }
 
@@ -255,13 +264,18 @@ const MESSAGE_LIMIT = 800
 // end, and the length of the reply text that is returned.
 const CLOSED_SESSION = 'closed'
 const TURN_ITEMS = new Set(['user_message', 'assistant_message', 'tool_call'])
+// The driver whose providers the product knows cannot take a steer: a provider the runtime drives
+// through its ACP driver has no autonomous steering, so a message to its running turn is held.
+const DRIVER_WITHOUT_STEERING = 'acp'
 const TIMELINE_TAIL = 20
+// How far back the reconciliation reads for a message id: enough for the turns a recipient ran
+// while one message waited, and one bounded read either way.
+const RECONCILE_TAIL = 200
 const FINAL_TEXT_LIMIT = 3000
 // agent-send and agent-wait: the provider entries of the runtime's configuration that cannot
 // take a message into a running turn, the default and the reserve of one wait, the timeline
 // entries read for the reply, and the runtime's events that end a turn. The reply comes back
 // whole; the role-message tool cuts it at the settings' limit (MIK-R117).
-const DRIVER_WITHOUT_STEERING = 'acp'
 const WAIT_DEFAULT_MS = 30000
 const WAIT_RESERVE_MS = 6000
 // How often a wait looks at the agent while a turn runs, how long a turn that has ended is given
@@ -511,11 +525,9 @@ async function sendFirstMessage(api, daemon, agent, request) {
   }
   try {
     if (request.hasToolServers) await toolServerStart()
-    // With the steer behaviour: should a turn run by now, the runtime's default would cancel it.
-    await handle.send(request.prompt, {
-      messageId: request.firstMessageId,
-      activeTurnBehavior: 'steer'
-    })
+    // A newly created agent runs no turn yet; no active-turn behaviour is asked for, so a
+    // message never ends a turn (MIK-R171 rule 2).
+    await handle.send(request.prompt, { messageId: request.firstMessageId })
   } catch (error) {
     if (daemon.getConnectionState().status !== 'connected') throw error
     throw failure(
@@ -781,17 +793,24 @@ async function sendToAgent({ api, daemon }, input) {
     Object.assign(refusal.delivery, { permissionPending: true, ...(permission ? { permission } : {}) })
     return refusal
   }
+  // MIK-R171@v2 rule 2: the recipient's state is read just before the send, and the host's own
+  // activity record counts as a read of it (the snapshot can lag a turn the host has published).
   const running = turnOf(before)
-  if (running.active && !(await providerSteers(api, before.provider))) {
+  const inTurn = running.active || input.turnReportedByHost === true
+  // A steer goes into a running turn only for a provider the product knows takes one. Every
+  // other message to a recipient in a turn is held, and rule 1 delivers it after the turn ends.
+  if (inTurn && !(await providerSteers(api, before.provider))) {
     return refused(
       'busy',
-      'the agent is mid-turn and the host cannot hand a message to a running turn of this provider'
+      'the agent is in a turn and its provider is not one that takes a steer, so the message is ' +
+        'held until the turn ends'
     )
   }
-  // Always with the steer behaviour: should a turn begin between the lookup and the send, the
-  // runtime's default would cancel it.
   try {
-    await api.agents.ref(agentId).send(message, { messageId, activeTurnBehavior: 'steer' })
+    await api.agents.ref(agentId).send(
+      message,
+      inTurn ? { messageId, activeTurnBehavior: 'steer' } : { messageId }
+    )
   } catch (error) {
     if (daemon.getConnectionState().status === 'connected') throw error
     throw failure(
@@ -802,15 +821,46 @@ async function sendToAgent({ api, daemon }, input) {
   }
   // The runtime accepted the message. What the agent runs now is looked up for the answer only.
   const after = turnOf((await findAgent(api, daemon, agentId).catch(() => null)) ?? {})
-  const replaced = running.active && after.id !== null && running.id !== null && after.id !== running.id
+  const replaced = inTurn && after.id !== null && running.id !== null && after.id !== running.id
   return {
     serverId,
     delivery: {
       delivered: true,
-      taken: !running.active ? 'started' : replaced ? 'replaced' : 'steered',
+      // The named gap of v2 rule 2: a provider known to steer may replace the turn at that
+      // moment, and a turn may begin between the read and the send. The answer says so.
+      taken: !inTurn ? 'started' : replaced ? 'replaced' : 'steered',
       turnId: after.id
     }
   }
+}
+
+async function agentHasMessage({ api, daemon }, input) {
+  const agentId = requiredText(input, 'agentId')
+  const messageId = requiredText(input, 'messageId')
+  const serverId = serverIdOf(daemon)
+  const agent = await findAgent(api, daemon, agentId)
+  if (!agent) return { serverId, present: false }
+  // The record the recipient already holds, read without sending anything: the timeline's
+  // user messages carry the client message id a send used (MIK-R171 rule 3).
+  let page
+  try {
+    page = await api.agents
+      .ref(agentId)
+      .timeline.refetch({ direction: 'tail', limit: RECONCILE_TAIL, projection: 'projected' })
+  } catch (error) {
+    if (daemon.getConnectionState().status !== 'connected') throw error
+    throw failure(
+      'paseo_timeline_unreadable',
+      `The Paseo runtime could not read the timeline of agent ${agentId}: ${text(error?.message ?? error)}`
+    )
+  }
+  const entries = Array.isArray(page?.entries) ? page.entries : []
+  const present = entries.some((entry) => {
+    const item = entry?.item
+    if (item?.type !== 'user_message') return false
+    return item.clientMessageId === messageId || item.messageId === messageId
+  })
+  return { serverId, present }
 }
 
 async function waitForAgent({ api, daemon, deadline }, input) {
@@ -1025,17 +1075,17 @@ function pendingPermissionName(agent) {
   return nonEmpty(first?.name) ?? nonEmpty(first?.title) ?? null
 }
 
+// The agent with exactly this id, or null. The runtime also resolves an id prefix and a title; an
+// answer under another id is not the agent that was asked for. A lookup the runtime fails for
+// another reason says nothing about the agent, so it is not reported as a refused call.
 // Whether the runtime hands a message to a running turn of this provider. It says so nowhere
-// directly; a provider it drives through its ACP driver has no steering, and such a provider is
-// an entry of the runtime's configuration that extends that driver.
+// directly; a provider the runtime drives through its ACP driver has no steering, and such a
+// provider is an entry of the runtime's configuration that extends that driver.
 async function providerSteers(api, provider) {
   const entries = (await api.config?.get())?.config?.providers ?? {}
   return entries[provider]?.extends !== DRIVER_WITHOUT_STEERING
 }
 
-// The agent with exactly this id, or null. The runtime also resolves an id prefix and a title; an
-// answer under another id is not the agent that was asked for. A lookup the runtime fails for
-// another reason says nothing about the agent, so it is not reported as a refused call.
 async function findAgent(api, daemon, agentId) {
   let result
   try {

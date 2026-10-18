@@ -38,7 +38,6 @@ from agents_remember.cli import (
     role_launch_receipts,
     role_launch_routes,
     role_launch_workspace,
-    role_message_delivery,
     role_retire,
 )
 from agents_remember.cli.paseo_launch import StartingAgent
@@ -134,7 +133,6 @@ class RoleToolsTestCase(StatusTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.replace(paseo_role_tools, "bridge_call", self.runtime)
-        self.replace(role_message_delivery, "bridge_call", self.runtime)
         self.replace(paseo_role_wait, "bridge_call", self.runtime)
         # The held-message store and native retirement call the bridge from their own
         # modules (MIK-R100 rules 4/8): the fake runtime answers there too.
@@ -142,8 +140,6 @@ class RoleToolsTestCase(StatusTestCase):
         self.replace(role_retire, "bridge_call", self.runtime)
         self.replace(paseo_role_tools, "resolve_role_launch_context", side_effect=self.context)
         self.replace(paseo_role_tools, "TaskDocumentTopology", self.topology)
-        self.replace(role_message_delivery, "resolve_role_launch_context", side_effect=self.context)
-        self.replace(role_message_delivery, "TaskDocumentTopology", self.topology)
         self.runtime._agent_send = self.agent_send
         self.runtime._agent_wait = self.agent_wait
         # What each wait call answers, in order; the clock moves by `waitMs` with every call.
@@ -177,8 +173,11 @@ class RoleToolsTestCase(StatusTestCase):
             if agent["status"] == "closed"
             else ("busy", "the agent waits for a permission decision")
             if agent.get("pendingPermissions")
-            else ("busy", "the agent is mid-turn and cannot take a message up")
-            if agent["status"] == "running" and agent.get("steers") is False
+            # MIK-R171@v2 rule 2: a steer goes into a running turn only for a provider the
+            # product knows takes one; every other message to such a recipient is held.
+            else ("busy", "the agent is in a turn and its provider is not one that takes a steer")
+            if (agent["status"] == "running" or payload.get("turnReportedByHost") is True)
+            and agent.get("steers") is not True
             else None
         )
         if refusal is not None:
@@ -192,13 +191,21 @@ class RoleToolsTestCase(StatusTestCase):
                 delivery.update(permissionPending=True, **({"permission": name} if name else {}))
             return {"serverId": SERVER_ID, "delivery": delivery}
         assert agent is not None
-        running = agent["status"] == "running"
+        in_turn = agent["status"] == "running" or payload.get("turnReportedByHost") is True
         agent.setdefault("received", []).append((payload["messageId"], payload["text"]))
+        # The host records the message id in the recipient's timeline; it does not
+        # deduplicate by it, so a resend under the same id would be a second copy.
+        agent.setdefault("timeline", []).append(payload["messageId"])
         agent["status"] = "running"
-        taken = agent.get("taken") or ("steered" if running else "started")
+        # A host-reported replacement models the read/send race or a failed steer (v2 rule 2).
+        taken = agent.get("taken") or ("steered" if in_turn else "started")
         return {
             "serverId": SERVER_ID,
-            "delivery": {"delivered": True, "taken": taken, "turnId": TURN},
+            "delivery": {
+                "delivered": True,
+                "taken": taken,
+                "turnId": TURN,
+            },
         }
 
     def agent_wait(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1289,6 +1296,7 @@ class RegisteredRoleToolTests(RoleToolsTestCase):
                 self.receipt(investigator_request).get("parentAgentId"),
                 self.architect.agent_id,
             )
+            self.runtime.agents[started["agentId"]]["status"] = "idle"
             _loop, sent = self.call(
                 "role_message", {"text": "hello", "agent_id": started["agentId"]}
             )

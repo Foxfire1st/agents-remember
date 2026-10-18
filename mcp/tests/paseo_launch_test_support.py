@@ -70,6 +70,13 @@ class FakeRuntime:
         failure = PaseoBridgeFailure(code, message or f"{command} failed with {code}")
         self.failures.setdefault(command, []).append((failure, after_effect))
 
+    def _agent_has_message(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Whether the recipient's timeline already carries this message id (MIK-R171 rule 3)."""
+
+        agent = self.agents.get(payload["agentId"])
+        carried = list(agent.get("timeline") or []) if agent else []
+        return {"serverId": SERVER_ID, "present": payload["messageId"] in carried}
+
     def __call__(
         self, _config: McpRuntimeConfig, command: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
