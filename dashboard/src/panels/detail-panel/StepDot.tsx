@@ -4,9 +4,17 @@ import { createPortal } from 'react-dom';
 
 import { Markdown } from '../../grammar/Markdown';
 import type { TaskStepNode } from '../../types/projection';
+import { cx } from '../../../styled-system/css';
 import type { StepDisplayState } from './model';
 import { dim, pip } from './pageStyles';
-import { dotTarget, stepTip, tipChildren, tipHead } from './stepDotStyles';
+import {
+  dotTarget,
+  stepTip,
+  tipChildren,
+  tipHead,
+  tipPart,
+  tipTitle,
+} from './stepDotStyles';
 
 const POINTER_REST_MS = 300;
 function StepTooltip({
@@ -34,21 +42,23 @@ function StepTooltip({
   return createPortal(
     <div ref={ref} role="tooltip" className={stepTip} style={position}>
       <div className={tipHead}>
-        <span className={dim}>{step.id}</span>
-        <strong>
+        <span className={cx(dim, tipPart)}>{step.id}</span>
+        <strong className={tipTitle}>
           <Markdown inline>{step.title}</Markdown>
         </strong>
-        <span className={dim}>{state === 'current' ? 'in work' : state}</span>
+        <span className={cx(dim, tipPart)}>{state === 'current' ? 'in work' : state}</span>
       </div>
       {step.substeps.length > 0 ? (
         <ol className={tipChildren}>
           {step.substeps.map((item) => (
             <li key={item.id} data-state={item.status}>
-              <span className={dim}>{item.id}</span>
-              <span>
+              <span className={cx(dim, tipPart)}>{item.id}</span>
+              <span className={tipTitle}>
                 <Markdown inline>{item.title}</Markdown>
               </span>
-              <span className={dim}>{item.status === 'inProgress' ? 'in work' : item.status}</span>
+              <span className={cx(dim, tipPart)}>
+                {item.status === 'inProgress' ? 'in work' : item.status}
+              </span>
             </li>
           ))}
         </ol>

@@ -51,7 +51,6 @@ import {
   TaskPivotBar,
   type Pivot,
 } from './columnPresentation';
-import { docProgress } from './docProgress';
 
 // The native task tree, grouped by repository or served status. Selecting a row
 // opens that entry; keyboard navigation and the approved column layout stay.
@@ -448,30 +447,47 @@ function TaskRowLine({
 }) {
   const row = item.row;
   const entry = row.entry;
+  // MIK-R175 rule 1: no `title` on the row line or on the figure box, because either one is an
+  // ancestor of the step dots and the browser would show it over them. The hover text lives on
+  // the cells beside the marks instead (rule 2), so the rest of the row keeps it.
+  const hover = rowHover(entry);
   return (
-    <div className={rowLine} style={indent(row.depth)} title={rowHover(entry)}>
+    <div className={rowLine} style={indent(row.depth)}>
       <RowCaret item={item} flat={flat} onToggleRow={onToggleRow} />
       <RowMark entry={entry} />
-      {id ? <span className={rowIdCell({ long: flat })}>{id}</span> : null}
+      {id ? (
+        <span className={rowIdCell({ long: flat })} title={hover}>
+          {id}
+        </span>
+      ) : null}
       <span
         className={rowTitle({ weight: form === 'task' ? undefined : 'parent' })}
         data-part="title"
+        title={hover}
       >
         {entry.title}
       </span>
-      {showRepo ? <span className={rowRepo}>{entry.reference?.repository}</span> : null}
-      <span className={rowWordCell({ tone: taskStatusKey(entry) === 'works' ? 'run' : 'rest' })}>
+      {showRepo ? (
+        <span className={rowRepo} title={hover}>
+          {entry.reference?.repository}
+        </span>
+      ) : null}
+      <span
+        className={rowWordCell({ tone: taskStatusKey(entry) === 'works' ? 'run' : 'rest' })}
+        title={hover}
+      >
         <TaskStatusWord task={entry} testid="task-word" mark={false} />
       </span>
-      <RowFigure entry={entry} form={form} />
+      <RowFigure entry={entry} form={form} hover={hover} />
     </div>
   );
 }
 
-function RowFigure({ entry, form }: { entry: TaskEntry; form: string }) {
+function RowFigure({ entry, form, hover }: { entry: TaskEntry; form: string; hover: string }) {
   const hostUnknown = useDashboard(selectHostActivityUnknown);
+  const figure = progressFigure(entry);
   return (
-    <span className={cx(rowFigure, dim)} title={docProgress(entry).progressNoun}>
+    <span className={cx(rowFigure, dim)}>
       {form === 'task' ? (
         <StepMarks
           states={stepMarkStates(entry.summary?.steps ?? [])}
@@ -483,7 +499,7 @@ function RowFigure({ entry, form }: { entry: TaskEntry; form: string }) {
           {entry.counts.works} works · {entry.counts.paused} paused ·{' '}
         </span>
       )}
-      {progressFigure(entry)}
+      {figure ? <span title={hover}>{figure}</span> : null}
     </span>
   );
 }

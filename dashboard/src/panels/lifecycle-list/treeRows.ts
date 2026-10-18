@@ -1,6 +1,6 @@
 import { taskEntrySelectionKey } from '../../data/taskReference';
 import type { TaskEntry } from '../../types/projection';
-import { rowBand } from './rowState';
+import { rowOrder } from './rowState';
 
 export interface TreeRow {
   key: string;
@@ -93,7 +93,7 @@ export function treeItems(
     const ordered = references
       .map((key) => tasks[key])
       .filter(Boolean)
-      .sort((left, right) => rowBand(left) - rowBand(right));
+      .sort((left, right) => rowOrder(left, right));
     for (const entry of ordered) {
       const reference = entry.key;
       if (seen.has(taskEntrySelectionKey(reference))) continue;

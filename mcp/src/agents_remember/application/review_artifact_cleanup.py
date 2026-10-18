@@ -80,6 +80,7 @@ from agents_remember.application.review_comparison_reclamation import (
     discard_comparison_snapshots,
     release_comparison_code_object,
 )
+from agents_remember.application.review_frame_store import reclaim_task_frames
 from agents_remember.errors import CodeObjectRetentionError, ComparisonReclamationError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
@@ -109,6 +110,7 @@ class _Report:
     released_generations: list[dict[str, str]] = field(default_factory=list)
     dataset_copies: list[dict[str, Any]] = field(default_factory=list)
     ar_caches: list[dict[str, Any]] = field(default_factory=list)
+    frame_revisions: list[dict[str, Any]] = field(default_factory=list)
     failures: list[dict[str, str]] = field(default_factory=list)
     held_refs: set[str] = field(default_factory=set)
     confinement: _Confinement | None = None
@@ -140,6 +142,7 @@ class _Report:
             "releasedGenerations": self.released_generations,
             "datasetCopies": self.dataset_copies,
             "arCaches": self.ar_caches,
+            "frameRevisions": self.frame_revisions,
             "failures": self.failures,
             "alreadyAbsent": [],
         }
@@ -211,7 +214,25 @@ def _sweep(request: ReviewArtifactCleanupRequest, confined: _Confinement) -> _Re
     report.confinement = confined
     _delete_dataset_copies(confined, report)
     _delete_ar_caches(confined, report)
+    _delete_frames(confined, report)
     return report
+
+
+def _delete_frames(confined: _Confinement, report: _Report) -> None:
+    """Reclaim the archived task's published frames, with the receipt that explains the loss (R103).
+
+    A frame is a page the task owns, so it ends with the task's other attachments. The store's own
+    owner does the deletion and writes the unavailability receipt; this hook only carries its result
+    into the archive record, including every target it could not delete.
+    """
+
+    outcome = reclaim_task_frames(confined.task_root, dry_run=report.dry_run)
+    for entry in outcome["would_remove"] if report.dry_run else outcome["removed"]:
+        report.frame_revisions.append(entry)
+    for failure in outcome["failed"]:
+        report.failures.append(
+            {"target": failure["path"], "detail": f"held, not deleted: {failure['reason']}"}
+        )
 
 
 def _nothing_deleted(

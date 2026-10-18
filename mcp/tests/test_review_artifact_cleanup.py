@@ -683,6 +683,7 @@ def test_an_interrupted_cache_deletion_replays_as_attributed_already_absent(
         "retainedCodeRefs",
         "datasetCopies",
         "arCaches",
+        "frameRevisions",
         "releasedGenerations",
     }
     assert interrupted["planned"]["arCaches"] == [{"path": late.as_posix(), "bytes": 4}]

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { taskEntrySelectionKey } from '../../data/taskReference';
-import { hierarchy, task, taskMap } from './test-utils';
+import { hierarchy, task, taskMap, taskSummary } from './test-utils';
 import { foldKey, treeItems, type TreeView } from './treeRows';
 
 const view = (over: Partial<TreeView> = {}): TreeView => ({
@@ -88,6 +88,29 @@ it('constructs no terminal child rows at two long-history sizes and preserves au
         .map((item) => item.row.entry),
     ).toEqual(children);
   }
+});
+
+it('orders the started band by host time, newest first, and leaves untimed rows after them', () => {
+  // MIK-R174: MIK stands first while it works; once it pauses it used to fall back to its
+  // document key's place among masters whose time is unknown. A time it has now orders it.
+  const master = (id: string, over: Parameters<typeof task>[1] = {}) =>
+    task(id, { summary: taskSummary({ kind: 'master', form: 'master' }), ...over });
+  const sprint = master('S');
+  const works = master('M-work', { activity: 'works', eventAt: '2026-10-17T19:00:00Z' });
+  const untimedFirst = master('M-a');
+  const newer = master('M-new', { eventAt: '2026-10-17T20:00:00Z' });
+  const older = master('M-old', { eventAt: '2026-10-17T18:00:00Z' });
+  const untimedSecond = master('M-b');
+  const children = [works, untimedFirst, newer, older, untimedSecond];
+  sprint.children = children.map((entry) => entry.key);
+  for (const entry of children) entry.parent = sprint.key;
+  const rows = treeItems(taskMap([sprint, ...children]), [sprint.key], view())
+    .filter((item) => item.kind === 'row')
+    .map((item) => item.row.entry.id);
+  expect(rows).toEqual(['S', 'M-work', 'M-new', 'M-old', 'M-a', 'M-b']);
+  // A missing time is never read as an epoch or as now: the two untimed rows keep the server's
+  // order instead of being reordered against each other.
+  expect(rows.slice(-2)).toEqual(['M-a', 'M-b']);
 });
 
 it('reaches unlisted and missing-parent roots and each declared child once in authored order', () => {

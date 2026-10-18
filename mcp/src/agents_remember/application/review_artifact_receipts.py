@@ -34,7 +34,13 @@ IN_PROGRESS: Final = "in-progress"
 # ``arCaches`` entries carry ``path``/``bytes`` like ``datasetCopies``: the class belongs here so
 # every shared consumer -- planned receipts, already-absent replay, remainder counts, deleted
 # names, preview accounting -- treats cache deletions exactly like the older classes.
-_ARTIFACT_KEYS: Final = ("reviewRefs", "retainedCodeRefs", "datasetCopies", "arCaches")
+_ARTIFACT_KEYS: Final = (
+    "reviewRefs",
+    "retainedCodeRefs",
+    "datasetCopies",
+    "arCaches",
+    "frameRevisions",
+)
 DELETION_KEYS: Final = (*_ARTIFACT_KEYS, "releasedGenerations")
 _NUMBERED: Final = re.compile(r"\.attempt-(\d+)$")
 

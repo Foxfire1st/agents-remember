@@ -280,7 +280,9 @@ it('keeps flat master runs without orchestration tiers, and long titles shrink w
   const word = row.querySelector('[data-testid="task-word"]');
   expect(word?.parentElement?.className).toContain('tov_ellipsis');
   expect(word?.parentElement?.className).toContain('max-w_15ch');
-  const hover = row.firstElementChild?.getAttribute('title') ?? '';
+  // MIK-R175 rule 1: the row line carries no title (it is an ancestor of the step dots), so the
+  // full hover context lives on the row's own cells — the title cell keeps all of it.
+  const hover = title.getAttribute('title') ?? '';
   for (const text of [
     leaf.title,
     'State: paused',
@@ -328,9 +330,11 @@ it('names terminal disclosure state accessibly, excludes aborted tasks from prog
   expect(rowOf(ui.getByText(master.title)).textContent).toContain('1/3');
   expect(ui.getByTestId('page-counts').textContent).toContain('1/3');
   expect(ui.getByTestId('now-split').textContent).toContain('1 completed · 1 aborted');
-  expect(rowOf(ui.getByText(master.title)).firstElementChild?.getAttribute('title')).toContain(
-    'Tasks completed: 1 of 3, 1 abandoned',
-  );
+  expect(
+    rowOf(ui.getByText(master.title))
+      .querySelector('[data-part="title"]')
+      ?.getAttribute('title'),
+  ).toContain('Tasks completed: 1 of 3, 1 abandoned');
   const line = rowOf(ui.getByText('1 completed, 1 aborted'));
   expect(line.getAttribute('aria-label')).toBe('1 completed, 1 aborted, hidden');
   fireEvent.click(ui.getByText('1 completed, 1 aborted'));
