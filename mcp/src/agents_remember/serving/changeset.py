@@ -45,7 +45,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_status
-from agents_remember.serving.changeset_cache import ChangesetCache
+from agents_remember.serving.changeset_cache import ChangesetCache, cached_read, observe_inputs
 from agents_remember.serving.changeset_comparison import comparison_changeset, comparison_file_diff
 from agents_remember.serving.changeset_endpoints import (
     NOT_RECORDED,
@@ -64,6 +64,7 @@ from agents_remember.serving.master_net_generation import (
     MASTER_NET_SCOPE,
     MasterEndpointAbsent,
     MasterNetPins,
+    MasterNetSelection,
     load_master_contract,
     master_task_root,
     select_master_net,
@@ -242,6 +243,76 @@ def _net_diff(
         ) from err
 
 
+def _master_onboarding_root(contract: WorktreeContract | None) -> Path | None:
+    """The onboarding root whose route indexes decide the net's ``hasSidecar`` flags."""
+
+    if contract is None or contract.memory_repo_path is None:
+        return None
+    candidate = contract.memory_repo_path / "onboarding"
+    return candidate if candidate.is_dir() else None
+
+
+def _master_net(
+    repo_id: str,
+    contract: WorktreeContract | None,
+    selection: MasterNetSelection,
+    master: str,
+) -> dict[str, Any]:
+    """The endpoint-keyed net half of a master change-set: both diffs, the sidecar flags.
+
+    A diff between two commit ids is fixed by those ids, so the net is served again from
+    its endpoint digest with no observation and no native read on a hit (MIK-R176 v2
+    rule 5). What the endpoints do *not* fix is the onboarding state the ``hasSidecar``
+    flags are read from -- the memory repository's working tree, not its commits -- so
+    every path the sidecar decision consults is observed before it is read: a moved
+    route index or sidecar changes the next read's answer instead of leaving a stale
+    flag. The leaf breakdown stays per-request (see :func:`master_changeset`): a live
+    leaf's counters move with its worktree and are no part of this net.
+    """
+
+    endpoints = selection.endpoints
+    onboarding_root = _master_onboarding_root(contract)
+    observed: dict[Path, None] = {}
+
+    def observe(path: Path) -> None:
+        observed.setdefault(path, None)
+        observe_inputs((path,))
+
+    def produce() -> dict[str, Any]:
+        code = _net_diff(
+            contract.code_repo_path if contract is not None else None,
+            endpoints.code_base,
+            endpoints.code_tip,
+            side="code",
+            master=master,
+        )
+        for entry in code:
+            entry["hasSidecar"] = (
+                onboarding_root is not None
+                and route_sidecar_status(onboarding_root, str(entry["path"]), observe=observe)
+                == "present"
+            )
+        memory = _net_diff(
+            contract.memory_repo_path if contract is not None else None,
+            endpoints.memory_base,
+            endpoints.memory_tip,
+            side="memory",
+            master=master,
+        )
+        return {
+            "code": code,
+            "memory": memory,
+            "counters": {"code": _sum(code), "memory": _sum(memory)},
+        }
+
+    return cached_read(
+        ("master-net", repo_id, master, selection.digest, str(onboarding_root or "")),
+        (),
+        produce,
+        additional_inputs=lambda: tuple(observed),
+    )
+
+
 def master_changeset(
     config: McpRuntimeConfig,
     repo_id: str,
@@ -263,7 +334,12 @@ def master_changeset(
     ``leaves`` keeps the optional per-leaf counter breakdown alongside it, each row labelled
     ``committed`` or ``working``. Callers that render only the net range can skip those extra
     per-leaf git diffs. An in-flight leaf not yet integrated is excluded from the net.
+
+    The net itself is keyed by those endpoint commits (see :func:`_master_net`), so asking for
+    the same generation again recomputes nothing; only the live leaf breakdown is read per
+    request.
     """
+
     selection = select_master_net(config, repo_id, master, pins or MasterNetPins())
     if selection is None:
         return {
@@ -277,37 +353,14 @@ def master_changeset(
             "scope": MASTER_NET_SCOPE,
         }
     contract = load_master_contract(config, repo_id, master)
-    onboarding_root: Path | None = None
-    if contract is not None and contract.memory_repo_path is not None:
-        candidate = contract.memory_repo_path / "onboarding"
-        if candidate.is_dir():
-            onboarding_root = candidate
+    net = _master_net(repo_id, contract, selection, master)
     endpoints = selection.endpoints
-    code = _net_diff(
-        contract.code_repo_path if contract is not None else None,
-        endpoints.code_base,
-        endpoints.code_tip,
-        side="code",
-        master=master,
-    )
-    memory = _net_diff(
-        contract.memory_repo_path if contract is not None else None,
-        endpoints.memory_base,
-        endpoints.memory_tip,
-        side="memory",
-        master=master,
-    )
-    for entry in code:
-        entry["hasSidecar"] = (
-            onboarding_root is not None
-            and route_sidecar_status(onboarding_root, str(entry["path"])) == "present"
-        )
     return {
         "master": master,
         "leaves": _master_leaf_summaries(config, repo_id, master) if include_leaves else [],
-        "code": code,
-        "memory": memory,
-        "counters": {"code": _sum(code), "memory": _sum(memory)},
+        "code": net["code"],
+        "memory": net["memory"],
+        "counters": net["counters"],
         "generation": {
             "codeBase": endpoints.code_base,
             "codeTip": endpoints.code_tip,

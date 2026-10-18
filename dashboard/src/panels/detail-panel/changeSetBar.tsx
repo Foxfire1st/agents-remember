@@ -53,20 +53,40 @@ function LeafAttribution({ leaves }: { leaves: MasterChangeset['leaves'] | null 
 function changesetTotal(
   counters: { code: ChangeCounters; memory: ChangeCounters } | null,
   unrecorded: string | null,
+  unmeasured: string | null,
 ): string | null {
   // Truthiness, not `=== null`: a response that omits `counters` sets the state to `undefined`, and
   // the original inline expression treated that as "no total" rather than as a value to read.
-  if (!counters || unrecorded !== null) return null;
+  if (!counters || unrecorded !== null || unmeasured !== null) return null;
   const insertions = counters.code.insertions + counters.memory.insertions;
   const deletions = counters.code.deletions + counters.memory.deletions;
   return `+${insertions} −${deletions}`;
 }
 
+// A master answer that names no generation measured nothing: the selection resolved no base and no
+// selected result, so the server's zero counters are the ABSENCE of a net range, not a measured
+// empty one. The leaf view draws the same distinction with its own `unrecorded` state; without this
+// the bar printed `+0 −0` for a series nothing had measured — a zero of nothing, which is exactly
+// the reading this control must never publish (B6), and the one the developer saw frozen on a page
+// whose read had answered while the series contract was unreadable.
+function masterUnmeasured(data: Awaited<ReturnType<typeof loadChangeSet>>): string | null {
+  if (!('leaves' in data)) return null; // a leaf/task view has no generation to name
+  if (data.generation) return null; // a measured generation is a real range, even an empty one
+  if (data.currentness !== 'unmeasured') return null;
+  return (
+    'the server named no measurable generation for this series: no base and no selected result ' +
+    'resolved, so there is no net range to count'
+  );
+}
+
 function changeSetRead(data: Awaited<ReturnType<typeof loadChangeSet>> | undefined) {
-  if (!data) return { counters: null, unrecorded: null, leaves: null, generation: null };
+  if (!data) {
+    return { counters: null, unrecorded: null, unmeasured: null, leaves: null, generation: null };
+  }
   return {
     counters: data.counters,
     unrecorded: 'state' in data && data.state === 'unrecorded' ? (data.stateDetail ?? '') : null,
+    unmeasured: masterUnmeasured(data),
     leaves: 'leaves' in data ? data.leaves : null,
     generation: 'generation' in data ? (data.generation ?? null) : null,
   };
@@ -90,7 +110,7 @@ export function ChangeSetButton({
   } | null>(null);
   const data = settled?.key === key ? settled.data : peekChangeSet(target);
   const problem = settled?.key === key ? (settled.problem ?? null) : null;
-  const { counters, unrecorded, leaves, generation } = changeSetRead(data);
+  const { counters, unrecorded, unmeasured, leaves, generation } = changeSetRead(data);
   useEffect(() => {
     let live = true;
     // A switch to another task aborts this page's read with its request: the
@@ -118,7 +138,7 @@ export function ChangeSetButton({
     };
   }, [key, revalidation, target.repo, target.scope, target.master, target.leaf, target.mode]);
   // An unrecorded range prints no total: `+0 −0` would present a zero of nothing as a measurement.
-  const total = changesetTotal(counters, unrecorded);
+  const total = changesetTotal(counters, unrecorded, unmeasured);
   return (
     <Fragment>
       <button
@@ -130,9 +150,19 @@ export function ChangeSetButton({
         ⇄ {label}
         {total ? <span className={changeSetCounts}>{total}</span> : null}
         <LeafAttribution leaves={leaves} />
-        <ChangeSetReadState counters={counters} problem={problem} unrecorded={unrecorded} />
+        <ChangeSetReadState
+          counters={counters}
+          problem={problem}
+          unrecorded={unrecorded}
+          unmeasured={unmeasured}
+        />
       </button>
-      <ChangeSetStateDetails label={label} problem={problem} unrecorded={unrecorded} />
+      <ChangeSetStateDetails
+        label={label}
+        problem={problem}
+        unrecorded={unrecorded}
+        unmeasured={unmeasured}
+      />
     </Fragment>
   );
 }
@@ -158,10 +188,12 @@ function ChangeSetReadState({
   counters,
   problem,
   unrecorded,
+  unmeasured,
 }: {
   counters: { code: ChangeCounters; memory: ChangeCounters } | null;
   problem: ReviewFailure | null;
   unrecorded: string | null;
+  unmeasured: string | null;
 }) {
   if (problem) {
     return (
@@ -183,6 +215,20 @@ function ChangeSetReadState({
         data-review-state="unrecorded"
       >
         unrecorded
+      </span>
+    );
+  }
+  // A series the server named no generation for was never measured: it is its own state, not a
+  // `known-empty` zero, and the total is withheld above so the control cannot print `+0 −0`.
+  if (unmeasured !== null) {
+    return (
+      <span
+        className={changeSetCounts}
+        data-testid="changeset-state"
+        data-review-state="unmeasured"
+        title="no base and no selected result resolved: this series has no net range to count"
+      >
+        unmeasured
       </span>
     );
   }
@@ -213,15 +259,24 @@ function ChangeSetStateDetails({
   label,
   problem,
   unrecorded,
+  unmeasured,
 }: {
   label: string;
   problem: ReviewFailure | null;
   unrecorded: string | null;
+  unmeasured: string | null;
 }) {
   if (problem) {
     return (
       <EntryStateDetails testId="changeset-state-details" label={label}>
         This change-set could not be read. {problemSentence(problem)}
+      </EntryStateDetails>
+    );
+  }
+  if (unmeasured !== null) {
+    return (
+      <EntryStateDetails testId="changeset-state-details" label={label}>
+        This series change-set has no measured range.{unmeasured ? ` ${unmeasured}` : ''}
       </EntryStateDetails>
     );
   }

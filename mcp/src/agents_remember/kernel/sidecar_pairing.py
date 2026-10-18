@@ -16,6 +16,7 @@ present "this source file has no onboarding yet".
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -88,7 +89,9 @@ def confine_non_symlink_rel(root: Path, requested: str) -> str:
     return resolved.relative_to(resolved_root).as_posix()
 
 
-def route_sidecar_status(onboarding_root: Path, rel: str) -> str:
+def route_sidecar_status(
+    onboarding_root: Path, rel: str, *, observe: Callable[[Path], None] | None = None
+) -> str:
     """Map the route index's sidecar status, degrading gracefully when absent.
 
     Walks the governing route-index chain nearest-first; the first index whose
@@ -96,23 +99,34 @@ def route_sidecar_status(onboarding_root: Path, rel: str) -> str:
     exists, fall back to a direct sidecar-file probe of the mirror path so a
     repo with sidecars but no built index still resolves (the route index is the
     authority when present, never a crash when absent).
+
+    ``observe`` receives every path whose identity decides this status — each
+    candidate index and, on the fallback, the mirror sidecar — **before** it is
+    read, so a caller that reuses the answer observes the inputs it was derived
+    from instead of re-deciding them (MIK-R176 v2 rule 5).
     """
-    for index in _governing_indexes(onboarding_root, rel):
+    for index in _governing_indexes(onboarding_root, rel, observe):
         status = sidecar_status(rel, index)
         if status in {"present", "absent"}:
             return status
         # out-of-scope: try the next (more general) governing index.
     # No governing index covered the path. Fall back to the mirror probe.
-    return "present" if mirror_onboarding_path(onboarding_root, rel).is_file() else "absent"
+    mirror = mirror_onboarding_path(onboarding_root, rel)
+    if observe is not None:
+        observe(mirror)
+    return "present" if mirror.is_file() else "absent"
 
 
-def _governing_indexes(onboarding_root: Path, rel: str) -> list[dict[str, Any]]:
+def _governing_indexes(
+    onboarding_root: Path, rel: str, observe: Callable[[Path], None] | None = None
+) -> list[dict[str, Any]]:
     """The route-index chain governing ``rel``, nearest folder first then up to root.
 
     Small private nearest-route prefix match (the route_index public surface is
     consumed read-only, never extended): for ``a/b/c.py`` we check
     ``a/b/overview.index.json``, ``a/overview.index.json``, then the root
-    ``overview.index.json``.
+    ``overview.index.json``. Each candidate is reported to ``observe`` (an absent
+    one included: creating it later must move the answer) before it is read.
     """
     indexes: list[dict[str, Any]] = []
     parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
@@ -121,10 +135,19 @@ def _governing_indexes(onboarding_root: Path, rel: str) -> list[dict[str, Any]]:
         parent = parent.rsplit("/", 1)[0] if "/" in parent else ""
         routes.append(parent)
     for route in routes:
+        if observe is not None:
+            observe(_route_index_path(onboarding_root, route))
         index = _load_route_index(onboarding_root, route)
         if index is not None:
             indexes.append(index)
     return indexes
+
+
+def _route_index_path(onboarding_root: Path, route: str) -> Path:
+    """The exact route-index file one route is decided by (absent or not)."""
+
+    index_rel = INDEX_FILE_NAME if route == "" else f"{route}/{INDEX_FILE_NAME}"
+    return onboarding_root / index_rel
 
 
 def _load_route_index(onboarding_root: Path, route: str) -> dict[str, Any] | None:

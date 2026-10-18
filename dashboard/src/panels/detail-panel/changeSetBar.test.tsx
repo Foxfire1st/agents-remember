@@ -655,6 +655,45 @@ describe("the counter read's refusal (L32/D01)", () => {
     expect(state.dataset.reviewState).not.toBe('loading');
   });
 
+  it('never prints a zero for a series the server named no generation for (S8)', async () => {
+    // The delivered defect: an unresolvable master answers `generation: null` with zero counters --
+    // the shape `master_changeset` returns when the series contract resolves no base and no selected
+    // result. The bar printed `+0 −0` for it: a zero of NOTHING that read exactly like a measured
+    // empty range, and it stayed on the page for as long as the page lived. It is its own state now,
+    // `unmeasured`, with no total, and the disclosure names what did not resolve.
+    seedProjection({});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        routeAnswer(200, 'OK', {
+          master: MASTER_NET,
+          leaves: [],
+          code: [],
+          memory: [],
+          counters: {
+            code: { files: 0, insertions: 0, deletions: 0 },
+            memory: { files: 0, insertions: 0, deletions: 0 },
+          },
+          generation: null,
+          currentness: 'unmeasured',
+          scope: 'integrated',
+        }),
+      ),
+    );
+    const { view } = masterBar(MASTER_NET);
+
+    const state = await waitFor(() => {
+      const found = view.getByTestId('changeset-state');
+      expect(found.dataset.reviewState).toBe('unmeasured');
+      return found;
+    });
+    expect(view.getByTestId('open-changeset').textContent).not.toContain('+0 −0');
+    expect(state.textContent).toBe('unmeasured');
+    const details = view.getByTestId('changeset-state-details');
+    expect(details.textContent).toContain('no measured range');
+    expect(details.textContent).toContain('no base and no selected result resolved');
+  });
+
   it("does not let a superseded read's refusal land on the control that replaced it", async () => {
     // The `live` guard is kept and is load-bearing: the first master's read is held open until AFTER
     // the bar has moved to a second master and that master's answer has rendered. Removing
