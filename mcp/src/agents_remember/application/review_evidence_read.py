@@ -10,7 +10,8 @@ The operand is the comparison's own tree, never something the caller can choose:
   limits the work actually done instead of truncating a fully materialized blob (rule 4);
 * a line range is reached by a bounded scan that reports how far it got and where the next read
   starts, so a continuation always makes progress and an unexamined remainder is never called empty
-  (rules 4, 12);
+  (rules 4, 12); a read that reaches the object's end inside the requested range ends at its last
+  line and is complete, and a remainder is counted only where the read measured it;
 * relationships are read through the landed owners' own schemas -- family members, record links and
   supersession, sidecar realizations and proofs, history rows -- with their direction, revision,
   origin leaf and attempt, and a lookup that failed is not a measured absence (rule 5);
@@ -356,29 +357,19 @@ def _blob_read(  # noqa: PLR0913, PLR0911 - one blob states its own operands and
     """One blob as a bounded, range-addressed window of text (rules 3, 4, 12)."""
 
     base = _base_fields(record, operand, path, entry.object_id, blob.size, page)
-    offset, scanned = start_byte, 0
-    requested_start = start_line or 1
-    if requested_start > 1:
-        reached = _scan_to_line(
-            blob,
-            requested_start,
-            MAX_SCAN_BYTES - start_byte,
-            start=offset,
-            start_line=resume_line if offset > 0 and resume_line else 1,
-        )
-        if isinstance(reached, str):
-            return _unavailable(record, operand, path, reached)
-        offset, scanned, position, line_count, at_end = reached
-        if position is None:
-            return _scan_cut(
-                line_count,
-                offset,
-                blob.consumed,
-                requested_start,
-                base,
-                start=start_byte,
-                at_end=at_end,
-            )
+    located = _located_start(
+        record,
+        operand,
+        path,
+        blob=blob,
+        requested_start=start_line or 1,
+        start_byte=start_byte,
+        resume_line=resume_line,
+        base=base,
+    )
+    if isinstance(located, EvidenceReadReceipt):
+        return located
+    offset, scanned = located
     window = blob.read_at(offset, limits.bytes_per_read)
     if isinstance(window, str):
         return _unavailable(record, operand, path, window)
@@ -408,6 +399,53 @@ def _blob_read(  # noqa: PLR0913, PLR0911 - one blob states its own operands and
         limits=limits,
         scanned=scanned,
         base=base,
+    )
+
+
+def _located_start(  # noqa: PLR0913 - one read's own operands and its located byte
+    record: ReviewTreeComparisonRecord,
+    operand: SideOperand,
+    path: str,
+    *,
+    blob: _Blob,
+    requested_start: int,
+    start_byte: int,
+    resume_line: int | None,
+    base: dict[str, Any],
+) -> tuple[int, int] | EvidenceReadReceipt:
+    """Where the requested line starts in the blob, or the receipt that ends the read (rules 3, 12).
+
+    A caller that starts at the object's end asks for a line no byte can hold, so it gets the
+    measured range absence rather than an empty line; a scan that could not reach the requested
+    line reports what it measured instead of certifying a range it never read.
+    """
+
+    offset, scanned = start_byte, 0
+    ended = _object_end_absence(blob, offset, requested_start, base)
+    if ended is not None:
+        return ended
+    if requested_start <= 1:
+        return offset, scanned
+    reached = _scan_to_line(
+        blob,
+        requested_start,
+        MAX_SCAN_BYTES - start_byte,
+        start=offset,
+        start_line=resume_line if offset > 0 and resume_line else 1,
+    )
+    if isinstance(reached, str):
+        return _unavailable(record, operand, path, reached)
+    offset, scanned, position, line_count, at_end = reached
+    if position is not None:
+        return offset, scanned
+    return _scan_cut(
+        line_count,
+        offset,
+        blob.consumed,
+        requested_start,
+        base,
+        start=start_byte,
+        at_end=at_end,
     )
 
 
@@ -509,8 +547,13 @@ def _window_receipt(  # noqa: PLR0913 - one window states its own bounds and fac
         window, lines, complete, requested_start=requested_start, end_line=end_line, limits=limits
     )
     returned_end = requested_start + len(take) - 1 if take else requested_start - 1
-    remaining, state = _remainder(
-        returned_end, end_line, next_byte, blob.size, bool(take), line_cut=line_cut
+    remaining, state, object_last_line = _remainder(
+        returned_end,
+        end_line,
+        bool(take),
+        measured_through=requested_start + complete - 1 if complete else requested_start - 1,
+        reached_end=window.end >= blob.size,
+        line_cut=line_cut,
     )
     return _receipt_from_window(
         window=window,
@@ -525,6 +568,7 @@ def _window_receipt(  # noqa: PLR0913 - one window states its own bounds and fac
         size=blob.size,
         consumed=blob.consumed,
         line_cut=line_cut,
+        object_last_line=object_last_line,
         base=base,
     )
 
@@ -544,6 +588,7 @@ def _receipt_from_window(  # noqa: PLR0913 - one window's measured facts, stated
     base: dict[str, Any],
     consumed: int = 0,
     line_cut: bool = False,
+    object_last_line: int | None = None,
 ) -> EvidenceReadReceipt:
     truncated = state == "truncated"
     return EvidenceReadReceipt(
@@ -582,6 +627,7 @@ def _receipt_from_window(  # noqa: PLR0913 - one window's measured facts, stated
             size=size,
             remaining=remaining,
             truncated=truncated,
+            object_last_line=object_last_line,
         ),
         **base,
     )
@@ -596,12 +642,18 @@ def _window_detail(  # noqa: PLR0913 - one window's measured facts, each its own
     size: int,
     remaining: int | None,
     truncated: bool,
+    object_last_line: int | None = None,
 ) -> str:
     detail = (
         f"requested {requested_start}-{end_line or 'end of object'}; returned "
         f"{requested_start}-{returned_end} from a {window_length}-character window of a {size}-byte "
         "object"
     )
+    if object_last_line is not None:
+        return (
+            detail + f"; the object's last line is line {object_last_line} and the requested range "
+            "runs past it"
+        )
     if remaining is not None:
         return detail + f"; {remaining} line(s) remain in the requested range"
     if truncated:
@@ -641,26 +693,49 @@ def _take_window(  # noqa: PLR0913 - one window, its lines and its three bounds
 def _remainder(  # noqa: PLR0913 - one window's returned range, bounds and cut
     returned_end: int,
     end_line: int | None,
-    next_byte: int | None,
-    size: int,
     returned: bool,
     *,
+    measured_through: int,
+    reached_end: bool,
     line_cut: bool = False,
-) -> tuple[int | None, str]:
-    """Whether the requested source is complete, and how much of it is left when that is known."""
+) -> tuple[int | None, str, int | None]:
+    """The state, the remainder when it was measured, and the object's last line when it ended.
+
+    A remaining count is exact only where the read measured it: the examined bytes hold the
+    requested range's end, or the object's end. The distance from the returned range to a
+    requested end line that was never read is not a count of lines that exist. A read that
+    reached the object's end before its requested end line, having returned every line from its
+    start to that end, is complete; ``object_last_line`` names that end for the detail.
+    """
 
     if line_cut:
-        return None, "truncated"
+        return None, "truncated", None
     if not returned:
-        return None, "absent"
-    if end_line is not None:
-        if returned_end < end_line:
-            return end_line - returned_end, "truncated"
-        # The requested range was returned whole; bytes after it are simply not part of the request.
-        return 0, "present"
-    if next_byte is not None and next_byte < size:
-        return None, "truncated"
-    return 0, "present"
+        return None, "absent", None
+    if end_line is not None and returned_end >= end_line:
+        # The requested range was returned whole; bytes after it are not part of the request.
+        return 0, "present", None
+    if end_line is not None and measured_through >= end_line:
+        # The requested end line was read, so the rest of the request is exactly countable.
+        return end_line - returned_end, "truncated", None
+    if not reached_end:
+        return None, "truncated", None
+    return _measured_object_end(returned_end, end_line, measured_through)
+
+
+def _measured_object_end(
+    returned_end: int, end_line: int | None, measured_through: int
+) -> tuple[int | None, str, int | None]:
+    """The remainder of a read whose examined bytes hold the object's end (rules 1, 2).
+
+    Every line that exists was measured, so a page bound that held lines back leaves an exact
+    count, and a read that returned them all is complete even though its requested range runs
+    past the end. ``object_last_line`` names that end for the detail.
+    """
+
+    if returned_end < measured_through:
+        return measured_through - returned_end, "truncated", None
+    return 0, "present", measured_through if end_line is not None else None
 
 
 def _scan_to_line(
@@ -690,7 +765,14 @@ def _scan_to_line(
             index = -1
             for _ in range(remaining):
                 index = chunk.index(b"\n", index + 1)
-            return offset + index + 1, scanned + len(chunk), "found", None, False
+            position = offset + index + 1
+            if position < blob.size:
+                return position, scanned + len(chunk), "found", None, False
+            # The nth newline was the object's last byte: no line begins at that offset.
+            line += count
+            scanned += len(chunk)
+            offset = position
+            break
         line += count
         scanned += len(chunk)
         offset += len(chunk)
@@ -707,6 +789,28 @@ def _decode_at(blob: _Blob, offset: int, limits: EvidenceLimits) -> _TextWindow 
     if isinstance(window, str) or not window:
         return None
     return _TextWindow.open(blob, offset, window, limits)
+
+
+def _object_end_absence(
+    blob: _Blob, offset: int, requested_start: int, base: dict[str, Any]
+) -> EvidenceReadReceipt | None:
+    """The measured range absence for a read that starts at or past the object's end (rule 3).
+
+    No line begins at or after that byte, so the answer is an absence about the requested range,
+    never an empty line and never a continuation that reads no byte.
+    """
+
+    if blob.size == 0 or offset < blob.size:
+        return None
+    return _scan_cut(
+        None,
+        offset,
+        blob.consumed,
+        requested_start,
+        base,
+        start=offset,
+        at_end=True,
+    )
 
 
 def _scan_cut(  # noqa: PLR0913 - one scan's own bounds and its measured result
@@ -731,10 +835,10 @@ def _scan_cut(  # noqa: PLR0913 - one scan's own bounds and its measured result
             **base,
         )
 
-    if at_end and line_count is not None:
+    if at_end:
         held = (
             f"the object holds {line_count} line(s)"
-            if start == 0
+            if start == 0 and line_count is not None
             else f"the object ends before any line {requested_start} at or after byte {start}"
         )
         return EvidenceReadReceipt(
