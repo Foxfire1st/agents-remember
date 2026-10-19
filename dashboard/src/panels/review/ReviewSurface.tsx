@@ -43,6 +43,9 @@ import {
   ReviewReadCache,
   ReviewReadCacheContext,
 } from './ReviewReadCache';
+import { CanvasPanel, type CanvasEvidenceNavigation } from './canvas/CanvasPanel';
+import type { CanvasComparison } from './canvas/canvasApi';
+import { useRetainedComparison } from './canvas/canvasHooks';
 import { ReviewTechnicalDetails } from './ReviewRecordPanes';
 import { ReviewRefresh, generationOf } from './ReviewRefresh';
 import {
@@ -455,8 +458,11 @@ function pageMatchesCurrent(
     sameGeneration(state.generation, comparisonGenerationOf(current.payload))
   );
 }
-function sameChangeRead(context: ReviewChangeContext, current: CurrentChangeContext,
-  worklist: ReviewChangeContext['worklist']): boolean {
+function sameChangeRead(
+  context: ReviewChangeContext,
+  current: CurrentChangeContext,
+  worklist: ReviewChangeContext['worklist'],
+): boolean {
   return sameLane(context.lane, current.laneRead) && context.worklist === worklist;
 }
 function useHeldPageLane(
@@ -615,6 +621,50 @@ function readingStatusOf(
     label,
     problem: read.phase === 'loading' ? null : problemBlock(label),
   };
+}
+
+/** The comparison on screen, with the lineage number and the history the reviewer is reading. */
+function pageComparison(
+  shown: Pick<ReviewPayload, 'comparison' | 'limitations'> | null | undefined,
+  history: ReviewHistory | undefined,
+): CanvasComparison | undefined {
+  if (!shown?.comparison) return undefined;
+  return {
+    reference: shown.comparison.reference,
+    number: treeComparisonNumber(shown.limitations),
+    history: history ?? 'live',
+  };
+}
+
+/**
+ * An evidence navigation the saved page asked for, bound to the comparison on screen (L104-B11).
+ *
+ * The panel has already refused a destination that belongs to another comparison or another review
+ * target, and this surface checks the same two facts against the payload it is showing before it
+ * selects anything: a destination that moved under the panel is not opened, and no substitute record
+ * is selected in its place. `keepTree` keeps the tree the reader walked, so returning to the page
+ * finds the review where it was.
+ */
+function evidenceSelection(
+  destination: CanvasEvidenceNavigation,
+  shown: ReviewPayload | null,
+  selectSubject: (
+    subject: { kind: 'invariant' | 'family'; id: string },
+    context?: undefined,
+    options?: SelectionOptions,
+  ) => void,
+): void {
+  if (!shown?.comparison) return;
+  if (shown.comparison.reference !== destination.comparison.reference) return;
+  if (
+    destination.comparison.number !== undefined &&
+    treeComparisonNumber(shown.limitations) !== destination.comparison.number
+  ) {
+    return;
+  }
+  selectSubject({ kind: destination.selector.kind, id: destination.selector.id }, undefined, {
+    keepTree: true,
+  });
 }
 
 // Every selection but the one of a row the family tree shows starts the walked tree afresh (MIK-R39).
@@ -780,6 +830,33 @@ function useRefreshReview(
   return { refreshReview, retryReview };
 }
 
+/**
+ * The page above the deterministic detail (MIK-R105 rules 2, 13), with its evidence navigation.
+ *
+ * The comparison is held by the surface across a selection that is still reading: the page belongs to
+ * the comparison, not to the selection, so a reading turn neither unmounts it nor drops its channel
+ * (L104-B11).
+ */
+function CanvasRegion(props: {
+  repo: string;
+  master: string;
+  leaf: string;
+  history: ReviewHistory | undefined;
+  shown: ReviewPayload | null;
+  onSelect: ReturnType<typeof useSurface>['selectSubject'];
+}) {
+  const comparison = useRetainedComparison(pageComparison(props.shown, props.history));
+  return (
+    <CanvasPanel
+      repository={props.repo}
+      master={props.master}
+      leaf={props.leaf}
+      comparison={comparison}
+      onOpenEvidence={(destination) => evidenceSelection(destination, props.shown, props.onSelect)}
+    />
+  );
+}
+
 export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
   const surface = useSurface(props);
   const { repo, master, leaf, history, read, shown, reading, instead } = surface;
@@ -800,7 +877,13 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
       data-review-pending={reading && !reading.problem ? reading.subject : undefined}
       data-review-unavailable={reading?.problem ? reading.subject : undefined}
       // This surface owns its scroll; pending/answer relayout must not move it via UA anchoring.
-      style={{ height: '100%', minHeight: 0, minWidth: 0, overflowY: 'auto', overflowAnchor: 'none' }}
+      style={{
+        height: '100%',
+        minHeight: 0,
+        minWidth: 0,
+        overflowY: 'auto',
+        overflowAnchor: 'none',
+      }}
     >
       <ReviewReadCacheContext.Provider value={surface.cache}>
         <ReviewHeader
@@ -819,6 +902,16 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
               generation={generationOf(read, surface.carried, shown)}
             />
           }
+        />
+        {/* The page above the deterministic detail: saved-first, generated only on request
+            (MIK-R105 rules 2, 13). It never replaces this surface's own detail. */}
+        <CanvasRegion
+          repo={repo}
+          master={master}
+          leaf={leaf}
+          history={history}
+          shown={shown}
+          onSelect={surface.selectSubject}
         />
         <ReviewOutcomeRegion
           read={read}

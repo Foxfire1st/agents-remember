@@ -1,0 +1,589 @@
+{
+  "state": "ok",
+  "frame": {
+    "repository": "agents-remember",
+    "master": "260928_maintained-invariant-knowledge",
+    "leaf": "260928-MIK-L104",
+    "frame": "host-and-presenter"
+  },
+  "opening": {
+    "state": "ready",
+    "frame_id": "host-and-presenter",
+    "revision": 1,
+    "manifest": {
+      "schema_": "ar-review-frame-manifest/v2",
+      "frame_id": "host-and-presenter",
+      "revision": 1,
+      "parent_revision": null,
+      "binding": {
+        "comparison_owner": "agents_remember.application.review_tree_comparison",
+        "task_id": "260928_maintained-invariant-knowledge",
+        "leaf_id": "260928-MIK-L104",
+        "comparison_number": 7,
+        "comparison_reference": "review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/7",
+        "code_base_repository": "/repo/code",
+        "code_base_tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "code_base_commit": null,
+        "code_base_ref": null,
+        "code_candidate_repository": "/repo/code",
+        "code_candidate_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "code_candidate_commit": null,
+        "code_candidate_ref": null,
+        "memory_base_repository": "/repo/memory",
+        "memory_base_tree": "cccccccccccccccccccccccccccccccccccccccc",
+        "memory_base_commit": null,
+        "memory_base_ref": null,
+        "memory_candidate_repository": "/repo/memory",
+        "memory_candidate_tree": "dddddddddddddddddddddddddddddddddddddddd",
+        "memory_candidate_commit": null,
+        "memory_candidate_ref": null,
+        "converted_base_commit": null,
+        "converted_base_version": null,
+        "converted_base_code_commit": null,
+        "converted_base_tree": null,
+        "compared_memory_base_tree": "cccccccccccccccccccccccccccccccccccccccc",
+        "four_tree_digest": "8b7eac4459aef8aac072373d54296a27e31f6e882b414197e0eda1f298296554"
+      },
+      "focus": "the explained change",
+      "authoring": {
+        "request_id": "req-publish",
+        "execution_id": null,
+        "session_id": "seed",
+        "model": null,
+        "started_at": "2026-10-18T09:00:00Z",
+        "finished_at": null
+      },
+      "created_at": "2026-10-18T09:00:00Z",
+      "entrypoint": {
+        "path": "index.html",
+        "media_type": "text/html"
+      },
+      "assets": [
+        {
+          "path": "app.css",
+          "media_type": "text/css",
+          "byte_size": 25,
+          "digest": "9037288bf3ed1d49966655bc9651a66c7cd4572a1f3590dedb031b762ce5abec"
+        },
+        {
+          "path": "app.js",
+          "media_type": "text/javascript",
+          "byte_size": 29,
+          "digest": "9f282c862e6984e4773dfcd1e1ab33746f88b49d5d650bf3d71812a2b835c654"
+        },
+        {
+          "path": "index.html",
+          "media_type": "text/html",
+          "byte_size": 67,
+          "digest": "f1e7392a3e39e35c4e089f4252507201d319392cf704fde29abf11f71c65ac8a"
+        }
+      ],
+      "artifact_digest": "a34c1fec23bec01c0233f3f4df08c5e17338f2e0883f0e03bf9ef59fedba6570",
+      "evidence": {
+        "schema_": "ar-review-evidence-packet/v1",
+        "comparison": {
+          "schema_": "ar-review-evidence-packet/v1",
+          "comparison_owner": "agents_remember.application.review_tree_comparison",
+          "repository_id": "agents-remember",
+          "task_id": "260928_maintained-invariant-knowledge",
+          "leaf_id": "260928-MIK-L104",
+          "comparison_number": 7,
+          "comparison_reference": "review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/7",
+          "code_base": {
+            "side": "base",
+            "repository": "/repo/code",
+            "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commit": null,
+            "ref": null,
+            "state": "available",
+            "detail": null
+          },
+          "code_candidate": {
+            "side": "candidate",
+            "repository": "/repo/code",
+            "tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "commit": null,
+            "ref": null,
+            "state": "available",
+            "detail": null
+          },
+          "memory_base": {
+            "side": "before",
+            "repository": "/repo/memory",
+            "tree": "cccccccccccccccccccccccccccccccccccccccc",
+            "commit": null,
+            "ref": null,
+            "state": "available",
+            "index_state": "complete",
+            "detail": null
+          },
+          "memory_candidate": {
+            "side": "after",
+            "repository": "/repo/memory",
+            "tree": "dddddddddddddddddddddddddddddddddddddddd",
+            "commit": null,
+            "ref": null,
+            "state": "available",
+            "index_state": "complete",
+            "detail": null
+          },
+          "converted_base": null,
+          "stored_memory_base_tree": "cccccccccccccccccccccccccccccccccccccccc",
+          "compared_memory_base_tree": "cccccccccccccccccccccccccccccccccccccccc",
+          "subject_binding_digest": null,
+          "recorded_at": "2026-10-18T09:00:00Z"
+        },
+        "scope": "the change to src/app.py",
+        "question": "why did it move?",
+        "collections": [
+          {
+            "name": "subject-wording",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          },
+          {
+            "name": "conditions-and-exclusions",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          },
+          {
+            "name": "family-guarantees-and-membership",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          },
+          {
+            "name": "recorded-effects",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          },
+          {
+            "name": "judgments",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          },
+          {
+            "name": "proofs",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          },
+          {
+            "name": "currentness",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          },
+          {
+            "name": "worklist",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          },
+          {
+            "name": "source-inventory-and-linked-locations",
+            "producer": "agents_remember.application.review_evidence_packet",
+            "population": "the collection rule 2 names",
+            "state": "not-selected",
+            "count": null,
+            "reason": "preparation selected no producer for this collection",
+            "items": [],
+            "truncated": false,
+            "continuation": null,
+            "limit": null
+          }
+        ],
+        "supplemental": [],
+        "claims": {
+          "claims": [
+            {
+              "claim_id": "c-present",
+              "authoring_revision": "rev-1",
+              "classification": "recorded-fact",
+              "subject": "the change to src/app.py",
+              "applicability": "this comparison",
+              "statement": "src/app.py gained one function",
+              "bases": [
+                {
+                  "kind": "tree-blob",
+                  "reference": "code-candidate:src/app.py",
+                  "state": "present",
+                  "limitation": null,
+                  "comparison_number": null,
+                  "side": "code-candidate",
+                  "tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "path": "src/app.py",
+                  "start_line": null,
+                  "end_line": null,
+                  "record_id": null,
+                  "record_revision": null,
+                  "row_id": null,
+                  "attempt": null,
+                  "proof_id": null,
+                  "execution": null,
+                  "receipt_id": null
+                }
+              ],
+              "limit": null
+            },
+            {
+              "claim_id": "c-gone",
+              "authoring_revision": "rev-1",
+              "classification": "unavailable-evidence",
+              "subject": "the earlier record of the same path",
+              "applicability": "this comparison",
+              "statement": "the earlier record cannot be read",
+              "bases": [
+                {
+                  "kind": "knowledge-record",
+                  "reference": "knowledge:old-record",
+                  "state": "unavailable",
+                  "limitation": "the record was pruned before this comparison was recorded",
+                  "comparison_number": null,
+                  "side": null,
+                  "tree": null,
+                  "path": "onboarding/src/app.md",
+                  "start_line": null,
+                  "end_line": null,
+                  "record_id": "old-record",
+                  "record_revision": 2,
+                  "row_id": null,
+                  "attempt": null,
+                  "proof_id": null,
+                  "execution": null,
+                  "receipt_id": null
+                }
+              ],
+              "limit": "the object is gone; today's record is not it"
+            }
+          ]
+        },
+        "evidence_map": {
+          "included": [],
+          "omissions": [
+            {
+              "item": "subject-wording",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            },
+            {
+              "item": "conditions-and-exclusions",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            },
+            {
+              "item": "family-guarantees-and-membership",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            },
+            {
+              "item": "recorded-effects",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            },
+            {
+              "item": "judgments",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            },
+            {
+              "item": "proofs",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            },
+            {
+              "item": "currentness",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            },
+            {
+              "item": "worklist",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            },
+            {
+              "item": "source-inventory-and-linked-locations",
+              "kind": "not-selected-collection",
+              "detail": "not-selected: preparation selected no producer for this collection",
+              "witness": "agents_remember.application.review_evidence_packet"
+            }
+          ],
+          "counts": [],
+          "edge_meanings": [],
+          "coverage": "the selected change"
+        },
+        "limits": {
+          "bytes_per_read": 262144,
+          "paths_per_packet": 64,
+          "records_per_collection": 200,
+          "relationship_depth": 2,
+          "pages_per_read": 4,
+          "measurement": null
+        },
+        "limitations": []
+      },
+      "supplemental": [],
+      "asset_ancestry": []
+    },
+    "asset_paths": [
+      "app.css",
+      "app.js",
+      "index.html"
+    ],
+    "detail": "revision 1 opens from its own 3 asset(s) for comparison review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/7"
+  },
+  "staleness": {
+    "state": "stale",
+    "frame_id": "host-and-presenter",
+    "revision": 1,
+    "retained": {
+      "comparison_owner": "agents_remember.application.review_tree_comparison",
+      "task_id": "260928_maintained-invariant-knowledge",
+      "leaf_id": "260928-MIK-L104",
+      "comparison_number": 7,
+      "comparison_reference": "review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/7",
+      "code_base_repository": "/repo/code",
+      "code_base_tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "code_base_commit": null,
+      "code_base_ref": null,
+      "code_candidate_repository": "/repo/code",
+      "code_candidate_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "code_candidate_commit": null,
+      "code_candidate_ref": null,
+      "memory_base_repository": "/repo/memory",
+      "memory_base_tree": "cccccccccccccccccccccccccccccccccccccccc",
+      "memory_base_commit": null,
+      "memory_base_ref": null,
+      "memory_candidate_repository": "/repo/memory",
+      "memory_candidate_tree": "dddddddddddddddddddddddddddddddddddddddd",
+      "memory_candidate_commit": null,
+      "memory_candidate_ref": null,
+      "converted_base_commit": null,
+      "converted_base_version": null,
+      "converted_base_code_commit": null,
+      "converted_base_tree": null,
+      "compared_memory_base_tree": "cccccccccccccccccccccccccccccccccccccccc",
+      "four_tree_digest": "8b7eac4459aef8aac072373d54296a27e31f6e882b414197e0eda1f298296554"
+    },
+    "selected": {
+      "comparison_owner": "agents_remember.application.review_tree_comparison",
+      "task_id": "260928_maintained-invariant-knowledge",
+      "leaf_id": "260928-MIK-L104",
+      "comparison_number": 8,
+      "comparison_reference": "review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/8",
+      "code_base_repository": "/repo/code",
+      "code_base_tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "code_base_commit": null,
+      "code_base_ref": null,
+      "code_candidate_repository": "/repo/code",
+      "code_candidate_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "code_candidate_commit": null,
+      "code_candidate_ref": null,
+      "memory_base_repository": "/repo/memory",
+      "memory_base_tree": "cccccccccccccccccccccccccccccccccccccccc",
+      "memory_base_commit": null,
+      "memory_base_ref": null,
+      "memory_candidate_repository": "/repo/memory",
+      "memory_candidate_tree": "dddddddddddddddddddddddddddddddddddddddd",
+      "memory_candidate_commit": null,
+      "memory_candidate_ref": null,
+      "converted_base_commit": null,
+      "converted_base_version": null,
+      "converted_base_code_commit": null,
+      "converted_base_tree": null,
+      "compared_memory_base_tree": "cccccccccccccccccccccccccccccccccccccccc",
+      "four_tree_digest": "8b7eac4459aef8aac072373d54296a27e31f6e882b414197e0eda1f298296554"
+    },
+    "changed": [
+      "comparison"
+    ],
+    "supplemental_state": "unread",
+    "regeneration_offered": true,
+    "detail": "revision 1 binds comparison review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/7; the selected comparison is review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/8 and comparison moved. The page is stale for this selection, regeneration is offered, and nothing starts by itself"
+  },
+  "presenter": {
+    "state": "ready",
+    "revision": 1,
+    "detail": "revision 1 opens from its own 3 asset(s) for comparison review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/7",
+    "entrypoint": "index.html",
+    "comparison": "review-comparison:260928_maintained-invariant-knowledge/260928-MIK-L104/7",
+    "attempts": [],
+    "live": null
+  },
+  "launch": {
+    "state": "ok",
+    "detail": "the launch choices are applied from the settings",
+    "harness": "hermes",
+    "model": "the-presenter-model",
+    "effort": null,
+    "provenance": {
+      "key": "orchestration.roles.review-presenter",
+      "source": "/tmp/frame-capture-xrw26j4n/settings.json",
+      "value": {
+        "harness": "hermes",
+        "model": "the-presenter-model",
+        "effort": null,
+        "mode": null
+      }
+    }
+  },
+  "design": {
+    "source": "default",
+    "available": true,
+    "words": 455,
+    "sha256": "bd739881dcff6c96ec5840d6900ebbf29e63f2e4bd5aa65ef5dc83ae5a30da13"
+  },
+  "policy": {
+    "policyDigest": "c66169211f9fcc86f101668bb31c89e61b5bd955d6d2635beda207dabc7608bc",
+    "originArrangement": "opaque-sandbox-v1",
+    "scripts": false,
+    "proof": {
+      "state": "absent",
+      "browser": null,
+      "browserVersion": null,
+      "observed": [],
+      "failedChecks": [],
+      "detail": ""
+    },
+    "limits": {
+      "assets-per-revision": {
+        "value": 64,
+        "unit": "files",
+        "enforced_by": "browser",
+        "where": "admission refuses a revision beyond the store's own file ceiling"
+      },
+      "bytes-per-revision": {
+        "value": 16777216,
+        "unit": "bytes",
+        "enforced_by": "browser",
+        "where": "publication refuses and one asset read is bounded before it is served"
+      },
+      "messages-per-second": {
+        "value": 20,
+        "unit": "messages",
+        "enforced_by": "browser",
+        "where": "the host protocol's token bucket refuses the excess without side effects"
+      },
+      "message-burst": {
+        "value": 40,
+        "unit": "messages",
+        "enforced_by": "browser",
+        "where": "the same bucket's burst ceiling"
+      },
+      "requests-per-session": {
+        "value": 240,
+        "unit": "requests",
+        "enforced_by": "browser",
+        "where": "after it the session answers refused:exhausted until it is reopened"
+      },
+      "message-bytes": {
+        "value": 4096,
+        "unit": "bytes",
+        "enforced_by": "browser",
+        "where": "the envelope is sized before it is parsed"
+      },
+      "active-frames": {
+        "value": 4,
+        "unit": "frames",
+        "enforced_by": "browser",
+        "where": "opening a fifth session disposes the least recently used one first"
+      },
+      "session-seconds": {
+        "value": 1800,
+        "unit": "seconds",
+        "enforced_by": "browser",
+        "where": "an idle session is revoked and its channel answers refused:revoked"
+      },
+      "workers": {
+        "value": 0,
+        "unit": "workers",
+        "enforced_by": "browser",
+        "where": "worker-src 'none' and child-src 'none' in the served policy"
+      },
+      "timers": {
+        "value": 0,
+        "unit": "enforced-limit",
+        "enforced_by": "container",
+        "where": "a browser page's timer count is not inspectable; hidden/disposed frames are dropped"
+      },
+      "heap-and-cpu": {
+        "value": 0,
+        "unit": "enforced-limit",
+        "enforced_by": "container",
+        "where": "no browser API caps a frame's heap or CPU; the frame process is the bound"
+      },
+      "gpu": {
+        "value": 0,
+        "unit": "enforced-limit",
+        "enforced_by": "container",
+        "where": "context is reachable only if a page asks; a GPU share needs a stronger container"
+      }
+    },
+    "containerRequired": [
+      "timers",
+      "heap-and-cpu",
+      "gpu"
+    ]
+  },
+  "sessions": []
+}

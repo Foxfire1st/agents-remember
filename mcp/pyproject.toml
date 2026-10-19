@@ -89,5 +89,11 @@ where = ["src"]
 agents_remember = [
   "package_data/**/*",
   "package_data/benchmarks/.gitignore",
+  # The presenter capability text ships beside its module as well as in the capsule contract's
+  # generated package-data copy: canvas/presenter_inputs.py resolves it module-relatively, and an
+  # installed build has no checkout to fall back on. The two are byte-identical, and
+  # mcp/tests/test_canvas_capsule_text.py fails on drift.
+  "canvas/*.md",
+  "canvas/*.mjs",
   "cli/*.mjs",
 ]

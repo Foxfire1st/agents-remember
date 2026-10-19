@@ -47,6 +47,10 @@ SRC = "mcp/src/agents_remember/"
 # Identifiers in which the four letters belong to two unrelated words, each with the files it
 # stands in. Nothing else of a listed file is allowed.
 ALLOWED_IDENTIFIERS: dict[str, tuple[str, ...]] = {
+    # A regex anchor cache in the pinned Shiki bundle: the letters cross the two
+    # words, not a host name. Keep the upstream bytes and kit manifest unchanged.
+    "_anchorCache": (SRC + "package_data/canvas/kit/shiki/4.5.0/shiki-kit.js",),
+    "_buildAnchorCache": (SRC + "package_data/canvas/kit/shiki/4.5.0/shiki-kit.js",),
     "_CuratorCandidateInputs": (
         SRC + "application/memory_quality/controller.py",
         "mcp/tests/test_memory_quality_runs.py",

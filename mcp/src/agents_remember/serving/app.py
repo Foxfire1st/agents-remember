@@ -47,6 +47,7 @@ from agents_remember.serving._app_routes import (
 )
 from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import process_serving_build
+from agents_remember.serving.canvas import canvas_hosts, register_canvas_routes
 from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.files import register_files_routes
@@ -67,6 +68,7 @@ from agents_remember.serving.review import register_review_routes
 from agents_remember.serving.review_summary import register_review_summary_route
 from agents_remember.serving.review_trees import register_review_trees_route
 from agents_remember.serving.static import mount_static
+from agents_remember.serving.write_guard import RefuseCrossOriginWrites, RefuseForeignHosts
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -183,6 +185,18 @@ def create_app(
     register_knowledge_reader_route(app, collaborators.knowledge_reader)
     if collaborators.extra_api_routes is not None:
         collaborators.extra_api_routes(app)
+    # The generated page's host (MIK-R104) and the presenter's start/session surface (MIK-R105).
+    # The review-trees port is the landed comparison owner, so a presenter start prepares its
+    # evidence through it rather than through a second comparison.
+    register_canvas_routes(app, canvas_hosts(config, review_trees=collaborators.review_trees))
+    # Every state-changing request from a foreign or opaque origin is refused before any route
+    # (MIK-R104 rule 4): local-first is a deployment posture, not a write authorization. The frame
+    # navigating itself is an accepted channel (v2, D331), so no navigation guard is installed: a
+    # navigated frame keeps its sandbox flags and its writes still fail this guard as null-origin.
+    app.add_middleware(RefuseCrossOriginWrites)
+    # Rule 15 (D332): every route, reads included, answers only this dashboard's own host and port,
+    # so a page reached through a rebinding name never reaches a route.
+    app.add_middleware(RefuseForeignHosts)
     mount_static(app)
     return app
 

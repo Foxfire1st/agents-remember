@@ -104,6 +104,13 @@ KNOWN_ROLES = frozenset(
         "bootstrap",
     }
 )
+# The host capabilities that carry a launch block but are not lifecycle seats (L104-B17). The
+# role family is the one landed owner of launch choices and of their per-field provenance, so a
+# capability's choices are admitted under ``orchestration.roles.<capability id>`` -- the key the
+# product's design names -- and are refused by the same rules a seat's row is (repo-local rows
+# carry no permission authority). A capability is never dispatchable as a seat: ``CAPSULE_ROLES``,
+# the dispatch tables and ``ROLE_LEVELS`` stay seat-only, and nothing resolves one from here.
+CAPABILITY_IDS = frozenset({"review-presenter"})
 KNOWN_ROLE_LAUNCH_FIELDS = frozenset(
     {
         "harness",

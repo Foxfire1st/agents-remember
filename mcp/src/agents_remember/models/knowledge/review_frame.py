@@ -139,6 +139,8 @@ class FrameAsset(KnowledgeModel):
 
 def _suffix(path: str) -> str:
     name = path.rsplit("/", 1)[-1]
+    if name == "LICENSE":
+        return ".txt"
     _stem, dot, suffix = name.rpartition(".")
     return f".{suffix.lower()}" if dot else ""
 

@@ -142,6 +142,10 @@ OTHER_ATTRIBUTES_ALLOWED = {
 # A module name computed at run time cannot be checked, so each module that imports one is named.
 # None of them may spell a SQLite module's name in any string.
 COMPUTED_IMPORTS_ALLOWED = {
+    "canvas/proof_record.py": (
+        "hashes the running enforcement modules named by the policy's finite "
+        "ENFORCEMENT_SOURCES tuple; the name never comes from an author or a request"
+    ),
     "memory_quality/style/citations/grammars.py": (
         "loads the tree-sitter grammar package its own GRAMMAR_PACKAGES table names"
     ),

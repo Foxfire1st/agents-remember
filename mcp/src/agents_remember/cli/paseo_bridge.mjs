@@ -97,6 +97,14 @@
 //   archivedAt, createdAt}: what the runtime reports as applied, `thinkingOptionId` being the
 //   effective one.
 //
+//   presenter-transcript {agentId: string}
+//            -> {serverId, state, available, entries: [{id, at, role, text}], hasOlder?, detail?}
+//            Up to 200 presenter-only timeline entries, without loading a closed session.
+//
+//   presenter-cancel {agentId: string}
+//            -> {serverId, agent}
+//            Cancels only the named presenter session; it never changes an AR role.
+//
 //   agent-state  {agentId: string}
 //            -> {serverId, agent: STATE | null}
 //            What the runtime reports about the agent with exactly that id, archived or not; null
@@ -240,6 +248,8 @@ const COMMANDS = {
   'agent-get': getAgent,
   'agent-archive': archiveAgent,
   'agent-state': readAgentState,
+  'presenter-transcript': presenterTranscript,
+  'presenter-cancel': presenterCancel,
   'agents-live': listLiveAgents,
   'agent-resume': resumeAgent,
   'agent-send': sendToAgent,
@@ -602,12 +612,23 @@ function agentCreation(input, agentId) {
   // the pinned host reads for it is disallowedTools of a provider's options; which provider,
   // and where the host reads it, stands in application/agent_binding.py. Nothing else is
   // handed over under this name.
-  const providerOptions = input.providerOptions
+  let providerOptions = input.providerOptions
   if (providerOptions !== undefined && (!isRecord(providerOptions) ||
       Object.keys(providerOptions).some((key) => key !== 'disallowedTools') ||
       !Array.isArray(providerOptions.disallowedTools) || providerOptions.disallowedTools.length === 0 ||
       providerOptions.disallowedTools.some((rule) => !nonEmpty(rule)))) {
     throw failure('invalid_bridge_payload', 'providerOptions must hold disallowedTools as a list of rules and nothing else.')
+  }
+  if (input.labels['ar.capability'] === 'review-presenter') {
+    if (provider !== 'claude' || !isRecord(appliedServers) ||
+        Object.keys(appliedServers).length !== 1 || !appliedServers['review-presenter']) {
+      throw failure('presenter_confinement_unavailable',
+        'The qualified presenter boundary requires Claude with only its review-presenter tool server.')
+    }
+    // Native Claude CLI enforcement: no built-in filesystem/shell/delegation tools and no
+    // inherited user/project MCP servers. This capability's exact read/write tools are its
+    // entire tool authority, on every resume. It is never an instruction-text fence.
+    providerOptions = { ...providerOptions, extraArgs: { tools: '', 'strict-mcp-config': null } }
   }
   // What the runtime keeps with the agent and applies again on every resume of its session.
   const kept = {
@@ -694,6 +715,46 @@ async function readAgentState({ api, daemon }, input) {
   const agentId = requiredText(input, 'agentId')
   const agent = await findAgent(api, daemon, agentId)
   return { serverId: serverIdOf(daemon), agent: agent ? await agentState(api, agent) : null }
+}
+
+async function presenterAgent(api, daemon, input) {
+  const agent = await findAgent(api, daemon, requiredText(input, 'agentId'))
+  if (!agent || agent.labels?.['ar.capability'] !== 'review-presenter') {
+    throw failure('unknown_presenter', 'The host has no presenter under this exact identity.')
+  }
+  return agent
+}
+
+async function presenterTranscript({ api, daemon }, input) {
+  const agent = await presenterAgent(api, daemon, input)
+  // A timeline read loads a closed native session. Passive history must not resume it.
+  if (agent.status === CLOSED_SESSION || nonEmpty(agent.archivedAt)) {
+    return {serverId: serverIdOf(daemon), state: agent.status, available: false, entries: [],
+      detail: 'Native history cannot be read without loading this closed/archived session.'}
+  }
+  const page = await api.agents.ref(agent.id).timeline.refetch({
+    direction: 'tail', limit: 200, projection: 'projected'
+  })
+  return {
+    serverId: serverIdOf(daemon), state: agent.status, available: true,
+    entries: (page?.entries ?? []).filter((entry) =>
+      ['user_message', 'assistant_message'].includes(entry?.item?.type)
+    ).map((entry) => ({
+      id: entry.id, at: entry.timestamp ?? entry.createdAt ?? '',
+      role: entry.item.type === 'user_message' ? 'developer' : 'presenter',
+      text: String(entry.item.text ?? '').slice(0, 8192)
+    })),
+    hasOlder: page?.hasOlder === true
+  }
+}
+
+async function presenterCancel({ api, daemon }, input) {
+  const agent = await presenterAgent(api, daemon, input)
+  // The pinned public handle exposes no cancellation. The daemon client's named cancellation
+  // is the host operation; it cancels this exact session and never archives or replaces it.
+  await daemon.cancelAgent(agent.id)
+  const after = await findAgent(api, daemon, agent.id)
+  return { serverId: serverIdOf(daemon), agent: await agentState(api, after ?? agent) }
 }
 
 async function resumeAgent({ api, daemon }, input) {

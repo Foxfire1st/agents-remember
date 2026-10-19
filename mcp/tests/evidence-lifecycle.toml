@@ -7,6 +7,11 @@ owner = "mcp/src/agents_remember/controlplane/durable_store.py"
 evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
 
 [[contract]]
+id = "canvas-host-and-presenter-cases"
+owner = "mcp/tests/canvas_host_test_support.py"
+evidence_node = "mcp/tests/test_canvas_serving.py::test_generation_is_explicit_and_publishes_through_the_store"
+
+[[contract]]
 id = "knowledge-diff-cases"
 owner = "mcp/tests/diff_scope_test_support.py"
 evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
@@ -158,6 +163,19 @@ consumers = [
   "mcp/tests/test_bootstrap_uv_minimum_version.py",
   "mcp/tests/test_candidate_identity.py",
   "mcp/tests/test_canonical_skill_worklist.py",
+  "mcp/tests/test_canvas_capsule_text.py",
+  "mcp/tests/test_canvas_host.py",
+  "mcp/tests/test_canvas_kit.py",
+  "mcp/tests/test_canvas_kit_assets.py",
+  "mcp/tests/test_canvas_presenter.py",
+  "mcp/tests/test_canvas_presenter_authoring.py",
+  "mcp/tests/test_canvas_presenter_files.py",
+  "mcp/tests/test_canvas_presenter_host.py",
+  "mcp/tests/test_canvas_presenter_settings.py",
+  "mcp/tests/test_canvas_presenter_store.py",
+  "mcp/tests/test_canvas_prospective.py",
+  "mcp/tests/test_canvas_readiness.py",
+  "mcp/tests/test_canvas_serving.py",
   "mcp/tests/test_capsule_delivery.py",
   "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",
@@ -740,6 +758,34 @@ consumers = [
   "mcp/tests/test_tool_refusal_conformance.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_candidate_capture.py",
+]
+
+[[artifact]]
+path = "mcp/tests/canvas_host_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "canvas-host-and-presenter-cases"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the landed owners over a temporary task: one recorded comparison, its admitted R102 packet, a published R103 revision, the review-trees answer and a confined runner double"
+introduced_by = "260928-MIK-L104"
+lifetime = "permanent"
+permanence_rationale = "Every canvas case needs a task directory with a published revision, an admitted packet and a comparison record; the builders are the one place those shapes are made, so a host, presenter or route case cannot quietly disagree with the store it consumes."
+replacement_contract = "contract:canvas-host-and-presenter-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_canvas_host.py",
+  "mcp/tests/test_canvas_kit.py",
+  "mcp/tests/test_canvas_kit_assets.py",
+  "mcp/tests/test_canvas_presenter.py",
+  "mcp/tests/test_canvas_presenter_authoring.py",
+  "mcp/tests/test_canvas_presenter_host.py",
+  "mcp/tests/test_canvas_presenter_settings.py",
+  "mcp/tests/test_canvas_presenter_store.py",
+  "mcp/tests/test_canvas_prospective.py",
+  "mcp/tests/test_canvas_readiness.py",
+  "mcp/tests/test_canvas_serving.py",
 ]
 
 [[artifact]]
@@ -1554,6 +1600,19 @@ consumers = [
   "mcp/tests/test_bootstrap_uv_minimum_version.py",
   "mcp/tests/test_candidate_identity.py",
   "mcp/tests/test_canonical_skill_worklist.py",
+  "mcp/tests/test_canvas_capsule_text.py",
+  "mcp/tests/test_canvas_host.py",
+  "mcp/tests/test_canvas_kit.py",
+  "mcp/tests/test_canvas_kit_assets.py",
+  "mcp/tests/test_canvas_presenter.py",
+  "mcp/tests/test_canvas_presenter_authoring.py",
+  "mcp/tests/test_canvas_presenter_files.py",
+  "mcp/tests/test_canvas_presenter_host.py",
+  "mcp/tests/test_canvas_presenter_settings.py",
+  "mcp/tests/test_canvas_presenter_store.py",
+  "mcp/tests/test_canvas_prospective.py",
+  "mcp/tests/test_canvas_readiness.py",
+  "mcp/tests/test_canvas_serving.py",
   "mcp/tests/test_capsule_delivery.py",
   "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",

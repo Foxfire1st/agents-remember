@@ -1,0 +1,494 @@
+{
+  "kit": "ar-canvas-kit/v1",
+  "admittedPrefix": "kit/",
+  "contract": "A page names a kit file with a path relative to its own revision, e.g. kit/shiki/4.5.0/shiki-kit.js. Every kit file it names must be carried as an admitted asset of that revision under the same relative path; no other host path, no CDN and no absolute URL is part of the kit.",
+  "entries": [
+    {
+      "id": "shiki",
+      "name": "Shiki with @shikijs/magic-move",
+      "version": "4.5.0",
+      "licence": "MIT",
+      "licenceFile": "shiki/4.5.0/LICENSE",
+      "licenceQuotation": "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction",
+      "purpose": "Offline syntax highlighting and code-to-code morphing: five languages (javascript, typescript, json, bash, python), two themes (github-dark, github-light), the magic-move web component that animates one snippet into another, and its stylesheet.",
+      "entry": "shiki/4.5.0/shiki-kit.js",
+      "files": [
+        {
+          "path": "LICENSE",
+          "bytes": 1121,
+          "sha256": "7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee"
+        },
+        {
+          "path": "magic-move.css",
+          "bytes": 1149,
+          "sha256": "ccd01d7cffacbde8fbd77de4e4412dfb1e2589de121e676ef12ff368308e2a16"
+        },
+        {
+          "path": "shiki-kit.js",
+          "bytes": 684647,
+          "sha256": "80cfe7b513e77da768d5a2858aa710581d1768edd6606b83bc239cb09695c5d1"
+        }
+      ],
+      "dependencyLicences": [
+        {
+          "file": "LICENSES/@shikijs__core.txt",
+          "bytes": 1121,
+          "sha256": "7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee"
+        },
+        {
+          "file": "LICENSES/@shikijs__engine-javascript.txt",
+          "bytes": 1121,
+          "sha256": "7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee"
+        },
+        {
+          "file": "LICENSES/@shikijs__langs.txt",
+          "bytes": 1121,
+          "sha256": "7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee"
+        },
+        {
+          "file": "LICENSES/@shikijs__magic-move.txt",
+          "bytes": 1121,
+          "sha256": "7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee"
+        },
+        {
+          "file": "LICENSES/@shikijs__primitive.txt",
+          "bytes": 1121,
+          "sha256": "7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee"
+        },
+        {
+          "file": "LICENSES/@shikijs__themes.txt",
+          "bytes": 1121,
+          "sha256": "7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee"
+        },
+        {
+          "file": "LICENSES/@shikijs__types.txt",
+          "bytes": 1121,
+          "sha256": "7a9d8d01038aeacf9e5bcdabbddf2a7815200dce9fc1118468cc553e00ae3eee"
+        },
+        {
+          "file": "LICENSES/@shikijs__vscode-textmate.txt",
+          "bytes": 1083,
+          "sha256": "b5cb7ff7859e7d282d98fc43ab081b0dda5dc659dc3385cf65740c759a7e6a6c"
+        },
+        {
+          "file": "LICENSES/ccount.txt",
+          "bytes": 1099,
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        },
+        {
+          "file": "LICENSES/character-entities-html4.txt",
+          "bytes": 1099,
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        },
+        {
+          "file": "LICENSES/character-entities-legacy.txt",
+          "bytes": 1099,
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        },
+        {
+          "file": "LICENSES/comma-separated-tokens.txt",
+          "bytes": 1099,
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        },
+        {
+          "file": "LICENSES/diff-match-patch-es.txt",
+          "bytes": 11342,
+          "sha256": "c5922472726ff1692b24c9a65e8faf36f6e61afdbee2d9df3f2cf5bc82c429d3"
+        },
+        {
+          "file": "LICENSES/hast-util-to-html.txt",
+          "bytes": 1094,
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        },
+        {
+          "file": "LICENSES/hast-util-whitespace.txt",
+          "bytes": 1099,
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        },
+        {
+          "file": "LICENSES/html-void-elements.txt",
+          "bytes": 1099,
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        },
+        {
+          "file": "LICENSES/ohash.txt",
+          "bytes": 1078,
+          "sha256": "46231df5a7733c3f52f11b71f3df61813007745b62b09031acfb45fb42d75082"
+        },
+        {
+          "file": "LICENSES/oniguruma-parser.txt",
+          "bytes": 1077,
+          "sha256": "5fe78c91b36c6147ed0b6ab1631ce731165b7dd5e00482be1f027d46d12a8082"
+        },
+        {
+          "file": "LICENSES/oniguruma-to-es.txt",
+          "bytes": 1077,
+          "sha256": "c1a5a1ebc88f3e0f3caa04c0af52bf8f3a5405a467337a09594ae1ad149cec83"
+        },
+        {
+          "file": "LICENSES/property-information.txt",
+          "bytes": 1101,
+          "sha256": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b"
+        },
+        {
+          "file": "LICENSES/regex-recursion.txt",
+          "bytes": 1072,
+          "sha256": "3d19c2b6246b3072547af2bd05e6b4c09bd3d15955590f1f1e1d20382c919a49"
+        },
+        {
+          "file": "LICENSES/regex-utilities.txt",
+          "bytes": 1072,
+          "sha256": "8ca7af4f6c753e5ab8388e1078d94ce4650723bba4b0d4dfe562fbd45fb4a4e6"
+        },
+        {
+          "file": "LICENSES/regex.txt",
+          "bytes": 1072,
+          "sha256": "3d19c2b6246b3072547af2bd05e6b4c09bd3d15955590f1f1e1d20382c919a49"
+        },
+        {
+          "file": "LICENSES/space-separated-tokens.txt",
+          "bytes": 1099,
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        },
+        {
+          "file": "LICENSES/stringify-entities.txt",
+          "bytes": 1106,
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+        },
+        {
+          "file": "LICENSES/zwitch.txt",
+          "bytes": 1099,
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "dependencies": [
+        {
+          "package": "@shikijs/core",
+          "version": "4.5.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@shikijs__core.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "@shikijs/engine-javascript",
+          "version": "4.5.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@shikijs__engine-javascript.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "@shikijs/langs",
+          "version": "4.5.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@shikijs__langs.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "@shikijs/magic-move",
+          "version": "4.5.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@shikijs__magic-move.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "@shikijs/primitive",
+          "version": "4.5.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@shikijs__primitive.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "@shikijs/themes",
+          "version": "4.5.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@shikijs__themes.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "@shikijs/types",
+          "version": "4.5.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@shikijs__types.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "@shikijs/vscode-textmate",
+          "version": "10.0.2",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@shikijs__vscode-textmate.txt",
+          "firstLine": "The MIT License (MIT)"
+        },
+        {
+          "package": "ccount",
+          "version": "2.0.1",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/ccount.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "character-entities-html4",
+          "version": "2.1.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/character-entities-html4.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "character-entities-legacy",
+          "version": "3.0.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/character-entities-legacy.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "comma-separated-tokens",
+          "version": "2.0.3",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/comma-separated-tokens.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "diff-match-patch-es",
+          "version": "2.0.1",
+          "declared": "Apache-2.0",
+          "licenceFile": "LICENSES/diff-match-patch-es.txt",
+          "firstLine": "Apache License"
+        },
+        {
+          "package": "hast-util-to-html",
+          "version": "9.0.5",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/hast-util-to-html.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "hast-util-whitespace",
+          "version": "3.0.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/hast-util-whitespace.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "html-void-elements",
+          "version": "3.0.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/html-void-elements.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "ohash",
+          "version": "2.0.12",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/ohash.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "oniguruma-parser",
+          "version": "0.12.2",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/oniguruma-parser.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "oniguruma-to-es",
+          "version": "4.3.6",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/oniguruma-to-es.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "property-information",
+          "version": "7.2.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/property-information.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "regex",
+          "version": "6.1.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/regex.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "regex-recursion",
+          "version": "6.0.2",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/regex-recursion.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "regex-utilities",
+          "version": "2.3.0",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/regex-utilities.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "space-separated-tokens",
+          "version": "2.0.2",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/space-separated-tokens.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "stringify-entities",
+          "version": "4.0.4",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/stringify-entities.txt",
+          "firstLine": "(The MIT License)"
+        },
+        {
+          "package": "zwitch",
+          "version": "2.0.4",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/zwitch.txt",
+          "firstLine": "(The MIT License)"
+        }
+      ],
+      "build": "esbuild 0.28.1 --bundle --format=esm --platform=browser --target=es2022 --minify --legal-comments=eof; entry imports shiki/core, shiki/engine/javascript, five @shikijs/langs, two @shikijs/themes and @shikijs/magic-move/dist/web-component.mjs",
+      "notes": [
+        "The JavaScript regex engine is used, so no oniguruma wasm file is shipped or fetched.",
+        "The bundle contains no fetch, XHR, WebSocket or beacon call and no absolute URL."
+      ],
+      "bytes": 725730
+    },
+    {
+      "id": "motion-canvas",
+      "name": "Motion Canvas",
+      "version": "3.17.2",
+      "licence": "MIT",
+      "licenceFile": "motion-canvas/3.17.2/LICENSE",
+      "licenceQuotation": "Copyright (c) 2022 motion-canvas",
+      "purpose": "Keyframed vector scenes: Player/PlaybackManager/Stage, the 2D node tree (Rect, Txt, Layout, Node, View2D) and the easing set, with a thin adapter (scene, createKit, renderFrame, paint) so a page can render a frame without a project file or the editor.",
+      "entry": "motion-canvas/3.17.2/motion-canvas-kit.js",
+      "files": [
+        {
+          "path": "LICENSE",
+          "bytes": 1070,
+          "sha256": "b3f12201916c5d478263cd210cf17f3d0c007d03bd574e0b77cac6307953068e"
+        },
+        {
+          "path": "motion-canvas-kit.js",
+          "bytes": 184268,
+          "sha256": "fe9b6f9076e3112e872bb9e0f01b4a4da08c045392ebff9c8a504266384e186e"
+        }
+      ],
+      "dependencyLicences": [
+        {
+          "file": "LICENSES/@motion-canvas__2d.txt",
+          "bytes": 1070,
+          "sha256": "b3f12201916c5d478263cd210cf17f3d0c007d03bd574e0b77cac6307953068e"
+        },
+        {
+          "file": "LICENSES/@motion-canvas__core.txt",
+          "bytes": 1070,
+          "sha256": "b3f12201916c5d478263cd210cf17f3d0c007d03bd574e0b77cac6307953068e"
+        },
+        {
+          "file": "LICENSES/chroma-js.txt",
+          "bytes": 2418,
+          "sha256": "c266032eef15ef0c01e7b0cca314b2944399d357f18d591e6ca72699d667cd23"
+        }
+      ],
+      "dependencies": [
+        {
+          "package": "@motion-canvas/2d",
+          "version": "3.17.2",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@motion-canvas__2d.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "@motion-canvas/core",
+          "version": "3.17.2",
+          "declared": "MIT",
+          "licenceFile": "LICENSES/@motion-canvas__core.txt",
+          "firstLine": "MIT License"
+        },
+        {
+          "package": "chroma-js",
+          "version": "2.4.2",
+          "declared": "(BSD-3-Clause AND Apache-2.0)",
+          "licenceFile": "LICENSES/chroma-js.txt",
+          "firstLine": "chroma.js - JavaScript library for color conversions"
+        }
+      ],
+      "build": "esbuild 0.28.1 --bundle --format=esm --platform=browser --target=es2022 --minify --legal-comments=eof over @motion-canvas/core and @motion-canvas/2d plus the adapter in the entry (scene/createKit/renderFrame/paint)",
+      "notes": [
+        "MediaNode loads its own src through fetch; a page that points it at a relative admitted path stays offline. No absolute URL is fetched by the bundle."
+      ],
+      "bytes": 189896
+    },
+    {
+      "id": "open-generative-ui",
+      "name": "OpenGenerativeUI (upstream: OpenIntelligentUI)",
+      "version": "0.1.0-8391a94",
+      "licence": "MIT",
+      "licenceFile": "open-generative-ui/0.1.0-8391a94/LICENSE",
+      "licenceQuotation": "Copyright (c) Atai Barkai",
+      "purpose": "The design system for generated panels: theme tokens (light and dark), SVG diagram classes (.box/.node/.arr/.leader, .c-* ramps, .t/.ts/.th text), form-control styles, a first-render stagger and the generation skill text.",
+      "entry": "open-generative-ui/0.1.0-8391a94/open-generative-ui-kit.js",
+      "files": [
+        {
+          "path": "LICENSE",
+          "bytes": 1067,
+          "sha256": "15a0e5343aea872c0573ad72feb6044b336f162d724cc1673c608e6b37ea071b"
+        },
+        {
+          "path": "PROVENANCE.md",
+          "bytes": 1419,
+          "sha256": "6dc534c8d287dcdba8aa0e253e5f31bb8bbccd3a546f21deda3f57ca4520477e"
+        },
+        {
+          "path": "open-generative-ui-kit.js",
+          "bytes": 16118,
+          "sha256": "6c35f6d329e289d87d01d78fb82438f61b4c94e86e5dacdb0e230fbaefa17f57"
+        }
+      ],
+      "dependencyLicences": [],
+      "dependencies": [],
+      "build": "esbuild 0.28.1 --bundle --format=esm --platform=browser --target=es2022 --minify --legal-comments=eof over packages/design-system/src/index.ts at commit 8391a94",
+      "notes": [
+        "Upstream publishes no npm package and no tags; the pin is the commit 8391a94c1c3939c679e40ddd7bfc08a9ef690e70 and the package version 0.1.0 in its private packages/design-system/package.json.",
+        "index.ts is vendored with its last 758 bytes removed: the IMPORTMAP and IMPORTMAP_SCRIPT_TAG exports, which map three/gsap/d3/chart.js to esm.sh. Shipping them would be a network dependency, so they are not part of the offline kit."
+      ],
+      "bytes": 18604
+    },
+    {
+      "id": "ar-video",
+      "name": "ar-video engine vocabulary",
+      "version": "23fd71bf",
+      "licence": "own material (no licence file; not third-party)",
+      "licenceFile": null,
+      "licenceQuotation": null,
+      "purpose": "The developer's video repo, reduced to a dependency-free ESM module (palette col(), the easing/arithmetic set, the Canvas2D perspective camera Proj with fog, orbit and orbitKeys, strokeSegs/curveSegs/spark) and VOCABULARY.md, the techniques a page can copy.",
+      "entry": "ar-video/23fd71bf/ar-video-vocabulary.js",
+      "files": [
+        {
+          "path": "PROVENANCE.md",
+          "bytes": 1315,
+          "sha256": "66110f0f0a93d56203b0b9c641a67a9db256676a92be15918c39b3ac16a79881"
+        },
+        {
+          "path": "VOCABULARY.md",
+          "bytes": 6747,
+          "sha256": "6268f5976f710d3db4b380ac97b8037ed0fc09d2dd01e6dfb24d4bc7352625d8"
+        },
+        {
+          "path": "ar-video-vocabulary.js",
+          "bytes": 4354,
+          "sha256": "e58d75c8afaeed13277c41d0713886b6f0ba091c6d522cff2f5547a5c69aa075"
+        }
+      ],
+      "dependencyLicences": [],
+      "dependencies": [],
+      "build": "esbuild 0.28.1 --bundle --format=esm --platform=browser --target=es2022 --minify --legal-comments=eof over src/engine/{palette,math,three}.ts at commit 23fd71bf",
+      "notes": [
+        "The repo has no dependencies and no LICENSE file; it is the developer's own material, shipped by its owner, so there is no third-party licence to read or pass on.",
+        "The repo is otherwise read-only; nothing in it is modified by the kit."
+      ],
+      "bytes": 12416
+    }
+  ],
+  "totalBytes": 946646
+}

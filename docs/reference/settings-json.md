@@ -553,6 +553,13 @@ Paseo role launches read these choices from the host's running catalog, not a bu
 | `stepUp` | none | One user-layer alternative with the same launch fields and optional `afterTries`; never nested. |
 | `launchArgs`, `promptKeywords`, `sessionCommands` | none | Accepted; no code reads them in this build. `server_info` names the ones a file holds under `unusedSettingsKeys`. |
 
+The same family admits one non-seat capability id, `review-presenter` (the review canvas's authoring
+capability, MIK-R105). Its row is validated by every rule above -- unknown fields and a repository
+row's `mode`/`notes`/permission features refuse with the file and key -- but it is never dispatchable
+as a lifecycle seat. The capability applies `harness`, `model`, `effort`, `mode`, `serviceTier`,
+`featureValues` and `notes` through the native launch. A row naming `stepUp` alone refuses the
+capability's launch by name because it owns no seat replacement ladder.
+
 `orchestration.roles.<role>.stepUp` names an alternative `harness`, `model`, `effort`,
 `serviceTier`, `mode`, `featureValues`, and `notes`. It is user-layer only. For Worker,
 a try is a recorded code-review round ending with findings remaining; for Curator it is

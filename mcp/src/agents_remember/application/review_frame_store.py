@@ -418,6 +418,9 @@ def finish_draft(  # noqa: PLR0913 - one outcome, its identity, time and admitte
 
 
 def _media_type(path: str) -> str | None:
+    # Pinned kit licences retain their upstream basename and use the existing plain-text type.
+    if Path(path).name == "LICENSE":
+        return "text/plain"
     _stem, dot, suffix = path.rpartition(".")
     return _MEDIA_BY_SUFFIX.get(f".{suffix.lower()}") if dot else None
 

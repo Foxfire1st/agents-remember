@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 from agents_remember.kernel._agentic_settings_core import (
+    CAPABILITY_IDS,
     COMPLEXITY_SCALE,
     DEFAULT_COMMIT_CHECK_TIMEOUT_SECONDS,
     DEFAULT_LOOP_MAX_ROUNDS,
@@ -212,7 +213,7 @@ def _parse_step_up(raw: object, role: str, owner: str, source: str) -> RoleStepU
 def _resolve_role_keys(raw: object, *, owner: str, source: str) -> dict[str, Any]:
     """Admit the earlier role key without rewriting the settings file."""
     roles = _require_object(raw, owner, source)
-    _refuse_unknown(roles, KNOWN_ROLES | {"system-specialist"}, owner, source)
+    _refuse_unknown(roles, KNOWN_ROLES | CAPABILITY_IDS | {"system-specialist"}, owner, source)
     if "system-specialist" not in roles:
         return roles
     if "investigator" in roles and roles["investigator"] != roles["system-specialist"]:

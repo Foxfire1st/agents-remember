@@ -55,13 +55,26 @@ RULE21_ADMITTED_NAMES = {
 }
 
 
+# MIK-R104/105: the qualified presenter is a confined capability, not a generic role
+# launch. These two owners name the only provider whose native tool boundary was
+# qualified (D341); another provider name must fail until separately qualified.
+PRESENTER_MODULES = {
+    "canvas/presenter_native.py": "the qualified presenter start refuses providers "
+    "without the measured native tool boundary; it is not a generic launch default",
+    "cli/paseo_bridge.mjs": "the host-side presenter create applies the qualified "
+    "provider's native empty built-in tools and strict MCP config on every resume",
+}
+PRESENTER_ADMITTED_NAMES = {name: {"Claude", "claude"} for name in PRESENTER_MODULES}
+ADMITTED_NAMES = RULE21_ADMITTED_NAMES | PRESENTER_ADMITTED_NAMES
+
+
 def guard_passes(name: str, found: list[str]) -> bool:
     """Whether the harness-name guard accepts ``found`` in the named scanned file."""
 
     if name in RULE6_MODULES:
         return found != []
-    if name in RULE21_MODULES:
-        return set(found) == RULE21_ADMITTED_NAMES[name]
+    if name in ADMITTED_NAMES:
+        return set(found) == ADMITTED_NAMES[name]
     return found == []
 
 
@@ -179,6 +192,11 @@ class NoHarnessNameTests(unittest.TestCase):
         self.assertEqual(sorted(RULE21_MODULES), ["cli/paseo_catalog.py", "cli/paseo_launch.py"])
         for _name, reason in RULE21_MODULES.items():
             self.assertGreater(len(reason), 40)
+        self.assertEqual(
+            sorted(PRESENTER_MODULES), ["canvas/presenter_native.py", "cli/paseo_bridge.mjs"]
+        )
+        for reason in PRESENTER_MODULES.values():
+            self.assertGreater(len(reason), 40)
         for path, name in zip(scanned, names, strict=True):
             with self.subTest(name):
                 text = path.read_text(encoding="utf-8")
@@ -188,7 +206,7 @@ class NoHarnessNameTests(unittest.TestCase):
                 )
         # The R71 admission is exact: the admitted words pass, an unrelated new
         # provider word fails, and silence fails (the mechanism must stay named).
-        for name, admitted in RULE21_ADMITTED_NAMES.items():
+        for name, admitted in ADMITTED_NAMES.items():
             with self.subTest(witness=name):
                 self.assertTrue(guard_passes(name, sorted(admitted)))
                 self.assertFalse(guard_passes(name, sorted(admitted | {"eve"})))
@@ -196,7 +214,7 @@ class NoHarnessNameTests(unittest.TestCase):
         # A mutant probe on the real files: an unrelated provider decision added to
         # either R71 file's actual text fails the guard, so the admission cannot
         # silently widen to new harness/provider branches.
-        for name in RULE21_ADMITTED_NAMES:
+        for name in ADMITTED_NAMES:
             with self.subTest(mutant=name):
                 text = (PACKAGE / name).read_text(encoding="utf-8")
                 mutated = (
