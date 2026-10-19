@@ -145,3 +145,5 @@ class LayoutMarker(FileModel):
 
     schema_: Literal["ar-memory-layout/v2"] = Field(default=LAYOUT_MARKER_SCHEMA, alias="schema")
     conversion: Label
+    dependent_links: dict[str, list[str]] | None = None
+    """Writer-derived target-to-record paths, so a landing need not search record bodies."""

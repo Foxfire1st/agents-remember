@@ -184,6 +184,8 @@ class MemoryState:
     base: KnowledgeTree | None
     documents: dict[str, dict[str, Any]] = field(default_factory=dict)
     removed: set[str] = field(default_factory=set)
+    removed_ids: set[str] = field(default_factory=set)
+    """The records this operation removed: a row about one is consistent with the produced tree."""
     moved_markdown: dict[str, str] = field(default_factory=dict)
     records: dict[str, tuple[str, RecordKind]] = field(default_factory=dict)
     sidecar_paths: list[str] = field(default_factory=list)
@@ -259,6 +261,29 @@ class MemoryState:
             self.sidecar_paths.append(path)
         self.documents[path] = document
         self.touched.add(path)
+
+    def remove_record(self, record_id: str) -> tuple[str, RecordKind] | None:
+        """Remove a stored record's file, answering the path and kind it lived at.
+
+        Only a record the tree still holds is removed; the caller decides which kinds may leave
+        (MIK-R124 rule 5: a document that is gone takes its dependent record with it). The
+        record's Markdown twin goes with it, and nothing else in the tree is touched.
+        """
+
+        located = self.records.get(record_id)
+        if located is None:
+            return None
+        path, kind = located
+        self.removed.add(path)
+        self.removed_ids.add(record_id)
+        self.documents.pop(path, None)
+        self.touched.discard(path)
+        markdown = f"{path.removesuffix('.json')}.md"
+        if markdown in self.files or markdown in self.documents:
+            self.removed.add(markdown)
+            self.documents.pop(markdown, None)
+        self.records.pop(record_id, None)
+        return path, kind
 
     def touch(self, path: str) -> None:
         """Mark a document edited in place, so it is rendered and validated."""

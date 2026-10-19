@@ -500,7 +500,17 @@ def _direct_landing_result(
     operation_input: DirectLandingOperationInput,
     memory_commit: str,
 ) -> dict[str, object]:
-    return {
+    # MIK-R124 rule 4: the answer names the documents this landing made stale and how to read
+    # them, on this route too -- a direct publication's raw result is what its answer projects
+    # from, so the field must exist here or the answer loses it (F13).
+    from agents_remember.worktrees.knowledge_gate import (  # noqa: PLC0415 - the gate imports us
+        landing_document_answer,
+    )
+
+    documents = landing_document_answer(
+        contract, code_commit=operation_input.codeCommit, memory_commit=memory_commit
+    )
+    result: dict[str, object] = {
         "ok": True,
         "operation": "direct_landing",
         "state": "landed",
@@ -518,3 +528,6 @@ def _direct_landing_result(
         },
         "effectiveInput": operation_input.effectiveInput.model_dump(mode="json"),
     }
+    if documents is not None:
+        result["staleDocuments"] = documents
+    return result

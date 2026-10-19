@@ -168,8 +168,8 @@ def onboarding_trace_sides(request: TraceSideRequest) -> OnboardingTraceSides | 
         )
     return OnboardingTraceSides(
         owner=request.owner,
-        base=_onboarding_and_history(base),
-        candidate=_onboarding_and_history(candidate),
+        base=_onboarding_inputs(base),
+        candidate=_onboarding_inputs(candidate),
         pairing={
             "base": request.code_base,
             "memoryBase": request.memory_base,
@@ -181,11 +181,13 @@ def onboarding_trace_sides(request: TraceSideRequest) -> OnboardingTraceSides | 
     )
 
 
-def _onboarding_and_history(tree: KnowledgeTree) -> dict[str, bytes]:
+def _onboarding_inputs(tree: KnowledgeTree) -> dict[str, bytes]:
+    # Dependents classify documents before the gate constructs source-card and route duties.
     return {
         path: data
         for path, data in tree.files.items()
-        if path.startswith(("onboarding/", "knowledge/history/")) or path == LAYOUT_MARKER_PATH
+        if path.startswith(("onboarding/", "knowledge/history/", "knowledge/dependents/"))
+        or path == LAYOUT_MARKER_PATH
     }
 
 

@@ -70,7 +70,10 @@ from agents_remember.models.knowledge_files.census import (
     CensusRoute,
     governing_status,
 )
-from agents_remember.models.knowledge_files.documents import ONBOARDING_ROOT
+from agents_remember.models.knowledge_files.documents import (
+    ONBOARDING_ROOT,
+    dependent_document_paths,
+)
 from agents_remember.models.knowledge_files.history import (
     HistoryFile,
     HistoryRow,
@@ -458,6 +461,12 @@ class UnexplainedSides:
 def unexplained_items(changes: Sequence[Mapping[str, Any]], sides: UnexplainedSides) -> Unexplained:
     """Raise one item per unlinked change of ``changes`` (the run's ``changes[]`` linkage)."""
 
+    # A dependent document owes its own confirmation item, not a second onboarding/hunk item.
+    # Both sides retain this classification through record removal and document renaming.
+    documents = dependent_document_paths(sides.base.files) | dependent_document_paths(
+        sides.candidate.files
+    )
+    changes = [change for change in changes if str(change["path"]) not in documents]
     generated = generated_copies.generated_copy_facts(
         sides.code, (str(change["path"]) for change in changes)
     )

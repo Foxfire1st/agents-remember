@@ -398,7 +398,7 @@ def _paired_code_tree(
             f"the paired code commit {code_commit[:12]} is not in {code_root}; states are "
             "unverifiable"
         )
-    return CodeTree(code_root, tree), f"the paired code commit {code_commit}"
+    return CodeTree(code_root, code_commit), f"the paired code commit {code_commit}"
 
 
 def _rev_parse(repository: Path, revision: str) -> str | None:

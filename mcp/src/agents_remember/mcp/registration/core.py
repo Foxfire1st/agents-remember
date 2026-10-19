@@ -102,13 +102,11 @@ def _register_orientation_tools(
         """
         Name which knowledge governs up to 20 paths (MIK-R109).
 
-        Per path: existence, its governing card with `cardStatus`, record counts by state,
-        and the action-asking records by ID, kind, state and heading. A card the route index
-        misses is still served, and the answer names `route_index_refresh`. No text is
-        returned: open the files yourself. `refresh` is removed, and supplying it is
-        `argument-removed`. Leaf calls pass `task_context`: source and cards come from its
-        worktrees, and `worktreeScope`, `sourceRoot` and `memoryRoot` name both. Longer
-        explanation: docs/reference/mcp-tools.md.
+        Per path: existence, its governing card with `cardStatus`, record counts, and the
+        action-asking records by ID, kind, state and heading. `openWeaknesses` and
+        `dependentDocuments` are one count each, absent at zero. No text is returned: open the
+        files yourself. `refresh` is removed. Leaf calls pass `task_context`; `worktreeScope`,
+        `sourceRoot` and `memoryRoot` name both. Longer explanation: docs/reference/mcp-tools.md.
         """
         return read_ar_files_payload(
             config,

@@ -13,6 +13,7 @@ from typing import Any, cast
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
 from agents_remember.memory.knowledge_index import KnowledgeIndex, Record
 from agents_remember.memory.knowledge_index.query import Answer, FamilyKnowledge, IndexState
+from agents_remember.models.knowledge_files.records import record_status
 
 
 class _ChainLookups:
@@ -32,7 +33,7 @@ class _ChainLookups:
                 str(document["schema"]).removeprefix("ar-").removesuffix("/v1"),
                 indexed.path,
                 record.revision,
-                record.status,
+                record_status(record),
                 document,
             ),
             self.state,

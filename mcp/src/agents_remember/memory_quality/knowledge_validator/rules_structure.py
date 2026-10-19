@@ -31,8 +31,14 @@ from agents_remember.memory_quality.knowledge_validator.registry import (
     register_rule,
     sidecar_entries,
 )
-from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.models.knowledge_files.documents import (
+    LAYOUT_MARKER_PATH,
+    dependent_link_index,
+    parse_document_text,
+)
 from agents_remember.models.knowledge_files.history import frozen_history_violation
+from agents_remember.models.knowledge_files.records import DependentRecord
+from agents_remember.models.knowledge_files.sidecars import LayoutMarker
 
 
 def _problems(context: ValidationContext, category: ProblemCategory) -> Iterator[Finding]:
@@ -49,6 +55,25 @@ def check_shape(context: ValidationContext) -> Iterator[Finding]:
             "the layout marker is missing; a converted memory tree keeps it (MIK-R21 rule 1)",
         )
     yield from _problems(context, "shape")
+    data = context.candidate.get(LAYOUT_MARKER_PATH)
+    if data is None:
+        return
+    try:
+        marker = parse_document_text(data.decode("utf-8"))
+    except ValueError:
+        return  # The shape parser already reports the malformed marker.
+    expected = dependent_link_index(
+        (one.path, one.record)
+        for one in context.parsed.records
+        if isinstance(one.record, DependentRecord)
+    )
+    if isinstance(marker, LayoutMarker) and marker.dependent_links != expected:
+        yield Finding(
+            LAYOUT_MARKER_PATH,
+            "dependent_links",
+            "the dependent link lookup differs from its records; write the dependents through "
+            "knowledge_write to rebuild their mechanical lookup before landing",
+        )
 
 
 def check_canonical(context: ValidationContext) -> Iterator[Finding]:

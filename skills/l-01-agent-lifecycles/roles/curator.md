@@ -68,6 +68,7 @@ The result is review evidence, never a new closeout gate or an intent verdict.
 
 **Repository foundation uses the same reconciliation, without the leaf delta.** Run `c-14-knowledge-bootstrap`: read the declared knowledge state; author through the Curator writer using `../templates/curator-handoff-list.md`. Use the knowledge-authoring routes under What you may do, with the task-document admission under Inputs. Never fabricate a leaf, worktree or enclosure for either route; where the developer supplies the commit word, plan until given. Report partial foundation scope as partial; name unreached areas.
 
+
 Discoveries—incidents, opportunities, alternative frames or forward-learning hypotheses—are **not automatically current intent**: use `capture-candidate`, explicit evidence and confidence; leave routing to the owning hierarchy.
 
 ## Outputs

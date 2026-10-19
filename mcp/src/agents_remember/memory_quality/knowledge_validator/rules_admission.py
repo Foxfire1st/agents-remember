@@ -70,6 +70,7 @@ from agents_remember.models.knowledge_files.documents import (
     RECORD_DIRECTORIES,
     split_record_filename,
 )
+from agents_remember.models.knowledge_files.history import RECORD_PREFIXES, RecordRow
 from agents_remember.models.knowledge_files.ids import derived_record_id
 from agents_remember.models.knowledge_files.records import (
     DecisionRecord,
@@ -368,10 +369,34 @@ def check_legacy_unassessed(context: ValidationContext) -> Iterator[Finding]:
         yield Finding(admitted.path, "admission", message)
 
 
+def _retired_row_answers(context: ValidationContext, record_id: str) -> bool:
+    """Whether a leaf's history row retired this record (MIK-R124 rule 5).
+
+    A dependent record is the one kind a tree may be rid of: its document was deleted, so the
+    record has no subject left. The removal is not silent -- the leaf's ``record`` row about it
+    says ``retired``, which is what this reads.
+    """
+
+    for _owner, history in context.parsed.histories:
+        for row in history.rows:
+            if (
+                isinstance(row, RecordRow)
+                and row.subject == record_id
+                and row.disposition == "retired"
+            ):
+                return True
+    return False
+
+
 def check_record_kept(context: ValidationContext) -> Iterator[Finding]:
     """MIK-R52 rule 6: a record is never deleted -- every record ID a comparison base holds
     still exists in the candidate. Refuses at every route; a record leaves use by
-    ``status: retired``, never by removing its file."""
+    ``status: retired``, never by removing its file.
+
+    One exception, because the packet names it (MIK-R124 rule 5): a *dependent* record leaves the
+    tree when its document is deleted, and the leaf's ``retired`` row about it is the record of
+    that removal. Every other kind keeps this rule whole.
+    """
 
     base_ids = _base_record_ids(context.bases)
     if not base_ids:
@@ -379,7 +404,10 @@ def check_record_kept(context: ValidationContext) -> Iterator[Finding]:
     candidate_ids = _base_record_ids((context.candidate,)) | {
         admitted.id for admitted in _admitted_records(context)
     }
+    dependent_prefix = f"{RECORD_PREFIXES['dependent']}-"
     for missing in sorted(base_ids - candidate_ids):
+        if missing.startswith(dependent_prefix) and _retired_row_answers(context, missing):
+            continue
         yield Finding(
             KNOWLEDGE_ROOT,
             f"records.{missing}",

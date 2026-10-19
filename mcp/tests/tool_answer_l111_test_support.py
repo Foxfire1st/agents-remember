@@ -315,6 +315,7 @@ _L111_USES: dict[str, str] = {
     "phase": "the lifecycle phase the worktree is in",
     "gateId": "the gate blocking the landing",
     "handover_gate": "the gate verdict the preview evaluated",
+    "staleDocuments": "the documents this landing made stale, with the read that lists them",
     "task_document_copies": "the stale requirement copies, in the producer's own words",
     "lifecycleOperations": "the operations the status polls",
     "syncOperation": "the sync operation the status polls",

@@ -77,6 +77,12 @@ from agents_remember.models.knowledge_files.history import (
     winning_row_closed,
 )
 from agents_remember.models.knowledge_files.planned import planned_item_open
+from agents_remember.models.knowledge_files.records import (
+    DependentAnchorLink,
+    DependentFileLink,
+    DependentRecord,
+    DependentRecordLink,
+)
 from agents_remember.models.knowledge_files.sidecars import ProofEntry
 from agents_remember.models.knowledge_files.unexplained import (
     COVERED,
@@ -598,3 +604,211 @@ def link_target_open(item: Mapping[str, Any], context: GateContext) -> str | Non
 register_gate_predicate("link_target", link_target_open)
 register_gate_predicate("unassigned_invariant", membership_row_open)
 register_gate_predicate("touched_record", record_row_open)
+
+
+def weakness_anchor_open(item: Mapping[str, Any], context: GateContext) -> str | None:
+    """MIK-R118 rule 7: the leaf answers whether a weakness it walked past still stands.
+
+    The answer is a ``record`` row about the weakness at its K_C revision, and it is ``changed``
+    exactly when the record file differs in K_C: the Curator moved the anchor with the code, or
+    closed the weakness. A ``no_impact`` row says the weakness still stands where it stood, and
+    answers the item too -- nothing here refuses a leaf for a weakness.
+    """
+
+    return _record_row_about(item, context, changed_required=False)
+
+
+def changed_document_open(item: Mapping[str, Any], context: GateContext) -> str | None:
+    """MIK-R124 rule 5: only this task's confirmed dependent record answers a changed document.
+
+    A dependent's every write is a confirmation at the task's tip, so the answer is a ``changed``
+    ``record`` row about it at its K_C revision -- and the record K_C holds must be the fresh
+    one: it names the changed document, and its ``confirmed.task`` is not the task that confirmed
+    it last time. A row alone proves nothing about the document (F07). A document this leaf
+    deleted has its record removed; that removal is answered by a ``retired`` row about it.
+    """
+
+    subject = str(item.get("subject"))
+    row = None if context.history is None else context.history.row_about(subject)
+    if not isinstance(row, RecordRow):
+        return f"the leaf's history file holds no record row about {subject}"
+    indexed = context.candidate.parsed.records.get(subject)
+    if indexed is None:
+        return _removed_document_reason(subject, row)
+    record = indexed.record
+    if not isinstance(record, DependentRecord):
+        return f"{subject} is a {type(record).__name__}, not the dependent record this item names"
+    return _confirmation_answers(item, context, record)
+
+
+def _removed_document_reason(subject: str, row: RecordRow) -> str | None:
+    """Why a row does not answer for a record K_C no longer holds, or ``None`` when it does."""
+
+    if row.disposition == "retired":
+        return None
+    return (
+        f"row {row.id} is a {row.disposition} row, but K_C holds no record {subject}: the "
+        "document it named was removed, so the row that answers it is a retired row about it"
+    )
+
+
+def _confirmation_answers(
+    item: Mapping[str, Any], context: GateContext, record: DependentRecord
+) -> str | None:
+    """Why this task's confirmation is not yet the record's, or ``None`` when it is."""
+
+    reason = _record_row_about(item, context, changed_required=True)
+    if reason is not None:
+        return reason
+    facts = item.get("facts") or {}
+    if record.document != facts.get("document"):
+        return (
+            f"{record.id} names {record.document!r}, not the changed document "
+            f"{facts.get('document')!r}: confirm the document this leaf changed"
+        )
+    # The confirmation must be *this* task's, and it must be newer than the one the item was
+    # raised against: a record still confirmed by the previous confirmer is that confirmer's
+    # judgment, and a third party's is nobody's here (F07).
+    if record.confirmed.task == facts.get("confirmedTask"):
+        return (
+            f"{record.id} is still confirmed by {record.confirmed.task!r}; a changed row names "
+            "the confirmation this task made, not the previous one -- write the dependent "
+            "through the writer in this task, with this task's confirming task and "
+            "one-sentence judgment"
+        )
+    if context.owner is not None and record.confirmed.task != context.owner:
+        return (
+            f"{record.id} is confirmed by {record.confirmed.task!r}, but this task is "
+            f"{context.owner!r}: a changed row names the confirmation this task made, and no other "
+            "task's confirmation answers it"
+        )
+    stale = _stale_confirmation_reason(record, context)
+    if stale is not None:
+        return stale
+    return None
+
+
+def observe_anchor(code: Any, anchor: Any) -> EntryObservation:
+    """Observe one dependent anchor link at C, exactly as the reader observes a weakness anchor."""
+
+    entry = Entry(
+        id="",
+        kind="realization",
+        invariant="",
+        path=anchor.path or "",
+        sidecar="",
+        document={"anchor": anchor.to_document()},
+    )
+    return observe_entry(entry, code)
+
+
+def _stale_confirmation_reason(record: DependentRecord, context: GateContext) -> str | None:
+    """Why the confirmation does not name the code at C, or ``None`` when it does.
+
+    A confirmation records the values the links were read at, so a link whose value changed since
+    is a confirmation of the previous code: it answers a document that moved with its links, not
+    one whose code moved under it (F07).
+    """
+
+    for link in record.stands_on:
+        reason = _link_moved_reason(record, link, context)
+        if reason is not None:
+            return reason
+    return None
+
+
+def _link_moved_reason(record: DependentRecord, link: Any, context: GateContext) -> str | None:
+    """Why one stand-on link is no longer the value the confirmation recorded, or ``None``."""
+
+    if isinstance(link, DependentRecordLink):
+        return _record_link_reason(record, link, context)
+    if isinstance(link, DependentAnchorLink):
+        return _anchor_link_reason(record, link, context)
+    if not isinstance(link, DependentFileLink):
+        return None
+    observed = context.code.files.get(link.path)
+    if observed is None:
+        return (
+            f"{record.id} stands on {link.path}, which C does not hold: the confirmation names "
+            "code that is not there -- write the dependent again, or remove the link"
+        )
+    if link.blob == observed:
+        return None
+    return (
+        f"{record.id} records {link.path} at blob {link.blob}, but C holds {observed}: the "
+        "confirmation names code that has moved -- write the dependent again in this task so "
+        "its links and judgment are taken at C"
+    )
+
+
+def _record_link_reason(
+    record: DependentRecord, link: DependentRecordLink, context: GateContext
+) -> str | None:
+    """A record link is the revision the candidate holds, or it is not this confirmation's."""
+
+    current = context.candidate.revision(link.id)
+    if current is None:
+        return (
+            f"{record.id} stands on {link.id}, which the candidate does not hold: the "
+            "confirmation names a record that is not there -- write the dependent again, "
+            "or remove the link"
+        )
+    if link.revision == current:
+        return None
+    return (
+        f"{record.id} records {link.id} at revision {link.revision}, but it stands at "
+        f"{current} in the candidate: the confirmation names a record that has moved -- "
+        "write the dependent again so its links are taken at C"
+    )
+
+
+def _anchor_link_reason(
+    record: DependentRecord, link: DependentAnchorLink, context: GateContext
+) -> str | None:
+    """An anchor link is current only where its locator still resolves to the recorded bytes."""
+
+    observed = observe_anchor(context.code, link.anchor)
+    if observed.state == "unverifiable":
+        return (
+            f"{record.id} stands on an anchor in {link.anchor.path} that cannot be read at C "
+            f"({observed.reason}): a confirmation whose code cannot be read is not proved at C "
+            "-- write the dependent again in this task"
+        )
+    if observed.state == "current":
+        return None
+    return (
+        f"{record.id} records {link.anchor.content!r} at {link.anchor.path} "
+        f"{link.anchor.locator.kind}, but C holds "
+        f"{observed.observed_content or 'nothing at that locator'}: the confirmation names "
+        "code that has moved -- write the dependent again in this task so its links and "
+        "judgment are taken at C"
+    )
+
+
+def _record_row_about(
+    item: Mapping[str, Any], context: GateContext, *, changed_required: bool
+) -> str | None:
+    """The shared rule: the leaf's record row about the subject, at K_C's revision."""
+
+    subject = str(item.get("subject"))
+    row = None if context.history is None else context.history.row_about(subject)
+    if not isinstance(row, RecordRow):
+        return f"the leaf's history file holds no record row about {subject}"
+    revision = context.candidate.revision(subject)
+    if revision is not None and row.revision != revision:
+        return (
+            f"row {row.id} records revision {row.revision}, but {subject} is at revision "
+            f"{revision} in K_C; name {subject} again in the hand-off's 'history' and let the "
+            "writer record the current revision"
+        )
+    if changed_required and row.disposition != "changed":
+        return (
+            f"row {row.id} is a {row.disposition} row, but {subject} names a document this leaf "
+            "changed; only the confirmed record answers it -- write the dependent through the "
+            "writer (its every write is a confirmation) and name it as a changed row"
+        )
+    return None
+
+
+register_gate_predicate("weakness_anchor", weakness_anchor_open)
+register_gate_predicate("changed_document", changed_document_open)

@@ -498,6 +498,10 @@ async def test_the_registered_handlers_read_a_memory_tree_and_take_no_database_p
             "repositoryRoot",
             "codeTreeId",
             "recordId",
+            "weaknessKind",
+            "includeClosed",
+            "staleOnly",
+            "standsOn",
         },
         "knowledge_diff": {
             "memoryRoot",

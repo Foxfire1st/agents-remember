@@ -43,6 +43,7 @@ class DirectLandingResponse(ToolResponse):
     ledgerCache: dict[str, Any] | None = None
     dryRun: bool = False
     memory: dict[str, Any] | None = None
+    staleDocuments: dict[str, Any] | None = None
     effectiveInput: EffectiveCloseoutInput | None = None
     invalidFields: list[CloseoutInvalidField] | None = None
     resolvedPlan: ResolvedCloseoutPlan | None = None

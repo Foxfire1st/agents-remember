@@ -71,6 +71,10 @@ from agents_remember.application.knowledge_paging.tree_read import (
 )
 from agents_remember.application.knowledge_proofs import tree_view_proofs
 from agents_remember.application.knowledge_read import open_read_context
+from agents_remember.application.knowledge_reader.marks import (
+    dependent_list,
+    weakness_list,
+)
 from agents_remember.application.knowledge_reader.selection import (
     READ_FAILURES,
     selection_for_dataset,
@@ -208,6 +212,10 @@ class ReadToolRequest:
     repository_root: str | None = None
     code_tree_id: str | None = None
     repository_id: str = INDEX_REPOSITORY_ID
+    weakness_kind: str | None = None
+    include_closed: bool = False
+    stale_only: bool = False
+    stands_on: str | None = None
 
 
 @dataclass(frozen=True)
@@ -321,6 +329,167 @@ def _record_view(
     return answer
 
 
+def _one_view(
+    request: ReadToolRequest,
+    selected: SelectedKnowledgeDataset,
+    repository_id: str,
+    *,
+    workspace_root: str | None = None,
+    coordination_root: str | None = None,
+) -> dict[str, Any]:
+    """The answer one single-record view holds: a record's truth view, or the marks' listing."""
+
+    if request.view == "record":
+        return _record_view(
+            request,
+            selected,
+            repository_id,
+            workspace_root=workspace_root,
+            coordination_root=coordination_root,
+        )
+    return _marks_view(
+        request,
+        selected,
+        repository_id,
+        workspace_root=workspace_root,
+        coordination_root=coordination_root,
+    )
+
+
+def _marks_view(
+    request: ReadToolRequest,
+    selected: SelectedKnowledgeDataset,
+    repository_id: str,
+    *,
+    workspace_root: str | None = None,
+    coordination_root: str | None = None,
+) -> dict[str, Any]:
+    """The weaknesses or the dependents of one memory tree, bounded and naming how to read on.
+
+    MIK-R118 rule 6 and MIK-R124 rule 7 read through this same tool. A weakness row holds the id,
+    the file, the kind, the sentence and the measurement; a dependent row holds the document, its
+    derived state and, where it is stale, each link that moved. Neither row carries the record's
+    own text beyond what the requirement names.
+
+    The page is what the answer can actually deliver: the caller's ``limit`` capped at the
+    transport's list bound, delivered from ``continuation`` (a ``rows:<n>`` cursor) onward, so the
+    counts are true and a page beyond the bound is reachable (F14). An anterior page's cursor is
+    the only continuation accepted; a token this view cannot read refuses, never restarts the walk.
+    """
+
+    tree = selected.memory_tree
+    if tree is None:
+        return _refused_read(
+            request.view,
+            repository_id,
+            "snapshot_unavailable",
+            "the selection names no converted memory tree, so no record can be read",
+        )
+    start = _marks_offset(request)
+    if isinstance(start, str):
+        return _refused_read(request.view, repository_id, "bad_continuation", start)
+    memory_root = Path(request.memory_root)
+    source = _observed_source_or_none(request, workspace_root)
+    code_tree = _code_tree_of(source)
+    try:
+        selection = selection_for_dataset(
+            repository_id=repository_id,
+            memory_root=memory_root,
+            database_path=selected.database_path,
+            tree_key=tree.tree_key,
+            code_tree=code_tree,
+            coordination_root=None if coordination_root is None else Path(coordination_root),
+        )
+    except READ_FAILURES as error:
+        return _refused_read(
+            request.view,
+            repository_id,
+            "snapshot_unavailable",
+            f"the selected index could not be opened: {error}",
+        )
+    try:
+        rows = _marks_rows(request, selection)
+    except READ_FAILURES as error:
+        return _refused_read(
+            request.view, repository_id, "unavailable", f"the records could not be read: {error}"
+        )
+    finally:
+        selection.close()
+        if source is not None:
+            source.close()
+    limit = min(max(1, request.limit), TOOL_ANSWER_LIST_MAX)
+    page = rows[start : start + limit]
+    remaining = max(0, len(rows) - start - len(page))
+    answer: dict[str, Any] = {
+        "ok": True,
+        "operation": "knowledge_read",
+        "view": request.view,
+        "state": "view",
+        "repositoryId": repository_id,
+        "memoryRoot": memory_root.as_posix(),
+        "memoryTree": {"treeKey": tree.tree_key, "indexState": tree.index_state},
+        "rows": page,
+        "counts": {
+            "rowsReturned": len(page),
+            "total": len(rows),
+            "rowsRemaining": remaining,
+            "offset": start,
+        },
+    }
+    if remaining:
+        # MIK-R108: the answer names how to read on rather than carrying the rest, and the cursor
+        # it names reaches rows the transport's list bound would otherwise hide.
+        answer["readOn"] = {
+            "how": (
+                "the same view answers the next rows: pass `continuation` as given here, or "
+                "narrow it with `sourcePath` (a folder), `weaknessKind`, `staleOnly` or `standsOn`"
+            ),
+            "continuation": _marks_cursor(start + len(page)),
+            "rowsRemaining": remaining,
+            "limit": limit,
+        }
+    return answer
+
+
+def _marks_cursor(start: int) -> str:
+    """The continuation a marks view's next page starts at."""
+
+    return f"rows:{start}"
+
+
+def _marks_offset(request: ReadToolRequest) -> int | str:
+    """The row a marks view's page starts at, or why the continuation cannot be read."""
+
+    token = request.continuation
+    if token is None or not token.strip():
+        return 0
+    head, _, tail = token.strip().partition(":")
+    if head != "rows" or not tail.isdigit():
+        return (
+            f"the continuation {token!r} is not one this view minted: it reads `rows:<n>` as the "
+            "previous page's `readOn` carried it; narrow the view instead of restarting it"
+        )
+    return int(tail)
+
+
+def _marks_rows(request: ReadToolRequest, selection: Any) -> list[dict[str, Any]]:
+    """The rows one marks view holds, before the answer's bound is applied."""
+
+    if request.view == "weakness":
+        return weakness_list(
+            selection,
+            folder=request.source_path,
+            kind=request.weakness_kind,
+            include_closed=request.include_closed,
+        )
+    return dependent_list(
+        selection,
+        folder=request.source_path,
+        stale_only=request.stale_only,
+        stands_on=request.stands_on,
+    )
+
+
 def _observed_source_or_none(
     request: ReadToolRequest, workspace_root: str | None
 ) -> _ObservedSource | None:
@@ -379,8 +548,16 @@ def _refused_read(view: str, repository_id: str, code: str, detail: str) -> dict
     }
 
 
-# MIK-R73 rule 2: the tree views, and `record`, the truth view of one record.
-_ADMITTED_VIEWS: Final = ("source_context", "invariant", "family", "record")
+# MIK-R73 rule 2: the tree views, and `record`, the truth view of one record. MIK-R118 rule 6 and
+# MIK-R124 rule 7 read the two record kinds through this same tool: no tool is added.
+_ADMITTED_VIEWS: Final = (
+    "source_context",
+    "invariant",
+    "family",
+    "record",
+    "weakness",
+    "dependent",
+)
 
 
 def _submission_refusal(request: ReadToolRequest) -> dict[str, Any] | None:
@@ -822,11 +999,11 @@ def _read_result(
             # same moved-selection refusal as the projection seam: no
             # mixed epoch is ever bound to rows.
             raise SelectionMovedError(before_commit, provenance.commit)
-        if view == "record":
-            # MIK-R73 rule 2: one record, its links with their states and its history, answered
-            # by the reader's own truth view over this exact dataset.
+        if view in ("record", "weakness", "dependent"):
+            # MIK-R73 rule 2: one record, its links with their states and its history. MIK-R118
+            # rule 6 and MIK-R124 rule 7: the same tool lists the two record kinds.
             return (
-                _record_view(
+                _one_view(
                     request,
                     selected,
                     repository_id,

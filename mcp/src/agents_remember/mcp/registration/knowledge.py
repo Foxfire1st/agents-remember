@@ -107,17 +107,20 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         sourcePath: str | None = None,
         repositoryRoot: str | None = None,
         codeTreeId: str | None = None,
+        weaknessKind: str | None = None,
+        includeClosed: bool = False,
+        staleOnly: bool = False,
+        standsOn: str | None = None,
     ) -> dict[str, Any]:
         """
         Name records of one memory-tree view.
 
-        Views: source_context, invariant, family, and record (one record's fields, link states and
-        history). `recordId` takes any record's text ID (`INV-…`, `FAM-…`, `DEC-…`, `ASM-…`);
-        UUIDs are derived from it and stored nowhere. Rows name a record's text ID, kind, state and
-        location, never its text. `codeTreeId` with `repositoryRoot` names the tree states are
-        measured at; `working-tree` measures your uncommitted code. Writes go through
-        `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`, never this
-        tool. Docs: docs/reference/mcp-tools.md.
+        Views: source_context, invariant, family, record, weakness (open by file, kind or sentence),
+        dependent (documents and their links). `recordId` takes a text ID (`INV-…`, `WKN-…`, `DPD-…`).
+        Rows name ID, kind, state and location, never text. Filters: `sourcePath`, `weaknessKind`,
+        `includeClosed`, `staleOnly`, `standsOn`. `repositoryRoot` and `codeTreeId` select the measured
+        code tree. Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`.
+        Docs: docs/reference/mcp-tools.md.
         """
 
         return knowledge_read_payload(
@@ -133,6 +136,10 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
                 source_path=sourcePath,
                 repository_root=repositoryRoot,
                 code_tree_id=codeTreeId,
+                weakness_kind=weaknessKind,
+                include_closed=includeClosed,
+                stale_only=staleOnly,
+                stands_on=standsOn,
             ),
             workspace_root=str(config.workspace_root),
             coordination_root=str(config.coordination_root),

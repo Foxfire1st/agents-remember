@@ -34,15 +34,26 @@ from agents_remember.application.knowledge_worklist.registry import (
     subject_row,
 )
 from agents_remember.models.knowledge_files.history import (
+    RECORD_PREFIXES,
     RECORD_ROW_PREFIXES,
     RECORD_ROW_SUBJECT_PATTERN,
     ReconsiderationRow,
 )
+from agents_remember.models.knowledge_files.records import record_status
 
 __all__ = ["TOUCHED_RECORD_KIND", "TOUCHED_RECORD_PREFIXES", "touched_record_items"]
 
 ITEM_KIND: Final = "touched_record"
-TOUCHED_RECORD_PREFIXES: Final = RECORD_ROW_PREFIXES
+TOUCHED_RECORD_PREFIXES: Final = tuple(
+    prefix for prefix in RECORD_ROW_PREFIXES if prefix != RECORD_PREFIXES["weakness"]
+)
+"""The record subjects a ``touched_record`` item is raised for.
+
+A weakness is excluded (MIK-R118 rule 4): it is an advisory mark with its own ``weakness_anchor``
+kind, and a changed weakness record must never raise a generic obligation that could refuse a
+leaf. It still takes a ``record`` history row when a leaf names one, so its own subject pattern
+stays the full record-row one below.
+"""
 # The spelling of the writer's mark, canonical in
 # ``application/knowledge_writer/reconsideration.py``; repeated here so this module stays
 # dependency-free of the writer.
@@ -160,8 +171,8 @@ def touched_record_items(
                 "facts": {
                     "baseRevision": base_record.revision,
                     "revision": record.revision,
-                    "baseStatus": base_record.status,
-                    "status": record.status,
+                    "baseStatus": record_status(base_record),
+                    "status": record_status(record),
                 },
             }
         )

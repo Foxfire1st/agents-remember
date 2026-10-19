@@ -133,6 +133,11 @@ class KnowledgeReadResponse(ToolResponse):
     family: dict[str, Any] | None = None
     decision: dict[str, Any] | None = None
     facet: dict[str, Any] | None = None
+    # MIK-R118 rule 6 and MIK-R124 rule 7: the `weakness` and `dependent` views answer rows of
+    # those two record kinds, their counts, and -- when rows remain -- how to read on.
+    rows: list[dict[str, Any]] | None = None
+    counts: dict[str, Any] | None = None
+    readOn: dict[str, Any] | None = None
 
 
 class KnowledgeDiffResponse(ToolResponse):
@@ -215,6 +220,12 @@ class KnowledgeWriteResponse(ToolResponse):
     ``provisionalIds`` says the IDs in the report of a planning run are not the ones a committing
     run will mint, and ``plannedBeforeRefusal`` says how many outcomes a refused run had planned
     before it stopped: nothing was written in either case.
+
+    ``reportPath`` is where the whole report was written and ``reportError`` is why it was not when
+    it could not be (MIK-R108 rule 3). The two travel together because the answer must not lose the
+    write's own outcome to a filesystem error about its report: a run that planned or wrote reports
+    ``reportError`` as ``None`` beside the path, and a run whose report could not be written keeps
+    the outcome and says that nothing about the report is claimed.
     """
 
     operation: Literal["knowledge_write"] = "knowledge_write"
@@ -233,5 +244,8 @@ class KnowledgeWriteResponse(ToolResponse):
     written: list[str] | None = None
     removed: list[str] | None = None
     reportPath: str | None = None
+    # Why the report at `reportPath` could not be written, when it could not: `None` means the
+    # report exists. Declared because the tool's own answer carries it on every report route.
+    reportError: str | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None

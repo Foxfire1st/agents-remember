@@ -47,6 +47,7 @@ from agents_remember.worktrees.knowledge_gate import (
     GateProbeError,
     closed_out_memory,
     converted_memory,
+    landing_document_answer,
     landing_gate_refusal,
     landing_history_refusal,
     leaf_cutover_refusal,
@@ -71,7 +72,11 @@ from agents_remember.worktrees.modules.state_refusals import (
 )
 from agents_remember.worktrees.series_closeout import landed_chain_refusal
 from agents_remember.worktrees.services import LandingGateRequest
-from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    load_contract,
+    original_base_pair,
+)
 
 # The route label recorded in the contract's ``integration.strategy`` cell, so the cell says which
 # route actually landed the work. ``worktree_integrate`` writes its own strategy there instead.
@@ -412,6 +417,8 @@ def _landing_request(
         leaf_owner=(contract.leaf_id or contract.task_name) if contract.kind == "leaf" else None,
         frozen=tuple(made_on) if recorded else (),
         series_contract=contract.contract_path.as_posix(),
+        master_end=contract.kind == "series",
+        document_base=original_base_pair(contract) if contract.kind == "series" else None,
     )
 
 
@@ -572,18 +579,26 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
         contract.memory_mode != "external"
         or args.landed_memory_content_commit.strip() == contract.memory_base_commit
     )
-    return WorktreeCommandResult(
-        0,
-        {
-            **_identity_payload(updated),
-            "state": "recorded",
-            "integrationStrategy": updated.integration_strategy,
-            "landedCodeCommit": commit,
-            "landingTargets": claimed,
-            **({"emptyLanding": True} if empty_landing else {}),
-            "summary": (
-                f"Recorded integration of {commit} on {', '.join(claimed)} via the pull-request "
-                "route. Cleanup and the series abandon guard now read this work as landed."
-            ),
-        },
+    recorded_payload: dict[str, object] = {
+        **_identity_payload(updated),
+        "state": "recorded",
+        "integrationStrategy": updated.integration_strategy,
+        "landedCodeCommit": commit,
+        "landingTargets": claimed,
+        **({"emptyLanding": True} if empty_landing else {}),
+        "summary": (
+            f"Recorded integration of {commit} on {', '.join(claimed)} via the pull-request "
+            "route. Cleanup and the series abandon guard now read this work as landed."
+        ),
+    }
+    # MIK-R124 rule 4: the answer names how many documents this landing made stale and how to read
+    # them -- one field, absent when none moved, never a refusal of the landing.
+    documents = landing_document_answer(
+        updated,
+        code_commit=commit,
+        memory_commit=args.landed_memory_content_commit.strip(),
+        master_end=contract.kind == "series",
     )
+    if documents is not None:
+        recorded_payload["staleDocuments"] = documents
+    return WorktreeCommandResult(0, recorded_payload)

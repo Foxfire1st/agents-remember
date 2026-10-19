@@ -60,6 +60,13 @@ class CodeSnapshot:
     _bytes: dict[str, bytes] = field(default_factory=dict)
     symlinks: frozenset[str] = frozenset()
     """Paths whose tree entry is a symlink (mode 120000): never parsed for symbols."""
+    commit: str | None = None
+    """The commit this tree is, when the snapshot was taken at a committed state.
+
+    ``None`` for a worktree capture: the tree then holds uncommitted changes and no commit names
+    it (MIK-R124 rule 1 -- a confirmation never claims a commit the recorded values did not come
+    from).
+    """
 
     @classmethod
     def capture(cls, root: Path) -> CodeSnapshot:
@@ -81,10 +88,10 @@ class CodeSnapshot:
         tree = result.stdout.strip()
         if result.returncode != 0 or not tree:
             raise AnchorResolutionError(f"the code commit {commit!r} has no tree in {repository}")
-        return cls.of_tree(repository, tree)
+        return cls.of_tree(repository, tree, commit=commit)
 
     @classmethod
-    def of_tree(cls, root: Path, tree: str) -> CodeSnapshot:
+    def of_tree(cls, root: Path, tree: str, *, commit: str | None = None) -> CodeSnapshot:
         """Read the regular files and symlinks of ``tree`` in ``root``'s object store."""
 
         blobs: dict[str, str] = {}
@@ -99,7 +106,7 @@ class CodeSnapshot:
                 blobs[decoded] = object_id
                 if mode == "120000":
                     symlinks.add(decoded)
-        return cls(root=root, tree=tree, blobs=blobs, symlinks=frozenset(symlinks))
+        return cls(root=root, tree=tree, blobs=blobs, symlinks=frozenset(symlinks), commit=commit)
 
     def has_file(self, path: str) -> bool:
         return path in self.blobs

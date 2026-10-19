@@ -103,6 +103,13 @@ def require_repository_path(value: str) -> str:
 
 
 Text = Annotated[str, Field(min_length=1, max_length=PROSE_MAX_LENGTH), AfterValidator(_nonblank)]
+# MIK-R118 rule 1: a weakness' statement is one sentence that says what the code does and what that
+# costs, or what is wrong. The writer's bound is a length: a longer statement is refused with its
+# field rather than split or trimmed, so the author decides where the one sentence ends.
+ONE_SENTENCE_MAX: Final = 400
+OneSentence = Annotated[
+    str, Field(min_length=1, max_length=ONE_SENTENCE_MAX), AfterValidator(_nonblank)
+]
 Label = Annotated[
     str, Field(min_length=1, max_length=REFERENCE_MAX_LENGTH), AfterValidator(_exact_token)
 ]
@@ -336,6 +343,7 @@ Relation = Literal[
     "exercises",
     "diagnoses",
     "defines_term_in",
+    "burdens",
 ]
 
 

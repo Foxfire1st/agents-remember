@@ -53,6 +53,10 @@ from agents_remember.application.knowledge_worklist.leaf import (
     worklist_for_sides,
     worklist_path,
 )
+from agents_remember.application.knowledge_worklist.marks import (
+    DOCUMENT_ITEM_KIND,
+    WEAKNESS_ITEM_KIND,
+)
 from agents_remember.application.knowledge_worklist.membership import (
     UNASSIGNED_INVARIANT_KIND,
 )
@@ -86,6 +90,7 @@ from agents_remember.application.knowledge_worklist.unexplained import (
 )
 
 __all__ = [
+    "DOCUMENT_ITEM_KIND",
     "FAMILY_ROUTE_CONDITION_KIND",
     "ITEM_KINDS",
     "ONBOARDING_TRACE_KIND",
@@ -95,6 +100,7 @@ __all__ = [
     "UNASSIGNED_INVARIANT_KIND",
     "UNEXPLAINED_FILE_KIND",
     "UNEXPLAINED_HUNK_KIND",
+    "WEAKNESS_ITEM_KIND",
     "WORKLIST_FILE_NAME",
     "WORKLIST_SCHEMA",
     "ExplicitSides",

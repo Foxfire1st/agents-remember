@@ -43,6 +43,7 @@ from agents_remember.worktrees.integration.integration_resolution_handoff import
 from agents_remember.worktrees.integration.master_review_gate import (
     blocked_integration_payload,
 )
+from agents_remember.worktrees.knowledge_gate import landing_document_answer
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -676,6 +677,16 @@ def _integrated_result(
         # ordering. Named only when empty, so other landings answer exactly as before.
         **({"emptyLanding": True} if empty_landing else {}),
     }
+    # MIK-R124 rule 4: the answer names how many documents this landing made stale and how to read
+    # them -- one field, absent when none moved, never a refusal of the landing.
+    documents = landing_document_answer(
+        contract,
+        code_commit=commits.code,
+        memory_commit=commits.memory_content,
+        master_end=contract.kind == "series",
+    )
+    if documents is not None:
+        payload["staleDocuments"] = documents
     if handover_warning is not None:
         payload["handover_gate_warning"] = handover_warning
     return WorktreeCommandResult(0, payload)
@@ -1023,6 +1034,12 @@ def _checkpoint_result(
         ),
         checkpoint=True,
     )
+    # MIK-R124 rule 4 and 8: the checkpoint's answer names the documents the series has made stale
+    # -- reported, never refused here, because the master stays open. Computed on this route so the
+    # field exists in the raw result the answer is projected from (F13).
+    documents = landing_document_answer(
+        updated, code_commit=commits.code, memory_commit=commits.memory_content
+    )
     return WorktreeCommandResult(
         0,
         {
@@ -1036,6 +1053,7 @@ def _checkpoint_result(
             "strategy": args.strategy,
             "integrated_code_commit": commits.code,
             "integrated_memory_content_commit": commits.memory_content,
+            **({"staleDocuments": documents} if documents is not None else {}),
         },
     )
 

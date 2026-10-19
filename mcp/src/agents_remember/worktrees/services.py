@@ -247,6 +247,15 @@ class LandingGateRequest:
     leaf_owner: str | None = None
     frozen: tuple[str, ...] = ()
     series_contract: str | None = None
+    master_end: bool = False
+    """This landing finishes the master (MIK-R124 rule 8), rather than a checkpoint.
+
+    A checkpoint lands the master's accumulated line and leaves the master open: it reports the
+    documents the series made stale and refuses nothing for them. Only the landing that finishes
+    the master refuses, and only it examines every document rather than the ones a change can move.
+    """
+    document_base: tuple[str, str] | None = None
+    """Original code/memory pair for cumulative document debt, independent of validator bases."""
 
 
 @dataclass(frozen=True)

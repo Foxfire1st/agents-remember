@@ -45,6 +45,7 @@ from agents_remember.models.knowledge_files.canonical import CanonicalFormatErro
 from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
     ONBOARDING_ROOT,
+    dependent_document_paths,
     history_path,
     owner_history_attempt,
     parse_history_document,
@@ -566,6 +567,16 @@ def onboarding_trace_result(
         )
     rows, problem = _history_rows(sides)
     base, candidate = sides.base, sides.candidate
+    try:
+        documents = dependent_document_paths(base) | dependent_document_paths(candidate)
+    except RuntimeError as error:
+        return OnboardingTraceResult(
+            owner=sides.owner,
+            items=(),
+            problems=((INCOMPLETE_CODE, "knowledge/dependents", str(error)),),
+            pairing=sides.pairing,
+        )
+    changed_paths = [path for path in changed_paths if path not in documents]
     items: list[TraceItem] = []
     groups = source_groups or {}
     aliases = {

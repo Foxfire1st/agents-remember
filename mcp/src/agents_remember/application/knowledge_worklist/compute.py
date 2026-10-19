@@ -58,6 +58,7 @@ from agents_remember.application.knowledge_worklist.code import (
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
 from agents_remember.application.knowledge_worklist.link_targets import link_target_items
 from agents_remember.application.knowledge_worklist.linkage import change_linkage, non_text_linked
+from agents_remember.application.knowledge_worklist.marks import mark_items
 from agents_remember.application.knowledge_worklist.membership import membership_items
 from agents_remember.application.knowledge_worklist.planned_effects import (
     Declaration,
@@ -290,6 +291,15 @@ class _Run:
                 *(
                     planned.mark(item)
                     for item in touched_record_items(inputs.base, inputs.candidate, inputs.owner)
+                ),
+                *(
+                    planned.mark(item)
+                    for item in mark_items(
+                        inputs.base,
+                        changed_paths,
+                        candidate_files=inputs.code.candidate(),
+                        renamed=renamed,
+                    )
                 ),
             ],
             key=lambda item: (item["kind"], item["subject"]),

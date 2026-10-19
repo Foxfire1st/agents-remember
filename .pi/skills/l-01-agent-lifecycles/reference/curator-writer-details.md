@@ -24,6 +24,10 @@ Hand the same JSON hand-off list to
 The command
    needs converted memory: on the legacy format it refuses with `legacy-format` and names the conversion command.
 
+## Step 2 — weakness and dependent records
+
+**A weakness and a dependent are recorded through the writer, as every record.** An entry of kind `weakness` in a producer's hand-off list becomes a `WKN-` record through the writer, or the report says why not: the writer refuses one without a file, with an unknown kind, or with a statement beyond its one-sentence bound, and the refusal names the field. An entry of kind `dependent` becomes a `DPD-` record: the document, and for each place it stands on the recorded value the writer reads at the task's tip -- a code anchor, a whole file's blob, or an invariant's or a family's revision -- with the confirmation's task, role and commit. Every write of a dependent is a confirmation; no value is typed in. A Curator answers the worklist's row for a weakness (it stands, and the anchor moves with the code; or it is closed) and for a changed document (only the confirmed record answers it). Neither record ever refuses a task.
+
 ## Step 3 — family and external-reference format
 
 When you restate a family's

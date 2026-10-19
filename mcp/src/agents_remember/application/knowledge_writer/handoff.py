@@ -223,7 +223,12 @@ class EntryRequest:
 
 @dataclass(frozen=True)
 class RecordRequest:
-    """One curator-authored record of any kind, created or (with ``record_id``) updated."""
+    """One curator-authored record of any kind, created or (with ``record_id``) updated.
+
+    ``remove`` says the record leaves the tree: a document a task deleted takes its dependent
+    record with it (MIK-R124 rule 5). No other kind is removed this way -- a weakness is closed,
+    and every older kind is retired.
+    """
 
     key: str
     kind: RecordKind
@@ -231,6 +236,7 @@ class RecordRequest:
     entry: str | None = None
     record_id: str | None = None
     slug: str | None = None
+    remove: bool = False
 
     @property
     def handoff_entry(self) -> str:
@@ -578,7 +584,7 @@ def _record(position: int, raw: Any, problems: list[Problem]) -> RecordRequest |
     owned = sorted(WRITER_OWNED_FIELDS & set(fields))
     if owned:
         problems.append(Problem(where, f"the writer owns {owned}; remove them from 'fields'"))
-    unknown = sorted(set(raw) - {"key", "kind", "entry", "id", "slug", "fields"})
+    unknown = sorted(set(raw) - {"key", "kind", "entry", "id", "slug", "fields", "remove"})
     if unknown:
         problems.append(Problem(where, f"unknown record key(s) {unknown}"))
     record_id, slug = _text(raw.get("id")), _text(raw.get("slug"))
@@ -593,6 +599,7 @@ def _record(position: int, raw: Any, problems: list[Problem]) -> RecordRequest |
         entry=_text(raw.get("entry")),
         record_id=record_id,
         slug=slug,
+        remove=bool(raw.get("remove")),
     )
 
 

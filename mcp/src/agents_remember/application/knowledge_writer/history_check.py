@@ -76,9 +76,11 @@ def owner_history_problems(state: MemoryState, owner: Owner) -> list[Problem]:
     remedy = _FROZEN if frozen else _REMEDY
     if history.closed and not frozen:
         remedy += REOPEN_STEP
+    # A record this same write removed is still a subject its retired row names: the row is what
+    # makes the removal readable, and the record is deliberately not in the tree any more (F05).
     problems = [
         Problem(path, f"a row's subject {subject} names no record of the candidate; {remedy}")
-        for subject in unknown_subjects(history, set(state.records))
+        for subject in unknown_subjects(history, set(state.records) | state.removed_ids)
     ]
     anchors = _candidate_anchors(state, history)
     earlier = _earlier_attempts(state, owner, attempt)

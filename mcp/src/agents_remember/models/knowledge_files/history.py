@@ -441,6 +441,8 @@ RECORD_ROW_PREFIXES: Final = (
     RECORD_PREFIXES["scenario"],
     RECORD_PREFIXES["diagnostic"],
     RECORD_PREFIXES["term"],
+    RECORD_PREFIXES["weakness"],
+    RECORD_PREFIXES["dependent"],
 )
 """The record subjects a ``record`` row names: decisions and facet records, never invariants."""
 

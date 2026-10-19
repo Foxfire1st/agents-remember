@@ -80,6 +80,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Any
 
 from agents_remember.memory_quality.knowledge_validator.parsed import parse_sidecars_leniently
 from agents_remember.memory_quality.knowledge_validator.registry import (
@@ -92,9 +93,11 @@ from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTr
 from agents_remember.models.knowledge_files.canonical import CanonicalFormatError
 from agents_remember.models.knowledge_files.documents import parse_history_document
 from agents_remember.models.knowledge_files.history import (
+    RECORD_PREFIXES,
     FamilyRow,
     HistoryFile,
     InvariantRow,
+    RecordRow,
     is_closed_history,
     keeps_change_visible,
     reanchor_mismatches,
@@ -266,6 +269,21 @@ def _hidden_change_message(row: Judgment, hidden: Judgment) -> str:
     )
 
 
+def _answers_a_document_removal(row: Any) -> bool:
+    """Whether ``row`` is the retired row of a dependent a deleted document took with it.
+
+    The narrowest form the tree can show: the row is a ``record`` row, it retires, and its subject
+    is a dependent ID. Anything else -- a retired decision, weakness or facet row, or a membership or
+    invariant row -- names a record the tree must still hold, and its absence refuses (F05).
+    """
+
+    return (
+        isinstance(row, RecordRow)
+        and row.disposition == "retired"
+        and row.subject.split("-", 1)[0] == RECORD_PREFIXES["dependent"]
+    )
+
+
 def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
     # The item check reads the re-anchor check's files (MIK-R180): a row a leaf's own publication
     # judged is not judged again at a master's checkpoint, a master-level landing or a sync.
@@ -282,6 +300,12 @@ def check_history_rows(context: ValidationContext) -> Iterator[Finding]:
     for path, history in context.parsed.histories:  # every file: a subject never disappears
         for subject in unknown_subjects(history, context.record_ids):
             row = history.row_about(subject)
+            if _answers_a_document_removal(row):
+                # One intended case only: a document deleted from the code takes its dependent
+                # record with it (MIK-R124 rule 5), so that record's retired row has no subject
+                # left in the tree. Every other retired row about an absent subject still refuses:
+                # a retired row is not a general permission to name a record that is not there.
+                continue
             yield Finding(
                 path,
                 f"rows.{row.id if row is not None else subject}.subject",

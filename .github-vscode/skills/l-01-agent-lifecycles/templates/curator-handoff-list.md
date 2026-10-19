@@ -801,6 +801,65 @@ outside Git. It `constrains` the knowledge routes, is `motivated_change_to` the 
 has `reconsider_on` alternative 1 to the assumption "knowledge stays under about 100,000 records and
 every writer uses Git".
 
+## The two record kinds a producer may name
+
+A producer names these in its hand-off list; the curator records them through the writer or says in
+its report why not (`roles/curator.md` owns the recording side).
+
+**A weakness (MIK-R118).** What an agent met in the code outside the scope of its task: a waste of
+an agent's context, compute, storage or time, a fault, or a debt. One entry, with the producer's
+words verbatim:
+
+```json
+{
+  "kind": "weakness",
+  "fields": {
+    "kind": "time",
+    "statement": "one sentence: what the code does and what that costs, or what is wrong",
+    "anchor": {"path": "cli/paseo_role_tools.py", "locator": {"kind": "symbol", "value": "_line_receipts"}},
+    "seen": {"task": "<the task that saw it>", "role": "worker"},
+    "state": "open",
+    "measurement": {"number": 0.4, "unit": "s", "how": "one message at 2,300 receipts", "commit": "<40 hex>", "date": "2026-10-09"}
+  }
+}
+```
+
+The writer fills `blob` and `content` at the code candidate. `measurement` is present only where the
+producer took one. A weakness that belongs to no file is not recorded here, and a statement beyond
+the writer's one-sentence bound is refused with its field. It carries no priority and no proposal.
+
+**A dependent (MIK-R124).** One document that describes code, and what the document stands on:
+
+```json
+{
+  "kind": "dependent",
+  "fields": {
+    "document": "docs/reference/settings-json.md",
+    "stands_on": [
+      {"kind": "anchor", "heading": "The host pin", "anchor": {"path": "kernel/primitives/paseo_runtime_settings.py", "locator": {"kind": "symbol", "value": "PaseoRuntimeSettings"}}},
+      {"kind": "file", "path": "mcp/src/agents_remember/package_data/paseo_host/contract.json"},
+      {"kind": "record", "id": "INV-…"}
+    ],
+    "confirmed": {
+      "task": "<the task that confirms it>",
+      "role": "curator",
+      "statement": "one sentence: this task's judgment of the document as it now stands"
+    }
+  }
+}
+```
+
+**Every dependent write is a confirmation, so every confirmation carries its sentence.** `statement`
+is this task's own one-sentence judgment of the document — not a summary of the code, and not the
+previous confirmer's words. It is required whether the document itself changed, stood still while the
+code under its links moved, or was confirmed as it stands: the writer refuses a confirmation without
+it, because a confirmation that states nothing claims agreement nobody gave (MIK-R124 rule 5).
+
+The writer reads every recorded value at the task's tip -- an anchor's content, a whole file's blob,
+a record's revision -- and fills `confirmed.commit`. No value is typed in. A document has at most
+one dependent record; a record without a link, or for a path that is not a tracked file, is refused
+with its field. The record holds no text of the document and no summary of it.
+
 ## What this template is not
 
 It is not the curator's side. The curator consumes this list as data, fills `resolution`,

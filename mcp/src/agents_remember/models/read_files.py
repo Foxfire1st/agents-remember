@@ -54,6 +54,11 @@ class NamedFile(StrictResponseModel):
     cardStatus: Literal["found", "missing"] | None = None
     cardState: str | None = None
     recordCounts: dict[str, int] | None = None
+    # MIK-R118 rule 5 and MIK-R124 rule 7: one short line, a number, and no more. The count of open
+    # weaknesses on the file, and the count of documents that stand on it. The field is absent when
+    # the count is zero, and neither ever carries a record's text.
+    openWeaknesses: int | None = None
+    dependentDocuments: int | None = None
     actionNeeded: list[NamedRecord] | None = None
     statesProblem: str | None = None
     indexComplete: bool | None = None

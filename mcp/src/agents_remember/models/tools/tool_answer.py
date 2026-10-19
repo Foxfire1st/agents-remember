@@ -528,6 +528,17 @@ def _fit_scalars(
     return dropped, kept
 
 
+def _document_notice(answer: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Keep the landing's debt or failed-computation notice when its detailed lists overflow."""
+
+    notice = answer.get("staleDocuments")
+    if not isinstance(notice, Mapping):
+        return None
+    result = {key: notice[key] for key in ("count", "state") if key in notice}
+    result["read"] = {"view": "dependent", "staleOnly": True}
+    return result
+
+
 def short_form(
     answer: Mapping[str, Any],
     *,
@@ -586,6 +597,8 @@ def short_form(
         short["logError"] = log_error
     else:
         _fit_location(short, log, count)
+    if (notice := _document_notice(answer)) is not None:
+        short["staleDocuments"] = notice
     error_cut = prior_error_cut
     if "error" in answer:
         error_cut = _fit_error(short, answer["error"], count) or prior_error_cut

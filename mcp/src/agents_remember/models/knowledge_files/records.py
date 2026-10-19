@@ -23,27 +23,32 @@ means) belong to MIK-R13 and MIK-R27, not here.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
-from typing import ClassVar, Final, Literal
+from typing import Annotated, ClassVar, Final, Literal, get_args
 
 from pydantic import Field, model_validator
 
 from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, RecordKind
 from agents_remember.models.knowledge_files.shapes import (
+    Anchor,
     DecisionAdmission,
     DecisionId,
     FamilyAdmission,
     FamilyId,
     FileModel,
+    GitBlobId,
     IncidentId,
     InvariantAdmission,
     InvariantId,
     Label,
     LegacyUnassessed,
     Link,
+    OneSentence,
     Origin,
     RecordId,
     Relation,
+    RepositoryPath,
     Text,
     require_unique,
 )
@@ -65,6 +70,8 @@ RELATIONS_BY_KIND: Final[Mapping[RecordKind, frozenset[Relation]]] = {
     "scenario": frozenset({"exercises"}),
     "diagnostic": frozenset({"diagnoses"}),
     "term": frozenset({"defines_term_in"}),
+    "weakness": frozenset({"burdens"}),
+    "dependent": frozenset(),
 }
 
 
@@ -287,6 +294,178 @@ class TermRecord(_FacetRecord):
     scope: Text
 
 
+# --------------------------------------------------------------------------------------------------
+# MIK-R118: a weakness of the code, recorded where it occurs
+# --------------------------------------------------------------------------------------------------
+
+# The closed list of weakness kinds (MIK-R118 rule 1): the four wastes, a fault, and a debt. One
+# definition, the model literal; the runtime tuple is derived from it, so a reader, a writer and a
+# validator cannot drift from each other by editing one of two lists.
+WeaknessKind = Literal["context", "compute", "storage", "time", "fault", "debt"]
+WEAKNESS_KINDS: Final[tuple[str, ...]] = get_args(WeaknessKind)
+WeaknessState = Literal["open", "closed"]
+
+
+class Measurement(FileModel):
+    """``{ number, unit, how, commit, date }``: a weakness' measurement (MIK-R118 rule 1)."""
+
+    number: float
+    unit: Label
+    how: Text
+    commit: GitBlobId
+    date: Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]
+
+
+class SeenBy(FileModel):
+    """``{ task, role }``: who saw the weakness (MIK-R118 rule 1)."""
+
+    task: Label
+    role: Label
+
+
+class Closure(FileModel):
+    """``{ task, commit, reason? }``: the change that removed a weakness' cause (rule 7).
+
+    ``reason`` is the one sentence a task writes when it finds a weakness does not stand.
+    """
+
+    task: Label
+    commit: GitBlobId
+    reason: Text | None = None
+
+
+class WeaknessRecord(_Record):
+    """``ar-weakness/v1``: a weakness of the code, anchored where it occurs (MIK-R118).
+
+    The ``kind`` is one of :data:`WEAKNESS_KINDS`. ``anchor`` names the file and, where it has one,
+    the symbol: the same anchor a realization entry carries, recorded at the commit that saw it.
+    ``measurement`` is present only where there is one. ``seen`` is who saw it. ``state`` is
+    ``open`` or ``closed``; a closed record names the ``task`` and ``commit`` that removed its
+    cause. ``links`` may carry ``burdens`` towards an invariant or a family. There is no priority
+    field and no proposal field: a weakness that belongs to no file is not recorded here.
+    """
+
+    record_kind: ClassVar[RecordKind] = "weakness"
+
+    schema_: Literal["ar-weakness/v1"] = Field(default="ar-weakness/v1", alias="schema")
+    id: RecordId
+    revision: int = Field(ge=1)
+    kind: WeaknessKind
+    statement: OneSentence
+    anchor: Anchor
+    seen: SeenBy
+    state: WeaknessState
+    measurement: Measurement | None = None
+    closed: Closure | None = None
+    links: tuple[Link, ...] = ()
+
+    @model_validator(mode="after")
+    def _require_place_and_close(self) -> WeaknessRecord:
+        if self.anchor.path is None:
+            raise ValueError("a weakness anchors to a file: 'anchor.path' is required")
+        if (self.state == "closed") != (self.closed is not None):
+            raise ValueError(
+                "a closed weakness names its 'closed' task and commit, and an open one carries none"
+            )
+        return self
+
+
+# --------------------------------------------------------------------------------------------------
+# MIK-R124: a document that describes code, and what it stands on
+# --------------------------------------------------------------------------------------------------
+
+
+class DependentAnchorLink(FileModel):
+    """One link to a place in a file: the anchor a realization entry carries (MIK-R124 rule 2)."""
+
+    kind: Literal["anchor"] = "anchor"
+    anchor: Anchor
+    heading: Label | None = None
+
+    @model_validator(mode="after")
+    def _require_path(self) -> DependentAnchorLink:
+        if self.anchor.path is None:
+            raise ValueError("an anchor link names its file: 'anchor.path' is required")
+        return self
+
+
+class DependentFileLink(FileModel):
+    """One link to a whole file: the recorded value is the file's blob (MIK-R124 rule 2)."""
+
+    kind: Literal["file"] = "file"
+    path: RepositoryPath
+    blob: GitBlobId
+    heading: Label | None = None
+
+
+class DependentRecordLink(FileModel):
+    """One link to an invariant or a family: the recorded value is its ``revision``."""
+
+    kind: Literal["record"] = "record"
+    id: RecordId
+    revision: int = Field(ge=1)
+    heading: Label | None = None
+
+
+DependentLink = Annotated[
+    DependentAnchorLink | DependentFileLink | DependentRecordLink,
+    Field(discriminator="kind"),
+]
+
+
+class Confirmation(FileModel):
+    """``{ task, role, commit, codeTree?, uncommitted?, statement? }``: who last confirmed a
+    document, at what code state.
+
+    ``statement`` is the one sentence a Curator writes when it confirms a document it did not
+    change (MIK-R124 rule 5). ``codeTree`` is the tree the recorded link values were read from,
+    and ``uncommitted`` says that this tree is not the named commit's own tree -- the links then
+    describe the candidate's worktree, and the commit names only the line it sits on. Nothing
+    here is typed: the writer fills all four (MIK-R124 rule 1).
+    """
+
+    task: Label
+    role: Label
+    commit: GitBlobId
+    codeTree: GitBlobId | None = None
+    uncommitted: bool = False
+    statement: Text | None = None
+
+
+def _dependent_link_key(link: DependentLink) -> str:
+    """One link's identity for the distinctness check: its kind and what it stands on."""
+
+    document = link.to_document()
+    document.pop("heading", None)
+    return json.dumps(document, sort_keys=True, separators=(",", ":"))
+
+
+class DependentRecord(_Record):
+    """``ar-dependent/v1``: one document, and every place it stands on (MIK-R124 rule 1).
+
+    ``document`` is a tracked file of the code repository; at most one record names it. Each
+    ``stands_on`` link records what stood at the anchor at the last confirmation. ``confirmed``
+    names the task, role and code commit of that confirmation. The record holds no text of the
+    document and no summary of it. Whether the document is stale is derived, never stored.
+    """
+
+    record_kind: ClassVar[RecordKind] = "dependent"
+
+    schema_: Literal["ar-dependent/v1"] = Field(default="ar-dependent/v1", alias="schema")
+    id: RecordId
+    revision: int = Field(ge=1)
+    document: RepositoryPath
+    stands_on: tuple[DependentLink, ...] = Field(min_length=1)
+    confirmed: Confirmation
+
+    @model_validator(mode="after")
+    def _require_distinct_links(self) -> DependentRecord:
+        keys = [_dependent_link_key(one) for one in self.stands_on]
+        if len(set(keys)) != len(keys):
+            raise ValueError("a dependent's 'stands_on' must not repeat a link")
+        return self
+
+
 KnowledgeRecord = (
     InvariantRecord
     | FamilyRecord
@@ -298,7 +477,24 @@ KnowledgeRecord = (
     | ScenarioRecord
     | DiagnosticRecord
     | TermRecord
+    | WeaknessRecord
+    | DependentRecord
 )
+
+
+def record_status(record: KnowledgeRecord) -> str:
+    """The record's lifecycle word, for the rows that carry one (MIK-R118, MIK-R124).
+
+    The older kinds store ``status``; a weakness stores ``state`` (``open`` or ``closed``), and a
+    dependent stores neither, because whether its document is stale is derived from what the document
+    stands on and never written into the record (MIK-R124 rule 3). The empty word is that fact, not a
+    default status: a caller that needs currency must derive it.
+    """
+
+    if isinstance(record, WeaknessRecord):
+        return record.state
+    return getattr(record, "status", "")
+
 
 RECORD_MODELS: Final[Mapping[RecordKind, type[KnowledgeRecord]]] = {
     "invariant": InvariantRecord,
@@ -311,4 +507,6 @@ RECORD_MODELS: Final[Mapping[RecordKind, type[KnowledgeRecord]]] = {
     "scenario": ScenarioRecord,
     "diagnostic": DiagnosticRecord,
     "term": TermRecord,
+    "weakness": WeaknessRecord,
+    "dependent": DependentRecord,
 }

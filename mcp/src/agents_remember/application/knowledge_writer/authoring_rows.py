@@ -49,6 +49,7 @@ from agents_remember.application.knowledge_writer.reconsideration import (
     refreshed_links,
 )
 from agents_remember.application.knowledge_writer.report import (
+    RecordOutcome,
     RowOutcome,
 )
 from agents_remember.kernel.git_command import GitPreparationError
@@ -90,6 +91,22 @@ if TYPE_CHECKING:
 
 NON_MEANING_FIELDS: Final = frozenset({"id", "schema", "origin", "revision", "admission", "status"})
 ABSENT: Final = "absent"
+
+# The record kinds a `record` history row may be about (MIK-R53 rule 8, MIK-R118, MIK-R124).
+# One definition, because a `handoff:` alias and a literal ID name the same record: two lists that
+# drifted apart made the alias refuse the row the literal admitted (F02).
+RECORD_ROW_KINDS: Final[tuple[str, ...]] = (
+    "decision",
+    "incident",
+    "assumption",
+    "limitation",
+    "failure_mode",
+    "scenario",
+    "diagnostic",
+    "term",
+    "weakness",
+    "dependent",
+)
 
 
 def meaning(document: Mapping[str, Any]) -> dict[str, Any]:
@@ -139,6 +156,7 @@ class HistoryRowAuthoring:
         owner: Owner
         notes: list[str]
         rows: list[RowOutcome]
+        records: list[RecordOutcome]
         _stored_in: dict[str, list[str]]
         _foreign_evidence: dict[str, list[tuple[str, tuple[str, ...]]]]
         decisions: DecisionResolver | None
@@ -321,32 +339,14 @@ class HistoryRowAuthoring:
         key = request.subject.removeprefix(HANDLE_PREFIX)
         candidate = self.handles.get(key)
         if candidate is None:
-            for kind in (
-                "decision",
-                "incident",
-                "assumption",
-                "limitation",
-                "failure_mode",
-                "scenario",
-                "diagnostic",
-                "term",
-            ):
+            for kind in RECORD_ROW_KINDS:
                 candidate = self.state.record_by_origin(kind, self.owner, key)
                 if candidate is not None:
                     break
         if candidate is None:
             return None
         found = self.state.record(candidate)
-        if found is None or found[1] not in (
-            "decision",
-            "incident",
-            "assumption",
-            "limitation",
-            "failure_mode",
-            "scenario",
-            "diagnostic",
-            "term",
-        ):
+        if found is None or found[1] not in RECORD_ROW_KINDS:
             return None
         return candidate
 
@@ -695,34 +695,26 @@ class HistoryRowAuthoring:
         if refusal is not None:
             self.problem(where, refusal)
             return None
-        subject = self.resolve_id(request.subject, where)
-        found = None if subject is None else self.state.record(subject)
-        if subject is None:
+        admitted = self._record_row_subject(request, where)
+        if admitted is None:
             return None
-        if found is None or found[1] not in {
-            "decision",
-            "incident",
-            "assumption",
-            "limitation",
-            "failure_mode",
-            "scenario",
-            "diagnostic",
-            "term",
-        }:
-            self.problem(
-                where, f"the subject {request.subject!r} names no decision or facet record"
-            )
-            return None
+        subject, stored, removed = admitted
+        # A removed record has no stored document to carry a foreign reason or a revision from;
+        # the removal is the change, so the row records no revision and carries nothing.
         row: dict[str, Any] = {
             "id": existing["id"] if existing is not None else self.mint("history_row"),
             "subject": subject,
             "disposition": request.disposition,
             "reason": self._reason_with_evidence(
-                subject, request.reason, self._foreign_carry(existing, found[2])
+                subject, request.reason, self._foreign_carry(existing, stored)
             ),
             "items": list(request.items),
-            "revision": found[2].get("revision"),
         }
+        if stored.get("revision") is not None:
+            row["revision"] = stored["revision"]
+        elif removed is not None:
+            # The row is about the revision the record stood at when this write removed it.
+            row["revision"] = removed.revision
         if request.effect is not None:
             row["effect"] = request.effect
         if request.because:
@@ -733,6 +725,39 @@ class HistoryRowAuthoring:
             self.problem(where, _first_error(error))
             return None
         return row
+
+    def _record_row_subject(
+        self, request: RowRequest, where: str
+    ) -> tuple[str, Mapping[str, Any], RecordOutcome | None] | None:
+        """The record a ``record`` row is about, or the refusal that it names none (F02, F05).
+
+        A literal ID and a ``handoff:`` alias reach the same record and the same kinds, and a
+        record this same write removed is still a subject its ``retired`` row answers: the record
+        is gone from state by the time rows are admitted, and the kind and revision are the ones
+        the removal recorded.
+        """
+
+        subject = self.resolve_id(request.subject, where)
+        if subject is None:
+            return None
+        found = self.state.record(subject)
+        removed = None
+        if found is None:
+            removed = next(
+                (
+                    outcome
+                    for outcome in self.records
+                    if outcome.id == subject and outcome.action == "removed"
+                ),
+                None,
+            )
+        kind = found[1] if found is not None else (removed.kind if removed is not None else None)
+        if kind is None or kind not in RECORD_ROW_KINDS:
+            self.problem(
+                where, f"the subject {request.subject!r} names no decision or facet record"
+            )
+            return None
+        return subject, (found[2] if found is not None else {}), removed
 
     def _record_effect_refusal(self, request: RowRequest) -> str | None:
         """Why a record row's effect input is refused, or ``None`` (MIK-R53 rule 8)."""

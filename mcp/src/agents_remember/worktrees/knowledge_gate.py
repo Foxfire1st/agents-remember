@@ -76,7 +76,7 @@ from agents_remember.worktrees.services import (
     LeafPublication,
     worktree_services,
 )
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import WorktreeContract, original_base_pair
 
 __all__ = [
     "GATE_UNBOUND",
@@ -353,6 +353,50 @@ def landing_gate_refusal(request: LandingGateRequest) -> str | None:
     ]
     named = [refusal for refusal in refusals if refusal is not None]
     return "\n".join(named) if named else None
+
+
+def landing_document_answer(
+    contract: WorktreeContract, *, code_commit: str, memory_commit: str, master_end: bool = False
+) -> dict[str, Any] | None:
+    """The stale-document field a landing's answer names (MIK-R124 rule 4), or ``None``.
+
+    The count is the documents this landing made stale: stale at its tip, and current or without a
+    record at its base (rule 3's derivation, over both trees). The field carries the count and the
+    read that lists them; where there are none it is absent. An unconverted line carries no
+    dependents and answers nothing. A state that cannot be computed is named in place of the count
+    and refuses nothing -- the master's end is the route that refuses it (rule 8).
+    """
+
+    repository = contract.memory_repo_path
+    base = contract.memory_base_commit
+    if contract.memory_mode != "external" or repository is None or not base or not memory_commit:
+        return None
+    # Deferred: the gate implementation imports this module (``application.knowledge_gate.gate``
+    # asks for ``closed_out_memory``), so naming the computation at module scope would close a
+    # cycle between the two layers.
+    from agents_remember.application.knowledge_gate.landing import (  # noqa: PLC0415
+        document_staleness,
+    )
+
+    try:
+        if not converted_memory(repository, memory_commit, base):
+            return None
+    except GateProbeError as error:
+        return {"state": "uncomputable", "detail": str(error)}
+    return document_staleness(
+        LandingGateRequest(
+            memory_repository=repository,
+            memory_commit=memory_commit,
+            memory_bases=(base,),
+            code_repository=contract.code_repo_path,
+            code_commit=code_commit,
+            code_base=contract.code_base_commit,
+            document_base=original_base_pair(contract) if master_end else None,
+        ),
+        # A series landing is the master's own line: every document is examined, so one already
+        # stale at the base is named and debt a net-zero change would hide is still caught (F11).
+        full=master_end,
+    ).answer(name_already_stale=master_end)
 
 
 def landing_history_refusal(request: LandingGateRequest) -> str | None:

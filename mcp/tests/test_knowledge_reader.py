@@ -564,7 +564,8 @@ def _assert_file_invariants(view: dict[str, Any], world: World) -> None:
     # Its entry here is current at the paired code tree; its proof elsewhere is not (MIK-R03 rule 2).
     assert [(e["id"], e["state"]) for e in own["entries"]] == [("RLZ-RVW001", "current")]
     assert own["state"] == "stale" and invariants[SIBLING_INVARIANT]["state"] == "stale"
-    assert view["currentness"]["codeTree"]["treeId"] == _code_tree(world)
+    # Keep the paired commit: dependent movement needs its ancestry, not only its tree.
+    assert view["currentness"]["codeTree"]["treeId"] == world.code_commit
 
 
 def _assert_file_records(view: dict[str, Any]) -> None:

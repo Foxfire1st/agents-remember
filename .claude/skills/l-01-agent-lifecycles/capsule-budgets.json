@@ -92,16 +92,16 @@
       "budget_words": 2533
     },
     "worker/orientation": {
-      "size_words": 2432,
-      "budget_words": 2676
+      "size_words": 2584,
+      "budget_words": 2843
     },
     "worker/implementation": {
-      "size_words": 2288,
-      "budget_words": 2517
+      "size_words": 2440,
+      "budget_words": 2684
     },
     "worker/recovery": {
-      "size_words": 1748,
-      "budget_words": 1923
+      "size_words": 1900,
+      "budget_words": 2090
     },
     "curator/orientation": {
       "size_words": 3142,
@@ -148,8 +148,8 @@
       "budget_words": 3700
     },
     "launcher/orientation": {
-      "size_words": 1520,
-      "budget_words": 1672
+      "size_words": 1531,
+      "budget_words": 1685
     },
     "launcher/coordination": {
       "size_words": 2135,
@@ -170,8 +170,8 @@
       "budget_words": 58
     },
     "reference/reviewer-baseline-d301.md": {
-      "size_words": 119,
-      "budget_words": 131
+      "size_words": 196,
+      "budget_words": 216
     },
     "reference/reviewer-adjudication-d301.md": {
       "size_words": 42,
@@ -206,8 +206,8 @@
       "budget_words": 360
     },
     "reference/curator-writer-details.md": {
-      "size_words": 278,
-      "budget_words": 306
+      "size_words": 450,
+      "budget_words": 495
     },
     "reference/shared-writing-profile.md": {
       "size_words": 1334,
@@ -720,5 +720,65 @@
         "budget_words": 2517
       }
     }
-  }
+  },
+  "decisions_L118": {
+    "authority": "MIK-R118 and MIK-R124; MIK-R125 capped eleven-tenths rule",
+    "capsule_ceiling": 3700,
+    "step_detail_ceiling": 2500,
+    "measurement": "All 38 actual compiled render_instructions whitespace-split sizes, excluding task data and seals; all complete declared step sources.",
+    "reason": "L118's scope and authoring paragraphs are retained verbatim in the existing declared stage details with explicit role instructions linking them. Only L118-added role text moves. No preexisting role instruction, ceiling or compiler count rule changes.",
+    "changes": {
+      "worker/orientation": {
+        "size_words": 2584,
+        "budget_words": 2843
+      },
+      "worker/implementation": {
+        "size_words": 2440,
+        "budget_words": 2684
+      },
+      "worker/recovery": {
+        "size_words": 1900,
+        "budget_words": 2090
+      },
+      "curator/orientation": {
+        "size_words": 3144,
+        "budget_words": 3459
+      },
+      "curator/curation": {
+        "size_words": 3700,
+        "budget_words": 3700
+      },
+      "curator/recovery": {
+        "size_words": 2460,
+        "budget_words": 2706
+      },
+      "reviewer/orientation": {
+        "size_words": 3698,
+        "budget_words": 3700
+      },
+      "reviewer/review": {
+        "size_words": 3652,
+        "budget_words": 3700
+      },
+      "reviewer/recovery": {
+        "size_words": 3014,
+        "budget_words": 3316
+      },
+      "launcher/orientation": {
+        "size_words": 1531,
+        "budget_words": 1685
+      }
+    },
+    "step_detail_changes": {
+      "reference/reviewer-baseline-d301.md": {
+        "size_words": 196,
+        "budget_words": 216
+      },
+      "reference/curator-writer-details.md": {
+        "size_words": 450,
+        "budget_words": 495
+      }
+    }
+  },
+  "decisions_L118_A15": {"authority": "L118 second landing check: the two detail-link sentences only; unchanged 3700 capsule and 2500 step ceilings.", "change": "Remove only the two redundant immediate Apply links added by L118; keep the existing step-qualified Read links and both verbatim stage paragraphs. No other role or detail instruction changes.", "changes": {"curator/orientation": {"before": {"size_words": 3144, "budget_words": 3459}, "after": {"size_words": 3142, "budget_words": 3457}}, "curator/curation": {"before": {"size_words": 3700, "budget_words": 3700}, "after": {"size_words": 3698, "budget_words": 3700}}, "curator/recovery": {"before": {"size_words": 2460, "budget_words": 2706}, "after": {"size_words": 2458, "budget_words": 2704}}, "reviewer/orientation": {"before": {"size_words": 3698, "budget_words": 3700}, "after": {"size_words": 3696, "budget_words": 3700}}, "reviewer/review": {"before": {"size_words": 3652, "budget_words": 3700}, "after": {"size_words": 3650, "budget_words": 3700}}, "reviewer/recovery": {"before": {"size_words": 3014, "budget_words": 3316}, "after": {"size_words": 3012, "budget_words": 3314}}}}
 }

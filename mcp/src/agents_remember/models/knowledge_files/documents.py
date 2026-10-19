@@ -23,7 +23,7 @@ the file is named after its owner. The census schemas (``ar-census-*/v1``) are M
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, Final
 
 from agents_remember.models.knowledge_files.canonical import parse_json
@@ -32,6 +32,7 @@ from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA, Histo
 from agents_remember.models.knowledge_files.ids import CROCKFORD_ALPHABET, RecordKind
 from agents_remember.models.knowledge_files.records import (
     RECORD_MODELS,
+    DependentRecord,
     KnowledgeRecord,
     schema_name,
 )
@@ -61,6 +62,8 @@ RECORD_DIRECTORIES: Final[Mapping[RecordKind, str]] = {
     "scenario": "scenarios",
     "diagnostic": "diagnostics",
     "term": "terms",
+    "weakness": "weaknesses",
+    "dependent": "dependents",
 }
 
 SCHEMA_MODELS: Final[Mapping[str, type[FileModel]]] = {
@@ -112,6 +115,45 @@ def record_path(kind: RecordKind, record_id: str, slug: str, *, extension: str =
     if extension not in {"json", "md"}:
         raise ValueError("a record file is .json or .md")
     return f"{KNOWLEDGE_ROOT}/{RECORD_DIRECTORIES[kind]}/{record_id}-{slug}.{extension}"
+
+
+def dependent_link_index(
+    records: Iterable[tuple[str, DependentRecord]],
+) -> dict[str, list[str]] | None:
+    """Mechanical lookup metadata; the dependent remains the sole owner of its links."""
+
+    targets: dict[str, set[str]] = {}
+    for path, record in records:
+        for link in record.stands_on:
+            target = (
+                f"record:{link.id}"
+                if link.kind == "record"
+                else f"file:{link.anchor.path if link.kind == 'anchor' else link.path}"
+            )
+            targets.setdefault(target, set()).add(path)
+    return {key: sorted(paths) for key, paths in sorted(targets.items())} or None
+
+
+def dependent_document_paths(files: Mapping[str, bytes]) -> frozenset[str]:
+    """Documents represented by dependent records, never by onboarding (MIK-R124 rule 1).
+
+    The record supplies this classification; a Markdown suffix or a storage exemption does not.
+    An unreadable record is a named failure, so it cannot silently remove an onboarding duty.
+    """
+
+    documents: set[str] = set()
+    prefix = f"{KNOWLEDGE_ROOT}/{RECORD_DIRECTORIES['dependent']}/"
+    for path, data in files.items():
+        if not path.startswith(prefix) or not path.endswith(".json"):
+            continue
+        try:
+            record = parse_document_text(data.decode("utf-8"))
+            if not isinstance(record, DependentRecord):
+                raise ValueError("the dependent folder holds a different record kind")
+        except (UnicodeDecodeError, ValueError) as error:
+            raise RuntimeError(f"cannot read dependent document record {path}: {error}") from error
+        documents.add(record.document)
+    return frozenset(documents)
 
 
 def split_record_filename(filename: str) -> tuple[str, str, str]:

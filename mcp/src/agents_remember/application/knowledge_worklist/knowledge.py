@@ -133,8 +133,18 @@ class KnowledgeSide:
         return indexed.path, self.files[indexed.path]
 
     def revision(self, record_id: str) -> int | None:
-        record = self.invariants.get(record_id) or self.families.get(record_id)
-        return None if record is None else record.revision
+        """The record's stored revision, whatever its kind (MIK-R124 rule 5).
+
+        It used to answer only for invariants and families, so a document predicate comparing a
+        dependent's row revision got ``None`` and skipped the comparison — a changed row could
+        stand in for a real confirmation.
+        """
+
+        indexed = self.parsed.records.get(record_id)
+        if indexed is None:
+            return None
+        revision = indexed.record.to_document().get("revision")
+        return revision if isinstance(revision, int) else None
 
     def history(self, owner_id: str) -> HistoryFile | None:
         return self.parsed.histories.get(owner_id)

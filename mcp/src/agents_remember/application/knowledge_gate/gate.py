@@ -389,6 +389,7 @@ def judge(
     """The gate's findings over one recomputed worklist and its exact candidate trees."""
 
     findings: list[GateFinding] = []
+    advisory: list[GateFinding] = []
     if document.get("state") != "complete":
         findings += [
             GateFinding(
@@ -400,14 +401,15 @@ def judge(
             for one in document.get("incomplete") or ({"input": "worklist", "detail": "-"},)
         ]
     else:
-        findings += _item_findings(document.get("items") or (), trees, owner)
+        item_findings, advisory = _item_findings(document.get("items") or (), trees, owner)
+        findings += item_findings
     refusing, reports = validation_findings(trees)
     return GateResult(
         owner=owner,
         worklist=document,
         worklist_path=path,
         findings=tuple([*findings, *refusing]),
-        reports=tuple(reports),
+        reports=tuple([*advisory, *reports]),
     )
 
 
@@ -474,15 +476,15 @@ def _held_candidate(
 
 def _item_findings(
     items: Sequence[Mapping[str, Any]], trees: GateTrees, owner: str | None
-) -> list[GateFinding]:
+) -> tuple[list[GateFinding], list[GateFinding]]:
     context = _candidate(trees, owner)
     if isinstance(context, GateFinding):
-        return [context]
+        return [context], []
     where = _writable_history(context, owner, trees) if owner else "knowledge/history"
     try:
-        decided = _decided(items, context, where)
+        refusing, advisory = _decided(items, context, where)
     except GitReadFailed as error:  # never decided on a read that did not happen (never memoised)
-        return [_unreadable("git", error)]
+        return [_unreadable("git", error)], []
     findings: list[GateFinding] = []
     if not owner:
         findings.append(
@@ -493,7 +495,7 @@ def _item_findings(
                 "its items (MIK-R07 rule 1)",
             )
         )
-    return findings + decided
+    return findings + refusing, advisory
 
 
 def item_verdicts(
@@ -581,8 +583,12 @@ def _closed_in(trees: GateTrees, commits: tuple[str, ...], path: str) -> bool:
 
 def _decided(
     items: Sequence[Mapping[str, Any]], context: GateContext, where: str
-) -> list[GateFinding]:
-    """Each item through its kind's predicate: the invariant kinds first, for the family rule."""
+) -> tuple[list[GateFinding], list[GateFinding]]:
+    """Each item through its kind's predicate: the invariant kinds first, for the family rule.
+
+    Returns ``(refusing, advisory)``. An advisory kind -- a weakness (MIK-R118 rule 4) -- never
+    refuses: its open item is reported by the gate and blocks nothing.
+    """
 
     invariant_reasons = {
         index: reason
@@ -600,11 +606,18 @@ def _decided(
         else item_open_reason(item, context)
         for index, item in enumerate(items)
     ]
-    return [
-        GateFinding(ITEM_OPEN, where, _open_message(item, reason), str(item.get("id")))
-        for item, reason in zip(items, reasons, strict=True)
-        if reason is not None
-    ]
+    refusing: list[GateFinding] = []
+    advisory: list[GateFinding] = []
+    for item, reason in zip(items, reasons, strict=True):
+        if reason is None:
+            continue
+        finding = GateFinding(ITEM_OPEN, where, _open_message(item, reason), str(item.get("id")))
+        registered = ITEM_KINDS.get(str(item.get("kind")))
+        if registered is not None and registered.advisory:
+            advisory.append(finding)
+        else:
+            refusing.append(finding)
+    return refusing, advisory
 
 
 def _open_message(item: Mapping[str, Any], reason: str) -> str:

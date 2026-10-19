@@ -43,6 +43,8 @@ RecordKind = Literal[
     "scenario",
     "diagnostic",
     "term",
+    "weakness",
+    "dependent",
 ]
 EntryKind = Literal["realization", "proof"]
 RowKind = Literal["history_row"]
@@ -59,6 +61,8 @@ RECORD_PREFIXES: Final[Mapping[RecordKind, str]] = {
     "scenario": "SCN",
     "diagnostic": "DGN",
     "term": "TRM",
+    "weakness": "WKN",
+    "dependent": "DPD",
 }
 ENTRY_PREFIXES: Final[Mapping[EntryKind, str]] = {"realization": "RLZ", "proof": "PRF"}
 # A history row's ID (MIK-R07 rule 1): minted by the writer like every other ID, never derived.

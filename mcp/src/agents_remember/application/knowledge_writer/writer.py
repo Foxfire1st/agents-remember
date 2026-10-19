@@ -64,10 +64,12 @@ from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.models.knowledge_files.decisions import stored_superseded_fields
 from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
+    dependent_link_index,
     parse_document,
     parse_history_document,
 )
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA
+from agents_remember.models.knowledge_files.records import DependentRecord
 from agents_remember.models.knowledge_files.unexplained import FILE_ITEM_KIND, HUNK_ITEM_KIND
 
 UNCONVERTED = (
@@ -183,6 +185,17 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     if problems:
         return replace(report, state="refused", problems=tuple(problems))
     files = state.candidate_files(rendered)
+    marker = state.document(LAYOUT_MARKER_PATH)
+    assert marker is not None
+    links = dependent_link_index(
+        (path, DependentRecord.model_validate(state.document(path)))
+        for path, kind in state.records.values()
+        if kind == "dependent" and path not in state.removed
+    )
+    marker = {**marker, "dependent_links": links}
+    if links is None:
+        marker.pop("dependent_links")
+    files[LAYOUT_MARKER_PATH] = canonical_text(marker).encode("utf-8")
     bases = (state.base,) if state.base is not None and state.base.converted else ()
     validation = validate_tree(
         KnowledgeTree(label=f"{request.owner.id} candidate", files=files),

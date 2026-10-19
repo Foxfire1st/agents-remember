@@ -712,6 +712,16 @@ def _sync_lines(contract: WorktreeContract) -> list[str]:
     ]
 
 
+def original_base_pair(contract: WorktreeContract) -> tuple[str, str]:
+    """The initial pair, retained by the first sync even after checkpoints advance source refs."""
+
+    first = contract.sync_log[0] if contract.sync_log else {}
+    return (
+        first.get("codeBaseFrom", "") or contract.code_base_commit,
+        first.get("memoryBaseFrom", "") or contract.memory_base_commit,
+    )
+
+
 def _parse_sync_log(value: str) -> tuple[dict[str, str], ...]:
     if not value:
         return ()

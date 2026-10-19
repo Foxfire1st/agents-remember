@@ -269,6 +269,19 @@ list under the same wave writes the same files with the same IDs, so a resumed r
 wave. A run that did not examine a required area **cannot claim the foundation complete for it**. A
 tree with no records, a refused run, or an exit status of zero is not a populated foundation.
 
+### 7. A weakness met while reading a file is recorded in the same step (MIK-R118 rule 8)
+
+The full migration of MIK-R19 reads every file of the code, and this procedure reads a bounded part
+of it. **Whatever the run reads, a weakness it meets in that file is recorded in the same step**, as
+a `WKN-` record of kind `context`, `compute`, `storage`, `time`, `fault` or `debt`, on the file and
+the symbol where it occurs, with one sentence and any measurement the reader took. The author is the
+curator and the route is the writer, exactly as for every other record: nothing here writes a
+weakness by hand, and nobody is sent to look for one.
+
+**A wave's check neither counts them nor asks for any.** The census, the coverage plan and the
+independent check of a wave count records and obligations; a weakness is not one of those, it is not
+a finding, and its absence from a file is not an omission. A run that meets none records none.
+
 ## Failure And Recovery Behavior
 
 | State | Observed from | The move |

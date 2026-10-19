@@ -79,6 +79,12 @@ class ItemKind:
     satisfying_row: str
     row_lookup: RowLookup = field(compare=False, repr=False)
     owner: str
+    advisory: bool = False
+    """True when an open item of this kind is reported and never refuses anything.
+
+    A weakness is such a mark (MIK-R118 rule 4): the gate and every route may show it as open,
+    and no review, gate or closeout is refused by it.
+    """
 
     def accepts_subject(self, subject: str) -> bool:
         return re.match(self.subject_pattern, subject) is not None

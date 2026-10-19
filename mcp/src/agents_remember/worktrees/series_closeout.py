@@ -34,6 +34,7 @@ from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
     load_contract,
+    original_base_pair,
 )
 
 
@@ -641,11 +642,7 @@ def _require_chain_origin(
 def _series_pre_sync_base(series: WorktreeContract) -> tuple[str, str]:
     """The pair the first recorded sync advanced from: the master's line before it reconciled."""
 
-    first = series.sync_log[0]
-    return (
-        first.get("codeBaseFrom", "") or series.code_base_commit,
-        first.get("memoryBaseFrom", "") or series.memory_base_commit,
-    )
+    return original_base_pair(series)
 
 
 @dataclass(frozen=True)

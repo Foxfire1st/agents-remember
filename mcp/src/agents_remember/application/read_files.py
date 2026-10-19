@@ -22,13 +22,22 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import apsw
 
 from agents_remember.application.knowledge_currentness.observe import CodeTree
+from agents_remember.application.knowledge_reader.marks import (
+    dependent_counts,
+    open_weakness_counts,
+)
+from agents_remember.application.knowledge_reader.selection import (
+    READ_FAILURES,
+    ReaderSelection,
+    selection_for_dataset,
+)
 from agents_remember.application.published_intent import select_knowledge_dataset
 from agents_remember.application.read_file_cards import (
     READ_AR_FILES_MAX_PATHS,
@@ -129,6 +138,7 @@ def read_ar_files_tool(
     )
 
     memory_state, dataset = _memory_selection(context, config)
+    weaknesses, documents, counts_problem = _mark_counts(context, memory_state, dataset)
     code_root = Path(repo.path)
     # The states are measured at the code the caller sees: the commit when the checkout is clean,
     # else its working tree, captured and held for exactly this read (MIK-R73 rule 7).
@@ -151,6 +161,9 @@ def read_ar_files_tool(
                     code_tree=code_tree,
                     object_directory=object_directory,
                     working_folder=working_folder,
+                    open_weaknesses=weaknesses,
+                    dependent_documents=documents,
+                    counts_problem=counts_problem,
                 ),
                 worktree_scope=worktree_scope,
                 code_state=code_state,
@@ -312,6 +325,12 @@ class _BatchScope:
     working_folder: Path | None
     object_directory: Path | None
     """The held capture's store when the read observes a working tree, else ``None``."""
+    open_weaknesses: Mapping[str, int] = field(default_factory=dict)
+    """How many open weaknesses each code file carries (MIK-R118 rule 5)."""
+    dependent_documents: Mapping[str, int] = field(default_factory=dict)
+    """How many documents stand on each code file (MIK-R124 rule 7)."""
+    counts_problem: str | None = None
+    """Why the two counts could not be taken, or ``None``: said, never a refusal."""
 
 
 def _name_one(
@@ -325,6 +344,7 @@ def _name_one(
     rel = _confined_rel(code_root, path)
     exists = filesystem.is_file(code_root / rel)
     result: dict[str, Any] = {"path": path, "exists": exists}
+    _add_mark_lines(result, rel, scope)
     if not exists:
         return result
 
@@ -386,6 +406,61 @@ def _name_one(
         )
     )
     return result
+
+
+def _add_mark_lines(result: dict[str, Any], rel: str, scope: _BatchScope) -> None:
+    """Add the card read's two one-line counts for ``rel`` (MIK-R118 rule 5, MIK-R124 rule 7).
+
+    A line is one short integer: the number of open weaknesses on the file, and the number of
+    documents that stand on it. Where there is none the field is absent, and the text of a record
+    never travels here -- a card's read names a count, no sentence. A count that could not be taken
+    is said once per row rather than reported as none.
+    """
+
+    weaknesses = scope.open_weaknesses.get(rel, 0)
+    if weaknesses:
+        result["openWeaknesses"] = weaknesses
+    documents = scope.dependent_documents.get(rel, 0)
+    if documents:
+        result["dependentDocuments"] = documents
+    if scope.counts_problem is not None:
+        result.setdefault("statesProblem", scope.counts_problem)
+
+
+def _mark_counts(
+    context: CoordinationContext, memory_state: str, dataset: _Dataset
+) -> tuple[dict[str, int], dict[str, int], str | None]:
+    """The two counts a card's read names, over the memory tree the batch already resolved.
+
+    One selection answers both: how many open weaknesses each code file carries, and how many
+    documents stand on each. A tree that is not converted carries neither kind, so both are empty;
+    a tree that cannot be read answers no counts and says so, and never refuses the card read.
+    """
+
+    if memory_state != "converted" or dataset.index_path is None or dataset.memory_tree_id is None:
+        return {}, {}, None
+    selection: ReaderSelection | None = None
+    try:
+        selection = selection_for_dataset(
+            repository_id=context.code_repository_name,
+            memory_root=context.onboarding_root.parent,
+            database_path=dataset.index_path,
+            tree_key=dataset.memory_tree_id,
+            coordination_root=context.coordination_root,
+        )
+        return open_weakness_counts(selection), dependent_counts(selection), None
+    except READ_FAILURES as error:
+        return (
+            {},
+            {},
+            (
+                "the weaknesses and documents on each file could not be counted "
+                f"({type(error).__name__}: {error})"
+            ),
+        )
+    finally:
+        if selection is not None:
+            selection.close()
 
 
 @dataclass(frozen=True)

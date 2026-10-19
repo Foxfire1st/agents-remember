@@ -16,6 +16,7 @@ from agents_remember.kernel.onboarding_doc import (
     markdown_table_cells,
 )
 from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.models.knowledge_files.documents import dependent_document_paths
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     require_git,
@@ -85,7 +86,11 @@ def sidecar_onboarding_path(onboarding_root: Path, source_path: str) -> Path:
 
 
 def onboarding_refresh_plan_for_context(
-    context, changed_paths: list[str], *, working_paths: list[str] | None = None
+    context,
+    changed_paths: list[str],
+    *,
+    working_paths: list[str] | None = None,
+    dependent_documents: frozenset[str] | None = None,
 ) -> OnboardingRefreshPlan:
     """Plan sidecar refreshes for changed sources, split by responsibility tier.
 
@@ -96,12 +101,25 @@ def onboarding_refresh_plan_for_context(
     so transported history cannot force whole-repository onboarding. ``None``
     keeps the strict legacy semantics: every changed path is treated as working.
     """
+    if dependent_documents is None:
+        memory_root = context.onboarding_root.parent
+        folder = filesystem.extended_path(memory_root / "knowledge/dependents")
+        dependent_documents = dependent_document_paths(
+            {
+                path.relative_to(
+                    filesystem.extended_path(memory_root)
+                ).as_posix(): path.read_bytes()
+                for path in folder.glob("*.json")
+            }
+        )
     working = set(changed_paths if working_paths is None else working_paths)
     required: list[dict[str, str]] = []
     missing: list[str] = []
     unsupported: list[str] = []
     unonboarded: list[str] = []
     for source_path in changed_paths:
+        if source_path in dependent_documents:
+            continue
         storage = resolver.resolve_storage_for_source(
             source_path, context.storage, context.code_repository_name
         )
@@ -592,8 +610,23 @@ def onboarding_refresh_plan(
     *,
     working_paths: list[str] | None = None,
 ) -> OnboardingRefreshPlan:
+    from agents_remember.application.knowledge_worklist.leaf_completion import (  # noqa: PLC0415
+        leaf_onboarding_trace_sides,
+    )
+
+    sides = leaf_onboarding_trace_sides(contract)
+    documents = None
+    if sides is not None:
+        if sides.incomplete is not None:
+            raise RuntimeError(
+                f"the onboarding refresh cannot read its memory sides: {sides.incomplete}"
+            )
+        documents = dependent_document_paths(sides.base) | dependent_document_paths(sides.candidate)
     return onboarding_refresh_plan_for_context(
-        contract_context(contract), changed_paths, working_paths=working_paths
+        contract_context(contract),
+        changed_paths,
+        working_paths=working_paths,
+        dependent_documents=documents,
     )
 
 
@@ -611,10 +644,19 @@ def entity_fingerprint_refresh_plan(
 
 
 def _require_onboarded_sources(
-    context, changed_paths: list[str], working_paths: list[str] | None
+    context,
+    changed_paths: list[str],
+    working_paths: list[str] | None,
+    *,
+    dependent_documents: frozenset[str],
 ) -> OnboardingRefreshPlan:
     """Today's missing/unsupported sidecar refusal, shared by both gates unchanged."""
-    plan = onboarding_refresh_plan_for_context(context, changed_paths, working_paths=working_paths)
+    plan = onboarding_refresh_plan_for_context(
+        context,
+        changed_paths,
+        working_paths=working_paths,
+        dependent_documents=dependent_documents,
+    )
     details: list[str] = []
     if plan["missing"]:
         details.append(f"missing sidecar onboarding for: {', '.join(plan['missing'])}")
@@ -713,7 +755,13 @@ def onboarding_trace_gate_for_context(
     )
     findings = result.repair_findings()
     try:
-        _require_onboarded_sources(context, changed_paths, inputs.working_paths)
+        documents = dependent_document_paths(sides.base) | dependent_document_paths(sides.candidate)
+        _require_onboarded_sources(
+            context,
+            changed_paths,
+            inputs.working_paths,
+            dependent_documents=documents,
+        )
     except RuntimeError as error:
         findings.insert(
             0,

@@ -147,6 +147,31 @@ def test_doc14_verbatim_illustrative_shapes_are_refused() -> None:
 # ------------------------------------------------------------------------------------------------
 
 _KIND_FIELDS: dict[RecordKind, dict[str, Any]] = {
+    "weakness": {
+        "revision": 1,
+        "kind": "time",
+        "statement": "S.",
+        "anchor": {
+            "path": "mcp/x.py",
+            "locator": {"kind": "line_range", "start": 1, "end": 2},
+            "blob": BLOB,
+            "content": CONTENT,
+        },
+        "seen": {"task": "260928-MIK-L21", "role": "worker"},
+        "state": "open",
+        "links": [],
+    },
+    "dependent": {
+        "revision": 1,
+        "document": "docs/reference/tool.md",
+        "stands_on": [{"kind": "file", "path": "mcp/x.py", "blob": BLOB}],
+        "confirmed": {
+            "task": "260928-MIK-L21",
+            "role": "curator",
+            "commit": BLOB,
+            "uncommitted": False,
+        },
+    },
     "invariant": {
         "revision": 1,
         "status": "accepted",
