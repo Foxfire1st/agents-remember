@@ -12,7 +12,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -24,6 +24,7 @@ from agents_remember.serving.projections.snapshots_impl._closeout_queue import (
     tasks_tree_digest,
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from test_closeout_queue import MASTER_A, QueueFixture
 from test_worktree_support import git
 
@@ -46,6 +47,95 @@ class CloseoutLiveGateTests(unittest.TestCase):
             for first, second in zip(queues, retained, strict=True):
                 self.assertIs(second, first)
                 self.assertEqual(second.model_dump(), first.model_dump(), "retained byte for byte")
+
+    def test_unwatched_worktree_edits_arrive_on_the_next_heartbeat(self) -> None:
+        """Unseen input freshness stays heartbeat-bounded, including a second dirty edit."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = QueueFixture(Path(tmp))
+            fixture.declare(MASTER_A)
+            now = datetime.now(UTC)
+            queues, cache = refresh_closeout_queues(fixture.coord, now=now, cache=None, paths=())
+            edited = self._write_code_file(fixture)
+            for tick in (15, 30):
+                edited.write_text(f"dirty at {tick}\n", encoding="utf-8")
+                when = now + timedelta(seconds=tick)
+                arrived, cache = refresh_closeout_queues(
+                    fixture.coord, now=when, cache=cache, paths=()
+                )
+                self.assertIsNot(arrived[0], queues[0])
+                self.assertEqual(
+                    arrived[0].model_dump(),
+                    read_closeout_queues(fixture.coord, now=when)[0].model_dump(),
+                )
+                queues = arrived
+
+    def test_trust_flagged_edits_recompute_on_the_next_heartbeat(self) -> None:
+        """An empty native status cannot vouch for a trust-flagged tracked file (R1-03)."""
+
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as tmp:
+                fixture = QueueFixture(Path(tmp))
+                fixture.declare(MASTER_A)
+                edited = self._write_code_file(fixture)
+                worktree = edited.parent
+                git(worktree, "add", "-A")
+                git(worktree, "commit", "-m", "tracked heartbeat input")
+                git(worktree, "update-index", flag, edited.name)
+                index = Path(
+                    git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "index")
+                )
+                original_index = index.read_bytes()
+                before = worktree_candidate_tree(worktree, Path(tmp) / "before.index")
+                now = datetime.now(UTC)
+                queues, cache = refresh_closeout_queues(
+                    fixture.coord, now=now, cache=None, paths=()
+                )
+                for tick in (15, 30):
+                    edited.write_text(f"hidden eligible edit at {tick}\n", encoding="utf-8")
+                    self.assertEqual(
+                        git(worktree, "--no-optional-locks", "status", "--porcelain=v2"), ""
+                    )
+                    after = worktree_candidate_tree(worktree, Path(tmp) / "after.index")
+                    self.assertNotEqual(after, before, "fresh capture observes the hidden edit")
+                    when = now + timedelta(seconds=tick)
+                    arrived, cache = refresh_closeout_queues(
+                        fixture.coord, now=when, cache=cache, paths=()
+                    )
+                    self.assertIsNot(arrived[0], queues[0], "hidden input must recompute")
+                    self.assertEqual(
+                        arrived[0].model_dump(),
+                        read_closeout_queues(fixture.coord, now=when)[0].model_dump(),
+                    )
+                    self.assertIsNone(queue_module._worktree_live_parts(worktree, "code"))
+                    self.assertEqual(index.read_bytes(), original_index)
+                    before, queues = after, arrived
+
+    def test_a_missed_watched_change_arrives_at_the_five_minute_refresh(self) -> None:
+        """A lost task-file notification is healed by 300 seconds, without aging worktrees."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = QueueFixture(Path(tmp))
+            fixture.declare(MASTER_A)
+            now = datetime.now(UTC)
+            queues, cache = refresh_closeout_queues(fixture.coord, now=now, cache=None, paths=())
+            original = cache.tasks_digest
+            probe = fixture.tasks / "sprint" / "task.json"
+            payload = json.loads(probe.read_text())
+            payload["title"] = "changed without a watcher notification"
+            probe.write_text(json.dumps(payload), encoding="utf-8")
+            _, cache = refresh_closeout_queues(
+                fixture.coord, now=now + timedelta(seconds=15), cache=cache, paths=()
+            )
+            self.assertEqual(cache.tasks_digest, original)
+            when = now + timedelta(seconds=300)
+            arrived, cache = refresh_closeout_queues(fixture.coord, now=when, cache=cache, paths=())
+            self.assertNotEqual(cache.tasks_digest, original)
+            self.assertIsNot(arrived[0], queues[0], "the missed document change is delivered")
+            self.assertEqual(
+                [row.model_dump() for row in arrived],
+                [row.model_dump() for row in read_closeout_queues(fixture.coord, now=when)],
+            )
 
     def test_tasks_tree_digest_moves_on_any_write(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

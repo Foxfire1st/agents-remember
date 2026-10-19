@@ -164,6 +164,7 @@ consumers = [
   "mcp/tests/test_capsule_replay_integrity.py",
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_capsule_serving_surface.py",
+  "mcp/tests/test_capture_baseline.py",
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_carryover_document_units.py",
   "mcp/tests/test_catalog_selection.py",
@@ -482,6 +483,7 @@ consumers = [
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_retry_coverage.py",
   "mcp/tests/test_retry_selection.py",
+  "mcp/tests/test_review_answer_reuse.py",
   "mcp/tests/test_review_artifact_cleanup.py",
   "mcp/tests/test_review_artifact_cleanup_caches.py",
   "mcp/tests/test_review_assessment_history.py",
@@ -1558,6 +1560,7 @@ consumers = [
   "mcp/tests/test_capsule_replay_integrity.py",
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_capsule_serving_surface.py",
+  "mcp/tests/test_capture_baseline.py",
   "mcp/tests/test_carryover_apply_transaction.py",
   "mcp/tests/test_carryover_document_units.py",
   "mcp/tests/test_catalog_selection.py",
@@ -1876,6 +1879,7 @@ consumers = [
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_retry_coverage.py",
   "mcp/tests/test_retry_selection.py",
+  "mcp/tests/test_review_answer_reuse.py",
   "mcp/tests/test_review_artifact_cleanup.py",
   "mcp/tests/test_review_artifact_cleanup_caches.py",
   "mcp/tests/test_review_assessment_history.py",
@@ -2990,6 +2994,24 @@ lifetime = "permanent"
 permanence_rationale = "The manifest removes the unmarked-unit fallback and binds selection, cadence, retry, and reporting to one explicit population."
 replacement_contract = "node:mcp/tests/test_evidence_lanes.py::EvidenceLaneRegistryTests::test_incomplete_or_ambiguous_registry_is_refused"
 consumer_scope = "all-tests"
+
+[[artifact]]
+path = "mcp/tests/test_capture_baseline.py"
+kind = "migration-proof"
+authority = "internal-hand-authored"
+owner = "mcp/src/agents_remember/worktrees/modules/capture_baseline.py"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "Git-backed request-local capture proof formerly embedded in test_git_command.py"
+introduced_by = "260928-MIK-L177"
+lifetime = "permanent"
+permanence_rationale = "Capture-proof replacement must keep detecting eligible additions, tracked edits and HEAD movement while ignoring dependency trees."
+replacement_contract = "node:mcp/tests/test_capture_baseline.py::CaptureBaselineTests::test_a_new_untracked_file_is_a_doubt"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_capture_baseline.py",
+]
 
 [[artifact]]
 path = "mcp/tests/tool_answer_l110_rows.py"

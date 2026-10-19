@@ -101,6 +101,15 @@ def _reset_tool_writer(module: ModuleType, attribute: str) -> None:
     module.reset_tool_writer()
 
 
+def _reset_background_pool(module: ModuleType, attribute: str) -> None:
+    del attribute
+    with module._BACKGROUND_POOL_LOCK:
+        executor = module._BackgroundPool.executor
+        if executor is not None:
+            executor.shutdown(wait=True)
+            module._BackgroundPool.executor = None
+
+
 def _row(
     module: str,
     attribute: str,
@@ -260,6 +269,12 @@ PROCESS_MUTABLE_STATES = (
         _reset_tool_writer,
     ),
     _row(
+        "serving.background_accounting",
+        "_BackgroundPool.executor",
+        "Drain and shut down the module's background threads before forgetting the pool.",
+        _reset_background_pool,
+    ),
+    _row(
         "serving.build_info",
         "process_serving_build",
         "Recompute serving identity so another module cannot inherit a patched build resolver.",
@@ -275,6 +290,11 @@ PROCESS_MUTABLE_STATES = (
         "serving.files",
         "_repo_catalog_cache",
         "Forget repository catalog TTL results between test modules.",
+    ),
+    _row(
+        "serving.projections.host_activity",
+        "_ENDINGS",
+        "Forget retained host-publication endings between test modules.",
     ),
     _row(
         "serving.projections.projection_store",

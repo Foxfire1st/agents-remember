@@ -128,8 +128,17 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     from agents_remember.application.review_tree_knowledge import (  # noqa: PLC0415 - composition
         read_review_trees,
     )
+    from agents_remember.cli.dashboard_review_reads import (  # noqa: PLC0415 - composition
+        RecordedReviewAnswers,
+    )
+    from agents_remember.serving.review_answer_reuse import (  # noqa: PLC0415 - composition
+        RecordedAnswerReuse,
+    )
 
     worklist_processes = ReviewerWorklistProcesses()
+    # A recorded comparison is fixed; its four answers are kept by the exact inputs they are a
+    # function of and served unchanged while those hold (MIK-R179 rule 3).
+    recorded_answers = RecordedReviewAnswers(config, RecordedAnswerReuse())
 
     def review_port(request):
         """Render one review through the application adapter, with its complete record collection.
@@ -147,9 +156,14 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         The candidate is resolved once for both halves (MIK-R40 rule 2): the records and the
         composition read the same resolution, so one request captures each worktree once and
         rechecks it once before the answer is published.
+
+        A recorded read is a function of the record and its trees, and of nothing this process's
+        working views do; its answer is kept and served again unchanged while those inputs hold.
         """
 
-        return read_complete_knowledge_review(config, request)
+        return recorded_answers.intent(
+            request, lambda: read_complete_knowledge_review(config, request)
+        )
 
     def review_entries_port(repository_id, master, leaf_id):
         """List the subjects the same resolution can be reviewed on, through the same adapter.
@@ -159,7 +173,12 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         entry a caller is offered and the review it then opens on one candidate.
         """
 
-        return list_knowledge_review_entries(config, repository_id, master, leaf_id)
+        return recorded_answers.entries(
+            repository_id,
+            master,
+            leaf_id,
+            lambda: list_knowledge_review_entries(config, repository_id, master, leaf_id),
+        )
 
     def review_source_content_port(request):
         """Open one listed entry's content at the two code trees the listing published.
@@ -174,9 +193,16 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         return read_review_source_content(config, request)
 
     def review_trees_port(query):
-        """The tree view of the same resolution (MIK-R25): four trees, knowledge diff, worklist."""
+        """The tree view of the same resolution (MIK-R25): four trees, knowledge diff, worklist.
 
-        return read_review_trees(config, query, processes=worklist_processes)
+        A recorded comparison's tree view is a function of its record and the objects it names, so
+        it is kept and served again while those hold; a live view depends on a working tree and is
+        computed on every read.
+        """
+
+        return recorded_answers.trees(
+            query, lambda: read_review_trees(config, query, processes=worklist_processes)
+        )
 
     def knowledge_reader_port(query):
         """The path-based knowledge reader (MIK-R29): one read-only view of one memory tree."""

@@ -21,7 +21,7 @@ from agents_remember.serving.background_accounting import (
     describe_snapshot,
     measured,
 )
-from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS, async_wait_until
 
 
 class LedgerRecordTests(unittest.TestCase):
@@ -623,6 +623,53 @@ class OffloadAttributionTests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(projection, dict)
         self.assertEqual(projection["units"], 1)
         self.assertEqual(projection["cpuSecondsTotal"], 11.0)
+
+
+class BackgroundThreadIsolationTests(unittest.IsolatedAsyncioTestCase):
+    """MIK-R179 rule 2: background work never takes the thread a read runs on."""
+
+    async def test_saturated_background_work_does_not_hold_the_default_executor(self) -> None:
+        """Four blocked units fill the background pool while a read still runs on its own."""
+
+        ledger = BackgroundLedger()
+        entered = threading.Semaphore(0)
+        release = threading.Event()
+        names: list[str] = []
+
+        def _blocked() -> None:
+            names.append(threading.current_thread().name)
+            entered.release()
+            release.wait(HANG_GUARD_SECONDS)
+
+        units = [
+            asyncio.ensure_future(accounting_module.offload(OWNER_PROJECTION, ledger, _blocked))
+            for _ in range(accounting_module.BACKGROUND_WORKERS)
+        ]
+        read = None
+        try:
+            for _ in units:
+                self.assertTrue(
+                    await asyncio.to_thread(entered.acquire, True, HANG_GUARD_SECONDS),
+                    "background unit did not enter the saturated pool",
+                )
+            # Prove completion while every background thread is still parked. The deadline
+            # only guards a hang; the ordering condition, rather than elapsed time, is the proof.
+            read = asyncio.create_task(asyncio.to_thread(lambda: "read"))
+            await async_wait_until(read.done, "read completed while the background pool was full")
+            self.assertEqual(read.result(), "read")
+            self.assertTrue(all(not unit.done() for unit in units))
+        finally:
+            release.set()
+            await asyncio.gather(*units)
+            if read is not None:
+                await read
+
+        self.assertTrue(names and all(name.startswith("ar-background") for name in names), names)
+        owners = ledger.snapshot()["owners"]
+        assert isinstance(owners, dict)
+        projection = owners[OWNER_PROJECTION]
+        assert isinstance(projection, dict)
+        self.assertEqual(projection["units"], accounting_module.BACKGROUND_WORKERS)
 
 
 class OwnerInventoryTests(unittest.TestCase):

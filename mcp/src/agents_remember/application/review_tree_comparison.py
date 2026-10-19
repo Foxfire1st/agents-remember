@@ -84,6 +84,7 @@ from agents_remember.tasks.task_paths import slugify
 from agents_remember.worktrees.modules.capture_baseline import (
     begin_capture_baseline,
     capture_baseline_unchanged,
+    capture_entries,
     note_capture_baseline,
 )
 from agents_remember.worktrees.modules.git import (
@@ -352,20 +353,30 @@ def _live_draft(
 
 
 def _capture(memory_worktree: Path) -> str:
+    captured: tuple[tuple[str, int, int, int, int], ...] | None = None
+
+    def observe(index: Path) -> None:
+        nonlocal captured
+        captured = capture_entries(index)
+
     try:
         head_before = head_commit(memory_worktree)
         before = begin_capture_baseline(memory_worktree)
         with TemporaryDirectory(prefix="ar-review-memory-") as scratch:
-            tree = worktree_candidate_tree(memory_worktree, Path(scratch) / "index")
+            tree = worktree_candidate_tree(
+                memory_worktree, Path(scratch) / "index", captured=observe
+            )
         head_after = head_commit(memory_worktree)
     except (RuntimeError, OSError) as error:
         raise TreeSideUnreadable(
             "memory candidate", f"the memory worktree {memory_worktree} cannot be captured: {error}"
         ) from error
-    # Keep a tree proof only when neither HEAD nor the inputs spanning capture moved.
+    # Keep a tree proof only when neither HEAD nor the directories spanning capture moved.
     if head_before == head_after:
         with suppress(OSError, RuntimeError):
-            note_capture_baseline(memory_worktree, tree=tree, before=before, head=head_before)
+            note_capture_baseline(
+                memory_worktree, tree=tree, entries=captured, before=before, head=head_before
+            )
     return tree
 
 

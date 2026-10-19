@@ -178,6 +178,8 @@ class Projector:
         # legacy ``sleep(interval)`` pacemaker.
         self._change_watcher = change_watcher
         self._host_supervisor = HostSupervisorSubscription()
+        # The stable form of the tick being published, when that tick computed one.
+        self._tick_stable: StableProjectionState | None = None
         self._pacer: ChangePacer | None = (
             ChangePacer(
                 interval=interval,
@@ -426,18 +428,24 @@ class Projector:
         """
         if self._before_tick is not None:
             self._before_tick(moment)
+        self._tick_stable = None
+        tick = ProjectionTickState(
+            input_state=self._input_state,
+            provider_refresher=self._provider_refresher,
+            landing_state=self._landing_refresher,
+        )
         with measured(OWNER_PROJECTION, self._ledger):
-            return project_and_write(
+            projection = project_and_write(
                 self._config,
                 now=moment,
                 refresh=refresh,
                 previous_stable=previous_stable,
-                tick=ProjectionTickState(
-                    input_state=self._input_state,
-                    provider_refresher=self._provider_refresher,
-                    landing_state=self._landing_refresher,
-                ),
+                tick=tick,
             )
+        # Publication diffs the stable form this tick already computed for its write decision:
+        # one dump per tick instead of two (MIK-R179 rule 2).
+        self._tick_stable = tick.stable
+        return projection
 
     def _publish_projection(self, current: WorkspaceProjection) -> None:
         """Atomically publish one successful tick and notify current subscribers.
@@ -447,7 +455,7 @@ class Projector:
         ``snapshot`` event. The published tuple is committed before queue notification; this
         method contains no await, so subscription capture cannot interleave with the transition.
         """
-        current_stable = stable_projection_state(current)
+        current_stable = self._tick_stable or stable_projection_state(current)
         seq, previous = self._published
         events = (
             [DeltaEvent("snapshot", current)]

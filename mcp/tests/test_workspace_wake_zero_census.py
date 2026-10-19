@@ -57,8 +57,8 @@ class WorkspaceOnlyWakeTests(unittest.TestCase):
                     ) as fingerprinted,
                     mock.patch.object(
                         queue_module,
-                        "_snapshot_entries",
-                        wraps=queue_module._snapshot_entries,
+                        "working_generation",
+                        wraps=queue_module.working_generation,
                     ) as snapshotted,
                     mock.patch.object(
                         queue_module,

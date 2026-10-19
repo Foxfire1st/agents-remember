@@ -1,4 +1,4 @@
-"""Request-scoped capture baselines and worktree snapshot proof."""
+"""Request-scoped capture baselines and worktree change proof."""
 
 from __future__ import annotations
 
@@ -6,26 +6,37 @@ import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.worktrees.modules.capture_index import _IndexCopyUnusable, _real_index
+from agents_remember.worktrees.modules.capture_index import (
+    _index_copy_has_trust_flags,
+    _index_entries,
+    _IndexCopyUnusable,
+    _real_index,
+)
+
+type _CapturedEntry = tuple[str, int, int, int, int]
 
 
 @dataclass(frozen=True)
 class WorktreeCaptureBaseline:
-    """A tree and the same index/file snapshot observed on both sides of its capture.
+    """The capture's own entries and the real index that bracketed their capture.
 
-    A captured HEAD is checked before reuse when the capture depends on it. Other identity
-    fields (including the code endpoint and base commit) remain independently checked by
-    the identity consumer. No snapshot taken after capture alone authorizes reuse.
+    The private index names every captured path and its recorded file stat. The real index is
+    read in process before capture, and its stamp must remain unchanged. Every real-index path
+    must have been captured; otherwise an absent tracked path could later reappear unnoticed.
+    Git's fresh status supplies the eligible untracked set and HEAD together at recheck. Staged,
+    renamed, unmerged or trust-flagged inputs do not establish this proof and are re-derived.
     """
 
     tree: str
     index_stat: tuple[int, int, int]
-    entries: tuple[tuple[str, ...], ...]
+    entries: tuple[_CapturedEntry, ...]
+    untracked: frozenset[str]
     head: str | None = None
+    root: str = ""
 
 
 _CAPTURE_BASELINES: ContextVar[dict[str, WorktreeCaptureBaseline] | None] = ContextVar(
@@ -42,10 +53,11 @@ def memo_capture_baselines(*, on_capture: Callable[[Path], None] | None = None) 
 
     The recheck a review runs before publication (ICR-R01) re-derives the candidate to prove the
     worktree did not move while the review was composed. When the baseline remembered here proves
-    nothing moved -- the same index file, the same file stats -- the re-derivation
-    is skipped and the remembered tree stands; any doubt re-derives, exactly as without the
-    scope (MIK-R81 rule 7, F17). Scopes nest like the object-lookup scope. The scope lives and
-    dies with the read; nothing outside it ever reads a baseline.
+    nothing moved -- the same index file, every captured path still carrying the stat the capture
+    recorded, every eligible path still present -- the re-derivation is skipped and the
+    remembered tree stands; any doubt re-derives, exactly as without the scope (MIK-R81 rule 7,
+    F17). Scopes nest like the object-lookup scope. The scope lives and dies with the read;
+    nothing outside it ever reads a baseline.
     """
 
     observer = _CAPTURE_OBSERVER.set(on_capture or _CAPTURE_OBSERVER.get())
@@ -58,40 +70,90 @@ def memo_capture_baselines(*, on_capture: Callable[[Path], None] | None = None) 
         _CAPTURE_OBSERVER.reset(observer)
 
 
-def begin_capture_baseline(repo: Path) -> WorktreeCaptureBaseline | None:
-    """Observe inputs before capture; invalidate any earlier proof for this worktree."""
+def capture_entries(index: Path) -> tuple[_CapturedEntry, ...] | None:
+    """The census of one captured private index, for :func:`note_capture_baseline`.
 
+    This is the callback a capture is given (``worktree_candidate_tree(..., captured=...)``): it
+    reads the index the tree was written from, in process, and names every path the capture read.
+    ``None`` means that index is not one this build can read, and then nothing is remembered.
+    """
+
+    return _index_entries(index)
+
+
+def begin_capture_baseline(
+    repo: Path,
+) -> tuple[tuple[int, int, int], frozenset[str]] | None:
+    """Read the real index before capture; invalidate an earlier proof.
+
+    Trust flags let status hide a tracked path's restoration, so they cannot prove reuse. A
+    partial or unfamiliar index also supplies no proof. These inputs retain full re-derivation.
+    """
     scope = _CAPTURE_BASELINES.get()
     if scope is None:
         return None
     scope.pop(repo.as_posix(), None)
-    return _snapshot_baseline(repo, tree="")
+    try:
+        index, _top = _real_index(repo)
+        before = index.stat()
+        if _index_copy_has_trust_flags(index) is not False:
+            return None
+        entries = _index_entries(index)
+        after = index.stat()
+    except (OSError, RuntimeError, _IndexCopyUnusable):
+        return None
+    stamp = (before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+    if entries is None or stamp != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        return None
+    return stamp, frozenset(entry[0] for entry in entries)
 
 
 def note_capture_baseline(
-    repo: Path, *, tree: str, before: WorktreeCaptureBaseline | None, head: str | None = None
+    repo: Path,
+    *,
+    tree: str,
+    entries: tuple[_CapturedEntry, ...] | None,
+    before: tuple[tuple[int, int, int], frozenset[str]] | None = None,
+    head: str | None = None,
 ) -> None:
-    """Remember a tree only when its entire capture was bracketed by equal snapshots."""
+    """Remember only a complete capture whose real index did not move.
 
+    The eligible untracked set is derived from the capture itself, never an observation taken
+    after capture. Missing real-index paths prevent admission: their restoration must not hide
+    behind a clean status. Final status also refuses any staged difference from HEAD, because
+    the capture seeds its private index from HEAD rather than from staged additions/removals.
+    """
     scope = _CAPTURE_BASELINES.get()
-    if scope is None or before is None:
+    if scope is None or entries is None or before is None:
         return
-    after = _snapshot_baseline(repo, tree="")
-    if after == before:
-        scope[repo.as_posix()] = replace(before, tree=tree, head=head)
-        observer = _CAPTURE_OBSERVER.get()
-        if observer is not None:
-            observer(repo)
+    try:
+        real_index, top = _real_index(repo)
+        stamp = real_index.stat()
+    except (OSError, RuntimeError, _IndexCopyUnusable):
+        return
+    index_stamp, tracked = before
+    paths = frozenset(entry[0] for entry in entries)
+    if index_stamp != (stamp.st_size, stamp.st_mtime_ns, stamp.st_ctime_ns) or not tracked <= paths:
+        return
+    scope[repo.as_posix()] = WorktreeCaptureBaseline(
+        tree=tree,
+        index_stat=index_stamp,
+        entries=entries,
+        untracked=paths - tracked,
+        head=head,
+        root=top.as_posix(),
+    )
+    observer = _CAPTURE_OBSERVER.get()
+    if observer is not None:
+        observer(repo)
 
 
-def capture_baseline_unchanged(repo: Path, *, tree: str) -> bool:
+def capture_baseline_unchanged(repo: Path, *, tree: str, head: str | None = None) -> bool:
     """Whether the worktree provably still captures to ``tree`` (the fast recheck).
 
-    True only when a baseline was remembered for this worktree in this scope, it names this
-    tree, the index file's stamp is untouched, and a fresh snapshot matches entry for entry.
-    A staged change rewrites the index file; a file change moves a stat; a recorded HEAD
-    is read fresh even when the index is untouched. Each change requires re-derivation. Anything unreadable is
-    a doubt, never an agreement: ``False``.
+    True requires the same bracketed index, unchanged captured file stats, the same eligible
+    untracked names from Git, and any recorded/required HEAD read fresh by that same status.
+    Anything unreadable, hidden by trust flags, or staged differently from HEAD is re-derived.
     """
 
     scope = _CAPTURE_BASELINES.get()
@@ -100,91 +162,88 @@ def capture_baseline_unchanged(repo: Path, *, tree: str) -> bool:
     baseline = scope.get(repo.as_posix())
     if baseline is None or baseline.tree != tree:
         return False
-    if baseline.head is not None:
-        observed = run_git(repo, ["rev-parse", "HEAD"])
-        if observed.returncode != 0 or observed.stdout.strip() != baseline.head:
-            return False
-    fresh = _snapshot_baseline(repo, tree=tree)
-    return fresh is not None and replace(fresh, head=baseline.head) == baseline
+    return _still_captures(repo, baseline, head=head)
 
 
-def _snapshot_baseline(repo: Path, *, tree: str) -> WorktreeCaptureBaseline | None:
-    """The baseline for one worktree, or ``None`` when anything behind it cannot be read."""
+def _still_captures(repo: Path, baseline: WorktreeCaptureBaseline, *, head: str | None) -> bool:
+    """One native status supplies HEAD and eligible untracked names without ignored walks."""
+    if not _index_stamp_unchanged(repo, baseline):
+        return False
+    result = run_git(
+        repo,
+        ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
+    )
+    if result.returncode:
+        return False
+    observed = _status_inputs(result.stdout)
+    if observed is None:
+        return False
+    observed_head, untracked = observed
+    return (
+        all(expected is None or observed_head == expected for expected in (baseline.head, head))
+        and untracked == baseline.untracked
+        and _entries_unchanged(Path(baseline.root), baseline.entries)
+        and _index_stamp_unchanged(repo, baseline)
+    )
+
+
+def _status_inputs(output: str) -> tuple[str, set[str]] | None:
+    """Only unstaged changes and eligible untracked paths can certify the capture."""
+    observed_head: str | None = None
+    untracked: set[str] = set()
+    for record in output.split("\0"):
+        if record.startswith("# branch.oid "):
+            observed_head = record.removeprefix("# branch.oid ")
+        elif record.startswith("? "):
+            untracked.add(record[2:])
+        elif record.startswith("1 "):
+            fields = record.split(" ", 8)
+            if len(fields) != 9 or fields[1][0] != ".":
+                return None
+        elif record and not record.startswith("# "):
+            # Renames and unmerged entries cannot certify this HEAD-seeded capture.
+            return None
+    if observed_head is None:
+        return None
+    return observed_head, untracked
+
+
+def _index_stamp_unchanged(repo: Path, baseline: WorktreeCaptureBaseline) -> bool:
+    """The worktree's own index file: the same bytes-written stamp, under the same top level."""
 
     try:
         real_index, top = _real_index(repo)
-    except (OSError, RuntimeError, _IndexCopyUnusable):
-        return None
-    try:
         stamp = real_index.stat()
-        index_stat = (stamp.st_size, stamp.st_mtime_ns, stamp.st_ctime_ns)
-    except OSError:
-        return None
-    entries = _snapshot_entries(top)
-    if entries is None:
-        return None
-    return WorktreeCaptureBaseline(tree=tree, index_stat=index_stat, entries=entries)
+    except (OSError, RuntimeError, _IndexCopyUnusable):
+        return False
+    return (
+        top.as_posix() == baseline.root
+        and (
+            stamp.st_size,
+            stamp.st_mtime_ns,
+            stamp.st_ctime_ns,
+        )
+        == baseline.index_stat
+    )
 
 
-def _snapshot_entries(
-    top: Path, *, max_entries: int | None = None
-) -> tuple[tuple[str, ...], ...] | None:
-    """Every non-``.git`` entry's kind and stat, sorted; ``None`` when the walk fails.
+def _entries_unchanged(top: Path, entries: tuple[_CapturedEntry, ...]) -> bool:
+    """Whether every captured path still carries the stat the capture recorded for it.
 
-    ``max_entries`` bounds the walk: past it the walk stops with ``None``, so a caller
-    that only needs a change signal recomputes instead of walking a huge tree.
+    The census is the capture's own, so one pass over it proves what a walk of the whole worktree
+    used to prove for a file: a path that changed has another size or another time, and a path that
+    is gone cannot be read at all. An unreadable path is a doubt.
     """
 
-    entries: list[tuple[str, ...]] = []
-    stack = [top]
-    while stack:
-        directory = stack.pop()
+    for relative, mode, size, mtime_ns, ctime_ns in entries:
         try:
-            children = list(os.scandir(directory))
+            info = os.lstat(top / relative)
         except OSError:
-            return None
-        for child in children:
-            if directory == top and child.name == ".git":
-                # The worktree's own Git directory is not captured; nested `.git` files
-                # (submodules) are walked like any other entry.
-                continue
-            try:
-                entries.append(_snapshot_entry(top, child, stack))
-            except _SnapshotFailed:
-                return None
-            if max_entries is not None and len(entries) > max_entries:
-                return None
-    entries.sort()
-    return tuple(entries)
-
-
-class _SnapshotFailed(Exception):
-    """A child that cannot be stated: the whole snapshot is unusable."""
-
-
-def _snapshot_entry(top: Path, child: os.DirEntry[str], stack: list[Path]) -> tuple[str, ...]:
-    """One child's snapshot entry; raises :class:`_SnapshotFailed` when unreadable."""
-    try:
-        info = child.stat(follow_symlinks=False)
-    except OSError as error:
-        raise _SnapshotFailed from error
-    relative = str(Path(child.path).relative_to(top))
-    if child.is_symlink():
-        try:
-            target = os.readlink(child.path)
-        except OSError as error:
-            raise _SnapshotFailed from error
-        return ("link", relative, target)
-    if child.is_dir(follow_symlinks=False):
-        stack.append(Path(child.path))
-        return ("dir", relative, str(info.st_mtime_ns))
-    if child.is_file(follow_symlinks=False):
-        return (
-            "file",
-            relative,
-            str(info.st_mode & 0o777),
-            str(info.st_size),
-            str(info.st_mtime_ns),
-            str(info.st_ctime_ns),
-        )
-    return ("other", relative, str(info.st_mode))
+            return False
+        if (info.st_mode & 0o170000) != (mode & 0o170000):
+            return False
+        if info.st_size != size:
+            return False
+        if info.st_mtime_ns != mtime_ns or info.st_ctime_ns != ctime_ns:
+            return False
+    return True

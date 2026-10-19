@@ -40,6 +40,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.observer.projection import EnclosureNode, ProviderNode, WorkspaceProjection
 from agents_remember.serving import change_watcher as watcher_module
+from agents_remember.serving import delta as delta_module
 from agents_remember.serving import projector as projector_module
 from agents_remember.serving._app_common import stream_events
 from agents_remember.serving.app import (
@@ -48,8 +49,12 @@ from agents_remember.serving.app import (
 )
 from agents_remember.serving.change_watcher import ChangePacer, ProjectionInputWatcher
 from agents_remember.serving.projections import landing_state as landing_module
+from agents_remember.serving.projections import projection_store
 from agents_remember.serving.projections.landing_state import LandingStateRefresher
-from agents_remember.serving.projections.projection_inputs import ProjectionDomain
+from agents_remember.serving.projections.projection_inputs import (
+    ProjectionDomain,
+    ProjectionRefresh,
+)
 from agents_remember.serving.projector import (
     ProjectionCadence,
     ProjectionRefreshers,
@@ -105,6 +110,33 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         self._dir.cleanup()
+
+    async def test_a_tick_computes_its_stable_form_once(self) -> None:
+        """The write decision's stable form is the one publication diffs (MIK-R179 rule 2)."""
+
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
+        await projector.prime()
+        computed: list[int] = []
+        real = delta_module.stable_projection_state
+
+        def counted(current: WorkspaceProjection):
+            computed.append(1)
+            return real(current)
+
+        _, previous = projector.current()
+        assert previous is not None
+        with (
+            mock.patch.object(projector_module, "stable_projection_state", counted),
+            mock.patch.object(projection_store, "stable_projection_state", counted),
+        ):
+            current = await projector._tick(
+                datetime(2026, 10, 18, tzinfo=UTC), ProjectionRefresh.heartbeat()
+            )
+            projector._publish_wake(None, current)
+
+        # One dump served both the write decision and the diff of the same tick.
+        self.assertEqual(len(computed), 1)
+        self.assertIs(projector.current()[1], current)
 
     async def test_snapshot_subscription_cannot_lose_an_interleaved_projection(self) -> None:
         projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))

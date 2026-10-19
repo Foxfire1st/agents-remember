@@ -64,7 +64,6 @@ from agents_remember.worktrees.modules.future_code_candidate import (
     FutureCodeCandidateIdentity,
     capture_future_code_candidate,
 )
-from agents_remember.worktrees.modules.git import head_commit
 from agents_remember.worktrees.task_resolver import slugify
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -307,12 +306,14 @@ def require_current_candidate_identity(resolved: ReviewCandidateResolution) -> R
             return moved_memory
     try:
         if (
-            capture_baseline_unchanged(contract.code_worktree, tree=accepted.codeCandidateTree)
+            capture_baseline_unchanged(
+                contract.code_worktree,
+                tree=accepted.codeCandidateTree,
+                head=accepted.observedCodeHead,
+            )
             and contract.code_base_commit == accepted.codeBaseCommit
-            and head_commit(contract.code_worktree) == accepted.observedCodeHead
         ):
-            # The bracketed file/index proof covers the tree only. Check the other
-            # captured identity fields against their current owners on every reuse.
+            # Git's status proof also reads HEAD fresh; the contract still owns the base.
             return None
         current = capture_future_code_candidate(contract)
     except (FutureCodeCandidateError, OSError, RuntimeError) as error:

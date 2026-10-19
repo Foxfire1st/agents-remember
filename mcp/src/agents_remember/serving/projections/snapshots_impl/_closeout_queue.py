@@ -16,6 +16,7 @@ from agents_remember.observer.projection import (
     CloseoutProjectionProblemNode,
     CloseoutQueueNode,
 )
+from agents_remember.serving.changeset_generation import identity, working_generation
 from agents_remember.serving.projections.snapshots_impl._common import (
     _iter_task_document_payloads,
     _read_json,
@@ -23,7 +24,7 @@ from agents_remember.serving.projections.snapshots_impl._common import (
 )
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA, TaskDocument
 from agents_remember.tasks.retired_rows import payload_is_sprint
-from agents_remember.worktrees.modules.capture_baseline import _snapshot_entries
+from agents_remember.worktrees.modules.capture_index import _index_copy_has_trust_flags
 from agents_remember.worktrees.queue.closeout_projection import (
     _leaf_door_sources,
     _task_census,
@@ -63,11 +64,6 @@ def _sample_touches_live_inputs(coordination_root: Path, paths: tuple[str, ...])
         if first in _LIVE_INPUT_ROOT_NAMES:
             return True
     return False
-
-
-#: Entries walked for one worktree's live fingerprint; more means that sprint recomputes
-#: (safe direction, bounded work per pass).
-_LIVE_SNAPSHOT_ENTRY_CAP = 5000
 
 
 def tasks_tree_digest(tasks_root: Path, *, paths: list[Path] | None = None) -> str | None:
@@ -275,12 +271,18 @@ def _walk_files(root: Path, cap: int) -> list[Path] | None:
     return found
 
 
+#: Watcher-visible task inputs are fully re-observed at least every five minutes.
+#: Worktrees are deliberately unwatched, and are read natively on every heartbeat.
+TASKS_FULL_REFRESH_SECONDS = 300.0
+
+
 @dataclass
 class CloseoutQueueCache:
     """What the last closeout read computed, for per-sprint retention (F13)."""
 
     tasks_digest: str | None = None
     live: dict[str, str | None] = field(default_factory=dict)
+    tasks_full_at: float | None = None
     queues: list[CloseoutQueueNode] = field(default_factory=list)
     overrides: dict[TaskDocumentRef, TaskDocument] = field(default_factory=dict)
 
@@ -311,12 +313,19 @@ def refresh_closeout_queues(
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
         return [], CloseoutQueueCache()
+    taken_at = now.timestamp()
+    full_refresh = (
+        paths is None
+        or cache.tasks_full_at is None
+        or taken_at - cache.tasks_full_at >= TASKS_FULL_REFRESH_SECONDS
+    )
     named = (
         _task_subtree_paths(tasks_root, paths)
-        if paths is not None and cache.tasks_digest is not None
+        if not full_refresh and paths is not None and cache.tasks_digest is not None
         else None
     )
     digest = tasks_tree_digest(tasks_root, paths=named)
+    tasks_full_at = taken_at if named is None else cache.tasks_full_at
     if digest is not None and digest == cache.tasks_digest:
         overrides = cache.overrides
         sprints = [
@@ -344,12 +353,19 @@ def refresh_closeout_queues(
         return list(cache.queues), CloseoutQueueCache(
             tasks_digest=digest,
             live=dict(cache.live),
+            tasks_full_at=tasks_full_at,
             queues=list(cache.queues),
             overrides=cache.overrides,
         )
+    # The watcher excludes worktrees. Their native generations remain fresh on every
+    # heartbeat; only the watched tasks tree uses incremental samples and the full refresh.
     queues, live = _recompute_queues(coordination_root, now, cache, overrides, sprints)
     return queues, CloseoutQueueCache(
-        tasks_digest=digest, live=live, queues=queues, overrides=overrides
+        tasks_digest=digest,
+        live=live,
+        tasks_full_at=tasks_full_at,
+        queues=queues,
+        overrides=overrides,
     )
 
 
@@ -381,13 +397,17 @@ def _recompute_queues(
     overrides: dict[TaskDocumentRef, TaskDocument],
     sprints: list[tuple[TaskDocumentRef, TaskDocument, Path]],
 ) -> tuple[list[CloseoutQueueNode], dict[str, str | None]]:
-    """Recompute exactly the sprints whose inputs moved, retaining the rest (F09/F13)."""
+    """Recompute exactly the sprints whose current native inputs moved (F09/F13)."""
     inputs_moved = overrides != cache.overrides
     by_key = {queue.sprintRef.key: queue for queue in cache.queues}
     queues = []
     live: dict[str, str | None] = {}
     for ref, doc, path in sprints:
-        fingerprint = sprint_live_fingerprint(coordination_root, ref, overrides)
+        fingerprint = sprint_live_fingerprint(
+            coordination_root,
+            ref,
+            overrides,
+        )
         previous = by_key.get(ref.key)
         if (
             previous is not None
@@ -415,6 +435,8 @@ def sprint_live_fingerprint(
     code/memory edit or a tip advance moves under a closeout queue. A sprint whose
     traversal fails recomputes; an absent worktree or branch is a stable fact, not a
     failure, and fingerprints as absent.
+
+    The native working generation is re-observed on each heartbeat, including dirty-file stats.
     """
 
     try:
@@ -431,15 +453,23 @@ def sprint_live_fingerprint(
     return digest.hexdigest()
 
 
-def _door_source_live_parts(source: object) -> str:
+def _door_source_live_parts(
+    source: object,
+) -> str:
     """The live fingerprint of one door source's contract, deterministically rendered."""
 
     contract = getattr(source, "contract", None)
     address = getattr(source, "address", "")
     if contract is None:
         return f"no-contract\0{address}\0"
-    code_worktree = _worktree_live_parts(getattr(contract, "code_worktree", None), "code")
-    memory_worktree = _worktree_live_parts(getattr(contract, "memory_worktree", None), "memory")
+    code_worktree = _worktree_live_parts(
+        getattr(contract, "code_worktree", None),
+        "code",
+    )
+    memory_worktree = _worktree_live_parts(
+        getattr(contract, "memory_worktree", None),
+        "memory",
+    )
     code_tip = _branch_tip_parts(
         getattr(contract, "code_repo_path", None),
         getattr(contract, "code_source_branch", ""),
@@ -457,28 +487,33 @@ class _LiveFingerprintUnreadable(Exception):
     """One live input could not be read; the sprint recomputes instead of retaining."""
 
 
-def _worktree_live_parts(worktree: Path | None, _side: str) -> str | None:
+def _worktree_live_parts(
+    worktree: Path | None,
+    _side: str,
+) -> str | None:
     """Head content, index stamp and file stats of one worktree, or ``None`` to recompute."""
 
-    if worktree is None:
-        return "absent\0"
-    gitdir = _worktree_gitdir(worktree)
-    if gitdir is None:
+    if worktree is None or (gitdir := _worktree_gitdir(worktree)) is None:
         return "absent\0"
     try:
         head = (gitdir / "HEAD").read_text(encoding="utf-8").strip()
     except OSError:
         return "no-head\0"
     try:
-        stamp = (gitdir / "index").stat()
-        index = f"{stamp.st_size}\0{stamp.st_mtime_ns}\0{stamp.st_ctime_ns}\0"
+        index_path = gitdir / "index"
+        stamp = identity(index_path)
+        # Native status can hide an eligible edit under assume-unchanged/skip-worktree.
+        # Reuse the capture owner's scanner: flags or an unsupported index force the
+        # existing recomputation path rather than treating empty status as freshness.
+        if _index_copy_has_trust_flags(index_path) is not False:
+            return None
+        index = f"{stamp!r}\0"
+        generation = working_generation(worktree)
+        if identity(index_path) != stamp:
+            return None
     except OSError:
-        index = "no-index\0"
-    entries = _snapshot_entries(worktree, max_entries=_LIVE_SNAPSHOT_ENTRY_CAP)
-    if entries is None:
         return None
-    digest = hashlib.sha256(repr(entries).encode()).hexdigest()
-    return f"head\0{head}\0index\0{index}entries\0{digest}\0"
+    return f"head\0{head}\0index\0{index}entries\0{generation}\0"
 
 
 def _worktree_gitdir(worktree: Path) -> Path | None:

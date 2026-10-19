@@ -16,6 +16,7 @@ from agents_remember.controlplane.durable_store import (
     declare_process_role,
     declared_process_role,
 )
+from agents_remember.serving import background_accounting
 from agents_remember_test_support.testing.global_state import (
     OWNED_MUTABLE_STATES,
     PROCESS_MUTABLE_STATES,
@@ -58,6 +59,13 @@ def _owned_delegated_writer(module: ModuleType, state: ProcessMutableState) -> A
     return {"previous module": object()}
 
 
+def _owned_background_pool(module: ModuleType, state: ProcessMutableState) -> Any:
+    executor = mock.Mock()
+    module.__dict__["_BACKGROUND_POOL_LOCK"] = threading.Lock()
+    module.__dict__["_BackgroundPool"] = SimpleNamespace(executor=executor)
+    return executor
+
+
 def _owned_binding(module: ModuleType, state: ProcessMutableState) -> Any:
     module.__dict__["reset_worktree_services"] = lambda: setattr(module, state.attribute, None)
     return object()
@@ -94,6 +102,7 @@ _OWNED_STATE_BUILDERS = {
     "_reset_sweep_cursor": _owned_delegated_sweep,
     "_reset_tool_writer": _owned_delegated_writer,
     "_clear_binding": _owned_binding,
+    "_reset_background_pool": _owned_background_pool,
 }
 
 
@@ -187,14 +196,36 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
                             sys.modules[state.module].ServerSession.__init__,
                             module.original_callable,
                         )
+                    elif action == "_reset_background_pool":
+                        previous.shutdown.assert_called_once_with(wait=True)
+                        self.assertIsNone(sys.modules[state.module]._BackgroundPool.executor)
                     elif action == "_clear_binding":
                         self.assertIsNone(value)
-                    elif action == "_reset_sweep_cursor":
-                        module._reset_sweep_cursor.assert_called_once_with()
-                    elif action == "_reset_tool_writer":
-                        module.reset_tool_writer.assert_called_once_with()
+                    elif action in {"_reset_sweep_cursor", "_reset_tool_writer"}:
+                        resetter = {
+                            "_reset_sweep_cursor": "_reset_sweep_cursor",
+                            "_reset_tool_writer": "reset_tool_writer",
+                        }[action]
+                        getattr(module, resetter).assert_called_once_with()
                     else:
                         self.assertEqual(value, {})
+
+    def test_background_pool_reset_closes_the_old_executor_and_allows_a_fresh_one(self) -> None:
+        state = next(
+            row
+            for row in PROCESS_MUTABLE_STATES
+            if row.name == "agents_remember.serving.background_accounting._BackgroundPool.executor"
+        )
+        assert state.reset is not None
+        previous = background_accounting._background_pool()
+        self.assertEqual(previous.submit(lambda: "before").result(HANG_GUARD_SECONDS), "before")
+        state.reset(background_accounting, state.attribute)
+        self.assertIsNone(background_accounting._BackgroundPool.executor)
+        with self.assertRaises(RuntimeError):
+            previous.submit(lambda: "closed")
+        replacement = background_accounting._background_pool()
+        self.assertIsNot(replacement, previous)
+        self.assertEqual(replacement.submit(lambda: "after").result(HANG_GUARD_SECONDS), "after")
 
     def test_each_restored_row_names_the_leak_and_restores_its_loaded_table(self) -> None:
         states = [state for state in PROCESS_MUTABLE_STATES if state.treatment == "restored"]

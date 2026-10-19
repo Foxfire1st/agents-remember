@@ -55,6 +55,7 @@ from agents_remember.serving.review_trees import ReviewTreesQuery, register_revi
 from agents_remember.worktrees.modules.capture_baseline import (
     begin_capture_baseline,
     capture_baseline_unchanged,
+    capture_entries,
     memo_capture_baselines,
     note_capture_baseline,
 )
@@ -359,6 +360,19 @@ def test_a_subject_read_starts_at_most_40_git_children(world: World, extra_files
         assert CODE_FILE in [entry.path for entry in result.payload.source.inventory.entries]
 
 
+def _captured(
+    repo: Path, index_path: Path
+) -> tuple[str, tuple[tuple[str, int, int, int, int], ...]]:
+    """One capture and the census it recorded, as the composition's own capture reads them."""
+
+    seen: list[tuple[str, int, int, int, int]] = []
+
+    def observe(index: Path) -> None:
+        seen.extend(capture_entries(index) or ())
+
+    return worktree_candidate_tree(repo, index_path, captured=observe), tuple(seen)
+
+
 def test_an_unmoved_worktree_skips_to_the_tree_a_rederive_would_derive(world: World) -> None:
     """F17: the fast recheck stands for the same tree, not a cheaper different one.
 
@@ -376,8 +390,8 @@ def test_an_unmoved_worktree_skips_to_the_tree_a_rederive_would_derive(world: Wo
         for worktree in (world.code_worktree, world.memory_worktree):
             with memo_capture_baselines():
                 before = begin_capture_baseline(worktree)
-                tree = worktree_candidate_tree(worktree, scratch / "resolve.index")
-                note_capture_baseline(worktree, tree=tree, before=before)
+                tree, entries = _captured(worktree, scratch / "resolve.index")
+                note_capture_baseline(worktree, tree=tree, entries=entries, before=before)
                 assert capture_baseline_unchanged(worktree, tree=tree)
                 rederived = worktree_candidate_tree(worktree, scratch / "recheck.index")
                 assert rederived == tree
@@ -385,8 +399,8 @@ def test_an_unmoved_worktree_skips_to_the_tree_a_rederive_would_derive(world: Wo
         moved.write_text("VALUE = 2\n", encoding="utf-8")
         with memo_capture_baselines():
             before = begin_capture_baseline(world.code_worktree)
-            tree = worktree_candidate_tree(world.code_worktree, scratch / "resolve2.index")
-            note_capture_baseline(world.code_worktree, tree=tree, before=before)
+            tree, entries = _captured(world.code_worktree, scratch / "resolve2.index")
+            note_capture_baseline(world.code_worktree, tree=tree, entries=entries, before=before)
             moved.write_text("VALUE = 3\n", encoding="utf-8")
             assert not capture_baseline_unchanged(world.code_worktree, tree=tree)
             assert worktree_candidate_tree(world.code_worktree, scratch / "recheck2.index") != tree

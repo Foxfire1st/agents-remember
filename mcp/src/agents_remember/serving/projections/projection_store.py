@@ -134,16 +134,25 @@ class ProviderStateRefresh(Protocol):
     def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None: ...
 
 
-@dataclass(frozen=True)
+@dataclass
 class ProjectionTickState:
     """What a projector carries between ticks: the retained input snapshot it re-reads
     incrementally, and the two pre-read refreshers (provider current state, landing state) it
     drives before reading. All three are the projector's own long-lived collaborators; a tick
-    given some of them and not others silently reverts to a cold read."""
+    given some of them and not others silently reverts to a cold read.
+
+    ``stable`` is filled in by the tick itself: it is the stable form the tick computed for its
+    own write decision, published afterwards instead of being computed a second time. The value
+    is live only for the tick that set it, so it is not part of the state a tick starts from.
+    """
 
     input_state: ProjectionInputState | None = None
     provider_refresher: ProviderStateRefresh | None = None
     landing_state: LandingStateReader | None = None
+    # The stable form this tick computed for its own write decision, so publication compares the
+    # same dump instead of computing a second one (MIK-R179 rule 2: no repeated work with no new
+    # input). ``None`` until the tick has computed it.
+    stable: StableProjectionState | None = None
 
 
 def project_and_write(
@@ -202,8 +211,12 @@ def project_and_write(
         ),
     )
     _warn_if_task_documents_payload_over_budget(projection, now=moment)
-    if previous_stable is None or stable_projection_state(projection) != previous_stable:
+    if previous_stable is None:
         write_projection(root, projection)
+    else:
+        tick.stable = stable_projection_state(projection)
+        if tick.stable != previous_stable:
+            write_projection(root, projection)
     return projection
 
 

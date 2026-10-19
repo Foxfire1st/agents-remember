@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from time import monotonic
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
@@ -22,6 +23,14 @@ from agents_remember.serving.changeset_cache import (
 type Inputs = tuple[ReadInput, ...]
 type Observe = Callable[[Inputs], None]
 
+#: A kept summary answer is served for at most this long. Rule 3 asks for a bound on reuse as well
+#: as a bound on size: an answer kept through an unnoticed dependency drift would otherwise be
+#: reusable for the life of the process.
+DEFAULT_MAX_AGE_SECONDS = 900.0
+
+#: Admission records are bounded too, so the bound itself cannot grow without limit.
+DEFAULT_ADMISSIONS = 256
+
 
 @dataclass(frozen=True)
 class ReviewIntentSummaryPort:
@@ -32,15 +41,47 @@ class ReviewIntentSummaryPort:
 
 
 class IntentSummaryCache:
-    def __init__(self, port: ReviewIntentSummaryPort, cache: ChangesetCache) -> None:
+    def __init__(
+        self,
+        port: ReviewIntentSummaryPort,
+        cache: ChangesetCache,
+        *,
+        max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
+        admissions: int = DEFAULT_ADMISSIONS,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
         self.port = port
         self.cache = cache
+        self._max_age_seconds = max_age_seconds if max_age_seconds > 0 else DEFAULT_MAX_AGE_SECONDS
+        self._admissions = admissions
+        self._clock = clock
+        # The window an answer belongs to is part of its cache key, and the clock alone decides it:
+        # when the window rolls over the key changes by itself, so an answer can never be looked up
+        # outside the window it was produced in. No admission record is consulted to decide that --
+        # a bounded admission table that had forgotten an entry would otherwise mint the old window
+        # again and serve an answer older than the bound (L177-R1-06). ``_kept`` stays as a bounded
+        # record of the last windows admitted per question, for inspection only.
+        self._kept: dict[tuple[str, str, str], int] = {}
+
+    def _window(self, key: tuple[str, str, str]) -> int:
+        """The age window whose answer may be served for ``key``: the clock's, and nothing else."""
+
+        window = int(self._clock() // self._max_age_seconds)
+        self._remember(key, window)
+        return window
+
+    def _remember(self, key: tuple[str, str, str], window: int) -> None:
+        self._kept.pop(key, None)
+        self._kept[key] = window
+        while len(self._kept) > self._admissions:
+            self._kept.pop(next(iter(self._kept)))
 
     def response(self, request: Request, repo: str, master: str, leaf: str) -> Response:
         return self.cache.response(request, lambda: self._response(repo, master, leaf))
 
     def _response(self, repo: str, master: str, leaf: str) -> Response:
         key = (repo, master, leaf)
+        window = self._window(key)
         initial = self.port.inputs(*key)
         actual: Inputs = ()
 
@@ -66,7 +107,7 @@ class IntentSummaryCache:
             return result
 
         result = cached_read(
-            ("intent-summary", *key),
+            ("intent-summary", *key, window),
             initial,
             produce,
             # Repositories were already consumed by resolution. A newly discovered

@@ -131,8 +131,9 @@ function unavailableReason(catalogue: ReviewNavigationState['catalogue']): strin
 // The longest the reviewer's first read waits for the catalogue to choose a subject. The catalogue
 // read is one indexed listing (tens of milliseconds on a real task), so the bound only matters when it
 // is slow or stalled; then the task-context review is read at the bound, exactly as it is when the
-// catalogue refuses. When the catalogue does answer, its first subject is selected only if the reader
-// has not started working in the task-context view (`engage`); otherwise it only fills the navigation.
+// catalogue refuses. Subject chosen at that point, the answer on screen is the task context, so a
+// catalogue that arrives later fills the navigation and does not select a subject on its own: one
+// default open is one main read (L177-R1-07). The reader moves on by choosing, as always.
 export const SUBJECT_HOLD_MS = 750;
 
 // An explicit source-only choice remains source-only when the catalogue refreshes.
@@ -164,12 +165,17 @@ export function useReviewNavigation(target: {
   const key = JSON.stringify(target);
   const [choice, setChoice] = useState<{ key: string; subject?: ReviewSubject }>();
   const chosen = choice?.key === key;
+  const [expired, setExpired] = useState<string>();
+  // Past the bound the task-context read is the open's read: a catalogue that arrives afterwards
+  // fills the navigation and selects nothing on its own, so one default open is one main read
+  // (L177-R1-07). A choice the reader makes is still theirs and still wins.
   const subject = chosen
     ? choice.subject
-    : initialSubject(target, catalogue.entries, catalogue.outline, order);
+    : expired === key
+      ? undefined
+      : initialSubject(target, catalogue.entries, catalogue.outline, order);
   const answered = catalogue.entries !== undefined || catalogue.problem !== undefined;
   const waiting = !chosen && !(target.selectorKind && target.selectorId) && !answered;
-  const [expired, setExpired] = useState<string>();
   useEffect(() => {
     if (!waiting) return undefined;
     const timer = setTimeout(() => setExpired(key), SUBJECT_HOLD_MS);

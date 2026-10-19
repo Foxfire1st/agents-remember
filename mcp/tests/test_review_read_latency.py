@@ -18,6 +18,7 @@ The capture's own identity matrix is ``test_worktree_candidate_capture``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import time
@@ -860,3 +861,178 @@ def test_recorded_leaf_view_observes_its_stored_worklist_and_keeps_absence_disti
         assert "IsADirectoryError" in unreadable.refusal.detail
         assert imported[str(path)] == "unreadable (IsADirectoryError)"
         assert not LEAF_VIEW_MEMO
+
+
+# -- rule 3 (MIK-R179): a recorded comparison's answers are kept by their inputs ----------------------
+
+
+def test_a_recorded_tree_view_is_served_again_from_its_exact_inputs(world: World) -> None:  # noqa: F811
+    """A closed leaf's tree view is composed once and answered again with the same bytes."""
+
+    world.edit()
+    contract, _ = _live(world)
+    world.contract(live=False)
+    task_root = world.config.coordination_root / "tasks" / REPO / MASTER
+    comparison = review_tree_comparison.comparison_directory(task_root, LEAF)
+    assert comparison.is_dir()
+
+    with mock.patch.object(
+        review_tree_knowledge,
+        "read_review_trees",
+        wraps=review_tree_knowledge.read_review_trees,
+    ) as counted:
+        ports = _ports(world)
+        first = ports.trees(_query(recorded=True))
+        second = ports.trees(_query(recorded=True))
+
+    assert first.state == "trees", first.refusal
+    assert counted.call_count == 1, counted.call_args_list
+    assert _body(first) == _body(second)
+    # The kept answer is what a cold composition of the same record answers: the same bytes.
+    assert _body(_ports(world).trees(_query(recorded=True))) == _body(second)
+
+    # A successor file in the comparison directory is a new input set: the view is composed again.
+    (comparison / "record-successor.json").write_text("{}\n", encoding="utf-8")
+    with mock.patch.object(
+        review_tree_knowledge,
+        "read_review_trees",
+        wraps=review_tree_knowledge.read_review_trees,
+    ) as recomposed:
+        recomposed_view = _ports(world).trees(_query(recorded=True))
+    assert recomposed.call_count == 1
+    assert recomposed_view.state == first.state
+    assert contract.leaf_id == LEAF
+
+
+def test_a_removed_recorded_tree_is_never_served_from_the_kept_answer(world: World) -> None:  # noqa: F811
+    """A kept recorded answer must not outlive the object it was computed from (L177-R1-05).
+
+    The object census stays the same size when one tree is removed and one unrelated blob is
+    added, so only checking the recorded trees themselves can see the loss. The kept answer is not
+    served; the read that reports the loss answers instead, and a cold composition agrees with it.
+    """
+
+    world.edit()
+    _live(world)
+    world.contract(live=False)
+    task_root = world.config.coordination_root / "tasks" / REPO / MASTER
+    records = review_tree_comparison.comparison_records(task_root, LEAF)
+    assert records
+    side = records[-1].code_candidate
+    repository = Path(side.repository)
+    loose = repository / ".git" / "objects" / side.tree[:2] / side.tree[2:]
+    assert loose.is_file(), "the fixture's recorded tree is a loose object"
+
+    ports = _ports(world)
+    first = ports.trees(_query(recorded=True))
+    assert first.state == "trees", first.refusal
+
+    data = loose.read_bytes()
+    loose.unlink()
+    subprocess.run(
+        ["git", "-C", str(repository), "hash-object", "-w", "--stdin"],
+        input=b"an unrelated blob\n",
+        capture_output=True,
+        check=True,
+    )
+    try:
+        lost = ports.trees(_query(recorded=True))
+        cold = _ports(world).trees(_query(recorded=True))
+    finally:
+        loose.write_bytes(data)
+        loose.chmod(0o444)
+
+    assert _body(lost) != _body(first), "the kept answer stood in for a read it no longer matches"
+    assert _body(cold) == _body(lost), "the answer is the cold composition of the same record"
+
+
+@pytest.mark.parametrize(
+    "path, loss",
+    [
+        ("pkg", "remove"),
+        ("pkg/a.py", "remove"),
+        ("pkg/a.py", "unreadable"),
+        ("pkg/a.py", "truncated-body"),
+    ],
+)
+def test_a_removed_recorded_descendant_is_never_served_from_the_kept_answer(
+    path: str,
+    loss: str,
+    world: World,  # noqa: F811
+) -> None:
+    """A kept recorded answer must not outlive the object it was computed from (L177-R1-05).
+
+    The object census stays the same size when one tree is removed and one unrelated blob is
+    added, so only checking the recorded trees themselves can see the loss. The kept answer is not
+    served; the read that reports the loss answers instead, and a cold composition agrees with it.
+    """
+
+    world.edit()
+    if loss == "truncated-body":
+        # A large compressed body can lose its tail while its header remains readable.
+        (world.code_worktree / path).write_text(
+            "".join(hashlib.sha256(str(i).encode()).hexdigest() + "\n" for i in range(4096))
+        )
+    _live(world)
+    world.contract(live=False)
+    task_root = world.config.coordination_root / "tasks" / REPO / MASTER
+    records = review_tree_comparison.comparison_records(task_root, LEAF)
+    assert records
+    side = records[-1].code_candidate
+    repository = Path(side.repository)
+    descendant = subprocess.check_output(
+        ["git", "-C", str(repository), "rev-parse", f"{side.tree}:{path}"], text=True
+    ).strip()
+    loose = repository / ".git" / "objects" / descendant[:2] / descendant[2:]
+    assert loose.is_file(), "the fixture's recorded tree is a loose object"
+
+    ports = _ports(world)
+    request = ReviewSurfaceRequest(
+        repository_id=REPO, master=MASTER, leaf_id=LEAF, history="recorded"
+    )
+    first = ports.review(request)
+    assert first.state == "review", first.refusal
+
+    data = loose.read_bytes()
+    if loss == "remove":
+        loose.unlink()
+    elif loss == "unreadable":
+        loose.chmod(0)
+    else:
+        assert len(data) > 4096
+        loose.chmod(0o644)
+        loose.write_bytes(data[:-12])
+        loose.chmod(0o444)
+        assert (
+            subprocess.run(
+                ["git", "-C", str(repository), "cat-file", "-s", descendant],
+                capture_output=True,
+                check=False,
+            ).returncode
+            == 0
+        )
+        assert (
+            subprocess.run(
+                ["git", "-C", str(repository), "cat-file", "blob", descendant],
+                capture_output=True,
+                check=False,
+            ).returncode
+            != 0
+        )
+    if loss != "truncated-body":
+        subprocess.run(
+            ["git", "-C", str(repository), "hash-object", "-w", "--stdin"],
+            input=b"an unrelated blob\n",
+            capture_output=True,
+            check=True,
+        )
+    try:
+        lost = ports.review(request)
+        cold = _ports(world).review(request)
+    finally:
+        loose.chmod(0o644) if loose.exists() else None
+        loose.write_bytes(data)
+        loose.chmod(0o444)
+
+    assert _body(lost) != _body(first), "the kept answer stood in for a read it no longer matches"
+    assert _body(cold) == _body(lost), "the answer is the cold composition of the same record"

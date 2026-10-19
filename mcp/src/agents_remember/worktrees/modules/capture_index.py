@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from pathlib import Path
 
 from agents_remember.kernel.git_command import copy_git_index, run_git, run_git_with_index
@@ -154,7 +156,13 @@ def _excluded_pathspec(path: str) -> str:
     return MEMORY_CACHE_EXCLUDE if path == LEDGER_RELATIVE_PATH else f":(top,exclude){path}"
 
 
-def _tree_from_index_copy(repo: Path, index: Path, exclude_paths: tuple[str, ...]) -> str:
+def _tree_from_index_copy(
+    repo: Path,
+    index: Path,
+    exclude_paths: tuple[str, ...],
+    *,
+    captured: Callable[[Path], None] | None = None,
+) -> str:
     """Capture through a private copy of the worktree's own index, trusting Git's own evidence.
 
     The copy is brought to exactly the state the full capture starts from -- ``HEAD``'s entries and
@@ -197,6 +205,8 @@ def _tree_from_index_copy(repo: Path, index: Path, exclude_paths: tuple[str, ...
         _index_step(repo, index, ["update-index", "--force-remove", "--", *exclude_paths])
     _index_step(repo, index, _add_all_args(exclude_paths))
     tree = _index_step(repo, index, ["write-tree"]).strip()
+    if captured is not None:
+        captured(index)
     return tree
 
 
@@ -205,3 +215,66 @@ def _add_all_args(exclude_paths: tuple[str, ...]) -> list[str]:
     if exclude_paths:
         args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
     return args
+
+
+def _index_entries(index: Path) -> tuple[tuple[str, int, int, int, int], ...] | None:
+    """Every entry of a version-2 or version-3 index: path, mode, size and recorded times.
+
+    This is the capture's own census of the paths it read: ``HEAD``'s entries, and every eligible
+    addition ``git add`` made, with the file time Git recorded for each. An ignored path is absent
+    because the capture never read one, which is what makes a proof over this census cheap without
+    being weaker. ``None`` is any shape this scan does not understand -- version 4's path
+    compression, a truncation, an unreadable file -- so a caller fails over to re-deriving instead
+    of trusting a partial reading.
+    """
+
+    try:
+        data = index.read_bytes()
+    except OSError:
+        return None
+    if len(data) < 12 or data[:4] != b"DIRC":
+        return None
+    if int.from_bytes(data[4:8], "big") not in (2, 3):
+        return None
+    count = int.from_bytes(data[8:12], "big")
+    entries: list[tuple[str, int, int, int, int]] = []
+    offset = 12
+    for _ in range(count):
+        parsed = _index_entry(data, offset)
+        if parsed is None:
+            return None
+        entry, offset = parsed
+        entries.append(entry)
+    return tuple(entries)
+
+
+def _index_entry(data: bytes, offset: int) -> tuple[tuple[str, int, int, int, int], int] | None:
+    """One entry's path, mode, size, mtime and ctime, and the next entry's offset."""
+
+    if offset + 62 > len(data):
+        return None
+    ctime_seconds = int.from_bytes(data[offset : offset + 4], "big")
+    ctime_nanos = int.from_bytes(data[offset + 4 : offset + 8], "big")
+    mtime_seconds = int.from_bytes(data[offset + 8 : offset + 12], "big")
+    mtime_nanos = int.from_bytes(data[offset + 12 : offset + 16], "big")
+    mode = int.from_bytes(data[offset + 24 : offset + 28], "big")
+    size = int.from_bytes(data[offset + 36 : offset + 40], "big")
+    flags = int.from_bytes(data[offset + 60 : offset + 62], "big")
+    cursor = offset + 62
+    if flags & 0x4000:  # extended flags present
+        if cursor + 2 > len(data):
+            return None
+        cursor += 2
+    end = data.find(b"\x00", cursor)
+    if end < 0:
+        return None
+    path = os.fsdecode(data[cursor:end])
+    # An entry is padded to a multiple of eight bytes counted from its own start.
+    next_offset = (end + 1 - offset + 7) // 8 * 8 + offset
+    return (
+        path,
+        mode,
+        size,
+        mtime_seconds * 1_000_000_000 + mtime_nanos,
+        ctime_seconds * 1_000_000_000 + ctime_nanos,
+    ), next_offset

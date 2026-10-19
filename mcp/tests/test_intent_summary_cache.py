@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
@@ -18,7 +19,12 @@ from agents_remember.models.knowledge.review_intent_summary import ReviewIntentS
 from agents_remember.serving import changeset_generation
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.changeset_cache import ChangesetCache, ContentRead
-from agents_remember.serving.intent_summary_cache import IntentSummaryCache, ReviewIntentSummaryPort
+from agents_remember.serving.intent_summary_cache import (
+    DEFAULT_ADMISSIONS,
+    DEFAULT_MAX_AGE_SECONDS,
+    IntentSummaryCache,
+    ReviewIntentSummaryPort,
+)
 from agents_remember.serving.review_summary import register_review_summary_route
 from agents_remember_test_support.testing.review_git_trees import (
     CODE_FILE,
@@ -345,3 +351,139 @@ def test_slow_intent_does_not_serialize_other_reads(world, route, extra):
         finally:
             release.set()
         assert pending.result(timeout=HANG_GUARD_SECONDS).status_code == 200
+
+
+class _Elapsed:
+    """A clock the test moves, so an age bound can be exercised without waiting."""
+
+    def __init__(self) -> None:
+        self.seconds = 0.0
+
+    def __call__(self) -> float:
+        return self.seconds
+
+
+def test_a_kept_summary_answer_expires_and_is_then_produced_again(tmp_path: Path):
+    """Rule 3 bounds reuse by age as well as by size, and expiry is a native read."""
+
+    input = tmp_path / "index"
+    input.write_bytes(b"derived index")
+    produced: list[str] = []
+    elapsed = _Elapsed()
+
+    def read(repo, master, leaf, observe):
+        produced.append(leaf)
+        observe((ContentRead(input),))
+        return ReviewIntentSummaryResult(
+            state="unavailable",
+            repository_id=repo,
+            master=master,
+            leaf_id=leaf,
+            refusal=ReviewRefusal(
+                code="candidate_dataset_absent", detail="not authored", next_action="author"
+            ),
+        )
+
+    reader = IntentSummaryCache(
+        ReviewIntentSummaryPort(inputs=lambda *_: (), read=read),
+        ChangesetCache(capacity=8),
+        clock=elapsed,
+    )
+    with reader.cache.reading():
+        first = reader._response("repo", "master", "leaf")
+    assert produced == ["leaf"]
+
+    elapsed.seconds = 60.0
+    with reader.cache.reading():
+        inside = reader._response("repo", "master", "leaf")
+    assert produced == ["leaf"], "an answer inside the age bound is served, not re-read"
+    assert inside.body == first.body
+
+    elapsed.seconds = 60.0 + DEFAULT_MAX_AGE_SECONDS + 1.0
+    with reader.cache.reading():
+        expired = reader._response("repo", "master", "leaf")
+    assert produced == ["leaf", "leaf"], "an answer past the age bound is produced again"
+    assert expired.body == first.body, "reuse and expiry answer the same bytes"
+
+
+def test_a_changed_input_still_invalidates_a_summary_answer_inside_the_age_bound(tmp_path: Path):
+    input = tmp_path / "index"
+    input.write_bytes(b"derived index")
+    produced: list[str] = []
+    elapsed = _Elapsed()
+
+    def read(repo, master, leaf, observe):
+        produced.append(leaf)
+        observe((ContentRead(input),))
+        return ReviewIntentSummaryResult(
+            state="unavailable",
+            repository_id=repo,
+            master=master,
+            leaf_id=leaf,
+            refusal=ReviewRefusal(
+                code="candidate_dataset_absent", detail="not authored", next_action="author"
+            ),
+        )
+
+    reader = IntentSummaryCache(
+        ReviewIntentSummaryPort(inputs=lambda *_: (), read=read),
+        ChangesetCache(capacity=8),
+        clock=elapsed,
+    )
+    with reader.cache.reading():
+        reader._response("repo", "master", "leaf")
+    input.write_bytes(b"derived index, revised")
+    elapsed.seconds = 1.0
+    with reader.cache.reading():
+        reader._response("repo", "master", "leaf")
+    assert produced == ["leaf", "leaf"]
+
+
+def test_a_bounded_admission_table_cannot_resurrect_an_over_age_answer(tmp_path: Path):
+    """L177-R1-06 after eviction: the clock alone decides the window, so the answer is produced again.
+
+    The exact counterexample the Reviewer ran against A3: the target plus every admission the table
+    holds, then a clock past the bound. An answer must not be reused because its admission record
+    was evicted.
+    """
+
+    input = tmp_path / "index"
+    input.write_bytes(b"derived index")
+    produced: Counter[str] = Counter()
+    elapsed = _Elapsed()
+
+    def read(repo, master, leaf, observe):
+        produced[leaf] += 1
+        observe((ContentRead(input),))
+        return ReviewIntentSummaryResult(
+            state="unavailable",
+            repository_id=repo,
+            master=master,
+            leaf_id=leaf,
+            refusal=ReviewRefusal(
+                code="candidate_dataset_absent", detail="not authored", next_action="author"
+            ),
+        )
+
+    reader = IntentSummaryCache(
+        ReviewIntentSummaryPort(inputs=lambda *_: (), read=read),
+        ChangesetCache(capacity=512),
+        clock=elapsed,
+    )
+
+    def fetch(leaf: str):
+        with reader.cache.reading():
+            return reader._response("repo", "master", leaf)
+
+    first = fetch("target")
+    assert produced["target"] == 1
+    for index in range(DEFAULT_ADMISSIONS):
+        fetch(f"other-{index}")
+    assert ("repo", "master", "target") not in reader._kept, "the admission record was evicted"
+
+    elapsed.seconds = DEFAULT_MAX_AGE_SECONDS + 1.0
+    after = fetch("target")
+    assert produced["target"] == 2, (
+        "an over-age answer was served because its admission was evicted"
+    )
+    assert after.body == first.body

@@ -893,6 +893,11 @@ def test_a_file_changed_after_write_tree_cannot_be_certified_by_a_later_snapshot
 
 def test_a_fast_tree_recheck_still_checks_the_recorded_base_commit(source_world: World) -> None:
     world = source_world
+    # Exercise a provable fast path: preserve edits and eligible additions, but restore the
+    # deleted tracked file and unstage the fixture. Missing tracked paths and staged differences
+    # deliberately re-derive, since their later restoration/ignore changes can evade status.
+    git(world.code_worktree, "reset", "--mixed", "HEAD")
+    git(world.code_worktree, "checkout", "HEAD", "--", SYNCHRONIZATION_PATH)
     with memo_capture_baselines():
         resolved = _public_resolution(world)
         assert resolved.candidate_identity is not None and resolved.contract is not None
@@ -919,6 +924,9 @@ def test_memory_head_only_movement_rechecks_and_refuses_equal_physical_files(
     git(repo, "commit", "-qm", "track ignored path at another endpoint")
     after_head = git(repo, "rev-parse", "HEAD")
     git(repo, "update-ref", "HEAD", before_head)
+    # Leave the files in place with HEAD's index. The ignored file is still absent from this
+    # capture and becomes tracked only on the later HEAD-only movement below.
+    git(repo, "reset", "--mixed", "HEAD")
     with memo_capture_baselines():
         resolved = _public_resolution(world)
         assert resolved.trees is not None

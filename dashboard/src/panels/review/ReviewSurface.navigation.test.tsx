@@ -449,10 +449,11 @@ it('does not move a reader who is working when the catalogue answers after the b
   expect(server.catalogueReads()).toHaveLength(1);
 });
 
-it('lands a reader who has not acted on the first family when the catalogue answers late, without remounting', async () => {
+it('opens one main read when the catalogue answers after the bounded wait (L177-R1-07)', async () => {
   vi.useFakeTimers();
   const server = delayedServer({ holdCatalogue: true });
   const view = render(<ReviewSurface {...target} />);
+  // The bounded wait releases the whole-task read: the subject is decided for this open.
   await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
   expect(server.heldFor(null)).toHaveLength(1);
   vi.useRealTimers();
@@ -460,16 +461,27 @@ it('lands a reader who has not acted on the first family when the catalogue answ
   await view.findByTestId('review-center-unselected');
   const workspace = view.getByTestId('review-workspace');
 
+  // The catalogue arrives late. It fills the navigation and selects nothing on its own: the one
+  // main read of this open is the task context, and no second read is issued without a gesture.
   await server.releaseCatalogue();
-  const pending = await view.findByTestId('review-reading-pending');
-  expect(pending.dataset.pendingSubject).toBe(`family:${families[0].family_id}`);
+  await act(async () => {});
+  await waitFor(() => expect(view.getAllByTestId('review-family-open')).toHaveLength(families.length));
+  await act(async () => {});
+  expect(server.reviewReads()).toHaveLength(1);
+  expect(view.getByTestId('review-center-unselected')).toBeTruthy();
+  expect(view.queryByTestId('review-reading-pending')).toBeNull();
+  expect(server.held).toHaveLength(0);
   expect(view.getByTestId('review-workspace')).toBe(workspace);
+  expect(server.catalogueReads()).toHaveLength(1);
+
+  // The reader's own choice is still one subject, one read.
+  fireEvent.click(view.getAllByTestId('review-family-open')[0]);
+  await waitFor(() => expect(server.heldFor(families[0].family_id)).toHaveLength(1), { timeout: 3000 });
   await server.answer(families[0].family_id);
   await waitFor(() =>
     expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
   );
-  expect(view.getByTestId('review-workspace')).toBe(workspace);
-  expect(server.catalogueReads()).toHaveLength(1);
+  expect(server.reviewReads()).toHaveLength(2);
 });
 
 it('keeps the task-context answer the bounded wait released when the catalogue answers before it (MIK-R40 rule 5)', async () => {
@@ -480,22 +492,16 @@ it('keeps the task-context answer the bounded wait released when the catalogue a
   await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
   expect(server.heldFor(null)).toHaveLength(1);
   vi.useRealTimers();
-  // The catalogue answers first: the reader, who has not acted, is taken to the first family.
+  // The catalogue answers while that read is in flight: it fills the navigation, and the answer
+  // the reader is waiting for is still the task context (L177-R1-07).
   await server.releaseCatalogue();
-  await waitFor(() => expect(server.heldFor(families[0].family_id)).toHaveLength(1));
-  await server.answer(families[0].family_id);
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
-  );
-  // The superseded whole-task answer arrives: it never writes the panes.
-  await server.answer(null);
   await act(async () => {});
-  expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id);
-  expect(view.queryByTestId('review-center-unselected')).toBeNull();
-  expect(server.reviewReads().filter((url) => !url.searchParams.has('selectorKind'))).toHaveLength(
-    1,
-  );
+  await server.answer(null);
+  await view.findByTestId('review-center-unselected');
+  await act(async () => {});
   expect(server.held).toHaveLength(0);
+  expect(server.reviewReads()).toHaveLength(1);
+  expect(view.queryByTestId('review-center-family')).toBeNull();
   expect(view.queryByTestId('review-reading-pending')).toBeNull();
 });
 

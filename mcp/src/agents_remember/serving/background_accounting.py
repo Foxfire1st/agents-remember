@@ -13,13 +13,22 @@ ledger itself cannot grow with uptime or input size.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+
+#: Threads the background owners run on. Their own pool, never the loop's default executor:
+#: the default one is what Starlette runs a sync route on, so before this the projection and a
+#: review read shared a queue and a long projection unit could hold the thread a read needed
+#: (MIK-R179 rule 2). Four covers the loops that block -- projection, change watcher, landing
+#: refresh, held delivery, event tail and metrics -- and keeps a runaway unit's cost bounded.
+BACKGROUND_WORKERS = 4
 
 #: Seconds of history the "last 60 s" columns cover (MIK-R81 rule 1).
 WINDOW_SECONDS = 60.0
@@ -525,6 +534,39 @@ def measured(owner: str, ledger: BackgroundLedger | None) -> Iterator[None]:
         ledger.record(owner, time.thread_time() - cpu_before, time.monotonic() - wall_before)
 
 
+class _BackgroundPool:
+    """The one executor, created on first use and never resized."""
+
+    executor: ThreadPoolExecutor | None = None
+
+
+_BACKGROUND_POOL_LOCK = threading.Lock()
+
+
+def _background_pool() -> ThreadPoolExecutor:
+    """The background owners' own threads, created once and reused.
+
+    A read that runs on the loop's default executor never queues behind background work, and
+    background work never takes a thread a read needs. The pool is process-wide because the
+    owners are, and it is never resized: a size that followed the moment would reintroduce the
+    contention this exists to remove.
+    """
+
+    with _BACKGROUND_POOL_LOCK:
+        if _BackgroundPool.executor is None:
+            _BackgroundPool.executor = ThreadPoolExecutor(
+                max_workers=BACKGROUND_WORKERS, thread_name_prefix="ar-background"
+            )
+        return _BackgroundPool.executor
+
+
+async def _background_thread[R](func: Callable[[], R]) -> R:
+    """One owned thread unit, with the same task boundary as ``asyncio.to_thread``."""
+    context = contextvars.copy_context()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_background_pool(), context.run, func)
+
+
 async def offload[R](
     owner: str,
     ledger: BackgroundLedger | None,
@@ -549,7 +591,9 @@ async def offload[R](
             return function(*args, **kwargs)
 
     _run.__wrapped__ = function  # type: ignore[attr-defined]
-    worker = asyncio.create_task(asyncio.to_thread(_run))
+    # Keep an explicit task for the exact thread unit: shutdown shields and drains this
+    # task even when its owner is cancelled repeatedly. Its executor stays background-only.
+    worker = asyncio.create_task(_background_thread(_run))
     try:
         return await asyncio.shield(worker)
     except BaseException:

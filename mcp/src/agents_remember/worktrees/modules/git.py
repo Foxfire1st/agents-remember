@@ -56,7 +56,11 @@ def _require_git_with_index(repo: Path, args: list[str], index: Path) -> str:
 
 
 def worktree_candidate_tree(
-    repo: Path, index_path: Path, *, exclude_paths: tuple[str, ...] = ()
+    repo: Path,
+    index_path: Path,
+    *,
+    exclude_paths: tuple[str, ...] = (),
+    captured: Callable[[Path], None] | None = None,
 ) -> str:
     """The tree of ``repo``'s working files as ``git add -A`` over ``HEAD`` would commit them.
 
@@ -72,18 +76,31 @@ def worktree_candidate_tree(
     the files Git cannot prove unchanged (:func:`capture_index._tree_from_index_copy`). When that copy cannot be
     made or Git reports an error on the way, the capture is taken again from an empty index, which
     hashes every file (:func:`_tree_from_head`): slower, the same tree, never a guess.
+
+    ``captured`` is handed the private index the tree was written from, before the temporary
+    directory holding it goes away. That index is the capture's own census of every path it read --
+    ``HEAD``'s entries plus every eligible addition, and no ignored path -- so a caller proving the
+    tree did not move reads it instead of walking the worktree (MIK-R179 rule 1).
     """
     # The caller selects a scratch namespace; every observation owns its physical index.
     index_path.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=f".{index_path.name}-", dir=index_path.parent) as temporary:
         scratch = Path(temporary)
         try:
-            return capture_index._tree_from_index_copy(repo, scratch / "index", exclude_paths)
+            return capture_index._tree_from_index_copy(
+                repo, scratch / "index", exclude_paths, captured=captured
+            )
         except capture_index._IndexCopyUnusable:
-            return _tree_from_head(repo, scratch / "full-index", exclude_paths)
+            return _tree_from_head(repo, scratch / "full-index", exclude_paths, captured=captured)
 
 
-def _tree_from_head(repo: Path, isolated_index: Path, exclude_paths: tuple[str, ...]) -> str:
+def _tree_from_head(
+    repo: Path,
+    isolated_index: Path,
+    exclude_paths: tuple[str, ...],
+    *,
+    captured: Callable[[Path], None] | None = None,
+) -> str:
     """The full capture: an empty private index seeded from ``HEAD``, so every file is hashed."""
 
     actions = [("seed candidate index", ["read-tree", "HEAD"])]
@@ -106,6 +123,8 @@ def _tree_from_head(repo: Path, isolated_index: Path, exclude_paths: tuple[str, 
             f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
         )
     tree = result.stdout.strip()
+    if captured is not None:
+        captured(isolated_index)
     return tree
 
 

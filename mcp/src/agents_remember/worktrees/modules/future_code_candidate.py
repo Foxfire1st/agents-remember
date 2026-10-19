@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from agents_remember.errors import FutureCodeCandidateError
 from agents_remember.worktrees.modules.capture_baseline import (
     begin_capture_baseline,
+    capture_entries,
     note_capture_baseline,
 )
 from agents_remember.worktrees.modules.git import (
@@ -38,10 +40,16 @@ def capture_future_code_candidate(contract: WorktreeContract) -> FutureCodeCandi
             "future-code-candidate-not-applicable",
             "future-code candidate identity belongs only to an ordinary leaf worktree",
         )
+    captured: tuple[tuple[str, int, int, int, int], ...] | None = None
+
+    def observe(index: Path) -> None:
+        nonlocal captured
+        captured = capture_entries(index)
+
     try:
         observed_head = head_commit(contract.code_worktree)
         before = begin_capture_baseline(contract.code_worktree)
-        candidate_tree = _candidate_tree(contract)
+        candidate_tree = _candidate_tree(contract, observe)
         if head_commit(contract.code_worktree) != observed_head:
             raise FutureCodeCandidateError(
                 "future-code-candidate-head-moved",
@@ -55,7 +63,9 @@ def capture_future_code_candidate(contract: WorktreeContract) -> FutureCodeCandi
         # HEAD guards the source identity; equal snapshots spanning the capture guard
         # the tree. A post-capture snapshot alone cannot certify the tree Git captured.
         with suppress(OSError, RuntimeError):
-            note_capture_baseline(contract.code_worktree, tree=candidate_tree, before=before)
+            note_capture_baseline(
+                contract.code_worktree, tree=candidate_tree, entries=captured, before=before
+            )
         return identity
     except FutureCodeCandidateError:
         raise
@@ -82,7 +92,9 @@ def require_current_future_code_candidate(
     return current
 
 
-def _candidate_tree(contract: WorktreeContract) -> str:
+def _candidate_tree(
+    contract: WorktreeContract, captured: Callable[[Path], None] | None = None
+) -> str:
     # The scratch index lives in the system temporary directory, never in the worktree group:
     # a read creates no directory except to hold a file of MIK-R74 rule 6 (a) to (c), and this
     # capture is none of those until a comparison records it.
@@ -90,4 +102,5 @@ def _candidate_tree(contract: WorktreeContract) -> str:
         return worktree_candidate_tree(
             contract.code_worktree,
             Path(temporary_directory) / "index",
+            captured=captured,
         )

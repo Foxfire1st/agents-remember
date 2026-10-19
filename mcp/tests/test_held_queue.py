@@ -25,6 +25,7 @@ from agents_remember.cli.role_held_messages import (
 )
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA
 from agents_remember.observer.host_activity import HOST_ACTIVITY_FILE
+from agents_remember.serving.projections import host_activity as host_activity_module
 from agents_remember.serving.projections.host_activity import (
     activity_directory,
     turn_ended_agents,
@@ -827,6 +828,31 @@ class TurnEndDeliveryTests(HeldQueueRecoveryTests):
         )
         assert located is not None
         return located[0], Path(located[2])
+
+    def test_an_unchanged_publication_is_parsed_once_across_ticks(self) -> None:
+        """The tick's own input is the host's file: while it holds, nothing is read again."""
+
+        manager = binding("manager")
+        worker = self.start(manager, "worker")["agentId"]
+        self.publish_activity({worker: "2026-10-17T05:27:09+00:00"})
+        reads: list[str] = []
+        real_read = host_activity_module._read_publication
+
+        def counted(path: Path) -> Any:
+            reads.append(str(path))
+            return real_read(path)
+
+        with patch.object(host_activity_module, "_read_publication", counted):
+            seen: dict[str, str] = {}
+            # One tick reads it; the next three find the same file and only stat it.
+            self.assertEqual(turn_ended_agents(self.config, seen), [worker])
+            for _ in range(3):
+                self.assertEqual(turn_ended_agents(self.config, seen), [])
+            # A host write is new input again.
+            self.publish_activity({worker: "2026-10-17T05:27:10+00:00"})
+            self.assertEqual(turn_ended_agents(self.config, seen), [worker])
+
+        self.assertEqual(len(reads), 2, reads)
 
     def test_a_turn_end_delivers_what_waits_without_another_message(self) -> None:
         manager = binding("manager")

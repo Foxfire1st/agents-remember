@@ -38,6 +38,11 @@ def activity_directory(config: McpRuntimeConfig) -> Path | None:
 _NO_TURN_STATES = frozenset({"idle", "ended"})
 # How many agent stamps one caller keeps between looks; the memory of a reader, bounded.
 _TURN_END_SEEN_LIMIT = 4096
+# The last parsed endings per publication file, with the stamp they were parsed at. The 3 s
+# held-delivery tick used to read and parse the host's publication every time even when the host
+# had written nothing; one stat answers that (MIK-R179 rule 2). A few files, never a growing map.
+_ENDINGS: dict[str, tuple[tuple[int, int, int, int], tuple[tuple[str, str], ...]]] = {}
+_ENDINGS_LIMIT = 4
 
 
 def agent_in_turn(config: McpRuntimeConfig, agent_id: str) -> bool:
@@ -73,14 +78,11 @@ def turn_ended_agents(config: McpRuntimeConfig, seen: dict[str, str]) -> list[st
     directory = activity_directory(config)
     if directory is None:
         return []
-    publication = _read_publication(directory / HOST_ACTIVITY_FILE)
-    if publication is None or not publication.complete:
+    endings = _no_turn_endings(directory / HOST_ACTIVITY_FILE)
+    if endings is None:
         return []
     ended: list[str] = []
-    for agent_id, activity in publication.agents.items():
-        if activity.state not in _NO_TURN_STATES:
-            continue
-        stamp = activity.eventAt.isoformat() if activity.eventAt is not None else ""
+    for agent_id, stamp in endings:
         if stamp and seen.get(agent_id) == stamp:
             continue
         if stamp:
@@ -89,6 +91,43 @@ def turn_ended_agents(config: McpRuntimeConfig, seen: dict[str, str]) -> list[st
             seen[agent_id] = stamp
         ended.append(agent_id)
     return ended
+
+
+def _no_turn_endings(path: Path) -> tuple[tuple[str, str], ...] | None:
+    """The agents the publication reports as not in a turn, with their own stamps.
+
+    Parsed once per publication content: the tick's own input is the host's file, and while that
+    file has not changed there is no new input to read. ``None`` is a missing, unreadable or
+    incomplete publication -- nothing to act on, and nothing kept for it.
+    """
+
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    stamp = (info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    key = path.as_posix()
+    kept = _ENDINGS.get(key)
+    if kept is not None and kept[0] == stamp:
+        return kept[1]
+    publication = _read_publication(path)
+    if publication is None or not publication.complete:
+        _ENDINGS.pop(key, None)
+        return None
+    endings = tuple(
+        sorted(
+            (
+                agent_id,
+                activity.eventAt.isoformat() if activity.eventAt is not None else "",
+            )
+            for agent_id, activity in publication.agents.items()
+            if activity.state in _NO_TURN_STATES
+        )
+    )
+    while len(_ENDINGS) >= _ENDINGS_LIMIT:
+        _ENDINGS.pop(next(iter(_ENDINGS)))
+    _ENDINGS[key] = (stamp, endings)
+    return endings
 
 
 class HostActivityInput:
