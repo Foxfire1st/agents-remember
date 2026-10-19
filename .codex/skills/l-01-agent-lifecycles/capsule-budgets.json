@@ -4,28 +4,28 @@
   "how": "budget = min(ceil(size_words * 11 / 10), ceiling); ceilings = 3700 capsule / 2500 step file; capsule size = whitespace-split words of render_instructions(), task data and seals excluded; step size = complete declared source",
   "capsules": {
     "architect/orientation": {
-      "size_words": 2844,
-      "budget_words": 3129
+      "size_words": 2972,
+      "budget_words": 3270
     },
     "architect/planning": {
-      "size_words": 2195,
-      "budget_words": 2415
+      "size_words": 2323,
+      "budget_words": 2556
     },
     "architect/review": {
-      "size_words": 2454,
-      "budget_words": 2700
+      "size_words": 2582,
+      "budget_words": 2841
     },
     "architect/coordination": {
-      "size_words": 3448,
+      "size_words": 3576,
       "budget_words": 3700
     },
     "architect/authorized-closeout": {
-      "size_words": 2067,
-      "budget_words": 2274
+      "size_words": 2195,
+      "budget_words": 2415
     },
     "architect/recovery": {
-      "size_words": 2160,
-      "budget_words": 2376
+      "size_words": 2288,
+      "budget_words": 2517
     },
     "orchestrator/orientation": {
       "size_words": 2224,
@@ -686,6 +686,38 @@
       "worker/recovery": {
         "size_words": 1748,
         "budget_words": 1923
+      }
+    }
+  },
+  "decisions_L182": {
+    "authority": "MIK-R184 rules 1 to 3; MIK-R125 capped eleven-tenths rule",
+    "capsule_ceiling": 3700,
+    "measurement": "post-edit sizes compiled from the canonical texts with the shipped compiler (compiled_size in test_role_capsule_budgets.py); task data and seals excluded",
+    "reason": "The Architect's Boundaries paragraph says he may check, measure, run and try things on a copy, that this never stands in for a leaf's build, review, curation or gate, and that a check before a landing is not a step of it; every measured capsule stays within the 3700-word ceiling.",
+    "changes": {
+      "architect/orientation": {
+        "size_words": 2972,
+        "budget_words": 3270
+      },
+      "architect/planning": {
+        "size_words": 2323,
+        "budget_words": 2556
+      },
+      "architect/review": {
+        "size_words": 2582,
+        "budget_words": 2841
+      },
+      "architect/coordination": {
+        "size_words": 3576,
+        "budget_words": 3700
+      },
+      "architect/authorized-closeout": {
+        "size_words": 2195,
+        "budget_words": 2415
+      },
+      "architect/recovery": {
+        "size_words": 2288,
+        "budget_words": 2517
       }
     }
   }

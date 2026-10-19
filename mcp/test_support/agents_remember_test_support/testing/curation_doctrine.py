@@ -81,6 +81,12 @@ class RetiredCurationStatement:
 
 RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
     RetiredCurationStatement(
+        statement="You run no test suite, no build and no investigation of a failure in your own chat.",
+        sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
+        probe="You run no test suite, no build and no investigation of a failure in your own chat.",
+        reason="MIK-R184@v1: the Architect may check, measure, run and try things himself on a copy, and that work never stands in for a leaf's build, review, curation or gate",
+    ),
+    RetiredCurationStatement(
         statement="When a System Specialist is needed, start it with `role_start` on `agents-remember-task`; you may start that role. Give the returned agent ID, report path, handover artifact path and status to the Manager or Orchestrator coordinating the work; neither gains permission to start that role.",
         sources=("skills/l-01-agent-lifecycles/roles/architect.md",),
         probe="When a System Specialist is needed, start it with `role_start` on `agents-remember-task`; you may start that role. Give the returned agent ID, report path, handover artifact path and status to the Manager or Orchestrator coordinating the work; neither gains permission to start that role.",
