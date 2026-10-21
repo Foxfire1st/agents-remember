@@ -104,17 +104,18 @@ test.todo('todo');
 test.each([1])('parameterized', () => {});
 it(`computed ${value}`, () => {});"""
         bound = spans("review.spec.ts", source)
-        for title, reason in (
-            ("skipped", ".skip"),
-            ("todo", ".todo"),
-            ("parameterized", ".each"),
-            ("computed", "computed"),
+        # A case that does not run proves nothing, so it offers no line range either (rule 3).
+        for title, reason, offers_range in (
+            ("skipped", ".skip, which does not run", False),
+            ("todo", ".todo, which does not run", False),
+            ("parameterized", ".each", True),
+            ("computed", "computed", True),
         ):
             with self.subTest(title=title):
                 self.assertNotIn(title, bound)
                 message = grammars.test_case_refusal("review.spec.ts", source.splitlines(), title)
                 self.assertIn(reason, message or "")
-                self.assertIn("line_range", message or "")
+                self.assertEqual(offers_range, "line_range" in (message or ""))
 
 
 class PythonExtentTests(unittest.TestCase):

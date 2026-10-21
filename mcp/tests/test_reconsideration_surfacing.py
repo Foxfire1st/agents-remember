@@ -791,7 +791,13 @@ def test_a_range_that_cannot_be_mapped_refuses_the_row_naming_the_link(world: Wo
     worklist = world.worklist(gone)
     row = {"subject": S18B, "disposition": "still_rejected", "reason": "Gone anyway."}
     refused = _write(world, [row], None, worklist=worklist)
-    assert refused.state == "refused" and "links.1: the linked anchor" in refused.render()
+    text = refused.render()
+    assert refused.state == "refused", text
+    # Rule 7: the refusal names the route that works, and does not send the curator in a circle.
+    assert "links.1: the fired target" in text
+    assert "`repoint` this link to where the code now lives" in text
+    assert "`raise` when the reconsider-when condition may be met" in text
+    assert "re-author the link target" not in text
     # A row naming another item than the worklist's current one is refused too.
     stale = _write(world, [{**row, "items": ["sha256:" + "0" * 64]}], None, worklist=worklist)
     assert stale.state == "refused" and "recompute the worklist" in stale.render()

@@ -46,8 +46,10 @@ Each fired link in K_C is judged against the K_B target the item fired on (:func
   unjudged;
 * anything else was **re-authored** in the leaf and refuses the row, naming the link.
 
-A link that cannot be mapped, or a fired link no longer at its index, refuses the row too. A
-``raise`` leaves the links as they are: the reconsidered revision re-authors them.
+A fired link whose base target has no image at C is **unmappable**: a refresh cannot answer it, so
+the row re-points it to where the code now lives (``repoint``, :mod:`.repoint`) or raises. A fired
+link no longer at its index refuses the row too. A ``raise`` leaves the links as they are, and its
+question says where the code lives.
 
 The curator never reverses a decision: neither row changes an alternative, its status or the chosen
 option. Decision authority stays with the developer.
@@ -64,6 +66,9 @@ from agents_remember.application.knowledge_writer.carry import mapped_anchor
 from agents_remember.memory.knowledge.requirement_endpoint import version_number
 from agents_remember.models.knowledge_files.decisions import RECONSIDER_ON, RECONSIDERABLE
 from agents_remember.models.knowledge_files.reconsideration import (
+    ANCHOR,
+    ANCHOR_STALE,
+    REFRESH_NOT_CURRENT,
     REFRESHED_TRIGGERS,
     REQUIREMENT_VERSION,
     link_target_key,
@@ -72,15 +77,22 @@ from agents_remember.models.knowledge_files.reconsideration import (
 )
 
 __all__ = [
+    "ANCHOR",
+    "ANCHOR_STALE",
+    "REFRESH_NOT_CURRENT",
     "UNDER_RECONSIDERATION",
+    "UNMAPPABLE",
     "Answer",
     "CodeAtC",
     "OpenQuestions",
     "Refresh",
     "append_questions",
+    "fired_target",
+    "link_at",
     "raise_question",
     "reconsidered_alternative",
     "refreshed_links",
+    "refreshed_target",
 ]
 
 UNDER_RECONSIDERATION: Final = "under_reconsideration"
@@ -210,6 +222,7 @@ EARLIER: Final = "earlier"
 CHANGED: Final = "changed"
 STALE_ITEM: Final = "stale item"
 RE_AUTHORED: Final = "re-authored"
+UNMAPPABLE: Final = "unmappable"
 NEW_CHANGES: Final = frozenset({EARLIER, CHANGED})
 
 
@@ -259,14 +272,14 @@ def refreshed_links(
         if one.get("trigger") not in REFRESHED_TRIGGERS:
             continue
         position = one.get("link")
-        link = _at(links, position)
+        link = link_at(links, position)
         if not isinstance(position, int) or link is None or link.get("alternative") != index:
             problems.append(
                 f"links.{position}: the fired link is no longer a reconsider_on link of "
                 f"alternative {index}; recompute the worklist"
             )
             continue
-        known = _fired_target(_at(base_links, position), one)
+        known = fired_target(link_at(base_links, position), one)
         outcome = _outcome(link.get("target"), known, one, answer, code)
         if isinstance(outcome, str):
             problems.append(f"links.{position}: {outcome}")
@@ -288,10 +301,12 @@ def _outcome(
     state, detail = _link_state(current, known, fired, code)
     if state == CARRIED:
         return detail, False  # an earlier refresh that still stands: no further bump
+    if state == UNMAPPABLE:
+        return str(detail)
     if state == RE_AUTHORED:
         return (
             f"the link was re-authored since the worklist was computed (it no longer names "
-            f"{fired.get('target')}); recompute the worklist"
+            f"{fired.get('target')}); restore its base target in `records`, or `raise`"
         )
     if state == STALE_ITEM:
         return (
@@ -301,7 +316,7 @@ def _outcome(
         )
     if state in NEW_CHANGES and not answer.names_item:
         return _new_change(state, detail, fired, answer)
-    target = _refreshed_target(current, fired, code)
+    target = refreshed_target(current, fired, code)
     return target if isinstance(target, str) else (target, True)
 
 
@@ -323,7 +338,7 @@ def _new_change(state: str, detail: Any, fired: Mapping[str, Any], answer: Answe
     return f"{change} and answer the new item by naming {answer.item} in the row's items"
 
 
-def _fired_target(
+def fired_target(
     base_link: Mapping[str, Any] | None, fired: Mapping[str, Any]
 ) -> Mapping[str, Any] | None:
     """The whole K_B target the item fired on, or ``None`` when only its key is known.
@@ -349,7 +364,7 @@ def _link_state(
 ) -> tuple[str, Any]:
     """Where the K_C link stands against the fired K_B target, with what that state carries.
 
-    The refresh of the K_B target is the one :func:`_refreshed_target` writes: a requirement at the
+    The refresh of the K_B target is the one :func:`refreshed_target` writes: a requirement at the
     item's ``latestApproved`` and ``latestPacket``, an anchor mapped to C. Only exact equality
     counts; a link that merely shares the version, the packet or the path was re-authored.
     """
@@ -410,14 +425,16 @@ def _anchor_state(
 
     if known is None:
         return RE_AUTHORED, None
-    refresh = _refreshed_target(known, fired, code)
+    refresh = refreshed_target(known, fired, code)
     seen = _seen_content(fired)
     if not isinstance(refresh, str) and seen is not None and seen != refresh["content"]:
         return STALE_ITEM, (seen, refresh["content"])
     if dict(current) == dict(known):
         return UNCHANGED, None
     if isinstance(refresh, str):
-        return RE_AUTHORED, None
+        # The base target has no image at C, so a refresh cannot answer it: only the curator's
+        # judgment of where the code lives now, or a raise, does (MIK-R194 rule 7).
+        return UNMAPPABLE, refresh
     return _refreshed_anchor_state(current, refresh, fired, code)
 
 
@@ -426,7 +443,7 @@ def _refreshed_anchor_state(
 ) -> tuple[str, Any]:
     """A link refreshed earlier in the leaf: carried when its content survives the mapping to C."""
 
-    carried = _refreshed_target(current, fired, code)
+    carried = refreshed_target(current, fired, code)
     if carried != refresh:
         return RE_AUTHORED, None
     if refresh["content"] == current.get("content"):
@@ -442,7 +459,7 @@ def _seen_content(fired: Mapping[str, Any]) -> Any:
     return seen.get("content") if isinstance(seen, Mapping) else None
 
 
-def _at(links: list[Any], position: Any) -> Mapping[str, Any] | None:
+def link_at(links: list[Any], position: Any) -> Mapping[str, Any] | None:
     """The link at ``position`` when it is a ``reconsider_on`` link of any alternative."""
 
     if not isinstance(position, int) or not 0 <= position < len(links):
@@ -451,7 +468,7 @@ def _at(links: list[Any], position: Any) -> Mapping[str, Any] | None:
     return link if isinstance(link, Mapping) and link.get("relation") == RECONSIDER_ON else None
 
 
-def _refreshed_target(target: Any, fired: Mapping[str, Any], code: CodeAtC) -> dict[str, Any] | str:
+def refreshed_target(target: Any, fired: Mapping[str, Any], code: CodeAtC) -> dict[str, Any] | str:
     """An anchor mapped to C, or a requirement re-pointed to the item's approved version."""
 
     if not isinstance(target, Mapping):
@@ -472,8 +489,8 @@ def _refreshed_target(target: Any, fired: Mapping[str, Any], code: CodeAtC) -> d
     )
     if mapped is None:
         return (
-            f"the linked anchor {path} cannot be mapped to C (its range has no image, or it no "
-            "longer resolves); re-author the link target in 'records' before answering "
-            "still_rejected"
+            f"the fired target {path} cannot be mapped to C (its range has no image, or it no "
+            "longer resolves); `repoint` this link to where the code now lives, with the reason, "
+            "or `raise` when the reconsider-when condition may be met"
         )
     return mapped

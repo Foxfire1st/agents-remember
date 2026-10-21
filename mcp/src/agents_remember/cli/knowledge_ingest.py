@@ -1,7 +1,7 @@
 """CLI adapter: write a curator hand-off list into a leaf's memory worktree as knowledge files.
 
     agents-remember knowledge-ingest --contract <leaf enclosure contract> --list <hand-off list>
-        --authorization-ref <ref> [--commit] [--json] [--config <MCP settings>]
+        --authorization-ref <ref> [--commit] [--json]
     agents-remember knowledge-ingest --contract <master series contract>
         --crossing <task-id>-crossing-<n> --list <hand-off list> --authorization-ref <ref>
         [--commit] [--json]
@@ -85,13 +85,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "(by its id; its revision becomes one more than the higher side's) and record the rows into "
         "the open <task-id>-crossing-<n> history file. --contract then names the master's series "
         "contract; the sync's memory worktree is written, and no entry or new record is authored.",
-    )
-    parser.add_argument(
-        "--config",
-        default=None,
-        help="MIK-R14: the MCP authority settings through which a raise row's question is appended "
-        "to the leaf's task document (task_doc). Omit to discover them from the working directory; "
-        "without them a raise is refused.",
     )
 
 

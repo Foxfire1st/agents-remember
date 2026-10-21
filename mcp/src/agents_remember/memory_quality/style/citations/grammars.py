@@ -32,7 +32,7 @@ from pathlib import PurePosixPath
 from tree_sitter import Language, Node, Parser
 
 from agents_remember.errors import GrammarUnavailableError
-from agents_remember.memory_quality.style.citations import test_cases
+from agents_remember.memory_quality.style.citations import test_case_ranges, test_cases
 
 PYTHON = "python"
 TYPESCRIPT = "typescript"
@@ -249,7 +249,27 @@ def test_case_refusal(path: str, lines: Sequence[str], name: str) -> str | None:
     if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
         return None
     tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
-    return test_cases.refusal(_walk(tree.root_node), name)
+    return test_cases.refusal(_walk(tree.root_node), path, name)
+
+
+def test_case_range(
+    path: str,
+    lines: Sequence[str],
+    start: int,
+    end: int,
+    reaches: test_case_ranges.Reaches | None = None,
+) -> test_case_ranges.CaseExtent | str:
+    """The one test case a line-range proof names, or why these lines are none (MIK-R194 rule 2).
+
+    A range is admitted only in a JavaScript or TypeScript ``.test.``/``.spec.`` file, only when it
+    is exactly one case's extent, and only when no ``path::title`` reaches that case. The extent is
+    measured as every other extent in this module is, on a parse of the candidate bytes.
+    """
+    grammar = grammar_of(path)
+    if grammar not in {TYPESCRIPT, TSX, JAVASCRIPT} or not test_cases.is_test_file(path):
+        return test_case_ranges.not_a_case_file(path, start, end)
+    tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
+    return test_case_ranges.case_at(path, _walk(tree.root_node), start, end, reaches)
 
 
 def _walk(root: Node) -> list[Node]:
@@ -276,10 +296,8 @@ def _widened(node: Node, wrappers: frozenset[str]) -> Node:
 
 
 def _span(node: Node) -> tuple[int, int]:
-    """The one-based line range ``node`` occupies."""
-    start = node.start_point[0] + 1
-    row, column = node.end_point
-    return start, max(start, row if column == 0 else row + 1)
+    """The one-based line range ``node`` occupies (one rule: :func:`test_cases.span_of`)."""
+    return test_cases.span_of(node)
 
 
 def _text(node: Node | None) -> list[str]:

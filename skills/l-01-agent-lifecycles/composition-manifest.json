@@ -412,6 +412,7 @@
         "knowledge_diff",
         "knowledge_integrity_check",
         "knowledge_read",
+        "knowledge_write",
         "memory_quality_check",
         "read_ar_files",
         "role_message",

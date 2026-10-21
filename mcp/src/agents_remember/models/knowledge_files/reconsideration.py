@@ -26,10 +26,19 @@ reverses a decision.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Set
+from collections.abc import Mapping, Sequence, Set
 from typing import Any, Final
 
+from pydantic import Field
+
 from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, id_pattern
+from agents_remember.models.knowledge_files.shapes import (
+    ContentHash,
+    FileModel,
+    GitBlobId,
+    Locator,
+    RepositoryPath,
+)
 
 __all__ = [
     "RECONSIDERATION_ITEM_KIND",
@@ -37,11 +46,14 @@ __all__ = [
     "RECONSIDER_SUBJECT_PATTERN",
     "TRIGGERING_DISPOSITIONS",
     "TRIGGERS",
+    "Repoint",
+    "RepointAnchor",
     "link_target_key",
     "parse_reconsider_subject",
     "question_key",
     "reconsider_subject",
     "reconsideration_item_open",
+    "require_unique_repoints",
 ]
 
 RECONSIDERATION_ITEM_KIND: Final = "reconsideration_candidate"
@@ -117,6 +129,41 @@ def link_target_key(target: Any) -> str:
     found = target.get("task")
     task: Mapping[str, Any] = found if isinstance(found, Mapping) else {}
     return f"{task.get('repository')}/{task.get('path')}#{target.get('id')}@{target.get('version')}"
+
+
+class RepointAnchor(FileModel):
+    """One end of a re-point: ``{path, locator, blob, content}``, with the path required (rule 5).
+
+    ``Anchor.path`` is optional because a file sidecar's anchor is its own file's. A re-point's two
+    targets sit in a history row about the decision, so the path is what the link moved from and to,
+    and it is never omitted.
+    """
+
+    path: RepositoryPath
+    locator: Locator
+    blob: GitBlobId
+    content: ContentHash
+
+
+class Repoint(FileModel):
+    """One link a ``still_rejected`` row re-points: where it stood, and where the code now lives.
+
+    ``before`` is the fired base target and ``after`` the target resolved at C. Both name their path,
+    so a re-point that loses its code is still readable (MIK-R194 rule 5).
+    """
+
+    link: int = Field(ge=0)
+    before: RepointAnchor
+    after: RepointAnchor
+
+
+def require_unique_repoints(items: Sequence[Repoint]) -> None:
+    """Refuse a re-point list that names one link twice: one item judges one link (rule 4)."""
+
+    named = [one.link for one in items]
+    twice = sorted({link for link in named if named.count(link) > 1})
+    if twice:
+        raise ValueError(f"a repoint names its link once; link(s) {twice} appear more than once")
 
 
 def reconsideration_item_open(

@@ -77,6 +77,8 @@ from agents_remember.models.knowledge_files.planned import (
 from agents_remember.models.knowledge_files.reconsideration import (
     RECONSIDER_DISPOSITIONS,
     RECONSIDER_SUBJECT_PATTERN,
+    Repoint,
+    require_unique_repoints,
 )
 from agents_remember.models.knowledge_files.shapes import (
     Anchor,
@@ -423,13 +425,29 @@ class ReconsiderationRow(HistoryRow):
     Subject ``reconsider:<DEC-ID>#<alternative index>``; disposition ``still_rejected`` (the
     rejection holds, and ``reason`` says why) or ``raise`` (the alternative goes to the developer:
     the writer sets the decision's ``status`` to ``under_reconsideration`` and appends a question to
-    the leaf's task-document ``openQuestions``). It carries nothing beyond the common fields. MIK-R14
-    owns the kind; the row answers a ``reconsideration_candidate`` worklist item.
+    the leaf's task-document ``openQuestions``). It carries nothing beyond the common fields and, on
+    ``still_rejected`` only, ``repoint``: the fired links whose code moved, with the target each stood
+    at, the target it now names, and the row's reason for judging the condition unmet (MIK-R194
+    rules 4 and 5). MIK-R14 owns the kind; the row answers a ``reconsideration_candidate`` item.
     """
 
     row_kind: ClassVar[str] = "reconsideration"
     subject_pattern: ClassVar[str] = RECONSIDER_SUBJECT_PATTERN
     dispositions: ClassVar[tuple[str, ...]] = RECONSIDER_DISPOSITIONS
+
+    repoint: tuple[Repoint, ...] | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _require_judged_repoints(self) -> ReconsiderationRow:
+        if self.repoint is None:
+            return self
+        if self.disposition != "still_rejected":
+            raise ValueError(
+                "only a still_rejected row re-points a link: a raise leaves the links as they are "
+                "and asks the developer where the code lives"
+            )
+        require_unique_repoints(self.repoint)
+        return self
 
 
 RECORD_ROW_PREFIXES: Final = (

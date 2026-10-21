@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import threading
 from collections.abc import Iterator
@@ -10,7 +9,6 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from agents_remember.application import knowledge_write_route as write_body
 from agents_remember.application.knowledge_writer import (
     Owner,
     WriteRequest,
@@ -134,9 +132,19 @@ def test_loaded_settings_root_mismatch_refuses_raise_before_publication(
     world = build_world(tmp_path / "writer")
     port, path = setup_port(tmp_path / "questions")
     port.config.config_path.write_text("{}")
-    monkeypatch.setattr(write_body, "load_config", lambda _path: port.config)
+    monkeypatch.setattr(
+        knowledge_write_route, "discover_config", lambda _start: port.config.config_path
+    )
+    monkeypatch.setattr(knowledge_write_route, "load_config", lambda _path: port.config)
     questions = knowledge_write_route.LeafQuestions(
-        argparse.Namespace(config=str(port.config.config_path)), load_contract(world.contract)
+        load_contract(world.contract),
+        command=knowledge_write_route.CommandRoute(
+            settings=knowledge_write_route.command_settings,
+            handoff_path=str(tmp_path / "wave6.json"),
+            handoff_name="wave6.json",
+            contract_path=str(world.contract),
+            authorization_ref="authorized-by-test",
+        ),
     )
     before = path.read_bytes()
     refusal = questions.check("[key]", "[key] raised")
@@ -144,6 +152,11 @@ def test_loaded_settings_root_mismatch_refuses_raise_before_publication(
     assert str(port.config.coordination_root) in refusal
     assert str(world.root) in refusal
     assert str(port.config.config_path) in refusal
+    # Rule 9: the command's refusal names the mounted call, and never the dead --config option.
+    assert "mounted knowledge_write" in refusal
+    assert f"handoffPath {tmp_path / 'wave6.json'}" in refusal
+    assert "authorizationRef authorized-by-test" in refusal
+    assert "--config" not in refusal
     assert path.read_bytes() == before
 
 

@@ -430,6 +430,15 @@ first authored in this leaf needs no row unless an item names it. A `raise` need
 a wave or crossing owner has no leaf worklist. A refused run lists no records, entries, rows
 or carried work as done: its count is planned and nothing was written.
 
+**A `raise` the command cannot publish.** `knowledge-ingest` writes a raise's question to the
+leaf's task document through MCP authority settings it trusts. When it has none — no trusted
+settings at or above the working directory, the checkout guard refusing an undeclared run from the
+primary checkout, a settings file it cannot load, or settings for another coordination root — it
+refuses the WHOLE batch, writes nothing and publishes no question. Its text names the cause in one
+fixed clause and the route that works: send the same hand-off through the mounted `knowledge_write`
+with `contractPath` (absolute), `handoffPath` (absolute), `handoffName` and `authorizationRef`, then
+preview and `commit: true`. `--config` is not an option: no route reads it.
+
 For identical changes at uncovered paths, judge the representative once: the row names all
 of the grouped paths and their candidate blobs. Two card-bearing paths keep their own items,
 and covered paths are never grouped. Equal copies declared by the candidate repository's
@@ -438,8 +447,9 @@ the canonical file. Ordinary non-generated files keep their obligations.
 
 A `link_target` item is open while the candidate still holds the broken target key: restate
 or remove that link through the writer. No history row answers it. A reconsideration
-`refresh_not_current` candidate likewise cannot be answered by a row; make the link current
-at C or restore its base value. A stale reconsideration refusal is cleared when you recompute
+`refresh_not_current` candidate is answered by a `still_rejected` row that names the item in
+`items`, optionally with a `repoint` for where the code lives now; it closes once the link is
+current at C. A stale reconsideration refusal is cleared when you recompute
 the worklist and judge its current item.
 
 Record a rejected simplification or workaround as a decision whose chosen option is the
@@ -474,8 +484,18 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   item becomes a `proves` entry in the test file's sidecar. `test` may also be `{path, symbol}`.
   In JavaScript/TypeScript `.test.` or `.spec.` files, a plain-string `it` or `test` case
   has the enclosing `describe` titles and its own joined by ` > `; a unique bare title also
-  resolves. Hand-off evidence names it as `<path>::"<title>"`. `.skip`, `.todo`, `.each` and
-  computed titles are not definitions: use the offered `line_range` instead.
+  resolves. Hand-off evidence names it as `<path>::"<title>"`.
+- **A case that runs but that no name reaches is proved by its lines.** For an `it.each`, a `for`
+  table, a title bound twice, or a case under a computed title (its own or an enclosing
+  `describe`'s), write the case's whole extent instead:
+  `"test": {"path": "<path>", "locator": {"kind": "line_range", "start": S, "end": E}}`.
+  The range must be exactly one case's extent: its first line to the line that closes it (the outer
+  call, never the inner `it.each([...])`). The writer pairs the proof with the evidence quoting the
+  case's own title, bare or behind its plain-titled `describe` titles; an expanded or interpolated
+  title does not pair. A writer refusal for an unresolved case name offers the exact range.
+- **A case that does not run proves nothing.** `.skip`, `.todo`, `.skipIf`, `.runIf` and `.fails`
+  prove no invariant, and no line range reaches them either: the refusal names the modifier, read on
+  the case and on every enclosing `describe`. Prove the invariant with a case that always runs.
 - `replace_evidence: true` replaces `origin.handoff.evidence` when this owner authored the record,
   including an empty replacement; without it, new evidence is appended.
 - `evidence` is stored in the record's `origin.handoff.evidence` when this leaf authored the record.
@@ -627,9 +647,9 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
     re-pointed to the item's `latestApproved` version, and an anchor link is re-anchored at C (a
     line range is mapped through the leaf's diff). The decision's revision goes up once in the
     leaf, like any change to its links. So the same condition is not raised again, while a later
-    change to the anchored code, in this leaf or a later one, is raised as a new item. A linked
-    anchor that cannot be mapped or no longer resolves refuses the row: re-author the link in
-    `records` first. A link anchor that went stale (`anchor_stale`) is raised too, and
+    change to the anchored code, in this leaf or a later one, is raised as a new item. A link
+    anchor whose base target has no image at C is re-pointed through `repoint` (below), or raises
+    instead. A link anchor that went stale (`anchor_stale`) is raised too, and
     `still_rejected` re-anchors it. When a newer version is approved, or the anchored code changes
     again, after you refreshed a link, rerunning the same row is refused: answer the new item by
     naming its ID in `items`;
@@ -637,6 +657,29 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
     `under_reconsideration` and appends a question to the leaf's task-document `openQuestions`
     through `task_doc`, keeping every existing question. When the question cannot be written, the
     `raise` is refused and the item stays open.
+
+  **`repoint`: where the code lives now.** A `still_rejected` row may carry
+  `repoint: [{link, path, locator}, …]`, one item per fired link of the answered alternative (`link`
+  is the link's 0-based position in the decision's `links`, named once). `path` and `locator`, in the
+  hand-off locator form, say where the code the alternative's `reconsider_when` is about lives at C.
+  The writer admits an item only when the fired base target has no image at C (a link that still maps
+  is refreshed, and a `repoint` on it is refused), the leaf's current link is still that base target
+  (or already this same re-point, so a rerun writes the same bytes), and the new target resolves at
+  C. The row records `before` and `after` with their paths, and its `reason` says, against the new
+  target, why the condition is not met. Links not named refresh as today; `relation` and
+  `alternative` never change. A `raise` carries no `repoint`: it leaves the links as they are. If
+  the reason leaves open whether the condition may be met, the row should have been a `raise`.
+  When the re-point bumps the decision's revision, follow it with a `changed` record row about the
+  decision (`{ "subject": "<DEC-ID>", "disposition": "changed", "effect": "clarify", "reason": … }`)
+  listed AFTER the reconsideration row: a record row takes the revision stored when it is read, and
+  that row answers the `touched_record` item the new revision raises.
+
+  **When the condition may be met, raise.** If the reason would leave open whether the condition
+  holds, `raise` instead: the answer reaches the developer, and nothing re-points, keeps a rejection
+  or answers an item on its own. Record the developer's answer against the question's key, then
+  write the reconsidered revision in `records` — a `changed` row whose `reason` cites the answer —
+  and point the links at the code the answer names. That is how L89's `DEC-AYX6QE` was answered
+  (D428): raise, recorded answer, reconsidered revision in `records`.
 
   A `route:` target fires when its directory had files at B and none at C (`route_absent`),
   or a rerouting family row names that route or a route inside it. A decision superseded in

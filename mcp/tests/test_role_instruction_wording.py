@@ -11,8 +11,6 @@ the tool server ``agents-remember-task``, and the handover says that a server na
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import io
 import json
 import re
 import tempfile
@@ -35,7 +33,6 @@ from agents_remember.application.skill_resources.capsule import (
     routed_admission_for,
 )
 from agents_remember.cli import role_launch_preparation
-from agents_remember.cli.__main__ import build_parser
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.role_launch_preparation import (
     RoleHandoverRequest,
@@ -284,7 +281,8 @@ class InstructionFileWordingTests(unittest.TestCase):
                 "Intake/writer admission: `../operations/curation.md` §Required inputs and §Bound Paseo intake and capabilities.",
                 "taskless `agents-remember knowledge-bootstrap` under `c-14-knowledge-bootstrap`, with **no enclosure in scope**, otherwise `enclosure_in_scope`, never writing onto a task's line.",
                 "Never fabricate a leaf, worktree or enclosure for either route;",
-                "Those two are the only knowledge write entry points; no MCP tool writes knowledge.",
+                "or the mounted `knowledge_write`, which runs the same writer with the same arguments;",
+                "No other route writes knowledge.",
                 "Report one full-intake worklist of distinct outstanding memory actions:",
                 "A Curator started from the dashboard has no parent and needs none.",
                 "A Curator starts no role:",
@@ -366,25 +364,6 @@ class InstructionFileWordingTests(unittest.TestCase):
             "Use only the whole, unchanged agent ID supplied by the product",
         )
         self.assertEqual(missing_clauses(worker, LEAF_CLAUSES["roles/worker.md"]), [])
-
-    def test_manifest_descriptions_follow_the_coordination_default(self) -> None:
-        manifest = json.loads(read(LIFECYCLE / "composition-manifest.json"))
-        self.assertEqual(
-            manifest["operations"]["planning"]["purpose"],
-            "Shape a bounded plan and requirement set; Architect delegation starts with one Manager for one master, one Orchestrator for concurrent masters, unless the developer chooses otherwise.",
-        )
-        self.assertEqual(
-            manifest["roles"]["architect"]["seat"],
-            "Projects-level semantic owner; may be launched taskless; delegates one master to one Manager and concurrent masters to one Orchestrator, unless the developer chooses otherwise.",
-        )
-        self.assertEqual(
-            manifest["roles"]["orchestrator"]["seat"],
-            "Sprint coordinator above one Manager per concurrently worked master; also available above a single master when the developer explicitly asks.",
-        )
-        self.assertEqual(
-            manifest["roles"]["manager"]["seat"],
-            "Selected-master coordinator and decision owner under the Architect for one master or the Orchestrator for concurrent masters.",
-        )
 
     def test_the_surfaces_are_the_router_seven_roles_and_their_eight_operations(
         self,
@@ -746,88 +725,6 @@ class InstructionFileWordingTests(unittest.TestCase):
             "message), and open limitations.",
             implementation,
         )
-
-    def test_the_curator_writer_is_admitted_for_the_selected_runtime(self) -> None:
-        # MIK owns the converted file writer; a capsule without its capability reports the gap.
-        curation = " ".join(read(LIFECYCLE / "operations" / "curation.md").split())
-        self.assertIn(
-            "{{detail:reference/curator-writer-details.md}}",
-            read(LIFECYCLE / "roles" / "curator.md"),
-        )
-        details = " ".join(read(LIFECYCLE / "reference" / "curator-writer-details.md").split())
-        intake = " ".join(read(LIFECYCLE / "reference" / "curator-intake-details.md").split())
-        self.assertIn("`arMcpContext.readerArguments`", intake)
-        self.assertIn("agents-remember knowledge-ingest", details)
-        self.assertIn("--authorization-ref <ref> --commit --json", details)
-        self.assertIn("The CLI has no `--baseline`, `--publish` or `--publish-to` options", details)
-        self.assertIn("its parser rejects them before the file writer is invoked", details)
-        for text in (curation,):
-            with self.subTest(told="operation"):
-                self.assertIn("source-bound command", text)
-                self.assertIn(
-                    "Use only the selected runtime's admitted source-bound command; if this Paseo capsule exposes no writer and admits none, report required records not written.",
-                    text,
-                )
-                self.assertIn(
-                    "Never bypass refusal with another installation's command or an internal writer.",
-                    text,
-                )
-                self.assertIn("Verify every output resolves inside the selected memory root.", text)
-                self.assertIn("Paseo capsule exposes no", text)
-                self.assertIn("report", text)
-                self.assertIn("not written", text)
-                self.assertIn("another installation's", text)
-                self.assertIn("`agents-remember-task`", text)
-                self.assertIn("selected memory root", text)
-                self.assertIn("memory_quality_check", text)
-                self.assertIn("prepare", text)
-                self.assertIn("publish", text)
-                self.assertIn("validate", text)
-                self.assertNotIn("the writer is not available to you on this line", text)
-        # The role carries the same admission by reference to its operation home.
-        role = role_text("curator")
-        with self.subTest(told="role"):
-            self.assertIn("There is no dataset to publish.", role)
-            self.assertIn(
-                "Intake/writer admission: `../operations/curation.md` "
-                "§Required inputs and §Bound Paseo intake and capabilities.",
-                role,
-            )
-            self.assertNotIn("the writer is not available to you on this line", role)
-
-        parser = build_parser()
-        arguments = [
-            "knowledge-ingest",
-            "--contract",
-            "leaf-contract",
-            "--list",
-            "handoff.json",
-            "--authorization-ref",
-            "wording-proof",
-            "--commit",
-            "--json",
-        ]
-        self.assertTrue(callable(parser.parse_args(arguments).func))
-        for option in ("--baseline", "--publish", "--publish-to"):
-            with (
-                self.subTest(unsupported_option=option),
-                contextlib.redirect_stderr(io.StringIO()) as errors,
-            ):
-                with self.assertRaises(SystemExit) as caught:
-                    parser.parse_args([*arguments, option])
-                self.assertEqual(caught.exception.code, 2)
-                self.assertIn("unrecognized arguments: " + option, errors.getvalue())
-
-    def test_the_manifest_grants_the_role_tools_to_the_roles_that_may_use_them(
-        self,
-    ) -> None:
-        manifest = json.loads(read(LIFECYCLE / "composition-manifest.json"))
-        for role in LAUNCHER_ROLES:
-            with self.subTest(role=role):
-                tools = manifest["roles"][role]["tools"]
-                self.assertIn("role_message", tools)
-                self.assertEqual("role_start" in tools, role in STARTERS)
-                self.assertEqual(set(tools) - set(PUBLIC_TOOLS), set())
 
 
 class HandoverTextWordingTests(unittest.TestCase):

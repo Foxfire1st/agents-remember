@@ -65,6 +65,7 @@ _ROW_KEYS: Final = frozenset(
         "examined",
         "considered",
         "ref",
+        "repoint",
     }
 )
 # The architect's ruling (L21 review, finding 6): the template's ``incidental`` has no spelling in the
@@ -132,6 +133,16 @@ class TargetRequest:
 
 
 @dataclass(frozen=True)
+class RepointRequest:
+    """One fired link a ``still_rejected`` row re-points: where the code it names now lives."""
+
+    position: int
+    link: int
+    path: str
+    locator: LocatorRequest
+
+
+@dataclass(frozen=True)
 class TestReference:
     """A test named as ``path::name`` (``path::Class::method`` is the symbol ``Class.method``)."""
 
@@ -142,6 +153,23 @@ class TestReference:
     def spelling(self) -> str:
         name = self.name.replace(".", "::") if self.path.endswith(".py") else self.name
         return f"{self.path}::{name}"
+
+
+@dataclass(frozen=True)
+class TestRangeReference:
+    """A test case named by the lines it occupies, for a case no ``path::name`` reaches.
+
+    An ``it.each`` title, a ``for`` table, a computed title and a title bound twice are proved this
+    way (MIK-R194 rules 1 to 3); the writer admits the range only for one case that runs and that no
+    name reaches.
+    """
+
+    path: str
+    locator: LocatorRequest
+
+    @property
+    def spelling(self) -> str:
+        return f"{self.path}::{self.locator.describe()}"
 
 
 @dataclass(frozen=True)
@@ -191,7 +219,7 @@ class ProofRequest:
     """A curator-confirmed proof: the test that proves the entry's invariant, and what it shows."""
 
     position: int
-    test: TestReference
+    test: TestReference | TestRangeReference
     facet: str
 
 
@@ -275,6 +303,8 @@ class RowRequest:
     """A membership row's examined families (MIK-R53 rule 6)."""
     ref: Mapping[str, Any] | None = None
     """A planned row's ``ref`` (MIK-R11 rule 5)."""
+    repoint: tuple[RepointRequest, ...] = ()
+    """The fired links a ``still_rejected`` row re-points, where the code they name now lives."""
 
 
 @dataclass(frozen=True)
@@ -456,22 +486,58 @@ def _targets(
     return tuple(planned)
 
 
-def read_test_reference(value: Any) -> TestReference | str:
-    """Read ``path::name`` or ``{path, symbol}`` into a test reference."""
+def read_test_reference(value: Any) -> TestReference | TestRangeReference | str:
+    """Read ``path::name``, ``{path, symbol}`` or ``{path, locator: {kind: line_range, …}}``."""
 
     if isinstance(value, Mapping):
-        path, name = _text(value.get("path")), _text(value.get("symbol"))
-        if path and name:
-            return TestReference(path, name)
-        return "a test is '<path>::<name>' or {path, symbol}"
+        return _mapping_test_reference(value)
     if isinstance(value, str):
-        case = _CASE_PROOF.fullmatch(value.strip())
-        if case is not None:
-            return TestReference(case["path"], case["name"])
-        match = _TEST_ID.fullmatch(value.strip())
-        if match is not None:
-            return TestReference(match["path"], match["name"].replace("::", "."))
-    return f"not a test reference: {value!r}; write '<path>::<name>' or {{path, symbol}}"
+        return _written_test_reference(value)
+    return _not_a_test_reference(value)
+
+
+def _mapping_test_reference(value: Mapping[str, Any]) -> TestReference | TestRangeReference | str:
+    """A test written as an object: by its symbol, or by the lines of a case no name reaches."""
+
+    path, name = _text(value.get("path")), _text(value.get("symbol"))
+    if path and name:
+        return TestReference(path, name)
+    if path and "locator" in value:
+        return _range_test_reference(path, value.get("locator"))
+    return _not_a_test_reference(value)
+
+
+def _range_test_reference(path: str, locator: Any) -> TestRangeReference | str:
+    """A test named by its lines; only a line-range locator says where a case sits."""
+
+    read = read_locator(locator)
+    if isinstance(read, str):
+        return read
+    if read.kind != "line_range":
+        return (
+            "a test's 'locator' names the case's lines: {path, locator: "
+            "{kind: line_range, start, end}}"
+        )
+    return TestRangeReference(path, read)
+
+
+def _written_test_reference(value: str) -> TestReference | str:
+    """A test written as ``path::name`` or as a pytest test ID."""
+
+    case = _CASE_PROOF.fullmatch(value.strip())
+    if case is not None:
+        return TestReference(case["path"], case["name"])
+    match = _TEST_ID.fullmatch(value.strip())
+    if match is not None:
+        return TestReference(match["path"], match["name"].replace("::", "."))
+    return _not_a_test_reference(value)
+
+
+def _not_a_test_reference(value: Any) -> str:
+    return (
+        f"not a test reference: {value!r}; write '<path>::<name>', {{path, symbol}} or "
+        "{path, locator: {kind: line_range, start, end}}"
+    )
 
 
 def _proofs(
@@ -498,6 +564,53 @@ def _proofs(
         else:
             planned.append(ProofRequest(position=position, test=test, facet=facet))
     return tuple(planned)
+
+
+def _repoints(value: Any, where: str, problems: list[Problem]) -> tuple[RepointRequest, ...]:
+    """Read a row's ``repoint`` items: the link each re-points, and where its code now lives.
+
+    A link is named at most once: a second item for the same link is a shape problem, not a
+    sequence of re-points, so nothing here depends on which one came first (MIK-R194 rule 4).
+    """
+
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        problems.append(Problem(where, "'repoint' is a list of {link, path, locator}"))
+        return ()
+    found: list[RepointRequest] = []
+    for position, item in enumerate(value, start=1):
+        at = f"{where}.repoint[{position}]"
+        if not isinstance(item, Mapping):
+            problems.append(Problem(at, "a repoint is {link, path, locator}"))
+            continue
+        unknown = sorted(set(item) - {"link", "path", "locator"})
+        if unknown:
+            problems.append(Problem(at, f"unknown repoint key(s) {unknown}"))
+            continue
+        link = item.get("link")
+        if not isinstance(link, int) or isinstance(link, bool) or link < 0:
+            problems.append(
+                Problem(
+                    at, "'link' is the 0-based position of the decision's fired reconsider_on link"
+                )
+            )
+            continue
+        path = _text(item.get("path"))
+        if path is None:
+            problems.append(Problem(at, "a repoint names the 'path' the code now lives at"))
+            continue
+        locator = read_locator(item.get("locator"))
+        if isinstance(locator, str):
+            problems.append(Problem(at, locator))
+            continue
+        found.append(RepointRequest(position=position, link=link, path=path, locator=locator))
+    named = [one.link for one in found]
+    twice = sorted({link for link in named if named.count(link) > 1})
+    if twice:
+        problems.append(Problem(where, f"'repoint' names link(s) {twice} more than once"))
+        return ()
+    return tuple(found)
 
 
 def _identifiers(value: Any) -> tuple[str, ...]:
@@ -766,4 +879,5 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         examined=_identifiers(raw.get("examined")),
         considered=_identifiers(raw.get("considered")),
         ref=raw["ref"] if isinstance(raw.get("ref"), Mapping) else None,
+        repoint=_repoints(raw.get("repoint"), f"{where} ({subject})", problems),
     )

@@ -28,7 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-from agents_remember.application.knowledge_writer.authoring_rows import HistoryRowAuthoring, meaning
+from agents_remember.application.knowledge_writer import case_proof
+from agents_remember.application.knowledge_writer.authoring_rows import meaning
 from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
@@ -46,6 +47,7 @@ from agents_remember.application.knowledge_writer.handoff import (
     RecordRequest,
     TargetRequest,
     TestFileMention,
+    TestRangeReference,
     TestReference,
     read_locator,
 )
@@ -61,6 +63,7 @@ from agents_remember.application.knowledge_writer.reconsideration import (
 )
 from agents_remember.application.knowledge_writer.record_updates import record_origin, remap_links
 from agents_remember.application.knowledge_writer.refresh_restoration import restore_refreshes
+from agents_remember.application.knowledge_writer.repoint import RepointRowAuthoring
 from agents_remember.application.knowledge_writer.report import (
     Action,
     CitedTest,
@@ -147,7 +150,7 @@ def code_state_of(snapshot: CodeSnapshot) -> tuple[str, str, bool] | None:
 
 
 @dataclass
-class Authoring(HistoryRowAuthoring):
+class Authoring(RepointRowAuthoring):
     """One operation's edits: what it placed, what it reported, and every problem it found."""
 
     state: MemoryState
@@ -375,9 +378,9 @@ class Authoring(HistoryRowAuthoring):
                 continue
             seen.add(key)
             self._write_realization(entry, invariant_id, target)
-        proven = {
-            proof.test: self._write_proof(entry, invariant_id, proof) for proof in entry.proofs
-        }
+        proven = case_proof.proven_tests(
+            entry.proofs, lambda proof: self._write_proof(entry, invariant_id, proof)
+        )
         self._remove_unnamed_entries(entry.entry_id, invariant_id)
         return tuple(self._cited_test(entry, test, proven) for test in entry.cited_tests())
 
@@ -865,8 +868,19 @@ class Authoring(HistoryRowAuthoring):
             },
         )
 
-    def _write_proof(self, entry: EntryRequest, invariant_id: str, proof: ProofRequest) -> str:
-        locator = {"kind": "symbol", "name": proof.test.name}
+    def _write_proof(
+        self, entry: EntryRequest, invariant_id: str, proof: ProofRequest
+    ) -> tuple[str, tuple[TestReference, ...]]:
+        """Write one proof, and name the evidence references it pairs with (MIK-R194 rules 1-3).
+
+        A ``path::name`` proof resolves the symbol, as today. A proof named by the lines of a test
+        case resolves the range, and only after the range is shown to be one case that runs and that
+        no name reaches; it then pairs with the evidence naming the case's title, so the same case
+        cited by name is reported ``proof_written`` rather than ``unresolvable``.
+        """
+        locator, paired = self._proof_locator(entry, proof)
+        if locator is None:
+            return "", ()
         try:
             anchor = self.code.resolve(proof.test.path, locator)
         except AnchorResolutionError as error:
@@ -874,7 +888,7 @@ class Authoring(HistoryRowAuthoring):
                 f"entry {entry.entry_id}",
                 f"proof {proof.position} ({proof.test.spelling}): {error}",
             )
-            return str(error)
+            return str(error), ()
         self._upsert_entry(
             kind="proof",
             source_path=proof.test.path,
@@ -882,7 +896,27 @@ class Authoring(HistoryRowAuthoring):
             handoff_entry=entry.entry_id,
             fields={"anchor": anchor.to_document(), "facet": proof.facet},
         )
-        return f"proof {self.entries[-1].id} in {self.entries[-1].sidecar}"
+        return f"proof {self.entries[-1].id} in {self.entries[-1].sidecar}", paired
+
+    def _proof_locator(
+        self, entry: EntryRequest, proof: ProofRequest
+    ) -> tuple[Mapping[str, Any] | None, tuple[TestReference, ...]]:
+        """The locator a proof resolves by, and the evidence references a range proof pairs with.
+
+        ``None`` is a proof that writes nothing; the refusal is already a problem of this entry.
+        """
+
+        test = proof.test
+        if not isinstance(test, TestRangeReference):
+            return {"kind": "symbol", "name": test.name}, ()
+        found = case_proof.range_proof(self.code, test)
+        if found.refusal is not None:
+            self.problem(
+                f"entry {entry.entry_id}",
+                f"proof {proof.position} ({test.spelling}): {found.refusal}",
+            )
+            return None, ()
+        return found.locator, tuple(TestReference(test.path, one) for one in found.titles)
 
     def _cited_test(
         self,

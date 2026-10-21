@@ -48,6 +48,25 @@ change alone motivates. Such a statement stays prose in the onboarding Markdown.
 memory only (the text format, MIK-R21); this criterion entered by the requirement, not by the
 ratchet, and is demoted only by a developer ruling.
 
+### OM-5 — A re-point and a reconsidered revision say what they judge *(requirement-bound: MIK-R194 rule 6)*
+
+**A `repoint` on a reconsideration row is a judgment, and the reviewer judges it.** For each
+item:
+- the new target is the code the alternative's `reconsider_when` condition is about;
+- the row's `reason` says, against that code, why the condition is not met.
+
+If the reason leaves open whether the condition may be met, the finding is that the row should have
+been a `raise`.
+
+**A reconsidered revision written after a `raise` is judged against the recorded answer.** For each
+one:
+- the alternative's status matches the developer's recorded answer;
+- a link re-pointed in `records` names the code the condition is about;
+- the `changed` row cites the answer.
+
+Binds converted memory only; this criterion entered by the requirement, not by the ratchet, and is
+demoted only by a developer ruling.
+
 ## Candidate Criteria (seeded exploratory — one catching engagement; promote at ≥2)
 
 Run under the exploratory mandate during a baseline review only; a candidate is proposed for

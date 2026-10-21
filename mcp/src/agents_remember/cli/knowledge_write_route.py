@@ -1,7 +1,7 @@
 """CLI adapter for the file writer's route (MIK-R12 rule 7, MIK-R54).
 
     agents-remember knowledge-ingest --contract <leaf enclosure contract> --list <hand-off list>
-        --authorization-ref <ref> [--commit] [--json] [--config <MCP settings>]
+        --authorization-ref <ref> [--commit] [--json]
     agents-remember knowledge-ingest --contract <master series contract>
         --crossing <task-id>-crossing-<n> --list <hand-off list> --authorization-ref <ref>
         [--commit] [--json]
@@ -19,7 +19,10 @@ Git: the leaf's closeout commits its memory worktree.
 The body this adapter runs lives in :mod:`agents_remember.application.knowledge_write_route`, which
 the mounted ``knowledge_write`` tool runs too (MIK-R73 rule 1): the same contract guard, the same
 authorization reference and the same refusals. This module adds the argument list and the printed
-report, and decides nothing itself.
+report, and decides nothing itself. A ``raise`` row needs the leaf's task document, which this
+command reaches only through settings it trusts; where it has none, the refusal names the cause in
+one fixed clause and the mounted ``knowledge_write`` call that can publish the same hand-off
+(MIK-R194 rule 9).
 
 Exit status: 0 when the operation wrote or planned; 1 when the writer refused it (every problem and
 violation is in the report, and nothing was written); 2 when the invocation itself is refused (a
@@ -33,8 +36,10 @@ import argparse
 import json
 from pathlib import Path
 
+from agents_remember.application import knowledge_write_command
 from agents_remember.application.knowledge_write_route import (
     BLANK_AUTHORIZATION,
+    CommandRoute,
     LeafQuestions,
     WaveTarget,
     WriteSubmission,
@@ -48,13 +53,20 @@ from agents_remember.application.knowledge_write_route import (
     wave_write_report,
 )
 from agents_remember.application.knowledge_writer import WriteReport
-from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
+from agents_remember.cli.discovery import discover_config
+from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.primitives.checkout_coordination import (
+    checkout_cli_location,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 EXIT_WRITTEN = 0
 EXIT_WRITE_REFUSED = 1
 EXIT_REFUSED = 2
+CHECKOUT_GUARD_CLAUSE = (
+    "the checkout guard refuses settings to an undeclared run from the primary checkout"
+)
 
 __all__ = [
     "BLANK_AUTHORIZATION",
@@ -62,6 +74,7 @@ __all__ = [
     "EXIT_WRITE_REFUSED",
     "EXIT_WRITTEN",
     "LeafQuestions",
+    "command_settings",
     "is_converted",
     "load_leaf_contract",
     "run_crossing_write",
@@ -89,15 +102,22 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
     if isinstance(document, str):
         print(document)
         return EXIT_REFUSED
+    name = handoff_label(list_path, contract.task_root)
     report = leaf_write_report(
         contract,
         WriteSubmission(
             document=document,
-            handoff_path=handoff_label(list_path, contract.task_root),
+            handoff_path=name,
             authorization_ref=str(args.authorization_ref),
             commit=bool(args.commit),
         ),
-        settings=_discovered_settings,
+        command=CommandRoute(
+            settings=command_settings,
+            handoff_path=str(list_path.resolve()),
+            handoff_name=name,
+            contract_path=str(contract.contract_path.resolve()),
+            authorization_ref=str(args.authorization_ref),
+        ),
     )
     if isinstance(report, str):
         print(report)
@@ -170,10 +190,18 @@ def run_wave_write(
     return EXIT_WRITE_REFUSED if report.refused else EXIT_WRITTEN
 
 
-def _discovered_settings() -> McpRuntimeConfig:
-    """The settings this command line resolves when a ``raise`` row needs ``task_doc``."""
+def command_settings() -> McpRuntimeConfig | str:
+    """The settings this command line would use, or the one fixed clause naming why it cannot.
 
-    try:
-        return load_config(discover_config(Path.cwd()))
-    except (ConfigDiscoveryError, OSError, ValueError) as error:
-        raise ValueError(str(error)) from error
+    The sorting of the causes lives in :mod:`application.knowledge_write_command`; this function hands
+    it the command's own three moves. No error's own text is embedded, so the refusal names one clause
+    and the mounted call that works (MIK-R194 rule 9).
+    """
+
+    return knowledge_write_command.discovered_settings(
+        Path.cwd(),
+        discover=discover_config,
+        guard=checkout_cli_location,
+        load=load_config,
+        unreadable=(AgentsRememberError, OSError, ValueError),
+    )
