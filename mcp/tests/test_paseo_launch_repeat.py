@@ -15,6 +15,7 @@ import test_paseo_launch as launch
 from agents_remember.application.role_launch_context import selection_binding
 from agents_remember.cli import role_launch_receipts, role_launch_routes
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, agent_title
+from agents_remember.cli.role_handover_artifacts import artifact_line
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference
 from agents_remember.models.role_launcher import RoleDispatchRequest
@@ -145,15 +146,12 @@ class RepeatTestCase(launch.PaseoLaunchTestCase):
         return self.receipt(self.request(role))
 
     def expected_first_message(self, request: Any, body: str) -> str:
-        """The sent message for one artifact body: the artifact line names its SHA."""
+        """The sent message for one artifact body: the line names both files and its SHA."""
 
-        path = self.artifact(request)["path"]
         digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
-        return (
-            f"AR handover artifact: {path} (SHA-256 {digest}). It holds "
-            "everything below this line; read that file again whenever your assignment is no "
-            f"longer in your context.\n{body}"
-        )
+        reference = {**self.artifact(request), "sha256": digest}
+        handover_file, _content = self.planned_handover(request)
+        return f"{artifact_line(reference, handover_file)}\n{body}"
 
 
 class RepeatAfterChangeTests(RepeatTestCase):

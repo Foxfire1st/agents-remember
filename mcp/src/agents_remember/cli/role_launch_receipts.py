@@ -33,10 +33,7 @@ from agents_remember.cli.investigator_receipts import (
 )
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND, LaunchOutcome, run_launch_call
 from agents_remember.cli.role_activity import publish_receipt_role_agent
-from agents_remember.cli.role_handover_artifacts import (
-    restore_handover_artifact,
-    restore_step_up_artifact,
-)
+from agents_remember.cli.role_handover_restore import HandoverFileRefusal, restore_launch_files
 from agents_remember.cli.role_instruction_details import validate_instruction_detail_artifacts
 from agents_remember.cli.role_instructions import instruction_metadata, launch_choice_metadata
 from agents_remember.cli.role_launch_choices import (
@@ -108,9 +105,14 @@ def _execute_prepared_launch(
             status_code=409,
             detail="The unresolved launch has no saved launch call; reconcile the Paseo runtime before retrying.",
         )
-    artifact = current.get("handoverArtifact")
-    if isinstance(artifact, dict):
-        _restore_launch_handover(path, current, launch_call)
+    # A receipt that carries the complete hand-over must be restored through it even when its
+    # sibling text reference is missing or mistyped: absence of the pair is the legacy case, not
+    # damage to one of its references (MIK-R193 rule 4).
+    if isinstance(current.get("handoverArtifact"), dict) or "handoverFile" in current:
+        try:
+            _restore_launch_handover(path, current, launch_call)
+        except HandoverFileRefusal as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
     predecessor = current.get("predecessorReports")
     if isinstance(predecessor, dict):
         collect_execution_reports(predecessor)
@@ -149,29 +151,33 @@ def _execute_prepared_launch(
 def _restore_launch_handover(
     path: Path, current: dict[str, Any], launch_call: dict[str, Any]
 ) -> None:
-    """Restore the handover artifact the first message names before creating the agent.
+    """Restore the handover files the first message names before creating the agent.
 
-    A held seat has no first message yet: its stored opening handover stands in.
+    A held seat has no first message yet: its stored opening handover stands in. A launch of
+    this leaf names two files, and both are checked before either is written, so a refusal leaves
+    them as they are (MIK-R193 rule 4). A receipt from a start before this leaf has no
+    ``handoverFile`` and is restored by today's rules alone. Every refusal is a ``ValueError``:
+    the held-seat opener converts it into a plain cannot-open answer.
     """
 
     artifact = current.get("handoverArtifact")
-    if not isinstance(artifact, dict):
+    if not isinstance(artifact, dict) and "handoverFile" not in current:
         validate_instruction_detail_artifacts(current)
         return
     _rebind_report_access(current)
     validate_instruction_detail_artifacts(current)
+    restore_launch_files(path, current, _restored_message(current, launch_call))
+
+
+def _restored_message(current: dict[str, Any], launch_call: dict[str, Any]) -> str:
+    """The first message a receipt saved: the held seat's opening, or the launch call's prompt."""
+
     if current.get("heldSeat") is True:
         held_opening = current.get("heldOpeningPrompt")
         if not isinstance(held_opening, str):
-            raise HTTPException(
-                status_code=409,
-                detail="The held seat has no stored opening handover; start it again.",
-            )
-        message = held_opening
-    else:
-        message = _saved_first_message(launch_call)
-    restore_handover_artifact(artifact, message, receipt=path)
-    restore_step_up_artifact(current, message, receipt=path)
+            raise ValueError("The held seat has no stored opening handover; start it again.")
+        return held_opening
+    return _saved_first_message(launch_call)
 
 
 def _same_request_receipt(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:

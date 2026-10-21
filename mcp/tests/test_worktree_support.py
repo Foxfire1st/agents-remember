@@ -7,7 +7,7 @@ import unittest
 from contextlib import (
     contextmanager,
 )
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -406,16 +406,44 @@ def initialized_memory_repo(
     return git(memory_repo, "rev-parse", "HEAD")
 
 
-def open_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
-    code_repo = root / "repo-a"
+@dataclass(frozen=True, slots=True)
+class FixtureNames:
+    """The names a converted fixture is built from, below its temporary root.
+
+    They default to the short ones most proofs read; a proof that measures a first message passes
+    names as long as the ones it is measuring (MIK-R193 rule 5).
+    """
+
+    repo_name: str = "repo-a"
+    task_name: str = "Commit Approval Thing"
+    master_name: str = "Commit Approval Master"
+    leaf_name: str = "commit-approval-thing"
+
+
+DEFAULT_FIXTURE_NAMES = FixtureNames()
+
+
+def open_external_contract_fixture(
+    root: Path,
+    *,
+    lifecycle_id: str = "",
+    names: FixtureNames = DEFAULT_FIXTURE_NAMES,
+):
+    """A converted external-memory contract fixture for one leaf."""
+
+    repo_name, task_name = names.repo_name, names.task_name
+    master_name, leaf_name = names.master_name, names.leaf_name
+    code_repo = root / repo_name
     init_repo(code_repo, "main")
-    install_fixture_profile(code_repo, "repo-a")
+    install_fixture_profile(code_repo, repo_name)
     git(code_repo, "add", "-A")
     git(code_repo, "commit", "-m", "Add repository certification profile")
     code_base = git(code_repo, "rev-parse", "HEAD")
-    memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
+    memory_repo = root / "ar-coordination" / "memory-repos" / f"ar-{repo_name}"
     memory_seed = init_repo(memory_repo, "main")
-    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
+    write_ledger(
+        memory_repo / "memory.md", create_initial_ledger(repo_name, code_base, memory_seed)
+    )
     # MIK-R46 rule 8: the shared fixture builds converted memory -- the layout marker rides
     # the base commit, so lifecycles under test run the converted routes.
     (memory_repo / "knowledge").mkdir(parents=True, exist_ok=True)
@@ -431,13 +459,13 @@ def open_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
     git(memory_repo, "branch", "super", memory_base)
     contract = default_contract(
         ContractTask(
-            name="Commit Approval Thing",
-            repo_name="repo-a",
+            name=task_name,
+            repo_name=repo_name,
             coordination_root=root / "ar-coordination",
             workflow_kind="chat-task",
             memory_mode="external",
         ),
-        leaf=LeafIdentity(worktree_name="commit-approval-thing", lifecycle_id=lifecycle_id),
+        leaf=LeafIdentity(worktree_name=leaf_name, lifecycle_id=lifecycle_id),
         code=RepoBranchPlan(
             repo_path=code_repo,
             source_branch="super",
@@ -453,8 +481,8 @@ def open_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
     )
     parent = default_series_contract(
         ContractTask(
-            name="Commit Approval Master",
-            repo_name="repo-a",
+            name=master_name,
+            repo_name=repo_name,
             coordination_root=root / "ar-coordination",
             workflow_kind="chat-task",
             memory_mode="external",

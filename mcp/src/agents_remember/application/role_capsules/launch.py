@@ -349,9 +349,14 @@ def _compile_admitted_task(
     )
     if not outcome.ok:
         return _refusal(role, outcome)
-    result = outcome.result
-    assert result is not None  # outcome.ok
-    return _capsule_launch(role, result)
+    compilation = outcome.compilation
+    assert compilation is not None  # outcome.ok
+    assert compilation.result is not None  # a compilation that carries a result
+    return _capsule_launch(
+        role,
+        compilation.result,
+        shared_block=compilation.shared_block,
+    )
 
 
 def _admit_task_document(
@@ -500,7 +505,7 @@ def _compile_project_task(
             getattr(outcome.error, "status", "capsule-compilation-refused"),
             outcome.render_explanation(),
         )
-    return _capsule_launch(role, outcome.result)
+    return _capsule_launch(role, outcome.result, shared_block=outcome.shared_block)
 
 
 def _compile_free_agent(
@@ -540,16 +545,19 @@ def _compile_free_agent(
             getattr(outcome.error, "status", "capsule-compilation-refused"),
             outcome.render_explanation(),
         )
-    return _capsule_launch(role, outcome.result)
+    return _capsule_launch(role, outcome.result, shared_block=outcome.shared_block)
 
 
-def _capsule_launch(role: str, result: CapsuleCompilationResult) -> LaunchCapsule:
-    """The delivered value: the carrier for this launch."""
+def _capsule_launch(
+    role: str, result: CapsuleCompilationResult, *, shared_block: str | None = None
+) -> LaunchCapsule:
+    """The delivered value: the carrier for this launch, with the block a source may provide."""
 
     return LaunchCapsule(
         mode=LaunchCapsuleMode.CAPSULE,
         role=role,
         delivery=capsule_delivery_from(result),
+        shared_block=shared_block,
     )
 
 

@@ -177,6 +177,8 @@ class RoleStartResponse(ToolResponse):
     parentAgentId: str | None = None
     reportPath: str | None = None
     handoverArtifactPath: str | None = None
+    # The complete hand-over object's file beside the hand-over text (MIK-R193 rule 2).
+    handoverFilePath: str | None = None
     executionStatus: str | None = None
     preparation: RoleEnvironmentPreparation | None = None
     preparationStatus: str | None = None

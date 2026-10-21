@@ -55,6 +55,10 @@ class CapsuleCompilationOutcome:
     result: CapsuleCompilationResult | None
     manifest: CapsuleManifest
     error: CapsuleCompilationError | None
+    # The text of the "What every role acts on" block a launch writes into its first message,
+    # apart from ``render_instructions()``. No source fills it yet: it stays None, and the
+    # message then writes no block and no heading (MIK-R193 rule 1).
+    shared_block: str | None = None
 
     def __post_init__(self) -> None:
         if (self.result is None) == (self.error is None):

@@ -477,7 +477,9 @@ def _trim_preview_commit_locations(answer: dict[str, Any]) -> None:
 # but that do not exist). Anything else (rejected, unknown, refused) keeps
 # its shape: the caller reads why and what to do from the detail file, and
 # the refusal keeps its reason.
-_ROLE_START_SUCCESS_KEPT = frozenset({"ok", "agentId", "handoverArtifactPath", "warning"})
+_ROLE_START_SUCCESS_KEPT = frozenset(
+    {"ok", "agentId", "handoverArtifactPath", "handoverFilePath", "warning"}
+)
 
 
 def project_role_start_answer(whole: dict[str, Any]) -> dict[str, Any]:

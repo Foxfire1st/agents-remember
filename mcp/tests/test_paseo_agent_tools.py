@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -23,10 +24,12 @@ from agents_remember.application.agent_binding import (
 )
 from agents_remember.application.role_launch_context import RoleLaunchContext
 from agents_remember.cli import (
+    immutable_artifact,
     paseo_launch,
-    role_handover_artifacts,
+    role_held_messages,
     role_launch_preparation,
     role_launch_receipts,
+    role_launch_routes,
 )
 from agents_remember.cli.paseo_launch import (
     RECOVERY_NOTE_LIMIT,
@@ -40,6 +43,8 @@ from agents_remember.cli.role_handover_artifacts import (
     restore_handover_artifact,
     write_handover_artifact,
 )
+from agents_remember.cli.role_handover_file import handover_file_reference
+from agents_remember.cli.role_handover_publication import publish_handover_files
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.server import LAUNCHED_SERVER_INSTRUCTIONS, launched_server_instructions
@@ -761,7 +766,7 @@ class HandoverArtifactTests(unittest.TestCase):
                     return error
 
             with (
-                patch.object(role_handover_artifacts.tempfile, "mkstemp", mkstemp),
+                patch.object(immutable_artifact.tempfile, "mkstemp", mkstemp),
                 ThreadPoolExecutor(max_workers=writers) as pool,
             ):
                 return list(pool.map(write, contents))
@@ -783,6 +788,12 @@ class HandoverArtifactTests(unittest.TestCase):
             self.assertEqual(outcomes, [outcomes[0]] * writers)
             self.assertIsInstance(outcomes[0], dict)
             self.assertEqual(os.stat(outcomes[0]["canonicalPath"]).st_nlink, 1)
+
+
+def _planned_sha(content: str, report: str) -> dict[str, Any]:
+    """The reference the planner gives one text for one report path."""
+
+    return handover_file_reference(report, content)
 
 
 class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
@@ -939,6 +950,64 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         self.assertEqual(self.dispatch(request)[1]["status"], "running")
         self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
 
+    def test_a_leaf_retry_leaves_an_unchanged_complete_handover_alone(self) -> None:
+        """MIK-R193 rule 4: a complete hand-over that holds the saved text is left untouched."""
+
+        request, saved, _access, _stored = self.unresolved_leaf_launch()
+        complete = Path(saved["handoverFile"]["canonicalPath"])
+        written = (complete.stat().st_ino, complete.stat().st_mtime_ns)
+        self.assertEqual(self.dispatch(request)[1]["status"], "running")
+        self.assertEqual(
+            (complete.stat().st_ino, complete.stat().st_mtime_ns),
+            written,
+            "the retry rewrote a complete hand-over that already held its text",
+        )
+        self.assertEqual(stat.S_IMODE(complete.stat().st_mode), 0o444)
+
+    def test_a_leaf_retry_writes_a_lost_complete_handover_again(self) -> None:
+        request, saved, _access, _stored = self.unresolved_leaf_launch()
+        complete = Path(saved["handoverFile"]["canonicalPath"])
+        self.assertEqual(stat.S_IMODE(complete.stat().st_mode), 0o444)
+        complete.unlink()
+        self.assertEqual(self.dispatch(request)[1]["status"], "running")
+        self.assertEqual(complete.read_text(encoding="utf-8"), saved["handoverFile"]["content"])
+        self.assertEqual(stat.S_IMODE(complete.stat().st_mode), 0o444)
+
+    def test_a_leaf_retry_refuses_a_changed_complete_handover_until_it_is_deleted(self) -> None:
+        request, saved, _access, _stored = self.unresolved_leaf_launch()
+        complete = Path(saved["handoverFile"]["canonicalPath"])
+        # The file is read-only: replace it the way an overwrite would.
+        complete.unlink()
+        complete.write_text('{"schema": "another hand-over"}\n', encoding="utf-8")
+        kept = self.receipt_path(request).read_bytes()
+        self.assertEqual(
+            self.refused_with_nothing_sent(request),
+            f"The complete hand-over file {complete} no longer holds the hand-over saved for "
+            "this request. Delete that file and retry; the retry writes it again from the "
+            "saved text.",
+        )
+        self.assertEqual(self.receipt_path(request).read_bytes(), kept)
+        self.assertEqual(complete.read_text(encoding="utf-8"), '{"schema": "another hand-over"}\n')
+        complete.unlink()
+        self.assertEqual(self.dispatch(request)[1]["status"], "running")
+        self.assertEqual(complete.read_text(encoding="utf-8"), saved["handoverFile"]["content"])
+
+    def test_a_leaf_retry_refuses_a_complete_handover_that_moved(self) -> None:
+        request, saved, _access, _stored = self.unresolved_leaf_launch()
+        complete = Path(saved["handoverFile"]["canonicalPath"])
+        elsewhere = self.root / "moved-role-launch"
+        shutil.move(str(complete.parent), str(elsewhere))
+        complete.parent.symlink_to(elsewhere, target_is_directory=True)
+        moved = elsewhere / complete.name
+        self.assertEqual(
+            self.refused_with_nothing_sent(request),
+            f"The complete hand-over of this request is recorded at {complete}, but the path "
+            f"the agent was given, {saved['handoverFile']['path']}, now leads to "
+            f"{moved}. Put back what that path ran through (for a leaf role, the "
+            "report-access link of its enclosure) and retry.",
+        )
+        self.assertEqual(moved.read_text(encoding="utf-8"), saved["handoverFile"]["content"])
+
     def test_a_leaf_retry_uses_the_receipt_as_the_launch_wrote_it(self) -> None:
         # The link-disagreement cases of the enclosure-link design left with it (L71):
         # a new start binds no link, so there is nothing to disagree about the link's
@@ -963,6 +1032,119 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
             self.assertEqual(self.receipt(request)["handoverArtifact"]["path"], stored.as_posix())
             self.assertTrue(access.is_dir() and not access.is_symlink())
+
+    def test_a_conflicting_complete_handover_refuses_before_the_text_is_created(self) -> None:
+        """B01: a fresh start whose complete hand-over is taken creates neither of its files."""
+
+        report = (self.root / "pair" / "report.md").as_posix()
+        target = Path(report).with_suffix(".handover.json")
+        target.parent.mkdir(parents=True)
+        target.write_text('{"schema": "another hand-over"}\n', encoding="utf-8")
+        text_artifact = Path(report).with_suffix(".handover.txt")
+        with self.assertRaises(ValueError):
+            publish_handover_files(
+                report,
+                self.prompt,
+                '{"schema": "ar-role-handover/v1"}\n',
+                expected=_planned_sha('{"schema": "ar-role-handover/v1"}\n', report),
+            )
+        self.assertFalse(text_artifact.exists(), "the refusal created the text artifact first")
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"schema": "another hand-over"}\n')
+
+    def test_a_leaf_retry_refuses_before_rewriting_a_missing_text_with_a_changed_object(
+        self,
+    ) -> None:
+        """B01: a changed complete hand-over refuses without recreating the missing text file."""
+
+        request, saved, _access, stored = self.unresolved_leaf_launch()
+        complete = Path(saved["handoverFile"]["canonicalPath"])
+        stored.unlink()
+        complete.unlink()
+        complete.write_text('{"schema": "another hand-over"}\n', encoding="utf-8")
+        self.assertIn(
+            f"The complete hand-over file {complete} no longer holds the hand-over saved for "
+            "this request.",
+            self.refused_with_nothing_sent(request),
+        )
+        self.assertFalse(stored.exists(), "the refusal recreated the text artifact")
+        self.assertEqual(complete.read_text(encoding="utf-8"), '{"schema": "another hand-over"}\n')
+
+    def test_a_modern_receipt_without_its_text_reference_is_refused(self) -> None:
+        """B02: a complete hand-over without its sibling text reference refuses, not launches."""
+
+        request, saved, _access, stored = self.unresolved_leaf_launch()
+        path = self.receipt_path(request)
+        with self.subTest("the text reference is absent"):
+            role_launch_receipts._write_receipt(
+                path, {key: value for key, value in saved.items() if key != "handoverArtifact"}
+            )
+            self.assertIn(
+                f"The receipt {path} records the handover artifact of this request without its "
+                "path, canonicalPath, sha256,",
+                self.refused_with_nothing_sent(request),
+            )
+            self.assertTrue(stored.exists())
+        with self.subTest("the text reference is not an object"):
+            role_launch_receipts._write_receipt(
+                path, {**saved, "handoverArtifact": stored.as_posix()}
+            )
+            self.assertIn(
+                f"The receipt {path} records the handover artifact of this request without its ",
+                self.refused_with_nothing_sent(request),
+            )
+        with self.subTest("the receipt as the launch wrote it gets the retry through"):
+            role_launch_receipts._write_receipt(path, saved)
+            self.assertEqual(self.dispatch(request)[1]["status"], "running")
+
+    def test_a_held_seat_that_cannot_restore_its_object_returns_cannot_open(self) -> None:
+        """B03: the held opener answers cannot-open and keeps the work, releasing its claim."""
+
+        request = self.request("worker")
+        role_launch_routes._start_execution(self.config, request, held=True)
+        receipt_path = self.receipt_path(request)
+        saved = self.receipt(request)
+        self.assertIs(saved.get("heldSeat"), True)
+        self._hold_one_message(saved, "Report your role and operation.")
+        damanaged = {**saved}
+        damanaged["handoverFile"] = {**saved["handoverFile"], "sha256": "0" * 64}
+        role_launch_receipts._write_receipt(receipt_path, damanaged)
+        creates = len([call for call in self.runtime.calls if call[0] == "agent-create"])
+        outcome = role_held_messages.drain_held(self.config, receipt_path, self.receipt(request))
+        self.assertEqual(outcome["outcome"], "cannot-open", outcome)
+        self.assertEqual(
+            len([call for call in self.runtime.calls if call[0] == "agent-create"]),
+            creates,
+            "the refused open created an agent",
+        )
+        self.assertEqual(
+            role_held_messages.waiting_total(saved["workspace"]["path"], saved["agentId"]), 1
+        )
+        store = json.loads(
+            role_held_messages.store_path_for(
+                saved["workspace"]["path"], saved["agentId"]
+            ).read_text(encoding="utf-8")
+        )
+        self.assertNotIn("deliveryClaim", store, "the refusal kept the delivery claim")
+        role_launch_receipts._write_receipt(receipt_path, saved)
+        self.assertEqual(
+            role_held_messages.drain_held(self.config, receipt_path, self.receipt(request))[
+                "outcome"
+            ],
+            "opened",
+            "the released work did not open on the unchanged receipt",
+        )
+
+    def _hold_one_message(self, saved: dict[str, Any], text: str) -> None:
+        role_held_messages.hold_message(
+            saved["workspace"]["path"],
+            saved["agentId"],
+            role_held_messages.HeldMessage(
+                sender_line="From manager · fixture · agent sender-fixture",
+                sender_agent_id="sender-fixture",
+                text=text,
+                reason="not-running",
+            ),
+        )
 
     def saved_alias_world(self) -> tuple[Any, dict[str, Any], Path, Path, Path]:
         """A pre-existing alias world: the enclosure's task-reports link over a reports folder.
@@ -989,7 +1171,8 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             },
         }
         legacy = {
-            **saved,
+            # A start before this leaf names one file only: no complete hand-over reference.
+            **{key: value for key, value in saved.items() if key != "handoverFile"},
             "replayRequest": replay,
             "workspace": {
                 **saved["workspace"],
@@ -1052,14 +1235,20 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         digest = hashlib.sha256(self.prompt.encode("utf-8")).hexdigest()
         # The agent is told the paths it can reach from inside its enclosure, everywhere.
         reachable = (access / "role-launch" / f"{name}.handover.txt").as_posix()
+        complete = (access / "role-launch" / f"{name}.handover.json").as_posix()
         environment = created["mcpServers"]["agents-remember-task"]["env"]
         self.assertEqual(environment["AR_REPORT_PATH"], report.as_posix())
         self.assertIn(
             f" Assignment file: {reachable} (SHA-256 {digest}). ", created["systemPrompt"]
         )
-        self.assertTrue(
-            created["prompt"].startswith(f"AR handover artifact: {reachable} (SHA-256 {digest}). ")
+        self.assertEqual(
+            created["prompt"].partition("\n")[0],
+            artifact_line(
+                self.receipt(request)["handoverArtifact"], self.receipt(request)["handoverFile"]
+            ),
         )
+        self.assertTrue(created["prompt"].startswith(f"AR handover artifacts: {reachable} "))
+        self.assertIn(f"; {complete} (SHA-256 ", created["prompt"].split("\n")[0])
         self.assertEqual(
             self.receipt(request)["handoverArtifact"],
             {
@@ -1072,6 +1261,19 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         stored = access / "role-launch" / f"{name}.handover.txt"
         self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
         self.assertEqual(stat.S_IMODE(stored.stat().st_mode), 0o444)
+        # The complete hand-over object is written beside it, read-only and complete.
+        handover_file = Path(complete)
+        self.assertEqual(stat.S_IMODE(handover_file.stat().st_mode), 0o444)
+        saved_object = json.loads(handover_file.read_text(encoding="utf-8"))
+        self.assertEqual(saved_object["schema"], "ar-role-handover/v1")
+        self.assertEqual(
+            self.receipt(request)["handoverFile"]["sha256"],
+            hashlib.sha256(handover_file.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            self.receipt(request)["handoverFile"]["content"],
+            handover_file.read_text(encoding="utf-8"),
+        )
 
 
 if __name__ == "__main__":

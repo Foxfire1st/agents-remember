@@ -310,6 +310,9 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         }
         return {
             "prompt": self.prompt,
+            "projection": {"schema": "ar-role-handover/v1"},
+            "handoverFile": self.planned_handover(request)[0],
+            "handoverFileContent": self.planned_handover(request)[1],
             "capsuleOperation": "planning",
             "capsuleDigest": "capsule-digest",
             "taskDocumentDigest": documents,
@@ -573,6 +576,7 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
             nown,
             sorted(
                 {f"reports/{saved['requestId']}.handover.txt" for _, saved, _, _ in observed}
+                | {f"reports/{saved['requestId']}.handover.json" for _, saved, _, _ in observed}
                 | task_documents
             ),
         )

@@ -73,6 +73,9 @@ class LaunchCapsule:
     delivery: CapsuleDelivery | None = None
     refusal_status: str = ""
     refusal_detail: str = ""
+    # The text of the "What every role acts on" block, apart from the capsule's instructions.
+    # None until a source provides one: the first message then writes no block (MIK-R193 rule 1).
+    shared_block: str | None = None
 
     @property
     def is_refusal(self) -> bool:

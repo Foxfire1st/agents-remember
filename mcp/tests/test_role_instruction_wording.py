@@ -273,7 +273,7 @@ class InstructionFileWordingTests(unittest.TestCase):
             "operations/coordination.md": [
                 "The Manager starts a leaf's Worker, Reviewer and Curator as a set in one `role_start_set` call on `agents-remember-task`: the Worker opens at once, and the Reviewer and the Curator are held until their first message opens them, unless the call carries the Reviewer's first work. The Reviewer first cold-reads the requirement before code exists. The Worker, Reviewer and Curator run the leaf repair loop directly with `role_message` on `agents-remember-task`: Worker freeze to Reviewer, verdict and sealed findings back to Worker, passed freeze and producer lists to Curator, memory change and verdict between Curator and Reviewer. A Curator's code concern goes to both Reviewer and Worker even after code PASS; the Reviewer answers it and the Curator records the answer. The Manager reads their reports, decides the gate and keeps closeout, integration, status, acceptance and landing order; it relays no freeze, finding, verdict or memory change. Keep paired code/memory/report paths and exact task references in each hand-over.",
                 "The Architect delegates coordination first to one Manager for one master, or to one Orchestrator on the sprint when two or more masters are worked on at the same time. The Orchestrator starts one Manager per master; each Manager coordinates its distinct Workers, Reviewers, and Curators. Only the developer may choose direct coordination by the Architect. The developer may also ask for an Orchestrator above a single master. If the Architect's coordinating-agent start is refused, the Architect tells the developer the refusal and its reason; it does not fall back to direct coordination.",
-                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A leaf hand-over uses the role and exact task reference in `leafSeats.roleMessageArguments`; use a product-supplied agent ID only whole and unchanged. The current leaf resolver reaches a seat's single live agent; a seat with two live occupants is refused naming both, and the tool never picks one; an empty-seat refusal is reported once to the Manager with its text and no candidate is chosen. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled; when the host cannot hand a message to the running turn, the message is held, and while anything is held for a recipient a further message is held behind it. A message to a recipient that waits for a permission decision, or whose start has not finished, is held the same way: the answer says `held` and why, and the product delivers what it holds in the order it took it once the recipient can take it. The host is never sent a message for a recipient that waits at a permission prompt, because it would answer the permission with a denial; only the developer answers the prompt, in that agent's chat. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, also for a wait on a held message, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
+                "Send one message to one agent with `role_message` on `agents-remember-task`, addressed by agent ID or by role plus task references. A leaf hand-over uses the role and exact task reference its seat list gives for the role addressed; use a product-supplied agent ID only whole and unchanged. The current leaf resolver reaches a seat's single live agent; a seat with two live occupants is refused naming both, and the tool never picks one; an empty-seat refusal is reported once to the Manager with its text and no candidate is chosen. A role address never means you yourself. A recipient that is mid-turn takes the message up without its turn being cancelled; when the host cannot hand a message to the running turn, the message is held, and while anything is held for a recipient a further message is held behind it. A message to a recipient that waits for a permission decision, or whose start has not finished, is held the same way: the answer says `held` and why, and the product delivers what it holds in the order it took it once the recipient can take it. The host is never sent a message for a recipient that waits at a permission prompt, because it would answer the permission with a denial; only the developer answers the prompt, in that agent's chat. A closed session is resumed first; an archived or missing agent is refused and stays as it is. With `wait` the call returns when the turn that took your message has ended: with the recipient's final text, or saying that the turn failed or was cancelled; or it returns a pending permission, also for a wait on a held message, or a timeout with the message still delivered. It can also return `accepted` without a text, when the host cannot say which turn took the message; read the reply later then. The text of a message delivered during a turn can be that running turn's own; `detail` says so. Do not wait on an agent that may be waiting on you: two agents that wait on each other both stand still until one wait runs out. If your own tool calls are cut off earlier than the wait, pass a shorter `timeout_seconds`. An Orchestrator, Manager or developer-direct-coordinating Architect follows assignments until the work is complete, blocked, or a true developer decision is needed; it does not start a role and stop. The Architect releases execution coordination after the handover and continues the developer conversation and status reading; it holds no wait on an Orchestrator or Manager for execution completion. On a refusal or an uncertain result, act on the named reason; do not guess a parent or start duplicate work. A role started from the dashboard works directly with the developer and needs no parent.",
             ],
             "SKILL.md": [
                 "Use the agent IDs these tools return and the sender line of each message you receive; never invent a sender, recipient, parent, or delivery result.",
@@ -1057,7 +1057,6 @@ class HandoverTextWordingTests(unittest.TestCase):
             StartingAgent("2f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "orchestrator", "SPRINT"),
             StartingAgent("3f3c2f0e-6a57-4f0b-9d4e-0c8f1a2b3c4d", "manager", "MASTER"),
         )
-        categories = "new or dropped scope or a change to a requirement's promise; something only the developer can do or approve; an override of a role default; or a blocker that none of your own decisions can remove."
         final = "Send one further message with the path of your report when the whole assignment is finished or cannot be finished."
         for role in LAUNCHER_ROLES:
             for parent in (None, *parents):
@@ -1073,7 +1072,13 @@ class HandoverTextWordingTests(unittest.TestCase):
                             f"Agent {parent.agent_id} ({parent.role} · {parent.subject}) started this role and is its parent in Paseo.",
                             relation,
                         )
-                        self.assertIn(categories, relation)
+                        # The categories of a developer decision are the role text's, named
+                        # rather than repeated: the same passage may not stand twice in one
+                        # first message (MIK-R193 rule 6).
+                        self.assertIn(
+                            "what needs the developer's decision, as your role text defines it",
+                            relation,
+                        )
                         self.assertIn(final, relation)
                         self.assertIn("addressed to the return address", relation)
                         self.assertNotIn("addressed to its agent id", relation)
@@ -1112,8 +1117,27 @@ class HandoverTextWordingTests(unittest.TestCase):
                 self.assertIn(REPORT_DIRECTORY, prompt)
                 self.assertEqual(forbidden_in(prompt), [])
                 self.assertEqual(forbidden_in(json.dumps(handover, ensure_ascii=False)), [])
-                # The first message carries the reader context the launch compiled.
-                self.assertIn(handover["arMcpContext"]["missingCapabilityAction"], prompt)
+                # The first message carries the reader arguments; the rest of the reader context
+                # is in the complete hand-over file the message names (MIK-R193 rule 1).
+                projection = json.loads(
+                    prompt.split("AR owner assignment and canonical task handover:\n", 1)[1]
+                )
+                reader = handover["arMcpContext"]
+                reader_arguments = reader["readerArguments"]
+                expected = (
+                    {"readerArguments": reader_arguments}
+                    if reader_arguments is not None
+                    else {
+                        key: reader[key]
+                        for key in ("availableRepositoryIds", "repositorySelection")
+                        if reader.get(key) is not None
+                    }
+                )
+                self.assertEqual(projection["arMcpContext"], expected)
+                self.assertEqual(
+                    projection["handoverFile"]["path"],
+                    handover["taskReportPath"].rsplit(".", 1)[0] + ".handover.json",
+                )
 
     def test_the_reader_context_names_the_readers_of_the_task_tool_server(self) -> None:
         _prompt, leaf = self.compiled("worker", None)

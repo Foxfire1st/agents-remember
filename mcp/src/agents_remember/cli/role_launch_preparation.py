@@ -39,6 +39,7 @@ from agents_remember.cli.paseo_catalog import (
     resolve_agent_selection,
 )
 from agents_remember.cli.paseo_launch import StartingAgent
+from agents_remember.cli.role_brief_message import BriefParts, brief_prompt
 from agents_remember.cli.role_instruction_details import compose_launch_instructions
 from agents_remember.cli.role_instructions import (
     instruction_metadata,
@@ -67,7 +68,7 @@ from agents_remember.models.role_launcher import (
     RoleSelection,
 )
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
-from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
+from agents_remember.serving.launch_capsule import LaunchCapsule, LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.task_document_copies import prepare_task_document_copies
 from agents_remember.worktrees.task_resolver import series_contract_path
@@ -130,6 +131,17 @@ _AR_TOOL_SERVER_USAGE_TAIL = (
     "carries no file text: read the named files with your harness's own file tool. If either tool "
     "schema lacks the declared task_context fields, stop and report the missing AR reader "
     "capability; do not drop task_context or substitute another root."
+)
+# MIK-R193 rule 11: the one constant every role's first message carries. Another role's work is
+# a role_start, never a helper; a harness without sub-agents is one of the named exceptions.
+SPLIT_WORK_DIRECTION = (
+    "Inside your own assignment, split independent work across helpers (your harness's "
+    "sub-agents) from the start, where your harness has them; helpers have no cap. Another "
+    f"role's work goes to {ROLE_START_TOOL}, never to a helper. Working through independent parts "
+    "in series is the exception and names its reason: a gate, a shared-file one-writer "
+    "dependency, a ruling, or a harness without sub-agents. You stay the single writer of your "
+    "stage's records and verify every helper's part. Your report says how you split the work, "
+    "or why it could not be split."
 )
 _AR_TOOL_SERVER_USAGE = (
     f"{_AR_TOOL_SERVER_USAGE_HEAD}{_AR_OTHER_SERVER_CHOICE}{_AR_TOOL_SERVER_USAGE_TAIL}"
@@ -536,6 +548,44 @@ def _prepare_role_folders(
     workspace["scratchRoot"] = scratch.as_posix()
 
 
+def _assembled_brief(
+    request: RoleHandoverRequest,
+    handover: dict[str, Any],
+    *,
+    report_path: str,
+    texts: tuple[str, str],
+    capsule: LaunchCapsule,
+) -> tuple[str, dict[str, Any], dict[str, Any], str]:
+    """The first message, its projection and the file it names, from what this module gathered.
+
+    The assembly itself lives in its own module (MIK-R193 rule 1 and rule 10); this call gives it
+    the role's own values: who started the seat, the one direction its brief carries, where this
+    session holds the AR tools, and the compiled capsule.
+    """
+
+    context = request.context
+    bound_document = (
+        context.effective_task.ref.model_dump(mode="json") if context.effective_task else None
+    )
+    first_read, instructions = texts
+    parts = BriefParts(
+        started_from=_started_from(request.started_by),
+        direction=SPLIT_WORK_DIRECTION,
+        ar_tools=_ar_tool_server_usage(
+            request.harness_id, servers=_brief_servers(request.accepts_tool_servers)
+        ),
+        first_read=first_read,
+        instructions=instructions,
+        shared_block=capsule.shared_block,
+    )
+    return brief_prompt(
+        handover,
+        report_path=report_path,
+        bound_document=bound_document,
+        parts=parts,
+    )
+
+
 def _compile_handover(
     request: RoleHandoverRequest,
 ) -> dict[str, Any]:
@@ -802,23 +852,21 @@ def _compile_handover(
                 if role != context.role
             },
         }
-    prompt = (
-        f"AR ROLE BRIEF: {_started_from(started_by)} started this role with the role and "
-        "operation identified below. "
-        "The following effective instructions and canonical handover are the complete AR "
-        "role/operation instructions and assignment for this agent. Do not reopen ambient AR role, "
-        "lifecycle, or coordination-level role-routing text to infer a different assignment. "
-        "Preserve system/developer instructions, approvals, sandbox policy, and "
-        "repository-specific coding/tool rules.\n\n"
-        # Before the capsule, which names AR tools: where this session holds them.
-        f"AR tools, before your first tool call: {_ar_tool_server_usage(request.harness_id, servers=_brief_servers(request.accepts_tool_servers))}\n\n"
-        + instructions
-        + "\n\nAR owner assignment and canonical task handover:\n"
-        + json.dumps(handover, ensure_ascii=False, separators=(",", ":"))
+    # The complete object is written beside the message before the start is sent; the message
+    # names it and carries only the projection (MIK-R193 rules 1 and 2).
+    prompt, projection, handover_file, handover_file_content = _assembled_brief(
+        request,
+        handover,
+        report_path=report_path,
+        texts=(first_read, instructions),
+        capsule=capsule,
     )
     return {
         "prompt": prompt,
         "handover": handover,
+        "projection": projection,
+        "handoverFile": handover_file,
+        "handoverFileContent": handover_file_content,
         "capsuleOperation": operation,
         "capsuleDigest": effective_digest,
         "instructionComposition": instruction_record,
@@ -953,10 +1001,8 @@ def _owner_relation(
         return (
             f"Agent {started_by.agent_id} ({started_by.role} · {started_by.subject}) started this "
             "role and is its parent in Paseo. Send that agent only what needs the developer's "
-            "decision: new or dropped scope or a change to a requirement's promise; "
-            "something only the developer can do or approve; an override of a role default; "
-            "or a blocker that none of your own decisions can remove. Send these with "
-            f"{ROLE_MESSAGE_TOOL}, {addressed}. Send one further "
+            "decision, as your role text defines it, "
+            f"with {ROLE_MESSAGE_TOOL}, {addressed}. Send one further "
             "message with the path of your report when the whole assignment is finished or "
             "cannot be finished. Decide everything else yourself and record it in your "
             "rulings record, list of requirement sentences to change, and status file; send "

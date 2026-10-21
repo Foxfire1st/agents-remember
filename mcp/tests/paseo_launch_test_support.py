@@ -8,10 +8,12 @@ import json
 import os
 import sys
 import unittest
+import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
+from agents_remember.cli.role_handover_artifacts import artifact_line
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
@@ -210,6 +212,18 @@ class FakeRuntime:
         }
 
 
+class RequestId(Protocol):
+    """What the fixture's projections read from a request: the id its own files are named for.
+
+    The launch fixture hands these methods a dispatch request; a case that starts through the
+    preparation hands them the prepared hand-over's own request. Both carry that id, so the
+    contract is the id and not one concrete request type.
+    """
+
+    @property
+    def request_id(self) -> uuid.UUID | None: ...
+
+
 class GivenToAgentExpectations(unittest.TestCase):
     """Expected artifact, first message, tool server and recovery note of a launch.
 
@@ -238,15 +252,25 @@ class GivenToAgentExpectations(unittest.TestCase):
             "bytes": len(body),
         }
 
+    def handover_object(self, request: RequestId) -> dict[str, Any]:
+        """The complete hand-over object this fixture's compilation stands for."""
+
+        return {"schema": "ar-role-handover/v1", "requestId": str(request.request_id)}
+
+    def planned_handover(self, request: RequestId) -> tuple[dict[str, Any], str]:
+        """The file reference the projection names, and the text the file holds (rule 2)."""
+
+        content = json.dumps(self.handover_object(request), ensure_ascii=False, indent=1) + "\n"
+        path = (self.root / "reports" / f"{request.request_id}.handover.json").as_posix()
+        sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        return {"path": path, "canonicalPath": path, "sha256": sha, "bytes": len(content)}, content
+
     def first_message(self, request: RoleDispatchRequest) -> str:
-        """What the agent of ``request`` receives: one line naming the artifact, then its content."""
+        """What the agent of ``request`` receives: the artifact line, then its content."""
 
         artifact = self.artifact(request)
-        return (
-            f"AR handover artifact: {artifact['path']} (SHA-256 {artifact['sha256']}). It holds "
-            "everything below this line; read that file again whenever your assignment is no "
-            f"longer in your context.\n{self.prompt}"
-        )
+        handover_file, _content = self.planned_handover(request)
+        return f"{artifact_line(artifact, handover_file)}\n{self.prompt}"
 
     def watch_launch(self, path: Path, observed: list[tuple[str, Any, Any, bool]]) -> None:
         """At every runtime call of a launch, record the receipt on disk and whether its artifact is."""

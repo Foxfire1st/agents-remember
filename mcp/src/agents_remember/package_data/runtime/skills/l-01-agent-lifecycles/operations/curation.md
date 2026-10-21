@@ -52,7 +52,7 @@ their accumulated change is reviewed on the canonical master at master-to-parent
 ## Bound Paseo intake and capabilities
 
 <!-- ar:roles curator -->
-For AR-launched Paseo, use your file tools to read rendered task and canonical JSON at `taskDocReadArgs`' exact `rendered_path` and `json_path`.
+For AR-launched Paseo, use your file tools to read rendered task and canonical JSON at `documents[0].taskDocReadArgs`' exact `rendered_path` and `json_path`.
 `task_doc` writes and does not read. Call these AR tools only on `agents-remember-task`.
 Read [scoped read signatures]({{detail:reference/curator-intake-details.md}}) when you reach **Curation workflow 1: Reconcile**, not before. Missing scope or refused capabilities block work; never switch AR servers or use unscoped commands. Read assignment-applicable packets, not unrelated roles or the whole hierarchy by default.
 

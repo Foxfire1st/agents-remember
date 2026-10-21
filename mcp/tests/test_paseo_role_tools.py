@@ -601,6 +601,7 @@ class RoleStartTests(RoleToolsTestCase):
                 "parentAgentId": self.architect.agent_id,
                 "reportPath": receipt["report"]["path"],
                 "handoverArtifactPath": receipt["handoverArtifact"]["path"],
+                "handoverFilePath": receipt["handoverFile"]["path"],
                 "executionStatus": "running",
                 "preparation": {"enclosure": "created", "workspace": "created"},
                 "choices": receipt.get("choices"),

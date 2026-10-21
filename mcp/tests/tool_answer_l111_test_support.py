@@ -281,7 +281,9 @@ def _l111_task_doc_fields(operation: str) -> frozenset[str]:
     return _L111_TASK_DOC_COMMON_FIELDS | _L111_TASK_DOC_EXTRAS.get(operation, frozenset())
 
 
-_L111_ROLE_START_FIELDS = frozenset({"agentId", "handoverArtifactPath", "warning"})
+_L111_ROLE_START_FIELDS = frozenset(
+    {"agentId", "handoverArtifactPath", "handoverFilePath", "warning"}
+)
 _L111_ROLE_MESSAGE_FIELDS = frozenset(
     {"status", "taken", "recipientAgentId", "warning", "text", "textTruncated", "detail"}
 )
@@ -394,6 +396,7 @@ _L111_USES: dict[str, str] = {
     "wouldLose": "what the dry run would overwrite",
     "agentId": "the id of the started agent",
     "handoverArtifactPath": "where the handover lies",
+    "handoverFilePath": "where the complete hand-over lies",
     "warning": "what the caller must know although the call succeeded",
     "status": "how the host took the message",
     "taken": "how the recipient took the message",
@@ -551,6 +554,7 @@ _L111_ORDINARY: dict[tuple[str, str | None], dict[str, Any]] = {
         "ok": True,
         "agentId": "0dfd57f7-1b4b-4b71-ac30-20698eaca57f",
         "handoverArtifactPath": "role-reports/worker/0dfd57f7/handover.md",
+        "handoverFilePath": "role-reports/worker/0dfd57f7/handover.json",
     },
     ("role_message", None): {
         "ok": True,
@@ -771,6 +775,7 @@ def _l111_role_start_largest() -> dict[str, Any]:
         "ok": True,
         "agentId": "0dfd57f7-1b4b-4b71-ac30-20698eaca57f",
         "handoverArtifactPath": "role-reports/worker/0dfd57f7/handover.md",
+        "handoverFilePath": "role-reports/worker/0dfd57f7/handover.json",
         "warning": f"The leaf names requirement files that do not exist: {missing}.",
     }
 

@@ -50,7 +50,10 @@ from agents_remember.cli.paseo_warmup import register_warmup_route
 from agents_remember.cli.role_answers import alias_response
 from agents_remember.cli.role_document_chat_tree import register_document_chat_tree_route
 from agents_remember.cli.role_document_chats import register_document_chat_route
-from agents_remember.cli.role_handover_artifacts import first_message, write_handover_artifact
+from agents_remember.cli.role_handover_artifacts import (
+    first_message,
+)
+from agents_remember.cli.role_handover_publication import publish_handover_files
 from agents_remember.cli.role_instructions import launch_choice_metadata
 from agents_remember.cli.role_launch_liveness import (
     HostUnreachableRefusal,
@@ -519,7 +522,14 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         # First work carried with the start (MIK-R100 rule 3): the seat opens at once
         # with its handover and that message.
         prompt = f"{prompt}\n{start.opening_message}"
-    artifact = write_handover_artifact(prepared["taskReportPath"], prompt)
+    # The message's artifact and the complete hand-over are written before the message that
+    # names them is sent; both targets are checked first, so a refusal creates neither.
+    artifact, handover_file = publish_handover_files(
+        prepared["taskReportPath"],
+        prompt,
+        prepared["handoverFileContent"],
+        expected=prepared["handoverFile"],
+    )
     launch_call = build_launch_call(
         RoleLaunch(
             agent_id=agent_id,
@@ -528,7 +538,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             folder=workspace["path"],
             provider=provider,
             session_options=session_options,
-            prompt=first_message(artifact, prompt),
+            prompt=first_message(artifact, prompt, handover_file),
             report_path=prepared["taskReportPath"],
             handover_artifact=artifact,
             settings_file=start.config.config_path,
@@ -597,10 +607,14 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         "execution": {},
         "preparation": {"enclosure": workspace.get("enclosurePreparation", "not-applicable")},
         "handoverArtifact": artifact,
+        "handoverFile": {**handover_file, "content": prepared["handoverFileContent"]},
         "stepUpArtifact": prepared.get("stepUpArtifact"),
         # A held seat keeps its opening handover for its first message (MIK-R100 rules 2/4).
         **(
-            {"heldSeat": True, "heldOpeningPrompt": first_message(artifact, prompt)}
+            {
+                "heldSeat": True,
+                "heldOpeningPrompt": first_message(artifact, prompt, handover_file),
+            }
             if start.held
             else {}
         ),

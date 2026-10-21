@@ -27,6 +27,10 @@ from agents_remember.cli import (
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import RoleLaunch, build_launch_call
+from agents_remember.cli.role_handover_projection import (
+    PROJECTION_FIELDS,
+    PROJECTION_FILE_FIELD,
+)
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_OPERATIONS,
     RoleHandoverRequest,
@@ -57,6 +61,32 @@ from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees.services import bind_worktree_services, reset_worktree_services
 from test_role_instruction_wording import forbidden_in
 from test_worktree_support import open_external_contract_fixture
+
+
+def _check_projection(
+    projection: dict[str, Any], prepared: dict[str, Any], *, kept: tuple[str, ...]
+) -> None:
+    """The projection holds only the permitted fields and names the complete hand-over.
+
+    ``kept`` names the optional fields this seat's own selection makes present.
+    """
+
+    assert set(projection) - {PROJECTION_FILE_FIELD} == set(projection) & set(PROJECTION_FIELDS)
+    assert projection[PROJECTION_FILE_FIELD]["path"] == (
+        Path(prepared["taskReportPath"]).with_suffix(".handover.json").as_posix()
+    )
+    for absent in ("capsule", "contextPacket", "ownerHandover", "taskDocumentDigest"):
+        assert absent not in projection
+    for name in ("documents", "leafSeats"):
+        assert (name in projection) is (name in kept)
+
+
+def _projection(prepared: dict[str, Any]) -> dict[str, Any]:
+    """The projection the compiled first message carries (MIK-R193 rule 1)."""
+
+    return json.loads(
+        prepared["prompt"].rsplit("\n\nAR owner assignment and canonical task handover:\n", 1)[1]
+    )
 
 
 class RoleScopedCapsuleBindingTests(unittest.TestCase):
@@ -208,10 +238,9 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                         )
                     finally:
                         reset_worktree_services()
-                    handover = json.loads(
-                        prepared["prompt"].rsplit(
-                            "\n\nAR owner assignment and canonical task handover:\n", 1
-                        )[1]
+                    handover = prepared["handover"]
+                    _check_projection(
+                        _projection(prepared), prepared, kept=("documents", "leafSeats")
                     )
                     binding = handover["capsule"]["binding"]
                     assert context.task is not None
@@ -441,11 +470,8 @@ class RoleScopedCapsuleBindingTests(unittest.TestCase):
                     request_id=request_id,
                 )
             prepared = role_handover.handover
-            handover = json.loads(
-                prepared["prompt"].rsplit(
-                    "\n\nAR owner assignment and canonical task handover:\n", 1
-                )[1]
-            )
+            handover = prepared["handover"]
+            _check_projection(_projection(prepared), prepared, kept=())
 
         self.assertEqual(
             (

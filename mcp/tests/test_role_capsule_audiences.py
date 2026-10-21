@@ -185,7 +185,7 @@ def test_curator_receives_ruled_step_details_separately_and_keeps_writer_boundar
         assert f"{{{{detail:{reference.source_path}}}}}" in text
         assert reference.content.decode() not in text
     for reference, syntax in (
-        (intake, "`knowledge_read` takes `memoryRoot`"),
+        (intake, "`knowledge_read` takes `workspace.memoryRoot`"),
         (messages, "The full text goes in `body` and its files in `attach`"),
     ):
         assert syntax in reference.content.decode()
@@ -609,13 +609,16 @@ R125_ADDRESSED_PARAGRAPHS = (
 # the expected delivery corpus without reading markers as an ownership oracle.
 # The orientation pin was renewed for MIK-R172 rule 1: the sentence that made the
 # agent's own chat reply the answer now sends the answer with `role_message`.
+# The implementation and coordination pins were renewed for MIK-R193 rule 8: the
+# implementation document lost the "Messages" passage its role text already carries, and
+# the coordination document stopped naming a nested field three of its readers never have.
 R125_OPERATION_SHA256 = {
     "orientation": "cb21c41525efc28773e5497b396701ef0f9b246833958c3d7b3448c57a5b11f1",
     "planning": "d6a1c6458d3a67ed54c0bbf0b399066022d8ac094110e5fae4673c5d0bd36f63",
     "review": "c7ddda94f04ea23c555296fbf8108037598098a17d22cad26613be65de64c317",
-    "coordination": "4d0e8fe886c1806091a9355cad05d3d28199bf7b5bd9d1f5d4283c0ee015b2be",
+    "coordination": "747dc35ea5a1a47710963073a88bea17cdf6286c89433ce2b96c1a6c0096d54f",
     "recovery": "ae7583596bc9f30d49b5d675e48b5076da2aabca5cf3d992ab97ce438e7607b1",
-    "implementation": "c3a028dec741ee1edc277bc6ef2841d7e04fe1af529e491ec52bb486abe10b02",
+    "implementation": "53561f31eed705d04851973f654d9670b48a061075a132c704f83b2817798ce9",
     "bootstrap": "e1235cd05d77c8684df3f9028ade5ac361d725097082a3604ae658b7ae1589bf",
 }
 R125_CLOSEOUT_SHA256 = "baea8d9c29a19b55b3bd58cb8c81382965f4ad5f2d665e42839f2843ef3411f0"

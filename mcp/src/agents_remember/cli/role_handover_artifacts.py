@@ -11,21 +11,59 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import stat
-import tempfile
 from pathlib import Path
 from typing import Any
 
+from agents_remember.cli.immutable_artifact import (
+    MAX_ARTIFACT_BYTES,
+)
+from agents_remember.cli.immutable_artifact import (
+    canonical_path as _canonical,
+)
+from agents_remember.cli.immutable_artifact import (
+    preflight as preflight_target,
+)
+from agents_remember.cli.immutable_artifact import (
+    write_once as _write_once,
+)
+from agents_remember.cli.role_handover_file import handover_file_line
 from agents_remember.errors import AgentsRememberError
 from agents_remember.models.role_capsules.types import CapsuleDetailReference
 
 # A first message of 300,000 bytes has to launch; this bound only keeps a runaway compilation
 # from being written to a task's report folder.
-MAX_HANDOVER_ARTIFACT_BYTES = 1_048_576
+MAX_HANDOVER_ARTIFACT_BYTES = MAX_ARTIFACT_BYTES
 _ARTIFACT_SUFFIX = ".handover.txt"
-# Nobody writes the file after it was created, the agent it is for included.
-_ARTIFACT_MODE = 0o444
+
+
+def _changed_artifact(canonical: Path) -> str:
+    return (
+        f"This role request already has different handover content in {canonical}. That file is "
+        "never changed; start the role again under a new request id."
+    )
+
+
+def handover_artifact_reference(report_path: str, content: str) -> dict[str, Any]:
+    """The reference a write of this content produces, without writing any file."""
+
+    body = content.encode("utf-8")
+    if len(body) > MAX_HANDOVER_ARTIFACT_BYTES:
+        raise ValueError("The compiled role handover exceeds the task artifact size limit.")
+    path = Path(report_path).with_suffix(_ARTIFACT_SUFFIX)
+    return {
+        "path": path.as_posix(),
+        "canonicalPath": _canonical(path).as_posix(),
+        "sha256": hashlib.sha256(body).hexdigest(),
+        "bytes": len(body),
+    }
+
+
+def preflight_handover_artifact(report_path: str, content: str) -> None:
+    """Refuse now when the artifact's own target holds other bytes; write nothing."""
+
+    reference = handover_artifact_reference(report_path, content)
+    canonical = Path(reference["canonicalPath"])
+    preflight_target(canonical, content.encode("utf-8"), _changed_artifact(canonical))
 
 
 def write_handover_artifact(report_path: str, content: str) -> dict[str, Any]:
@@ -42,12 +80,7 @@ def write_handover_artifact(report_path: str, content: str) -> dict[str, Any]:
     canonical = _canonical(path)
     # An artifact with other content and no receipt belongs to an earlier attempt of this request
     # id, which no execution carries: the request id is spent.
-    _write_once(
-        canonical,
-        body,
-        f"This role request already has different handover content in {canonical}. That file is "
-        "never changed; start the role again under a new request id.",
-    )
+    _write_once(canonical, body, _changed_artifact(canonical))
     return {
         "path": path.as_posix(),
         "canonicalPath": canonical.as_posix(),
@@ -101,8 +134,21 @@ def takeover_artifact_line(reference: dict[str, Any]) -> str:
 
 def restore_step_up_artifact(saved: dict[str, Any], message: str, *, receipt: Path) -> None:
     """Restore only frozen takeover bytes, refusing changed, nonregular or rebound targets."""
-    if not saved.get("stepUp"):
+
+    target = checked_step_up_target(saved, message, receipt=receipt)
+    if target is None:
         return
+    canonical, body = target
+    _write_takeover(canonical, body)
+
+
+def checked_step_up_target(
+    saved: dict[str, Any], message: str, *, receipt: Path
+) -> tuple[Path, bytes] | None:
+    """Where a saved receipt's takeover material goes and what it holds, or nothing to write."""
+
+    if not saved.get("stepUp"):
+        return None
     reference = saved.get("stepUpArtifact")
     report = saved.get("report") or {}
     remedy = f"The takeover material recorded by receipt {receipt} cannot be verified; restore its original reference and retry the same request."
@@ -128,46 +174,90 @@ def restore_step_up_artifact(saved: dict[str, Any], message: str, *, receipt: Pa
         raise AgentsRememberError(
             f"Takeover material at {expected} has no matching saved hash. {remedy}"
         )
-    _write_takeover(_canonical(expected), body)
+    return _canonical(expected), body
 
 
-def _write_takeover(path: Path, body: bytes) -> None:
-    remedy = (
+def takeover_refusal(path: Path) -> str:
+    """What a restore says when the takeover material's target holds other bytes."""
+
+    return (
         f"The takeover material at {path} must be an unchanged regular file. "
         "Remove the changed or nonregular target and retry the same request; "
         "saved receipts restore only their original bytes."
     )
+
+
+def _write_takeover(path: Path, body: bytes) -> None:
+    remedy = takeover_refusal(path)
     try:
         _write_once(path, body, remedy)
     except (OSError, ValueError) as error:
         raise AgentsRememberError(remedy) from error
 
 
-def artifact_line(reference: dict[str, Any]) -> str:
-    """The one line that precedes the compiled content in the message an agent receives."""
+def artifact_line(reference: dict[str, Any], handover_file: dict[str, Any] | None = None) -> str:
+    """The one line that precedes the compiled content in the message an agent receives.
 
+    A launch of this leaf names both files: the text that holds the message below the line, and
+    the JSON that holds the complete hand-over object (MIK-R193 rule 3). A receipt without that
+    reference — a seat started before this leaf — keeps today's one-file text, so that the
+    restore's comparison of an unchanged message still holds.
+    """
+
+    if handover_file is None:
+        return (
+            f"AR handover artifact: {reference['path']} (SHA-256 {reference['sha256']}). It holds "
+            "everything below this line; read that file again whenever your assignment is no "
+            "longer in your context."
+        )
     return (
-        f"AR handover artifact: {reference['path']} (SHA-256 {reference['sha256']}). It holds "
-        "everything below this line; read that file again whenever your assignment is no longer "
-        "in your context."
+        f"AR handover artifacts: {reference['path']} (SHA-256 {reference['sha256']}) holds "
+        f"everything below this line; {handover_file_line(handover_file)} holds the complete "
+        "hand-over. Read them again whenever your assignment is no longer in context."
     )
 
 
-def first_message(reference: dict[str, Any], content: str) -> str:
+def first_message(
+    reference: dict[str, Any],
+    content: str,
+    handover_file: dict[str, Any] | None = None,
+) -> str:
     """The message sent to the agent: the artifact line, then the content exactly as stored."""
 
-    return f"{artifact_line(reference)}\n{content}"
+    return f"{artifact_line(reference, handover_file)}\n{content}"
 
 
-def restore_handover_artifact(reference: dict[str, Any], message: str, *, receipt: Path) -> None:
+def restore_handover_artifact(
+    reference: dict[str, Any],
+    message: str,
+    *,
+    receipt: Path,
+    handover_file: dict[str, Any] | None = None,
+) -> None:
     """Before a saved first message is sent again, make sure its artifact still holds it.
 
     A missing artifact is written again from the saved message; one whose content differs is
     refused. The file is the one the reference's own ``path`` leads to, and no other. Each
     refusal says what has to be put right before the same request is retried: a retry is the
     only way on for a request that has its receipt. ``receipt`` is the file the reference was
-    read from; a reference that lacks one of its parts is refused by that name.
+    read from; a reference that lacks one of its parts is refused by that name. ``handover_file``
+    is the complete hand-over's reference of the same receipt, which the artifact line names.
     """
+
+    canonical, body = checked_handover_artifact_target(
+        reference, message, receipt=receipt, handover_file=handover_file
+    )
+    _write_once(canonical, body, artifact_refusal(canonical))
+
+
+def checked_handover_artifact_target(
+    reference: dict[str, Any],
+    message: str,
+    *,
+    receipt: Path,
+    handover_file: dict[str, Any] | None = None,
+) -> tuple[Path, bytes]:
+    """Where the saved message's artifact goes and what it holds, or why it cannot be written."""
 
     missing = [
         key
@@ -184,7 +274,7 @@ def restore_handover_artifact(reference: dict[str, Any], message: str, *, receip
     body = content.encode("utf-8")
     if (
         not separator
-        or line != artifact_line(reference)
+        or line != artifact_line(reference, handover_file)
         or hashlib.sha256(body).hexdigest() != reference["sha256"]
     ):
         raise ValueError("The saved first message does not match its handover artifact reference.")
@@ -201,58 +291,13 @@ def restore_handover_artifact(reference: dict[str, Any], message: str, *, receip
             "Put back what that path ran through (for a leaf role, the report-access link of its "
             "enclosure) and retry."
         )
-    _write_once(
-        canonical,
-        body,
+    return canonical, body
+
+
+def artifact_refusal(canonical: Path) -> str:
+    """What a start or restore says when the artifact's target holds other bytes."""
+
+    return (
         f"The handover artifact {canonical} no longer holds the first message saved for this "
-        "request. Delete that file and retry; the retry writes it again from the saved message.",
+        "request. Delete that file and retry; the retry writes it again from the saved message."
     )
-
-
-def _canonical(path: Path) -> Path:
-    """The artifact's own name in its resolved folder; a link at that name is never followed."""
-
-    return path.parent.resolve(strict=False) / path.name
-
-
-def _write_once(path: Path, body: bytes, refusal: str) -> None:
-    """Create ``path`` with ``body``, or leave it when it already holds exactly that.
-
-    ``refusal`` is what the caller says when the file holds something else.
-    """
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if _matches(path, body, refusal):
-        return
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(body)
-            stream.flush()
-            os.fchmod(stream.fileno(), _ARTIFACT_MODE)
-            os.fsync(stream.fileno())
-        try:
-            os.link(temporary, path, follow_symlinks=False)
-        except FileExistsError:
-            # Another launch of the same request wrote it in the meantime.
-            _matches(path, body, refusal)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-
-
-def _matches(path: Path, expected: bytes, refusal: str) -> bool:
-    try:
-        mode = path.lstat().st_mode
-    except FileNotFoundError:
-        return False
-    if not stat.S_ISREG(mode):
-        raise ValueError("The task handover artifact path is not a regular file.")
-    # Open without following a swapped link, and never block on a swapped FIFO.
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(descriptor, "rb") as stream:
-        opened = os.fstat(stream.fileno())
-        if not stat.S_ISREG(opened.st_mode):
-            raise ValueError("The task handover artifact path is not a regular file.")
-        if opened.st_size != len(expected) or stream.read(len(expected) + 1) != expected:
-            raise ValueError(refusal)
-    return True

@@ -67,6 +67,11 @@ def started_answer(config: McpRuntimeConfig, request: RoleDispatchRequest) -> di
         "parentAgentId": receipt.get("parentAgentId"),
         "reportPath": report.get("path") if isinstance(report, dict) else None,
         "handoverArtifactPath": artifact.get("path") if isinstance(artifact, dict) else None,
+        "handoverFilePath": (
+            receipt["handoverFile"].get("path")
+            if isinstance(receipt.get("handoverFile"), dict)
+            else None
+        ),
         "executionStatus": execution,
         **({"preparation": receipt["preparation"]} if "preparation" in receipt else {}),
         "choices": launch_choice_metadata(receipt.get("choices", {})),
