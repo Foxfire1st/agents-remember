@@ -321,7 +321,7 @@ def test_review_get_routes_read_without_writing(tmp_path: Path, worktree_service
         app,
         ReviewIntentSummaryPort(
             inputs=lambda *_: (),
-            read=lambda _repo, master, _leaf, _observe: intent_summary_of(
+            read=lambda _repo, master, _leaf, _number, _observe: intent_summary_of(
                 summary_resolution, master
             ),
         ),

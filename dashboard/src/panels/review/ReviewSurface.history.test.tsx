@@ -67,8 +67,14 @@ function serving(body: unknown): void {
   );
 }
 
+// The subject's review read. The page's other opening reads (the summary, the outline, the trees)
+// are made beside it (MIK-R89 v2 rule 2), so the review read is found by its route, not its turn.
 function requestUrl(fetchMock: ReturnType<typeof vi.fn>): string {
-  return String(fetchMock.mock.calls[0][0]);
+  const review = fetchMock.mock.calls
+    .map((call) => String(call[0]))
+    .find((url) => new URL(url, "http://localhost").pathname === "/api/review/intent");
+  if (review === undefined) throw new Error("the surface made no review read");
+  return review;
 }
 
 afterEach(() => {

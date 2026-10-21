@@ -52,6 +52,8 @@ export interface ReviewCatalogueKey {
   history?: string;
   generation?: number;
   comparisonGeneration?: ComparisonGeneration;
+  // One recorded comparison by its number (MIK-R89 v2 rule 10), read-only; absent = the bound one.
+  comparison?: number;
 }
 
 function catalogueAnswer(result: ReviewEntryListResult): ReviewCatalogueRead {
@@ -92,7 +94,8 @@ export function useReviewCatalogue(
   comparison: ReviewCatalogueKey,
 ): ReviewCatalogueRead & { refresh: () => void } {
   const { repo, master, leaf, history, generation, comparisonGeneration } = comparison;
-  const comparisonKey = `${repo}/${master}/${leaf}/${history ?? 'live'}`;
+  const number = comparison.comparison;
+  const comparisonKey = `${repo}/${master}/${leaf}/${history ?? 'live'}${number === undefined ? '' : `#${number}`}`;
   const targetKey = `${comparisonKey}/${generation ?? 0}`;
   const [read, setRead] = useState<ReviewCatalogueRead>({ loading: false });
   const [nonce, setNonce] = useState(0);
@@ -107,7 +110,7 @@ export function useReviewCatalogue(
     const live = () => mounted && reads.current === seq;
     const boundGeneration = observed.current;
     setRead({ loading: true, comparisonKey, targetKey, generation: boundGeneration });
-    void intentReviewEntries(repo, master, leaf).then(
+    void intentReviewEntries(repo, master, leaf, '', number).then(
       (result) => {
         if (live())
           setRead({
@@ -131,7 +134,7 @@ export function useReviewCatalogue(
     return () => {
       mounted = false;
     };
-  }, [repo, master, leaf, nonce, targetKey, comparisonKey]);
+  }, [repo, master, leaf, number, nonce, targetKey, comparisonKey]);
   const refresh = () => {
     setNonce((value) => value + 1);
   };

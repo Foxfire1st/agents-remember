@@ -1,7 +1,9 @@
 // Shared by the MIK-R39 mounted tests (ReviewSurface.walk*.test.tsx): a served world made of captured
 // bodies, a `fetch` stub that answers from it and logs every request, and small readers of the mounted
-// reviewer. `ReviewSurface` is real; only `fetch` is replaced. The old catalogue is augmented
-// with the explicitly synthetic outline adapter, leaving every original capture unchanged.
+// review page. `ReviewSurface` is real; only `fetch` is replaced. The old catalogue is augmented
+// with the explicitly synthetic outline adapter, leaving every original capture unchanged. The page
+// opens with nothing selected (MIK-R89 v2 rule 2), so `open` names the subject in the target, and
+// the tree it reads is tree/ReviewTree.tsx (`review-tree`), drawn from the one change-set model.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, vi } from 'vitest';
@@ -35,6 +37,16 @@ const REFUSED = {
   },
 };
 
+// The summary read (read 1) is not part of these worlds: it is refused, and the page says so.
+const SUMMARY_REFUSED = {
+  state: 'unavailable',
+  operation: 'review-intent-summary',
+  repository_id: 'agents-remember',
+  master: '',
+  leaf_id: '',
+  refusal: REFUSED.refusal,
+};
+
 export interface Served {
   // The review request: no selector asks for the task context.
   review: (url: URL) => unknown;
@@ -48,6 +60,17 @@ export interface Requests {
   reviews: () => URL[];
 }
 
+function bodyFor(world: Served, url: URL): unknown {
+  if (url.pathname.endsWith('/entries')) return world.entries;
+  if (url.pathname.endsWith('/intent/summary')) return SUMMARY_REFUSED;
+  if (!url.pathname.endsWith('/trees') && !url.pathname.endsWith('/source-content')) return world.review(url);
+  const leafWide = url.pathname.endsWith('/trees') &&
+    !['lane', 'file', 'invariants'].some((key) => url.searchParams.has(key));
+  // R64 no longer derives code badges from whichever family happened to be read.
+  // Supply the genuine matching leaf-wide answer for these walk-world tests.
+  return world.tree?.(url) ?? (leafWide ? leafTrees : REFUSED);
+}
+
 // Stub `fetch` with the world. A `review` answer of `undefined` is a request the test did not expect.
 export function serve(world: Served): Requests {
   const all: URL[] = [];
@@ -56,16 +79,7 @@ export function serve(world: Served): Requests {
     vi.fn(async (address: string) => {
       const url = new URL(address, 'http://localhost');
       all.push(url);
-      let body: unknown;
-      if (url.pathname.endsWith('/entries')) body = world.entries;
-      else if (url.pathname.endsWith('/trees') || url.pathname.endsWith('/source-content')) {
-        const leafWide = url.pathname.endsWith('/trees') &&
-          !['lane', 'file', 'invariants'].some((key) => url.searchParams.has(key));
-        // R64 no longer derives code badges from whichever family happened to be read.
-        // Supply the genuine matching leaf-wide answer for these walk-world tests.
-        body = world.tree?.(url) ?? (leafWide ? leafTrees : REFUSED);
-      }
-      else body = world.review(url);
+      const body = bodyFor(world, url);
       if (body === undefined) throw new Error(`Unexpected review request: ${address}`);
       if (body instanceof Error) throw body;
       // A server answers with a new object each time, and the reviewer tells answers apart by identity.
@@ -95,7 +109,7 @@ export const familyBlock = (view: RenderResult, familyId: string) =>
 // The one tree node marked as the selection, as the reader sees it.
 export function selectedNode(view: RenderResult): HTMLElement | null {
   const marked = view
-    .getAllByTestId('review-family-tree')[0]
+    .getByTestId('review-tree')
     .querySelectorAll<HTMLElement>('[data-tree-node][aria-current="true"]');
   expect(marked.length).toBeLessThanOrEqual(1);
   return marked[0] ?? null;
@@ -151,12 +165,12 @@ export const R6R_ID = R6R.payload!.family_context!.entries[0].family_id;
 export const HBJ_ID = HBJ.payload!.family_context!.entries[0].family_id;
 export const R6R_TITLE = R6R.payload!.family_context!.entries[0].display_label!;
 export const HBJ_TITLE = HBJ.payload!.family_context!.entries[0].display_label!;
-// The display label of every member revision the bodies serve.
-const labelByRevision = new Map(
+// The display label of every member invariant the bodies serve (a tree row names its invariant).
+const labelBySubject = new Map(
   [R6R, HBJ, SHARED].flatMap((body) =>
     body.payload!.family_context!.entries.flatMap((entry) =>
       [...entry.before.members, ...entry.after.members].map(
-        (member) => [member.invariant_revision_id, member.display_label!] as const,
+        (member) => [member.invariant_id!, member.display_label!] as const,
       ),
     ),
   ),
@@ -179,17 +193,26 @@ export function open(subject: ReviewResult) {
 
 export type View = ReturnType<typeof open>;
 
-// The revision id of a member, by its display label.
-export const revisionOf = (label: string) =>
-  [...labelByRevision].find(([, shown]) => shown === label)![0];
+// The invariant id of a member, by its display label.
+export const subjectOfLabel = (label: string) =>
+  [...labelBySubject].find(([, shown]) => shown === label)![0];
 
-// The selected row as the reader names it: a member's label, or the family's title.
+// The selected row as the reader names it: a member's label, or the family's id.
 export function selectedName(view: View): string {
   const node = selectedNode(view)!;
-  return node.dataset.revision
-    ? labelByRevision.get(node.dataset.revision)!
-    : `family ${node.dataset.family}`;
+  return node.dataset.treeNode === 'family'
+    ? `family ${node.dataset.family}`
+    : labelBySubject.get(node.dataset.subjectId!)!;
 }
+
+// A member's row under one family of the tree, by the member's display label.
+export const memberRow = (view: View, familyId: string, label: string) =>
+  within(familyBlock(view, familyId))
+    .getAllByTestId('review-family-member-open')
+    .find((node) => node.dataset.subjectId === subjectOfLabel(label))!;
+
+// The selected subject's own reading in the column: its slot, under its heading (rule 2).
+export const slotOf = (view: View) => view.getByTestId('review-subject-slot');
 
 export const keptTags = (view: View) =>
   view.queryAllByTestId('review-family-kept').map((tag) => tag.textContent ?? '');
@@ -211,7 +234,7 @@ export const reviewCount = () => world.requests.reviews().length;
 // replaces `world.answer`, `world.tree` or `world.entries` to change what is served.
 export function serveWorld() {
   localStorage.clear();
-  treeOrderStore.getState().setOrder('triage');
+  treeOrderStore.getState().setOrder('priority');
   treeViewStore.getState().setView('all');
   world.answer = (_url, asked) => (asked === 'task-context' ? task : bodies.get(asked));
   world.tree = undefined;

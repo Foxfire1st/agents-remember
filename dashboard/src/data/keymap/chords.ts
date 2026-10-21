@@ -14,9 +14,10 @@ export interface ZoneChord {
   zones: readonly Zone[];
 }
 
-// The reviewer's change traversal (MIK-R33, adopting ICR-R32 rule 7): next and previous change in the
-// family tree. Printable, so the generic routing contract keeps them inert in inputs, textareas and
-// contenteditable regions; handled only in the reviewer's own zone.
+// The review page's block traversal (MIK-R89 v2 rule 11): next and previous block of the reading
+// column, by the block identity (panels/review/changeTraversal.ts). Printable, so the generic routing
+// contract keeps them inert in inputs, textareas and contenteditable regions; handled only in the
+// review's own zone.
 export const REVIEW_CHORDS: ZoneChord[] = [
   {
     chord: "J",

@@ -21,6 +21,7 @@ import type { LauncherRole } from '../../cockpit/roleLaunchModel';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 import { css } from '../../../styled-system/css';
+import { SidebarToggle, sidebarHandleProps, sidebarPanelProps, useSidebar } from '../../grammar/SidebarToggle';
 import type { FileContent } from '../../data/files';
 import { readNote, type NoteContent } from '../../data/notes';
 import {
@@ -518,12 +519,23 @@ function ReaderLayout({ kind, heading, path, onBack, failed, content, rail, deci
   rail?: ReactNode;
   decisions?: TaskDecisionNode[];
 }) {
+  // MIK-R89 v2 rule 8: the rail's shared toggle, only where the reader has a rail.
+  const railSide = useSidebar('notes', 'left');
   return (
     <div className={screen} data-testid="notes-reader-viewer" data-artifact-kind={kind}>
       <header className={header}>
         <button type="button" className={back} onClick={onBack} data-testid="notes-reader-back">
           ← back
         </button>
+        {rail ? (
+          <SidebarToggle
+            side="left"
+            open={railSide.open}
+            onToggle={railSide.toggle}
+            name={kind === 'requirements' ? 'Requirements sidebar' : 'Notes sidebar'}
+            testId="sidebar-toggle-notes-left"
+          />
+        ) : null}
         <span className={title}>{kind === 'role-report' ? 'Report' : kind + ' · ' + heading}</span>
         <span className={openPath} data-testid="notes-reader-open">
           {kind === 'role-report' ? path : kind + '/' + path}
@@ -532,10 +544,10 @@ function ReaderLayout({ kind, heading, path, onBack, failed, content, rail, deci
       <PanelGroup direction="horizontal" autoSaveId="notesreader.outer" className={css({ flex: "1", minHeight: "0" })}>
         {rail ? (
           <>
-            <Panel defaultSize={26} minSize={16}>
+            <Panel defaultSize={26} minSize={16} {...sidebarPanelProps(railSide.open)}>
               {rail}
             </Panel>
-            <PanelResizeHandle className={handle} />
+            <PanelResizeHandle className={handle} {...sidebarHandleProps(railSide.open)} />
           </>
         ) : null}
         <Panel minSize={30}>

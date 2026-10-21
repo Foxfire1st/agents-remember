@@ -4,7 +4,7 @@
 // The first B history's lifecycle-only closed flag is an explicitly disclosed fixture closeout;
 // judgment fields are unedited. All response bytes are genuine current public-route captures.
 // See l57.f04-native.capture-provenance.json; the obsolete pre-judgment bodies are not used.
-import { cleanup, render, within } from '@testing-library/react';
+import { cleanup, render, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReviewEntryListResult, ReviewResult } from '../../data/review';
 import type { ReviewTreesResult } from '../../data/reviewTrees';
@@ -28,7 +28,7 @@ const familySelector = family.payload!.knowledge.revision_selection!.record_id;
 beforeEach(() => {
   localStorage.clear();
   treeViewStore.getState().setView('changed');
-  treeOrderStore.getState().setOrder('triage');
+  treeOrderStore.getState().setOrder('priority');
   vi.stubGlobal(
     'fetch',
     vi.fn(async (address: string) => {
@@ -58,13 +58,16 @@ it('shows the real-ingest family weaken then clarify in the tree and the block',
       onBack={() => undefined}
     />,
   );
-  // Tree badge from the outline: both recorded labels in attempt order.
-  const rail = await view.findByTestId('review-catalogue-navigation');
-  const badges = () =>
-    within(rail)
-      .getAllByTestId('review-meaning-badge')
-      .map((node) => node.textContent);
-  expect(badges()).toContain('weaken → clarify');
+  // The tree's family row gives its one reason, the change badge (MIK-R86 v2 rule 3); the recorded
+  // labels in attempt order are the reading area's.
+  const tree = await view.findByTestId('review-tree');
+  await waitFor(() =>
+    expect(
+      within(tree)
+        .getAllByTestId('review-family-open')
+        .find((node) => node.dataset.family === familySelector)?.dataset.changePrimary,
+    ).toBe('changed'),
+  );
   // Reading-area block: both writer-minted rows with their fields.
   const block = await view.findByTestId('review-recorded-steps');
   expect(block.textContent).toContain("These are the leaf's successive recorded judgments.");
@@ -74,5 +77,7 @@ it('shows the real-ingest family weaken then clarify in the tree and the block',
   expect(block.textContent).toContain('clarify');
   expect(block.textContent).toContain('revision 2');
   expect(block.textContent).toContain('revision 3');
+  // Attempt order: weaken, then clarify.
+  expect(block.textContent!.indexOf('weaken')).toBeLessThan(block.textContent!.indexOf('clarify'));
   view.unmount();
 });

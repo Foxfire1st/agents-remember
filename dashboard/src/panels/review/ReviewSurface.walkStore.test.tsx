@@ -1,6 +1,8 @@
 // MIK-R39 in the mounted R86 reviewer, using a labelled synthetic outline over the store-authored comparison of MIK-R33
 // (walkStore.capture-provenance.json): a member of the second family only, and a kept family whose
 // members are not all returned. `ReviewSurface` is the real component and only `fetch` is stubbed.
+// Since MIK-R89 v2 rule 11 `j`/`k` walk the reading column's blocks, not the tree's rows (these answers
+// carry no code locations), so the walk here is made by the rows themselves.
 // Family FAM-F00001 has nine members, FAM-F00002 three; INV-FFFFFF belongs to both and INV-PPPPPP
 // to the second only.
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
@@ -11,8 +13,6 @@ import { syntheticCatalogue } from './outline.test-utils';
 import { treeViewStore } from './triageViewPreference';
 import { treeOrderStore } from './triageOrderPreference';
 import {
-  J,
-  K,
   captured,
   families,
   familyBlock,
@@ -21,7 +21,6 @@ import {
   selectedNode,
   serve,
   settled,
-  step,
   subjectOf,
   world,
 } from './walk.test-utils';
@@ -58,7 +57,7 @@ function answer(url: URL): unknown {
 
 beforeEach(() => {
   localStorage.clear();
-  treeOrderStore.getState().setOrder('triage');
+  treeOrderStore.getState().setOrder('priority');
   treeViewStore.getState().setView('all');
   useFirstPage = false;
   world.requests = serve({
@@ -89,7 +88,7 @@ function open(subject: ReviewResult) {
 
 type View = ReturnType<typeof open>;
 const labelOf = (node: HTMLElement) =>
-  node.dataset.family ? `family ${node.dataset.family}` : (node.textContent ?? '');
+  node.dataset.treeNode === 'family' ? `family ${node.dataset.family}` : (node.textContent ?? '');
 const clickFamilyRow = async (view: View, id: string) => {
   fireEvent.click(within(familyBlock(view, id)).getByTestId('review-family-open'));
   await waitFor(
@@ -98,15 +97,22 @@ const clickFamilyRow = async (view: View, id: string) => {
   await settled(view);
 };
 
-it("keeps both families as j selects the second family's member and an explicit unknown read fails", async () => {
+it("keeps both families as the second family's own member is selected, and an explicit unknown read fails", async () => {
   const view = open(SHARED);
   await view.findAllByTestId('review-family-open', undefined);
   await waitFor(() => expect(families(view)).toHaveLength(2));
   await clickFamilyRow(view, FAM2_ID);
   const first = families(view);
   expect(new Set(first)).toEqual(new Set([FAM1_ID, FAM2_ID]));
-  // j from the second family's own row selects INV-PPPPPP, a member of that family only.
-  await step(view, J, 1);
+  // INV-PPPPPP, a member of the second family only, by its row: one read.
+  const before = reviewCount();
+  fireEvent.click(
+    within(familyBlock(view, FAM2_ID))
+      .getAllByTestId('review-family-member-open')
+      .find((node) => node.textContent?.includes('INV-PPPPPP'))!,
+  );
+  await settled(view);
+  expect(reviewCount() - before).toBe(1);
   expect(selectedNode(view)!.textContent).toContain('INV-PPPPPP');
   expect(
     selectedNode(view)!.closest<HTMLElement>('[data-testid=review-family]')!.dataset.family,
@@ -116,7 +122,7 @@ it("keeps both families as j selects the second family's member and an explicit 
     familyBlock(view, FAM1_ID),
   );
   expect(memberOccurrences(familyBlock(view, FAM1_ID)).size).toBe(9);
-  await step(view, K, 0);
+  await clickFamilyRow(view, FAM2_ID);
   expect(labelOf(selectedNode(view)!)).toBe(`family ${FAM2_ID}`);
   const failedRow = within(familyBlock(view, FAM1_ID))
     .getAllByTestId('review-family-member-open')
@@ -159,7 +165,7 @@ it('keeps complete outline rows while a partial family continues in the main pag
   expect(memberOccurrences(familyBlock(view, FAM1_ID)).size).toBe(rows);
 });
 
-it('keeps the first family when a member of the second is opened from the reading area, and k steps back', async () => {
+it('keeps the first family when a member of the second is opened from its slot, and marks it under the second family', async () => {
   const view = open(SHARED);
   await view.findAllByTestId('review-family-open', undefined);
   await waitFor(() => expect(families(view)).toHaveLength(2));
@@ -176,6 +182,6 @@ it('keeps the first family when a member of the second is opened from the readin
   expect(selectedNode(view)!.textContent).toContain('INV-PPPPPP');
   expect(families(view)).toEqual(first);
   expect(familyBlock(view, FAM1_ID).dataset.familyKept).toBe('true');
-  await step(view, K, 0);
-  expect(labelOf(selectedNode(view)!)).toBe(`family ${FAM2_ID}`);
+  expect(selectedNode(view)!.closest<HTMLElement>('[data-testid=review-family]')).toBe(familyBlock(view, FAM2_ID));
+  expect(labelOf(selectedNode(view)!)).not.toBe(`family ${FAM2_ID}`);
 });

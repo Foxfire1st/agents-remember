@@ -48,6 +48,7 @@ export type PaseoPluginMessage =
   | { type: "shown"; agentId?: string; workspaceId?: string }
   | { type: "error"; code: string; agentId?: string; message?: string }
   | { type: "selection"; agentIds: string[] }
+  | { type: "showing"; agentId: string | null }
   | {
       type: "navigation-error";
       context: "parent";
@@ -55,14 +56,31 @@ export type PaseoPluginMessage =
       targetAgentId: string | null;
       code: string;
       message?: string;
-    };
+    }
+  | PaseoTrayMessage;
+
+/**
+ * The tray's part of the channel (MIK-R188 rules 3 and 5; the plug-in's client/pick.ts): a chat
+ * text pick with its provenance (its message's time is always there: the plug-in posts no pick
+ * without it), the one notice that chat text picks are off, and the message box's rectangle
+ * inside the frame (or why it cannot be read) for the tray's dock above it.
+ */
+export type PaseoTrayMessage =
+  | { type: "pick"; text: string; agentId: string; messageId: string | null; messageTime: string }
+  | { type: "pick-unavailable"; reason: string }
+  | { type: "composer"; top: number; height: number; frameHeight: number }
+  | { type: "composer-unavailable"; reason: string };
 
 const PASEO_PLUGIN_SOURCE = "ar-plugin";
 
+/** The tray's part of the channel, named alike by both sides (MIK-R188). */
+export const PICK_ABILITY = "pick";
+/** The plug-in tells the chat its page shows (`showing`), in both of Paseo's layouts (MIK-R188 rule 7). */
+export const SHOWING_ABILITY = "showing";
 /** What this dashboard uses of the plug-in in the frame. */
-const PLUGIN_ABILITIES_USED = ["open-agent", "ping", "page", "shown-on-display", "navigated", "on-chat", "load-failed"];
+const PLUGIN_ABILITIES_USED = ["open-agent", "ping", "page", "shown-on-display", "navigated", "on-chat", "load-failed", PICK_ABILITY];
 /** What this dashboard can do for a plug-in: it is told so once the plug-in said what it can. */
-export const DASHBOARD_ABILITIES = ["late-answer", "navigated", "on-chat", "load-failed"];
+export const DASHBOARD_ABILITIES = ["late-answer", "navigated", "on-chat", "load-failed", PICK_ABILITY, SHOWING_ABILITY];
 /**
  * Said of a plug-in that answers when the agent's screen is opened, not when its conversation
  * is drawn: the dashboard's waiting line then ends at that answer.
@@ -288,11 +306,56 @@ function parseNavigationMessage(message: Record<string, unknown>): PaseoPluginMe
       return text(message.agentId) ? { type: message.type, agentId: text(message.agentId)! } : null;
     case "selection":
       return selectionMessage(message.agentIds);
+    case "showing":
+      return showingMessage(message);
     case "navigation-error":
       return parentErrorMessage(message);
     default:
+      return parseTrayMessage(message);
+  }
+}
+
+function parseTrayMessage(message: Record<string, unknown>): PaseoTrayMessage | null {
+  switch (message.type) {
+    case "pick":
+      return pickMessage(message);
+    case "pick-unavailable":
+    case "composer-unavailable":
+      return text(message.reason) ? { type: message.type, reason: text(message.reason)! } : null;
+    case "composer":
+      return composerMessage(message);
+    default:
       return null;
   }
+}
+
+/** Absent reads as `null`; anything but `null` or non-empty text is no message of the plug-in. */
+function nullable(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function pickMessage(message: Record<string, unknown>): PaseoTrayMessage | null {
+  const agentId = text(message.agentId);
+  const pickText = typeof message.text === "string" && message.text.trim() ? message.text : null;
+  const messageId = nullable(message.messageId);
+  // MIK-R188 rule 3, Provenance: a pick without its message's time is none (the server refuses
+  // it too, ebdae1e5).
+  const messageTime = typeof message.messageTime === "string" && Number.isFinite(Date.parse(message.messageTime)) ? message.messageTime : null;
+  if (!agentId || pickText === null || messageId === undefined || messageTime === null) return null;
+  return { type: "pick", text: pickText, agentId, messageId, messageTime };
+}
+
+function composerMessage(message: Record<string, unknown>): PaseoTrayMessage | null {
+  const { top, height, frameHeight } = message;
+  if (typeof top !== "number" || typeof height !== "number" || typeof frameHeight !== "number") return null;
+  if (!Number.isFinite(top) || !Number.isFinite(height) || !Number.isFinite(frameHeight)) return null;
+  return height >= 0 && frameHeight > 0 ? { type: "composer", top, height, frameHeight } : null;
+}
+
+/** The chat the frame shows: an agent id, or `null` for none; anything else is no message. */
+function showingMessage(message: Record<string, unknown>): PaseoPluginMessage | null {
+  return "agentId" in message && nullableText(message.agentId) ? { type: "showing", agentId: message.agentId } : null;
 }
 
 function selectionMessage(agentIds: unknown): PaseoPluginMessage | null {

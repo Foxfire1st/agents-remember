@@ -1,31 +1,32 @@
 // Ordinary entry uses the real catalogue/read cycle; captured records supply the semantic content.
 //
-// The first two cases answer immediately and prove eventual content. The cases after them hold every
-// review reply open until the test releases it, because what they pin happens BETWEEN a selection and
-// its answer: the workspace, its navigation, the family tree and the open disclosures are the same DOM
-// nodes throughout; only the reading area is pending, and it names the requested subject; nothing of
-// the previous subject is labelled as the new one; a subject already read for this comparison is
-// shown again without a request; the latest of several quick selections is the one that settles; a
-// failed or refused selection is stated in the reading area for that subject while the shell stays
-// usable; focus the reader moved while waiting is not taken back; and a catalogue that answers after
-// the bounded wait does not move a reader who has started working.
+// The page opens with nothing selected (MIK-R89 v2 rule 2): the opening's one review read is the task
+// context's and waits for no catalogue, and a catalogue that answers selects nothing. The first two
+// cases answer immediately and prove eventual content. The cases after them hold every review reply
+// open until the test releases it, because what they pin happens BETWEEN a selection and its answer:
+// the workspace, the tree and the open disclosures are the same DOM nodes throughout; only the
+// selected subject's slot is pending, and it names the requested subject; nothing of the previous
+// subject is labelled as the new one; a subject already read for this comparison is shown again
+// without a request; the latest of several quick selections is the one that settles; a failed or
+// refused selection is stated in the slot for that subject while the shell stays usable; focus the
+// reader moved while waiting is not taken back; and a catalogue that answers late does not move a
+// reader who has started working.
 //
-// The last two cases force an order a busy machine produces on its own: the reader selects again in
-// the turn in which the previous answer's commit becomes visible, before React has run that commit's
-// passive effects. The late effect of the earlier render must leave the new selection's focus request
-// alone (`FocusRequest.after` in `ReviewWorkspace.tsx`): focus lands on the row selected last, by
-// pointer and by `j`, and no key press is lost. Both fail every time without that guard.
+// The last two such cases force an order a busy machine produces on its own: the reader selects
+// again in the turn in which the previous answer's commit becomes visible, before React has run that
+// commit's passive effects. The late effect of the earlier render must leave the new selection's
+// focus request alone (`FocusRequest.after` in `ReviewWorkspace.tsx`): focus lands on the row
+// selected last, by pointer and by `j` (which walks the blocks, rule 11), and no key press is lost.
 
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type {
   ReviewPayload,
   ReviewResult,
-  ReviewSourceContentResult,
   ReviewOutline,
   ReviewEntryListResult,
 } from '../../data/review';
-import { SUBJECT_HOLD_MS } from './ReviewNavigation';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 import { ReviewSurface } from './ReviewSurface';
 import { captured as currentCapture, replyFor } from './l86.test-utils';
 import { syntheticCatalogue } from './outline.test-utils';
@@ -50,6 +51,7 @@ const synthetic = syntheticCatalogue(familyBodies);
 synthetic.outline.families[0].change = 'changed';
 const catalogue = synthetic.entries;
 beforeEach(() => {
+  resetCardCachesForTests();
   treeOrderStore.getState().setOrder('authored');
   treeViewStore.getState().setView('all');
 });
@@ -68,7 +70,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('opens a real family from ordinary entry, navigates another family in place and preserves the full source population', async () => {
+const isReview = (url: URL) => url.pathname === '/api/review/intent';
+
+it('opens with nothing selected from ordinary entry, navigates families and a member in place and preserves the full source population', async () => {
   const urls: URL[] = [];
   vi.stubGlobal(
     'fetch',
@@ -79,78 +83,69 @@ it('opens a real family from ordinary entry, navigates another family in place a
     }),
   );
   const view = render(<ReviewSurface {...target} />);
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
-  );
+  await waitFor(() => expect(view.getAllByTestId('review-family-open')).toHaveLength(families.length));
+  await waitFor(() => expect(view.queryByTestId('review-loading')).toBeNull());
+  expect(urls.filter(isReview).map((url) => url.searchParams.has('selectorId'))).toEqual([false]);
+  expect(view.queryByTestId('review-subject-slot')).toBeNull();
   const workspace = view.getByTestId('review-workspace');
-  fireEvent.click(subjectButton(view, families[1].family_id));
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[1].family_id),
-  );
-  expect(urls.some((url) => url.searchParams.get('selectorId') === families[1].family_id)).toBe(
-    true,
-  );
-  await waitFor(() =>
-    expect(document.activeElement).toBe(subjectButton(view, families[1].family_id)),
-  );
-  fireEvent.click(subjectButton(view, families[0].family_id));
-  const member = families[0].after.members.find(
-    (row) => row.invariant_id === recorded.knowledge.revision_selection?.record_id,
-  )!;
+  for (const family of [families[1], families[0]]) {
+    fireEvent.click(subjectButton(view, family.family_id));
+    await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(family.family_id));
+    expect(urls.some((url) => url.searchParams.get('selectorId') === family.family_id)).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(subjectButton(view, family.family_id)));
+  }
   fireEvent.click(
-    view
+    within(familyItem(view, families[0].family_id))
       .getAllByTestId('review-family-member-open')
-      .find((node) => node.dataset.revision === member.invariant_revision_id)!,
+      .find((node) => node.dataset.subjectId === INVARIANT)!,
   );
   await view.findByTestId('review-center-member');
-  fireEvent.click(view.getByTestId('review-center-full-file'));
-  fireEvent.change(view.getByTestId('review-center-diff-layout'), { target: { value: 'inline' } });
-  expect(workspace.dataset.fullFile).toBe('true');
-  expect(workspace.dataset.diffLayout).toBe('inline');
-  const region = view.getByTestId('review-center-column');
-  const focus = vi.spyOn(region, 'focus');
-  const scroll = vi.spyOn(region, 'scrollIntoView');
-  fireEvent.click(view.getByTestId('review-jump-to-selection'));
-  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
-  expect(scroll).toHaveBeenCalledWith({ block: 'start' });
   expect(view.queryByTestId('review-source-explorer')).toBeNull();
   expect(view.getByTestId('review-workspace')).toBe(workspace);
 });
 
 it('keeps unreadable knowledge source-only without inventing a family or telling the reader to select one', async () => {
+  const unreadable = {
+    ...captured,
+    payload: {
+      ...recorded,
+      knowledge: { ...recorded.knowledge, selection_state: 'task_context' },
+      family_context: {
+        ...recorded.family_context,
+        state: 'unavailable',
+        entries: [],
+        detail: 'Historical snapshot unreadable.',
+      },
+    },
+  };
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (address: string) =>
-      address.includes('/entries')
-        ? response({
-            state: 'refused',
-            refusal: {
-              code: 'knowledge_unavailable',
-              detail: 'The historical knowledge snapshot cannot be read.',
-              next_action: 'Inspect source or restore the recorded snapshot.',
-            },
-          })
-        : response({
-            ...captured,
-            payload: {
-              ...recorded,
-              knowledge: { ...recorded.knowledge, selection_state: 'task_context' },
-              family_context: {
-                ...recorded.family_context,
-                state: 'unavailable',
-                entries: [],
-                detail: 'Historical snapshot unreadable.',
-              },
-            },
-          }),
-    ),
+    vi.fn(async (address: string) => {
+      const url = new URL(address, 'http://localhost');
+      if (url.pathname.endsWith('/entries'))
+        return response({
+          state: 'refused',
+          refusal: {
+            code: 'knowledge_unavailable',
+            detail: 'The historical knowledge snapshot cannot be read.',
+            next_action: 'Inspect source or restore the recorded snapshot.',
+          },
+        });
+      return response(isReview(url) ? unreadable : replyFor(url));
+    }),
   );
   const view = render(<ReviewSurface {...target} />);
-  await view.findByTestId('review-family-tree');
-  expect(view.getByTestId('review-outline-unavailable').textContent).toContain('cannot be read');
+  await waitFor(() => expect(view.getByTestId('review-change-status').textContent).toContain('cannot be read'));
+  await view.findByTestId('review-lane-section');
   expect(view.queryByTestId('review-family-open')).toBeNull();
+  expect(view.queryAllByTestId('review-subject-section')).toHaveLength(0);
+  expect(view.queryByTestId('review-subject-slot')).toBeNull();
   expect(view.queryByTestId('review-source-explorer')).toBeNull();
-  expect(view.getByTestId('review-center-unselected').textContent).toContain('Source');
+  expect(view.getByTestId('review-center-column').textContent).not.toMatch(/\bselect\b/i);
+  // A count that cannot be measured is named as unavailable, never written where a number stands.
+  await waitFor(() => expect(view.getByTestId('review-summary-invariants').textContent).toBe('changed invariants: unavailable'));
+  expect(view.getByTestId('review-summary').textContent).not.toMatch(/unavailable (invariants|files|changed)/);
+  expect(view.getByTestId('review-tree-counts').textContent).not.toMatch(/unavailable files/);
 });
 
 // ---------------------------------------------------------------------------------------------------
@@ -176,33 +171,6 @@ function reviewFor(url: URL): ReviewResult {
   return body;
 }
 
-function contentFor(url: URL): ReviewSourceContentResult {
-  const file = url.searchParams.get('path')!;
-  return {
-    state: 'content',
-    operation: 'read_review_source_content',
-    repository_id: target.repo,
-    expansion: {
-      path: file,
-      status: 'added',
-      mode_change: false,
-      language: 'python',
-      before: { state: 'absent', detail: 'no entry at this path', truncated: false },
-      after: { state: 'present', text: `# ${file}\n`, detail: 'regular file', truncated: false },
-      before_code_tree_id: url.searchParams.get('beforeCodeTreeId')!,
-      after_code_tree_id: url.searchParams.get('afterCodeTreeId')!,
-      currentness: 'current',
-      currentness_detail: 'the bound pair',
-      path_bound: 'requested_generation',
-      path_bound_detail: 'listed by the change set',
-      admission: 'changed',
-      admission_detail: 'listed as changed',
-      reference: 'review:source-content',
-      command: 'git cat-file',
-    },
-  };
-}
-
 // Every review reply waits for `answer`; the catalogue waits only when `holdCatalogue` is set.
 function delayedServer({ holdCatalogue = false } = {}) {
   const urls: URL[] = [];
@@ -220,7 +188,6 @@ function delayedServer({ holdCatalogue = false } = {}) {
           releaseCatalogue = () => resolve(response(catalogueBody));
         });
       }
-      if (url.pathname.endsWith('/source-content')) return response(contentFor(url));
       if (url.pathname !== '/api/review/intent') return response(replyFor(url));
       return await new Promise<Response>((resolve, reject) => {
         held.push({
@@ -265,20 +232,29 @@ const subjectButton = (view: ReturnType<typeof render>, familyId: string) =>
     .getAllByTestId('review-family-open')
     .find((button) => button.dataset.subjectId === familyId)!;
 
-it('keeps the reviewer mounted across family → invariant → family, pending only in the reading area, and reuses what it read', async () => {
+// The opening's task-context read is answered; then `familyId` is chosen and answered.
+async function openOn(view: ReturnType<typeof render>, server: ReturnType<typeof delayedServer>, familyId: string) {
+  await waitFor(() => expect(server.heldFor(null)).toHaveLength(1));
+  await server.answer(null);
+  await waitFor(() => expect(view.queryByTestId('review-loading')).toBeNull());
+  fireEvent.click(subjectButton(view, familyId));
+  await server.answer(familyId);
+  await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(familyId));
+}
+
+
+it('keeps the reviewer mounted across family → invariant → family, pending only in the slot, and reuses what it read', async () => {
   const server = delayedServer();
   const view = render(<ReviewSurface {...target} />);
   await waitFor(() => expect(server.held).toHaveLength(1));
-  // Nothing was read yet, so there is no shell to keep: the surface-level loading line stands.
+  // The opening reads the task context and draws the shell around its loading line.
+  expect(server.held[0].url.searchParams.has('selectorId')).toBe(false);
   expect(view.getByTestId('review-loading')).toBeTruthy();
-  await server.answer(families[0].family_id);
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
-  );
-
   const workspace = view.getByTestId('review-workspace');
-  const navigation = view.getByTestId('review-catalogue-navigation');
+  const navigation = view.getByTestId('review-tree');
   const center = view.getByTestId('review-center-column');
+  await openOn(view, server, families[0].family_id);
+
   // Read B once, then return to cached A. Current invariant answers contain only their
   // owning family; B must be retained from an actual earlier read, not invented in A's reply.
   fireEvent.click(subjectButton(view, families[1].family_id));
@@ -286,7 +262,7 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(families[1].family_id));
   fireEvent.click(subjectButton(view, families[0].family_id));
   const family = familyItem(view, families[0].family_id);
-  const rail = workspace.querySelector('aside')!;
+  const rail = view.getByTestId('review-tree-scroll');
   const technical = view.getByTestId('review-details') as HTMLDetailsElement;
   technical.open = true;
   rail.scrollTop = 120;
@@ -308,31 +284,24 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
   expect(view.queryByTestId('review-center')).toBeNull();
   expect(view.queryByTestId('review-center-family')).toBeNull();
   expect(view.queryByTestId('review-selection')).toBeNull();
-  expect(view.queryByTestId('review-unassessed')).toBeNull();
-  expect(view.getByTestId('review-details-pending').textContent).toContain('INV-1XKX9ERN');
+  expect(view.queryByTestId('review-scope-families')).toBeNull();
   expect(view.getByTestId('review-surface').dataset.comparison).toBeUndefined();
-  expect(view.getByTestId('review-scope-families').textContent).toContain('being read');
   expect(view.queryByTestId('review-scope-comparison')?.textContent).not.toContain(
     familyComparison,
   );
-  expect(view.queryByTestId('review-currentness-status')).toBeNull();
   expect(view.queryByTestId('review-loading')).toBeNull();
   // ...while the shell is the same DOM, still expanded, scrolled, focused and open.
   expect(view.getByTestId('review-workspace')).toBe(workspace);
-  expect(view.getByTestId('review-catalogue-navigation')).toBe(navigation);
+  expect(view.getByTestId('review-tree')).toBe(navigation);
   expect(view.getByTestId('review-center-column')).toBe(center);
   expect(familyItem(view, families[0].family_id)).toBe(family);
   expect(member.getAttribute('aria-current')).toBe('true');
   expect(document.activeElement).toBe(member);
   expect(technical.open).toBe(true);
   expect(rail.scrollTop).toBe(120);
-  // Navigation stays usable: every other subject and the whole-task view can still be chosen.
+  // Navigation stays usable: every other subject and the whole change set can still be chosen.
   expect(subjectButton(view, families[1].family_id).hasAttribute('disabled')).toBe(false);
-  expect(
-    within(navigation)
-      .getByRole('button', { name: /^All changes/ })
-      .hasAttribute('disabled'),
-  ).toBe(false);
+  expect(within(navigation).getByTestId('review-all-changes').hasAttribute('disabled')).toBe(false);
   expect(server.reviewReads().at(-1)!.searchParams.get('selectorKind')).toBe('invariant');
 
   await server.answer(INVARIANT);
@@ -374,9 +343,7 @@ it('keeps the reviewer mounted across family → invariant → family, pending o
 it('settles on the latest of rapid selections and never shows a superseded answer', async () => {
   const server = delayedServer();
   const view = render(<ReviewSurface {...target} />);
-  await waitFor(() => expect(server.held).toHaveLength(1));
-  await server.answer(families[0].family_id);
-  await view.findByTestId('review-center-family');
+  await openOn(view, server, families[0].family_id);
   const workspace = view.getByTestId('review-workspace');
 
   // A → B (another family) → C (an invariant of A, chosen from the tree still on screen).
@@ -419,91 +386,46 @@ it('settles on the latest of rapid selections and never shows a superseded answe
   );
 });
 
-it('does not move a reader who is working when the catalogue answers after the bounded wait', async () => {
-  vi.useFakeTimers();
-  const server = delayedServer({ holdCatalogue: true });
-  const view = render(<ReviewSurface {...target} />);
-  // The bounded wait releases the whole-task read.
-  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
-  expect(server.heldFor(null)).toHaveLength(1);
-  vi.useRealTimers();
-  await server.answer(null);
-  await view.findByTestId('review-center-unselected');
-  const workspace = view.getByTestId('review-workspace');
-  const file = view.getByTestId('review-family-filter');
-  fireEvent.pointerDown(file);
-  file.focus();
+// A catalogue that answers late, before or after the task context's answer, fills the tree and
+// selects nothing (MIK-R89 v2 rule 2; L177-R1-07).
+it.each(['after', 'before'] as const)(
+  'does not move a reader who is working when the catalogue answers %s the task context',
+  async (order) => {
+    const server = delayedServer({ holdCatalogue: true });
+    const view = render(<ReviewSurface {...target} />);
+    // The opening's one review read waits for no catalogue.
+    await waitFor(() => expect(server.heldFor(null)).toHaveLength(1));
+    const workspace = view.getByTestId('review-workspace');
+    const file = view.getByTestId('review-family-filter');
+    fireEvent.pointerDown(file);
+    file.focus();
+    if (order === 'before') await server.releaseCatalogue();
+    await server.answer(null);
+    await waitFor(() => expect(view.queryByTestId('review-loading')).toBeNull());
+    if (order === 'after') await server.releaseCatalogue();
+    await waitFor(() => expect(view.getAllByTestId('review-family-open')).toHaveLength(families.length));
+    await act(async () => {});
+    // The catalogue filled the tree; the reader's view, selection and focus did not move.
+    expect(server.reviewReads()).toHaveLength(1);
+    expect(server.held).toHaveLength(0);
+    expect(view.queryByTestId('review-subject-slot')).toBeNull();
+    expect(
+      view.getAllByTestId('review-family-open').some((button) => button.ariaCurrent === 'true'),
+    ).toBe(false);
+    expect(document.activeElement).toBe(file);
+    expect(view.getByTestId('review-workspace')).toBe(workspace);
+    expect(server.catalogueReads()).toHaveLength(1);
 
-  await server.releaseCatalogue();
-  await waitFor(() => expect(view.getAllByTestId('review-family-open')).toHaveLength(families.length));
-  await act(async () => {});
-  // The catalogue filled the navigation; the reader's view, selection and focus did not move.
-  expect(server.reviewReads()).toHaveLength(1);
-  expect(view.getByTestId('review-center-unselected')).toBeTruthy();
-  expect(view.queryByTestId('review-reading-pending')).toBeNull();
-  expect(
-    view.getAllByTestId('review-family-open').some((button) => button.ariaCurrent === 'true'),
-  ).toBe(false);
-  expect(document.activeElement).toBe(file);
-  expect(view.getByTestId('review-workspace')).toBe(workspace);
-  expect(server.catalogueReads()).toHaveLength(1);
-});
-
-it('opens one main read when the catalogue answers after the bounded wait (L177-R1-07)', async () => {
-  vi.useFakeTimers();
-  const server = delayedServer({ holdCatalogue: true });
-  const view = render(<ReviewSurface {...target} />);
-  // The bounded wait releases the whole-task read: the subject is decided for this open.
-  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
-  expect(server.heldFor(null)).toHaveLength(1);
-  vi.useRealTimers();
-  await server.answer(null);
-  await view.findByTestId('review-center-unselected');
-  const workspace = view.getByTestId('review-workspace');
-
-  // The catalogue arrives late. It fills the navigation and selects nothing on its own: the one
-  // main read of this open is the task context, and no second read is issued without a gesture.
-  await server.releaseCatalogue();
-  await act(async () => {});
-  await waitFor(() => expect(view.getAllByTestId('review-family-open')).toHaveLength(families.length));
-  await act(async () => {});
-  expect(server.reviewReads()).toHaveLength(1);
-  expect(view.getByTestId('review-center-unselected')).toBeTruthy();
-  expect(view.queryByTestId('review-reading-pending')).toBeNull();
-  expect(server.held).toHaveLength(0);
-  expect(view.getByTestId('review-workspace')).toBe(workspace);
-  expect(server.catalogueReads()).toHaveLength(1);
-
-  // The reader's own choice is still one subject, one read.
-  fireEvent.click(view.getAllByTestId('review-family-open')[0]);
-  await waitFor(() => expect(server.heldFor(families[0].family_id)).toHaveLength(1), { timeout: 3000 });
-  await server.answer(families[0].family_id);
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
-  );
-  expect(server.reviewReads()).toHaveLength(2);
-});
-
-it('keeps the task-context answer the bounded wait released when the catalogue answers before it (MIK-R40 rule 5)', async () => {
-  vi.useFakeTimers();
-  const server = delayedServer({ holdCatalogue: true });
-  const view = render(<ReviewSurface {...target} />);
-  // The catalogue is slower than the bound: the whole-task read is released and still in flight.
-  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
-  expect(server.heldFor(null)).toHaveLength(1);
-  vi.useRealTimers();
-  // The catalogue answers while that read is in flight: it fills the navigation, and the answer
-  // the reader is waiting for is still the task context (L177-R1-07).
-  await server.releaseCatalogue();
-  await act(async () => {});
-  await server.answer(null);
-  await view.findByTestId('review-center-unselected');
-  await act(async () => {});
-  expect(server.held).toHaveLength(0);
-  expect(server.reviewReads()).toHaveLength(1);
-  expect(view.queryByTestId('review-center-family')).toBeNull();
-  expect(view.queryByTestId('review-reading-pending')).toBeNull();
-});
+    // The reader's own choice is still one subject, one read.
+    fireEvent.click(subjectButton(view, families[0].family_id));
+    await waitFor(() => expect(server.heldFor(families[0].family_id)).toHaveLength(1));
+    await server.answer(families[0].family_id);
+    await waitFor(() =>
+      expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
+    );
+    expect(server.reviewReads()).toHaveLength(2);
+  },
+);
 
 const SUBJECT_REFUSAL = {
   state: 'refused',
@@ -520,11 +442,9 @@ it.each(['failed', 'refused'] as const)(
   async (outcome) => {
     const server = delayedServer();
     const view = render(<ReviewSurface {...target} />);
-    await waitFor(() => expect(server.held).toHaveLength(1));
-    await server.answer(families[0].family_id);
-    await view.findByTestId('review-center-family');
+    await openOn(view, server, families[0].family_id);
     const workspace = view.getByTestId('review-workspace');
-    const navigation = view.getByTestId('review-catalogue-navigation');
+    const navigation = view.getByTestId('review-tree');
     const center = view.getByTestId('review-center-column');
     const family = familyItem(view, families[0].family_id);
     const rows = view.getAllByTestId('review-family-open');
@@ -535,10 +455,12 @@ it.each(['failed', 'refused'] as const)(
       outcome === 'failed' ? { lost: true } : { body: SUBJECT_REFUSAL },
     );
 
-    // The owner's failure or refusal is in the reading area, labelled with the requested subject.
+    // The owner's failure or refusal is in the slot, labelled with the requested subject.
     const area = await view.findByTestId('review-reading-problem');
+    expect(area.closest('[data-testid="review-subject-slot"]')?.getAttribute('data-slot-state')).toBe('unavailable');
     expect(area.dataset.problemSubject).toBe(`family:${families[1].family_id}`);
     expect(area.textContent).toContain(families[1].display_label!);
+
     const block = within(area).getByTestId(
       outcome === 'failed' ? 'review-failure' : 'review-refusal',
     );
@@ -550,9 +472,12 @@ it.each(['failed', 'refused'] as const)(
       );
       expect(within(block).getByTestId('review-offending-input')).toBeTruthy();
     }
-    // Stated once, and nothing of the previous subject is shown under the new one.
+    // Stated once (this world's lane diffs fail on their own), and nothing of the previous subject
+    // is shown under the new one.
     expect(
-      view.getAllByTestId(outcome === 'failed' ? 'review-failure' : 'review-refusal'),
+      view
+        .getAllByTestId(outcome === 'failed' ? 'review-failure' : 'review-refusal')
+        .filter((node) => !node.closest('[data-testid="review-lane-section"]')),
     ).toHaveLength(1);
     expect(view.queryByTestId('review-center')).toBeNull();
     expect(view.getByTestId('review-surface').dataset.comparison).toBeUndefined();
@@ -560,11 +485,11 @@ it.each(['failed', 'refused'] as const)(
       `family:${families[1].family_id}`,
     );
     expect(view.getByTestId('review-scope-comparison').textContent).toContain('not available');
-    expect(view.getByTestId('review-details-unavailable')).toBeTruthy();
     expect(view.queryByTestId('review-selection')).toBeNull();
     // The shell is the same DOM and stays usable.
     expect(view.getByTestId('review-workspace')).toBe(workspace);
-    expect(view.getByTestId('review-catalogue-navigation')).toBe(navigation);
+    expect(view.getByTestId('review-tree')).toBe(navigation);
+
     expect(view.getByTestId('review-center-column')).toBe(center);
     expect(familyItem(view, families[0].family_id)).toBe(family);
     expect(view.getAllByTestId('review-family-open')).toEqual(rows);
@@ -598,9 +523,8 @@ it.each(['failed', 'refused'] as const)(
 it('leaves focus where the reader moved it while the selected subject was pending', async () => {
   const server = delayedServer();
   const view = render(<ReviewSurface {...target} />);
-  await waitFor(() => expect(server.held).toHaveLength(1));
-  await server.answer(families[0].family_id);
-  await view.findByTestId('review-center-family');
+  await openOn(view, server, families[0].family_id);
+
 
   const chosen = subjectButton(view, families[1].family_id);
   chosen.focus();
@@ -614,8 +538,8 @@ it('leaves focus where the reader moved it while the selected subject was pendin
   );
   expect(document.activeElement).toBe(elsewhere);
 
-  // A reader who stays on the selecting control still lands on the selected node (A was read, so its
-  // answer is immediate and its catalogue button gives way to its tree node).
+  // A reader who stays on the selecting control still lands on the selected row (A was read, so its
+  // answer is immediate).
   const again = subjectButton(view, families[0].family_id);
   again.focus();
   fireEvent.click(again);
@@ -624,6 +548,7 @@ it('leaves focus where the reader moved it while the selected subject was pendin
     within(familyItem(view, families[0].family_id)).getByTestId('review-family-open'),
   );
 });
+
 
 // ---------------------------------------------------------------------------------------------------
 // Forced order: a selection made before the passive effects of the previous answer's commit have run.
@@ -634,11 +559,12 @@ it('lands focus on a family chosen in the turn that shows the previous answer, b
     vi.fn(async (address: string) => {
       const url = new URL(address, 'http://localhost');
       if (url.pathname.endsWith('/entries')) return response(catalogueBody);
-      if (url.pathname.endsWith('/source-content')) return response(contentFor(url));
       return response(reviewFor(url));
     }),
   );
   const view = render(<ReviewSurface {...target} />);
+  await waitFor(() => expect(view.getAllByTestId('review-family-open')).toHaveLength(families.length));
+  fireEvent.click(subjectButton(view, families[0].family_id));
   // The second family is chosen inside the wait that first sees the first family. The wait's check
   // runs from a mutation observer, so the click is made after the commit that shows the first family
   // and before React has run that commit's passive effects. The wait ends with the check that clicks.
@@ -646,6 +572,7 @@ it('lands focus on a family chosen in the turn that shows the previous answer, b
     expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id);
     fireEvent.click(subjectButton(view, families[1].family_id));
   });
+
   await waitFor(() =>
     expect(view.getByTestId('review-center-family').dataset.family).toBe(families[1].family_id),
   );
@@ -658,40 +585,45 @@ it('lands focus on a family chosen in the turn that shows the previous answer, b
   });
 });
 
-it('keeps every j pressed in the turn that shows the previous answer, and lands focus on each selected row', async () => {
-  // Current real family/member answers. The first two changed members of A are followed
-  // by B's changed guarantee; all three are independent selector reads, never one body
-  // relabelled as another invariant. The additional capture has its exact public request provenance.
+it('keeps every j pressed in the turn that shows the previous answer, and lands focus on each selected block', async () => {
+  // Current real member answers and the captured cards of the member's family (the page reads the
+  // cards of every subject at once; this answers that read with them). Its three changed blocks are
+  // two of INV-1XKX9ERN and one of INV-753SKJFF: j walks them (rule 11), each block reads its
+  // invariant once, and the additional capture has its exact public request provenance.
   const second = currentCapture<ReviewResult>('navigation.member-753.captured.json');
-  const changes = [INVARIANT, second.payload!.knowledge.revision_selection!.record_id, families[1].family_id];
-  const subjects = new Map([captured, second, ...familyBodies].map((body) => [
+  const memberCards = currentCapture<unknown>('l86.member-cards.captured.json');
+  const subjects = new Map([captured, second].map((body) => [
     body.payload!.knowledge.revision_selection!.record_id, body,
   ]));
+  const reads: URL[] = [];
   vi.stubGlobal('fetch', vi.fn(async (address: string) => {
     const url = new URL(address, 'http://localhost');
     if (url.pathname.endsWith('/entries')) return response(catalogueBody);
+    if (url.pathname === '/api/review/trees' && url.searchParams.has('invariants')) return response(memberCards);
     if (url.pathname !== '/api/review/intent') return response(replyFor(url));
+    reads.push(url);
+    if (!url.searchParams.has('selectorId')) return response(taskBody);
     const body = subjects.get(url.searchParams.get('selectorId')!);
     if (!body) throw new Error(`Uncaptured keyboard selection: ${url}`);
     return response(structuredClone(body));
   }));
-  const view = render(<ReviewSurface {...target} selectorKind="family" selectorId={families[0].family_id} />);
-  await view.findByTestId('review-center-family');
-  subjectButton(view, families[0].family_id).focus();
-  const shows = (change: string) =>
+  const view = render(<ReviewSurface {...target} />);
+  await waitFor(() => expect(view.getAllByTestId('review-tree-location').length).toBeGreaterThanOrEqual(3));
+  const blocks = view.getAllByTestId('review-tree-location').slice(0, 3).map((row) => row.dataset.rowKey);
+  view.getByTestId('review-center-column').focus();
+  const shows = (block: number) =>
     view.getByTestId('review-surface').dataset.reviewPending === undefined &&
-    selectedNode(view) !== null &&
-    selectedNode(view)!.dataset.subjectId === change;
-  const landedOn = (change: string) =>
+    selectedNode(view)?.dataset.rowKey === blocks[block];
+  const landedOn = (block: number) =>
     waitFor(() => {
-      expect(shows(change)).toBe(true);
+      expect(shows(block)).toBe(true);
       expect(document.activeElement).toBe(selectedNode(view));
     });
   // The second press is made by a mutation observer, in the first microtask in which the first
-  // change's answer is shown: after its commit and before React has run that commit's passive effects.
+  // block's answer is shown: after its commit and before React has run that commit's passive effects.
   let pressedAgain = false;
   const observer = new MutationObserver(() => {
-    if (pressedAgain || !shows(changes[0])) return;
+    if (pressedAgain || !shows(0)) return;
     pressedAgain = true;
     press(J);
   });
@@ -703,21 +635,25 @@ it('keeps every j pressed in the turn that shows the previous answer, and lands 
   });
   try {
     // The first press, made again until the keymap's binding (itself a passive effect) takes it.
-    const before = selectedNode(view);
     await waitFor(() => {
-      if (selectedNode(view) === before) press(J);
-      expect(selectedNode(view)).not.toBe(before);
+      if (selectedNode(view) === null) press(J);
+      expect(selectedNode(view)).not.toBeNull();
     });
     await waitFor(() => expect(pressedAgain, 'the second press is made').toBe(true));
   } finally {
     observer.disconnect();
   }
-  // The second change is selected and focus is on its row, not back on the first change's row.
-  await landedOn(changes[1]);
-  // So the third press steps from the row the reader is on: to the third change, not to the second
+  // The second block is selected and focus is on its row, not back on the first block's row.
+  await landedOn(1);
+  // So the third press steps from the row the reader is on: to the third block, not to the second
   // again (a press that selects the row already selected is a press lost).
   press(J);
-  await landedOn(changes[2]);
+  await landedOn(2);
+  expect(reads.map((url) => url.searchParams.get('selectorId'))).toEqual([
+    null,
+    INVARIANT,
+    second.payload!.knowledge.revision_selection!.record_id,
+  ]);
 });
 
 // F03/F04 adverse sequences use explicit synthetic semantic inputs over immutable served captures.
@@ -818,7 +754,7 @@ function mountSharedWorld(world: ReturnType<typeof sharedNavigationWorld>) {
     />,
   );
 }
-it('F03 visits shared changed occurrences under both families by keys and controls, skipping aggregates and unknown', async () => {
+it('F03 shows a shared changed occurrence under both families and selects each by its row with one invariant read', async () => {
   const world = sharedNavigationWorld();
   const requests: URL[] = [];
   vi.stubGlobal(
@@ -834,37 +770,26 @@ it('F03 visits shared changed occurrences under both families by keys and contro
   );
   const view = mountSharedWorld(world);
   await view.findByTestId('review-center-family');
-  const rail = view.getByTestId('review-catalogue-navigation');
+  const rail = view.getByTestId('review-tree');
   const rows = () =>
     within(rail)
       .getAllByTestId('review-family-member-open')
       .filter((row) => row.dataset.subjectId === world.sharedId);
   expect(rows()).toHaveLength(2);
-  expect(new Set(rows().map((row) => row.dataset.occurrence)).size).toBe(2);
+  expect(rows().map((row) => row.dataset.family)).toEqual(world.familyIds);
   expect(
     within(rail)
       .getAllByTestId('review-family-open')
       .map((row) => row.dataset.changePrimary),
   ).toEqual(['unchanged', 'unchanged']);
-  within(rail).getAllByTestId('review-family-open')[0].focus();
-  const move = async (key: 'j' | 'k', family: string) => {
-    fireEvent.keyDown(document.activeElement!, { key, code: key === 'j' ? 'KeyJ' : 'KeyK' });
+  for (const family of [world.familyIds[0], world.familyIds[1], world.familyIds[0]]) {
+    const row = rows().find((node) => node.dataset.family === family)!;
+    fireEvent.click(row);
     await waitFor(() =>
       expect(view.getByTestId('review-center-member').dataset.family).toBe(family),
     );
-    expect((document.activeElement as HTMLElement).dataset.family).toBe(family);
-  };
-  await move('j', world.familyIds[0]);
-  await move('j', world.familyIds[1]);
-  await move('k', world.familyIds[0]);
-  fireEvent.click(within(rail).getByTestId('review-next-change'));
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-member').dataset.family).toBe(world.familyIds[1]),
-  );
-  fireEvent.click(within(rail).getByTestId('review-previous-change'));
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-member').dataset.family).toBe(world.familyIds[0]),
-  );
+    await waitFor(() => expect(document.activeElement).toBe(row));
+  }
   expect(within(rail).getAllByTestId('review-family')).toHaveLength(2);
   expect(
     requests.filter(
@@ -873,10 +798,42 @@ it('F03 visits shared changed occurrences under both families by keys and contro
         url.searchParams.get('selectorKind') === 'invariant',
     ),
   ).toHaveLength(1);
-  expect(view.getByTestId('review-navigation-summary').textContent).toContain(
-    '1 invariants changed',
-  );
+  expect(view.getByTestId('review-summary').textContent).toContain('1 invariant changed');
 });
+
+// Rule 9: a reload restores the selection with the family context it was made in.
+it('F03 restores a shared member under the family it was selected in after a reload', async () => {
+  const world = sharedNavigationWorld();
+  const candidate = world.review.payload!.candidate;
+  const place = new URLSearchParams({ repo: candidate.repository_id, master: candidate.master, leaf: candidate.leaf_id });
+  window.history.replaceState(null, '', `/#review?${place}`);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (address: string) => {
+      const url = new URL(address, 'http://localhost');
+      if (url.pathname.endsWith('/entries')) return response(outlineReply(world.outline));
+      return response(url.pathname === '/api/review/intent' ? structuredClone(world.review) : auxiliaryRefusal);
+    }),
+  );
+  const shared = (view: ReturnType<typeof render>) =>
+    within(view.getByTestId('review-tree'))
+      .getAllByTestId('review-family-member-open')
+      .filter((row) => row.dataset.subjectId === world.sharedId);
+  try {
+    const first = mountSharedWorld(world);
+    await first.findByTestId('review-center-family');
+    fireEvent.click(shared(first).find((node) => node.dataset.family === world.familyIds[1])!);
+    await waitFor(() => expect(first.getByTestId('review-center-member').dataset.family).toBe(world.familyIds[1]));
+    await waitFor(() => expect(window.location.hash).toContain('sel='));
+    first.unmount();
+    const view = mountSharedWorld(world);
+    await waitFor(() => expect(view.getByTestId('review-center-member').dataset.family).toBe(world.familyIds[1]));
+    expect(shared(view).find((node) => node.getAttribute('aria-current') === 'true')?.dataset.family).toBe(world.familyIds[1]);
+  } finally {
+    window.history.replaceState(null, '', '/');
+  }
+});
+
 
 function generationWorld(axis: 'memory' | 'code') {
   // Generation quarantine does not require the retired two-family shared-member dataset.
@@ -949,7 +906,7 @@ it.each(['memory', 'code'] as const)(
     const server = holdNextCatalogue(world);
     const view = mountSharedWorld(world);
     await view.findByTestId('review-center-family');
-    const rail = view.getByTestId('review-catalogue-navigation');
+    const rail = view.getByTestId('review-tree');
     expect(rail.textContent).toContain('Old outline title');
     const workspace = view.getByTestId('review-workspace');
     const refresh = view.getByTestId('review-refresh');
@@ -963,7 +920,11 @@ it.each(['memory', 'code'] as const)(
     expect(rail.textContent).not.toContain('Old outline title');
     expect(rail.textContent).not.toContain('Old outline summary');
     expect(rail.querySelector('[data-testid="review-outline-badge"]')).toBeNull();
-    expect(rail.textContent).toContain('Reading families and invariants for this comparison');
+    expect(within(rail).queryAllByTestId('review-family-open')).toHaveLength(0);
+    // The tree says the next generation's catalogue is being read, in its status line.
+    expect(within(rail).getByTestId('review-change-status').textContent).toContain(
+      'Reading families and invariants for this comparison',
+    );
     expect(document.activeElement).toBe(refresh);
     const reads = server.requests.length;
     await act(async () => server.release(outlineReply(world.nextOutline)));
@@ -998,14 +959,15 @@ it('F04 makes a failed generation reread explicit without reviving the prior sem
       },
     }),
   );
-  const rail = view.getByTestId('review-catalogue-navigation');
+  const rail = view.getByTestId('review-tree');
   await waitFor(() =>
     expect(rail.textContent).toContain('New generation catalogue could not be read.'),
   );
   expect(rail.textContent).not.toContain('Old outline title');
   expect(rail.textContent).not.toContain('Old outline summary');
   expect(rail.querySelector('[data-testid="review-outline-badge"]')).toBeNull();
-  expect(rail.textContent).toContain('catalogue for this comparison is unavailable');
+  expect(within(rail).getByTestId('review-change-status').textContent).toBe('New generation catalogue could not be read.');
+  expect(within(rail).queryAllByTestId('review-family-open')).toHaveLength(0);
   expect(server.requests.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(2);
 });
 
@@ -1030,7 +992,7 @@ it('F04 ignores a late catalogue answer superseded by another admitted generatio
   );
   const latest = structuredClone(world.nextOutline);
   latest.families[0].title = 'Latest matching catalogue';
-  const rail = view.getByTestId('review-catalogue-navigation');
+  const rail = view.getByTestId('review-tree');
   await act(async () => server.release(outlineReply(latest), 1));
   await waitFor(() => expect(rail.textContent).toContain('Latest matching catalogue'));
   await act(async () => server.release(outlineReply(world.nextOutline), 0));

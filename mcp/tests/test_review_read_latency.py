@@ -103,7 +103,7 @@ class Ports:
     """The four review ports of the dashboard's composition root, as the routes call them."""
 
     review: Callable[[ReviewSurfaceRequest], KnowledgeReviewResult]
-    entries: Callable[[str, str, str], Any]
+    entries: Callable[[str, str, str, int | None], Any]
     summary: Callable[[str, str, str], Any]
     trees: Callable[[ReviewTreesQuery], ReviewTreesResult]
 
@@ -116,7 +116,7 @@ def _ports(world: World) -> Ports:  # noqa: F811
     return Ports(
         review=ports.knowledge_review,
         entries=ports.knowledge_review_entries,
-        summary=lambda repo, master, leaf: summary_read(repo, master, leaf, lambda _: None),
+        summary=lambda repo, master, leaf: summary_read(repo, master, leaf, None, lambda _: None),
         trees=ports.review_trees,
     )
 
@@ -256,7 +256,7 @@ def test_a_subject_read_resolves_once_and_captures_each_worktree_once_and_for_th
     # The other reads of the surface resolve once too and capture once: they publish no comparison
     # of their own that a moved candidate could be bound to.
     for read in (
-        lambda: ports.entries(REPO, MASTER, LEAF),
+        lambda: ports.entries(REPO, MASTER, LEAF, None),
         lambda: ports.summary(REPO, MASTER, LEAF),
         lambda: ports.trees(_query()),
     ):

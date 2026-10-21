@@ -5,6 +5,7 @@ import { cleanup, render, within } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import type { ReviewFamilyContextEntry, ReviewFamilyGuarantee, ReviewResult } from '../../data/review';
 import { guaranteeComparison } from '../../data/review';
+import { DiffPane } from '../changeset/DiffPane';
 import { GuaranteeComparisonBlock } from './FamilyGuarantees';
 import { TreeComparisonScope } from './IntentWordDiff';
 
@@ -88,4 +89,17 @@ it('retains the current raw same-revision control as unchanged revision, not ide
   expect(block.textContent).toContain('Guarantee unchanged · same recorded revision');
   expect(within(block).getAllByText(after.joint_guarantee, { exact: true })).toHaveLength(1);
   expect(view.queryByTestId('review-center-guarantee-identical-text')).toBeNull();
+});
+
+// E6: a changed guarantee's diff sizes to its content (`fit`), so the selected family adds no scroll
+// container of its own on the review page.
+it('draws a changed guarantee in a fit diff pane', async () => {
+  const changed = structuredClone(distinctRevisions);
+  changed.after.guarantee!.joint_guarantee = 'A published review retains both recorded operands and their identities.';
+  const fit = render(<DiffPane before="" after="" language="text" mode="inline" collapse={false} fit />);
+  const fitClass = fit.getByTestId('diff-pane').className;
+  fit.unmount();
+  const view = render(<GuaranteeComparisonBlock entry={changed} layout="inline" />);
+  const block = view.getByTestId('review-center-guarantee-changed');
+  expect(within(block).getByTestId('diff-pane').className).toBe(fitClass);
 });

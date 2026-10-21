@@ -1,13 +1,11 @@
-// What the reviewer has already read for the comparison on screen, so returning to a subject or
-// reopening a file costs no request.
+// What the reviewer has already read for the comparison on screen, so returning to a subject costs no
+// request.
 //
 // WHAT IS KEPT, AND UNDER WHICH KEY
 //
 //   * A subject's whole review, under the read cycle's own question key (task context, record,
 //     subject). Paged questions are not kept: a roster walk is a continuation of the retained page and
 //     stays owned by the read cycle.
-//   * A changed file's content, under exactly the fields its request names (task context, path and
-//     the two code tree ids). One answer carries both sides, so the side needs no key of its own.
 //   * Only answers. A refusal or a failure is asked again, because it may describe a transient state
 //     rather than the immutable comparison.
 //
@@ -19,15 +17,12 @@
 // subject the reader returns to is never one read against a comparison the surface has left. The
 // reader's refresh forgets the question it re-asks, so a refresh always reaches the server.
 //
-// BOUNDS. Both stores are capped and evict the least recently used entry, and the cache belongs to
+// BOUNDS. The store is capped and evicts the least recently used entry, and the cache belongs to
 // one mounted review surface: it is reclaimed with it. It is a working surface, never a record.
 
-import { createContext } from 'react';
-
-import type { ReviewPayload, ReviewSourceContentResult } from '../../data/review';
+import type { ReviewPayload } from '../../data/review';
 
 export const REVIEW_CACHE_LIMIT = 24;
-export const SOURCE_CACHE_LIMIT = 32;
 
 class BoundedStore<V> {
   private readonly entries = new Map<string, V>();
@@ -92,22 +87,10 @@ export function sameGeneration(known: ComparisonGeneration, next: ComparisonGene
     : known.snapshots === next.snapshots;
 }
 
-export function sourceContentKey(
-  repo: string,
-  master: string,
-  leaf: string,
-  path: string,
-  beforeCodeTreeId: string,
-  afterCodeTreeId: string,
-): string {
-  return JSON.stringify([repo, master, leaf, path, beforeCodeTreeId, afterCodeTreeId]);
-}
-
 export class ReviewReadCache {
   inputEpoch = 0;
   private readonly reviews = new BoundedStore<ReviewPayload>(REVIEW_CACHE_LIMIT);
-  private readonly sources = new BoundedStore<ReviewSourceContentResult>(SOURCE_CACHE_LIMIT);
-  // The generation every kept entry was read under; a different one empties both stores.
+  // The generation every kept entry was read under; a different one empties the store.
   private generation: ComparisonGeneration | null = null;
 
   review(key: string): ReviewPayload | undefined {
@@ -121,7 +104,6 @@ export class ReviewReadCache {
     const known = this.generation;
     if (known !== null && !sameGeneration(known, next)) {
       this.reviews.clear();
-      this.sources.clear();
       this.generation = next;
       return;
     }
@@ -152,19 +134,7 @@ export class ReviewReadCache {
     this.reviews.clear();
   }
 
-  source(key: string): ReviewSourceContentResult | undefined {
-    return this.sources.get(key);
-  }
-
-  keepSource(key: string, result: ReviewSourceContentResult): void {
-    if (result.state === 'content' && result.expansion) this.sources.set(key, result);
-  }
-
-  get sizes(): { reviews: number; sources: number } {
-    return { reviews: this.reviews.size, sources: this.sources.size };
+  get sizes(): { reviews: number } {
+    return { reviews: this.reviews.size };
   }
 }
-
-// The surface provides its cache to the source content it renders; content rendered outside a review
-// surface has none and reads every time, as before.
-export const ReviewReadCacheContext = createContext<ReviewReadCache | null>(null);

@@ -24,6 +24,8 @@ import { arEmbedList } from "./shared/rpc";
 //   client/bridge.ts  the control channel with the dashboard and who the parent page is
 //   client/hierarchy.ts public SDK catalog and agent-specific Parent actions, while trusted
 //   client/selection.ts pinned web DOM adapter for the set of visible selected native chats
+//   client/pick.ts    the tray: chat text picks, copy on highlight, the message box's rectangle
+//                     and the tray's reserved space
 //   client/start.ts   the decision: which parent is trusted and what follows (it reads the
 //                     page's origin and nothing else)
 //

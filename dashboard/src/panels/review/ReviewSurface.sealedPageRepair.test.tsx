@@ -27,10 +27,14 @@ const lane = captured<{ state: string; comparison: { number: number }; lane: unk
 const changes = captured<TaskChangeset>('l86.changeset.captured.json');
 const diffs = captured<Record<string, FileDiff>>('l86.file-diffs.captured.json');
 const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+// The page opens with nothing selected (MIK-R89 v2 rule 2): these cases open the captured family by
+// its selector, which is the subject the old auto-selection chose.
+const familyId = catalogue.outline!.families.find((one) => one.id === 'FAM-2HBJREC2')!.selector_id;
+const familyTarget = { ...target, selectorKind: 'family' as const, selectorId: familyId };
 
 it('F05 main attribution uses the held destination counts and states pending without another read', async () => {
   const { release, asked } = serve(undefined, 'lane');
-  const view = render(<ReviewSurface {...target} />);
+  const view = render(<ReviewSurface {...familyTarget} />);
   await view.findByTestId('review-center-family');
   expect(view.getByTestId('review-remaining').dataset.attributionSource).toBe('lane');
   expect(view.getByTestId('review-remaining').textContent).toContain('Attribution pending');
@@ -70,10 +74,12 @@ it('F08 every non-tree complete-file trigger gives a named refusal without selec
       return response(url.pathname.endsWith('/entries') ? unavailable : nonTree);
     }),
   );
-  const view = render(<ReviewSurface {...target} />);
+  const view = render(<ReviewSurface {...familyTarget} />);
   await view.findByTestId('review-center-family');
+  // The one "All changes" link is the tree's (MIK-R89 v2 rule 7); no card or pane repeats it.
   const triggers = view.getAllByRole('button', { name: /^All changes/ });
-  expect(triggers.length).toBeGreaterThan(1);
+  expect(triggers).toHaveLength(1);
+  expect(triggers[0].closest('[data-testid="review-tree"]')).not.toBeNull();
   for (const trigger of triggers) {
     trigger.focus();
     fireEvent.click(trigger);
@@ -132,6 +138,8 @@ it('F04 an opened comparison retains its lane and inventory after a held subject
       const url = new URL(address, 'http://localhost');
       asked.push(url);
       if (url.pathname.endsWith('/entries')) return response(catalogue);
+      if (url.pathname.endsWith('/summary'))
+        return response({ state: 'unavailable', refusal: { code: 'not-served', detail: 'Not part of this check.', next_action: 'n' } });
       if (url.pathname === '/api/review/intent') {
         if (url.searchParams.get('selectorKind') === 'invariant')
           return await new Promise<Response>((resolve) => {
@@ -157,16 +165,16 @@ it('F04 an opened comparison retains its lane and inventory after a held subject
       throw new Error(`Unexpected ${url}`);
     }),
   );
-  const view = render(<ReviewSurface {...target} />);
+  const view = render(<ReviewSurface {...familyTarget} />);
   await view.findByTestId('review-center-family');
-  const rail = view.getByTestId('review-catalogue-navigation');
-  await waitFor(() => expect(rail.textContent).toMatch(/Changes without an invariant\s*167/));
-  fireEvent.click(
-    rail.querySelector(`[data-selector-id="${selectedMemberId}"]`) ??
-      within(rail).getByRole('button', { name: /INV-1XKX9ERN/ }),
-  );
+  const tree = view.getByTestId('review-tree');
+  // The tree's lane row counts the lane's bucket files (MIK-R86 v2 rule 4; W14).
+  await waitFor(() => expect(within(tree).getByTestId('review-tree-lane').textContent).toContain('138 files'));
+  fireEvent.click(tree.querySelector(`[data-subject-id="${selectedMemberId}"]`)!);
   await waitFor(() => expect(releaseSubject).toBeDefined());
-  fireEvent.click(within(rail).getByRole('button', { name: /^Changes without an invariant/ }));
+  fireEvent.click(
+    within(tree).getAllByTestId('review-tree-full-page').find((link) => link.dataset.destination === 'unexplained')!,
+  );
   const page = await view.findByTestId('changeset-viewer');
   await waitFor(() => expect(within(page).getByText('changed code (167)')).toBeTruthy());
   newComparison = true;

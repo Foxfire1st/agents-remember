@@ -1,35 +1,29 @@
-// Synthetic leaf facts over a current public task answer: verifies workspace wiring, not classification.
-import { render, cleanup } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
-import task from './l86.member.captured.json';
-import trees from './l86.trees.captured.json';
-import type { ReviewPayload, ReviewOutline } from '../../data/review';
-import type { ReviewTreesRead } from '../../data/reviewTrees';
-import { ReviewWorkspace, useWorkspaceState, type ReadingStatus } from './ReviewWorkspace';
+// The mounted review page over the L37 captures (l86.test-utils.ts) with synthetic movement facts on
+// the captured answers: verifies the page's wiring, not classification. The movement owners' states
+// stand in the status chip's four-row popover and their raw records in the closed Technical details
+// (MIK-R89 v2 rule 6); the one leaf-wide read feeds the tree's code facts and Worklist row.
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { ReviewPayload, ReviewResult } from '../../data/review';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
+import { ReviewSurface } from './ReviewSurface';
+import { captured, catalogue, replyFor, target } from './l86.test-utils';
 
-// Synthetic presentation composition over genuine captured data; not producer/classification evidence.
-const payload = task.payload as unknown as ReviewPayload;
-const outline: ReviewOutline = { state: 'outlined', detail: 'Synthetic', families: [{
-  id: 'FAM-AAAAAA', selector_id: 'family', title: 'A family', change: 'unchanged',
-  members: [{ id: 'INV-AAAAAA', selector_id: 'one', membership: 'both' }],
-}], invariants: [{ id: 'INV-AAAAAA', selector_id: 'one', summary: 'Code-only member', change: 'unchanged' }] };
-const ready: ReviewTreesRead = { phase: 'trees', trees: { ...trees,
-  code_changes: { state: 'facts', invariants: [{ invariant: 'INV-AAAAAA', invariant_key: 'one',
-    implementation: 'established', proof: false, range_unresolved: false, evidence: [], unknown_reasons: [] }] },
-  worklist: { source: 'computed', state: 'complete', bound: true, history_rows: [], changes: [], incomplete: [],
-    items: [{ id: 'open', kind: 'touched_invariant', subject: 'INV-AAAAAA', facts: {} }],
-    item_states: { open: { state: 'open', reason: 'No row' } } },
-} as Extract<ReviewTreesRead, { phase: 'trees' }>['trees'] };
-function Probe({ read = ready, body = payload, reading = null }: {
-  read?: ReviewTreesRead; body?: ReviewPayload; reading?: ReadingStatus | null;
-}) {
-  const state = useWorkspaceState();
-  const candidate = body.candidate;
-  return <ReviewWorkspace payload={body} reading={reading} repo={candidate.repository_id} master={candidate.master}
-    leaf={candidate.leaf_id} state={state} leafTrees={read} onPageSelect={() => {}}
-    navigation={{ catalogue: { loading: false, entries: [], outline, refresh: () => {} }, onSelect: () => {} }} />;
-}
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+const taskCapture = captured<ReviewResult>('l86.task.captured.json');
+const familyCapture = captured<ReviewResult>('l86.family.captured.json');
+const familyOf = (id: string) => catalogue.outline!.families.find((one) => one.id === id)!.selector_id;
+// The family the family capture answers, and another changed family.
+const ANSWERED = familyOf('FAM-2HBJREC2');
+const OTHER = familyOf('FAM-7B6N3Y4Q');
+
+beforeEach(() => {
+  localStorage.clear();
+  resetCardCachesForTests();
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 type MovementState = NonNullable<ReviewPayload['sync_movement']>['binding_state'];
 function movement(owner: 'sync' | 'external', state: MovementState, epoch = '') {
@@ -46,105 +40,186 @@ function movement(owner: 'sync' | 'external', state: MovementState, epoch = '') 
     owner_specific: { channel: owner, epoch, retained: ['owner-specific fact', { count: 2 }] },
   };
 }
-function movementBody(sync: MovementState | null | undefined, external: MovementState | null | undefined, epoch = '') {
-  const body = structuredClone(payload);
+function movementBody(
+  base: ReviewResult,
+  sync: MovementState | null | undefined,
+  external: MovementState | null | undefined,
+  epoch = '',
+) {
+  const body = structuredClone(base.payload!);
   body.sync_movement = sync == null ? sync : movement('sync', sync, epoch);
   body.external_git_movement = external == null ? external : movement('external', external, epoch);
   return body;
 }
-function expectOpenState(view: ReturnType<typeof render>, text: string) {
-  const state = view.getByTestId('review-movement-status');
-  expect(state.textContent).toBe(text);
-  expect(state.dataset.reviewContent).toBe('movement-state');
-  expect(state.closest('details:not([open])')).toBeNull();
-  expect(state.textContent).not.toContain('synthetic-identity');
+
+interface Served {
+  task?: ReviewPayload;
+  // The answer of the ANSWERED family's read, held until `release`.
+  next?: ReviewPayload;
+  failing?: (url: URL) => boolean;
+  hold?: (url: URL) => boolean;
 }
-function expectOpenFacts(view: ReturnType<typeof render>, body: ReviewPayload) {
+
+function replyOf(url: URL, task: ReviewPayload, next: ReviewPayload | undefined): unknown {
+  if (url.pathname !== '/api/review/intent') return replyFor(url);
+  const selectorId = url.searchParams.get('selectorId');
+  if (!selectorId) return { ...taskCapture, payload: task };
+  return next && selectorId === ANSWERED ? { ...familyCapture, payload: next } : replyFor(url);
+}
+
+// Serves the L37 captures with the task context's answer carrying `task`.
+function serve({ task = taskCapture.payload!, next, failing = () => false, hold = () => false }: Served = {}) {
+  const held: (() => void)[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (address: string) => {
+      const url = new URL(address, 'http://localhost');
+      if (failing(url)) throw new Error(`${url.pathname} could not be read.`);
+      const response = new Response(JSON.stringify(replyOf(url, task, next)), { status: 200 });
+      if (!hold(url)) return response;
+      return new Promise<Response>((resolve) => held.push(() => resolve(response)));
+    }),
+  );
+  return { release: () => held.splice(0).forEach((go) => go()) };
+}
+
+type View = ReturnType<typeof render>;
+const label = (view: View) => view.getByTestId('review-status-label').textContent;
+
+async function mounted(): Promise<View> {
+  const view = render(<ReviewSurface {...target} />);
+  await view.findByTestId('review-tree');
+  // The task context's answer is admitted: its movement records replace "not read".
+  await waitFor(() => expect(view.getByTestId('review-movement-facts').textContent).not.toContain('"sync_movement": "not read"'));
+  await waitFor(() => expect(label(view)).not.toBe('reading…'));
+  return view;
+}
+
+async function popoverRows(view: View): Promise<Record<string, string>> {
+  fireEvent.click(view.getByTestId('review-status-chip'));
+  const popover = await view.findByTestId('review-status-popover');
+  expect(popover.textContent).not.toContain('synthetic-identity');
+  const rows = within(popover).getAllByTestId('review-status-row') as HTMLTableRowElement[];
+  return Object.fromEntries(rows.map((row) => [row.cells[0].textContent, row.cells[1].textContent]));
+}
+
+// The raw record, once, inside the closed provenance disclosure at the bottom of the column.
+function rawRecord(view: View) {
   const facts = view.getByTestId('review-movement-facts');
-  expect(facts.closest('details:not([open])')).toBeNull();
-  expect(facts.dataset.reviewContent).toBe('movement-facts');
-  const supplied = { sync_movement: body.sync_movement, external_git_movement: body.external_git_movement };
-  expect(JSON.parse(facts.textContent!)).toEqual(JSON.parse(JSON.stringify(supplied)));
   expect(view.getAllByTestId('review-movement-facts')).toHaveLength(1);
-  expectOpenState(view, `Sync movement: ${body.sync_movement?.binding_state ?? 'not-measured'} · External Git movement: ${body.external_git_movement?.binding_state ?? 'not-measured'}`);
-  const identities = view.getByTestId('review-scope-task').closest('details')!;
-  expect(identities.open).toBe(false);
-  expect(identities.dataset.disclosure).toBe('provenance');
-  for (const closed of view.container.querySelectorAll('details:not([open])')) {
-    expect(closed.querySelector('[data-review-content]')).toBeNull();
-    for (const owner of [body.sync_movement, body.external_git_movement]) {
-      if (!owner) continue;
-      for (const text of [owner.statement, owner.reason, owner.successor_action, `"binding_state": "${owner.binding_state}"`]) {
-        if (text) expect(closed.textContent).not.toContain(text);
-      }
-    }
-  }
+  const details = facts.closest('details')!;
+  expect(details.open).toBe(false);
+  expect(details.dataset.disclosure).toBe('provenance');
+  return JSON.parse(facts.textContent!);
 }
+
+const shownValue = (body: ReviewPayload, owner: 'sync_movement' | 'external_git_movement') => {
+  const state = body[owner]?.binding_state;
+  if (!state || state === 'not-measured') return 'not measured';
+  return state === 'stale' ? 'moved' : state;
+};
+
+async function expectMovement(view: View, body: ReviewPayload, chip: string) {
+  expect(label(view)).toBe(chip);
+  const rows = await popoverRows(view);
+  expect(rows['Sync movement']).toBe(shownValue(body, 'sync_movement'));
+  expect(rows['External Git movement']).toBe(shownValue(body, 'external_git_movement'));
+  const record = rawRecord(view);
+  const supplied = {
+    sync_movement: body.sync_movement ?? 'not measured',
+    external_git_movement: body.external_git_movement ?? 'not measured',
+  };
+  expect({ sync_movement: record.sync_movement, external_git_movement: record.external_git_movement }).toEqual(
+    JSON.parse(JSON.stringify(supplied)),
+  );
+}
+
 it.each([
-  ['current sync and current external', 'current', 'current'],
-  ['stale sync and stale external', 'stale', 'stale'],
-  ['not-measured sync and not-measured external', 'not-measured', 'not-measured'],
-  ['unavailable sync and unavailable external', 'unavailable', 'unavailable'],
-  ['mixed stale sync and not-measured external', 'stale', 'not-measured'],
-] as const)('keeps both movement owners open for %s', (_label, sync, external) => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
-  const body = movementBody(sync, external);
-  const view = render(<Probe body={body} />);
-  expectOpenFacts(view, body);
-  expect(view.getByTestId('review-movement-facts').textContent).toContain('A sync moved the compared tree.');
-  if (external === 'not-measured')
-    expect(view.getByTestId('review-movement-facts').textContent).toContain('The input was an uncommitted tree.');
-});
-it.each([
-  ['sync only', 'stale', null],
-  ['external only', undefined, 'unavailable'],
-  ['neither owner', null, undefined],
-] as const)('keeps the movement presence boundary for %s', (_label, sync, external) => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
-  const body = movementBody(sync, external);
-  const view = render(<Probe body={body} />);
-  if (sync || external) expectOpenFacts(view, body);
-  else {
-    expect(view.queryByTestId('review-movement-facts')).toBeNull();
-    expectOpenState(view, 'Sync movement: not-measured · External Git movement: not-measured');
-  }
-});
-it('does not reveal previous movement facts while the next subject is pending or failed', () => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
-  const previous = movementBody('stale', 'not-measured', 'PREVIOUS-OWNER-EPOCH ');
-  const next = movementBody('current', 'unavailable', 'NEXT-OWNER-EPOCH ');
-  const view = render(<Probe body={previous} />);
-  expectOpenFacts(view, previous);
-  const reading: ReadingStatus = { key: 'next-subject', subject: 'INV-NEXT', label: 'Next subject', problem: null };
-  view.rerender(<Probe body={previous} reading={reading} />);
-  expectOpenState(view, 'Sync movement: being read · External Git movement: being read');
-  expect(view.queryByTestId('review-movement-facts')).toBeNull();
-  expect(view.container.textContent).not.toContain('PREVIOUS-OWNER-EPOCH');
-  view.rerender(<Probe body={previous} reading={{ ...reading, problem: <p>The next subject could not be read.</p> }} />);
-  expectOpenState(view, 'Sync movement: unavailable · External Git movement: unavailable');
-  expect(view.queryByTestId('review-movement-facts')).toBeNull();
-  expect(view.container.textContent).not.toContain('PREVIOUS-OWNER-EPOCH');
-  view.rerender(<Probe body={next} />);
-  expectOpenFacts(view, next);
-  expect(view.container.textContent).not.toContain('PREVIOUS-OWNER-EPOCH');
-  expect(view.getByTestId('review-movement-facts').textContent).toContain('NEXT-OWNER-EPOCH');
+  ['current sync and current external', 'current', 'current', 'branches: current'],
+  ['stale sync and stale external', 'stale', 'stale', 'branches: moved'],
+  ['not-measured sync and not-measured external', 'not-measured', 'not-measured', 'branches: not measured'],
+  ['unavailable sync and unavailable external', 'unavailable', 'unavailable', 'branches: unavailable'],
+  ['mixed stale sync and not-measured external', 'stale', 'not-measured', 'branches: moved'],
+  ['sync only', 'stale', null, 'branches: moved'],
+  ['external only', undefined, 'unavailable', 'branches: unavailable'],
+  ['neither owner', null, undefined, 'branches: not measured'],
+] as const)('states both movement owners in the chip and keeps their records for %s', async (_label, sync, external, chip) => {
+  const body = movementBody(taskCapture, sync, external);
+  serve({ task: body });
+  const view = await mounted();
+  await expectMovement(view, body, chip);
 });
 
-it('wires the one held leaf read into summary, unread tree rows and Worklist status', () => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
-  const view = render(<Probe />);
-  expect(view.getByTestId('review-navigation-summary').textContent).toContain('1 code changes');
-  expect(view.getByRole('button', { name: 'INV-AAAAAA Code-only member code changed' })).toBeTruthy();
-  expect(view.getByRole('button', { name: 'Worklist 1 open' })).toBeTruthy();
+// The chip is the task context's (Failure and Recovery): a subject's read leaves it as it was while
+// pending, its answer brings that answer's movement, and its failure stays in the subject's slot.
+it("shows the next subject's movement once it answered, and keeps a subject's pending read and failure out of the chip", async () => {
+  const previous = movementBody(taskCapture, 'stale', 'not-measured', 'PREVIOUS-OWNER-EPOCH ');
+  const next = movementBody(familyCapture, 'current', 'unavailable', 'NEXT-OWNER-EPOCH ');
+  const { release } = serve({
+    task: previous,
+    next,
+    hold: (url) => url.searchParams.get('selectorId') === ANSWERED,
+    failing: (url) => url.searchParams.get('selectorId') === OTHER,
+  });
+  const view = await mounted();
+  await expectMovement(view, previous, 'branches: moved');
+  const chip = view.getByTestId('review-status-chip');
+  const familyRow = (id: string) =>
+    view.getAllByTestId('review-family-open').find((node) => node.dataset.family === id)!;
+  fireEvent.click(familyRow(ANSWERED));
+  await waitFor(() => expect(view.getByTestId('review-subject-slot').dataset.slotState).toBe('pending'));
+  expect(label(view)).toBe('branches: moved');
+  expect(view.getByTestId('review-status-chip')).toBe(chip);
+  await act(async () => release());
+  await waitFor(() => expect(label(view)).toBe('branches: unavailable'));
+  await expectMovement(view, next, 'branches: unavailable');
+  expect(view.getByTestId('review-movement-facts').textContent).not.toContain('PREVIOUS-OWNER-EPOCH');
+  fireEvent.click(familyRow(OTHER));
+  await waitFor(() => expect(view.getByTestId('review-subject-slot').dataset.slotState).toBe('unavailable'));
+  expect(label(view)).toBe('branches: unavailable');
+  expect(view.getByTestId('review-status-chip')).toBe(chip);
 });
 
-it('separates file attribution from open work and does not call an unmeasured inventory empty', () => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')));
-  const body = structuredClone(payload);
-  body.source.inventory = { ...body.source.inventory, state: 'unavailable', listed_total: 0, entries: [] };
-  const view = render(<Probe read={{ phase: 'loading' }} body={body} />);
-  expect(view.getByRole('button', { name: /Changes without an invariant/ })).toBeTruthy();
-  expect(view.getByRole('button', { name: /Changes of unknown attribution/ })).toBeTruthy();
-  expect(view.getByRole('button', { name: 'Worklist …' })).toBeTruthy();
-  expect(view.getByTestId('review-navigation-summary').textContent).toContain('the change set could not be measured');
+it("wires the one leaf-wide read into the tree's code facts, a code-changed row and the Worklist row", async () => {
+  serve();
+  const view = await mounted();
+  const trees = captured<{ code_changes: { invariants: { invariant: string; implementation: string }[] } }>('l86.trees.captured.json');
+  const established = new Set(
+    trees.code_changes.invariants.filter((fact) => fact.implementation === 'established').map((fact) => fact.invariant),
+  );
+  const codeOnly = catalogue.outline!.invariants.filter((row) => row.change === 'unchanged' && established.has(row.id));
+  // The line counts these invariants (finding 4): their record is unchanged, their code changed.
+  expect(codeOnly.length).toBeGreaterThan(1);
+  await waitFor(() =>
+    expect(view.getByTestId('review-code-facts-status').textContent).toBe(
+      `${codeOnly.length} invariants changed only in their code.`,
+    ),
+  );
+  const row = view
+    .getAllByTestId('review-family-member-open')
+    .find((node) => node.dataset.subjectId === codeOnly[0].selector_id)!;
+  expect(row.dataset.changePrimary).toBe('code changed');
+  expect(row.getAttribute('aria-label')).toContain('code changed');
+  expect(view.getByTestId('review-tree-worklist').getAttribute('aria-label')).toBe('Worklist 518 open');
+});
+
+it('separates file attribution from open work and does not call an unmeasured change set empty', async () => {
+  const { release } = serve({
+    failing: (url) => url.pathname === '/api/review/intent/summary' || url.searchParams.has('lane'),
+    hold: (url) => url.pathname === '/api/review/trees' && !['lane', 'invariants', 'file'].some((name) => url.searchParams.has(name)),
+  });
+  const view = await mounted();
+  await waitFor(() =>
+    expect(view.getByTestId('review-tree-lane').getAttribute('aria-label')).toBe('Code without invariant unavailable'),
+  );
+  expect(view.getByTestId('review-tree-worklist').getAttribute('aria-label')).toBe('Worklist …');
+  expect(view.getByTestId('review-summary-lane').textContent).toBe('files without invariant: unavailable');
+  expect(view.getByTestId('review-tree-counts').textContent).not.toMatch(/\b0 files/);
+  expect(view.getByTestId('review-tree-counts').textContent).toContain('file count unavailable');
+  expect(view.getByTestId('review-tree-counts').textContent).not.toMatch(/unavailable files/);
+  await act(async () => release());
+  await waitFor(() =>
+    expect(view.getByTestId('review-tree-worklist').getAttribute('aria-label')).toBe('Worklist 518 open'),
+  );
+  expect(view.getByTestId('review-tree-lane').getAttribute('aria-label')).toBe('Code without invariant unavailable');
 });

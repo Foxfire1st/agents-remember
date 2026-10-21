@@ -38,10 +38,15 @@ function mount(body: ReviewResult, width: number) {
     leaf={payload.candidate.leaf_id} history="recorded" selectorKind={selection.record_kind}
     selectorId={selection.record_id} onBack={() => undefined} />);
 }
-function assertOrigin(area: HTMLElement, side: string, origin: ReviewOrigin) {
-  const block = within(area).getByTestId(`review-origin-${side}`);
-  expect(block.closest('details')).toBeNull();
-  expect(block.hidden).toBe(false);
+// The record's origin is the leaf that introduced it, which no revision updates: Technical details
+// name it "introduced by" in their closed provenance fold, never as a side's writer (MIK-R89 v2
+// rules 1 and 6, amended 9dde2b09). Every supplied value stays reachable there.
+function assertOrigin(area: HTMLElement, testid: string, origin: ReviewOrigin) {
+  const block = within(area).getByTestId(testid);
+  expect(block.closest('details')?.dataset.disclosure).toBe('provenance');
+  expect(block.closest('details')?.open).toBe(false);
+  expect(block.textContent).toContain(`introduced by ${origin.leaf ?? `task ${origin.task}`}`);
+  expect(block.textContent).not.toMatch(/(before|after) origin/);
   for (const value of [origin.task, origin.leaf, origin.wave, origin.handoffEntry, origin.handoff?.path, ...origin.handoff?.evidence ?? []]) {
     if (value) expect(block.textContent).toContain(value);
   }
@@ -49,15 +54,18 @@ function assertOrigin(area: HTMLElement, side: string, origin: ReviewOrigin) {
 
 for (const width of [1280, 390]) {
   for (const [kind, raw] of [['family', familyRaw], ['invariant', invariantRaw], ['family hand-off', handoffRaw]] as const) {
-    it(`shows both supplied native ${kind} origins without disclosure at ${width}px`, async () => {
+    it(`keeps the supplied native ${kind} origins in the closed Technical details at ${width}px`, async () => {
       const body = raw as unknown as ReviewResult;
       const view = mount(body, width);
-      const area = await waitFor(() => view.getByTestId(kind.startsWith('family') ? 'review-center-family' : 'review-center-column'));
-      for (const side of ['before', 'after'] as const) {
-        const origin = body.payload!.knowledge[`${side}_origin`];
-        expect(origin).toBeDefined();
-        assertOrigin(area, side, origin!);
-      }
+      await waitFor(() => view.getByTestId(kind.startsWith('family') ? 'review-center-family' : 'review-center-member'));
+      const area = view.getByTestId('review-subject-provenance');
+      const { before_origin: before, after_origin: after } = body.payload!.knowledge;
+      expect(before).toBeDefined();
+      expect(after).toBeDefined();
+      if (JSON.stringify(before) === JSON.stringify(after)) assertOrigin(area, 'review-origin', after!);
+      else for (const [side, origin] of [['before', before!], ['after', after!]] as const) assertOrigin(area, `review-origin-${side}`, origin);
+      // Nothing of the origin stands in the subject's reading before its content.
+      expect(within(view.getByTestId('review-subject-slot')).queryByText(/introduced by|origin:/)).toBeNull();
     });
   }
 }
@@ -67,8 +75,9 @@ it('keeps distinct family task, leaf/wave and hand-off entries on their own side
   body.payload!.knowledge.before_origin = { task: 'before-task', leaf: 'before-leaf', handoffEntry: 'before-entry' };
   body.payload!.knowledge.after_origin = { task: 'after-task', wave: 'after-wave', handoffEntry: 'after-entry', handoff: { path: 'after-handoff.json', evidence: ['after-evidence'] } };
   const view = mount(body, 390);
-  const area = await waitFor(() => view.getByTestId('review-center-family'));
-  for (const side of ['before', 'after'] as const) assertOrigin(area, side, body.payload!.knowledge[`${side}_origin`]!);
+  await waitFor(() => view.getByTestId('review-center-family'));
+  const area = view.getByTestId('review-subject-provenance');
+  for (const side of ['before', 'after'] as const) assertOrigin(area, `review-origin-${side}`, body.payload!.knowledge[`${side}_origin`]!);
   expect(within(area).getByTestId('review-origin-before').textContent).not.toContain('after-task');
   expect(within(area).getByTestId('review-origin-after').textContent).not.toContain('before-task');
 });

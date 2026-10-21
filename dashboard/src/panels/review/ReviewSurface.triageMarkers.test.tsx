@@ -48,7 +48,7 @@ function answer(url: URL): unknown {
 
 beforeEach(() => {
   localStorage.clear();
-  treeOrderStore.getState().setOrder('triage');
+  treeOrderStore.getState().setOrder('priority');
   treeViewStore.getState().setView('all');
   vi.stubGlobal('fetch', vi.fn(async (address: string) => {
     const url = new URL(address, 'http://localhost');
@@ -83,10 +83,9 @@ async function toUnknownTarget(view: ReturnType<typeof open>) {
     expect(found).toBeTruthy();
     return found!;
   });
-  fireEvent.click(within(card).getByTestId('review-card-full-file'));
-  const content = await view.findByTestId('review-card-full-file-content');
+  // The card's excerpt draws the hunk's mark (a card has no Full file of its own, MIK-R89 v2 rule 4).
   const mark = await waitFor(() => {
-    const found = within(content).queryAllByTestId('review-hunk-mark').find(
+    const found = within(card).queryAllByTestId('review-hunk-mark').find(
       (node) => node.dataset.hunk === '124:1:124:1',
     );
     expect(found).toBeTruthy();
@@ -121,10 +120,10 @@ it('states the native unknown reason once per focus/reading zone without inventi
   expect(row!.textContent).not.toMatch(/Attribution unknown|membership unknown/);
   expect(document.activeElement).toBe(rail);
   expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
-  expect(view.getByTestId('review-workspace').dataset.markerReturn).toBe('open');
+  expect(view.getByTestId('review-surface').dataset.markerReturn).toBe('open');
   fireEvent.click(view.getByTestId('review-marker-return'));
   await waitFor(() => expect(document.activeElement?.getAttribute('data-hunk')).toBe('124:1:124:1'));
-  expect(view.getByTestId('review-workspace').dataset.markerReturn).toBeUndefined();
+  expect(view.getByTestId('review-surface').dataset.markerReturn).toBeUndefined();
 });
 
 it('does not steal focus from a held marker return when its outline is unavailable', async () => {

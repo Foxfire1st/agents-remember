@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import patch
 
 from agents_remember.application.role_launch_context import selection_binding
+from agents_remember.cli.developer_seats import seat_list
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.role_document_chat_tree import document_chat_tree
 from agents_remember.cli.role_launch_receipts import RECEIPT_SCHEMA, _receipt_path
@@ -435,6 +436,16 @@ class AgentStateScriptTests(unittest.TestCase):
             ended = document_chat_tree(self.config, selections)
         self.assertEqual([row["agentId"] for row in ended["chats"][0]["agents"]], ["agent-250"])
         self.assertEqual(ended["chats"][1], {"agents": []})
+        # The developer's seat list (MIK-R188 rule 7) reads the same listing: the Manager's agent
+        # on the host's second page is a seat, and a listing that did not end leaves it incomplete.
+        with self.runtime(listing=listing):
+            seats = seat_list(self.config, 0)
+        self.assertEqual(
+            ([row["agentId"] for row in seats["seats"]], seats["complete"]), (["agent-250"], True)
+        )
+        with self.runtime(listing={**listing, "cursorless": True}):
+            cut = seat_list(self.config, 0)
+        self.assertEqual((cut["seats"], cut["complete"]), ([], False))
 
     def test_agent_resume_opens_a_closed_session_and_leaves_every_other_agent_alone(self) -> None:
         resume_read = {

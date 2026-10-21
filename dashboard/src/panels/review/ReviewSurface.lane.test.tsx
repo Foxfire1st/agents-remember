@@ -1,4 +1,5 @@
-// R86 replaces the lane/explorer's file lists with the actual comparison viewer.
+// R86 replaces the lane/explorer's file lists with the actual comparison viewer; MIK-R89 v2 rule 7
+// reaches it from the tree: the one "All changes" link and "Code without invariant"'s "Full page".
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ReviewSurface } from './ReviewSurface';
@@ -15,12 +16,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 const lane = captured<{ lane: ReviewUnexplainedLane }>('l86.lane.captured.json').lane;
+const laneRow = (view: ReturnType<typeof render>) => view.getByTestId('review-tree-lane');
+
 it('draws each destination in the existing page in the lane answer order, with its one reason sentence', async () => {
   serve();
   const view = render(<ReviewSurface {...target} />);
-  const rail = await view.findByTestId('review-catalogue-navigation');
-  await waitFor(() => expect(rail.textContent).toMatch(/Changes without an invariant\s*167/));
-  fireEvent.click(within(rail).getByRole('button', { name: /^Changes without an invariant/ }));
+  await waitFor(() => expect(laneRow(view).getAttribute('aria-label')).toBe(`Code without invariant ${lane.unexplained_changes!.bucket_files} files`));
+  const full = view.getAllByTestId('review-tree-full-page');
+  expect(full.map((link) => link.dataset.destination)).toEqual(['unexplained']);
+  fireEvent.click(full[0]);
   const page = await view.findByTestId('changeset-viewer');
   await waitFor(() => expect(page.querySelector('[data-active="true"]')).not.toBeNull());
   const code = within(page).getByText('changed code (167)').parentElement!;
@@ -40,15 +44,17 @@ it('draws each destination in the existing page in the lane answer order, with i
   ).toHaveLength(1);
   expect(page.querySelectorAll('details')).toHaveLength(0);
 });
+
 it('keeps All working while lane counts are being read, and never supplies guessed buckets', async () => {
   const { release } = serve(undefined, 'lane');
   const view = render(<ReviewSurface {...target} />);
-  const rail = await view.findByTestId('review-catalogue-navigation');
-  await view.findByTestId('review-center-family');
-  expect(view.getByTestId('review-navigation-summary').textContent).toContain(
-    '… files without an invariant',
+  // The tree's lane row reads "…" while the lane is read; the summary's count is read 1's own (W14).
+  await waitFor(() => expect(laneRow(view).getAttribute('aria-label')).toBe('Code without invariant …'));
+  await waitFor(() =>
+    expect(view.getByTestId('review-summary-lane').textContent).toContain(`${lane.unexplained} files without invariant`),
   );
-  fireEvent.click(within(rail).getByRole('button', { name: /^All changes/ }));
+  expect(view.queryAllByTestId('review-tree-full-page')).toHaveLength(0);
+  fireEvent.click(view.getByTestId('review-all-changes'));
   const page = await view.findByTestId('changeset-viewer');
   expect(
     within(page)
@@ -71,16 +77,17 @@ it('keeps All working while lane counts are being read, and never supplies guess
     ).toBe(false),
   );
 });
+
 it('states an unanswered leaf worklist as reading in its own view, never as no gate item', async () => {
   const { release } = serve(undefined, 'worklist');
   const view = render(<ReviewSurface {...target} />);
-  const rail = await view.findByTestId('review-catalogue-navigation');
-  await view.findByTestId('review-center-family');
-  fireEvent.click(within(rail).getByRole('button', { name: /^Worklist/ }));
+  const worklist = await view.findByTestId('review-tree-worklist');
+  await waitFor(() => expect(worklist.getAttribute('aria-label')).toBe('Worklist …'));
+  fireEvent.click(worklist);
   expect(view.getByTestId('review-worklist-view').textContent).toContain(
     "Reading the leaf's worklist",
   );
   expect(view.queryByText('No worklist item names this record.')).toBeNull();
   await act(async () => release());
-  await waitFor(() => expect(rail.textContent).toMatch(/Worklist\s*518 open/));
+  await waitFor(() => expect(worklist.textContent).toMatch(/Worklist\s*518 open/));
 });

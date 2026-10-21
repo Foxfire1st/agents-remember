@@ -27,7 +27,13 @@ const entry = taskEntry({
 const bodies = [captured<ReviewResult>('subjectReview.successorFamily.captured.json'), captured<ReviewResult>('l86.family.captured.json')];
 const families = bodies.map((body) => body.payload!.family_context!.entries[0]);
 const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+// The task entry's summary read. The review page reads its own summary for the comparison on screen
+// (`comparison=<n>`, MIK-R89 v2 rule 2's read 1); these cases count the entry's.
+const entrySummary = (url: URL) => url.pathname.endsWith('/summary') && !url.searchParams.has('comparison');
 afterEach(() => { cleanup(); dispose?.(); vi.unstubAllGlobals(); });
+// The family label the shown answer carries: Technical details' provenance names each family read
+// with its own label (MIK-R89 v2 rule 6, amended 9dde2b09).
+const familyRead = (view: ReturnType<typeof render>) => view.getByTestId('review-subject-provenance').textContent;
 
 it('reconciles an explicit subject and entry read before the first native readiness baseline', async () => {
   // Consumer schedule, not native timing proof: hold the first SSE baseline until both HTTP
@@ -51,7 +57,7 @@ it('reconciles an explicit subject and entry read before the first native readin
   }));
   const view = render(<IntentEntryRevalidation shown={true}><DocChangeSetBar kind="leaf" entry={entry} onOpen={() => undefined} /><ReviewSurface {...target} selectorKind="family" selectorId={selected.family_id} onBack={() => undefined} /></IntentEntryRevalidation>);
   const reviews = () => urls.filter((url) => url.pathname === '/api/review/intent');
-  const summaries = () => urls.filter((url) => url.pathname.endsWith('/summary'));
+  const summaries = () => urls.filter(entrySummary);
   await waitFor(() => {
     expect(view.getByTestId('review-center-family').dataset.family).toBe(selected.family_id);
     expect(view.getByTestId('open-intent-review').textContent).toContain('+1 −0');
@@ -61,7 +67,7 @@ it('reconciles an explicit subject and entry read before the first native readin
   edited = true;
   act(() => publishReviewMemory({ ...target, revision: 'ready-baseline:0' }));
   await waitFor(() => {
-    expect(view.getByTestId('review-center-family').textContent).toContain('Only pre-arm edit');
+    expect(familyRead(view)).toContain('Only pre-arm edit');
     expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0');
   });
   expect(reviews()).toHaveLength(2);
@@ -94,7 +100,7 @@ it('refreshes the actual selected review and mounted entry once, without resurre
     }
     return response(replyFor(url));
   }));
-  const view = render(<IntentEntryRevalidation shown={true}><DocChangeSetBar kind="leaf" entry={entry} onOpen={() => undefined} /><ReviewSurface {...target} onBack={() => undefined} /></IntentEntryRevalidation>);
+  const view = render(<IntentEntryRevalidation shown={true}><DocChangeSetBar kind="leaf" entry={entry} onOpen={() => undefined} /><ReviewSurface {...target} selectorKind="family" selectorId={families[0].family_id} onBack={() => undefined} /></IntentEntryRevalidation>);
   const reviews = () => urls.filter((url) => url.pathname === '/api/review/intent');
   await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id));
   expect(view.getByTestId('open-intent-review').textContent).toContain('+1 −0');
@@ -106,14 +112,14 @@ it('refreshes the actual selected review and mounted entry once, without resurre
   changed = true;
   act(() => { publishReviewMemory({ ...target, master: 'other', revision: 'ignored' }); publishReviewMemory({ ...target, revision: 'next' }); });
   await waitFor(() => expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0'));
-  await waitFor(() => expect(view.getByTestId('review-center-family').textContent).toContain('Updated watched family'));
+  await waitFor(() => expect(familyRead(view)).toContain('Updated watched family'));
   expect(reviews()).toHaveLength(4);
   expect(reviews()[3].searchParams.get('selectorId')).toBe(families[1].family_id);
   expect(reviews()[3].searchParams.get('previousBindingDigest')).not.toBeNull();
   await waitFor(() => expect(view.getAllByTestId('review-family-open').length).toBeGreaterThan(0));
   fireEvent.click(view.getAllByTestId('review-family-open').find((button) => button.dataset.subjectId === families[0].family_id)!);
   await waitFor(() => expect(reviews()).toHaveLength(5));
-  expect(urls.filter((url) => url.pathname.endsWith('/summary'))).toHaveLength(3);
+  expect(urls.filter(entrySummary)).toHaveLength(3);
   // Readiness returned the same comparison; only the later changed comparison renews the catalogue.
   expect(urls.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(2);
 });
@@ -143,15 +149,15 @@ it('rejects pre-readiness review and entry answers that arrive after the reconci
   ready = true;
   act(() => publishReviewMemory({ ...target, revision: 'ready-baseline:0' }));
   await waitFor(() => {
-    expect(view.getByTestId('review-center-family').textContent).toContain('Reconciled generation');
+    expect(familyRead(view)).toContain('Reconciled generation');
     expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0');
   });
   await act(async () => initial.forEach((resolve) => resolve()));
-  expect(view.getByTestId('review-center-family').textContent).not.toContain('Obsolete initial snapshot');
-  expect(view.getByTestId('review-center-family').textContent).toContain('Reconciled generation');
+  expect(familyRead(view)).not.toContain('Obsolete initial snapshot');
+  expect(familyRead(view)).toContain('Reconciled generation');
   expect(view.getByTestId('open-intent-review').textContent).toContain('+2 −0');
   expect(urls.filter((url) => url.pathname === '/api/review/intent')).toHaveLength(2);
-  expect(urls.filter((url) => url.pathname.endsWith('/summary'))).toHaveLength(2);
+  expect(urls.filter(entrySummary)).toHaveLength(2);
 });
 
 function deferredSurface() {
@@ -171,7 +177,8 @@ function deferredSurface() {
     }
     return response(replyFor(url));
   }));
-  const view = render(<ReviewSurface {...target} onBack={() => undefined} />);
+  // The page opens with nothing selected (MIK-R89 v2 rule 2): the case opens the first family.
+  const view = render(<ReviewSurface {...target} selectorKind="family" selectorId={families[0].family_id} onBack={() => undefined} />);
   return { view, reviews, pending, hold: () => { hold = true; } };
 }
 function changedBody(label: string, digest: string) {
@@ -194,10 +201,10 @@ it('never lets an earlier memory revision replace a newer visible answer', async
   act(() => publishReviewMemory({ ...target, revision: 'second-edit' }));
   await waitFor(() => expect(pending).toHaveLength(2));
   await act(async () => pending[1].resolve(changedBody('Newest watched family', 'f')));
-  await waitFor(() => expect(view.getByTestId('review-center-family').textContent).toContain('Newest watched family'));
+  await waitFor(() => expect(familyRead(view)).toContain('Newest watched family'));
   await act(async () => pending[0].resolve(changedBody('Obsolete watched family', 'e')));
-  expect(view.getByTestId('review-center-family').textContent).toContain('Newest watched family');
-  expect(view.getByTestId('review-center-family').textContent).not.toContain('Obsolete watched family');
+  expect(familyRead(view)).toContain('Newest watched family');
+  expect(familyRead(view)).not.toContain('Obsolete watched family');
   act(() => publishReviewMemory({ ...target, revision: 'second-edit' }));
   expect(reviews).toHaveLength(4);
 });
@@ -212,11 +219,15 @@ it('retains the labeled coherent generation when a memory-triggered read fails a
   act(() => publishReviewMemory({ ...target, revision: 'failed-edit' }));
   await waitFor(() => expect(pending).toHaveLength(1));
   await act(async () => pending[0].reject(new Error('Current memory could not be read')));
-  expect((await view.findByTestId('review-failure')).textContent).toContain('Current memory could not be read');
+  // The lane's own file reads are not served here and state their failures in the lane; the
+  // review's failure is the one naming the memory read.
+  const reviewFailure = () =>
+    view.queryAllByTestId('review-failure').filter((node) => node.textContent?.includes('Current memory could not be read'));
+  await waitFor(() => expect(reviewFailure()).toHaveLength(1));
   expect(view.getByTestId('review-retained-generation')).toBeTruthy();
   act(() => publishReviewMemory({ ...target, revision: 'recovered-edit' }));
   await waitFor(() => expect(pending).toHaveLength(2));
   await act(async () => pending[1].resolve(changedBody('Recovered watched family', 'f')));
-  await waitFor(() => expect(view.getByTestId('review-center-family').textContent).toContain('Recovered watched family'));
-  expect(view.queryByTestId('review-failure')).toBeNull();
+  await waitFor(() => expect(familyRead(view)).toContain('Recovered watched family'));
+  expect(reviewFailure()).toHaveLength(0);
 });

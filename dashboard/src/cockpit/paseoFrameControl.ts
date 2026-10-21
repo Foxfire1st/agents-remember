@@ -8,6 +8,7 @@ import {
   paseoFrameUrl,
   pluginNoticeText,
   pluginOpensAgents,
+  SHOWING_ABILITY,
   type AvailablePaseoFrame,
   type PaseoAgentTarget,
   type PaseoFrameShowing,
@@ -15,6 +16,7 @@ import {
   type PaseoPluginMessage,
   type PluginAbilities,
 } from "./paseoFrameModel";
+import { clearFrameTray, frameTrayReady, receiveFrameTray, setFrameChat, type FrameTrayLink } from "./frameTrayChannel";
 
 /**
  * How long the embedded application has to report ready after a load, how long a request to
@@ -102,6 +104,12 @@ export class PaseoFrameControl {
   // latest and never an intermediate. A lone selection loads when the window expires. The
   // ready report, Retry, host return, or a new deadline preempts the window.
   private settleTimer: number | null = null;
+  // The tray's part of the channel (frameTrayChannel.ts): linked while a plug-in that picks is
+  // ready, so the tray's wishes go out as `ar.tray` / `ar.tray-space` when they change.
+  private trayLink: FrameTrayLink | null = null;
+  // The chat the frame shows as its plug-in tells it, for the tray's default (MIK-R188 rule 7):
+  // an agent, null for none it can name, undefined while it has told nothing since this load.
+  private frameChat: string | null | undefined = undefined;
 
   constructor(private readonly pane: PaseoFramePane) {}
 
@@ -111,8 +119,12 @@ export class PaseoFrameControl {
    * the URL, so the frame lands on it even when the control channel stays down. Either way the
    * agent is asked for by message once the channel is ready: only that answer tells whether the
    * agent still exists.
+   *
+   * A preload (MIK-R89 v2 rule 12: the review page's closed chat column) starts the frame before
+   * its pane is shown. Its load names no agent, so preloading opens none; the pane's first showing
+   * asks for its agent by message.
    */
-  start(available: AvailablePaseoFrame, afterRetry: boolean): void {
+  start(available: AvailablePaseoFrame, afterRetry: boolean, preload = false): void {
     this.available = available;
     this.settled = null;
     this.shown = null;
@@ -120,18 +132,22 @@ export class PaseoFrameControl {
     this.closeRequest();
     this.clearSettle();
     this.selectedAgentIds.clear();
+    this.tellChat(undefined);
     this.setControl("waiting");
-    this.load(afterRetry || this.pane.page === "document" ? this.wanted : null);
+    const named = !preload && (afterRetry || this.pane.page === "document");
+    this.load(named ? this.wanted : null);
   }
 
   /** No frame (any more): nothing is steered and no deadline runs. */
   stop(): void {
+    this.linkTray(null);
     this.clearDeadline();
     this.clearSettle();
     this.available = null;
     this.pending = null;
     this.loading = false;
     this.selectedAgentIds.clear();
+    this.tellChat(undefined);
   }
 
   /**
@@ -196,10 +212,20 @@ export class PaseoFrameControl {
     switch (message.type) {
       case "selection":
         this.selectedAgentIds = new Set(message.agentIds);
+        this.followSelection(message.agentIds);
+        break;
+      case "showing":
+        this.tellChat(message.agentId);
         break;
       case "navigation-error":
         if (this.selectedAgentIds.has(message.sourceAgentId))
           this.pane.setAgentProblem(parentProblemText(message.code, message.message));
+        break;
+      case "pick":
+      case "pick-unavailable":
+      case "composer":
+      case "composer-unavailable":
+        receiveFrameTray(this.pane.page ?? "chats", message);
         break;
       default:
         this.onAnswer(message);
@@ -222,7 +248,7 @@ export class PaseoFrameControl {
         break;
       case "shown":
       case "load-failed":
-        this.onShown(message.agentId);
+        this.onShown(message.agentId, message.type === "shown");
         break;
       case "error":
         this.onError(message);
@@ -242,6 +268,7 @@ export class PaseoFrameControl {
     this.abilities = capabilities;
     this.pane.setPluginNotice(pluginNoticeText(capabilities, this.available!.provisionCommand));
     if (!pluginOpensAgents(capabilities)) {
+      this.linkTray(null);
       this.setControl("unavailable");
       this.sync();
       return;
@@ -249,7 +276,26 @@ export class PaseoFrameControl {
     this.setControl("ready");
     if (capabilities) this.post({ type: "ar.hello", capabilities: DASHBOARD_ABILITIES });
     if (this.pane.page === "document") this.post({ type: "ar.page", page: "document" });
+    this.linkTray(capabilities);
     this.sync();
+  }
+
+  /**
+   * After a ready report the plug-in's earlier tray reports no longer hold; a plug-in that picks
+   * is told the tray's wishes now and whenever they change while the channel is ready. `null`
+   * (no frame, or no plug-in that picks) unlinks.
+   */
+  private linkTray(capabilities: PluginAbilities): void {
+    const page = this.pane.page ?? "chats";
+    this.trayLink?.stop();
+    this.trayLink = null;
+    if (capabilities === null) {
+      clearFrameTray(page);
+      return;
+    }
+    this.trayLink = frameTrayReady(page, capabilities, (message) => {
+      if (this.control === "ready") this.post(message);
+    });
   }
 
   /**
@@ -286,13 +332,34 @@ export class PaseoFrameControl {
    * is on the agent, nothing more is waited for, and the frame is in reach; a failure is the
    * application's to say and to retry, the dashboard names none of its own.
    */
-  private onShown(agentId: string | undefined): void {
+  private onShown(agentId: string | undefined, drawn: boolean): void {
     if (!agentId || agentId !== this.pending) return;
     this.clearDeadline();
     this.settled = agentId;
     this.shown = agentId;
     this.closeRequest();
     this.pane.setAgentProblem(null);
+    this.tellChat(drawn ? agentId : null);
+  }
+
+  /**
+   * Paseo's own list can move the frame to another chat, and the tray's default is the chat the
+   * frame shows (MIK-R188 rule 7). A plug-in that names `showing` tells that chat in both of
+   * Paseo's layouts, and its report alone is followed. For an older one the visible selected
+   * chats (MIK-R95) stand in: one chat is that chat; several (split panes) keep the chat told
+   * before only if it is one of them; none tells nothing, as its compact layout publishes none
+   * while it shows a chat. Either way the frame is not steered: the host's own navigation stands,
+   * and the launcher's selection is not changed.
+   */
+  private followSelection(agentIds: string[]): void {
+    if (this.abilities?.includes(SHOWING_ABILITY)) return;
+    if (agentIds.length === 1) this.tellChat(agentIds[0]);
+    else if (agentIds.length > 1) this.tellChat(this.frameChat && agentIds.includes(this.frameChat) ? this.frameChat : null);
+  }
+
+  private tellChat(agentId: string | null | undefined): void {
+    this.frameChat = agentId;
+    setFrameChat(this.pane.page ?? "chats", agentId);
   }
 
   private onError(message: Extract<PaseoPluginMessage, { type: "error" }>): void {

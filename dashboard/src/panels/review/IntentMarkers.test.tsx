@@ -1,25 +1,19 @@
-// MIK-R34 at the real renderers: the per-hunk intent markers of the landed source-content view (the
-// explorer's opened file, `Expand full file`, a card's and the lane's full file) and of the lane's
-// focused windows. Every classification is a REAL served per-file body of MIK-L32's lane fixture world
-// (hunkMarkers.capture-provenance.json), and every diff draws the exact blob texts that body names;
-// only `fetch` is stubbed. The workspace's marker scope is a plain value here, so each case asserts
-// what the reader sees and what a followed marker asks the workspace to select.
+// MIK-R34 at the renderer the review page draws its marks on: a card's excerpt (ReviewBlockCard's
+// DiffPane, MIK-R89 v2 W1). A card has no Full file of its own (rule 4), so the cases that once used the
+// landed full-file view draw a card whose excerpt is the fixture file's whole text on both sides. Every
+// classification is a REAL served per-file body of MIK-L32's lane fixture world
+// (hunkMarkers.capture-provenance.json), and every excerpt draws the exact blob texts that body names;
+// nothing is fetched. The workspace's marker scope is a plain value here, so each case asserts what the
+// reader sees and what a followed marker asks the workspace to select.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type {
-  ReviewChangedFile,
-  ReviewResult,
-  ReviewSourceExpansion,
-  ReviewSourceSide,
-} from '../../data/review';
 import type { ReviewFileClassification } from '../../data/reviewLane';
-import type { ReviewTreesResult } from '../../data/reviewTrees';
-import { ExpressionCards } from './ExpressionCards';
-import { expressionCards } from './focusedCards';
+import type { ReviewTreeEntry, ReviewTreesResult } from '../../data/reviewTrees';
+import { blockIdentityOf, blockKey } from './blockIdentity';
+import { BlockCards } from './reading/blockCards.test-utils';
 import { type IntentMarkerScopeValue, IntentMarkerScope } from './intentMarkerScope';
-import { SourceContent, type SourceMarkers } from './SourceContent';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
 
 type Scenario =
@@ -28,18 +22,11 @@ type Body = {
   file_classification: ReviewFileClassification;
   texts: Record<'before' | 'after', string | null>;
 };
-const bodies = JSON.parse(
-  readFileSync(
-    path.join(
-      path.dirname(new URL(import.meta.url).pathname),
-      'hunkMarkers.classifier.captured.json',
-    ),
-    'utf8',
-  ),
-) as Record<Scenario, Record<string, Body>>;
-const BEFORE_TREE = 'b'.repeat(40);
-const AFTER_TREE = 'a'.repeat(40);
-const task = { repo: 'agents-remember', master: 'm', leaf: 'l' };
+const captured = <T,>(name: string): T =>
+  JSON.parse(readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), name), 'utf8')) as T;
+const bodies = captured<Record<Scenario, Record<string, Body>>>('hunkMarkers.classifier.captured.json');
+// The comparison a card read names (only its trees enter the blocks' identities).
+const comparison = captured<ReviewTreesResult>('gitTrees.cards.captured.json').comparison!;
 
 afterEach(() => {
   resetCardCachesForTests();
@@ -48,64 +35,47 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function side(file: ReviewFileClassification, name: 'before' | 'after', text: string | null) {
-  const recorded = file.sides.find((one) => one.side === name)!;
-  if (text === null) return { state: 'absent', detail: 'no entry', truncated: false } as const;
-  return {
-    state: 'present',
-    text,
-    detail: 'the complete content',
-    object_id: recorded.blob,
-    byte_length: text.length,
-    truncated: false,
-  } satisfies ReviewSourceSide;
-}
+type EntrySide = NonNullable<ReviewTreesResult['entries']>[number]['before'];
 
-// The landed source-content answer for one fixture file: its exact blob texts and object ids.
-function expansionOf(body: Body, over: Partial<ReviewSourceExpansion> = {}): ReviewSourceExpansion {
+const lineCount = (text: string) => {
+  const lines = text.split('\n');
+  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+  return lines.length;
+};
+
+// One side of a card whose excerpt is the whole file: its exact blob text from line 1, or no file.
+function wholeSide(body: Body, name: 'before' | 'after'): EntrySide {
   const file = body.file_classification;
+  const text = body.texts[name];
+  if (text === null) return { state: 'absent', path: file.path, reason: 'no file at the path on this side' };
   return {
+    state: 'resolved',
     path: file.path,
-    status: file.status as ReviewSourceExpansion['status'],
-    mode_change: false,
-    language: 'text',
-    before: side(file, 'before', body.texts.before),
-    after: side(file, 'after', body.texts.after),
-    before_code_tree_id: BEFORE_TREE,
-    after_code_tree_id: AFTER_TREE,
-    currentness: 'current',
-    currentness_detail: 'the bound pair',
-    path_bound: 'requested_generation',
-    path_bound_detail: 'listed',
-    admission: 'changed',
-    admission_detail: 'changed',
-    reference: 'review:source-content',
-    command: 'git cat-file blob',
-    ...over,
+    blob: file.sides.find((one) => one.side === name)!.blob,
+    start_line: 1,
+    end_line: lineCount(text),
+    excerpt: text,
+    role: 'primary-authority',
+    rationale: 'The whole file.',
   };
 }
 
-const requested: URL[] = [];
-
-// The transport: the content read answers `expansion`; a lane file read answers `file` (only the lane
-// focus asks it -- a view handed its classification never does).
-function serve(expansion: ReviewSourceExpansion, file?: Body) {
-  requested.length = 0;
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (address: string) => {
-      const url = new URL(address, 'http://localhost');
-      requested.push(url);
-      const body = url.pathname.endsWith('/source-content')
-        ? { state: 'content', operation: 'read', repository_id: task.repo, expansion }
-        : url.searchParams.get('file') && file
-          ? { state: 'trees', file_classification: file.file_classification }
-          : null;
-      if (body === null) throw new Error(`Unexpected request: ${address}`);
-      return { ok: true, status: 200, json: async () => body } as Response;
-    }),
-  );
+// A changed card over the fixture file's whole text on both sides.
+function wholeFileEntry(body: Body, sides: { before?: Partial<EntrySide>; after?: Partial<EntrySide> } = {}): ReviewTreeEntry {
+  const file = body.file_classification;
+  const link = file.hunks.flatMap((hunk) => hunk.links)[0];
+  return {
+    id: 'RLZ-WHOLEFILE',
+    kind: 'realization',
+    invariant: link?.invariant ?? 'INV-AAAAAA',
+    invariant_key: link?.invariant_key ?? 'invariant-key',
+    change: 'changed',
+    before: { ...wholeSide(body, 'before'), ...sides.before } as EntrySide,
+    after: { ...wholeSide(body, 'after'), ...sides.after } as EntrySide,
+  };
 }
+
+const paneOf = (entry: ReviewTreeEntry) => `card-excerpt:${blockKey(blockIdentityOf(entry, comparison))}`;
 
 function scopeOf(over: Partial<IntentMarkerScopeValue> = {}): IntentMarkerScopeValue {
   return {
@@ -124,41 +94,32 @@ function scopeOf(over: Partial<IntentMarkerScopeValue> = {}): IntentMarkerScopeV
   };
 }
 
-function entryOf(file: ReviewFileClassification): ReviewChangedFile {
-  return {
-    path: file.path,
-    status: file.status as ReviewChangedFile['status'],
-    content: 'text',
-    mode_change: false,
-  };
-}
-
+// The card of one fixture file, its classification served by the scope's one read. `returning` names a
+// hunk of this card's pane that a return is bringing the reader back to.
 function open(
   scenario: Scenario,
   file: string,
   options: {
-    scope?: IntentMarkerScopeValue | null;
+    scope?: Partial<IntentMarkerScopeValue>;
     layout?: 'split' | 'inline';
-    markers?: SourceMarkers;
-    expansion?: Partial<ReviewSourceExpansion>;
+    sides?: { before?: Partial<EntrySide>; after?: Partial<EntrySide> };
+    returning?: string;
   } = {},
 ) {
   const body = bodies[scenario][file];
-  serve(expansionOf(body, options.expansion));
-  const scope = options.scope === undefined ? scopeOf() : options.scope;
+  const entry = wholeFileEntry(body, options.sides);
+  const pane = paneOf(entry);
+  const scope = scopeOf({
+    classify: vi.fn(() => Promise.resolve({ phase: 'ready' as const, value: body.file_classification })),
+    ...(options.returning ? { returning: { path: file, pane, hunk: options.returning } } : {}),
+    ...options.scope,
+  });
   const view = render(
     <IntentMarkerScope.Provider value={scope}>
-      <SourceContent
-        {...task}
-        entry={entryOf(body.file_classification)}
-        beforeCodeTreeId={BEFORE_TREE}
-        afterCodeTreeId={AFTER_TREE}
-        mode={options.layout ?? 'split'}
-        markers={options.markers ?? { classification: body.file_classification }}
-      />
+      <BlockCards entries={[entry]} comparison={comparison} layout={options.layout ?? 'split'} collapse={false} />
     </IntentMarkerScope.Provider>,
   );
-  return { view, scope, body };
+  return { view, scope, body, pane };
 }
 
 // The marks in the owner's hunk order (document order puts the before editor's marks first).
@@ -178,17 +139,17 @@ const described = (mark: HTMLElement) => [
   mark.closest('.cm-merge-a') ? 'before editor' : 'after editor',
 ];
 
-describe('the marks of a full diff', () => {
+describe('the marks of a diff', () => {
   it("marks each owner hunk on the owner's side lines, a deletion in the before editor", async () => {
-    const { view } = open('curated', 'pkg/lines.txt');
+    const { view, scope } = open('curated', 'pkg/lines.txt');
     // The whole file is one displayed region holding three owner hunks: each keeps its own mark.
     expect((await marks(view, 3)).map(described)).toEqual([
       ['2 intents', 'L2', 'L2', 'after editor'],
       ['attribution unknown', 'L4', 'L4', 'after editor'],
       ['unexplained', 'L6', 'none (after L5)', 'before editor'],
     ]);
-    // Placed from the handed classification: no classification is read again.
-    expect(requested.map((url) => url.pathname)).toEqual(['/api/review/intent/source-content']);
+    // One classification read of the file, through the scope.
+    expect(vi.mocked(scope.classify).mock.calls.map(([asked]) => asked)).toEqual(['pkg/lines.txt']);
     // A phone-width gutter shows each mark's compact text; the label stays its text and name.
     const shownMarks = await marks(view, 3);
     expect(shownMarks.map((mark) => [mark.dataset.compact, mark.textContent])).toEqual([
@@ -215,8 +176,7 @@ describe('the marks of a full diff', () => {
   });
 
   it('lists a hunk’s intents with their family occurrences and follows one to its position', async () => {
-    const scope = scopeOf();
-    const { view, body } = open('curated', 'pkg/lines.txt', { scope });
+    const { view, body, scope, pane } = open('curated', 'pkg/lines.txt');
     const [two] = await marks(view, 3);
     fireEvent.click(two);
     expect(two.getAttribute('aria-expanded')).toBe('true');
@@ -235,7 +195,7 @@ describe('the marks of a full diff', () => {
     const link = body.file_classification.hunks[0].links[0];
     fireEvent.click(occurrences[2]);
     expect(scope.follow).toHaveBeenLastCalledWith(
-      { path: 'pkg/lines.txt', pane: 'file', hunk: '2:1:2:1' },
+      { path: 'pkg/lines.txt', pane, hunk: '2:1:2:1' },
       {
         invariant: 'INV-AAAAAA',
         invariantKey: link.invariant_key,
@@ -301,7 +261,7 @@ describe('a file without per-hunk marks', () => {
       'unexplained',
       expect.stringContaining('one mark for the whole file'),
     ]);
-    await view.findByTestId('file-pane');
+    await view.findByTestId('diff-pane');
     expect(view.queryAllByTestId('review-hunk-mark')).toHaveLength(0);
   });
 
@@ -313,37 +273,16 @@ describe('a file without per-hunk marks', () => {
     expect(view.queryAllByTestId('review-hunk-mark')).toHaveLength(0);
   });
 
-  it('marks nothing for an unchanged file or for other content', async () => {
-    // An unchanged realization-linked file has no hunks: nothing is classified or marked.
-    const classify = vi.fn(() => null);
-    const unchanged = open('curated', 'pkg/lines.txt', {
-      scope: scopeOf({ classify }),
-      markers: {},
-      expansion: { status: 'unchanged' },
-    }).view;
-    await unchanged.findByTestId('diff-pane');
-    expect([classify.mock.calls.length, unchanged.queryAllByTestId('review-hunk-mark')]).toEqual([
-      0,
-      [],
-    ]);
-    cleanup();
+  // An unchanged file's card is "never reads, nor speaks for, an unchanged file's card" below.
+  it('marks nothing for other content on either side, and says why', async () => {
     // A classification of other bytes than the drawn ones places no mark, and says why.
-    const body = bodies.curated['pkg/lines.txt'];
-    const other = open('curated', 'pkg/lines.txt', {
-      expansion: { after: { ...expansionOf(body).after, object_id: 'f'.repeat(40) } },
-    }).view;
-    expect((await other.findByTestId('review-marks-state')).dataset.marksState).toBe(
-      'other-content',
-    );
+    const other = open('curated', 'pkg/lines.txt', { sides: { after: { blob: 'f'.repeat(40) } } }).view;
+    expect((await other.findByTestId('review-marks-state')).dataset.marksState).toBe('other-content');
     expect(other.queryAllByTestId('review-hunk-mark')).toHaveLength(0);
     cleanup();
     // The before object alone differing is other content too.
-    const otherBefore = open('curated', 'pkg/lines.txt', {
-      expansion: { before: { ...expansionOf(body).before, object_id: 'e'.repeat(40) } },
-    }).view;
-    expect((await otherBefore.findByTestId('review-marks-state')).dataset.marksState).toBe(
-      'other-content',
-    );
+    const otherBefore = open('curated', 'pkg/lines.txt', { sides: { before: { blob: 'e'.repeat(40) } } }).view;
+    expect((await otherBefore.findByTestId('review-marks-state')).dataset.marksState).toBe('other-content');
     expect(otherBefore.queryAllByTestId('review-hunk-mark')).toHaveLength(0);
   });
 
@@ -351,8 +290,7 @@ describe('a file without per-hunk marks', () => {
     // Review R1 F5: the file may have changed, and its classification is not read -- said so.
     const classify = vi.fn(() => null);
     const partial = open('curated', 'pkg/lines.txt', {
-      scope: scopeOf({ classify, listed: () => false, partial: true }),
-      markers: {},
+      scope: { classify, listed: () => false, partial: true },
     }).view;
     const note = await partial.findByTestId('review-marks-state');
     expect([note.dataset.marksState, note.textContent]).toEqual([
@@ -363,25 +301,10 @@ describe('a file without per-hunk marks', () => {
     cleanup();
     // A complete inventory that does not list a path: the file is unchanged, with nothing to mark.
     const complete = open('curated', 'pkg/lines.txt', {
-      scope: scopeOf({ listed: () => false, partial: false }),
-      markers: {},
+      scope: { listed: () => false, partial: false },
     }).view;
     await complete.findByTestId('diff-pane');
     expect(complete.queryByTestId('review-marks-state')).toBeNull();
-  });
-
-  it('names the hunks past a bounded text instead of dropping them silently', async () => {
-    const body = bodies.curated['pkg/lines.txt'];
-    const bounded = (name: 'before' | 'after') => ({
-      ...expansionOf(body)[name],
-      text: body.texts[name]!.split('\n').slice(0, 3).join('\n') + '\n',
-      truncated: true,
-    });
-    const { view } = open('curated', 'pkg/lines.txt', {
-      expansion: { before: bounded('before'), after: bounded('after') },
-    });
-    expect((await marks(view, 1))[0].textContent).toBe('2 intents');
-    expect(view.getByTestId('review-marks-past-text').textContent).toContain('2 hunk(s)');
   });
 });
 
@@ -391,11 +314,7 @@ describe('the return to a followed marker', () => {
     vi.stubGlobal('Element', Element);
     Element.prototype.scrollIntoView = scrolled;
     const settle = vi.fn();
-    const scope = scopeOf({
-      returning: { path: 'pkg/lines.txt', pane: 'file', hunk: '4:1:4:1' },
-      settle,
-    });
-    const { view } = open('curated', 'pkg/lines.txt', { scope });
+    const { view } = open('curated', 'pkg/lines.txt', { returning: '4:1:4:1', scope: { settle } });
     const four = (await marks(view, 3))[1];
     await waitFor(() => expect(settle).toHaveBeenCalled());
     expect(document.activeElement).toBe(four);
@@ -408,8 +327,7 @@ describe('the return to a followed marker', () => {
   it('keeps the returned mark focused while the pane settles, never against the reader', async () => {
     vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
     // Review R2-F1: a redraw after the reveal leaves focus on the body; the short hold gives it back.
-    const scope = scopeOf({ returning: { path: 'pkg/lines.txt', pane: 'file', hunk: '4:1:4:1' } });
-    const { view } = open('curated', 'pkg/lines.txt', { scope });
+    const { view } = open('curated', 'pkg/lines.txt', { returning: '4:1:4:1' });
     const four = (await marks(view, 3))[1];
     await act(async () => { await vi.advanceTimersByTimeAsync(32); });
     expect(document.activeElement).toBe(four);
@@ -425,81 +343,12 @@ describe('the return to a followed marker', () => {
   });
 
   it('does not reopen a pane the marker was not followed from', async () => {
-    const scope = scopeOf({
-      returning: { path: 'pkg/lines.txt', pane: 'lane-full', hunk: '4:1:4:1' },
+    const { view, scope } = open('curated', 'pkg/lines.txt', {
+      scope: { returning: { path: 'pkg/lines.txt', pane: 'lane-full', hunk: '4:1:4:1' } },
     });
-    const { view } = open('curated', 'pkg/lines.txt', { scope });
     await marks(view, 3);
     expect(view.queryByTestId('review-hunk-mark-panel')).toBeNull();
     expect(scope.settle).not.toHaveBeenCalled();
-  });
-});
-
-describe("a card's full file", () => {
-  // The REAL served cards of the MIK-L31 scratch leaf (gitTrees.capture-provenance.json): two cards
-  // of review_source_admission.py, at two ranges.
-  const cardsBody = JSON.parse(
-    readFileSync(
-      path.join(path.dirname(new URL(import.meta.url).pathname), 'gitTrees.cards.captured.json'),
-      'utf8',
-    ),
-  ) as ReviewTreesResult;
-  const payload = (
-    JSON.parse(
-      readFileSync(
-        path.join(path.dirname(new URL(import.meta.url).pathname), 'gitTrees.family.captured.json'),
-        'utf8',
-      ),
-    ) as ReviewResult
-  ).payload!;
-  const entries = ['RLZ-CXH58B4W', 'RLZ-D43E5CF2'].map((id) =>
-    cardsBody.entries!.find((entry) => entry.id === id)!,
-  );
-
-  function cards(scope: IntentMarkerScopeValue, openPath: string) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          state: 'refused',
-          refusal: { code: 'x', detail: 'not part of this check', next_action: 'n' },
-        }),
-      })),
-    );
-    return render(
-      <IntentMarkerScope.Provider value={scope}>
-        <ExpressionCards
-          payload={payload}
-          read={{ phase: 'trees', trees: { ...cardsBody, entries } }}
-          planning={new Map()}
-          layout="split"
-          onLayout={() => undefined}
-          fullFile={false}
-          onFullFile={() => undefined}
-          openPath={openPath}
-          onOpenPath={() => undefined}
-        />
-      </IntentMarkerScope.Provider>,
-    );
-  }
-
-  it('reopens the card a marker was followed from, not the first card of its path', () => {
-    const [first, second] = expressionCards(entries);
-    expect(first.path).toBe(second.path);
-    const back = cards(
-      scopeOf({ returning: { path: second.path, pane: `card:${second.key}`, hunk: '1:1:1:1' } }),
-      second.path,
-    );
-    const [one, two] = back.getAllByTestId('review-expression-card');
-    expect(within(two).getByTestId('review-card-full-file-content')).toBeTruthy();
-    expect(within(one).queryByTestId('review-card-full-file-content')).toBeNull();
-    cleanup();
-    // Without a return, the path opens in its first card, as it always did.
-    const plain = cards(scopeOf(), first.path);
-    const [landed] = plain.getAllByTestId('review-expression-card');
-    expect(within(landed).getByTestId('review-card-full-file-content')).toBeTruthy();
   });
 });
 
@@ -510,15 +359,6 @@ describe("a card's excerpt", () => {
   const body = bodies.before_unread['pkg/a.py'];
   const file = body.file_classification;
   const link = file.hunks[0].links[0];
-  const payload = (
-    JSON.parse(
-      readFileSync(
-        path.join(path.dirname(new URL(import.meta.url).pathname), 'gitTrees.family.captured.json'),
-        'utf8',
-      ),
-    ) as ReviewResult
-  ).payload!;
-  type EntrySide = NonNullable<ReviewTreesResult['entries']>[number]['before'];
   const unreadable: EntrySide = {
     state: 'unavailable',
     path: file.path,
@@ -564,30 +404,10 @@ describe("a card's excerpt", () => {
     });
     return render(
       <IntentMarkerScope.Provider value={scope}>
-        <ExpressionCards
-          payload={payload}
-          read={{
-            phase: 'trees',
-            trees: { ...emptyTrees, entries: entry(afterBlob, options.before, options.change) },
-          }}
-          planning={new Map()}
-          layout="split"
-          onLayout={() => undefined}
-          fullFile={false}
-          onFullFile={() => undefined}
-          openPath={undefined}
-          onOpenPath={() => undefined}
-        />
+        <BlockCards entries={entry(afterBlob, options.before, options.change) ?? []} comparison={comparison} />
       </IntentMarkerScope.Provider>,
     );
   }
-  const emptyTrees: ReviewTreesResult = {
-    state: 'trees',
-    repository_id: task.repo,
-    master: task.master,
-    leaf_id: task.leaf,
-    knowledge_sides: [],
-  };
 
   it.each(
     (

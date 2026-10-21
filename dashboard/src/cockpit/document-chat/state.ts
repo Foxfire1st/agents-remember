@@ -6,22 +6,65 @@ import {
   type RoleExecutionReceipt,
 } from '../roleLaunchModel';
 import { useKnownChats, useSelectionAgents } from './knownChats';
-import { bindingInTree, documentBindings, documentChatAgent, type DocumentAgent } from './model';
+import {
+  bindingInTree,
+  documentBindings,
+  documentChatAgent,
+  type DocumentAgent,
+  type DocumentChatBinding,
+} from './model';
 import { useDocumentAgents } from './useDocumentAgents';
 import { useWarmupStatus } from './warmup';
+
+/**
+ * A page names a task whose document the dashboard cannot name (MIK-R89 v2 rule 12): the review
+ * page before the task list has arrived (`pending`), or for a task the list does not hold. No role
+ * binds, the Projects architect included, and no chat is read. A pending task keeps the frame's
+ * screen visible and out of reach under `line`; an unknown one hides the frame behind `line`.
+ */
+export interface DocumentChatUnbound {
+  line: string;
+  pending: boolean;
+}
 
 export interface DocumentChatProps {
   taskDocumentRef?: TaskDocumentRef;
   tasks: TaskEntry[];
   active: boolean;
+  /**
+   * Start the embedded client while the chat is not shown (the review page's closed column,
+   * MIK-R89 v2 rule 12). It reads the frame descriptor only and opens no agent; every chat read
+   * still waits for `active` (INV-ZB0WFP).
+   */
+  preload?: boolean;
+  unbound?: DocumentChatUnbound | null;
 }
 
-export function useDocumentChat({ taskDocumentRef, tasks, active }: DocumentChatProps) {
-  const scope = JSON.stringify(taskDocumentRef ?? null);
+const UNBOUND_SELECTION = { role: 'worker' } as const;
+
+function documentBinding(
+  ref: TaskDocumentRef | undefined,
+  unbound: DocumentChatUnbound | null | undefined,
+  tree: ReturnType<typeof documentBindings>,
+): DocumentChatBinding {
+  if (!unbound) return bindingInTree(ref, tree);
+  return { selection: UNBOUND_SELECTION, roles: [], ...(unbound.pending ? {} : { problem: unbound.line }) };
+}
+
+// An unbound page has a scope of its own: it is never the documentless (architect) scope.
+function documentScope(ref: TaskDocumentRef | undefined, unbound: DocumentChatUnbound | null | undefined) {
+  return unbound ? JSON.stringify({ unbound: unbound.line }) : JSON.stringify(ref ?? null);
+}
+
+export function useDocumentChat({ taskDocumentRef, tasks, active, unbound }: DocumentChatProps) {
+  const scope = documentScope(taskDocumentRef, unbound);
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const tree = useMemo(() => documentBindings(tasks), [tasks]);
-  const binding = useMemo(() => bindingInTree(taskDocumentRef, tree), [taskDocumentRef, tree]);
+  const binding = useMemo(
+    () => documentBinding(taskDocumentRef, unbound, tree),
+    [taskDocumentRef, unbound, tree],
+  );
   const [revision, setRevision] = useState(0);
   const [launched, setLaunched] = useState<{
     scope: string;
@@ -37,7 +80,7 @@ export function useDocumentChat({ taskDocumentRef, tasks, active }: DocumentChat
     if (currentLaunch && answer?.agents?.length === 0) setLaunched(null);
   }, [currentLaunch, answer]);
   // A selection the dashboard already knows switches with the click.
-  const known = useKnownChats(tree, taskDocumentRef, active);
+  const known = useKnownChats(tree, taskDocumentRef, active && !unbound);
   const agents = useSelectionAgents(
     known,
     binding.selection,
@@ -46,18 +89,13 @@ export function useDocumentChat({ taskDocumentRef, tasks, active }: DocumentChat
   );
   const [available, setAvailable] = useState(false);
   const [launcherScope, setLauncherScope] = useState<string | null>(null);
-  const agent = displayedAgent(currentLaunch, taskDocumentRef, agents);
-  const target = agentTarget(agent);
+  const target = agentTarget(unbound ? null : displayedAgent(currentLaunch, taskDocumentRef, agents));
   // MIK-R145 rule 6: while the host-start loading runs, its one line and whether
   // the shown agent is still pending, so the pane can say it is being loaded now.
   const warmupPicture = useWarmupPicture(active, target);
-  const presentation = chatPresentation(
-    scope,
-    available,
-    { agents, roles: binding.roles.length },
-    Boolean(target),
-    launcherScope,
-  );
+  const presentation = unbound
+    ? unboundPresentation(available, unbound)
+    : chatPresentation(scope, available, { agents, roles: binding.roles.length }, Boolean(target), launcherScope);
   const onExecution = (receipt: RoleExecutionReceipt, selection: RoleDocumentScope) => {
     // The explicit Investigator request stays in the launcher/host tabs; the document's primary
     // conversation remains its Manager or Orchestrator even after a successful launch (R98).
@@ -156,6 +194,22 @@ function agentTarget(agent: DocumentAgent | null) {
 }
 
 /**
+ * An unbound page has no chat to name. While its task is still pending the frame keeps what it
+ * shows, out of reach, as for any selection the dashboard still asks about (INV-GY49SV); a task
+ * that is known to be missing hides the frame behind the named line. No launcher: no role binds.
+ */
+function unboundPresentation(available: boolean, unbound: DocumentChatUnbound) {
+  return {
+    showLauncher: false,
+    hideFrame: available && !unbound.pending,
+    hasControl: false,
+    asking: available && unbound.pending,
+    // The line the held frame shows: the page's own while its task is not yet named.
+    waitLine: unbound.pending ? unbound.line : null,
+  };
+}
+
+/**
  * The frame is hidden only where the selection is known to have no chat. While
  * the dashboard still asks which chat the document has, the frame keeps what it shows, out of
  * reach. A document no role can start on has no chat and nothing to ask.
@@ -174,5 +228,6 @@ function chatPresentation(
     hideFrame: available && known && !hasTarget,
     hasControl: available && hasTarget,
     asking: available && !known,
+    waitLine: null,
   };
 }

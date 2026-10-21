@@ -566,6 +566,29 @@ describe('control channel unavailable', () => {
 describe('document page: chat of the selected task', () => {
   const SECOND = { agentId: 'agent-second', workspaceId: 'wks_projects' };
 
+  it('preloads a hidden pane without loading an agent, and shows the agent by message (MIK-R89 v2 rule 12)', async () => {
+    const fetchMock = stubBackend([AVAILABLE]);
+    const { container, getByTestId, rerender } = render(
+      <PaseoChatFrame active={false} preload scope="leaf" target={WORKER} page="document" />,
+    );
+    await settle();
+    // The review page's closed column: one descriptor read, and a first load that names no agent.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const frame = frameElement(container);
+    expect(frame.getAttribute('src')).toBe(PROJECTS_URL + '?arPage=document');
+    const posts = watchPosts(frame);
+    rerender(<PaseoChatFrame active preload scope="leaf" target={WORKER} page="document" />);
+    deliver(frame, plugin({ type: 'ready' }));
+    expect(posts).toHaveBeenLastCalledWith(
+      { type: 'ar.open', agentId: WORKER.agentId, workspaceId: WORKER.workspaceId },
+      FRAME_ORIGIN,
+    );
+    await settle();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(frameElement(container)).toBe(frame);
+    expect(getByTestId('paseo-frame').getAttribute('data-generation')).toBe('1');
+  });
+
   it('moves across workspaces by message, without reloading the frame', async () => {
     stubBackend([AVAILABLE]);
     const { container, getByTestId, rerender } = render(

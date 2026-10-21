@@ -43,7 +43,7 @@ from agents_remember.kernel.git_command import (
     GitRunnerOptions,
     run_git,
 )
-from agents_remember.memory.knowledge_index import Entry
+from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex
 from agents_remember.models.knowledge_files.records import (
     DependentRecord,
     WeaknessRecord,
@@ -56,6 +56,7 @@ __all__ = [
     "dependent_list",
     "dependent_state",
     "open_weakness_counts",
+    "open_weakness_counts_in",
     "weakness_list",
 ]
 
@@ -98,10 +99,16 @@ def _anchor_observation(
 
 
 def _weaknesses(selection: ReaderSelection) -> list[WeaknessRecord]:
-    """Every weakness record of the tree that its own model reads, in ID order."""
+    """Every weakness record of the selection's tree that its own model reads, in ID order."""
+
+    return _weaknesses_in(selection.index)
+
+
+def _weaknesses_in(index: KnowledgeIndex) -> list[WeaknessRecord]:
+    """Every weakness record of one index's tree that its own model reads, in ID order."""
 
     records = []
-    for record in selection.index.records_of_kind("weakness").value:
+    for record in index.records_of_kind("weakness").value:
         try:
             records.append(WeaknessRecord.model_validate(record.document))
         except ValidationError:  # an unreadable record is the validator's finding, not a row
@@ -155,8 +162,18 @@ def weakness_list(
 def open_weakness_counts(selection: ReaderSelection) -> dict[str, int]:
     """How many open weaknesses each file carries: the one line a card's read names."""
 
+    return open_weakness_counts_in(selection.index)
+
+
+def open_weakness_counts_in(index: KnowledgeIndex) -> dict[str, int]:
+    """How many open weaknesses each file of one index's tree carries; a file with none is absent.
+
+    The reviewer's card read counts at the bound after-side index it already holds open (MIK-R89
+    v2 rule 3), so the count is one function whichever reader asks.
+    """
+
     counts: dict[str, int] = {}
-    for record in _weaknesses(selection):
+    for record in _weaknesses_in(index):
         if record.state != "open" or record.anchor.path is None:
             continue
         counts[record.anchor.path] = counts.get(record.anchor.path, 0) + 1

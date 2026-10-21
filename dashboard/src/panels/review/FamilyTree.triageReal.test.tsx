@@ -136,7 +136,7 @@ it('uses walked implementation facts for outline badges with intent and membersh
         memberChanges(entry).get(row.member_id)!.primary === 'intent' ? 'changed' : 'unchanged',
     })),
   };
-  const [group] = outlineGroups(outline, [], family.entries, 'triage');
+  const [group] = outlineGroups(outline, [], family.entries, 'priority');
   expect(group.members).toHaveLength(24);
   expect(group.members.filter((row) => row.badge === 'changed')).toHaveLength(2);
   expect(group.members.filter((row) => row.badge === 'code changed')).toHaveLength(6);

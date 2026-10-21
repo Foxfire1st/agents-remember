@@ -1,27 +1,36 @@
-// The family tree's order choice (MIK-R33, ICR-R32 rule 8): triage order by default, or pure authored
-// order. It is a browser-local UI preference in the house persisted-store idiom (vanilla zustand
-// seeded from localStorage, as intentDiffPreference.ts). It is not review state and no server store
-// holds it. When storage is unavailable, triage order applies and the control still works for the
-// page's lifetime.
+// The review page's one Sort choice (MIK-R89 v2 rule 3; MIK-R86 v2 rule 4): Priority by default, or
+// one of the other deterministic sorts. It is a browser-local UI preference in the house
+// persisted-store idiom (vanilla zustand seeded from localStorage, as intentDiffPreference.ts). It is
+// not review state and no server store holds it. When storage is unavailable, Priority applies and the
+// control still works for the page's lifetime.
+//
+// The key `review.tree-order.v1` keeps the earlier Order control's stored value (W7): a stored
+// `triage` reads as Priority, `authored` as Authored, and anything unknown as Priority (MIK-R89 v2
+// Failure and Recovery).
 
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 
-export type TreeOrder = 'triage' | 'authored';
+import { REVIEW_SORTS, type ReviewSort } from './reviewSelection';
 
 export const TREE_ORDER_KEY = 'review.tree-order.v1';
 
-export function readTreeOrder(storage: Pick<Storage, 'getItem'> | undefined): TreeOrder {
+export function sortOf(value: unknown): ReviewSort {
+  if (value === 'triage') return 'priority';
+  return REVIEW_SORTS.includes(value as ReviewSort) ? (value as ReviewSort) : 'priority';
+}
+
+export function readTreeOrder(storage: Pick<Storage, 'getItem'> | undefined): ReviewSort {
   try {
-    return storage?.getItem(TREE_ORDER_KEY) === 'authored' ? 'authored' : 'triage';
+    return sortOf(storage?.getItem(TREE_ORDER_KEY));
   } catch {
-    return 'triage';
+    return 'priority';
   }
 }
 
 interface TreeOrderState {
-  order: TreeOrder;
-  setOrder: (order: TreeOrder) => void;
+  order: ReviewSort;
+  setOrder: (order: ReviewSort) => void;
 }
 
 function storage(): Storage | undefined {
@@ -44,4 +53,4 @@ export const treeOrderStore = createStore<TreeOrderState>((set) => ({
   },
 }));
 
-export const useTreeOrder = (): TreeOrder => useStore(treeOrderStore, (state) => state.order);
+export const useTreeOrder = (): ReviewSort => useStore(treeOrderStore, (state) => state.order);

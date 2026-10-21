@@ -1,11 +1,15 @@
+import { useState } from 'react';
 import { css } from '../../styled-system/css';
 import type { TaskEntry } from '../types/projection';
 import type { RoleReportContent } from '../data/roleReport';
 import { PaseoChatFrame } from './PaseoChatFrame';
-import { paseoAgentTarget } from './paseoFrameModel';
+import { useFrameChat } from './frameTrayChannel';
+import { paseoAgentTarget, type PaseoAgentTarget } from './paseoFrameModel';
 import { RoleLauncher } from './role-launcher/RoleLauncher';
 import { useRoleLaunchProgress } from './role-launcher/useRoleLaunchProgress';
 import { NotesReaderViewer } from '../panels/notes-reader/NotesReaderViewer';
+import { TrayColumnDock } from '../tray/TrayDock';
+import { usePublishShownChat } from '../tray/shownChat';
 import {
   roleDefaultsCacheKey,
   usesRequestReceipts,
@@ -201,9 +205,28 @@ function useRoleChatsPresentation(props: RoleChatsViewProps) {
   };
 }
 
+/**
+ * The chat the Chats page's frame shows (MIK-R188 rule 7): the one its plug-in names, which
+ * Paseo's own list may have moved away from the launcher's; until the plug-in names one after a
+ * load, the launcher's. While a placeholder stands in for the frame (no frame yet, or the
+ * embedded chat unavailable) no chat is shown.
+ */
+function shownAgent(drawn: boolean, frameChat: string | null | undefined, frameTarget: PaseoAgentTarget | null) {
+  if (!drawn) return null;
+  return frameChat === undefined ? (frameTarget?.agentId ?? null) : frameChat;
+}
+
 export function RoleChatsView(props: RoleChatsViewProps) {
   const { active, boundSelection, report, onCloseReport } = props;
   const { frameScope, frameTarget, launcher } = useRoleChatsPresentation(props);
+  const bound = Boolean(boundSelection);
+  const [drawn, setDrawn] = useState(false);
+  const frameChat = useFrameChat('chats');
+  // The Chats page's own frame has a message box too: the tray docks above it there (MIK-R188
+  // rule 5), and the chat it shows is the default target of an object pick (rule 7).
+  const showsChat = active && !bound && !report;
+  const shown = showsChat ? shownAgent(drawn, frameChat, frameTarget) : null;
+  usePublishShownChat(shown ? { agentId: shown } : null);
   return (
     <>
       <section
@@ -213,11 +236,13 @@ export function RoleChatsView(props: RoleChatsViewProps) {
         style={rolePanePresentation(report, Boolean(boundSelection))}
       >
         <RoleLauncher {...launcher} />
-        {unboundChatFrame(Boolean(boundSelection), {
+        {unboundChatFrame(bound, {
           active,
           scope: frameScope,
           target: frameTarget,
+          onAvailability: setDrawn,
         })}
+        {bound ? null : <TrayColumnDock visible={showsChat} page="chats" />}
       </section>
       {report ? (
         <NotesReaderViewer kind="role-report" report={report} onBack={onCloseReport} />

@@ -4,6 +4,8 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import type { ReviewSideContent } from '../../data/review';
+import { DiffPane } from '../changeset/DiffPane';
+import { FilePane } from '../file-viewer/FilePane';
 import { KnowledgeStatements } from './KnowledgeStatements';
 
 const present = (text: string): ReviewSideContent => ({ state: 'present', text, language: 'text', detail: 'Recorded statement' });
@@ -41,4 +43,20 @@ it.each([absent('Known absent'), unresolved('Unreadable file')])('names $state d
   expect(view.getByTestId('review-after-state').dataset.sideState).toBe('absent');
   expect(view.queryByTestId('diff-pane')).toBeNull();
   expect(view.queryByTestId('file-pane')).toBeNull();
+});
+
+// E6: a selected subject on the review page adds no scroll container of its own; its statement panes
+// size to their content (`fit`), and the reading column scrolls them.
+it.each([
+  ['both present', present('Before wording'), present('After wording'), 'diff-pane'],
+  ['one-sided', absent('Not recorded before'), present('Added wording'), 'diff-pane'],
+  ['unreadable opposite', present('Still readable'), unresolved('After file cannot be read'), 'file-pane'],
+] as const)('draws the %s statement in a fit pane', async (_name, before, after, pane) => {
+  const fit = render(
+    pane === 'diff-pane' ? <DiffPane before="" after="" language="text" mode="inline" collapse={false} fit /> : <FilePane content="" language="text" fit />,
+  );
+  const fitClass = fit.getByTestId(pane).className;
+  fit.unmount();
+  const view = render(<KnowledgeStatements before={before} after={after} />);
+  expect((await view.findByTestId(pane)).className).toBe(fitClass);
 });

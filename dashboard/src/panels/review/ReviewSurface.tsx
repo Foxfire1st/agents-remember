@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+// The intent review page (MIK-R89 v2; MIK-R86 v2): layout B. A root that does not scroll; the top
+// line (back, title, status chip, comparison selector, refresh); under it the tree and the reading
+// column, both drawn from one change-set model (changeSetOrder.ts), the column the page scroller. The
+// page opens with nothing selected and makes exactly the six opening reads (reading/useChangeSet.ts);
+// a selection reads its subject only. Every page-level block stays mounted while reads are pending, and
+// the selected subject's slot alone changes with its read (rule 9).
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
 import { ReviewHeader } from './ReviewHeader';
+import { recordLabelOf } from './ReviewScopeHeader';
 import { matchingTreeRead } from './codeFacts';
 import { useReviewTrees } from '../../data/reviewTrees';
 import { useReviewMemoryWatch } from '../../data/reviewMemoryWatch';
 import type { ReviewChangeContext } from '../changeset/reviewChangeSet';
 import { ReviewChangeSetNavigation, type OpenReviewChanges } from './changeSetNavigation';
-import { css } from '../../../styled-system/css';
+import { RIGHT_RAIL_ID } from '../../cockpit/layout';
+import type { ReviewChatControl } from '../../cockpit/reviewChat';
+import { readReviewHashState } from '../../cockpit/reviewHash';
+import { SidebarToggle, useSidebar } from '../../grammar/SidebarToggle';
 import {
   useObservedComparison,
-  useReaderEngagement,
   useReviewNavigation,
   type ReviewNavigationState,
   type ReviewSubject,
-  type SelectionOptions,
 } from './ReviewNavigation';
 
 import type {
@@ -32,21 +40,18 @@ import {
   pageBounds,
 } from '../../data/review';
 import type { ReviewRefusal } from '../../data/review';
-import { useReviewLane } from '../../data/reviewLane';
+import type { useReviewLane } from '../../data/reviewLane';
 import { treeComparisonNumber } from '../../data/reviewTrees';
-import type { FamilySelection } from './FamilyTree';
 import { type ReviewPageRequest, targetKeyOf, useReviewReadCycle } from './ReviewReadCycle';
 import {
   comparisonGenerationOf,
   sameGeneration,
   type ComparisonGeneration,
   ReviewReadCache,
-  ReviewReadCacheContext,
 } from './ReviewReadCache';
 import { CanvasPanel, type CanvasEvidenceNavigation } from './canvas/CanvasPanel';
 import type { CanvasComparison } from './canvas/canvasApi';
 import { useRetainedComparison } from './canvas/canvasHooks';
-import { ReviewTechnicalDetails } from './ReviewRecordPanes';
 import { ReviewRefresh, generationOf } from './ReviewRefresh';
 import {
   type ReviewRead,
@@ -55,7 +60,22 @@ import {
   problemOf,
   shownPayload,
 } from './ReviewOutcome';
-import { type ReadingStatus, ReviewWorkspace, useWorkspaceState } from './ReviewWorkspace';
+import { type ReadingStatus, useSelectionFocus, useWorkspaceState } from './ReviewWorkspace';
+import { useBlockTraversal } from './changeTraversal';
+import { catalogueForComparison } from '../../data/useReviewCatalogue';
+import { IntentMarkerScope, markerInventory, useIntentMarkerScope } from './intentMarkerScope';
+import { MarkerReturn } from './IntentMarkers';
+import { LeafWorklistView } from './LeafKnowledgeChanges';
+import { workspaceMarkerMoves } from './markerNavigation';
+import type { ReviewSelection } from './reviewSelection';
+import { LaneSection } from './reading/LaneSection';
+import { crumbOf, OrphanSlot, PageNotes, PageTree, TopLineControls, useReadingValue, useTaskTitle, type PageProps } from './reading/pageParts';
+import { ReadingColumn } from './reading/ReadingColumn';
+import { ReviewGrid, reviewBody, reviewRoot, useBracketKeys } from './reading/ReviewLayout';
+import { SummaryLine } from './reading/SummaryLine';
+import { TechnicalDetails } from './reading/TechnicalDetails';
+import { useReadingLayout } from './reading/useReadingLayout';
+import { useReviewPage, type PageReads } from './reading/useReviewPage';
 
 export interface ReviewTarget {
   repo: string;
@@ -65,37 +85,6 @@ export interface ReviewTarget {
   selectorId?: string;
   history?: ReviewHistory;
 }
-
-const reviewShell = css({
-  background: 'bg',
-  color: 'ink',
-  fontFamily: 'mono',
-  fontSize: '0.83rem',
-  lineHeight: '1.65',
-  padding: '1.2rem',
-  overflowWrap: 'anywhere',
-  '@media (max-width: 40rem)': { padding: '0.7rem' },
-  '& summary': { cursor: 'pointer', color: 'muted', fontSize: '0.75rem', padding: '0.3rem 0' },
-  '& details[open] > summary': { color: 'cyan' },
-  '& button:not([data-tree-node]):not([data-path]), & select, & input': {
-    background: 'bgPanel',
-    color: 'ink',
-    border: '1px solid var(--grid)',
-    borderRadius: '2px',
-    font: 'inherit',
-    fontSize: '0.75rem',
-    padding: '0.4rem 0.6rem',
-    cursor: 'pointer',
-    maxWidth: '100%',
-  },
-  '& button:focus-visible, & select:focus-visible, & input:focus-visible, & summary:focus-visible':
-    {
-      outline: '2px solid var(--amber)',
-      outlineOffset: '2px',
-    },
-  '& button:hover': { color: 'amber' },
-  '& [data-testid=review-center-column]': { outlineOffset: '3px' },
-});
 
 const retryFor = (read: ReviewRead, reread: () => void) =>
   read.phase === 'failed' ? reread : undefined;
@@ -301,119 +290,6 @@ function PageControls({
   );
 }
 
-// The workspace and its record panes. `shown` is the answer for the subject on screen; while another
-// subject is pending, or its read failed or was refused, `frame` (the last admitted payload of this
-// task context) keeps the shell -- scope, navigation, family rail, source explorer and the open
-// disclosures -- mounted, and the reading area alone states the requested subject's status. Nothing
-// of the frame's subject is rendered as the requested subject's reading.
-type ReviewPanesProps = {
-  shown: ReviewPayload | null;
-  frame: ReviewPayload | null;
-  reading: ReadingStatus | null;
-  selection: ReviewPageRequest | undefined;
-  onSelect: (page: ReviewPageRequest | undefined) => void;
-  repo: string;
-  master: string;
-  leaf: string;
-  selectorKind?: ReviewSelectorKind;
-  selectorId?: string;
-  history?: ReviewHistory;
-  workspace: ReturnType<typeof useWorkspaceState>;
-  navigation: ReviewNavigationState;
-};
-
-function ReviewPanes({
-  shown,
-  frame,
-  reading,
-  selection,
-  onSelect,
-  repo,
-  master,
-  leaf,
-  selectorKind,
-  selectorId,
-  history,
-  workspace,
-  navigation,
-}: ReviewPanesProps) {
-  const payload = shown ?? (reading ? frame : null);
-  // The unexplained-changes lane of the tree comparison on screen, read once: the workspace's lane
-  // and explorer and the technical details all show this one classification.
-  const laneRead = useReviewLane(
-    repo,
-    master,
-    leaf,
-    payload === null ? undefined : treeComparisonNumber(payload.limitations),
-  );
-  const comparison = payload ? treeComparisonNumber(payload.limitations) : undefined;
-  const leafTrees = useReviewTrees(repo, master, leaf, { comparison }, comparison !== undefined);
-  const { changePage, openChanges, closeChanges } = useReviewChangePage({
-    repo,
-    master,
-    leaf,
-    comparison,
-    payload,
-    laneRead,
-    leafTrees,
-  });
-  if (payload === null) return null;
-  return (
-    <ReviewChangeSetNavigation.Provider value={openChanges}>
-      <div inert={changePage !== null} style={{ visibility: changePage ? 'hidden' : undefined }}>
-        <ReviewWorkspace
-          payload={payload}
-          reading={shown === null ? reading : null}
-          repo={repo}
-          master={master}
-          leaf={leaf}
-          selectorKind={selectorKind}
-          selectorId={selectorId}
-          history={history}
-          onPageSelect={onSelect}
-          state={workspace}
-          navigation={navigation}
-          laneRead={laneRead}
-          leafTrees={leafTrees}
-          changesOpen={changePage !== null}
-        />
-        <ReviewDetails
-          shown={shown}
-          laneRead={laneRead}
-          reading={reading}
-          selection={selection}
-          onSelect={onSelect}
-        />
-      </div>
-      <ReviewChangeOverlay state={changePage} onBack={closeChanges} />
-    </ReviewChangeSetNavigation.Provider>
-  );
-}
-
-function ReviewDetails({
-  shown,
-  laneRead,
-  reading,
-  selection,
-  onSelect,
-}: {
-  shown: ReviewPayload | null;
-  laneRead: ReturnType<typeof useReviewLane>;
-  reading: ReadingStatus | null;
-  selection: ReviewPageRequest | undefined;
-  onSelect: (page: ReviewPageRequest | undefined) => void;
-}) {
-  return (
-    <ReviewTechnicalDetails
-      payload={shown}
-      laneRead={laneRead}
-      unanswered={{ label: reading?.label ?? '', unavailable: Boolean(reading?.problem) }}
-      paging={
-        shown ? <PageControls payload={shown} selection={selection} onSelect={onSelect} /> : null
-      }
-    />
-  );
-}
 type OpenChangePage =
   | {
       kind: 'comparison';
@@ -648,11 +524,7 @@ function pageComparison(
 function evidenceSelection(
   destination: CanvasEvidenceNavigation,
   shown: ReviewPayload | null,
-  selectSubject: (
-    subject: { kind: 'invariant' | 'family'; id: string },
-    context?: undefined,
-    options?: SelectionOptions,
-  ) => void,
+  selectSubject: (subject: { kind: 'invariant' | 'family'; id: string }) => void,
 ): void {
   if (!shown?.comparison) return;
   if (shown.comparison.reference !== destination.comparison.reference) return;
@@ -662,126 +534,7 @@ function evidenceSelection(
   ) {
     return;
   }
-  selectSubject({ kind: destination.selector.kind, id: destination.selector.id }, undefined, {
-    keepTree: true,
-  });
-}
-
-// Every selection but the one of a row the family tree shows starts the walked tree afresh (MIK-R39).
-function subjectSelection(parts: {
-  navigation: ReturnType<typeof useReviewNavigation>;
-  workspace: ReturnType<typeof useWorkspaceState>;
-  setInstead: (failure: ReviewFailure | null) => void;
-  setSelection: (page: ReviewPageRequest | undefined) => void;
-}) {
-  const { navigation, workspace, setInstead, setSelection } = parts;
-  const selectSubject = (
-    subject: ReviewSubject | undefined,
-    context?: FamilySelection,
-    options?: SelectionOptions,
-  ) => {
-    workspace.focusSelection.current = {
-      from: document.activeElement,
-      after: workspace.treeIntent.id,
-    };
-    workspace.beginSelection(options?.keepTree === true);
-    navigation.onSelect(subject);
-    setInstead(null);
-    setSelection(options?.page);
-    workspace.setChosen(context ?? null);
-  };
-  // The offer to open the task context after a refusal is an outside selection too.
-  const openTaskContext = (failure: ReviewFailure) => {
-    workspace.beginSelection(false);
-    navigation.onSelect(undefined);
-    workspace.setChosen(null);
-    setSelection(undefined);
-    setInstead(failure);
-  };
-  return { selectSubject, openTaskContext };
-}
-
-function useSurface({
-  repo,
-  master,
-  leaf,
-  selectorKind: initialKind,
-  selectorId: initialId,
-  history,
-  onBack,
-}: ReviewTarget & { onBack: () => void }) {
-  const navigation = useReviewNavigation({
-    repo,
-    master,
-    leaf,
-    selectorKind: initialKind,
-    selectorId: initialId,
-    history,
-  });
-  const selectorKind = navigation.subject?.kind;
-  const selectorId = navigation.subject?.id;
-  const [instead, setInstead] = useState<ReviewFailure | null>(null);
-  const [selection, setSelection] = useState<ReviewPageRequest | undefined>(undefined);
-  const workspace = useWorkspaceState();
-  // One cache per mounted surface: reclaimed with it (see `ReviewReadCache`).
-  const [cache] = useState(() => new ReviewReadCache());
-  const { selectSubject, openTaskContext } = subjectSelection({
-    navigation,
-    workspace,
-    setInstead,
-    setSelection,
-  });
-  const cycle = useReviewReadCycle({
-    repo,
-    master,
-    leaf,
-    selectorKind,
-    selectorId,
-    history,
-    instead,
-    selection,
-    hold: navigation.settling,
-    cache,
-  });
-  const { read, retained, frame } = cycle;
-  useReviewMemoryWatch({ repo, master, leaf, history }, cycle, navigation.engage);
-  const key = targetKeyOf(
-    repo,
-    master,
-    leaf,
-    instead,
-    selectorKind,
-    selectorId,
-    selection,
-    history,
-  );
-  const coherent = retained !== null && retained.key === key ? retained.payload : null;
-  const shown = shownPayload(read, coherent);
-  useObservedComparison(navigation.observeComparison, shown);
-  const asked = instead === null ? navigation.subject : undefined;
-  const problem = problemOf(read);
-  const { refreshReview, retryReview } = useRefreshReview(workspace, read, cycle.refresh);
-  // The owner's failure or refusal for the requested subject, rendered in the reading area.
-  const problemBlock = (label: string) =>
-    problem === null ? null : (
-      <ReviewProblemBlock
-        origin={read.phase === 'refused' ? 'refusal' : 'failure'}
-        problem={problem}
-        subject={label}
-        onRetry={retryFor(read, retryReview)}
-        onOpenTaskContext={insteadFor(read, problem, instead, openTaskContext)}
-      />
-    );
-  return {
-    ...{ repo, master, leaf, selectorKind, selectorId, history, onBack, navigation, selectSubject },
-    ...{ instead, setInstead, selection, setSelection, workspace, cache, frame, coherent, shown },
-    ...{ read, carried: cycle.carried, refreshReview, retryReview, problem },
-    openTaskContext,
-    reading:
-      frame === null || shown !== null
-        ? null
-        : readingStatusOf(read, key, asked, navigation.catalogue, problemBlock),
-  };
+  selectSubject({ kind: destination.selector.kind, id: destination.selector.id });
 }
 
 // A refresh shows the comparison as it reads now, not the tree walked before it (MIK-R39), and asks
@@ -843,7 +596,7 @@ function CanvasRegion(props: {
   leaf: string;
   history: ReviewHistory | undefined;
   shown: ReviewPayload | null;
-  onSelect: ReturnType<typeof useSurface>['selectSubject'];
+  onSelect: (subject: { kind: 'invariant' | 'family'; id: string }) => void;
 }) {
   const comparison = useRetainedComparison(pageComparison(props.shown, props.history));
   return (
@@ -857,87 +610,276 @@ function CanvasRegion(props: {
   );
 }
 
-export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
-  const surface = useSurface(props);
-  const { repo, master, leaf, history, read, shown, reading, instead } = surface;
-  // Any reading gesture makes the subject on screen the reader's own: a catalogue that answers late
-  // then fills the navigation without moving the reader (see `useReviewNavigation`).
-  const root = useRef<HTMLDivElement>(null);
-  useReaderEngagement(root, surface.navigation.engage);
+// The comparison chosen in the selector, null for the latest (MIK-R89 v2 rule 10), and the
+// navigation of that comparison: an older number's outline is read with `comparison=<n>`.
+function useComparisonNavigation(target: ReviewTarget) {
+  const [chosen, setChosen] = useState<number | null>(() => readReviewHashState().comparison);
+  const navigation = useReviewNavigation({ ...target, comparison: chosen ?? undefined });
+  return { navigation, chosen, setChosen };
+}
+
+// The surface's reads: the navigation (the catalogue and the subject the page reads), the read cycle
+// of that subject, and the reading status the selected subject's slot shows. The page's selection is
+// `useReviewPage`'s; a selection names the subject this reads.
+function useSurface({
+  repo,
+  master,
+  leaf,
+  selectorKind: initialKind,
+  selectorId: initialId,
+  history,
+}: ReviewTarget) {
+  const { navigation, chosen, setChosen } = useComparisonNavigation({
+    ...{ repo, master, leaf, selectorKind: initialKind, selectorId: initialId, history },
+  });
+  const selectorKind = navigation.subject?.kind;
+  const selectorId = navigation.subject?.id;
+  const [instead, setInstead] = useState<ReviewFailure | null>(null);
+  const [page, setPage] = useState<ReviewPageRequest | undefined>(undefined);
+  const workspace = useWorkspaceState();
+  // One cache per mounted surface: reclaimed with it (see `ReviewReadCache`).
+  const [cache] = useState(() => new ReviewReadCache());
+  const cycle = useReviewReadCycle({ repo, master, leaf, selectorKind, selectorId, history, instead, selection: page, cache });
+  const { read, retained, frame } = cycle;
+  useReviewMemoryWatch({ repo, master, leaf, history }, cycle);
+  const key = targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId, page, history);
+  const coherent = retained !== null && retained.key === key ? retained.payload : null;
+  const shown = shownPayload(read, coherent);
+  useObservedComparison(navigation.observeComparison, shown);
+  const asked = instead === null ? navigation.subject : undefined;
+  const problem = problemOf(read);
+  const { refreshReview, retryReview } = useRefreshReview(workspace, read, cycle.refresh);
+  // The offer to open the task context after a refusal: set by the page, which owns the selection.
+  const openTaskContext = useRef<(failure: ReviewFailure) => void>(() => undefined);
+  const problemBlock = (label: string) =>
+    problem === null ? null : (
+      <ReviewProblemBlock
+        origin={read.phase === 'refused' ? 'refusal' : 'failure'}
+        problem={problem}
+        subject={label}
+        onRetry={retryFor(read, retryReview)}
+        onOpenTaskContext={insteadFor(read, problem, instead, (failure) => openTaskContext.current(failure))}
+      />
+    );
+  const reading =
+    frame === null || shown !== null ? null : readingStatusOf(read, key, asked, navigation.catalogue, problemBlock);
+  // The catalogue of another comparison generation is not admitted beside the answer on screen
+  // (INV-CZVMX3): its fields read as loading until the catalogue is read for this one.
+  const answer = shown ?? frame;
+  const bound = answer ? { ...navigation, catalogue: catalogueForComparison(navigation.catalogue, answer) } : navigation;
+  return {
+    ...{ repo, master, leaf, history, navigation: bound, instead, setInstead, page, setPage, workspace },
+    ...{ chosen, setChosen },
+    ...{ frame, coherent, shown, read, carried: cycle.carried, refreshReview, retryReview, problem, reading },
+    openTaskContext,
+  };
+}
+
+type Surface = ReturnType<typeof useSurface>;
+
+function initialSelection(target: ReviewTarget): ReviewSelection | null {
+  return target.selectorKind && target.selectorId
+    ? { kind: 'subject', subject: { kind: target.selectorKind, id: target.selectorId } }
+    : null;
+}
+
+// The changed files of the comparison on screen: the task context's inventory for the latest one, and
+// an older comparison #k's own lane read, which lists every path #k measured (rule 10). Until #k's
+// list is read, nothing is classified at #k.
+function comparisonFiles(frame: Surface['frame'], changeSet: ReturnType<typeof useReviewPage>['changeSet']): { changed: string[]; partial: boolean } {
+  if (!changeSet.older) return frame ? markerInventory(frame.source.inventory) : { changed: [], partial: true };
+  const lane = changeSet.lane;
+  if (lane?.phase !== 'ready') return { changed: [], partial: true };
+  return { changed: lane.value.paths.map((row) => row.path), partial: lane.value.state !== 'measured' || lane.value.unmeasured.length > 0 };
+}
+
+// The marker scope of the page's diffs (MIK-R34): the comparison on screen, its changed files, and how
+// a followed marker selects its target and returns.
+function usePageMarkers(surface: Surface, page: ReturnType<typeof useReviewPage>) {
+  const { repo, master, leaf, workspace, navigation, frame } = surface;
+  return useIntentMarkerScope({
+    repo,
+    master,
+    leaf,
+    comparison: page.changeSet.number,
+    ...comparisonFiles(frame, page.changeSet),
+    moves: workspaceMarkerMoves(workspace, {
+      current: () => ({ subject: navigation.subject, chosen: workspace.chosen }),
+      select: (subject, context) =>
+        page.select(subject ? { kind: 'subject', subject } : null, { keepTree: false, context }),
+    }),
+  });
+}
+
+function readingState(reading: ReadingStatus | null): 'pending' | 'unavailable' | null {
+  if (!reading) return null;
+  return reading.problem === null ? 'pending' : 'unavailable';
+}
+
+function PageDetails({ props }: { props: PageProps & { reads: Surface } }) {
+  const { reads, page } = props;
+  const { shown, navigation } = reads;
+  const cards = page.changeSet.cards;
   return (
-    <div
-      ref={root}
-      className={reviewShell}
-      data-testid="review-surface"
-      // The keymap owner's reviewer zone: its j/k change traversal fires only inside it (MIK-R33).
-      data-kbzone="review"
-      data-comparison={shown?.comparison?.reference}
-      data-review-target={`${repo}/${master}/${leaf}`}
-      data-review-history={history ?? 'live'}
-      data-review-pending={reading && !reading.problem ? reading.subject : undefined}
-      data-review-unavailable={reading?.problem ? reading.subject : undefined}
-      // This surface owns its scroll; pending/answer relayout must not move it via UA anchoring.
-      style={{
-        height: '100%',
-        minHeight: 0,
-        minWidth: 0,
-        overflowY: 'auto',
-        overflowAnchor: 'none',
-      }}
-    >
-      <ReviewReadCacheContext.Provider value={surface.cache}>
-        <ReviewHeader
-          repo={repo}
-          master={master}
-          leaf={leaf}
-          selectorKind={surface.selectorKind}
-          selectorId={surface.selectorId}
-          instead={instead}
-          history={history}
-          onBack={surface.onBack}
-          refresh={
-            <ReviewRefresh
-              onRefresh={surface.refreshReview}
-              busy={read.phase === 'loading'}
-              generation={generationOf(read, surface.carried, shown)}
+    <TechnicalDetails
+      repo={reads.repo}
+      master={reads.master}
+      leaf={reads.leaf}
+      comparison={page.changeSet.comparison}
+      latest={page.changeSet.latest}
+      frame={reads.frame}
+      shown={shown}
+      status={readingState(reads.reading)}
+      subject={navigation.subject}
+      instead={reads.instead}
+      entries={cards.state === 'ready' ? cards.entries : []}
+      paging={shown ? <PageControls payload={shown} selection={reads.page} onSelect={reads.setPage} /> : null}
+    />
+  );
+}
+
+// The leaf worklist view (MIK-R86 rule 21), in the column in place of the change set when chosen.
+function WorklistView({ props, open }: { props: PageProps; open: OpenReviewChanges }) {
+  const { changeSet } = props.page;
+  return (
+    <LeafWorklistView
+      read={changeSet.number === undefined ? { phase: 'not-converted' } : changeSet.leafTrees}
+      reviewComparison={changeSet.number}
+      onOpenChanges={() => open('all', undefined, 'memory')}
+      onOpenPath={(path) => open('all', path)}
+    />
+  );
+}
+
+function PageReading({ props, tree, chat, open }: { props: PageProps & { reads: Surface }; tree: ReturnType<typeof useSidebar>; chat?: ReviewChatControl; open: OpenReviewChanges }) {
+  const { reads, page } = props;
+  const { changeSet } = page;
+  const layout = useReadingLayout(page.scroller);
+  const context = useReadingValue(props, layout);
+  const read = reads.read;
+  return (
+    <ReadingColumn
+      scroller={page.scroller}
+      context={context}
+      model={changeSet.model}
+      treeToggle={<SidebarToggle side="left" open={tree.open} onToggle={tree.toggle} name="Tree sidebar" controls="review-tree" keyHint="[" testId="review-tree-toggle" />}
+      chatToggle={
+        chat ? (
+          <SidebarToggle side="right" open={chat.open} onToggle={chat.toggle} name="Chat sidebar" controls={RIGHT_RAIL_ID} keyHint="]" testId="review-chat-toggle" />
+        ) : null
+      }
+      crumbText={crumbOf(page, reads.navigation.catalogue.entries)}
+      orphan={<OrphanSlot props={props} layout={layout} />}
+      markerReturn={<MarkerReturn />}
+      notes={
+        <PageNotes
+          page={page}
+          frame={reads.frame}
+          outcome={
+            <ReviewOutcomeRegion
+              read={read}
+              instead={reads.instead}
+              shown={reads.shown}
+              lastCoherent={read.phase === 'failed' ? reads.coherent : null}
+              onRetry={retryFor(read, reads.retryReview)}
+              onOpenTaskContext={insteadFor(read, reads.problem, reads.instead, (failure) => reads.openTaskContext.current(failure))}
+              readingInWorkspace={reads.reading !== null}
             />
           }
         />
-        {/* The page above the deterministic detail: saved-first, generated only on request
-            (MIK-R105 rules 2, 13). It never replaces this surface's own detail. */}
+      }
+      summary={<SummaryLine model={changeSet.model} catalogue={reads.navigation.catalogue} summary={changeSet.summary} lane={changeSet.lane} />}
+      replacement={reads.workspace.worklist ? <WorklistView props={props} open={open} /> : undefined}
+      lane={
+        <LaneSection
+          read={changeSet.lane}
+          place={context.place}
+          comparison={changeSet.comparison}
+          layout={layout}
+          collapse={context.collapse}
+          select={{ selection: page.selection, onSelect: context.select, onFile: page.lanes.onFile }}
+        />
+      }
+      canvas={
         <CanvasRegion
-          repo={repo}
-          master={master}
-          leaf={leaf}
-          history={history}
-          shown={shown}
-          onSelect={surface.selectSubject}
+          repo={reads.repo}
+          master={reads.master}
+          leaf={reads.leaf}
+          history={reads.history}
+          shown={reads.shown ?? reads.frame}
+          onSelect={(subject) => page.select({ kind: 'subject', subject }, { keepTree: true })}
         />
-        <ReviewOutcomeRegion
-          read={read}
-          instead={instead}
-          shown={shown}
-          lastCoherent={read.phase === 'failed' ? surface.coherent : null}
-          onRetry={retryFor(read, surface.retryReview)}
-          onOpenTaskContext={insteadFor(read, surface.problem, instead, surface.openTaskContext)}
-          readingInWorkspace={reading !== null}
-        />
-        <ReviewPanes
-          shown={shown}
-          frame={surface.frame}
-          reading={reading}
-          selection={surface.selection}
-          onSelect={surface.setSelection}
-          repo={repo}
-          master={master}
-          leaf={leaf}
-          selectorKind={surface.selectorKind}
-          selectorId={surface.selectorId}
-          history={history}
-          workspace={surface.workspace}
-          navigation={{ ...surface.navigation, onSelect: surface.selectSubject }}
-        />
-      </ReviewReadCacheContext.Provider>
+      }
+      details={<PageDetails props={props} />}
+    />
+  );
+}
+
+function surfaceAttributes(surface: Surface, layout: { markers: boolean }) {
+  const { repo, master, leaf, history, reading, shown } = surface;
+  return {
+    'data-comparison': shown?.comparison?.reference,
+    'data-review-target': `${repo}/${master}/${leaf}`,
+    'data-review-history': history ?? 'live',
+    'data-review-pending': reading && !reading.problem ? reading.subject : undefined,
+    'data-review-unavailable': reading?.problem ? reading.subject : undefined,
+    'data-marker-return': layout.markers ? 'open' : undefined,
+  };
+}
+
+export function ReviewSurface(props: ReviewTarget & { onBack: () => void; chat?: ReviewChatControl }) {
+  const surface = useSurface(props);
+  const reads: PageReads = { ...surface, initial: initialSelection(props) };
+  const page = useReviewPage(reads);
+  const root = useRef<HTMLDivElement>(null);
+  const { repo, master, leaf, read, workspace } = surface;
+  const change = useReviewChangePage({
+    repo,
+    master,
+    leaf,
+    comparison: page.changeSet.number,
+    payload: surface.shown ?? surface.frame,
+    laneRead: page.changeSet.lane,
+    leafTrees: page.changeSet.leafTrees,
+  });
+  const select = page.select;
+  useLayoutEffect(() => {
+    surface.openTaskContext.current = (failure) => {
+      select(null, { keepTree: false });
+      surface.setInstead(failure);
+    };
+  });
+  const onTraverse = useCallback((next: ReviewSelection) => select(next, { keepTree: true }), [select]);
+  const traversal = useBlockTraversal({ zone: root, stops: page.stops, selection: page.selection, onSelect: onTraverse, enabled: change.changePage === null });
+  const tree = useSidebar('review', 'left');
+  useBracketKeys(tree.toggle, props.chat?.toggle, change.changePage === null);
+  const markers = usePageMarkers(surface, page);
+  useSelectionFocus(surface.shown ?? surface.frame, workspace, surface.reading, root);
+  const title = useTaskTitle(repo, master, leaf);
+  const parts = { reads: { ...surface, initial: reads.initial }, page };
+  return (
+    // The keymap owner's reviewer zone: its j/k block traversal fires only inside it (MIK-R33).
+    <div ref={root} className={reviewRoot} data-testid="review-surface" data-kbzone="review" {...surfaceAttributes(surface, { markers: markers?.origin != null })}>
+      <IntentMarkerScope.Provider value={markers}>
+        <ReviewChangeSetNavigation.Provider value={change.openChanges}>
+          <div className={reviewBody} data-review-body inert={change.changePage !== null} style={{ visibility: change.changePage ? 'hidden' : undefined }}>
+            <ReviewHeader
+              leaf={leaf}
+              title={title}
+              record={recordLabelOf(surface.frame, surface.history)}
+              onBack={props.onBack}
+              chip={<TopLineControls props={parts} />}
+              refresh={<ReviewRefresh onRefresh={surface.refreshReview} busy={read.phase === 'loading'} generation={generationOf(read, surface.carried, surface.shown)} />}
+            />
+            <ReviewGrid
+              treeOpen={tree.open}
+              tree={<PageTree props={parts} traversal={traversal.status} />}
+              reading={<PageReading props={parts} tree={tree} chat={props.chat} open={change.openChanges} />}
+            />
+          </div>
+          <ReviewChangeOverlay state={change.changePage} onBack={change.closeChanges} />
+        </ReviewChangeSetNavigation.Provider>
+      </IntentMarkerScope.Provider>
     </div>
   );
 }

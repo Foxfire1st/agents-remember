@@ -20,6 +20,12 @@ const popup = css({
   fontSize: '0.8rem',
 });
 
+// The page's two sidebar keys (MIK-R89 v2 rule 8): fixed, outside the rebindable keymap.
+const PAGE_KEYS = [
+  ['Tree sidebar', '['],
+  ['Chat sidebar', ']'],
+] as const;
+
 function isHelpKey(event: KeyboardEvent): boolean {
   return event.key === '?' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.isComposing;
 }
@@ -51,6 +57,12 @@ export function ReviewKeys() {
               <div key={binding.commandId} style={{ display: 'flex', gap: '1rem', justifyContent: 'space-between' }}>
                 <dt>{COMMANDS.find((command) => command.id === binding.commandId)?.label}</dt>
                 <dd style={{ margin: 0 }}><kbd>{binding.label}</kbd></dd>
+              </div>
+            ))}
+            {PAGE_KEYS.map(([label, key]) => (
+              <div key={key} style={{ display: 'flex', gap: '1rem', justifyContent: 'space-between' }}>
+                <dt>{label}</dt>
+                <dd style={{ margin: 0 }}><kbd>{key}</kbd></dd>
               </div>
             ))}
           </dl>

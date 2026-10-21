@@ -1,3 +1,6 @@
+import { useContext } from 'react';
+
+import { css } from '../../../styled-system/css';
 import { GuaranteeComparisonBlock } from './FamilyGuarantees';
 import {
   FamilyMemberStatement,
@@ -21,17 +24,11 @@ import {
   type FamilyExcerptOccurrence,
 } from './familyExpressions';
 import { FAMILY_SIDES } from '../../data/review';
-import {
-  treeComparisonNumber,
-  useReviewTreeEntries,
-  type ReviewTreesRead,
-} from '../../data/reviewTrees';
-import { ExpressionCards } from './ExpressionCards';
-import { MemberFamilyLabel } from './MarkerTargetState';
+import { treeComparisonNumber, type ReviewTreesRead } from '../../data/reviewTrees';
+import { MemberFamilyLabel, useInvariantTargetState } from './MarkerTargetState';
 import { IntentWordDiffScope, guaranteeFact } from './IntentWordDiff';
+import { useProseLayout } from './intentDiffPreference';
 import { SubjectKnowledge } from './SubjectWorklistIdentity';
-import { planningMarks } from './worklistGroups';
-import { cardScope } from './focusedCards';
 import { familyTriage, memberChanges, orderMemberRows, outlineGroups } from './changeTriage';
 import {
   FamilyBreakdown,
@@ -39,13 +36,14 @@ import {
   useMemberChange,
   GuaranteeChangeBadge,
 } from './ChangeBadges';
-import { useTreeOrder, type TreeOrder } from './triageOrderPreference';
+import { useTreeOrder } from './triageOrderPreference';
+import type { ReviewSort } from './reviewSelection';
 import type { DiffMode as DiffLayout } from '../changeset/DiffPane';
 
 import { KnowledgeStatements } from './KnowledgeStatements';
 import { MeaningBlock, MeaningFieldGuard } from './MeaningEffects';
+import { ReadingContext } from './reading/readingContext';
 import {
-  Origin,
   SelectedStatement,
   SubjectJudgment,
   selectedRevision,
@@ -53,6 +51,7 @@ import {
 } from './SubjectReview';
 import type { ReviewSubject } from './ReviewNavigation';
 import { RosterLine, RosterNext, emptyRosterSentence, type FamilySelection } from './FamilyTree';
+import { tokenWords } from './stateWords';
 
 function RealizationClaims({ member }: { member: ReviewFamilyMember }) {
   if (!member.sources.length) {
@@ -157,12 +156,9 @@ function UnselectedCenter({
   knowledge: React.ReactNode;
 }) {
   const selected = payload.knowledge.selection_state === 'subject_selected';
-  const noFamily = payload.family_context?.state === 'no_family_recorded';
   return (
     <section className={shell} data-testid="review-center-unselected">
-      <h2 className={sectionLabel}>
-        {selected ? (noFamily ? 'No recorded family' : 'Selected intent') : 'Source review'}
-      </h2>
+      {selected ? null : <h2 className={sectionLabel}>Source review</h2>}
       <MeaningFieldGuard payload={payload} />
       {selected ? (
         <KnowledgeStatements
@@ -452,7 +448,7 @@ function displayedMemberRanks(
   entry: ReviewFamilyContextEntry,
   walked: readonly ReviewFamilyContextEntry[],
   outline: ReviewOutline | undefined,
-  order: TreeOrder,
+  order: ReviewSort,
 ): ((row: ReviewFamilyMember) => number) | undefined {
   if (!outline || outline.state !== 'outlined') return undefined;
   const group = outlineGroups(outline, [], walked, order).find(
@@ -472,7 +468,7 @@ function orderedCenterMembers(
   entry: ReviewFamilyContextEntry,
   walked: readonly ReviewFamilyContextEntry[],
   outline: ReviewOutline | undefined,
-  order: TreeOrder,
+  order: ReviewSort,
 ): ReviewFamilyMember[] {
   const members = [...entry.before.members, ...entry.after.members];
   const rows = [...new Map(members.map((m) => [m.invariant_revision_id, m])).values()].map(
@@ -485,24 +481,71 @@ function orderedCenterMembers(
   return (displayed ? rows : orderMemberRows(entry, rows, order)).map(({ member }) => member);
 }
 
-function FamilyCenter({
+// The members in the order the page's model draws them under this family; members the model does not
+// draw (the Changed view hides them) follow in their own order.
+function inModelOrder(members: ReviewFamilyMember[], order: readonly string[] | undefined): ReviewFamilyMember[] {
+  if (!order?.length) return members;
+  const rank = new Map(order.map((id, index) => [id, index]));
+  const at = (member: ReviewFamilyMember) => rank.get(member.invariant_id ?? '') ?? Number.MAX_SAFE_INTEGER;
+  return [...members].sort((a, b) => at(a) - at(b));
+}
+
+// The two parts of a selected subject's reading (MIK-R89 v2 rules 1 and 6, amended 9dde2b09): its
+// content under its heading, in the mockup's order (the word diff, the recorded steps and the recorded
+// judgment), and the rest after its code. `whole` draws both, the content first, where no code
+// follows (a subject without a section of its own).
+export type CenterPart = 'whole' | 'content' | 'after-code';
+
+// The parts stand unframed in the column: no box and no "Selected …" heading (9dde2b09).
+const flow = css({ display: 'grid', gap: '1rem', minWidth: 0, alignContent: 'start' });
+
+// The content keeps the mockup's reading measure, a narrower column than the code (styles.css
+// `.statement { max-width: 92ch }`; MIK-R89 v2 rule 1, d9a1ec8f item 6). Side by side spreads the
+// wording's two columns over the column, so it lifts the measure (MIK-R35 rule 4).
+const measured = css({ '&[data-measure="reading"]': { maxWidth: '92ch' } });
+const useMeasure = (): 'reading' | 'wide' => (useProseLayout() === 'side-by-side' ? 'wide' : 'reading');
+
+// A family's content: its guarantee's word diff, its recorded steps and its recorded judgment. Its
+// state sentences and the record's provenance are Technical details' (rule 6).
+function FamilyContent({
   entry,
   layout,
+  payload,
+}: {
+  entry: ReviewFamilyContextEntry;
+  layout: DiffLayout;
+  payload: ReviewPayload;
+}) {
+  const measure = useMeasure();
+  return (
+    <section
+      className={`${flow} ${measured}`}
+      data-testid="review-center-family"
+      data-family={entry.family_id}
+      data-measure={measure}
+    >
+      <GuaranteeComparisonBlock entry={entry} layout={layout} />
+      <MeaningBlock payload={payload} record={entry.family_id} />
+      <FamilyJudgment entry={entry} payload={payload} />
+    </section>
+  );
+}
+
+// A family's members and their resolution, after its members' code.
+function FamilyDetails({
+  entry,
   listed,
   listedPartial,
   onOpenMember,
   onOpenPath,
   onRosterNext,
-  expressions,
   knowledge,
   payload,
   outline,
 }: {
   entry: ReviewFamilyContextEntry;
-  expressions: React.ReactNode;
   knowledge: React.ReactNode;
   payload: ReviewPayload;
-  layout: DiffLayout;
   listed: Set<string>;
   listedPartial: boolean;
   onOpenMember: (memberRevisionId: string) => void;
@@ -513,43 +556,20 @@ function FamilyCenter({
 }) {
   const storeOrder = useTreeOrder();
   const walked = payload.family_context?.entries ?? [];
-  const distinct = orderedCenterMembers(entry, walked, outline, storeOrder);
+  // On the review page the list is the change-set model's order for this family (MIK-R89 v2 rule 3,
+  // one order; INV-719D48); elsewhere the outline's.
+  const modelOrder = useContext(ReadingContext)?.familyMembers.get(entry.family_id);
+  const distinct = inModelOrder(orderedCenterMembers(entry, walked, outline, storeOrder), modelOrder);
   return (
-    <section className={shell} data-testid="review-center-family" data-family={entry.family_id}>
-      <div>
-        <h2 className={sectionLabel}>Family {entry.display_label ?? entry.family_id}</h2>
-        <div>
-          <p>Family comparison details</p>
-          <p
-            className={muted}
-            data-review-content="reason"
-            data-testid="review-center-family-state"
-            data-family-state={entry.state}
-          >
-            {entry.state}: {entry.detail}
-          </p>
-          <p
-            className={muted}
-            data-review-content="reason"
-            data-testid="review-center-family-selection"
-          >
-            {entry.selection.state}: {entry.selection.statement}
-          </p>
-        </div>
-      </div>
+    <section className={flow} data-testid="review-center-family-details" data-family={entry.family_id}>
       <GuaranteeChangeBadge kinds={entry.change_kinds} />
       <FamilyBreakdown triage={familyTriage(entry)} />
-      <Origin side="before" origin={payload.knowledge.before_origin} />
-      <Origin side="after" origin={payload.knowledge.after_origin} />
-      <GuaranteeComparisonBlock entry={entry} layout={layout} />
-      <MeaningBlock payload={payload} record={entry.family_id} />
       <FamilyMemberContext
         entry={entry}
         distinct={distinct}
         onOpenMember={onOpenMember}
         onRosterNext={onRosterNext}
       />
-      {expressions}
       <section data-review-content="resolution">
         <p>Realization resolution details</p>
         <FamilyExpressionExcerpts
@@ -560,7 +580,6 @@ function FamilyCenter({
           onOpenPath={onOpenPath}
         />
       </section>
-      <FamilyJudgment entry={entry} payload={payload} />
       {knowledge}
     </section>
   );
@@ -626,7 +645,64 @@ function SharedMembership({ member }: { member?: ReviewFamilyMember }) {
   );
 }
 
-function MemberCenter({
+// The invariant's family line only when a followed marker's membership is unknown (MIK-R34): the
+// family's name, or its chip, is the meta line's, and no family reads as nothing (9dde2b09).
+function MemberTargetLine({
+  entry,
+  payload,
+  subject,
+}: {
+  entry?: ReviewFamilyContextEntry;
+  payload: ReviewPayload;
+  subject: ReviewSubject;
+}) {
+  const target = useInvariantTargetState(subject, payload.family_context);
+  if (!target) return null;
+  return (
+    <p className={muted} data-testid="review-center-member-family">
+      <MemberFamilyLabel subject={subject} payload={payload} entry={entry} />
+    </p>
+  );
+}
+
+// An invariant's content: its statement's word diff under the header that holds the wording-layout
+// switch, its recorded steps and its recorded judgment.
+function MemberContent({
+  entry,
+  layout,
+  payload,
+  subject,
+}: {
+  entry?: ReviewFamilyContextEntry;
+  layout: DiffLayout;
+  payload: ReviewPayload;
+  subject: ReviewSubject;
+}) {
+  const measure = useMeasure();
+  return (
+    <section
+      className={`${flow} ${measured}`}
+      data-testid="review-center-member"
+      data-family={entry?.family_id}
+      data-subject={subject.id}
+      data-measure={measure}
+    >
+      <MemberTargetLine entry={entry} payload={payload} subject={subject} />
+      <SelectedStatement
+        knowledge={payload.knowledge}
+        subject={subject}
+        layout={layout}
+        members={subjectRows(entry, subject)}
+      />
+      <MeaningBlock payload={payload} record={subject.id} />
+      <SubjectJudgment payload={payload} subject={subject} />
+    </section>
+  );
+}
+
+// What else the invariant's read carries, after its code: the family's guarantee it was selected
+// under, its membership and realization facts, its worklist items and its roster continuation.
+function MemberDetails({
   entry,
   member,
   layout,
@@ -634,7 +710,6 @@ function MemberCenter({
   listed,
   onOpenPath,
   onRosterNext,
-  expressions,
   knowledge,
   subject,
 }: {
@@ -644,38 +719,20 @@ function MemberCenter({
   payload: ReviewPayload;
   listed: Set<string>;
   subject: ReviewSubject;
-  expressions: React.ReactNode;
   knowledge: React.ReactNode;
   onOpenPath: (path: string) => void;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
 }) {
   return (
     <section
-      className={shell}
-      data-testid="review-center-member"
+      className={flow}
+      data-testid="review-center-member-details"
       data-family={entry?.family_id}
       data-subject={subject.id}
     >
-      <div>
-        <h2 className={sectionLabel}>{member?.display_label ?? 'Selected invariant'}</h2>
-        <SharedMembership member={member} />
-        <p className={muted} data-testid="review-center-member-family">
-          <MemberFamilyLabel subject={subject} payload={payload} entry={entry} />
-        </p>
-      </div>
       {entry ? <GuaranteeComparisonBlock entry={entry} layout={layout} /> : null}
-      <div className={card}>
-        <h3 className={sectionLabel}>Selected intent</h3>
-        {entry && member ? <MemberMeaning entry={entry} member={member} /> : null}
-        <SelectedStatement
-          knowledge={payload.knowledge}
-          subject={subject}
-          layout={layout}
-          members={subjectRows(entry, subject)}
-        />
-        <MeaningBlock payload={payload} record={subject.id} />
-      </div>
-      {expressions}
+      <SharedMembership member={member} />
+      {entry && member ? <MemberMeaning entry={entry} member={member} /> : null}
       <section data-review-content="resolution">
         <p>Statement, membership and realization details</p>
         <IndependentFacts entry={entry} payload={payload} subject={subject} />
@@ -693,9 +750,6 @@ function MemberCenter({
           </div>
         ) : null}
       </section>
-      <div className={card}>
-        <SubjectJudgment payload={payload} subject={subject} />
-      </div>
       {knowledge}
       {entry ? (
         <RosterNext entry={entry} onRosterNext={onRosterNext} testid="review-center-roster-next" />
@@ -742,22 +796,21 @@ function UnavailableMember({
   );
 }
 
+// The selected subject's own reading. Its code locations are not here: they are the subject's
+// blocks in its section of the reading column, from the page's one card read (MIK-R89 v2 W4).
 interface FamilyReviewCenterProps {
   payload: ReviewPayload;
   subject?: ReviewSubject;
   selection: FamilySelection | null;
   layout: DiffLayout;
-  onLayout: (next: DiffLayout) => void;
-  fullFile: boolean;
-  onFullFile: (next: boolean) => void;
   onOpenMember: (familyId: string, memberRevisionId: string) => void;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
-  openPath: string | null | undefined;
-  onOpenPath: (path: string | null) => void;
   onOpenFromCenter: (path: string) => void;
   // The leaf's measured tree view, read once per task context by the workspace.
   leafTrees?: ReviewTreesRead | null;
   outline?: ReviewOutline;
+  // Which part of the reading is drawn here; `whole` when not given.
+  part?: CenterPart;
 }
 
 // The center of one review. A tree comparison's intent wording is word-diffed inside it (MIK-R35).
@@ -774,14 +827,12 @@ function ReviewCenterBody(props: FamilyReviewCenterProps) {
   const { entry, member, listed } = centerSelection(payload, selection);
   const addressedSubject = member && !member.invariant_id ? undefined : subject;
   const invariant = addressedSubject?.kind === 'invariant';
-  const expressions = <CenterExpressions {...props} entry={entry} subject={addressedSubject} />;
   const common = {
     payload,
     layout,
     listed,
     onOpenPath: props.onOpenFromCenter,
     onRosterNext,
-    expressions,
     knowledge: (
       <SubjectKnowledge
         read={props.leafTrees}
@@ -801,7 +852,6 @@ function ReviewCenterBody(props: FamilyReviewCenterProps) {
       member={member}
       addressedSubject={addressedSubject}
       invariant={invariant}
-      expressions={expressions}
     />
   );
 }
@@ -812,7 +862,6 @@ function SelectedCenter({
   member,
   addressedSubject,
   invariant,
-  expressions,
 }: {
   props: FamilyReviewCenterProps;
   common: {
@@ -821,60 +870,86 @@ function SelectedCenter({
     listed: Set<string>;
     onOpenPath: (path: string) => void;
     onRosterNext: FamilyReviewCenterProps['onRosterNext'];
-    expressions: React.ReactNode;
     knowledge: React.ReactNode;
   };
   entry?: ReviewFamilyContextEntry;
   member?: ReviewFamilyMember;
   addressedSubject?: ReviewSubject;
   invariant: boolean;
-  expressions: React.ReactNode;
 }) {
   const { payload, selection, layout, onRosterNext, onOpenMember } = props;
+  const part = props.part ?? 'whole';
+  if (invariant)
+    return (
+      <CenterParts
+        part={part}
+        kind="member"
+        content={<MemberContent entry={entry} layout={layout} payload={payload} subject={addressedSubject!} />}
+        details={<MemberDetails {...common} entry={entry} member={member} subject={addressedSubject!} />}
+      />
+    );
+  if (entry !== undefined && !member)
+    return (
+      <CenterParts
+        part={part}
+        kind="family"
+        content={<FamilyContent entry={entry} layout={layout} payload={payload} />}
+        details={
+          <FamilyDetails
+            {...common}
+            entry={entry}
+            listedPartial={payload.source.inventory.partial}
+            onOpenMember={(revision) => onOpenMember(entry.family_id, revision)}
+            outline={props.outline}
+          />
+        }
+      />
+    );
+  // A subject with no family entry, or a member whose identity this page did not supply: its own
+  // state, drawn whole with the content.
+  if (part === 'after-code') return null;
   return (
     <div
       data-testid="review-center"
-      data-selection-kind={
-        invariant ? 'member' : selection === null ? 'none' : member ? 'member' : 'family'
-      }
+      data-selection-kind={selection === null ? 'none' : member ? 'member' : 'family'}
     >
-      {invariant ? (
-        <MemberCenter {...common} entry={entry} member={member} subject={addressedSubject!} />
-      ) : entry === undefined ? (
-        <>
-          <UnselectedCenter payload={payload} knowledge={common.knowledge} />
-          {expressions}
-        </>
-      ) : member ? (
-        <>
-          <UnavailableMember
-            entry={entry}
-            member={member}
-            layout={layout}
-            payload={payload}
-            onRosterNext={onRosterNext}
-          />
-          {expressions}
-        </>
+      {entry === undefined ? (
+        <UnselectedCenter payload={payload} knowledge={common.knowledge} />
       ) : (
-        <FamilyCenter
-          {...common}
+        <UnavailableMember
           entry={entry}
-          listedPartial={payload.source.inventory.partial}
-          onOpenMember={(revision) => onOpenMember(entry.family_id, revision)}
-          outline={props.outline}
+          member={member!}
+          layout={layout}
+          payload={payload}
+          onRosterNext={onRosterNext}
         />
       )}
     </div>
   );
 }
 
-// The worklist the cards' planning marks come from, only when the leaf-wide read answered for the
-// very comparison this payload was composed over (review F11); otherwise the cards carry no mark.
-function pinnedWorklist(leafTrees: ReviewTreesRead | null | undefined, payload: ReviewPayload) {
-  if (leafTrees?.phase !== 'trees') return undefined;
-  const same = leafTrees.trees.comparison?.number === treeComparisonNumber(payload.limitations);
-  return same ? leafTrees.trees.worklist : undefined;
+// The content and the details of one reading, as the part asks.
+function CenterParts({
+  part,
+  kind,
+  content,
+  details,
+}: {
+  part: CenterPart;
+  kind: 'member' | 'family';
+  content: React.ReactNode;
+  details: React.ReactNode;
+}) {
+  return (
+    <>
+      {part === 'after-code' ? null : (
+        <div data-testid="review-center" data-selection-kind={kind}>
+          {content}
+        </div>
+      )}
+      {part === 'content' ? null : details}
+    </>
+  );
 }
 
 function MemberMeaning({
@@ -910,68 +985,10 @@ function MemberMeaning({
         {[...entry.after.members].some((one) => one.member_id === member.member_id)
           ? ' · after'
           : ''}{' '}
-        · {member.state}
+        · {tokenWords(member.state)}
       </p>
     </div>
   );
-}
-
-// The code and test expressions of the selection, as focused cards of its tree comparison.
-function CenterExpressions({
-  payload,
-  entry,
-  subject,
-  layout,
-  onLayout,
-  fullFile,
-  onFullFile,
-  openPath,
-  onOpenPath,
-  leafTrees = null,
-}: FamilyReviewCenterProps & {
-  entry?: ReviewFamilyContextEntry;
-}) {
-  const cardRead = useReviewTreeEntries(
-    payload.candidate.repository_id,
-    payload.candidate.master,
-    payload.candidate.leaf_id,
-    treeComparisonNumber(payload.limitations),
-    cardInvariants(entry, subject),
-  );
-  if (cardRead === null)
-    return <p className={muted}>Code locations require a measured tree comparison.</p>;
-  return (
-    <ExpressionCards
-      payload={payload}
-      read={cardRead}
-      seed={subject?.kind === 'invariant' ? subject.id : undefined}
-      planning={planningMarks(pinnedWorklist(leafTrees, payload))}
-      scope={cardScope(entry)}
-      layout={layout}
-      onLayout={onLayout}
-      fullFile={fullFile}
-      onFullFile={onFullFile}
-      openPath={openPath}
-      onOpenPath={onOpenPath}
-    />
-  );
-}
-
-// The invariants whose entries make the cards: every member of the selected family (both sides),
-// or the selected invariant alone when it has no family on this page. Sorted, so one selection is
-// one read. A click on another member of the family that is already shown keeps the same set, so
-// the kept answer stands and no second cards read is sent (MIK-R81 rule 7); the subject's own id
-// joins the set only where no family is shown.
-function cardInvariants(
-  entry: ReviewFamilyContextEntry | undefined,
-  subject: ReviewSubject | undefined,
-): string[] {
-  const keys = new Set<string>();
-  for (const row of entry ? [...entry.before.members, ...entry.after.members] : [])
-    if (row.invariant_id) keys.add(row.invariant_id);
-  // An unreadable family roster does not erase the selected invariant's independent source read.
-  if ((!entry || keys.size === 0) && subject?.kind === 'invariant') keys.add(subject.id);
-  return [...keys].sort();
 }
 
 function centerSelection(payload: ReviewPayload, selection: FamilySelection | null) {
@@ -994,7 +1011,7 @@ function FamilyJudgment({
   payload: ReviewPayload;
 }) {
   return (
-    <div className={card} data-testid="review-family-judgment">
+    <div data-testid="review-family-judgment">
       <SubjectJudgment payload={payload} subject={{ kind: 'family', id: entry.family_id }} />
     </div>
   );

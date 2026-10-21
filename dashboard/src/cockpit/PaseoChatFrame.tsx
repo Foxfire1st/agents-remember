@@ -146,6 +146,14 @@ export function FrameUnavailable({
  */
 interface PaseoChatFrameProps {
   active: boolean;
+  /**
+   * Start the embedded client before the pane is first shown (the review page's closed chat
+   * column, MIK-R89 v2 rule 12, which supersedes MIK-R122 rule 2's "created when the chat is
+   * first shown"). Only the descriptor is read, and the first load names no agent while the pane
+   * is not shown: the agent is asked for by message once it is. Off by default: every other pane
+   * still starts on its first showing.
+   */
+  preload?: boolean;
   /** Identity of the launcher selection; a change means another execution is being displayed. */
   scope: string;
   target: PaseoAgentTarget | null;
@@ -239,21 +247,27 @@ function requestWait(request: PaseoOpenRequest | null, landed: boolean): FrameWa
   return { line: requestWaitText(request), held: !landed && request?.onChat !== true, late: request?.late === true };
 }
 
-/** Fetch the embed descriptor on first activation and each explicit Retry. */
-function useFrameDescriptor(active: boolean, controller: PaseoFrameControl) {
+/**
+ * Fetch the embed descriptor on first activation (or the first preload) and each explicit Retry.
+ * A frame started while its pane is not shown loads no agent's address.
+ */
+function useFrameDescriptor(active: boolean, preload: boolean, controller: PaseoFrameControl) {
   const [started, setStarted] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [descriptor, setDescriptor] = useState<PaseoFrameDescriptor | null>(null);
+  // Whether the pane is shown when the descriptor answers, read by the answer's callback.
+  const shown = useRef(active);
   useEffect(() => {
-    if (active) setStarted(true);
-  }, [active]);
+    shown.current = active;
+    if (active || preload) setStarted(true);
+  }, [active, preload]);
   useEffect(() => {
     if (!started) return;
     let cancelled = false;
     void fetchFrameDescriptor().then((next) => {
       if (cancelled) return;
       setDescriptor(next);
-      if (next.available) controller.start(next, attempt > 0);
+      if (next.available) controller.start(next, attempt > 0, !shown.current);
       else controller.stop();
     });
     return () => {
@@ -271,7 +285,7 @@ function useFrameDescriptor(active: boolean, controller: PaseoFrameControl) {
 export function PaseoChatFrame(props: PaseoChatFrameProps) {
   const { active, onAvailability } = props;
   const state = useFrameController(props);
-  const { started, descriptor, retry } = useFrameDescriptor(active, state.controller);
+  const { started, descriptor, retry } = useFrameDescriptor(active, props.preload === true, state.controller);
   useEffect(() => { onAvailability?.(descriptor?.available === true); }, [descriptor, onAvailability]);
   if (!started) return <div className={frameShell} />;
   if (descriptor && !descriptor.available)

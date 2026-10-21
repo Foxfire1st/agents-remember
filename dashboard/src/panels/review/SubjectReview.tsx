@@ -3,7 +3,6 @@ import { css } from '../../../styled-system/css';
 import type {
   ReviewFamilyMember,
   ReviewKnowledgePane,
-  ReviewOrigin,
   ReviewRevisionSelection,
 } from '../../data/review';
 import type { ReviewSubject } from './ReviewNavigation';
@@ -19,6 +18,8 @@ import {
 } from './statementWording';
 
 const muted = css({ color: 'muted', fontSize: '0.78rem', margin: '0.35rem 0' });
+// The statement's label in the mockup's label look (styles.css `.label`; d9a1ec8f): cyan, small capitals.
+const labelLook = css({ color: 'cyan', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0.35rem 0' });
 export function selectedRevision(
   knowledge: ReviewKnowledgePane,
   subject: ReviewSubject,
@@ -45,19 +46,22 @@ const FIELD_NAMES: Record<WordingField, string> = {
   exclusions: 'exclusions',
 };
 
+// The statement's header names the change and, where the page carried them, the revisions' display
+// numbers; the revision ids are in Technical details (MIK-R89 v2 rule 6, amended 9dde2b09).
 function statementLabel(
   selection: ReviewRevisionSelection,
   wording: WordingComparison,
-  revisions: string,
+  revisions: string | null,
 ): string {
+  const at = revisions === null ? '' : ` · ${revisions}`;
   if (selection.state === 'unresolved') return 'Revision comparison unresolved';
   if (selection.state === 'added') return 'Added statement · recorded on the after side only';
   if (selection.state === 'removed') return 'Removed statement · recorded on the before side only';
   if (wording.kind === 'same_revision') return 'Statement unchanged · same recorded revision';
-  if (wording.kind === 'wording_unchanged') return `Wording unchanged · ${revisions}`;
+  if (wording.kind === 'wording_unchanged') return `Wording unchanged${at}`;
   if (wording.kind === 'not_comparable')
-    return `Statement revised · ${revisions} · ${wording.fields.join(', ')} not carried here`;
-  return `Changed ${wording.fields.map((field) => FIELD_NAMES[field]).join(', ')} · ${revisions}`;
+    return `Statement revised${at} · ${wording.fields.join(', ')} not carried here`;
+  return `Changed ${wording.fields.map((field) => FIELD_NAMES[field]).join(', ')}${at}`;
 }
 
 // Only a text-first comparison (a tree comparison) can find one revision whose text differs.
@@ -87,7 +91,7 @@ function authoredSides(
 ): {
   before: AuthoredWording;
   after: AuthoredWording;
-  labels: [string, string];
+  labels: [string, string] | null;
   // Fields a side took from the comparison's joined field report rather than from a list.
   projected: WordingField[];
 } {
@@ -129,35 +133,28 @@ function authoredSides(
 }
 
 // Display versions when both are carried and differ; one revision's own version on both sides (it is
-// one number); otherwise the revisions' short identities, so two revisions never read as one.
+// one number); otherwise none, so two revisions never read as one and no revision id is named here.
 function revisionLabels(
   selection: ReviewRevisionSelection,
   beforeRow?: ReviewFamilyMember,
   afterRow?: ReviewFamilyMember,
-): [string, string] {
-  const short = (revision?: string) => (revision ? revision.slice(0, 8) : 'none');
-  const [before, after] = [beforeRow?.display_version, afterRow?.display_version];
+): [string, string] | null {
+  const before = shownVersion(beforeRow, selection.before_display_version);
+  const after = shownVersion(afterRow, selection.after_display_version);
   const one = before ?? after;
   if (selection.before_revision_id === selection.after_revision_id && one) return [one, one];
-  return before && after && before !== after
-    ? [before, after]
-    : [short(selection.before_revision_id), short(selection.after_revision_id)];
+  return before && after && before !== after ? [before, after] : null;
+}
+
+// A side's display version: its own member row's, else the one its revision selection carries.
+function shownVersion(row: ReviewFamilyMember | undefined, carried: string | undefined): string | undefined {
+  return row?.display_version ?? carried;
 }
 
 // A reported field value as the list it is compared as: absent = not carried, null = none recorded.
 function listed(value: string | null | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   return value === null ? [] : [value];
-}
-
-export function Origin({ side, origin }: { side: string; origin?: ReviewOrigin }) {
-  if (!origin) return null;
-  return <div className={muted} data-testid={`review-origin-${side}`}>
-    <p>{side} origin: task {origin.task}{origin.leaf ? ` · leaf ${origin.leaf}` : ''}
-      {origin.wave ? ` · wave ${origin.wave}` : ''}{origin.handoffEntry ? ` · hand-off entry ${origin.handoffEntry}` : ''}</p>
-    {origin.handoff?.path ? <p>Hand-off: {origin.handoff.path}</p> : null}
-    {origin.handoff?.evidence?.map((text, index) => <p key={index}>{text}</p>)}
-  </div>;
 }
 
 export function SelectedStatement({
@@ -187,20 +184,23 @@ export function SelectedStatement({
     oneRevision,
   );
   const state = statementState(selection, wording);
+  // The header line: what changed, with MIK-R35's wording-layout switch beside it (9dde2b09). Who
+  // introduced the record and the revision ids are Technical details' (MIK-R89 v2 rule 6).
+  const label = (
+    <p className={labelLook} data-testid="review-center-statement-label">
+      {statementLabel(selection, wording, sides.labels && revisionMeta(...sides.labels))}
+      {sameRevisionNote(oneRevision, wording)}
+    </p>
+  );
   return (
     <div
       data-review-content="statement"
       data-testid={`review-center-member-${state}`}
       data-revision-state={selection.state}
     >
-      <p className={muted} data-testid="review-center-statement-label">
-        {statementLabel(selection, wording, revisionMeta(...sides.labels))}
-        {sameRevisionNote(oneRevision, wording)}
-      </p>
-      <Origin side="before" origin={knowledge.before_origin} />
-      <Origin side="after" origin={knowledge.after_origin} />
       {['compared', 'added', 'removed'].includes(selection.state) ? (
         <IntentStatementBody
+          header={label}
           knowledge={knowledge}
           selection={selection}
           wording={wording}
@@ -209,18 +209,14 @@ export function SelectedStatement({
           layout={layout}
         />
       ) : (
-        <p className={muted} data-testid="review-center-statement-unavailable">
-          Before: {knowledge.before_statement.state} · after: {knowledge.after_statement.state}.
-          No statement diff is available.
-        </p>
+        <>
+          {label}
+          <p className={muted} data-testid="review-center-statement-unavailable">
+            Before: {knowledge.before_statement.state} · after: {knowledge.after_statement.state}.
+            No statement diff is available.
+          </p>
+        </>
       )}
-      <details data-disclosure="identifiers">
-        <summary>Statement revision details</summary>
-        <p className={muted} data-testid="review-center-member-revisions">
-          Before {selection.before_revision_id ?? 'no revision selected'} → after{' '}
-          {selection.after_revision_id ?? 'no revision selected'}
-        </p>
-      </details>
     </div>
   );
 }

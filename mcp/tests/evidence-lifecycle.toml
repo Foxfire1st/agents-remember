@@ -245,6 +245,7 @@ consumers = [
   "mcp/tests/test_dashboard_host.py",
   "mcp/tests/test_dependency_facts_store.py",
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
+  "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_developer_question_wording.py",
   "mcp/tests/test_direct_execution_grant_dashboard.py",
   "mcp/tests/test_direct_execution_grants.py",
@@ -1693,6 +1694,7 @@ consumers = [
   "mcp/tests/test_dashboard_host.py",
   "mcp/tests/test_dependency_facts_store.py",
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
+  "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_developer_question_wording.py",
   "mcp/tests/test_direct_execution_grant_dashboard.py",
   "mcp/tests/test_direct_execution_grants.py",
@@ -2686,6 +2688,7 @@ permanence_rationale = "What a launch gives an agent is asserted for every role 
 replacement_contract = "contract:paseo-launch-given-to-agent-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_held_queue.py",
   "mcp/tests/test_investigator.py",
   "mcp/tests/test_leaf_enclosure_start.py",
@@ -2726,6 +2729,7 @@ replacement_contract = "contract:paseo-runtime-command-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_dashboard_host.py",
+  "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_held_queue.py",
   "mcp/tests/test_host_activity_projection.py",
   "mcp/tests/test_host_release_contract.py",

@@ -418,6 +418,39 @@ class AgentSendScriptTests(RoleBridgeScriptTestCase):
                 {"messageId": MESSAGE_ID, "activeTurnBehavior": "steer"},
             )
 
+    def test_images_and_text_attachments_go_with_the_message_only_when_given(self) -> None:
+        """MIK-R188 rule 9: the tray's picks go natively; a send without them is unchanged."""
+
+        image = {"data": "iVBORw0KGgo=", "mimeType": "image/png"}
+        text = {"type": "text", "mimeType": "text/plain", "title": "Pick 2", "text": "the words"}
+        payload = {"agentId": AGENT_ID, "text": "From developer\nhi", "messageId": MESSAGE_ID}
+        delivery = self.call(
+            "agent-send", {**payload, "images": [image], "attachments": [text]}, holds=agent("idle")
+        )["delivery"]
+        self.assertIs(delivery["delivered"], True)
+        self.assertEqual(
+            self.recorded("send")[-1]["options"],
+            {"messageId": MESSAGE_ID, "images": [image], "attachments": [text]},
+        )
+        with self.subTest("empty lists add nothing to the options"):
+            self.call(
+                "agent-send", {**payload, "images": [], "attachments": []}, holds=agent("idle")
+            )
+            self.assertEqual(self.recorded("send")[-1]["options"], {"messageId": MESSAGE_ID})
+        malformed = {
+            "a text attachment without its mime type": {
+                "attachments": [{"type": "text", "text": "x"}]
+            },
+            "an image of another type": {"images": [{"data": "eA==", "mimeType": "text/plain"}]},
+            "images that are no list": {"images": image},
+        }
+        for label, extra in malformed.items():
+            with self.subTest(label), self.assertRaises(PaseoBridgeFailure) as raised:
+                self.call("agent-send", {**payload, **extra}, holds=agent("idle"))
+            self.assertEqual(raised.exception.code, "invalid_bridge_payload")
+            # Refused before the agent is read: nothing is sent with part of the payload.
+            self.assertEqual(self.recorded(), [])
+
     def test_a_running_turn_is_steered_or_held_by_the_provider_and_never_cut_off(self) -> None:
         for label, (provider, providers) in {
             "a steering provider": ("steering", {}),

@@ -2,6 +2,7 @@
 import type { ReviewPayload, ReviewUnresolvedReference } from '../../data/review';
 import type { LaneRead, ReviewUnexplainedLane } from '../../data/reviewLane';
 import { laneAttributionFacts, laneCountText } from './laneFocus';
+import { remainingWords, tokenWords } from './stateWords';
 
 const paragraph = (text: string, testid?: string) => <p data-testid={testid}>{text}</p>;
 const unresolved = (entries: ReviewUnresolvedReference[]) =>
@@ -40,7 +41,7 @@ function RecordFacts({ payload }: { payload: ReviewPayload }) {
         <ul data-testid="review-field-changes" data-review-content="changed-field">
           {fields.map((change) => (
             <li key={`${change.item_id}:${change.field}`}>
-              {change.field}: {fieldValue(change.before_value)} → {fieldValue(change.after_value)}
+              {tokenWords(change.field)}: {fieldValue(change.before_value)} → {fieldValue(change.after_value)}
             </li>
           ))}
         </ul>
@@ -54,14 +55,15 @@ function RecordFacts({ payload }: { payload: ReviewPayload }) {
     </>
   );
 }
+// The selected subject's main-page facts (its slot in the reading column): changed fields, unresolved
+// references, the remaining counts, the staleness statement and the submission contract. The one
+// "All changes" link is the tree's (MIK-R89 v2 rule 7); this pane has none.
 export function ReviewMainFacts({
   payload,
   laneRead,
-  onAllChanges,
 }: {
   payload: ReviewPayload;
   laneRead?: LaneRead<ReviewUnexplainedLane> | null;
-  onAllChanges?: () => void;
 }) {
   const { source, submission, staleness } = payload;
   const lane = laneRead ? laneAttributionFacts(laneRead) : { state: 'unknown' as const };
@@ -78,7 +80,7 @@ export function ReviewMainFacts({
             .map(
               (count) =>
                 laneCountText(count.name, lane) ??
-                `${count.name}: ${count.value ?? `not measured (${count.reason ?? 'no reason recorded'})`}`,
+                `${remainingWords(count.name)}: ${count.value ?? `not measured (${count.reason ?? 'no reason recorded'})`}`,
             )
             .join(' · ')}
         </p>
@@ -93,11 +95,6 @@ export function ReviewMainFacts({
         <p data-submission-state={submission.state}>Read-only review — {submission.reason}</p>
         <p>next: {submission.next_action}</p>
       </div>
-      {onAllChanges ? (
-        <button type="button" onClick={onAllChanges}>
-          All changes
-        </button>
-      ) : null}
     </section>
   );
 }
@@ -114,61 +111,31 @@ function JudgmentIdentifiers({ judgment }: { judgment: ReviewPayload['judgment']
   );
 }
 
-export function ReviewTechnicalDetails({
-  payload,
-  unanswered,
-  paging,
-}: {
-  payload: ReviewPayload | null;
-  unanswered: { label: string; unavailable: boolean };
-  paging: React.ReactNode;
-  laneRead?: LaneRead<ReviewUnexplainedLane> | null;
-}) {
+// The selected answer's record identities, for Technical details (MIK-R89 v2 rule 6): the comparison
+// reference and policy, the retained revisions, the expansion command, the judgment identifiers and
+// the dispositions the existing authority accepts.
+export function ReviewRecordIdentities({ payload }: { payload: ReviewPayload }) {
   return (
-    <section>
-      {payload === null ? (
-        <p
-          data-review-content="read-state"
-          data-testid={
-            unanswered.unavailable ? 'review-details-unavailable' : 'review-details-pending'
-          }
-        >
-          {unanswered.unavailable
-            ? `No records are shown: ${unanswered.label} could not be read.`
-            : `Reading the records of ${unanswered.label}…`}
-        </p>
-      ) : null}
-      {paging}
-      <details
-        data-disclosure="provenance"
-        data-testid="review-details"
-        style={{ marginTop: '1rem' }}
-      >
-        <summary>Technical details · records, paging and submission contract</summary>
-        {payload ? (
-          <>
-            <p data-testid="review-selection">
-              {payload.comparison
-                ? `comparison: ${payload.comparison.reference} · policy ${payload.comparison.policy_version}`
-                : 'No comparison identifier'}
-            </p>
-            <p data-testid="review-revision-groups">
-              retained revisions:{' '}
-              {payload.knowledge.revision_groups
-                .map((group) => `${group.side}:${group.record_id}=${group.selected_revision_count}`)
-                .join(' · ') || 'none selected'}
-            </p>
-            <p data-testid="review-expansion">
-              {payload.source.expansion_reference} {payload.source.expansion_command}
-            </p>
-            <JudgmentIdentifiers judgment={payload.judgment} />
-            <p>
-              Dispositions the existing authority accepts:{' '}
-              {payload.submission.proposed_dispositions.join(', ')}. None is publication approval.
-            </p>
-          </>
-        ) : null}
-      </details>
-    </section>
+    <>
+      <p data-testid="review-selection">
+        {payload.comparison
+          ? `comparison: ${payload.comparison.reference} · policy ${payload.comparison.policy_version}`
+          : 'No comparison identifier'}
+      </p>
+      <p data-testid="review-revision-groups">
+        retained revisions:{' '}
+        {payload.knowledge.revision_groups
+          .map((group) => `${group.side}:${group.record_id}=${group.selected_revision_count}`)
+          .join(' · ') || 'none selected'}
+      </p>
+      <p data-testid="review-expansion">
+        {payload.source.expansion_reference} {payload.source.expansion_command}
+      </p>
+      <JudgmentIdentifiers judgment={payload.judgment} />
+      <p>
+        Dispositions the existing authority accepts:{' '}
+        {payload.submission.proposed_dispositions.join(', ')}. None is publication approval.
+      </p>
+    </>
   );
 }

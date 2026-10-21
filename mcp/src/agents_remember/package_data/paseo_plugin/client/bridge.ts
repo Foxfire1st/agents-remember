@@ -2,6 +2,7 @@ import { documentSidebar, isDocumentPage, setEmbedPageMode } from "./sidebar";
 import { PLUGIN_ID } from "./look";
 import { startHierarchy, type HierarchyClient } from "./hierarchy";
 import { readSelectedChats, watchSelectedChats } from "./selection";
+import { PICK_ABILITY, startTrayChannel } from "./pick";
 import type { PluginPage } from "./page";
 
 // The control channel between the AR dashboard and the app it frames.
@@ -10,12 +11,20 @@ import type { PluginPage } from "./page";
 //                      { type: "ar.ping" } | { type: "ar.hello", capabilities }
 //   app -> dashboard   { source: "ar-plugin", type: "ready" | "shown" | "error" | "pong", ... }
 //                      { source: "ar-plugin", type: "navigated" | "on-chat" | "load-failed", agentId }
+//                      { source: "ar-plugin", type: "showing", agentId | null }
+//   the tray's part    { type: "ar.tray" | "ar.tray-space" } and "pick", "pick-unavailable",
+//                      "composer", "composer-unavailable": client/pick.ts
 //
 // Each side says what it can do. The plugin names its abilities in `ready` and in every `pong`
 // (PLUGIN_ABILITIES); a dashboard that reads this answers `ready` with `ar.hello` and its own
 // list. A side that says nothing is an older build: it is served as before, and it is sent
-// nothing it did not ask for. `navigated`, `on-chat` and `load-failed` go only to a dashboard
-// that said it reads them.
+// nothing it did not ask for. `navigated`, `on-chat`, `load-failed` and `showing` go only to a
+// dashboard that said it reads them, and the tray's messages only to one that said `pick`.
+//
+// `showing` names the chat the application shows, whoever moved it there: a dashboard request
+// or Paseo's own list (MIK-R188 rule 7, the tray's default target). It is told at the hello and
+// then on each change, read as the pick's provenance reads it (`visibleChatAgent` below); it is
+// display evidence like `shown`, and the bridge navigates nothing for it.
 //
 // A document page names the agent's workspace in `ar.open` for the record; navigation itself
 // carries the agent alone, because the supported `navigation.openAgent({agentId})` resolves the
@@ -54,9 +63,14 @@ export const OPEN_SCREEN_ID = "open";
  * What this plugin can do for the dashboard that frames it: show an agent on request and answer
  * for it, answer a ping, take the page mode, report `shown` only when the chat is displayed,
  * tell when the application was asked to navigate, when it is on the agent's chat, and when
- * it shows there that the host could not load the agent.
+ * it shows there that the host could not load the agent; and the tray's part (client/pick.ts):
+ * offer and post chat text picks, copy on highlight, report the message box and reserve the
+ * tray's height above it; and tell which chat it shows (`showing`).
  */
-export const PLUGIN_ABILITIES = ["open-agent", "ping", "page", "shown-on-display", "navigated", "on-chat", "load-failed"];
+export const SHOWING_ABILITY = "showing";
+export const PLUGIN_ABILITIES = ["open-agent", "ping", "page", "shown-on-display", "navigated", "on-chat", "load-failed", PICK_ABILITY, SHOWING_ABILITY];
+/** After a DOM batch, how long the shown chat waits before it is read again (once per window). */
+export const SHOWING_SETTLE_MS = 250;
 
 export interface EmbedEntry {
   dashboardOrigin: string;
@@ -392,6 +406,43 @@ export function installBridge(
       return false;
     }
   };
+  /**
+   * The agent the stored layout names as the shown pane's focused tab, for the workspace the
+   * frame's route names: the same pinned route, store, key and pane tree as the shared sign
+   * above, read only. `null` when any of it is absent or the focused tab is not an agent's.
+   */
+  const focusedRouteAgent = (): string | null => {
+    try {
+      const pathname = page.location?.pathname;
+      if (typeof pathname !== "string") return null;
+      const segments = pathname.split("/");
+      if (segments.length < 5 || segments[1] !== "h" || segments[3] !== "workspace" || !segments[2] || !segments[4]) return null;
+      const raw = page.localStorage.getItem(LAYOUT_STATE_KEY);
+      if (typeof raw !== "string") return null;
+      const layout = JSON.parse(raw)?.state?.layoutByWorkspace?.[`${segments[2]}:${segments[4]}`];
+      if (typeof layout !== "object" || layout === null || typeof layout.focusedPaneId !== "string") return null;
+      const panes: Array<Record<string, unknown>> = [];
+      panesOf(layout.root, panes);
+      const shown = panes.find((pane) => pane.id === layout.focusedPaneId);
+      const tab = shown && shown.hidden !== true ? shown.focusedTabId : null;
+      return typeof tab === "string" && tab.startsWith("agent_") && tab.length > "agent_".length ? tab.slice("agent_".length) : null;
+    } catch {
+      return null;
+    }
+  };
+  /**
+   * The agent of the chat the frame shows, for a text pick's provenance (client/pick.ts): the
+   * one visible selected agent tab where the wide strip shows tabs; the stored focus where the
+   * compact trigger replaces the strip; with several visible selected tabs (split panes) the
+   * focused one among them. Anything else is unknown (`null`), never a guess.
+   */
+  const visibleChatAgent = (): string | null => {
+    const visible = readSelectedChats(page);
+    if (visible.length === 1) return visible[0];
+    const focused = focusedRouteAgent();
+    if (visible.length === 0) return focused;
+    return focused !== null && visible.includes(focused) ? focused : null;
+  };
   const chatDrawn = (): boolean => {
     try {
       return agentChatVisible();
@@ -409,6 +460,57 @@ export function installBridge(
       return firstVisible('[id="agent-load-error"], [data-testid="agent-load-error"]') !== null;
     } catch {
       return false;
+    }
+  };
+  /** The application's own pane for an agent it does not know (`agent-not-found`; read only). */
+  const notFound = (): boolean => {
+    try {
+      return firstVisible('[id="agent-not-found"], [data-testid="agent-not-found"]') !== null;
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * The chat the frame shows, for `showing`: the agent `visibleChatAgent` names. In the compact
+   * layout that is the routed workspace's stored focus, as the `shown` sign reads it; there the
+   * strip is gone and no selection is published (MIK-R95). `null` where it names no agent (another
+   * screen, a terminal tab) or the agent's screen is the not-found or load-error pane.
+   */
+  const shownChat = (): string | null => (notFound() || loadFailed() ? null : visibleChatAgent());
+  let toldShowing: string | null | undefined = undefined;
+  let showingTimer: unknown = null;
+  const readsShowing = () => live && dashboardAbilities.includes(SHOWING_ABILITY);
+  const tellShowing = () => {
+    if (!readsShowing()) return;
+    const agentId = shownChat();
+    if (agentId === toldShowing) return;
+    toldShowing = agentId;
+    post({ type: "showing", agentId });
+  };
+  const stopShowingTimer = () => {
+    if (showingTimer === null) return;
+    try {
+      page.window.clearTimeout(showingTimer);
+    } catch {
+      // Observing must never break the bridge's teardown.
+    }
+    showingTimer = null;
+  };
+  /**
+   * A DOM batch: read the shown chat again once the window has passed, so a burst of batches
+   * (a streaming reply) costs one read per window, and a stored focus written just after the
+   * batch is seen. Without a timer it is read at once.
+   */
+  const noteShowing = () => {
+    if (!readsShowing() || showingTimer !== null) return;
+    try {
+      showingTimer = page.window.setTimeout(() => {
+        showingTimer = null;
+        tellShowing();
+      }, SHOWING_SETTLE_MS);
+    } catch {
+      showingTimer = null;
+      tellShowing();
     }
   };
   /**
@@ -447,6 +549,8 @@ export function installBridge(
   };
   const post = (payload: Record<string, unknown>) => {
     send(payload);
+    // A drawn chat: from now on the tray's part tells when its message box cannot be read.
+    if (payload.type === "shown" && typeof payload.agentId === "string") tray.chatShown();
     if (payload.type === "hierarchy") {
       knownAgents = new Map((payload.agents as Array<{ agentId: string; parentAgentId: string | null }>).map((agent) => [agent.agentId, agent]));
       publishSelection();
@@ -524,6 +628,14 @@ export function installBridge(
       post({ type: "pong", capabilities: PLUGIN_ABILITIES });
     } else if (message.type === "ar.hello" && Array.isArray(message.capabilities)) {
       dashboardAbilities = message.capabilities.filter((ability: unknown) => typeof ability === "string");
+      tray.hello(dashboardAbilities);
+      // A dashboard that says hello (again) is told the chat shown now.
+      toldShowing = undefined;
+      tellShowing();
+    } else if (message.type === "ar.tray") {
+      tray.configure(message);
+    } else if (message.type === "ar.tray-space") {
+      tray.reserve(message);
     } else if (message.type === "ar.open" && typeof message.agentId === "string") {
       void openAgent(message.agentId);
     } else if (message.type === "ar.open" && typeof message.workspaceId === "string") {
@@ -535,6 +647,8 @@ export function installBridge(
     }
   };
 
+  // The tray's part: silent until a dashboard says in ar.hello that it reads picks.
+  const tray = startTrayChannel(page, post, visibleChatAgent);
   page.window.addEventListener("message", onMessage);
   post({ type: "ready", capabilities: PLUGIN_ABILITIES });
   const stopHierarchy = startHierarchy(client, post, (sourceAgentId, parentId) => openAgent(parentId, sourceAgentId));
@@ -551,6 +665,7 @@ export function installBridge(
       const observer = new page.window.MutationObserver(() => {
         selectedCandidates = readSelectedChats(page);
         confirmDisplay();
+        noteShowing();
       });
       observer.observe(page.document.documentElement, {
         subtree: true,
@@ -567,6 +682,8 @@ export function installBridge(
   return () => {
     live = false;
     stopDisplayTimer();
+    stopShowingTimer();
+    tray.stop();
     stopSidebar?.();
     stopObserving();
     stopSelection();

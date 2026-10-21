@@ -75,12 +75,16 @@ it('names the missing effect of an older changed family row', () => {
   expect(view.container.textContent).toContain('3 examined members');
 });
 
-it('shows each statement sides recorded origin, including its hand-off entry', () => {
+// The record's origin (who introduced it, its hand-off entry) is Technical details' provenance, not
+// the statement's (MIK-R89 v2 rules 1 and 6, amended 9dde2b09; ReviewSurface.originRepair.test.tsx).
+it('keeps the record origin and its hand-off entry out of the statement', () => {
   const body = payload();
   const knowledge = { ...body.knowledge,
     before_origin: { task: 'old-task', wave: 'wave-one', handoffEntry: 'ENTRY-BEFORE' },
     after_origin: { task: 'new-task', leaf: 'leaf-two', handoffEntry: 'ENTRY-AFTER' } };
   const view = render(<SelectedStatement knowledge={knowledge} subject={subject} layout="inline" />);
   for (const text of ['old-task', 'wave-one', 'ENTRY-BEFORE', 'new-task', 'leaf-two', 'ENTRY-AFTER'])
-    expect(view.container.textContent).toContain(text);
+    expect(view.container.textContent).not.toContain(text);
+  expect(view.queryByTestId('review-origin-before')).toBeNull();
+  expect(view.queryByTestId('review-origin-after')).toBeNull();
 });

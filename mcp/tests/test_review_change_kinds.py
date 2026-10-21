@@ -747,6 +747,7 @@ def test_the_outline_reads_only_indexes_and_preserves_catalogue_fields(
         "total_subjects",
         "invariant_total",
         "family_total",
+        "comparison",
     )
     assert result.total_subjects == len(expected)
     assert result.invariant_total == sum(e.selector_kind == "invariant" for e in expected)

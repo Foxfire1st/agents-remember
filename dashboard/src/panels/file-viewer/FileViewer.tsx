@@ -19,6 +19,8 @@ import {
   type RepoCatalogEntry,
   type Scope,
 } from "../../data/files";
+import { SidebarToggle, sidebarHandleProps, sidebarPanelProps, useSidebar } from "../../grammar/SidebarToggle";
+import { usePublishPageRepository } from "../../tray/shownChat";
 import { DualPane, type SidecarView } from "./DualPane";
 import { FileTree } from "./FileTree";
 import { usePersistedFlag } from "./usePersistedFlag";
@@ -209,6 +211,7 @@ function FileViewerImpl({ active = true }: { active?: boolean }) {
   const [code, setCode] = useState<FileContent | null>(null);
   const [sidecar, setSidecar] = useState<SidecarView>({ state: "empty" });
   const [split, setSplit] = usePersistedFlag("fileviewer.split", true);
+  const explorerSide = useSidebar("files", "left");
   const [error, setError] = useState<string | null>(null);
   // The Cockpit keeps this layer mounted-but-hidden until its view is selected; the boot catalog
   // read waits for the FIRST real showing. `settled` marks a completed attempt (success OR
@@ -216,6 +219,8 @@ function FileViewerImpl({ active = true }: { active?: boolean }) {
   // mount effect had before — while StrictMode's replayed effect simply re-joins the shared
   // in-flight read (data/inflight.ts) instead of firing a second GET.
   const settledRef = useRef(false);
+  // The tray files a message to a chat without a task under the shown page's repository.
+  usePublishPageRepository("File Viewer", repo || null, active);
 
   useEffect(() => {
     if (!active || settledRef.current) return;
@@ -264,6 +269,8 @@ function FileViewerImpl({ active = true }: { active?: boolean }) {
   return (
     <div className={shell} data-testid="file-viewer">
       <header className={toolbar}>
+        {/* MIK-R89 v2 rule 8: the explorer's shared toggle, first on the line above it. */}
+        <SidebarToggle side="left" open={explorerSide.open} onToggle={explorerSide.toggle} name="Explorer sidebar" testId="sidebar-toggle-files-left" />
         <PickList label="Repo" items={repos.map((r) => ({ id: r.repo, label: r.repo }))} value={repo} onChange={setRepo} />
         <PickList label="Scope" items={scopeItems} value={scope} onChange={setScope} />
         <button type="button" className={toggle({ on: split })} aria-pressed={split} onClick={() => setSplit(!split)}>
@@ -276,7 +283,7 @@ function FileViewerImpl({ active = true }: { active?: boolean }) {
         ) : null}
       </header>
       <PanelGroup direction="horizontal" autoSaveId="fileviewer.outer" className={body}>
-        <Panel defaultSize={26} minSize={15}>
+        <Panel defaultSize={26} minSize={15} {...sidebarPanelProps(explorerSide.open)}>
           <div className={explorer}>
             <div className={treeLabel}>Code</div>
             <FileTree key={`${repo}:${scope}:code`} repo={repo} scope={scope} side="code" onOpen={openCode} />
@@ -284,9 +291,9 @@ function FileViewerImpl({ active = true }: { active?: boolean }) {
             <FileTree key={`${repo}:${scope}:onb`} repo={repo} scope={scope} side="onboarding" onOpen={openSidecar} />
           </div>
         </Panel>
-        <PanelResizeHandle className={vhandle} />
+        <PanelResizeHandle className={vhandle} {...sidebarHandleProps(explorerSide.open)} />
         <Panel defaultSize={74} minSize={40}>
-          <DualPane code={code} sidecar={sidecar} split={split} />
+          <DualPane code={code} sidecar={sidecar} split={split} repository={repo || undefined} />
         </Panel>
       </PanelGroup>
     </div>

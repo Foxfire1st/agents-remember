@@ -24,9 +24,10 @@
 // (no tree comparison and no unreadable side; nothing here applies). A body that is none of these,
 // and a request that never reached the server, are failures in the shared review vocabulary.
 
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { qs } from './files';
+import { useIntentEntryGeneration } from './intentEntryRevalidation';
 import {
   type ReviewFailure,
   type ReviewRefusal,
@@ -176,8 +177,28 @@ export interface ReviewTreeEntrySide {
   role?: string;
   facet?: string;
   rationale?: string;
+  // The locator's symbol name on this side, when the locator names one (MIK-R89 v2 rule 3's filter).
+  symbol?: string;
   currentness?: 'current' | 'stale' | 'unverifiable';
   currentness_reason?: string;
+}
+
+// The four memory values of one entry, read at the bound after-side index (MIK-R89 v2 rule 3). The
+// per-path values were read at `path`, the entry's after-side path.
+export interface ReviewEntryMemory {
+  path: string;
+  invariants_at_path: number;
+  incoming_links: number;
+  without_proof: boolean;
+  open_weaknesses: number;
+}
+
+// Whether the card read could give the memory values; absent on every other trees read.
+export interface ReviewEntryMemoryState {
+  state: 'available' | 'unavailable';
+  tree: string;
+  index_state?: 'complete' | 'partial';
+  reason?: string;
 }
 
 export interface ReviewTreeEntry {
@@ -189,6 +210,7 @@ export interface ReviewTreeEntry {
   before: ReviewTreeEntrySide;
   after: ReviewTreeEntrySide;
   change: 'changed' | 'unchanged' | 'undetermined';
+  memory?: ReviewEntryMemory;
 }
 
 export interface ReviewCodeChange {
@@ -225,6 +247,7 @@ export interface ReviewTreesResult {
   worklist?: ReviewWorklistView;
   code_changes?: ReviewCodeChanges;
   entries?: ReviewTreeEntry[];
+  entry_memory?: ReviewEntryMemoryState;
   refusal?: ReviewRefusal;
 }
 
@@ -353,15 +376,10 @@ export function treeComparisonNumber(limitations: string[]): number | undefined 
   return undefined;
 }
 
-// The entries of one selection's invariants, from the comparison the review payload names. The
-// answer is kept with the question it answers, so a superseded selection never draws its cards.
-//
-// The kept answers live outside the hook, in a bounded store keyed by the whole question: the
-// loading switch unmounts the cards (WorkspaceCenter shows the status instead), and a hook-held
-// answer would die with it and refetch on remount (L81-R1-F18). A remount with an unchanged set
-// finds the kept answer -- or the shared request still in flight -- and sends no second cards
-// request through pending or answer. A changed set prefetched on selection (prefetchCards, below)
-// is already in flight before the subject resolves, instead of waiting for it.
+// The kept card answers (MIK-R31's cards, read 5 of the review page's opening, MIK-R89 v2 rule 2).
+// They live outside the hook, in a bounded store keyed by the whole question, so a remount with an
+// unchanged set finds the kept answer -- or the shared request still in flight -- and sends no second
+// card request (L81-R1-F18).
 const CARD_ANSWERS_MAX = 20;
 const cardAnswers = new Map<string, ReviewTreesRead>();
 const cardInflight = new Map<string, Promise<ReviewTreesRead>>();
@@ -370,7 +388,19 @@ function cardsKey(repo: string, master: string, leaf: string, comparison: number
   return `${repo}/${master}/${leaf}/${comparison}/${wanted}`;
 }
 
+// Whether a card answer is the record's own answer, to keep (MIK-R89 v2 rule 3, Failure and
+// Recovery). A side the server names `unavailable-history` over trees it found readable, and memory
+// values unavailable while the after side is available, name a read that failed: such an answer is
+// this mount's to show and is asked again, never kept. An unconverted side is the record's own state.
+function keepableCardAnswer(result: ReviewTreesResult): boolean {
+  const sides = [...result.knowledge_sides, ...(result.code_sides ?? [])];
+  if (sides.some((side) => side.state === 'unavailable-history')) return false;
+  if (result.entry_memory === undefined || result.entry_memory.state === 'available') return true;
+  return !result.knowledge_sides.some((side) => side.side === 'after' && side.state === 'available');
+}
+
 function keepCardAnswer(key: string, read: ReviewTreesRead): void {
+  if (read.phase !== 'trees' || !keepableCardAnswer(read.trees)) return;
   cardAnswers.set(key, read);
   while (cardAnswers.size > CARD_ANSWERS_MAX) {
     const oldest = cardAnswers.keys().next();
@@ -399,9 +429,10 @@ function fetchCardEntries(
   );
   const tracked = fetch.then((read) => {
     cardInflight.delete(key);
-    // Only an answered read is kept: a failed fetch stays uncached, so a remount retries it
-    // exactly as a fresh mount would, instead of showing one transient failure forever.
-    if (read.phase === 'trees') keepCardAnswer(key, read);
+    // Only an answered read is kept: a failed fetch, or an answer that names a failed read, stays
+    // uncached, so a remount or a refresh retries it instead of showing one transient failure
+    // forever.
+    keepCardAnswer(key, read);
     return read;
   });
   cardInflight.set(key, tracked);
@@ -415,50 +446,95 @@ export function resetCardCachesForTests(): void {
   cardInflight.clear();
 }
 
-// Start one selection's cards read now, before its subject resolves: a member click whose family
-// is already displayed names its invariant set from the old payload, so the cards request flies
-// beside the subject request instead of after it. Best-effort and idempotent: a kept answer or a
-// shared request is reused, and a set the subject never confirms simply stays cached until it
-// ages out.
-export function prefetchCardEntries(
-  repo: string,
-  master: string,
-  leaf: string,
-  comparison: number | undefined,
-  invariants: string[],
-): void {
-  if (comparison === undefined || invariants.length === 0) return;
-  const wanted = [...invariants].sort().join(',');
-  const key = cardsKey(repo, master, leaf, comparison, wanted);
-  if (cardAnswers.has(key) || cardInflight.has(key)) return;
-  void fetchCardEntries(key, repo, master, leaf, comparison, wanted.split(','));
+// The cards of the review page's shown subjects: the opening's read 5 (MIK-R89 v2 rule 2). The route
+// takes at most 500 invariants per read, counting invariants, not subjects, so i invariants are
+// ⌈i / 500⌉ reads. Each chunk goes through the kept-answer store above, so a remount asks nothing
+// again, and the chunks' entries are one list in the order of the chunks.
+export const CARD_CHUNK = 500;
+
+export type ChangeSetCardsRead =
+  | { phase: 'loading' }
+  | {
+      phase: 'cards';
+      // The comparison every chunk answered for; null only when no invariant was asked.
+      comparison: ReviewTreeComparison | null;
+      entries: ReviewTreeEntry[];
+      memory?: ReviewEntryMemoryState;
+    }
+  | { phase: 'not-converted' }
+  | { phase: 'unavailable'; problem: ReviewFailure };
+
+// The sorted, distinct invariant ids, cut into reads of at most CARD_CHUNK each.
+function cardChunks(invariants: readonly string[]): string[][] {
+  const sorted = [...new Set(invariants)].sort();
+  const chunks: string[][] = [];
+  for (let start = 0; start < sorted.length; start += CARD_CHUNK)
+    chunks.push(sorted.slice(start, start + CARD_CHUNK));
+  return chunks;
 }
 
-export function useReviewTreeEntries(
+// A chunk whose memory values are unavailable makes the whole read's values unavailable, with the
+// first reason: a sort over half the entries' values would not be the sort the reader chose.
+function mergedMemory(results: ReviewTreesResult[]): ReviewEntryMemoryState | undefined {
+  const states = results.map((result) => result.entry_memory).filter((one) => one !== undefined);
+  return states.find((one) => one.state === 'unavailable') ?? states[0];
+}
+
+function mergedCards(reads: ReviewTreesRead[]): ChangeSetCardsRead {
+  const failed = reads.find((read) => read.phase === 'unavailable');
+  if (failed?.phase === 'unavailable') return failed;
+  if (reads.some((read) => read.phase === 'not-converted')) return { phase: 'not-converted' };
+  const results = reads.flatMap((read) => (read.phase === 'trees' ? [read.trees] : []));
+  return {
+    phase: 'cards',
+    comparison: results[0]?.comparison ?? null,
+    entries: results.flatMap((result) => result.entries ?? []),
+    memory: mergedMemory(results),
+  };
+}
+
+export function useChangeSetCards(
   repo: string,
   master: string,
   leaf: string,
   comparison: number | undefined,
-  invariants: string[],
-): ReviewTreesRead | null {
-  const wanted = [...invariants].sort().join(',');
-  const key = comparison === undefined ? null : cardsKey(repo, master, leaf, comparison, wanted);
-  const [, retell] = useReducer((telling: number) => telling + 1, 0);
+  invariants: readonly string[],
+  enabled: boolean,
+): ChangeSetCardsRead | null {
+  const signature = cardChunks(invariants)
+    .map((chunk) => chunk.join(','))
+    .join('|');
+  // The chunk answers this mount saw. A failed chunk is not kept in the shared store (a remount asks
+  // again); this mount shows it. An answer kept in the store from an earlier mount needs no read.
+  const [seen, setSeen] = useState<ReadonlyMap<string, ReviewTreesRead>>(() => new Map());
+  // The reviewer's Refresh (the shared re-validation generation) asks every chunk that is not kept
+  // again; a kept answer is reused. Until its new answer arrives, the failed one stays shown.
+  const refreshed = useIntentEntryGeneration();
   useEffect(() => {
-    if (key === null || !wanted) return undefined;
-    if (cardAnswers.has(key)) return undefined;
+    if (!enabled || comparison === undefined) return undefined;
     let alive = true;
-    void fetchCardEntries(key, repo, master, leaf, comparison as number, wanted.split(',')).then(
-      () => {
-        if (alive) retell();
-      },
-    );
+    for (const joined of signature ? signature.split('|') : []) {
+      const key = cardsKey(repo, master, leaf, comparison, joined);
+      if (cardAnswers.has(key)) continue;
+      void fetchCardEntries(key, repo, master, leaf, comparison, joined.split(',')).then((read) => {
+        if (alive) setSeen((previous) => new Map(previous).set(key, read));
+      });
+    }
     return () => {
       alive = false;
     };
-  }, [repo, master, leaf, comparison, wanted, key]);
-  if (key === null || !wanted) return null;
-  return cardAnswers.get(key) ?? { phase: 'loading' };
+  }, [repo, master, leaf, comparison, signature, enabled, refreshed]);
+  // One merged answer per set of chunk answers, so a render that changes nothing here hands the same
+  // object on (the page's model is derived from it).
+  return useMemo(() => {
+    if (!enabled || comparison === undefined) return null;
+    const reads = (signature ? signature.split('|') : []).map((joined) => {
+      const key = cardsKey(repo, master, leaf, comparison, joined);
+      return cardAnswers.get(key) ?? seen.get(key);
+    });
+    if (reads.some((read) => read === undefined)) return { phase: 'loading' };
+    return mergedCards(reads as ReviewTreesRead[]);
+  }, [enabled, comparison, signature, repo, master, leaf, seen]);
 }
 
 // The tree view read for one task context. A superseded read (the props moved while it was in

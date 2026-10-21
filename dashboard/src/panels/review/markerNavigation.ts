@@ -1,74 +1,52 @@
-// How the review workspace moves for a per-hunk intent marker (MIK-R34): following one selects its
-// target in the tree, and the return puts the reading position back as it was.
+// How the review page moves for a per-hunk intent marker (MIK-R34): following one selects its target
+// the way the tree selects it, and the return puts the reading position back as it was.
 //
-// The target is a tree position of the mounted workspace, selected the way the rail selects it: the
-// invariant's own review, at its member row of the named family (shared, before-only or removed
-// memberships alike), or with no family at all (`No recorded family`, or the state the review gives
-// an invariant whose membership is unknown). The file the marker sat in is closed while the target is
-// read; the return reopens it.
+// The target is the invariant's own review, at its member row of the named family (shared,
+// before-only or removed memberships alike), or with no family at all (`No recorded family`, or the
+// state the review gives an invariant whose membership is unknown). The return puts back the selected
+// subject and the worklist view.
 import type { FamilySelection } from './FamilyTree';
 import type { MarkTarget } from './hunkMarkers';
 import type { MarkerMoves } from './intentMarkerScope';
 import type { ReviewNavigationState } from './ReviewNavigation';
-import type { WorkspaceState } from './ReviewWorkspace';
+import type { WorkspaceState } from './workspaceState';
 
-interface Position {
-  subject: ReviewNavigationState['subject'];
-  chosen: FamilySelection | null;
-  worklist: boolean;
-  openPath: WorkspaceState['openPath'];
-  layout: WorkspaceState['layout'];
-  fullFile: boolean;
+type Subject = ReviewNavigationState['subject'];
+
+// The page's own selection, as the marker moves need it: what is selected, and how to select.
+export interface MarkerSelection {
+  current: () => { subject: Subject; chosen: FamilySelection | null };
+  select: (subject: Subject, context: FamilySelection | null) => void;
 }
 
-export function workspaceMarkerMoves(
-  state: WorkspaceState,
-  navigation?: ReviewNavigationState,
-): MarkerMoves {
+interface Position {
+  subject: Subject;
+  chosen: FamilySelection | null;
+  worklist: boolean;
+}
+
+export function workspaceMarkerMoves(state: WorkspaceState, selection: MarkerSelection): MarkerMoves {
   return {
     capture: () => {
-      const position: Position = {
-        subject: navigation?.subject,
-        chosen: state.chosen,
-        worklist: state.worklist,
-        openPath: state.openPath,
-        layout: state.layout,
-        fullFile: state.fullFile,
-      };
-      return () => restore(position, state, navigation);
+      const { subject, chosen } = selection.current();
+      const position: Position = { subject, chosen, worklist: state.worklist };
+      return () => restore(position, state, selection);
     },
-    open: (target) => openTarget(target, state, navigation),
+    open: (target) => openTarget(target, selection),
   };
 }
 
-function openTarget(
-  target: MarkTarget,
-  state: WorkspaceState,
-  navigation?: ReviewNavigationState,
-): void {
-  const context: FamilySelection | undefined = target.familyKey
+function openTarget(target: MarkTarget, selection: MarkerSelection): void {
+  const context: FamilySelection | null = target.familyKey
     ? { familyId: target.familyKey, memberRevisionId: target.memberRevisionKey }
-    : undefined;
-  state.setOpenPath(null);
-  if (navigation) navigation.onSelect({ kind: 'invariant', id: target.invariantKey }, context);
-  else state.setChosen(context ?? null);
+    : null;
+  selection.select({ kind: 'invariant', id: target.invariantKey }, context);
 }
 
-function restore(
-  position: Position,
-  state: WorkspaceState,
-  navigation?: ReviewNavigationState,
-): void {
-  if (navigation) {
-    navigation.onSelect(position.subject, position.chosen ?? undefined);
-    // The return focuses the originating marker, not the tree's selection.
-    state.focusSelection.current = null;
-  } else {
-    state.setChosen(position.chosen);
-  }
-  // After the subject: choosing a subject leaves the lane, and the return may be into the lane.
+function restore(position: Position, state: WorkspaceState, selection: MarkerSelection): void {
+  selection.select(position.subject, position.chosen);
+  // The return focuses the originating marker, not the tree's selection.
+  state.focusSelection.current = null;
+  // After the subject: choosing a subject leaves the worklist, and the return may be into it.
   state.setWorklist(position.worklist);
-  state.setOpenPath(position.openPath);
-  state.setLayout(position.layout);
-  state.setFullFile(position.fullFile);
 }

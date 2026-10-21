@@ -30,6 +30,7 @@
 // (see `ReviewReadCycle`), so the notice can never announce a candidate publication for a question
 // the reader had merely switched to.
 
+import { css } from '../../../styled-system/css';
 import { useRevalidateIntentEntry } from '../../data/intentEntryRevalidation';
 import type { ReviewPayload } from '../../data/review';
 import type { ReviewRead } from './ReviewOutcome';
@@ -46,6 +47,23 @@ export interface ReviewGeneration {
   currentBindingDigest?: string;
 }
 
+// The control and its notice are two items of the review's top line (ReviewHeader.tsx; MIK-R89 v2
+// rules 6, 9 and 11). The notice takes a row of its own under the line's controls (after them, the
+// line's whole width), so its sentence and digests never widen the line or move the branch chip.
+// Above 40rem it is one line ending in an ellipsis, with the whole notice in its title; at 40rem and
+// narrower it wraps inside the line's width.
+const notice = css({
+  order: 1,
+  flexBasis: '100%',
+  minWidth: 0,
+  color: 'muted',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  '& > [data-review-content]': { display: 'inline', marginLeft: '0.5rem' },
+  '@media (max-width: 40rem)': { whiteSpace: 'normal' },
+});
+
 export function ReviewRefresh({
   onRefresh,
   busy,
@@ -56,8 +74,15 @@ export function ReviewRefresh({
   generation: ReviewGeneration | null;
 }) {
   const revalidateEntry = useRevalidateIntentEntry();
+  const label = generation?.state === 'superseded' ? 'Comparison updated' : 'Comparison current';
+  const sentence =
+    generation === null
+      ? ''
+      : generation.state === 'superseded'
+        ? `the candidate's comparison moved (was ${generation.previousBindingDigest}, is now ${generation.currentBindingDigest}) — the panes below have been replaced whole with the current one`
+        : `the comparison below is still the candidate's current one (${generation.previousBindingDigest})`;
   return (
-    <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
+    <>
       <button
         type="button"
         onClick={() => {
@@ -74,21 +99,18 @@ export function ReviewRefresh({
       </button>
       {generation === null ? null : (
         <span
-          style={{ color: 'var(--muted)' }}
+          className={notice}
+          title={`${label}: ${sentence}`}
           data-testid="review-generation-notice"
           data-generation-state={generation.state}
           data-previous-binding={generation.previousBindingDigest}
           data-current-binding={generation.currentBindingDigest ?? ''}
         >
-          {generation.state === 'superseded' ? 'Comparison updated' : 'Comparison current'}
-          <div data-review-content="generation-state">
-            {generation.state === 'superseded'
-              ? `the candidate's comparison moved (was ${generation.previousBindingDigest}, is now ${generation.currentBindingDigest}) — the panes below have been replaced whole with the current one`
-              : `the comparison below is still the candidate's current one (${generation.previousBindingDigest})`}
-          </div>
+          {label}
+          <div data-review-content="generation-state">{sentence}</div>
         </span>
       )}
-    </span>
+    </>
   );
 }
 

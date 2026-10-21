@@ -43,6 +43,7 @@ __all__ = [
     "REVIEW_TREE_COMPARISON_SCHEMA",
     "ReviewCodeSide",
     "ReviewConvertedBase",
+    "ReviewEntryMemoryState",
     "ReviewKnowledgeFileChange",
     "ReviewKnowledgeRecordGroup",
     "ReviewKnowledgeSide",
@@ -239,6 +240,21 @@ class ReviewWorklistView(KnowledgeModel):
     incomplete: tuple[dict[str, Any], ...] = ()
 
 
+class ReviewEntryMemoryState(KnowledgeModel):
+    """Whether a card read could give its entries' memory values (MIK-R89 v2 rule 3).
+
+    ``tree`` is the after memory tree the values are read at. ``available`` carries the index's own
+    ``index_state``, so values from a partial index are never presented as complete. ``unavailable``
+    names why in ``reason``: the after side is not readable, or a read of its index failed; the
+    entries are answered either way, without values.
+    """
+
+    state: Literal["available", "unavailable"]
+    tree: str = Field(pattern=GIT_OBJECT_PATTERN)
+    index_state: Literal["complete", "partial"] | None = None
+    reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+
+
 ReviewTreesState = Literal["trees", "not-converted", "refused"]
 
 
@@ -264,6 +280,8 @@ class ReviewTreesResult(KnowledgeModel):
     code_changes: ReviewCodeChanges | None = None
     # Every realization and proof entry, on both code sides, for the focused cards (MIK-R31).
     entries: tuple[ReviewTreeEntry, ...] = ()
+    # Whether those entries carry their memory values (MIK-R89 v2 rule 3); a card read only.
+    entry_memory: ReviewEntryMemoryState | None = None
     # The unexplained-changes lane's destinations, or one changed path's classification (MIK-R32).
     lane: ReviewUnexplainedLane | None = None
     file_classification: ReviewFileClassification | None = None

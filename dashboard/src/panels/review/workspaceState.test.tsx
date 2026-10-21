@@ -1,33 +1,24 @@
+// The review page's local display choices (workspaceState.ts): one open Full file, the reading
+// column's opened groups, and the worklist view a family choice leaves.
 import { act, renderHook } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { useWorkspaceState } from './ReviewWorkspace';
 
-afterEach(() => vi.unstubAllGlobals());
-
-it('starts narrow expression diffs inline and preserves the reader choice afterwards', () => {
-  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
-  const { result, rerender } = renderHook(() => useWorkspaceState());
-  expect(result.current.layout).toBe('inline');
-  act(() => result.current.setLayout('split'));
-  rerender();
-  expect(result.current.layout).toBe('split');
+it('opens and closes a group by id, and opening an open group changes nothing', () => {
+  const { result } = renderHook(() => useWorkspaceState());
+  act(() => result.current.toggleGroup('g1'));
+  expect(result.current.openGroups.has('g1')).toBe(true);
+  const opened = result.current.openGroups;
+  act(() => result.current.openGroup('g1'));
+  expect(result.current.openGroups).toBe(opened);
+  act(() => result.current.toggleGroup('g1'));
+  expect(result.current.openGroups.has('g1')).toBe(false);
 });
 
-it('keeps the narrow review scroll position during an in-tree choice', () => {
-  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+it('leaves the worklist view when a family position is chosen', () => {
   const { result } = renderHook(() => useWorkspaceState());
-  const surface = document.createElement('div');
-  surface.dataset.testid = 'review-surface';
-  const center = document.createElement('div');
-  surface.append(center);
-  surface.scrollTop = 230;
-  result.current.center.current = center;
+  act(() => result.current.setWorklist(true));
   act(() => result.current.setChosen({ familyId: 'family' }));
-  expect(surface.scrollTop).toBe(230);
-});
-
-it('starts wide expression diffs side by side', () => {
-  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
-  const { result } = renderHook(() => useWorkspaceState());
-  expect(result.current.layout).toBe('split');
+  expect(result.current.worklist).toBe(false);
+  expect(result.current.chosen).toEqual({ familyId: 'family' });
 });

@@ -1,9 +1,8 @@
 // R16 (visible structured refusals) at the review client's transport boundary: the route's typed
 // refusal is read out of a NON-2xx response, and everything that is not that answer is named.
 //
-// WHAT THIS EXERCISES. The real client functions (`intentReview`, `intentReviewEntries`,
-// `reviewSourceContent`) and the real shared decode (`data/reviewTransport.ts`); only `fetch` is
-// stubbed, so the URL, the response status and the body all travel the way the browser's do.
+// WHAT THIS EXERCISES. The real client functions (`intentReview`, `intentReviewEntries`) and the real
+// shared decode (`data/reviewTransport.ts`); only `fetch` is stubbed, so the URL, the response status and the body all travel the way the browser's do.
 //
 // WHERE THE BODIES COME FROM. Every refusal body below is the measured output of the REAL route over
 // REAL HTTP in this leaf's evidence run -- `serving_collaborators(config)` ports inside
@@ -24,7 +23,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FilesApiError, getJson } from "./files";
 import type { ReviewSelectorKind } from "./review";
-import { intentReview, intentReviewEntries, reviewSourceContent } from "./review";
+import { intentReview, intentReviewEntries } from "./review";
 import { ReviewTransportError, reviewProblemFromCause } from "./reviewTransport";
 
 const REPO = "agents-remember";
@@ -109,31 +108,6 @@ const BAD_PATH = {
     "routes read no other repository in its place",
 };
 
-// The real expansion route's 400 for a path the measured change set does not contain and no recorded
-// realization links, re-measured by MIK-L31 (ICR-L43 review R2 O2) on its converted scratch leaf with
-// the leaf's own code (notes/reports/260928-MIK-L31-evidence/capture_refusal.py; repository id and
-// scratch paths normalized, sha256 of the normalized body
-// 56cd46256f8d1dc615363754016f1964c1bdbee9d9ceeb74edab835faac9ebd8). It replaces the pre-L43 text.
-const SOURCE_CONTENT_REFUSED = {
-  state: "refused",
-  operation: "read_review_source_content",
-  repository_id: "<repository_id>",
-  refusal: {
-    code: "source_content_unresolved",
-    detail:
-      "the requested path 'src/not-in-this-change-set.py' is not one of the 1 changed path(s) this " +
-      "surface measured between the requested trees, and no realization recorded in the " +
-      "comparison's knowledge links it (in the knowledge this leaf's review binds to the requested " +
-      "pair: the before snapshot records none; the after snapshot records none), so no content was " +
-      "read for it; this route reads an inventory entry, or an unchanged path a realization of the " +
-      "same comparison is anchored at, and no other path",
-    next_action:
-      "expand a path the inventory listed for this generation or one a realization of this " +
-      "comparison records, or reopen the review if the generation has moved",
-    offending_input: "src/not-in-this-change-set.py",
-  },
-};
-
 const intentUrl = `${"/api/review/intent"}?repo=${REPO}&master=${MASTER}&leaf=${LEAF}&selectorKind=invariant&selectorId=${SUBJECT}`;
 
 function serving(status: number, body: unknown, statusText = "") {
@@ -189,26 +163,12 @@ describe("the review route's typed answer, whatever the status", () => {
     expect((caught as { refusal?: unknown }).refusal).toBeUndefined();
   });
 
-  it("resolves the entry read's and the expansion read's typed refusals the same way", async () => {
+  it("resolves the entry read's typed refusal the same way", async () => {
     serving(404, ENTRIES_DATASET_ABSENT, "Not Found");
     const entries = await intentReviewEntries(REPO, MASTER, LEAF);
     expect(entries.state).toBe("refused");
     expect(entries.entries).toEqual([]);
     expect(entries.refusal?.code).toBe("candidate_dataset_absent");
-
-    serving(400, SOURCE_CONTENT_REFUSED, "Bad Request");
-    const opened = await reviewSourceContent(
-      REPO,
-      MASTER,
-      LEAF,
-      "src/not-in-this-change-set.py",
-      "before",
-      "after",
-    );
-    expect(opened.state).toBe("refused");
-    expect(opened.refusal?.code).toBe("source_content_unresolved");
-    expect(opened.refusal?.offending_input).toBe("src/not-in-this-change-set.py");
-    expect(opened.refusal?.next_action).toBe(SOURCE_CONTENT_REFUSED.refusal.next_action);
   });
 
   it("still resolves an ordinary 200 typed answer", async () => {

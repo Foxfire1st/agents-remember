@@ -6,6 +6,7 @@ operands are exercised through the comparison and composition boundaries.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -18,9 +19,11 @@ from agents_remember.application.knowledge_review import (
     ReviewCandidateResolution,
     compose_review,
 )
+from agents_remember.application.review_candidate_resolution import resolve_review_candidate
 from agents_remember.application.review_revision_comparison import (
     select_subject_revisions,
 )
+from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.diff import (
     KnowledgeDiffRequest,
@@ -33,6 +36,18 @@ from agents_remember.models.knowledge.read import (
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
+from agents_remember_test_support.testing.review_git_trees import (
+    INVARIANT,
+    INVARIANT_PATH,
+    LEAF,
+    MASTER,
+    REPO,
+    World,
+    build_world,
+)
+from agents_remember_test_support.testing.review_git_trees import ORIGIN as TREE_ORIGIN
+from agents_remember_test_support.testing.review_git_trees import _write as write_files
+from agents_remember_test_support.testing.review_git_trees import invariant as tree_invariant
 from knowledge_rows_test_support import (
     INDEX_REPOSITORY_ID,
     InvariantRequest,
@@ -257,6 +272,21 @@ def test_a_single_retained_revision_pair_compares_head_to_head(
     assert pair.revision_ids[0] in selection.statement
 
 
+def test_the_selection_carries_each_selected_revisions_display_version(tmp_path: Path) -> None:
+    """Each side's selected revision carries its own display version beside its id.
+
+    The review page's subject meta line reads "revision n → m" from them (MIK-R89 v2 rules 1 and 6,
+    amended 9dde2b09), also for an invariant no family names, whose read carries no member rows.
+    """
+
+    pair = _build_pair(tmp_path / "versions", before_count=1, after_count=1)
+    selection = _select(pair, _compare(pair))
+
+    # The text index projects a record's revision number as its display version (``r<n>``).
+    assert selection.before_display_version == "r1"
+    assert selection.after_display_version == "r1"
+
+
 def test_a_known_empty_after_side_stays_a_removal_with_the_before_head_recorded(
     tmp_path: Path,
 ) -> None:
@@ -386,3 +416,127 @@ def test_the_review_pane_renders_the_selected_head_pairs_own_statements(tmp_path
     assert knowledge.after_statement.state == "present"
     assert knowledge.before_statement.text == pair.statements[0]
     assert knowledge.after_statement.text == pair.statements[0]
+
+
+# ---- who wrote each selected revision (MIK-R89 v2 rules 1 and 6, amended 9dde2b09) ----------------
+#
+# A change the reviewed leaf did not write gets one chip that names its source. The source is the
+# owner whose history file records the revision: for an invariant, the owner of the ``changed`` row
+# at that revision (MIK-R07 rule 2, MIK-R21 rule 4); revision 1 that no row claims is the record's
+# introduction by its ``origin``.
+
+CARRIER = "260101-TRV-L9"
+
+
+def _changed_row(owner_revision: int, row_id: str = "ROW-W11111") -> dict[str, object]:
+    return {
+        "id": row_id,
+        "subject": INVARIANT,
+        "disposition": "changed",
+        "reason": "The statement was narrowed to exact values.",
+        "items": [],
+        "covers": [],
+        "revision": owner_revision,
+        "effect": "strengthen",
+    }
+
+
+def _owner_history(owner: str, rows: list[dict[str, object]], *, closed: bool) -> str:
+    return json.dumps({"schema": "ar-history/v1", "leaf": owner, "closed": closed, "rows": rows})
+
+
+def _writer_review(world: World) -> ReviewRevisionSelection:
+    resolved = resolve_review_candidate(world.config, REPO, MASTER, LEAF)
+    assert isinstance(resolved, ReviewCandidateResolution), resolved
+    result = compose_review(
+        resolved,
+        world.review(selector=InvariantIdentitySeed(invariant_id=text_uuid("identity", INVARIANT))),
+    )
+    assert result.state == "review", result.refusal
+    assert result.payload is not None
+    selection = result.payload.knowledge.revision_selection
+    assert selection is not None and selection.state == "compared"
+    return selection
+
+
+def _revised_world(tmp_path: Path, histories: dict[str, str]) -> World:
+    """The leaf's memory holds the invariant at revision 2, with the given history files."""
+
+    world = build_world(tmp_path)
+    write_files(
+        world.memory_worktree,
+        {INVARIANT_PATH: tree_invariant(2, "Values land exactly as given."), **histories},
+    )
+    return world
+
+
+def test_a_carried_revision_names_the_owner_whose_history_wrote_it(tmp_path: Path) -> None:
+    """Revision 2 came with another leaf's closed history file: that leaf is its writer.
+
+    The reviewed leaf has no row about the invariant, so the review's chip names the carried
+    change's source from this answer; the before revision 1 is the record's introduction.
+    """
+
+    world = _revised_world(
+        tmp_path,
+        {
+            f"knowledge/history/{CARRIER}.json": _owner_history(
+                CARRIER, [_changed_row(2)], closed=True
+            )
+        },
+    )
+    selection = _writer_review(world)
+
+    assert selection.after_display_version == "r2"
+    assert selection.after_writer is not None
+    assert (selection.after_writer.state, selection.after_writer.owners) == ("recorded", (CARRIER,))
+    assert selection.before_writer is not None
+    assert (selection.before_writer.state, selection.before_writer.owners) == (
+        "introduced",
+        (TREE_ORIGIN["leaf"],),
+    )
+
+
+def test_the_reviewed_leafs_own_change_names_the_reviewed_leaf(tmp_path: Path) -> None:
+    """A changed row in the reviewed leaf's own file makes it the after revision's writer."""
+
+    world = _revised_world(
+        tmp_path,
+        {f"knowledge/history/{LEAF}.json": _owner_history(LEAF, [_changed_row(2)], closed=False)},
+    )
+    selection = _writer_review(world)
+
+    assert selection.after_writer is not None
+    assert (selection.after_writer.state, selection.after_writer.owners) == ("recorded", (LEAF,))
+
+
+def test_a_revision_no_history_row_claims_has_no_recorded_writer(tmp_path: Path) -> None:
+    """Revision 2 with no ``changed`` row at 2 names no writer, and says so; nothing is inferred.
+
+    Another owner's ``no_impact`` row at the same revision judged it and wrote nothing.
+    """
+
+    judged = {**_changed_row(2), "disposition": "no_impact"}
+    judged.pop("effect")
+    world = _revised_world(
+        tmp_path,
+        {f"knowledge/history/{CARRIER}.json": _owner_history(CARRIER, [judged], closed=True)},
+    )
+    selection = _writer_review(world)
+
+    assert selection.after_writer is not None
+    assert selection.after_writer.state == "not_recorded"
+    assert selection.after_writer.owners == ()
+    assert "revision 2" in selection.after_writer.detail
+
+
+def test_an_incomplete_after_index_leaves_the_writer_unavailable(tmp_path: Path) -> None:
+    """History an incomplete index did not read cannot be reported as no writer."""
+
+    world = _revised_world(tmp_path, {"knowledge/invariants/INV-BBBBBB-broken.json": "{}\n"})
+    selection = _writer_review(world)
+
+    assert selection.after_writer is not None
+    assert selection.after_writer.state == "unavailable"
+    assert selection.after_writer.owners == ()
+    assert "incomplete" in selection.after_writer.detail

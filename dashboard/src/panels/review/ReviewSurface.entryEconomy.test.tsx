@@ -1,21 +1,20 @@
 // The reviewer's own subject catalogue, read the economical way once the task entry stops loading it.
 //
-// The entry no longer reads the catalogue, so the reviewer opened from it carries no subject. These
-// cases hold the reviewer to the request economy that makes that change pay off:
+// The entry no longer reads the catalogue, and the page opens with nothing selected (MIK-R89 v2 rule
+// 2). These cases hold the reviewer to the request economy that pays off:
 //   * the catalogue is read ONCE on entry -- keyed on the comparison, not on the global analytics
 //     document, so an unrelated workspace publication does not re-read it;
-//   * the first review read waits for the catalogue and asks for the subject it chose, rather than
-//     reading the whole task and then reading again for the subject;
-//   * choosing another subject reads that subject's review and never the catalogue again;
-//   * a refresh that reaches a new candidate generation (other snapshot digests) re-reads it once;
-//   * the wait for the catalogue is bounded: a catalogue that never answers does not withhold the
-//     task-context review or its All changes destination beyond `SUBJECT_HOLD_MS`.
+//   * the opening's one review read is the task context's and waits for nothing, so a catalogue that
+//     answers late, or never, withholds neither that review nor its All changes destination; a late
+//     catalogue selects nothing;
+//   * choosing a subject reads that subject's review and never the catalogue again;
+//   * a refresh that reaches a new candidate generation (other snapshot digests) re-reads it once.
 import { captured, selectedMemberId, replyFor } from './l86.test-utils';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewEntry, ReviewPayload, ReviewResult } from '../../data/review';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 import { dashboardStore } from '../../data/store';
-import { SUBJECT_HOLD_MS } from './ReviewNavigation';
 import { ReviewSurface } from './ReviewSurface';
 
 // Two independently captured family-selector answers from the same real L37 comparison.
@@ -43,8 +42,8 @@ const response = (body: unknown) => ({ ok: true, status: 200, json: async () => 
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
   vi.unstubAllGlobals();
+  resetCardCachesForTests();
 });
 
 function familyReview(familyId: string | null, afterSnapshot: string): ReviewResult {
@@ -60,32 +59,43 @@ function familyReview(familyId: string | null, afterSnapshot: string): ReviewRes
   } } };
 }
 
-it('reads the catalogue once on entry, then asks the review only for the subject it chose', async () => {
-  expect(selectedMemberId).toBe(captured<ReviewResult>('l86.member.captured.json').payload!.knowledge.revision_selection!.record_id);
+const sourceContentRefusal = {
+  state: 'refused',
+  refusal: { code: 'not-found', detail: 'outside this case', next_action: 'none' },
+};
+// The reviewer's reads; `answerCatalogue` answers the entries read (a promise that never settles stalls it).
+function serveEconomy(answerCatalogue: () => Promise<Response>, afterSnapshot: () => string) {
   const urls: URL[] = [];
-  let releaseCatalogue: (() => void) | undefined;
-  let afterSnapshot = recorded.comparison!.after_snapshot_digest!;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (address: string) => {
       const url = new URL(address, 'http://localhost');
       urls.push(url);
-      if (url.pathname.endsWith('/entries'))
-        return await new Promise<Response>((resolve) => {
-          releaseCatalogue = () => resolve(response(CATALOGUE));
-        });
-      if (url.pathname.endsWith('/source-content'))
-        return response({
-          state: 'refused',
-          refusal: { code: 'not-found', detail: 'outside this case', next_action: 'none' },
-        });
+      if (url.pathname.endsWith('/entries')) return await answerCatalogue();
+      if (url.pathname.endsWith('/source-content')) return response(sourceContentRefusal);
       return response(url.pathname === '/api/review/intent'
-        ? familyReview(url.searchParams.get('selectorId'), afterSnapshot)
+        ? familyReview(url.searchParams.get('selectorId'), afterSnapshot())
         : replyFor(url));
     }),
   );
-  const catalogueReads = () => urls.filter((url) => url.pathname.endsWith('/entries'));
-  const reviewReads = () => urls.filter((url) => url.pathname === '/api/review/intent');
+  return {
+    catalogueReads: () => urls.filter((url) => url.pathname.endsWith('/entries')),
+    reviewReads: () => urls.filter((url) => url.pathname === '/api/review/intent'),
+  };
+}
+const familyRow = (view: ReturnType<typeof render>, familyId: string) =>
+  view.getAllByTestId('review-family-open').find((button) => button.dataset.subjectId === familyId)!;
+
+it('reads the catalogue once on entry, opens on the task context, then asks the review only for the subject chosen', async () => {
+  expect(selectedMemberId).toBe(captured<ReviewResult>('l86.member.captured.json').payload!.knowledge.revision_selection!.record_id);
+  let releaseCatalogue: (() => void) | undefined;
+  let afterSnapshot = recorded.comparison!.after_snapshot_digest!;
+  const { catalogueReads, reviewReads } = serveEconomy(
+    () => new Promise<Response>((resolve) => {
+      releaseCatalogue = () => resolve(response(CATALOGUE));
+    }),
+    () => afterSnapshot,
+  );
 
   const view = render(
     <ReviewSurface
@@ -96,17 +106,15 @@ it('reads the catalogue once on entry, then asks the review only for the subject
     />,
   );
   await waitFor(() => expect(catalogueReads()).toHaveLength(1));
-  // The subject is being chosen: no review is read for a question about to be replaced.
-  await act(async () => {});
-  expect(reviewReads()).toHaveLength(0);
+  // The opening waits for nothing: its one review read is the task context's.
+  await waitFor(() => expect(reviewReads()).toHaveLength(1));
+  expect(reviewReads()[0].searchParams.has('selectorId')).toBe(false);
 
+  // The late catalogue selects nothing and reads no subject.
   await act(async () => releaseCatalogue?.());
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id),
-  );
+  await waitFor(() => expect(familyRow(view, families[0].family_id)).toBeTruthy());
+  expect(view.queryByTestId('review-subject-slot')).toBeNull();
   expect(reviewReads()).toHaveLength(1);
-  expect(reviewReads()[0].searchParams.get('selectorKind')).toBe('family');
-  expect(reviewReads()[0].searchParams.get('selectorId')).toBe(families[0].family_id);
 
   // An unrelated workspace publication does not re-read the reviewer's catalogue.
   act(() => {
@@ -115,15 +123,14 @@ it('reads the catalogue once on entry, then asks the review only for the subject
       publishedRevision: 7,
     });
   });
-  // Another subject reads that subject's review, never the catalogue again.
-  fireEvent.click(
-    view
-      .getAllByTestId('review-family-open')
-      .find((button) => button.dataset.subjectId === families[1].family_id)!,
-  );
-  await waitFor(() =>
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[1].family_id),
-  );
+  // A subject reads that subject's review, never the catalogue again.
+  for (const [index, family] of families.entries()) {
+    fireEvent.click(familyRow(view, family.family_id));
+    await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(family.family_id));
+    expect(reviewReads()).toHaveLength(index + 2);
+    expect(reviewReads()[index + 1].searchParams.get('selectorKind')).toBe('family');
+    expect(reviewReads()[index + 1].searchParams.get('selectorId')).toBe(family.family_id);
+  }
   expect(catalogueReads()).toHaveLength(1);
 
   // A refresh that reaches another candidate generation re-reads the catalogue once for it.
@@ -135,78 +142,12 @@ it('reads the catalogue once on entry, then asks the review only for the subject
   expect(catalogueReads()).toHaveLength(2);
 });
 
-// MIK-R40 rule 5 and its budgets: the entries read is budgeted at 0.3 s, and at twice that while the
-// leaf-wide view is computed. Both are inside the bounded wait, so opening the reviewer issues one
-// review read, for the subject the catalogue chose, and no whole-task read whose answer the choice
-// would then replace.
-it.each([300, 600])(
-  'opens with one review read when the catalogue answers after %i ms',
-  async (catalogueMs) => {
-    vi.useFakeTimers();
-    expect(catalogueMs).toBeLessThan(SUBJECT_HOLD_MS);
-    const urls: URL[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (address: string) => {
-        const url = new URL(address, 'http://localhost');
-        urls.push(url);
-        if (url.pathname.endsWith('/entries')) {
-          // load-independent: catalogue delay and product hold run on the same fake clock
-          await new Promise((resolve) => setTimeout(resolve, catalogueMs));
-          return response(CATALOGUE);
-        }
-        if (url.pathname.endsWith('/source-content'))
-          return response({
-            state: 'refused',
-            refusal: { code: 'not-found', detail: 'outside this case', next_action: 'none' },
-          });
-        return response(url.pathname !== '/api/review/intent' ? replyFor(url) :
-          familyReview(
-            url.searchParams.get('selectorId'),
-            recorded.comparison!.after_snapshot_digest!,
-          ),
-        );
-      }),
-    );
-    const reviewReads = () => urls.filter((url) => url.pathname === '/api/review/intent');
-    const view = render(
-      <ReviewSurface
-        repo="agents-remember"
-        master="review-economy"
-        leaf={`catalogue-after-${catalogueMs}-ms`}
-        onBack={() => undefined}
-      />,
-    );
-    await act(async () => { await vi.advanceTimersByTimeAsync(catalogueMs); });
-    expect(view.getByTestId('review-center-family').dataset.family).toBe(families[0].family_id);
-    // Past the bound as well: the wait ended with the catalogue's answer, so nothing is released.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS);
-    });
-    expect(reviewReads()).toHaveLength(1);
-    expect(reviewReads()[0].searchParams.get('selectorKind')).toBe('family');
-    expect(reviewReads()[0].searchParams.get('selectorId')).toBe(families[0].family_id);
-    expect(urls.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(1);
-  },
-);
-
-it('reads the task-context review and keeps All changes reachable when the catalogue never answers', async () => {
-  vi.useFakeTimers();
-  const urls: URL[] = [];
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (address: string) => {
-      const url = new URL(address, 'http://localhost');
-      urls.push(url);
-      // The catalogue stalls for the whole case: its answer never arrives.
-      if (url.pathname.endsWith('/entries')) return await new Promise<Response>(() => {});
-      return response(url.pathname === '/api/review/intent'
-        ? familyReview(null, recorded.comparison!.after_snapshot_digest!)
-        : replyFor(url));
-    }),
+it('reads the task-context review at once and keeps All changes reachable when the catalogue never answers', async () => {
+  // The catalogue stalls for the whole case: its answer never arrives.
+  const { catalogueReads, reviewReads } = serveEconomy(
+    () => new Promise<Response>(() => {}),
+    () => recorded.comparison!.after_snapshot_digest!,
   );
-  const reviewReads = () => urls.filter((url) => url.pathname === '/api/review/intent');
-
   const view = render(
     <ReviewSurface
       repo="agents-remember"
@@ -215,20 +156,15 @@ it('reads the task-context review and keeps All changes reachable when the catal
       onBack={() => undefined}
     />,
   );
-
-  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS - 1); });
-  expect(reviewReads()).toHaveLength(0);
-  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-  expect(reviewReads()).toHaveLength(1);
-  // The bounded wait released into the task-context review: no subject is named.
+  await waitFor(() => expect(reviewReads()).toHaveLength(1));
+  // No subject is named: the opening reads the task context without waiting for the catalogue.
   expect(reviewReads()[0].searchParams.get('selectorKind')).toBeNull();
-  vi.useRealTimers();
   await waitFor(() =>
     expect(view.getByTestId('review-scope-record').textContent).toContain(
       `${recorded.source.inventory.entries.length} changed files`,
     ),
   );
-  expect(urls.filter((url) => url.pathname.endsWith('/entries'))).toHaveLength(1);
-  expect(view.getAllByRole('button', { name: /^All changes/ }).length).toBeGreaterThan(0);
+  expect(catalogueReads()).toHaveLength(1);
+  expect(view.getByTestId('review-all-changes').closest('[data-testid="review-tree"]')).not.toBeNull();
   expect(view.queryByTestId('review-source-explorer')).toBeNull();
 });

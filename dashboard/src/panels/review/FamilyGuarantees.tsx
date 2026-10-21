@@ -93,22 +93,28 @@ export function GuaranteeComparisonBlock({
       </div>
     );
   }
+  return <ChangedGuarantee before={comparison.before} after={comparison.after} layout={layout} />;
+}
+
+// A changed guarantee's two texts as a diff that sizes to its content (`fit`): the selected family
+// adds no scroll container of its own on the review page (E6).
+function ChangedGuarantee({
+  before,
+  after,
+  layout,
+}: {
+  before: ReviewFamilyGuarantee;
+  after: ReviewFamilyGuarantee;
+  layout: DiffLayout;
+}) {
   return (
     <div data-testid="review-center-guarantee-changed">
       <p className={muted}>
-        the family guarantee changed between {comparison.before.revision_id} and{' '}
-        {comparison.after.revision_id}:
+        the family guarantee changed between {before.revision_id} and {after.revision_id}:
       </p>
-      <DiffPane
-        before={comparison.before.joint_guarantee}
-        after={comparison.after.joint_guarantee}
-        language="text"
-        mode={layout}
-        collapse={false}
-      />
+      <DiffPane before={before.joint_guarantee} after={after.joint_guarantee} language="text" mode={layout} collapse={false} fit />
       <p className={muted}>
-        before revision {comparison.before.revision_id} · after revision{' '}
-        {comparison.after.revision_id}
+        before revision {before.revision_id} · after revision {after.revision_id}
       </p>
     </div>
   );

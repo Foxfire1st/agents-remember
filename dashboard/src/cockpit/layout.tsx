@@ -21,9 +21,12 @@ export const shell = css({
     overflowX: "hidden",
     overflowWrap: "anywhere",
     "& .shell__body": { minWidth: "0", gridTemplateRows: "auto" },
-    "& .shell__body[data-fullbleed=false]": { flex: "0 0 auto", gridTemplateRows: "auto auto auto" },
-    "& .shell__body[data-fullbleed=false] > .rail": { height: "24rem" },
-    "& .shell__body[data-fullbleed=false] > .viewport": { minHeight: "28rem" },
+    // Operations stacks its rails above and below the task document. The review page is not
+    // stacked: its reading column lies over the screen and its chat column over that (MIK-R89 v2
+    // rule 11), so the stacked heights never reach it.
+    "& .shell__body[data-fullbleed=false]:not([data-page=review])": { flex: "0 0 auto", gridTemplateRows: "auto auto auto" },
+    "& .shell__body[data-fullbleed=false]:not([data-page=review]) > .rail": { height: "24rem" },
+    "& .shell__body[data-fullbleed=false]:not([data-page=review]) > .viewport": { minHeight: "28rem" },
     "& .rail, & .viewport": { maxWidth: "100%" },
     "& [data-testid=open-intent-review]": { flexWrap: "wrap", minWidth: "0", maxWidth: "100%" },
   },
@@ -203,14 +206,21 @@ function clampRail(n: number): number {
 // both re-lays-out and survives a reload.
 // Memoized like the rail panels it sits beside (tab-switch CPU): the shell re-renders on
 // every view switch with unchanged props, and the memo gate skips this handle's re-render then.
+// `label` and `testId` name a handle that is not one of the Operations rails' (the review page's
+// tree and chat column): the Operations handles stay in the document while hidden, so a second
+// handle with their name would make both ambiguous.
 export const RailResizeHandle = memo(function RailResizeHandle({
   side,
   width,
   onResize,
+  label,
+  testId,
 }: {
   side: "left" | "right";
   width: number;
   onResize: (next: number) => void;
+  label?: string;
+  testId?: string;
 }) {
   const narrow = useNarrowCockpit();
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -240,7 +250,7 @@ export const RailResizeHandle = memo(function RailResizeHandle({
     <div
       role="slider"
       aria-orientation="vertical"
-      aria-label={`Resize ${side} rail`}
+      aria-label={label ?? `Resize ${side} rail`}
       aria-valuenow={width}
       aria-valuemin={RAIL_MIN}
       aria-valuemax={RAIL_MAX}
@@ -248,7 +258,7 @@ export const RailResizeHandle = memo(function RailResizeHandle({
       className={railHandle({ side })}
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
-      data-testid={`rail-resize-${side}`}
+      data-testid={testId ?? `rail-resize-${side}`}
     />
   );
 });
@@ -278,13 +288,54 @@ export const takeoverBody = css({
   },
 });
 
-export function useNarrowCockpit(): boolean {
-  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 40rem)').matches);
+// The ids the shared sidebar toggles name as what they control (aria-controls). The right rail is
+// also the review page's chat column, so the review's chat toggle names it too.
+export const LEFT_RAIL_ID = "cockpit-left-rail";
+export const RIGHT_RAIL_ID = "cockpit-right-rail";
+
+// The one-line strip over the Operations task document that holds its two sidebar toggles: the
+// task list's at the start, the right column's at the end (MIK-R89 v2 rule 8).
+export const sidebarStrip = css({
+  display: "flex",
+  flexShrink: 0,
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "0.5rem",
+  minHeight: "26px",
+  marginBottom: "0.3rem",
+});
+
+// The review page's chat column (MIK-R89 v2 rules 1, 11, 12): the shell's right rail, framed like
+// the reading column's other boxes. Below 1440 px it lies over the reading column; at 40rem and
+// narrower over the whole screen, never wider than it.
+export const reviewChatColumn = css({
+  background: "bg",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+});
+
+// The overlying chat column's own line with its toggle, at the column's edge.
+export const reviewChatClose = css({
+  display: "flex",
+  flexShrink: 0,
+  alignItems: "center",
+  paddingInline: "0.3rem",
+  paddingTop: "0.3rem",
+});
+
+export function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
-    const media = window.matchMedia('(max-width: 40rem)');
-    const update = () => setNarrow(media.matches);
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
-  }, []);
-  return narrow;
+  }, [query]);
+  return matches;
+}
+
+export function useNarrowCockpit(): boolean {
+  return useMediaQuery('(max-width: 40rem)');
 }

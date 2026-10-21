@@ -2,14 +2,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import type { ReviewPayload, ReviewResult, ReviewSourceContentResult } from '../../data/review';
-import {
-  REVIEW_CACHE_LIMIT,
-  ReviewReadCache,
-  SOURCE_CACHE_LIMIT,
-  sameGeneration,
-  sourceContentKey,
-} from './ReviewReadCache';
+import type { ReviewPayload, ReviewResult } from '../../data/review';
+import { REVIEW_CACHE_LIMIT, ReviewReadCache, sameGeneration } from './ReviewReadCache';
 
 const recorded = (
   JSON.parse(
@@ -37,13 +31,6 @@ function payloadAt(afterTree: string, afterSnapshot?: string): ReviewPayload {
   };
 }
 
-const content = (path: string): ReviewSourceContentResult => ({
-  state: 'content',
-  operation: 'read_review_source_content',
-  repository_id: 'repo',
-  expansion: { path } as ReviewSourceContentResult['expansion'],
-});
-
 it.each([REVIEW_CACHE_LIMIT + 5, REVIEW_CACHE_LIMIT * 3])(
   'keeps at most the bound of reviews and evicts the least recently used (%i inserted)',
   (inserted) => {
@@ -62,28 +49,9 @@ it.each([REVIEW_CACHE_LIMIT + 5, REVIEW_CACHE_LIMIT * 3])(
   },
 );
 
-it.each([SOURCE_CACHE_LIMIT + 1, SOURCE_CACHE_LIMIT * 2])(
-  'keeps at most the bound of source answers (%i inserted) and never keeps a refusal',
-  (inserted) => {
-    const cache = new ReviewReadCache();
-    for (let index = 0; index < inserted; index += 1)
-      cache.keepSource(`file-${index}`, content(`file-${index}`));
-    expect(cache.sizes.sources).toBe(SOURCE_CACHE_LIMIT);
-    expect(cache.source('file-0')).toBeUndefined();
-    cache.keepSource('refused', {
-      state: 'refused',
-      operation: 'read_review_source_content',
-      repository_id: 'repo',
-      refusal: { code: 'source_content_unresolved', detail: 'd', next_action: 'n' },
-    });
-    expect(cache.source('refused')).toBeUndefined();
-  },
-);
-
-it('empties both stores when an answer belongs to another comparison generation', () => {
+it('empties the store when an answer belongs to another comparison generation', () => {
   const cache = new ReviewReadCache();
   cache.keepReview('family-a', payloadAt('tree-1', 'snap-1'));
-  cache.keepSource('file', content('file'));
   // A task-context answer compares no knowledge: it cannot move the snapshot pair.
   cache.keepReview('task', payloadAt('tree-1'));
   expect(cache.review('family-a')).toBeDefined();
@@ -91,7 +59,6 @@ it('empties both stores when an answer belongs to another comparison generation'
   cache.observe(payloadAt('tree-1', 'snap-2'));
   expect(cache.review('family-a')).toBeUndefined();
   expect(cache.review('task')).toBeUndefined();
-  expect(cache.source('file')).toBeUndefined();
   cache.keepReview('family-b', payloadAt('tree-1', 'snap-2'));
   cache.keepReview('family-c', payloadAt('tree-2', 'snap-2'));
   expect(cache.review('family-b')).toBeUndefined();
@@ -104,9 +71,6 @@ it('treats code trees and compared snapshots as the generation', () => {
   expect(
     sameGeneration({ trees: 'a:b', snapshots: 'x:y' }, { trees: 'a:b', snapshots: 'x:z' }),
   ).toBe(false);
-  expect(sourceContentKey('r', 'm', 'l', 'p', 'b', 'a')).not.toBe(
-    sourceContentKey('r', 'm', 'l', 'p', 'b', 'c'),
-  );
 });
 
 it('keeps an unshown answer only for the generation on screen and never lets it move that generation', () => {

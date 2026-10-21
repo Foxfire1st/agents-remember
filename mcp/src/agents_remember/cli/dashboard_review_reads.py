@@ -21,6 +21,7 @@ from agents_remember.application.review_tree_comparison import (
 from agents_remember.kernel.git_command import GitRunnerOptions, run_git, run_git_bytes
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
+from agents_remember.models.knowledge.review_trees import ReviewTreesResult
 from agents_remember.serving.changeset_cache import (
     ContentRead,
     DirectoryRead,
@@ -202,16 +203,32 @@ class RecordedReviewAnswers:
         )
 
     def entries[T](
-        self, repository_id: str, master: str, leaf_id: str, produce: Callable[[], T]
+        self,
+        repository_id: str,
+        master: str,
+        leaf_id: str,
+        number: int | None,
+        produce: Callable[[], T],
     ) -> T:
-        """The subject catalogue: reused only for a leaf answered from its record."""
+        """The subject catalogue: reused only for a leaf answered from its record.
+
+        ``number`` is the recorded comparison the catalogue was asked for (MIK-R89 v2 rule 10), or
+        ``None`` for the leaf's own resolution; two numbers are two answers.
+        """
 
         return self._answer(
-            ("entries", repository_id, master, leaf_id), (repository_id, master, leaf_id), produce
+            ("entries", repository_id, master, leaf_id, number),
+            (repository_id, master, leaf_id),
+            produce,
         )
 
     def trees[T](self, query: ReviewTreesQuery, produce: Callable[[], T]) -> T:
-        """The tree view: reused only when the query names a recorded comparison."""
+        """The tree view: reused only when the query names a recorded comparison.
+
+        A card answer whose memory values could not be read on a readable after side, and an answer
+        with a side whose index could not be built, names a failed read, so it is answered and
+        never kept (INV-5M9WY3).
+        """
 
         if not (query.recorded or query.number is not None):
             return produce()
@@ -219,6 +236,7 @@ class RecordedReviewAnswers:
             ("trees", _tree_key(query)),
             (query.repository_id, query.master, query.leaf_id),
             produce,
+            keep=_keepable_tree_view,
         )
 
     def _answer[T](
@@ -228,6 +246,7 @@ class RecordedReviewAnswers:
         produce: Callable[[], T],
         *,
         must_be_closed: bool = True,
+        keep: Callable[[T], bool] | None = None,
     ) -> T:
         """The answer to one recorded question: kept while its inputs hold, else computed."""
 
@@ -241,7 +260,30 @@ class RecordedReviewAnswers:
             # the kept one must never stand in for the fresh read that reports the loss.
             return produce()
         sources = _sources_of(self._config, contract, repository_id, master, leaf_id)
-        return self._reuse.answer(key, sources, produce)
+        return self._reuse.answer(key, sources, produce, keep=keep)
+
+
+def _keepable_tree_view(value: object) -> bool:
+    """Whether a tree-view answer is a function of its recorded inputs alone.
+
+    An answer is kept only after the reuse found every recorded tree readable, so a side it names
+    ``unavailable-history`` names a read that failed -- an index that could not be built over a
+    readable tree -- not a state of the record; a tree that is gone is never kept anyway. A card
+    answer whose ``entry_memory`` is unavailable while its after side is available names a failed
+    read too (MIK-R89 v2 rule 3, Failure and Recovery). Neither is kept, so the next read tries
+    again; an unconverted (``legacy-unavailable``) side is the record's own state and is kept.
+    """
+
+    if not isinstance(value, ReviewTreesResult):
+        return True
+    sides = (*value.knowledge_sides, *value.code_sides)
+    if any(side.state == "unavailable-history" for side in sides):
+        return False
+    if value.entry_memory is None or value.entry_memory.state == "available":
+        return True
+    return not any(
+        side.side == "after" and side.state == "available" for side in value.knowledge_sides
+    )
 
 
 def _tree_key(query: ReviewTreesQuery) -> tuple[object, ...]:

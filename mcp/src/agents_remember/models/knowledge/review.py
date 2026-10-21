@@ -679,6 +679,10 @@ class ReviewEntryListResult(KnowledgeModel):
     invariant_total: int = Field(default=0, ge=0)
     family_total: int = Field(default=0, ge=0)
     outline: ReviewOutline | None = None
+    # The recorded tree comparison this catalogue and outline describe (MIK-R89 v2 rule 10), so a
+    # reader can check that the answer belongs to the comparison it shows; none for a review with no
+    # tree comparison and for a refusal.
+    comparison: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _require_one_outcome(self) -> ReviewEntryListResult:

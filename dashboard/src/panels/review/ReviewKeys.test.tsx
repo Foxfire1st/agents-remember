@@ -17,8 +17,8 @@ it('opens a named key reference from a visible Keys control and shows effective 
   const view = render(<div data-kbzone="review"><ReviewKeys /></div>);
   fireEvent.click(view.getByRole('button', { name: 'Keys' }));
   const popup = await view.findByRole('dialog', { name: 'Reviewer keys' });
-  expect(within(popup).getByText('Next change').parentElement?.textContent).toContain('N');
-  expect(within(popup).getByText('Previous change').parentElement?.textContent).toContain('k');
+  expect(within(popup).getByText('Next block').parentElement?.textContent).toContain('N');
+  expect(within(popup).getByText('Previous block').parentElement?.textContent).toContain('k');
   fireEvent.click(within(popup).getByRole('button', { name: 'Close' }));
   expect(view.queryByRole('dialog')).toBeNull();
 });

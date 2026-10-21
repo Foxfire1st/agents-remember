@@ -11,7 +11,7 @@ import type {
   ReviewMemberChange,
 } from '../../data/reviewFamily';
 import type { ReviewOutlineMeaning } from '../../data/review';
-import type { TreeOrder } from './triageOrderPreference';
+import type { ReviewSort } from './reviewSelection';
 import type { ReviewCodeChange } from '../../data/reviewTrees';
 
 // Precedence and sort weight (ICR-R32 rule 2): intent > implementation > membership > unknown >
@@ -139,9 +139,10 @@ export function breakdownText(triage: FamilyTriage): string {
 }
 
 // Families by their weight, then authored order (the context's own order); unchanged families stay.
+// Every sort but Authored orders by weight.
 export function orderFamilies(
   entries: readonly ReviewFamilyContextEntry[],
-  order: TreeOrder,
+  order: ReviewSort,
 ): ReviewFamilyContextEntry[] {
   if (order === 'authored') return [...entries];
   return entries
@@ -150,13 +151,13 @@ export function orderFamilies(
     .map(({ entry }) => entry);
 }
 
-// Member rows by weight (triage order only), then authored order: the family record's `members`
+// Member rows by weight (every sort but Authored), then authored order: the family record's `members`
 // position the server delivered, then the landed row order. The rows of one occurrence (both
 // revisions of a revised member) stay together. Unchanged siblings are never removed.
 export function orderMemberRows<Row extends { member: ReviewFamilyMember }>(
   entry: ReviewFamilyContextEntry,
   rows: readonly Row[],
-  order: TreeOrder,
+  order: ReviewSort,
 ): Row[] {
   const facts = memberChanges(entry);
   const first = new Map<string, number>();
@@ -165,7 +166,7 @@ export function orderMemberRows<Row extends { member: ReviewFamilyMember }>(
   });
   const key = (row: Row, index: number): number[] => {
     const change = facts.get(row.member.member_id);
-    const weight = order === 'triage' ? -CHANGE_WEIGHT[occurrenceKind(facts, row.member)] : 0;
+    const weight = order === 'authored' ? 0 : -CHANGE_WEIGHT[occurrenceKind(facts, row.member)];
     const position = change?.authored_position ?? Number.MAX_SAFE_INTEGER;
     return [weight, position, first.get(row.member.member_id) ?? index, index];
   };
@@ -232,10 +233,12 @@ type Outline = import('../../data/review').ReviewOutline;
 type CatalogueEntry = import('../../data/review').ReviewEntry;
 type OutlineMember = import('../../data/review').ReviewOutlineMember;
 
+// Without an outline the catalogue names each subject: its label is the recorded display label (an
+// invariant's INV- id), never the selector id (finding 2).
 function catalogueGroups(catalogue: readonly CatalogueEntry[]): OutlineGroup[] {
   const row = (entry: CatalogueEntry): OutlineRow => ({
     kind: entry.selector_kind,
-    id: entry.selector_id,
+    id: entry.label,
     selectorId: entry.selector_id,
     title: entry.label,
   });
@@ -286,17 +289,32 @@ function memberMeaning(
   return outline.invariants.find((entry) => entry.selector_id === id)?.meaning;
 }
 
+// A member the outline's invariants do not list is named by its own outline id, else the catalogue's
+// label (both in `labels`), else a walked roster's display label; its selector id only when no read
+// names it (finding 2).
+function memberLabel(
+  labels: ReadonlyMap<string, string>,
+  walked: readonly ReviewFamilyContextEntry[],
+  id: string,
+): string {
+  const rostered = walked
+    .flatMap((context) => [...context.after.members, ...context.before.members])
+    .find((row) => row.invariant_id === id)?.display_label;
+  return labels.get(id) ?? rostered ?? id;
+}
+
 function outlineMember(
   outline: Outline,
   walked: readonly ReviewFamilyContextEntry[],
   id: string,
   familyId?: string,
   membership?: OutlineMember['membership'],
-  code?: Map<string, ReviewCodeChange> | null,
+  code?: ReadonlyMap<string, ReviewCodeChange> | null,
+  labels: ReadonlyMap<string, string> = new Map(),
 ): OutlineRow {
   const invariant = outline.invariants.find((entry) => entry.selector_id === id);
   const { revisionId, fact } = walkedMember(walked, id, familyId);
-  const label = invariant?.id ?? id;
+  const label = invariant?.id ?? memberLabel(labels, walked, id);
   const meaning = memberMeaning(outline, id, familyId);
   return {
     kind: 'invariant',
@@ -323,10 +341,13 @@ export function outlineGroups(
   outline: Outline | undefined,
   catalogue: readonly CatalogueEntry[],
   walked: readonly ReviewFamilyContextEntry[],
-  order: TreeOrder,
-  code?: Map<string, ReviewCodeChange> | null,
+  order: ReviewSort,
+  code?: ReadonlyMap<string, ReviewCodeChange> | null,
 ): OutlineGroup[] {
   if (outline?.state !== 'outlined') return catalogueGroups(catalogue);
+  const labels = new Map(catalogue.map((entry) => [entry.selector_id, entry.label]));
+  for (const member of outline.families.flatMap((family) => family.members))
+    if (member.id) labels.set(member.selector_id, member.id);
   const listed = new Set<string>();
   const sort = (rows: OutlineRow[]) =>
     order === 'authored' ? rows : rows.sort((a, b) => badgeWeight(b.badge) - badgeWeight(a.badge));
@@ -341,6 +362,7 @@ export function outlineGroups(
           entry.selector_id,
           item.membership,
           code,
+          labels,
         );
       }),
     );
@@ -360,7 +382,7 @@ export function outlineGroups(
       members,
     };
   });
-  if (order === 'triage') groups.sort((a, b) => groupWeight(b) - groupWeight(a));
+  if (order !== 'authored') groups.sort((a, b) => groupWeight(b) - groupWeight(a));
   groups.push({
     members: sort(
       outline.invariants
@@ -375,7 +397,7 @@ export function outlineGroups(
 
 export function firstOutlineChange(
   outline: import('../../data/review').ReviewOutline,
-  order: TreeOrder,
+  order: ReviewSort,
 ): OutlineRow | undefined {
   for (const group of outlineGroups(outline, [], [], order)) {
     // An aggregate family badge points to the member, not to the unchanged family record.

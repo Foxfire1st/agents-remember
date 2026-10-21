@@ -1,12 +1,9 @@
-// L81-R1-F18 mounted proof: member clicks through the production workspace.
-//
-// The same three cases as the hook-level tests, driven through the real
-// ReviewSurface member selection instead of the hook directly: an uncached member
-// of the already displayed family with an unchanged invariant set sends no second
-// cards request through pending or answer, a changed set's cards start before its
-// subject resolves, and the old subject stays out from under the new labels while
-// the new subject is pending. Only `fetch` is stubbed, with deferred subject
-// answers so request order is observable.
+// Member and family selections through the production page (MIK-R89 v2 rule 2, W4; L81-R1-F18's
+// successor): the cards are the opening's read 5, so a selection -- a member of the displayed
+// family, or another family -- reads its subject and no cards, through pending and answer; and the
+// old subject's reading stays out from under the new heading while the new subject is pending
+// (INV-8VQR13WX). Only `fetch` is stubbed, with deferred subject answers so request order is
+// observable.
 import { fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
@@ -40,19 +37,16 @@ const REFUSED = {
 };
 const ok = (body: unknown) =>
   ({ ok: true, status: 200, json: async () => structuredClone(body) }) as Response;
+// The card read's answer: the captured leaf's comparison (its four trees name the blocks), no entries.
+const comparison = captured<{ comparison: Record<string, unknown> }>('walkReal.trees.captured.json').comparison;
 const cardsBody = (marker: string) => ({
   state: 'trees',
   repository_id: 'r',
   master: 'm',
   leaf_id: 'l',
   knowledge_sides: [],
-  comparison: {
-    schema: 'ar-review-tree-comparison/v1',
-    task_id: 't',
-    leaf_id: 'l',
-    number: 1,
-    marker,
-  },
+  comparison: { ...comparison, marker },
+  entries: [],
 });
 
 const requested = (url: URL) =>
@@ -70,7 +64,7 @@ interface Mounted {
 // The R6R family settled on screen: one subject request, one cards request.
 async function mountSettledR6R(): Promise<Mounted> {
   localStorage.clear();
-  treeOrderStore.getState().setOrder('triage');
+  treeOrderStore.getState().setOrder('priority');
   treeViewStore.getState().setView('all');
   const intentCalls: string[] = [];
   const cardsCalls: string[] = [];
@@ -108,9 +102,8 @@ async function mountSettledR6R(): Promise<Mounted> {
     expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
     expect(selectedNode(view)).not.toBeNull();
   });
-  await waitFor(() =>
-    expect(view.queryByTestId('review-expression-cards')?.dataset.cardsState).toBe('ready'),
-  );
+  // The opening's read 5 has answered.
+  await waitFor(() => expect(cardsCalls).toHaveLength(1));
   return {
     view,
     intentCalls,
@@ -129,7 +122,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('an uncached member of the displayed family sends no second cards request', async () => {
+const slotState = (view: View) => view.getByTestId('review-subject-slot').dataset.slotState;
+
+it('a member of the displayed family reads its subject and no cards', async () => {
   const { view, intentCalls, cardsCalls, release } = await mountSettledR6R();
   expect(intentCalls).toEqual([R6R_FAMILY]);
   expect(cardsCalls).toHaveLength(1);
@@ -137,68 +132,43 @@ it('an uncached member of the displayed family sends no second cards request', a
   // INV-2E8MG43K was never selected: its subject resolves next, through pending.
   const member = 'invariant:97c94e1f-38e1-51db-ade2-f7bc3438024b';
   fireEvent.click(memberOpen(view, '97c94e1f-38e1-51db-ade2-f7bc3438024b'));
-  await waitFor(() =>
-    expect(view.queryByTestId('review-reading-pending')).not.toBeNull(),
-  );
+  await waitFor(() => expect(view.queryByTestId('review-reading-pending')).not.toBeNull());
   expect(intentCalls).toEqual([R6R_FAMILY, member]);
-  // The set is unchanged, so the kept answer stands: still no second cards request.
   expect(cardsCalls).toHaveLength(1);
 
-  // The old subject stays out from under the new labels while it pends.
+  // The old subject stays out from under the new heading while it pends: one slot, pending.
   const pending = view.getByTestId('review-reading-pending');
   expect(pending.dataset.pendingSubject).toBe(member);
-  expect(view.queryByTestId('review-expression-cards')).toBeNull();
-  expect(view.queryByTestId('review-center-expressions')).toBeNull();
+  expect(view.getAllByTestId('review-subject-slot')).toHaveLength(1);
+  expect(slotState(view)).toBe('pending');
+  expect(view.queryByTestId('review-center-family')).toBeNull();
 
   release(member);
-  await waitFor(() => {
-    expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
-  });
-  await waitFor(() =>
-    expect(view.queryByTestId('review-expression-cards')?.dataset.cardsState).toBe('ready'),
-  );
-  // Through the answer too: the remount reused the kept answer, one request total.
+  await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined());
+  await waitFor(() => expect(slotState(view)).toBe('answered'));
   expect(cardsCalls).toHaveLength(1);
 });
 
-it("a changed set's cards start before its subject resolves", async () => {
+it('another family reads its subject and no cards either', async () => {
   const { view, cardsCalls, release } = await mountSettledR6R();
-  const settledCards = cardsCalls.length;
-
-  // The shared member's review displays both families; its set is the family's own.
+  // The shared member's review displays both families.
   const shared = 'invariant:09b76b4c-9d5e-50a2-8a4d-de1485e8911c';
   fireEvent.click(memberOpen(view, '09b76b4c-9d5e-50a2-8a4d-de1485e8911c'));
-  await waitFor(() =>
-    expect(view.queryByTestId('review-reading-pending')).not.toBeNull(),
-  );
+  await waitFor(() => expect(view.queryByTestId('review-reading-pending')).not.toBeNull());
   release(shared);
-  await waitFor(() => {
-    expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
-  });
-  const families = view
-    .queryAllByTestId('review-family')
-    .map((block) => (block as HTMLElement).dataset.family);
-  expect(families).toContain(HBJ.payload!.family_context!.entries[0].family_id);
-
-  // Selecting the other family's row changes the set: its cards start now, while the
-  // new family subject is still pending -- not after it resolves.
-  const before = cardsCalls.length;
+  await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined());
+  const families = view.queryAllByTestId('review-family').map((block) => (block as HTMLElement).dataset.family);
   const hbjFamilyId = HBJ.payload!.family_context!.entries[0].family_id;
+  expect(families).toContain(hbjFamilyId);
+
   const hbjRow = view
     .getAllByTestId('review-family-open')
     .find((row) => (row as HTMLElement).dataset.family === hbjFamilyId)!;
   fireEvent.click(hbjRow);
-  await waitFor(() => expect(cardsCalls.length).toBeGreaterThan(before));
-  expect(view.getByTestId('review-surface').dataset.reviewPending).toBe(HBJ_FAMILY);
-
+  await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBe(HBJ_FAMILY));
+  expect(cardsCalls).toHaveLength(1);
   release(HBJ_FAMILY);
-  await waitFor(() => {
-    expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
-  });
-  await waitFor(() =>
-    expect(view.queryByTestId('review-expression-cards')?.dataset.cardsState).toBe('ready'),
-  );
-  // The hook mounted after the subject answer and reused the prefetched flight.
-  expect(cardsCalls.length).toBe(before + 1);
-  expect(settledCards).toBe(1);
+  await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined());
+  await waitFor(() => expect(slotState(view)).toBe('answered'));
+  expect(cardsCalls).toHaveLength(1);
 });

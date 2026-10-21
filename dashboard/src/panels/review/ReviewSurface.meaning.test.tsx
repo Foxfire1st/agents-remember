@@ -4,6 +4,7 @@
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { resetCardCachesForTests } from '../../data/reviewTrees';
 import { ReviewSurface } from './ReviewSurface';
 import { treeOrderStore } from './triageOrderPreference';
 import { treeViewStore } from './triageViewPreference';
@@ -12,8 +13,9 @@ import { catalogue as catalogue43, serve, subject, target, taskBody } from './l4
 
 beforeEach(() => {
   localStorage.clear();
+  resetCardCachesForTests();
   treeViewStore.getState().setView('changed');
-  treeOrderStore.getState().setOrder('triage');
+  treeOrderStore.getState().setOrder('priority');
 });
 afterEach(() => {
   cleanup();
@@ -33,38 +35,27 @@ function mount(kind: 'family' | 'invariant', selectorId: string) {
   );
 }
 
-it('shows effect badges in the changed and the all tree view: one, two, four and unrecorded', async () => {
+// The tree's subject rows carry the recorded effect; a family row's reason is its change badge
+// (WP5), so the family's "effect not recorded" is read in its slot (the family case below).
+it('shows effect badges on the subject rows in the changed and the all tree view: one, two and four', async () => {
   serve();
-  const view = render(
-    <ReviewSurface
-      repo={target.repo}
-      master={target.master}
-      leaf={target.leaf}
-      selectorKind="family"
-      selectorId={subject.family}
-      onBack={() => undefined}
-    />,
-  );
-  const rail = await view.findByTestId('review-catalogue-navigation');
+  const view = mount('family', subject.family);
+  const tree = await view.findByTestId('review-tree');
   await view.findByTestId('review-center-family');
-  const badges = () =>
-    within(rail)
-      .getAllByTestId('review-meaning-badge')
-      .map((node) => node.textContent);
+  const rows = () => Array.from(tree.querySelectorAll<HTMLElement>('[data-testid="review-family-member-open"]'));
+  const badges = () => rows().map((node) => node.dataset.meaning);
   // Four steps collapse to first, ellipsis, last; two join with an arrow.
   expect(badges()).toContain('weaken → … → merge');
   expect(badges()).toContain('clarify → strengthen');
   expect(badges()).toContain('clarify');
-  expect(badges()).toContain('effect not recorded');
   // The badge is in the row's accessible name.
-  const named = within(rail).getByRole('button', { name: /weaken → … → merge/ });
+  const named = rows().find((node) => node.getAttribute('aria-label')?.includes('weaken → … → merge'))!;
   expect(named.getAttribute('data-tree-node')).toBe('member');
-  fireEvent.click(within(rail).getByRole('button', { name: /View: Changed/ }));
-  await waitFor(() =>
-    expect(within(rail).getByRole('button', { name: /View: All/ })).toBeTruthy(),
-  );
+  const all = within(view.getByTestId('review-tree-view')).getByText('All');
+  fireEvent.click(all);
+  await waitFor(() => expect(all.getAttribute('aria-pressed')).toBe('true'));
   expect(badges()).toContain('weaken → … → merge');
-  expect(badges()).toContain('effect not recorded');
+  expect(badges()).toContain('clarify → strengthen');
 });
 
 it('lists every step beside the selected invariant with its fields', async () => {
@@ -218,9 +209,10 @@ it('fails a no-subject answer without the required field on the source branch', 
   };
   serve({ taskReply: stripped, catalogueReply: emptyCatalogue });
   const view = mountTask();
-  // The source-only branch renders (no subject selected) and the required-field
-  // failure shows: an answer without the field is invalid, never none.
-  await view.findByTestId('review-center-unselected');
+  // The page opens with nothing selected on the task context's answer, and the
+  // required-field failure shows: an answer without the field is invalid, never none.
+  await view.findByTestId('review-summary');
+  expect(view.queryByTestId('review-subject-slot')).toBeNull();
   const missing = await view.findByTestId('review-recorded-steps-missing');
   expect(missing.textContent).toContain('invalid answer');
   expect(view.queryByTestId('review-recorded-steps')).toBeNull();
@@ -239,11 +231,10 @@ it('accepts a no-subject answer whose field is genuinely empty', async () => {
   serve({ catalogueReply: emptyCatalogue });
   const view = mountTask();
   // The task capture carries the field with no records: valid, so no failure and
-  // the source branch stands on its own.
-  await view.findByTestId('review-center-unselected');
-  await waitFor(() =>
-    expect(view.queryByTestId('review-reading-pending')).toBeNull(),
-  );
+  // the unselected opening stands on its own.
+  await view.findByTestId('review-summary');
+  await waitFor(() => expect(view.getByTestId('review-status-label').textContent).not.toBe('reading…'));
+  expect(view.queryByTestId('review-subject-slot')).toBeNull();
   expect(view.queryByTestId('review-recorded-steps-missing')).toBeNull();
   expect(view.queryByTestId('review-recorded-steps')).toBeNull();
   view.unmount();
@@ -289,33 +280,27 @@ it('selecting a subject issues no request but its own review', async () => {
   const { asked } = serve();
   const view = mount('invariant', subject.invariant4);
   await view.findByTestId('review-recorded-steps');
-  const rail = await view.findByTestId('review-catalogue-navigation');
+  const tree = await view.findByTestId('review-tree');
   const intents = () => asked.filter((url) => url.pathname === '/api/review/intent');
   const entries = () => asked.filter((url) => url.pathname === '/api/review/intent/entries');
+  // A target selector opens on its own answer; the opening's last read is the cards.
+  await waitFor(() => expect(asked.some((url) => url.searchParams.has('invariants'))).toBe(true));
   expect(intents()).toHaveLength(1);
-  const node = Array.from(rail.querySelectorAll<HTMLElement>('[data-tree-node]')).find((one) =>
+  const node = Array.from(tree.querySelectorAll<HTMLElement>('[data-tree-node="member"]')).find((one) =>
     one.textContent?.includes('INV-C11114'),
   )!;
   const seen = asked.length;
   fireEvent.click(node);
   await waitFor(() => expect(intents()).toHaveLength(2));
-  // The new subject's review travels alone: no second catalogue read, no new route,
-  // and the only other request is the pre-existing entry-cards read.
+  // The new subject's review travels alone (MIK-R89 v2 W4): no second catalogue,
+  // summary, leaf-wide, lane or card read. Only the in-view marks of a card read a file.
   expect(entries()).toHaveLength(1);
-  const fresh = asked.slice(seen);
-  expect(fresh.map((url) => url.pathname).sort()).toEqual(
-    expect.arrayContaining(['/api/review/intent']),
-  );
-  for (const url of fresh) {
-    expect(['/api/review/intent', '/api/review/trees']).toContain(url.pathname);
-    if (url.pathname === '/api/review/intent') {
-      expect(url.searchParams.get('selectorId')).toBe(subject.invariant2);
-    } else {
-      // The only trees read a selection may add is the pre-existing entry-cards
-      // read for the new subject's invariants -- never a second catalogue or lane.
-      expect(url.searchParams.has('invariants')).toBe(true);
-    }
-  }
+  const fresh = asked
+    .slice(seen)
+    .filter((url) => url.pathname.startsWith('/api/review/') && !url.searchParams.has('file'));
+  expect(fresh.map((url) => `${url.pathname}?${url.searchParams.get('selectorId')}`)).toEqual([
+    `/api/review/intent?${subject.invariant2}`,
+  ]);
   const block = await view.findByTestId('review-recorded-steps');
   await waitFor(() => expect(block.textContent).toContain('ROW-F11118'));
   expect(block.textContent).toContain('ROW-F11119');

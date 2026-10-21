@@ -22,6 +22,9 @@ from agents_remember.serving.changeset_cache import (
 
 type Inputs = tuple[ReadInput, ...]
 type Observe = Callable[[Inputs], None]
+# One summary question: repository, master, leaf, and the recorded comparison number it names, or
+# ``None`` for the leaf's own resolution (MIK-R89 v2 rule 10). Two numbers are two answers.
+type SummaryKey = tuple[str, str, str, int | None]
 
 #: A kept summary answer is served for at most this long. Rule 3 asks for a bound on reuse as well
 #: as a bound on size: an answer kept through an unnoticed dependency drift would otherwise be
@@ -34,10 +37,14 @@ DEFAULT_ADMISSIONS = 256
 
 @dataclass(frozen=True)
 class ReviewIntentSummaryPort:
-    """Native selection inputs and the reader that reports its resolved dependencies."""
+    """Native selection inputs and the reader that reports its resolved dependencies.
 
-    inputs: Callable[[str, str, str], Inputs]
-    read: Callable[[str, str, str, Observe], ReviewIntentSummaryResult]
+    Both are asked one :data:`SummaryKey` (repository, master, leaf, comparison number); ``read``
+    takes the observer after it.
+    """
+
+    inputs: Callable[[str, str, str, int | None], Inputs]
+    read: Callable[[str, str, str, int | None, Observe], ReviewIntentSummaryResult]
 
 
 class IntentSummaryCache:
@@ -61,26 +68,28 @@ class IntentSummaryCache:
         # a bounded admission table that had forgotten an entry would otherwise mint the old window
         # again and serve an answer older than the bound (L177-R1-06). ``_kept`` stays as a bounded
         # record of the last windows admitted per question, for inspection only.
-        self._kept: dict[tuple[str, str, str], int] = {}
+        self._kept: dict[SummaryKey, int] = {}
 
-    def _window(self, key: tuple[str, str, str]) -> int:
+    def _window(self, key: SummaryKey) -> int:
         """The age window whose answer may be served for ``key``: the clock's, and nothing else."""
 
         window = int(self._clock() // self._max_age_seconds)
         self._remember(key, window)
         return window
 
-    def _remember(self, key: tuple[str, str, str], window: int) -> None:
+    def _remember(self, key: SummaryKey, window: int) -> None:
         self._kept.pop(key, None)
         self._kept[key] = window
         while len(self._kept) > self._admissions:
             self._kept.pop(next(iter(self._kept)))
 
-    def response(self, request: Request, repo: str, master: str, leaf: str) -> Response:
-        return self.cache.response(request, lambda: self._response(repo, master, leaf))
+    def response(
+        self, request: Request, repo: str, master: str, leaf: str, number: int | None = None
+    ) -> Response:
+        return self.cache.response(request, lambda: self._response(repo, master, leaf, number))
 
-    def _response(self, repo: str, master: str, leaf: str) -> Response:
-        key = (repo, master, leaf)
+    def _response(self, repo: str, master: str, leaf: str, number: int | None = None) -> Response:
+        key: SummaryKey = (repo, master, leaf, number)
         window = self._window(key)
         initial = self.port.inputs(*key)
         actual: Inputs = ()

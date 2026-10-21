@@ -8,6 +8,7 @@ production candidate selection. Both fixtures capture real source trees with the
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -711,6 +712,11 @@ def test_a_task_context_review_lists_the_complete_source_inventory_with_no_knowl
     assert response.status_code == 200, response.text
     payload = response.json()["payload"]
     assert "comparison" not in payload and payload["staleness"]["state"] == "not_compared"
+    # The status chip's one-sentence reason, and every other reason here, names where the inventory
+    # is read now, the change-set page "All changes", not a pane the review no longer has.
+    statement = payload["staleness"]["statement"]
+    assert "All changes" in statement and ". " not in statement
+    assert "Source pane" not in json.dumps(payload)
     assert payload["knowledge"]["selection_state"] == "task_context"
     assert payload["knowledge"]["before_statement"]["state"] == "unresolved"
     assert payload["judgment"]["state"] == "unavailable"

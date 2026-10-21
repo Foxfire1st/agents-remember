@@ -9,6 +9,8 @@ import { cx } from '../../../styled-system/css';
 import { useDashboard } from '../../data/store';
 import { taskEntrySelectionKey,taskReferenceKey } from '../../data/taskReference';
 import { Markdown } from '../../grammar/Markdown';
+import { AddToTray,addToTrayHost } from '../../tray/AddToTray';
+import { taskPick } from '../../tray/pickBuilders';
 import type { TaskEntry,TaskHeaderNoteNode,TaskSummary } from '../../types/projection';
 import {
 boundedText,
@@ -95,7 +97,7 @@ export function DocHead({
   const primary = primaryRequirement(doc);
   const notes = shownHeadNotes(doc, chain, primary);
   return (
-    <header data-testid="doc-head" data-block="head" data-form={form}>
+    <header className={addToTrayHost} data-testid="doc-head" data-block="head" data-form={form}>
       <div className={headTop}>
         <span className={formBadge({ form })} data-testid="doc-form">
           {form}
@@ -104,6 +106,14 @@ export function DocHead({
           {entry.id}
         </span>
         <TaskStatusWord task={entry} testid="doc-status" />
+        {/* MIK-R188 rule 1: the task's ⊕, once per task document, not on every Operations row. */}
+        {entry.reference ? (
+          <AddToTray
+            pick={taskPick({ reference: entry.reference, id: entry.id, title: entry.title })}
+            label={`task ${entry.id}`}
+            testId="doc-add-to-tray"
+          />
+        ) : null}
       </div>
       <h2 className={docTitle} data-testid="doc-title">
         {entry.title}

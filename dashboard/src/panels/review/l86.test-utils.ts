@@ -72,8 +72,37 @@ function treeReply(url: URL): unknown {
     ? memberCards
     : cards;
 }
+// The summary read (read 1 of the review page, MIK-R89 v2 rule 2) was not captured with L37: this
+// answer is composed from the captured lane's own file counts, with no intent counts claimed.
+const laneFacts = (lane as { lane: Record<string, number> }).lane;
+const summary = {
+  state: 'counted',
+  operation: 'review-intent-summary',
+  repository_id: target.repo,
+  master: target.master,
+  leaf_id: target.leaf,
+  counts: {
+    added: 0,
+    removed: 0,
+    invariants: { after_only: 0, before_only: 0 },
+    guarantees: { after_only: 0, before_only: 0 },
+    realization_only: 0,
+    membership_only: 0,
+    unresolved: 0,
+  },
+  attribution: {
+    state: 'counted',
+    changed_total: laneFacts.changed_total,
+    attributed: laneFacts.attributed,
+    unexplained: laneFacts.unexplained,
+    attribution_unknown: laneFacts.attribution_unknown,
+    unmeasured: [],
+  },
+};
 export function replyFor(url: URL, entries: ReviewEntryListResult = catalogue): unknown {
   switch (url.pathname) {
+    case '/api/review/intent/summary':
+      return summary;
     case '/api/review/intent/entries':
       return entries;
     case '/api/review/intent':

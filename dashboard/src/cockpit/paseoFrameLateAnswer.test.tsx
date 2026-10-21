@@ -24,7 +24,7 @@ const WORKER = { agentId: "agent-worker", workspaceId: "wks_leaf" };
 const OTHER = { agentId: "agent-other", workspaceId: "wks_other" };
 const WORKER_URL = FRAME_ORIGIN + "/h/srv_test/workspace/wks_leaf?open=agent:agent-worker&arPage=document";
 /** What the plug-in of this build says it can do. */
-const CURRENT = ["open-agent", "ping", "page", "shown-on-display", "navigated", "on-chat", "load-failed"];
+const CURRENT = ["open-agent", "ping", "page", "shown-on-display", "navigated", "on-chat", "load-failed", "pick"];
 const openOf = (target: { agentId: string; workspaceId: string }) => [{ type: "ar.open", ...target }, FRAME_ORIGIN];
 const PING = [{ type: "ar.ping" }, FRAME_ORIGIN];
 
@@ -82,7 +82,7 @@ describe("a change of the selection while the host is slow", () => {
     const { frame, posts, says, show, loads, getByTestId, queryByTestId, container } = await shownOnManager(CURRENT);
     // The plug-in said what it can do: no notice, and the dashboard said what it can do in turn.
     expect(queryByTestId("paseo-frame-plugin-notice")).toBeNull();
-    expect(posts).toHaveBeenCalledWith({ type: "ar.hello", capabilities: ["late-answer", "navigated", "on-chat", "load-failed"] }, FRAME_ORIGIN);
+    expect(posts).toHaveBeenCalledWith({ type: "ar.hello", capabilities: ["late-answer", "navigated", "on-chat", "load-failed", "pick", "showing"] }, FRAME_ORIGIN);
     expect(queryByTestId("paseo-frame-waiting")).toBeNull();
     expect(frame.hasAttribute("inert")).toBe(false);
 
@@ -303,7 +303,8 @@ describe("input while a conversation still loads", () => {
 describe("a plug-in that is older than the dashboard", () => {
   it.each([
     ["says nothing about itself", undefined, "does not say what it can do", true],
-    ["says less than the dashboard uses", ["open-agent", "page"], "ping, shown-on-display, navigated, on-chat, load-failed", true],
+    ["says less than the dashboard uses", ["open-agent", "page"], "ping, shown-on-display, navigated, on-chat, load-failed, pick.", true],
+    ["cannot pick chat text", CURRENT.filter((ability) => ability !== "pick"), "it lacks pick.", false],
     ["only cannot tell when it is on a chat", CURRENT.filter((ability) => ability !== "on-chat"), "it lacks on-chat.", false],
   ])("is named with the provisioning command and still switches by message when it %s", async (_case, capabilities, lack, answersEarly) => {
     const { frame, posts, show, loads, getByTestId, container } = await shownOnManager(capabilities);

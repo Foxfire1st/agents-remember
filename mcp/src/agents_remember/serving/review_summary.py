@@ -14,6 +14,10 @@ answers non-2xx (503), because then no summary exists at all.
 
 It is its own module rather than a fourth route in ``serving/review.py`` because that module is past
 the repository's size rail.
+
+``comparison=<n>`` summarizes the leaf's recorded tree comparison ``n`` (MIK-R89 v2 rule 10). A
+number the leaf did not record, and a negative one, are an ``unavailable`` summary carrying the
+refusal -- still a 200, so the summary keeps its one status set.
 """
 
 from __future__ import annotations
@@ -23,6 +27,8 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
+from agents_remember.models.knowledge.review_intent_summary import ReviewIntentSummaryResult
+from agents_remember.models.knowledge.review_refusal import ReviewRefusal
 from agents_remember.serving.changeset_cache import ChangesetCache
 from agents_remember.serving.intent_summary_cache import IntentSummaryCache, ReviewIntentSummaryPort
 
@@ -56,7 +62,32 @@ def register_review_summary_route(
         KNOWLEDGE_REVIEW_SUMMARY_ROUTE,
         responses={304: {"description": "Summary unchanged; ETag only, no body"}},
     )
-    def api_review_intent_summary(request: Request, repo: str, master: str, leaf: str) -> Response:
+    def api_review_intent_summary(
+        request: Request, repo: str, master: str, leaf: str, comparison: int | None = None
+    ) -> Response:
         if reader is None:
             return JSONResponse(_UNWIRED_SUMMARY, status_code=503)
-        return reader.response(request, repo, master, leaf)
+        if comparison is not None and comparison < 0:
+            return JSONResponse(_negative_comparison(repo, master, leaf, comparison))
+        return reader.response(request, repo, master, leaf, comparison)
+
+
+def _negative_comparison(repo: str, master: str, leaf: str, comparison: int) -> dict[str, Any]:
+    """The typed ``unavailable`` summary for a number no record can carry."""
+
+    refused = ReviewIntentSummaryResult(
+        state="unavailable",
+        repository_id=repo,
+        master=master,
+        leaf_id=leaf,
+        refusal=ReviewRefusal(
+            code="candidate_unresolved",
+            detail="a recorded tree comparison number is never negative, so none is counted",
+            next_action=(
+                "name a comparison number the leaf's trees answer lists, or omit comparison to "
+                "count the leaf's own review"
+            ),
+            offending_input=str(comparison),
+        ),
+    )
+    return refused.model_dump(mode="json", exclude_none=True)

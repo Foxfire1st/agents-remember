@@ -424,14 +424,25 @@ it.each(['wrong subject', 'conflicting content', 'page refusal'])(
     await waitFor(() =>
       expect(view.getByTestId('review-page-bounds').textContent).toContain('returned 8'),
     );
+    // The tree's rows take their locations from the cards read, which settles on its own; the
+    // retained review is compared once every member row holds them, whatever the machine's load.
+    await waitFor(() =>
+      view.getAllByTestId('review-family-member').forEach((row) =>
+        expect(
+          within(row).queryAllByTestId(/^review-tree-(location|group)$/).length,
+        ).toBeGreaterThan(0),
+      ),
+    );
     const selected = view.getByTestId('review-center-member-changed').textContent;
     const evidence = view.getByTestId('review-center-judgment').textContent;
     const members = view.getAllByTestId('review-family-member').map((row) => row.textContent);
     fireEvent.click(next(capture.before[2]));
-    const failure = await view.findByTestId('review-failure');
-    expect(failure.dataset.reviewCode).toBe(
-      fault === 'page refusal' ? 'comparison_page_reset' : 'comparison_page_unreadable',
-    );
+    // The page's other reads may state their own failures; this one is the walk's.
+    const code = fault === 'page refusal' ? 'comparison_page_reset' : 'comparison_page_unreadable';
+    const walkFailure = () =>
+      view.queryAllByTestId('review-failure').find((node) => node.dataset.reviewCode === code);
+    await waitFor(() => expect(walkFailure()).toBeTruthy());
+    const failure = walkFailure()!;
     expect(view.getByTestId('review-retained-generation')).toBeTruthy();
     expect(view.getByTestId('review-center-member-changed').textContent).toBe(selected);
     expect(view.getByTestId('review-center-judgment').textContent).toBe(evidence);
@@ -455,11 +466,6 @@ function mountFamilyCenter(payload: ReviewPayload) {
       subject={{ kind: 'family', id: capture.family_id }}
       selection={{ familyId: capture.family_id }}
       layout="split"
-      onLayout={vi.fn()}
-      fullFile={false}
-      onFullFile={vi.fn()}
-      openPath={null}
-      onOpenPath={vi.fn()}
       onOpenFromCenter={vi.fn()}
       onOpenMember={vi.fn()}
       onRosterNext={onRosterNext}
@@ -583,7 +589,9 @@ it('resets accumulated context on refresh, subject and history changes and drops
   expect(fresh.result.current.retained!.payload).toEqual(first.payload);
 });
 
-it('keeps selected intent, judgment, siblings, focus and open layout while later roster claims become reachable', async () => {
+// MIK-R89 v2 rule 4 removed this case's layout select and Full file: the diff layout follows the
+// reading column's width, and "Changes only | Full context" is the reader's one code choice.
+it('keeps selected intent, judgment, siblings and focus while later roster claims become reachable', async () => {
   const pages = new Map(
     [...capture.before.slice(1), ...capture.after.slice(1)].map((body) => [cursorOf(body), body]),
   );
@@ -614,38 +622,27 @@ it('keeps selected intent, judgment, siblings, focus and open layout while later
   fireEvent.click(
     within(walked)
       .getAllByTestId('review-family-member-open')
-      .find(
-        (node) =>
-          node.dataset.revision === first.payload.knowledge.revision_selection!.after_revision_id,
-      )!,
+      .find((node) => node.dataset.subjectId === capture.subject_id)!,
   );
   await waitFor(() =>
     expect(view.getByTestId('review-center-member').dataset.family).toBe(capture.family_id),
   );
   expect(view.getAllByTestId('review-center-roster-next')).toHaveLength(2);
-  const displayState = () =>
-    `expanded: ${view.container.querySelector<HTMLElement>('[data-testid="review-card-full-file"][aria-expanded="true"]')?.closest<HTMLElement>('[data-path]')?.dataset.path ?? ''}`;
   const evidence = view.getByTestId('review-center-judgment').textContent;
   const siblings = view.getAllByTestId('review-family-member').length;
-  const layout = view.getByTestId('review-center-diff-layout') as HTMLSelectElement;
-  fireEvent.change(layout, { target: { value: 'inline' } });
-  // The word-diff is mounted, and preserves the authoritative revision pair.
+  // The word-diff is mounted; the authoritative revision pair is Technical details' (MIK-R89 v2
+  // rule 6, amended 9dde2b09).
   const selected = first.payload.knowledge.revision_selection!;
-  expect(view.getByTestId('review-center-member-changed').textContent).toContain(
+  expect(view.getByTestId('review-center-member-revisions').textContent).toContain(
     selected.before_revision_id,
   );
-  expect(view.getByTestId('review-center-member-changed').textContent).toContain(
+  expect(view.getByTestId('review-center-member-revisions').textContent).toContain(
     selected.after_revision_id,
   );
   const statement = view.getByTestId('review-center-member-changed').textContent;
-  fireEvent.click(view.getByTestId('review-center-full-file'));
-  // No source excerpt is supplied on the first bounded page. The removed inventory bar
-  // could open an unrelated file; its replacement keeps Full file and opens the first
-  // selected-intent expression when the continuation actually supplies it.
-  let expanded: string | null = null;
-  let openedPath: string | null = null;
-  let continuedWithOpen = 0;
-  layout.focus();
+  // A continuation keeps the reader's focus where the reader left it.
+  const filter = view.getByTestId('review-family-filter');
+  filter.focus();
   for (const body of [...capture.before.slice(1), ...capture.after.slice(1)]) {
     const control = view
       .getAllByTestId('review-center-roster-next')
@@ -661,38 +658,14 @@ it('keeps selected intent, judgment, siblings, focus and open layout while later
         `returned ${body.payload.page!.returned}`,
       ),
     );
-    expect(document.activeElement).toBe(layout);
-    const cards = view.queryAllByTestId('review-expression-card');
-    if (openedPath === null && cards.length) {
-      const open = within(cards[0]).getByTestId('review-card-full-file') as HTMLButtonElement;
-      expect(open).not.toBeNull();
-      // The first linked expression opens automatically. Collapse it before explicitly opening
-      // it, so the same reader-owned path stays selected across subsequent continuations.
-      if (open.getAttribute('aria-expanded') === 'true') fireEvent.click(open);
-      fireEvent.click(open);
-      openedPath = cards[0].dataset.path!;
-      expanded = displayState();
-      expect(expanded).toContain(`expanded: ${openedPath}`);
-      layout.focus();
-    } else if (openedPath !== null) {
-      continuedWithOpen += 1;
-      expect(displayState()).toContain(`expanded: ${openedPath}`);
-      expect(view.getByTestId('review-center-full-file').getAttribute('aria-pressed')).toBe('true');
-      expect(layout.value).toBe('inline');
-    }
+    expect(document.activeElement).toBe(filter);
   }
-  expect(openedPath).not.toBeNull();
-  expect(continuedWithOpen).toBeGreaterThan(0);
   const selectedStatement = view.getByTestId('review-center-member-changed');
   expect(selectedStatement.textContent).toBe(statement);
-  expect(selectedStatement.textContent).toContain(selected.before_revision_id);
-  expect(selectedStatement.textContent).toContain(selected.after_revision_id);
+  expect(view.getByTestId('review-center-member-revisions').textContent).toContain(selected.before_revision_id);
+  expect(view.getByTestId('review-center-member-revisions').textContent).toContain(selected.after_revision_id);
   expect(view.getByTestId('review-center-judgment').textContent).toBe(evidence);
   expect(view.getAllByTestId('review-family-member')).toHaveLength(siblings);
-  expect(layout.value).toBe('inline');
-  expect(view.getByTestId('review-center-full-file').getAttribute('aria-pressed')).toBe('true');
-  expect(displayState()).toContain('expanded:');
-  expect(expanded).toContain('expanded:');
   expect(view.queryByTestId('review-center-roster-next')).toBeNull();
   const changedPaths = new Set(first.payload.source.inventory.entries.map((entry) => entry.path));
   const selectedRevision = first.payload.knowledge.revision_selection!.before_revision_id;
@@ -708,9 +681,10 @@ it('keeps selected intent, judgment, siblings, focus and open layout while later
     ),
   );
   expect(latePaths.size).toBeGreaterThan(0);
-  const renderedPaths = view
-    .getAllByTestId('review-expression-card')
-    .map((card) => card.dataset.path);
-  for (const path of latePaths) expect(renderedPaths).toContain(path);
+  // The cards are the opening's read (MIK-R89 v2 W4); the later claims are reached in the
+  // selected member's slot, as the recorded addresses of its accumulated realization claims.
+  const claims = within(view.getByTestId('review-center-member-details')).getAllByTestId('review-center-expressions');
+  const addresses = claims.flatMap((list) => Array.from(list.querySelectorAll('code'), (node) => node.textContent));
+  for (const path of latePaths) expect(addresses).toContain(path);
   await expectCompleteInventory(view);
 });

@@ -223,6 +223,83 @@ describe('a tree comparison statement', () => {
     expect(view.queryByTestId('intent-diff-layout-control')).toBeNull();
   });
 
+  // Ruling d9a1ec8f item 7 (revised): each condition, removed, added or changed, is one line with its
+  // word-diff marks on it; a click (or Enter, Space) opens that one in full, in place. The full text
+  // is always in the page, and nothing is folded: no `details`, no disclosure class (MIK-R86 v2
+  // rule 19's one line per item).
+  it('draws each condition as one line with its marks, and opens only the one clicked in place', () => {
+    const added = `${'A long added condition that runs well past the reading measure, '.repeat(4)}and ends here.`;
+    const view = review({ essential_conditions: [FIRST, 'One.', added] });
+    const list = view.getByTestId('intent-diff-list');
+    const items = [...list.children] as HTMLElement[];
+    expect(items.map((item) => item.dataset.item)).toEqual(['unchanged', 'removed', 'added', 'added']);
+    const lines = items.map((item) => within(item).getByTestId('intent-item-line'));
+    for (const line of lines) {
+      expect(line.getAttribute('role')).toBe('button');
+      expect(line.tabIndex).toBe(0);
+      expect(line.getAttribute('aria-expanded')).toBe('false');
+    }
+    // The marks stand on the line itself, and the whole text is in the page while closed.
+    expect(lines[1].querySelector('del')!.textContent).toContain(SECOND);
+    expect(lines[3].querySelector('ins')!.textContent).toContain('and ends here.');
+    fireEvent.click(lines[3]);
+    expect(lines.map((line) => line.getAttribute('aria-expanded'))).toEqual(['false', 'false', 'false', 'true']);
+    fireEvent.keyDown(lines[1], { key: 'Enter' });
+    expect(lines.map((line) => line.getAttribute('aria-expanded'))).toEqual(['false', 'true', 'false', 'true']);
+    fireEvent.keyDown(lines[3], { key: ' ' });
+    expect(lines.map((line) => line.getAttribute('aria-expanded'))).toEqual(['false', 'true', 'false', 'false']);
+    expect(lines[3].textContent).toContain('and ends here.');
+    expect(view.container.querySelector('details, [data-disclosure]')).toBeNull();
+  });
+
+  it('draws a changed condition as one line with its word marks on it', () => {
+    const edited = SECOND.replace('names what', 'lists what');
+    const view = review({ essential_conditions: [FIRST, edited] });
+    const items = [...view.getByTestId('intent-diff-list').children] as HTMLElement[];
+    const line = within(items[1]).getByTestId('intent-item-line');
+    expect(line.querySelector('del')!.textContent).toBe(' removed: names');
+    expect(line.querySelector('ins')!.textContent).toBe(' added: lists');
+    expect(read(line)).toBe(
+      'The refusal is source_content_unresolved and removed: names added: lists what each snapshot answered.',
+    );
+    fireEvent.click(line);
+    expect(line.getAttribute('aria-expanded')).toBe('true');
+    expect(within(items[0]).getByTestId('intent-item-line').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  // MIK-R35 rule 4 within the one line (d9a1ec8f item 7; ruling L89-THE-WORDING-LAYOUT-SWITCH-OF-
+  // MIK-R35-STAYS): side by side, a paired item's line holds its two halves, each with its marks.
+  it('draws a paired condition side by side on its one line, both halves marked, and opens it alone', () => {
+    proseLayoutStore.getState().setLayout('side-by-side');
+    const view = review({ essential_conditions: [FIRST, SECOND.replace('names what', 'lists what')] });
+    const items = [...view.getByTestId('intent-diff-list').children] as HTMLElement[];
+    const line = within(items[1]).getByTestId('intent-item-line');
+    expect(within(line).getByTestId('intent-diff').dataset.layout).toBe('side-by-side');
+    const before = within(line).getByTestId('intent-diff-before');
+    const after = within(line).getByTestId('intent-diff-after');
+    expect(before.querySelector('del')!.textContent).toBe(' removed: names');
+    expect(before.querySelector('ins')).toBeNull();
+    expect(after.querySelector('ins')!.textContent).toBe(' added: lists');
+    expect(after.querySelector('del')).toBeNull();
+    fireEvent.click(line);
+    expect(line.getAttribute('aria-expanded')).toBe('true');
+    expect(within(items[0]).getByTestId('intent-item-line').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('shows an above-ratio pair side by side by default, says why on its line, and offers it inline', () => {
+    const rewritten = 'Nothing of the old wording remains in this freshly rewritten condition at all.';
+    const view = review({ essential_conditions: [FIRST, rewritten] });
+    const items = [...view.getByTestId('intent-diff-list').children] as HTMLElement[];
+    expect(items[1].dataset.item).toBe('changed');
+    const line = within(items[1]).getByTestId('intent-item-line');
+    expect(within(line).getByTestId('intent-diff').dataset.layout).toBe('side-by-side');
+    expect(within(line).getByTestId('intent-diff-rewrite').textContent).toMatch(/Mostly rewritten: \d+ of \d+ words changed/);
+    fireEvent.click(line);
+    fireEvent.click(within(items[1]).getByRole('button', { name: 'Show inline' }));
+    expect(within(line).getByTestId('intent-diff').dataset.layout).toBe('inline');
+    expect(line.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('word-diffs a changed applicability as its own passage', () => {
     const view = review({
       applicability: row.applicability!.replace('does not list', 'never lists'),
@@ -254,14 +331,16 @@ describe('a tree comparison statement', () => {
       { statement },
       { rows: 'none', knowledge: { field_changes: [fieldRow('another-record-revision')] } },
     );
-    expect(label(other)).toMatch(/^Changed statement · revision /);
+    // No row carried the revisions' display versions: the label names no revision (the ids are in
+    // Technical details, MIK-R89 v2 rule 6 amended 9dde2b09).
+    expect(label(other)).toBe('Changed statement');
     expect(applicability(other)).toBeNull();
     cleanup();
     const own = review(
       { statement },
       { rows: 'none', knowledge: { field_changes: [fieldRow(NEXT)] } },
     );
-    expect(label(own)).toMatch(/^Changed statement, applicability · revision /);
+    expect(label(own)).toBe('Changed statement, applicability');
     expect(applicability(own)).not.toBeNull();
     cleanup();
   });
@@ -343,7 +422,7 @@ describe('a tree comparison statement', () => {
         knowledge: { field_changes: [exclusions] },
       },
     );
-    expect(label(view)).toMatch(/^Changed exclusions · revision /);
+    expect(label(view)).toMatch(/^Changed exclusions · the same revision on both sides/);
     expect(view.getByTestId('intent-field-projected').textContent).toBe(
       'before: Unmeasured pairs; unreadable knowledge · after: Unmeasured pairs; unreadable or unconverted knowledge',
     );

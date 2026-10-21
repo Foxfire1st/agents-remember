@@ -47,13 +47,8 @@ it('word-diffs a family member statement once while keeping both revision links'
       payload={payload}
       selection={{ familyId: entry.family_id }}
       layout="split"
-      onLayout={vi.fn()}
-      fullFile={false}
-      onFullFile={vi.fn()}
       onOpenMember={onOpenMember}
       onRosterNext={vi.fn()}
-      openPath={null}
-      onOpenPath={vi.fn()}
       onOpenFromCenter={vi.fn()}
     />,
   );
@@ -70,5 +65,8 @@ it('word-diffs a family member statement once while keeping both revision links'
     [entry.family_id, before.invariant_revision_id],
     [entry.family_id, after.invariant_revision_id],
   ]);
-  await view.findByTestId('review-expression-cards');
+  // The family's code locations are the reading column's blocks, read once at the opening (MIK-R89
+  // v2 rule 2, W4): the centre asks for no cards of its own.
+  expect(view.queryByTestId('review-expression-cards')).toBeNull();
+  expect(vi.mocked(fetch)).not.toHaveBeenCalled();
 });

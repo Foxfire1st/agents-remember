@@ -11,6 +11,7 @@ import { codeTheme } from "./codemirrorTheme";
 import { numberedFrom } from "./lineNumbering";
 import { langExtension } from "./langByExtension";
 import { type PaneMarks, useMarkedPane } from "./markGutter";
+import { trayLineGutter, type FileLineTarget } from "../../tray/fileLineGutter";
 
 const host = css({
   height: "100%",
@@ -19,8 +20,16 @@ const host = css({
   "& .cm-editor": { height: "100%" },
 });
 
-// An excerpt sizes to its content (`fit`) and keeps its file's line numbering (`firstLine`).
-const fitHost = css({ minHeight: "0", "& .cm-editor": { height: "auto", maxHeight: "32rem" } });
+// An excerpt sizes to its content (`fit`) and keeps its file's line numbering (`firstLine`). It has
+// no scroll box of its own (MIK-R89 v2 rule 1): the editor grows to its lines, its wrapped lines
+// never overflow, and the review page's one reading scroller scrolls it. Only the review page's panes
+// fit (its cards, statements and guarantees).
+const fitHost = css({
+  minHeight: "0",
+  "& .cm-editor": { height: "auto" },
+  // CodeMirror's base theme sets `overflow-x: auto` and is injected after this sheet.
+  "& .cm-scroller": { overflow: "visible !important" },
+});
 
 export function FilePane({
   content,
@@ -29,6 +38,7 @@ export function FilePane({
   fit = false,
   marks,
   highlightedLines,
+  trayLines,
 }: {
   content: string;
   language: string;
@@ -37,9 +47,15 @@ export function FilePane({
   // Marks on file lines (the reviewer's per-hunk intent markers); absent = no mark gutter at all.
   marks?: PaneMarks;
   highlightedLines?: readonly [number, number];
+  // The File Viewer's file: a hover ⊕ in the line gutter takes its lines into the AR tray
+  // (MIK-R188 rule 1). Absent = no tray gutter (excerpts, the reviewer's cards, the Knowledge page).
+  trayLines?: FileLineTarget;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { portals, placement, gutterFor, drawn } = useMarkedPane(marks);
+  const trayRepository = trayLines?.repository;
+  const trayScope = trayLines?.scope;
+  const trayPath = trayLines?.path;
 
   useEffect(() => {
     const parent = ref.current;
@@ -53,6 +69,9 @@ export function FilePane({
       const extensions: Extension[] = [
         gutterFor("all", firstLine),
         numberedFrom(firstLine),
+        trayRepository && trayScope && trayPath
+          ? trayLineGutter({ repository: trayRepository, scope: trayScope, path: trayPath }, firstLine)
+          : [],
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
         EditorView.lineWrapping,
@@ -78,7 +97,7 @@ export function FilePane({
       view?.destroy();
     };
     // `placement` rebuilds the pane when a mark moves (the marks themselves are read at build).
-  }, [content, language, firstLine, placement, gutterFor, drawn, highlightedLines]);
+  }, [content, language, firstLine, placement, gutterFor, drawn, highlightedLines, trayRepository, trayScope, trayPath]);
 
   return (
     <>

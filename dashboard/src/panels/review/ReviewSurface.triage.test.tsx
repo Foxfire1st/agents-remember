@@ -1,10 +1,12 @@
-// MIK-R33 in the mounted reviewer: j/k selection moves over the served bodies of the store-authored
-// comparison (triage.capture-provenance.json). `ReviewSurface` is the real component and only `fetch`
-// is stubbed. A move selects the next change's subject exactly as a click does, and keeps the family
-// context, the focus and the mounted workspace (ICR-R32 rule 6, L48).
+// The mounted reviewer over the served bodies of the store-authored comparison
+// (triage.capture-provenance.json). `ReviewSurface` is the real component and only `fetch` is
+// stubbed. The centre's member list follows the tree's sort, and selecting the next changed member
+// in the tree reads its subject and keeps the family context, the focus and the mounted workspace
+// (ICR-R32 rule 6, L48). Since MIK-R89 v2 rule 11 `j`/`k` walk the reading column's blocks, not the
+// tree's subjects; that walk is reading/ReviewPage.selection.test.tsx's.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type {
   ReviewFamilyContextEntry,
@@ -25,7 +27,6 @@ const family = captured<ReviewResult>('triage.family.captured.json');
 const memberA = captured<ReviewResult>('triage.memberA.captured.json');
 const memberH = captured<ReviewResult>('triage.memberH.captured.json');
 const entries = captured<unknown>('triage.entries.captured.json');
-const J = { key: 'j', code: 'KeyJ' };
 
 const subjectOf = (result: ReviewResult) => result.payload!.knowledge.revision_selection!.record_id;
 
@@ -84,17 +85,9 @@ const refused = {
   },
 };
 
-beforeEach(() => {
-  localStorage.clear();
-  treeOrderStore.getState().setOrder('triage');
-  // The order preamble compares the whole rosters, so the tree shows the All view: since
-  // MIK-R86 the default Changed view hides rows without a real change.
-  treeViewStore.getState().setView('all');
+function serve(outline: ReviewOutline) {
   const bodies = new Map([family, memberA, memberH].map((body) => [subjectOf(body), body]));
-  const servedEntries = {
-    ...(entries as Record<string, unknown>),
-    outline: syntheticOutline(family.payload!.family_context!.entries[0]),
-  };
+  const servedEntries = { ...(entries as Record<string, unknown>), outline };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (address: string) => {
@@ -108,6 +101,15 @@ beforeEach(() => {
       return { ok: true, status: 200, json: async () => body } as Response;
     }),
   );
+}
+
+beforeEach(() => {
+  localStorage.clear();
+  treeOrderStore.getState().setOrder('priority');
+  // The order preamble compares the whole rosters, so the tree shows the All view: since
+  // MIK-R86 the default Changed view hides rows without a real change.
+  treeViewStore.getState().setView('all');
+  serve(syntheticOutline(family.payload!.family_context!.entries[0]));
 });
 
 afterEach(() => {
@@ -120,9 +122,9 @@ const node = (container: HTMLElement, record: string) =>
     one.textContent?.includes(record),
   )!;
 
-it('moves the selection to the next change and keeps family context, focus and workspace', async () => {
+function mountFamily() {
   const payload = family.payload!;
-  const view = render(
+  return render(
     <ReviewSurface
       repo={payload.candidate.repository_id}
       master={payload.candidate.master}
@@ -132,12 +134,12 @@ it('moves the selection to the next change and keeps family context, focus and w
       onBack={() => undefined}
     />,
   );
-  await view.findAllByTestId('review-change-badge', undefined);
-  const workspace = view.getByTestId('review-workspace');
-  // The centre's member list follows the tree's displayed order (triage, then authored). The
-  // tree lists one row per invariant while the centre lists one row per member revision, so the
-  // comparison runs at invariant granularity: tree rows carry their invariant, centre revisions
-  // resolve to theirs through the served family context.
+}
+
+// The tree lists one row per invariant while the centre lists one row per member revision, so the
+// comparison runs at invariant granularity: tree rows carry their invariant, centre revisions resolve
+// to theirs through the served family context.
+function orders(view: ReturnType<typeof render>) {
   const invariantOf = new Map(
     (['before', 'after'] as const).flatMap((side) =>
       family.payload!.family_context!.entries[0][side].members.map(
@@ -145,43 +147,60 @@ it('moves the selection to the next change and keeps family context, focus and w
       ),
     ),
   );
-  const treeOrder = () => [
+  const tree = () => [
+    ...new Set(view.getAllByTestId('review-family-member-open').map((one) => (one as HTMLElement).dataset.subjectId)),
+  ];
+  const centre = () => [
     ...new Set(
-      view
-        .getAllByTestId('review-family-member-open')
-        .map((node) => (node as HTMLElement).dataset.subjectId),
+      view.getAllByTestId('review-center-open-member').map((one) => invariantOf.get(one.dataset.revision!)),
     ),
   ];
-  const centreOrder = () =>
-    view.getAllByTestId('review-center-open-member').map((node) => node.dataset.revision);
-  const centreInvariants = () => [
-    ...new Set(centreOrder().map((revision) => invariantOf.get(revision!))),
-  ];
-  expect(centreInvariants()).toEqual(treeOrder());
-  // The control computes the next order from the one it shows, and it shows the store's order through
-  // a subscription made in a passive effect: each click waits until the control shows its order, so
-  // the second click cannot repeat the first.
-  const orderShown = (order: string) =>
-    waitFor(() => expect(view.getByTestId('review-tree-order').dataset.order).toBe(order));
-  fireEvent.click(view.getByTestId('review-tree-order'));
-  await orderShown('authored');
-  expect(centreInvariants()).toEqual(treeOrder());
-  fireEvent.click(view.getByTestId('review-tree-order'));
-  await orderShown('triage');
+  return { tree, centre };
+}
+
+it("lists the centre's members in the tree's displayed order, under every sort", async () => {
+  const view = mountFamily();
+  await view.findAllByTestId('review-change-badge', undefined);
+  const { tree, centre } = orders(view);
+  for (const order of ['priority', 'authored'] as const) {
+    await act(async () => treeOrderStore.getState().setOrder(order));
+    await waitFor(() => expect(view.getByTestId('review-tree').dataset.treeOrder).toBe(order));
+    expect(centre()).toEqual(tree());
+  }
+});
+
+// Rule 3, one order (INV-719D48): the centre's list is the model's order, not a change-weight order
+// of its own. A later member whose recorded effect is a weakening goes before an earlier added one.
+it("lists the centre's members in the model's order when a recorded effect outranks an earlier added member", async () => {
+  const outline = syntheticOutline(family.payload!.family_context!.entries[0]);
+  const first = outline.invariants[0];
+  const last = outline.invariants[outline.invariants.length - 1];
+  first.change = 'added';
+  first.meaning = { state: 'none', labels: [] };
+  last.change = 'changed';
+  last.meaning = { state: 'steps', labels: ['weaken'] };
+  const member = outline.families[0].members.find((row) => row.selector_id === last.selector_id)!;
+  member.meaning = last.meaning;
+  serve(outline);
+  const view = mountFamily();
+  await view.findAllByTestId('review-change-badge', undefined);
+  const { tree, centre } = orders(view);
+  await waitFor(() => expect(tree()[0]).toBe(last.selector_id));
+  expect(centre()).toEqual(tree());
+});
+
+it('selects the next changed member from the tree and keeps family context, focus and workspace', async () => {
+  // The member order of the centre is the case above's; this one walks the tree in the authored order.
+  treeOrderStore.getState().setOrder('authored');
+  const view = mountFamily();
+  await view.findAllByTestId('review-change-badge', undefined);
+  const workspace = view.getByTestId('review-workspace');
   expect(view.getByTestId('review-surface').dataset.kbzone).toBe('review');
   // The family context is on screen, still badged: since MIK-R86 the breakdown by kind lives in
   // the family review (rule 10), not in the sidebar.
   expect(view.getByTestId('review-family-breakdown').textContent).toContain('of 9');
-  node(view.container, 'FAM-F00001').focus();
 
-  // The keymap's binding is a passive effect: a press made before it has run is ignored, as in a
-  // browser, so the press is made again until the selection moves.
-  const current = () => view.container.querySelector('[data-tree-node][aria-current="true"]');
-  const before = current();
-  await waitFor(() => {
-    if (current() === before) fireEvent.keyDown(document.activeElement!, J);
-    expect(current()).not.toBe(before);
-  });
+  fireEvent.click(node(view.container, 'INV-AAAAAA'));
   // The revised member's subject is read, as a click would read it.
   await view.findByTestId('review-center-member', undefined);
   await waitFor(() => {
@@ -199,10 +218,13 @@ it('moves the selection to the next change and keeps family context, focus and w
   expect(first.getAttribute('aria-current')).toBe('true');
   expect(document.activeElement).toBe(first);
   expect(view.getByTestId('review-workspace')).toBe(workspace);
-  // The family context stays on screen under the member review.
-  expect(view.getByTestId('review-center-member-family').textContent).toContain('FAM-F00001');
+  // The family read in full is named by its name in the member's meta line (MIK-R89 v2 rule 1,
+  // amended 9dde2b09), with the revisions' numbers.
+  const meta = within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta').textContent;
+  expect(meta).toContain('FAM-F00001');
+  expect(meta).toContain('revision 1 → 2');
 
-  fireEvent.keyDown(document.activeElement!, J);
+  fireEvent.click(node(view.container, 'INV-HHHHHH'));
   await waitFor(() =>
     expect(view.getByTestId('review-center-column').textContent).toContain(
       'INV-HHHHHH holds (r1).',

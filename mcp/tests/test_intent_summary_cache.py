@@ -200,7 +200,7 @@ def test_dependency_manifest_and_values_remain_bounded_over_growing_histories(tm
     input.write_bytes(b"derived index")
     calls = []
 
-    def read(repo, master, leaf, observe):
+    def read(repo, master, leaf, _number, observe):
         calls.append(leaf)
         observe((ContentRead(input),))
         return ReviewIntentSummaryResult(
@@ -296,7 +296,7 @@ def test_object_restored_after_native_refusal_is_not_adopted_as_the_refusals_inp
     path = fixture.memory / ".git/objects" / object_id[:2] / object_id[2:]
     data = path.read_bytes()
     path.unlink()
-    original = dashboard_review_summary.read_review_intent_summary
+    original = dashboard_review_summary.summarize_review
 
     def restore_after_read(*args, **kwargs):
         result = original(*args, **kwargs)
@@ -304,7 +304,7 @@ def test_object_restored_after_native_refusal_is_not_adopted_as_the_refusals_inp
             path.write_bytes(data)
         return result
 
-    monkeypatch.setattr(dashboard_review_summary, "read_review_intent_summary", restore_after_read)
+    monkeypatch.setattr(dashboard_review_summary, "summarize_review", restore_after_read)
     assert client.get(ROUTE, params=PARAMS).json()["state"] == "unavailable"
     children.clear()
     assert client.get(ROUTE, params=PARAMS).json()["state"] == "counted"
@@ -324,7 +324,7 @@ def test_slow_intent_does_not_serialize_other_reads(world, route, extra):
     fixture, _, _ = world
     entered, release = Event(), Event()
 
-    def slow(repo, master, leaf, observe):
+    def slow(repo, master, leaf, _number, observe):
         entered.set()
         assert release.wait(timeout=HANG_GUARD_SECONDS)
         return ReviewIntentSummaryResult(
@@ -371,7 +371,7 @@ def test_a_kept_summary_answer_expires_and_is_then_produced_again(tmp_path: Path
     produced: list[str] = []
     elapsed = _Elapsed()
 
-    def read(repo, master, leaf, observe):
+    def read(repo, master, leaf, _number, observe):
         produced.append(leaf)
         observe((ContentRead(input),))
         return ReviewIntentSummaryResult(
@@ -412,7 +412,7 @@ def test_a_changed_input_still_invalidates_a_summary_answer_inside_the_age_bound
     produced: list[str] = []
     elapsed = _Elapsed()
 
-    def read(repo, master, leaf, observe):
+    def read(repo, master, leaf, _number, observe):
         produced.append(leaf)
         observe((ContentRead(input),))
         return ReviewIntentSummaryResult(
@@ -452,7 +452,7 @@ def test_a_bounded_admission_table_cannot_resurrect_an_over_age_answer(tmp_path:
     produced: Counter[str] = Counter()
     elapsed = _Elapsed()
 
-    def read(repo, master, leaf, observe):
+    def read(repo, master, leaf, _number, observe):
         produced[leaf] += 1
         observe((ContentRead(input),))
         return ReviewIntentSummaryResult(
@@ -479,7 +479,9 @@ def test_a_bounded_admission_table_cannot_resurrect_an_over_age_answer(tmp_path:
     assert produced["target"] == 1
     for index in range(DEFAULT_ADMISSIONS):
         fetch(f"other-{index}")
-    assert ("repo", "master", "target") not in reader._kept, "the admission record was evicted"
+    assert ("repo", "master", "target", None) not in reader._kept, (
+        "the admission record was evicted"
+    )
 
     elapsed.seconds = DEFAULT_MAX_AGE_SECONDS + 1.0
     after = fetch("target")

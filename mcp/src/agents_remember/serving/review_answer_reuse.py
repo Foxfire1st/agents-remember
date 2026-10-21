@@ -12,7 +12,9 @@ Three rules bound what may be served:
 * at most ``capacity`` answers are kept, least recently used first out, and none is served after
   ``max_age_seconds``;
 * a value is kept only when one observation of its inputs taken *before* the computation equals one
-  taken after it, so an answer composed while its inputs moved is never kept.
+  taken after it, so an answer composed while its inputs moved is never kept;
+* a value its caller's ``keep`` refuses is never kept: an answer that names a failed read is not a
+  function of its inputs alone, so it is served once and computed again next time (INV-5M9WY3).
 """
 
 from __future__ import annotations
@@ -53,13 +55,19 @@ class RecordedAnswerReuse:
     _lock: RLock = field(default_factory=RLock)
 
     def answer[T](
-        self, key: tuple[object, ...], sources: tuple[ReadInput, ...], produce: Callable[[], T]
+        self,
+        key: tuple[object, ...],
+        sources: tuple[ReadInput, ...],
+        produce: Callable[[], T],
+        *,
+        keep: Callable[[T], bool] | None = None,
     ) -> T:
         """The kept answer for ``key`` while ``sources`` hold, else one fresh computation.
 
         ``produce`` runs with no lock held: one slow read never delays another's answer, and two
         concurrent misses compute twice and the last answer wins -- the same answer, since a
-        recorded comparison is a function of the inputs both observed.
+        recorded comparison is a function of the inputs both observed. ``keep`` (every value, when
+        omitted) says whether a fresh value may be kept at all.
         """
 
         kept = self._fresh(key, sources)
@@ -67,7 +75,7 @@ class RecordedAnswerReuse:
             return deepcopy(kept.value)  # type: ignore[return-value]
         before = self._observe(sources)
         value = produce()
-        if before is None:
+        if before is None or (keep is not None and not keep(value)):
             return value
         after = self._observe(sources)
         if after is not None and after == before:

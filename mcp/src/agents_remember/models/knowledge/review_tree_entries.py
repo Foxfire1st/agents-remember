@@ -30,6 +30,14 @@ either side has no resolved range, so a card is never counted as changed or unch
 :data:`EXCERPT_MAX_LINES` and :data:`EXCERPT_MAX_CHARACTERS` (``excerpt_truncated`` then says the text
 is a prefix of the range). An ``unchanged`` entry carries its excerpt on the ``after`` side only: the
 two ranges have one content identity, so the text is the same bytes and is shown once.
+
+``symbol`` is the name the side's locator names when it is a ``symbol`` locator, so a reader can find
+a card by the symbol it is about (MIK-R89 v2 rule 3's filter); a line range or a whole file has none.
+
+``memory`` is the entry's four memory values (MIK-R89 v2 rule 3), read at the bound after-side index:
+the invariants with a realization at the entry's after-side path, the incoming links of its
+invariant, whether that invariant lacks proof, and the open weaknesses at that path. It is absent
+when the card read could not give them; the result's own ``entry_memory`` then says why.
 """
 
 from __future__ import annotations
@@ -50,6 +58,7 @@ __all__ = [
     "EXCERPT_MAX_CHARACTERS",
     "EXCERPT_MAX_LINES",
     "ReviewEntryChange",
+    "ReviewEntryMemory",
     "ReviewEntryRangeState",
     "ReviewTreeEntry",
     "ReviewTreeEntrySide",
@@ -77,8 +86,26 @@ class ReviewTreeEntrySide(KnowledgeModel):
     role: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     facet: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     rationale: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    symbol: str | None = Field(default=None, min_length=1, max_length=REFERENCE_MAX_LENGTH)
     currentness: Literal["current", "stale", "unverifiable"] | None = None
     currentness_reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+
+
+class ReviewEntryMemory(KnowledgeModel):
+    """One entry's four memory values, read at the bound after-side index (MIK-R89 v2 rule 3).
+
+    ``path`` is the after-side path the two per-path values were read at. ``invariants_at_path``
+    counts the distinct invariants with a realization there, ``incoming_links`` the links recorded
+    towards the entry's invariant (family member links included), ``without_proof`` says whether that
+    invariant is a live one no proof names, and ``open_weaknesses`` counts the open weaknesses
+    anchored at the path.
+    """
+
+    path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    invariants_at_path: int = Field(ge=0)
+    incoming_links: int = Field(ge=0)
+    without_proof: bool
+    open_weaknesses: int = Field(ge=0)
 
 
 class ReviewTreeEntry(KnowledgeModel):
@@ -96,3 +123,4 @@ class ReviewTreeEntry(KnowledgeModel):
     before: ReviewTreeEntrySide
     after: ReviewTreeEntrySide
     change: ReviewEntryChange
+    memory: ReviewEntryMemory | None = None

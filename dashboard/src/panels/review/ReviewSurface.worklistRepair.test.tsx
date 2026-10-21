@@ -29,8 +29,10 @@ function replaceReplies(
 ) {
   serve();
   const original = globalThis.fetch;
+  const requests: URL[] = [];
   vi.stubGlobal('fetch', async (address: string) => {
     const url = new URL(address, 'http://localhost');
+    requests.push(url);
     if (
       url.pathname === '/api/review/trees' &&
       !['lane', 'invariants', 'file'].some((name) => url.searchParams.has(name))
@@ -40,6 +42,7 @@ function replaceReplies(
       return { ok: true, status: 200, json: async () => cards } as Response;
     return original(address);
   });
+  return requests;
 }
 function mount(kind: 'family' | 'invariant' = 'invariant') {
   return render(
@@ -54,17 +57,19 @@ function noFalseAbsence(element: HTMLElement) {
   expect(element.textContent).not.toContain('No worklist item names this record.');
   expect(element.textContent).not.toMatch(/0 of 0 changed hunks/);
 }
+// The cards' entry identifiers: one list in the one provenance disclosure, Technical details
+// (MIK-R89 v2 rule 6), for the cards the page read (read 5); no card holds a disclosure of its own.
 function checkEntryIdentities(
   root: HTMLElement,
   entries: NonNullable<ReviewTreesResult['entries']>,
 ) {
-  const details = root.querySelectorAll<HTMLDetailsElement>(
-    'details[data-testid="review-entry-identifiers"]',
-  );
-  expect(details).toHaveLength(1);
-  expect(details[0].dataset.disclosure).toBe('identifiers');
-  expect(details[0].querySelector('[data-review-content]')).toBeNull();
-  const rows = details[0].querySelectorAll<HTMLElement>('[data-entry]');
+  const lists = root.querySelectorAll<HTMLElement>('[data-testid="review-entry-identifiers"]');
+  expect(lists).toHaveLength(1);
+  const disclosure = lists[0].closest('details')!;
+  expect(disclosure.dataset.testid).toBe('review-details');
+  expect(disclosure.dataset.disclosure).toBe('provenance');
+  expect(lists[0].querySelector('[data-review-content]')).toBeNull();
+  const rows = lists[0].querySelectorAll<HTMLElement>(':scope > ul > [data-entry]');
   expect(rows).toHaveLength(entries.length);
   for (const entry of entries) {
     const row = [...rows].find((one) => one.dataset.entry === entry.id)!;
@@ -79,10 +84,15 @@ function checkEntryIdentities(
   expect(root.querySelector('[data-testid="review-expression-card"] details')).toBeNull();
 }
 
+// The page reads the cards of its shown subjects once (MIK-R89 v2 rule 2, read 5); a selection reads
+// no cards of its own (W4). The served set for that read is l86.test-utils' `cards` reply.
+const readCards = (requests: URL[]) =>
+  requests.filter((url) => url.pathname === '/api/review/trees' && url.searchParams.has('invariants'));
+
 it.each(['family', 'invariant'] as const)(
   'F02/F07 joins the actual %s record and preserves every entry side identity',
   async (kind) => {
-    replaceReplies();
+    const requests = replaceReplies();
     const view = mount(kind);
     const canonical = kind === 'family' ? 'FAM-2HBJREC2' : 'INV-1XKX9ERN';
     const block = await view.findByTestId('review-subject-worklist');
@@ -104,16 +114,21 @@ it.each(['family', 'invariant'] as const)(
     noFalseAbsence(block);
     const identities = await view.findByTestId('review-entry-identifiers');
     expect(identities).toBeTruthy();
-    const entries = (kind === 'family' ? familyCards : memberCards).entries!;
+    // One card read, for the page's shown subjects whichever subject is selected; its answer here is
+    // the captured family-set body.
+    await waitFor(() => expect(readCards(requests)).toHaveLength(1));
+    const entries = familyCards.entries!;
+    await waitFor(() =>
+      expect(identities.querySelectorAll(':scope > ul > [data-entry]')).toHaveLength(entries.length),
+    );
     checkEntryIdentities(view.getByTestId('review-surface'), entries);
-    if (kind === 'invariant') expect(entries.some((one) => one.kind === 'proof')).toBe(true);
   },
 );
 
 it('F06 shows captured resolved-stale reasons and a supplied unverifiable proof-side reason outside disclosures', async () => {
   const cards = structuredClone(memberCards);
   const proof = cards.entries!.find(
-    (one) => one.kind === 'proof' && one.after.state === 'resolved',
+    (one) => one.kind === 'proof' && one.after.state === 'resolved' && one.change === 'changed',
   )!;
   expect(proof).toBeTruthy();
   proof.after.currentness = 'unverifiable';
@@ -121,7 +136,10 @@ it('F06 shows captured resolved-stale reasons and a supplied unverifiable proof-
   replaceReplies(trees, cards);
   const view = mount();
   await view.findByTestId('review-entry-identifiers');
-  const expected = cards.entries!.flatMap((entry) =>
+  await waitFor(() => expect(view.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
+  // A changed location is a card (MIK-R89 v2 rule 4); unchanged and not-comparable ones are the
+  // lines of their subject's closed groups (rule 5), which carry path, role and range only.
+  const expected = cards.entries!.filter((entry) => entry.change === 'changed').flatMap((entry) =>
     (['before', 'after'] as const)
       .filter(
         (side) =>
@@ -189,11 +207,7 @@ it.each(['incomplete', 'absent', 'unbound'] as const)(
           : 'not bound to this comparison',
     );
     noFalseAbsence(block);
-    fireEvent.click(
-      within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
-        name: /^Worklist/,
-      }),
-    );
+    fireEvent.click(view.getByTestId('review-tree-worklist'));
     const full = await view.findByTestId('review-worklist-view');
     noFalseAbsence(full);
     expect(within(full).getByTestId('review-worklist-linkage').textContent).toContain(
@@ -209,11 +223,7 @@ it('F11 permits complete bound emptiness and keeps returned partial facts explic
   const view = mount();
   const block = await view.findByTestId('review-subject-worklist');
   await waitFor(() => expect(block.textContent).toContain('No worklist item names this record.'));
-  fireEvent.click(
-    within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
-      name: /^Worklist/,
-    }),
-  );
+  fireEvent.click(view.getByTestId('review-tree-worklist'));
   expect((await view.findByTestId('review-worklist-view')).textContent).toContain(
     '0 of 0 changed hunks in 0 files',
   );
@@ -229,11 +239,7 @@ it('F11 permits complete bound emptiness and keeps returned partial facts explic
   await waitFor(() => expect(within(part).getAllByTestId('review-worklist-item')).toHaveLength(1));
   expect(part.querySelector('[data-worklist-complete="false"]')).toBeTruthy();
   noFalseAbsence(part);
-  fireEvent.click(
-    within(next.getByTestId('review-catalogue-navigation')).getByRole('button', {
-      name: /^Worklist/,
-    }),
-  );
+  fireEvent.click(next.getByTestId('review-tree-worklist'));
   expect((await next.findByTestId('review-worklist-view')).textContent).toContain(
     'Partial reported linkage:',
   );

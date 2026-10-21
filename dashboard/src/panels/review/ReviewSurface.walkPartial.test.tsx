@@ -1,27 +1,23 @@
 // R39 partial-read preservation under R86: the complete synthetic index outline keeps all rows,
 // while the immutable partial review body supplies only its loaded facts and main-page continuation.
-// The main-page cursor is sent unchanged, and status messages disappear when the shown order changes.
+// The main-page cursor is sent unchanged. (The end message of `j`/`k` speaks of the reading column's
+// blocks since MIK-R89 v2 rule 11, not of the tree's order: changeTraversal.test.tsx pins it.)
 import { fireEvent, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import {
   HBJ_ID,
-  K,
   R6R_ID,
   SHARED,
   bodyOf,
   clickedSecondFamily,
-  families,
   familyBlock,
   installWorld,
   memberOccurrences,
   open,
   reviewCount,
-  selectedNode,
   settled,
-  step,
   subjectOf,
-  triageStatus,
   world,
 } from './walk.test-utils';
 
@@ -62,27 +58,4 @@ it('shows complete outline rows for a partial read and keeps continuation in the
   ]).toEqual(['family', cursor]);
   expect(memberOccurrences(familyBlock(view, R6R_ID)).size).toBe(24);
   expect(familyBlock(view, HBJ_ID).dataset.familyKept).toBe('true');
-});
-
-it('drops "No earlier change" when the order control lists the other family before the selection', async () => {
-  const view = open(PAGE as ReviewResult);
-  // Changes first, the second family is displayed first, and its own row is the first change.
-  await clickedSecondFamily(view, [R6R_ID, HBJ_ID]);
-  const filter = view.getByTestId('review-family-filter');
-  fireEvent.change(filter, { target: { value: HBJ_ID } });
-  await step(view, K, 0);
-  expect(triageStatus(view)).toBe('No earlier change in this tree; the selection stays.');
-  // In authored order the first family is listed before it, with a changed member: an earlier
-  // change, so the message is gone, and the next k moves to that member.
-  fireEvent.change(filter, { target: { value: '' } });
-  fireEvent.click(view.getByTestId('review-tree-order'));
-  await waitFor(
-    () => expect(view.getByTestId('review-tree-order').dataset.order).toBe('authored'),
-  );
-  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
-  expect(triageStatus(view)).toBe('');
-  await step(view, K, 0);
-  expect(selectedNode(view)!.closest<HTMLElement>('[data-testid=review-family]')).toBe(
-    familyBlock(view, R6R_ID),
-  );
 });

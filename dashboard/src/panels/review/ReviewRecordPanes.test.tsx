@@ -1,9 +1,9 @@
 // Synthetic current-shape payload; only candidate/surface identities come from the capture.
-import { cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { cleanup, render } from '@testing-library/react';
+import { afterEach, expect, it } from 'vitest';
 import type { ReviewPayload } from '../../data/review';
 import captured from './subjectReview.invariant.captured.json';
-import { ReviewMainFacts, ReviewTechnicalDetails } from './ReviewRecordPanes';
+import { ReviewMainFacts, ReviewRecordIdentities } from './ReviewRecordPanes';
 
 function syntheticPayload(): ReviewPayload {
   return {
@@ -74,8 +74,7 @@ function syntheticPayload(): ReviewPayload {
 afterEach(cleanup);
 
 it('renders current-shape main facts, unresolved reads and read-only state without retired branches', () => {
-  const onAllChanges = vi.fn();
-  const view = render(<ReviewMainFacts payload={syntheticPayload()} onAllChanges={onAllChanges} />);
+  const view = render(<ReviewMainFacts payload={syntheticPayload()} />);
   expect(view.getByTestId('review-field-changes').textContent).toContain(
     'status: (absent) → (recorded empty)',
   );
@@ -94,8 +93,8 @@ it('renders current-shape main facts, unresolved reads and read-only state witho
   expect(view.getByText(/This review is read-only/).closest('details')).toBeNull();
   expect(view.container.textContent).not.toMatch(/assessment|evidence claim|detection/i);
   expect(view.queryByText('Authored in the subject pane')).toBeNull();
-  fireEvent.click(view.getByRole('button', { name: 'All changes' }));
-  expect(onAllChanges).toHaveBeenCalledOnce();
+  // The one "All changes" link is the tree's (MIK-R89 v2 rule 7).
+  expect(view.queryByRole('button', { name: 'All changes' })).toBeNull();
 });
 
 it('names attribution counts even before a lane read exists and explains an unmeasured change set', () => {
@@ -107,7 +106,28 @@ it('names attribution counts even before a lane read exists and explains an unme
     'changed files without an invariant: the change set could not be measured');
 });
 
-it('keeps only current judgment/proof identifiers and provenance in technical details', () => {
+// Finding 2: a changed field's name and each remaining count are read as words, never as the
+// answer's tokens (`payload_digest`, `changed_paths_outside_selection`).
+it('names changed fields and remaining counts in words', () => {
+  const payload = syntheticPayload();
+  payload.knowledge.field_changes = [
+    { item_id: 'one', item_kind: 'invariant', field: 'payload_digest', before_value: 'a1', after_value: 'b2' },
+  ];
+  payload.source.remaining = [
+    { name: 'locations_remaining', value: 0 },
+    { name: 'changed_paths_outside_selection', value: 175 },
+    { name: 'records_present_outside_selection', value: 6 },
+    { name: 'references_unresolved', value: 0 },
+  ];
+  const view = render(<ReviewMainFacts payload={payload} />);
+  expect(view.getByTestId('review-field-changes').textContent).toBe('payload digest: a1 → b2');
+  expect(view.getByTestId('review-remaining').textContent).toBe(
+    'comparison items not on this page: 0 · changed files no link of this subject reaches: 175 · ' +
+      'changed records outside this subject: 6 · unresolved references: 0',
+  );
+});
+
+it('keeps only current judgment/proof identifiers and provenance in the record identities', () => {
   const payload = syntheticPayload();
   payload.judgment = {
     state: 'rows',
@@ -136,26 +156,12 @@ it('keeps only current judgment/proof identifiers and provenance in technical de
       },
     ],
   };
-  const view = render(
-    <ReviewTechnicalDetails
-      payload={payload}
-      unanswered={{ label: 'synthetic task', unavailable: false }}
-      paging={<p>Paging read state</p>}
-    />,
-  );
-  const details = view.getByTestId('review-details');
-  fireEvent.click(view.getByText(/Technical details/));
+  // The record identities sit in Technical details (reading/TechnicalDetails.tsx); the page's paging
+  // controls and the unanswered subject's state are the details' and the slot's own.
+  const view = render(<ReviewRecordIdentities payload={payload} />);
+  const details = view.container;
   expect(details.textContent).toContain('ROW-SYNTHETIC');
   expect(details.textContent).toContain('PRF-SYNTHETIC');
   expect(details.textContent).toContain('knowledge/history/synthetic/attempt-1.json');
   expect(details.textContent).not.toMatch(/Authored|assessment|evidence claim|detection/i);
-  expect(view.getByText('Paging read state').closest('details')).toBeNull();
-  view.rerender(
-    <ReviewTechnicalDetails
-      payload={null}
-      unanswered={{ label: 'synthetic task', unavailable: true }}
-      paging={null}
-    />,
-  );
-  expect(view.getByTestId('review-details-unavailable').textContent).toContain('could not be read');
 });

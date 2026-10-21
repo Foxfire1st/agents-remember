@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager as _contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -24,6 +25,7 @@ import pytest
 from agents_remember.application import review_tree_comparison, review_tree_entries
 from agents_remember.application.knowledge_currentness import CodeTree
 from agents_remember.application.knowledge_currentness.observe import OpenedCodeTree
+from agents_remember.application.knowledge_reader.marks import open_weakness_counts_in
 from agents_remember.application.knowledge_review import (
     compose_review,
     list_knowledge_review_entries,
@@ -40,8 +42,9 @@ from agents_remember.application.review_candidate_resolution import (
 from agents_remember.application.review_source_content import read_review_source_content
 from agents_remember.application.review_tree_knowledge import read_review_trees
 from agents_remember.application.reviewer_worklist_child import isolated_leaf_worklist
+from agents_remember.cli.dashboard_review_reads import RecordedReviewAnswers
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
-from agents_remember.memory.knowledge_index import MemoryTreeError, text_uuid
+from agents_remember.memory.knowledge_index import KnowledgeIndex, MemoryTreeError, text_uuid
 from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.models.knowledge.review_source_content import ReviewSourceContentRequest
@@ -51,6 +54,7 @@ from agents_remember.models.knowledge.review_tree_entries import (
 )
 from agents_remember.models.knowledge.review_trees import ReviewTreeSideState
 from agents_remember.models.knowledge_files import canonical_text
+from agents_remember.serving.review_answer_reuse import RecordedAnswerReuse
 from agents_remember.serving.review_trees import ReviewTreesQuery, register_review_trees_route
 from agents_remember.worktrees.modules.capture_baseline import (
     begin_capture_baseline,
@@ -72,6 +76,7 @@ from agents_remember_test_support.testing.review_git_trees import (
     INVARIANT,
     LEAF,
     MASTER,
+    ORIGIN,
     REPO,
     World,
     _write,
@@ -839,6 +844,155 @@ def _unresolved_entry(gone: ReviewTreeEntry) -> None:
         None,
     )
     assert "does not resolve" in (gone.after.reason or "")
+
+
+SECOND = "INV-CCCCCC"
+
+
+def _memory_facts(world: World) -> None:
+    """K_C for the memory values: a second invariant at the path, a decision link, two weaknesses."""
+
+    world.edit()
+    sidecar = json.loads(_with_proof_and_unresolved(world))
+    first = sidecar["realizes"][0]
+    second_anchor = {**first["anchor"], "locator": {"kind": "file"}}
+    sidecar["realizes"].append(
+        {**first, "id": "RLZ-A00005", "invariant": SECOND, "anchor": second_anchor}
+    )
+    weakness = {
+        "schema": "ar-weakness/v1",
+        "revision": 1,
+        "kind": "time",
+        "statement": "The land body is read twice.",
+        "anchor": {**first["anchor"], "path": CODE_FILE},
+        "seen": {"task": LEAF, "role": "worker"},
+        "origin": ORIGIN,
+    }
+    decision = {
+        "schema": "ar-decision/v1",
+        "id": "DEC-AAAAAA",
+        "revision": 1,
+        "status": "active",
+        "context": "Values land as given.",
+        "alternatives": [{"option": "Land", "status": "chosen", "reason": "Exact."}],
+        "consequences": ["Nothing is rounded."],
+        "decider": "developer",
+        "supersedes": [],
+        "admission": "legacy-unassessed",
+        "links": [{"target": INVARIANT, "relation": "constrains"}],
+        "origin": ORIGIN,
+    }
+    closed = {"task": LEAF, "commit": "c" * 40}
+    _write(
+        world.memory_worktree,
+        {
+            f"onboarding/{CODE_FILE}.json": canonical_text(sidecar),
+            f"knowledge/invariants/{SECOND}-second.json": canonical_text(
+                {**json.loads(invariant()), "id": SECOND}
+            ),
+            "knowledge/decisions/DEC-AAAAAA-land.json": canonical_text(decision),
+            "knowledge/weaknesses/WKN-7K3F9Q-open.json": canonical_text(
+                {**weakness, "id": "WKN-7K3F9Q", "state": "open"}
+            ),
+            "knowledge/weaknesses/WKN-8M4G0R-closed.json": canonical_text(
+                {**weakness, "id": "WKN-8M4G0R", "state": "closed", "closed": closed}
+            ),
+        },
+    )
+
+
+def test_the_cards_read_gives_each_entry_its_four_memory_values_at_the_after_tree(
+    world: World,
+) -> None:
+    _memory_facts(world)
+    keys = tuple(text_uuid("identity", one) for one in (INVARIANT, SECOND))
+    view = read_review_trees(world.config, _query(invariants=keys))
+    assert view.comparison is not None and view.entry_memory is not None
+    assert (view.entry_memory.state, view.entry_memory.index_state) == ("available", "complete")
+    assert view.entry_memory.tree == view.comparison.memory_candidate.tree
+    entries = {entry.id: entry for entry in view.entries}
+    assert list(entries) == ["PRF-A00003", "RLZ-A00001", "RLZ-A00002", "RLZ-A00004", "RLZ-A00005"]
+    trees = _resolve(world).trees
+    assert trees is not None and trees.after.database is not None
+    with KnowledgeIndex(trees.after.database) as index:
+        # Each value is its definition, asked of the bound after-side index itself (evidence 4).
+        at_path = {one.invariant for one in index.entries_at_path(CODE_FILE).value.realizations}
+        links = {one: len(index.incoming_links(one).value) for one in (INVARIANT, SECOND)}
+        unproved = {record.id for record in index.invariants_without_proof().value}
+        weaknesses = open_weakness_counts_in(index)
+        # The family's member link counts beside the decision's link (W15); linked_from omits it.
+        assert len(index.invariant(INVARIANT).value.linked_from) == 1
+    assert (at_path, links, unproved, weaknesses) == (
+        {INVARIANT, SECOND},
+        {INVARIANT: 2, SECOND: 0},
+        {SECOND},
+        {CODE_FILE: 1},  # the closed weakness is not counted
+    )
+    for entry in view.entries:
+        assert entry.memory is not None and entry.memory.path == CODE_FILE
+        assert (
+            entry.memory.invariants_at_path,
+            entry.memory.incoming_links,
+            entry.memory.without_proof,
+            entry.memory.open_weaknesses,
+        ) == (len(at_path), links[entry.invariant], entry.invariant in unproved, 1)
+    # Each side names its locator's symbol; a whole-file locator names none (W12).
+    land, keep, whole = entries["RLZ-A00001"], entries["RLZ-A00002"], entries["RLZ-A00005"]
+    assert (land.before.symbol, land.after.symbol, keep.after.symbol) == ("land", "land", "keep")
+    assert (whole.before.symbol, whole.after.symbol) == (None, None)
+    # Only the card read carries memory values; the lane answer is unchanged by them.
+    assert read_review_trees(world.config, _query(lane=True)).entry_memory is None
+
+
+def test_the_cards_read_answers_without_memory_values_when_they_cannot_be_read(
+    world: World,
+) -> None:
+    world.edit()
+    keys = (text_uuid("identity", INVARIANT),)
+    trees = _resolve(world).trees
+    assert trees is not None
+    # An after side with no index: the entries are answered, without values, and say why.
+    gone = trees.after.wire.model_copy(update={"state": "unavailable-history", "detail": "gone"})
+    lost = review_tree_comparison.TreeKnowledge(wire=gone, database=None)
+    cards = review_tree_entries.tree_entries(replace(trees, after=lost), keys)
+    assert (cards.memory.state, cards.memory.reason, cards.memory.tree) == (
+        "unavailable",
+        "gone",
+        trees.record.memory_candidate.tree,
+    )
+    assert cards.entries and all(entry.memory is None for entry in cards.entries)
+    # A read that fails on a readable side: unavailable, naming the tree, and never kept (INV-5M9WY3).
+    world.contract(live=False)
+    reuse = RecordedAnswerReuse()
+    answers = RecordedReviewAnswers(world.config, reuse)
+    query = _query(recorded=True, invariants=keys)
+    # An after index that cannot be built is a failed read too, never the record's state.
+    cache, after = review_tree_comparison.KnowledgeIndexCache, trees.record.memory_candidate.tree
+    built = cache.for_git_tree
+
+    def build(self: Any, repository: Path, tree: str) -> KnowledgeIndex:
+        if tree == after:
+            raise OSError("the index directory is full")
+        return built(self, repository, tree)
+
+    with mock.patch.object(cache, "for_git_tree", build):
+        unbuilt = answers.trees(query, lambda: read_review_trees(world.config, query))
+    assert [side.state for side in unbuilt.knowledge_sides if side.side == "after"] == [
+        "unavailable-history"
+    ]
+    assert reuse.retained() == 0
+    failure = apsw.Error("disk I/O error")
+    with mock.patch.object(KnowledgeIndex, "incoming_links", side_effect=failure):
+        failed = answers.trees(query, lambda: read_review_trees(world.config, query))
+    assert failed.entry_memory is not None and failed.entry_memory.state == "unavailable"
+    assert trees.record.memory_candidate.tree in (failed.entry_memory.reason or "")
+    assert "disk I/O error" in (failed.entry_memory.reason or "")
+    assert failed.entries and all(entry.memory is None for entry in failed.entries)
+    assert reuse.retained() == 0
+    answered = answers.trees(query, lambda: read_review_trees(world.config, query))
+    assert answered.entry_memory is not None and answered.entry_memory.state == "available"
+    assert reuse.retained() == 1
+    assert answers.trees(query, lambda: pytest.fail("a kept answer is computed again")) == answered
 
 
 def test_the_cards_read_names_an_unreadable_side_unavailable_and_a_missing_file_absent(

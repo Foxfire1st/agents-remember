@@ -164,17 +164,35 @@ export type ReviewRevisionSelectionState =
   | "added"
   | "removed";
 
+// Who wrote one selected revision, as its tree's history files record it (`revision_selection.py`):
+// `recorded` names the owners whose changed row wrote it, `introduced` the record's origin for
+// revision 1; `not_recorded` and `unavailable` name no owner and say why in `detail`.
+export type ReviewRevisionWriterState = "recorded" | "introduced" | "not_recorded" | "unavailable";
+
+export interface ReviewRevisionWriter {
+  state: ReviewRevisionWriterState;
+  owners: string[];
+  detail: string;
+}
+
 export interface ReviewRevisionSelection {
   record_kind: "invariant" | "family";
   record_id: string;
   state: ReviewRevisionSelectionState;
   before_revision_id?: string;
   after_revision_id?: string;
+  // Each selected revision's own display version (`r3`), as `revision_selection.py` carries it.
+  before_display_version?: string;
+  after_display_version?: string;
   before_heads: string[];
   after_heads: string[];
   before_retained: string[];
   after_retained: string[];
   statement: string;
+  // The selected revisions' writers; absent where a side selects none or none was read (a family
+  // context's own selections).
+  before_writer?: ReviewRevisionWriter;
+  after_writer?: ReviewRevisionWriter;
 }
 
 // The change facts of a tree comparison (MIK-R33), mirroring `models/knowledge/review_change_kinds.py`.

@@ -56,6 +56,7 @@ function bothPresent(before: ReviewSideContent, after: ReviewSideContent, mode: 
       language={before.language}
       mode={mode}
       collapse={false}
+      fit
     />
   );
 }
@@ -73,6 +74,7 @@ function oneSidedDiff(before: ReviewSideContent, after: ReviewSideContent, mode:
       language={present.language}
       mode={mode}
       collapse={false}
+      fit
     />
   );
 }
@@ -86,7 +88,7 @@ function availableContent(before: ReviewSideContent, after: ReviewSideContent) {
         no diff is drawn: the other side is not a known-empty operand, so an addition or a removal
         cannot be claimed from it.
       </p>
-      <FilePane content={present.text ?? ''} language={present.language} />
+      <FilePane content={present.text ?? ''} language={present.language} fit />
     </>
   );
 }

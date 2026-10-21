@@ -1,34 +1,22 @@
-// Reveal a selected row without scrolling the containing page.
+// Reveal a tree row inside the tree's one scroller, by its `scrollTop` only (MIK-R89 v2 rule 9). The
+// scroller's height comes from CSS alone: nothing here writes a style, so a pending read that shrinks
+// the page can never leave the tree at 0 px (UX F1). The rows pinned to the scroller's bottom (the
+// Worklist and "Code without invariant") cover the rows above them, so a row above the pinned block is
+// revealed above it.
+export const TREE_SCROLL_SELECTOR = '[data-review-tree-panel]';
+export const TREE_PINNED_SELECTOR = '[data-review-tree-pinned]';
+
 export function revealTreeRow(row: HTMLElement | null): void {
-  const panel = row?.closest<HTMLElement>('[data-review-tree-panel]');
-  if (!row || !panel) return;
-  const bounds = visiblePanelBounds(panel);
+  const scroller = row?.closest<HTMLElement>(TREE_SCROLL_SELECTOR);
+  if (!row || !scroller) return;
+  const bounds = scroller.getBoundingClientRect();
+  const pinned = scroller.querySelector<HTMLElement>(TREE_PINNED_SELECTOR);
+  const coveredBy =
+    pinned && !pinned.contains(row) && pinned.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING
+      ? pinned.getBoundingClientRect().top
+      : bounds.bottom;
+  const bottom = Math.min(bounds.bottom, coveredBy);
   const selected = row.getBoundingClientRect();
-  if (selected.top < bounds.top) panel.scrollTop += selected.top - bounds.top;
-  else if (selected.bottom > bounds.bottom) panel.scrollTop += selected.bottom - bounds.bottom;
-}
-
-function visiblePanelBounds(panel: HTMLElement): Pick<DOMRect, 'top' | 'bottom'> {
-  // Restore the responsive CSS limit before measuring a changed viewport/header. A fixed header
-  // allowance can otherwise leave the panel itself below the review's clipping edge, where even
-  // its maximum scrollTop cannot reveal the last row. Constrain the scrollport, not the page.
-  panel.style.removeProperty('max-height');
-  let bounds = panel.getBoundingClientRect();
-  const surface = panel.closest<HTMLElement>('[data-kbzone="review"]');
-  const surfaceBounds = surface?.getBoundingClientRect();
-  const bottom = Math.min(window.innerHeight, surfaceBounds?.bottom ?? Infinity);
-  if (bounds.bottom > bottom) {
-    panel.style.maxHeight = `${Math.max(0, bottom - bounds.top)}px`;
-    bounds = panel.getBoundingClientRect();
-  }
-  const top = Math.max(0, bounds.top, surfaceBounds?.top ?? -Infinity);
-  const visibleBottom = Math.min(bottom, bounds.bottom);
-  return { top: belowControls(panel, top, visibleBottom), bottom: visibleBottom };
-}
-
-function belowControls(panel: HTMLElement, top: number, bottom: number): number {
-  const controls = panel.querySelector<HTMLElement>('[data-testid="review-triage-bar"]')?.getBoundingClientRect();
-  return controls && controls.top < bottom && controls.bottom > top
-    ? Math.max(top, controls.bottom)
-    : top;
+  if (selected.top < bounds.top) scroller.scrollTop += selected.top - bounds.top;
+  else if (selected.bottom > bottom) scroller.scrollTop += selected.bottom - bottom;
 }

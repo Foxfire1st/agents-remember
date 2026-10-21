@@ -16,6 +16,15 @@ the extractor, so a placement -- the range and its content identity, or "does no
 remembered per process in a bounded LRU table (:data:`PLACEMENTS`, 8,192 entries, the observation
 cache's bound and key, :func:`observation_key`). Only answers are remembered; a read that failed is
 asked again.
+
+**The memory values (MIK-R89 v2 rule 3).** Inside the one open of the after-side index that lists the
+after entries, each entry gets four values at its after-side path ``p`` (the after entry's path, else
+the before entry's, as the after side is located) and its invariant ``i``: the distinct invariants
+over ``entries_at_path(p).realizations``, ``len(incoming_links(i))`` (family member links count),
+whether ``i`` is among ``invariants_without_proof()`` (live invariants only), and the open weaknesses
+anchored at ``p``. Each path and each invariant is asked once per read, and the unproved list once.
+An after side with no index, or a read of it that fails, answers the entries without values and says
+why in the result's ``entry_memory``; the card read itself never fails for them.
 """
 
 from __future__ import annotations
@@ -26,6 +35,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+import apsw
+
 from agents_remember.application.knowledge_currentness import CodeTree
 from agents_remember.application.knowledge_currentness.observe import (
     ObservationKey,
@@ -34,21 +45,30 @@ from agents_remember.application.knowledge_currentness.observe import (
     observe_entry,
     open_code_tree,
 )
+from agents_remember.application.knowledge_reader.marks import open_weakness_counts_in
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees, Resolved
 from agents_remember.application.review_tree_comparison import ReviewTrees, TreeKnowledge
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
-from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex, text_uuid
+from agents_remember.memory.knowledge_index import (
+    Entry,
+    IndexMismatchError,
+    KnowledgeIndex,
+    text_uuid,
+)
 from agents_remember.memory_quality.style.citations import grammars
+from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.review_tree_entries import (
     EXCERPT_MAX_CHARACTERS,
     EXCERPT_MAX_LINES,
     ReviewEntryChange,
+    ReviewEntryMemory,
     ReviewTreeEntry,
     ReviewTreeEntrySide,
 )
+from agents_remember.models.knowledge.review_trees import ReviewEntryMemoryState
 from agents_remember.models.knowledge_files.anchor_content import blob_lines
 
-__all__ = ["PLACEMENTS", "tree_entries"]
+__all__ = ["PLACEMENTS", "CardEntries", "tree_entries"]
 
 PLACEMENTS: Final[BoundedMemo[ObservationKey, Resolved | None]] = BoundedMemo(8_192)
 
@@ -62,9 +82,25 @@ class _Side:
     code: OpenedCodeTree
 
 
-def tree_entries(trees: ReviewTrees, invariant_keys: Iterable[str]) -> tuple[ReviewTreeEntry, ...]:
+@dataclass(frozen=True)
+class CardEntries:
+    """A card read's entries, and whether their memory values could be read (MIK-R89 v2 rule 3)."""
+
+    entries: tuple[ReviewTreeEntry, ...]
+    memory: ReviewEntryMemoryState
+
+
+@dataclass(frozen=True)
+class _Memory:
+    """The memory values of one card read: the result-level state, and the values per entry ID."""
+
+    state: ReviewEntryMemoryState
+    values: Mapping[str, ReviewEntryMemory]
+
+
+def tree_entries(trees: ReviewTrees, invariant_keys: Iterable[str]) -> CardEntries:
     """Each entry of the named invariants in K_B or K_C, on B and C, ordered by invariant, kind,
-    path and ID.
+    path and ID, with its memory values at the after side.
 
     ``invariant_keys`` are the identities the landed review payload addresses invariants by; a key
     neither memory tree holds contributes nothing.
@@ -75,14 +111,16 @@ def tree_entries(trees: ReviewTrees, invariant_keys: Iterable[str]) -> tuple[Rev
     before = _side(
         trees.before, CodeTree(Path(record.code_base.repository), record.code_base.tree), wanted
     )
-    after = _side(
+    after, memory = _after_side(
         trees.after,
         CodeTree(Path(record.code_candidate.repository), record.code_candidate.tree),
         wanted,
+        before,
     )
     known = set(before.entries or {}) | set(after.entries or {})
-    listed = [_entry(entry_id, before, after) for entry_id in sorted(known)]
-    return tuple(sorted(listed, key=lambda one: (one.invariant, one.kind, _path(one), one.id)))
+    listed = [_entry(entry_id, before, after, memory.values) for entry_id in sorted(known)]
+    entries = tuple(sorted(listed, key=lambda one: (one.invariant, one.kind, _path(one), one.id)))
+    return CardEntries(entries=entries, memory=memory.state)
 
 
 def _path(entry: ReviewTreeEntry) -> str:
@@ -92,11 +130,71 @@ def _path(entry: ReviewTreeEntry) -> str:
 def _side(knowledge: TreeKnowledge, code_tree: CodeTree, wanted: frozenset[str]) -> _Side:
     code = open_code_tree(code_tree)
     if knowledge.database is None:
-        detail = knowledge.wire.detail or f"the memory tree is {knowledge.wire.state}"
-        return _Side(entries=None, unreadable=detail, code=code)
+        return _Side(entries=None, unreadable=_unreadable(knowledge), code=code)
     with KnowledgeIndex(knowledge.database) as index:
         entries = {entry.id: entry for entry in _entries_of(index, wanted)}
     return _Side(entries=entries, unreadable=None, code=code)
+
+
+def _after_side(
+    knowledge: TreeKnowledge, code_tree: CodeTree, wanted: frozenset[str], before: _Side
+) -> tuple[_Side, _Memory]:
+    """The after side as :func:`_side` reads it, and the memory values read in the same open."""
+
+    code = open_code_tree(code_tree)
+    tree = knowledge.wire.tree
+    if knowledge.database is None:
+        detail = _unreadable(knowledge)
+        return _Side(entries=None, unreadable=detail, code=code), _unavailable(tree, detail)
+    with KnowledgeIndex(knowledge.database) as index:
+        entries = {entry.id: entry for entry in _entries_of(index, wanted)}
+        located = {**(before.entries or {}), **entries}
+        memory = _memory_values(index, located, tree)
+    return _Side(entries=entries, unreadable=None, code=code), memory
+
+
+def _unreadable(knowledge: TreeKnowledge) -> str:
+    return knowledge.wire.detail or f"the memory tree is {knowledge.wire.state}"
+
+
+def _memory_values(index: KnowledgeIndex, located: Mapping[str, Entry], tree: str) -> _Memory:
+    """The four values of each entry, by the entry the after side is located with (rule 3).
+
+    ``located`` maps each entry ID to the after side's own entry, else the before side's, which is
+    the entry whose path the after side of the card names.
+    """
+
+    try:
+        unproved = {record.id for record in index.invariants_without_proof().value}
+        weaknesses = open_weakness_counts_in(index)
+        at_path: dict[str, int] = {}
+        links: dict[str, int] = {}
+        values: dict[str, ReviewEntryMemory] = {}
+        for entry_id, entry in located.items():
+            path, invariant = entry.path, entry.invariant
+            if path not in at_path:
+                realized = index.entries_at_path(path).value.realizations
+                at_path[path] = len({one.invariant for one in realized})
+            if invariant not in links:
+                links[invariant] = len(index.incoming_links(invariant).value)
+            values[entry_id] = ReviewEntryMemory(
+                path=path,
+                invariants_at_path=at_path[path],
+                incoming_links=links[invariant],
+                without_proof=invariant in unproved,
+                open_weaknesses=weaknesses.get(path, 0),
+            )
+    except (apsw.Error, IndexMismatchError, OSError) as error:
+        return _unavailable(
+            tree, f"the memory values cannot be read at memory tree {tree}: {error}"
+        )
+    state = ReviewEntryMemoryState(state="available", tree=tree, index_state=index.state.state)
+    return _Memory(state=state, values=values)
+
+
+def _unavailable(tree: str, reason: str) -> _Memory:
+    state = ReviewEntryMemoryState(state="unavailable", tree=tree, reason=reason[:PROSE_MAX_LENGTH])
+    return _Memory(state=state, values={})
 
 
 def _entries_of(index: KnowledgeIndex, wanted: frozenset[str]) -> Iterator[Entry]:
@@ -108,7 +206,9 @@ def _entries_of(index: KnowledgeIndex, wanted: frozenset[str]) -> Iterator[Entry
         yield from knowledge.proofs
 
 
-def _entry(entry_id: str, before: _Side, after: _Side) -> ReviewTreeEntry:
+def _entry(
+    entry_id: str, before: _Side, after: _Side, memory: Mapping[str, ReviewEntryMemory]
+) -> ReviewTreeEntry:
     own_before = None if before.entries is None else before.entries.get(entry_id)
     own_after = None if after.entries is None else after.entries.get(entry_id)
     carried = own_after or own_before
@@ -126,6 +226,7 @@ def _entry(entry_id: str, before: _Side, after: _Side) -> ReviewTreeEntry:
         before=before_side,
         after=after_side,
         change=change,
+        memory=memory.get(entry_id),
     )
 
 
@@ -143,15 +244,30 @@ def _located(entry: Entry, own: Entry | None, side: _Side) -> ReviewTreeEntrySid
 
     recorded = None if side.entries is None else own is not None
     fields = _authored(own) if own is not None else {}
+    symbol = _symbol(entry)
     if side.unreadable is not None and own is None:
         return ReviewTreeEntrySide(
-            recorded=recorded, state="unavailable", path=entry.path, reason=side.unreadable
+            recorded=recorded,
+            state="unavailable",
+            path=entry.path,
+            reason=side.unreadable,
+            symbol=symbol,
         )
     placed = _placed(entry, side.code)
     currentness = _currentness(own, side.code)
     return ReviewTreeEntrySide(
-        recorded=recorded, path=entry.path, **placed, **fields, **currentness
+        recorded=recorded, path=entry.path, symbol=symbol, **placed, **fields, **currentness
     )
+
+
+def _symbol(entry: Entry) -> str | None:
+    """The name the entry's locator names, when it is a ``symbol`` locator (rule 3's filter)."""
+
+    anchor = entry.document.get("anchor") or {}
+    locator: Mapping[str, Any] = anchor.get("locator") or {}
+    if locator.get("kind") != "symbol":
+        return None
+    return _text(locator.get("name"))
 
 
 def _authored(entry: Entry) -> dict[str, Any]:

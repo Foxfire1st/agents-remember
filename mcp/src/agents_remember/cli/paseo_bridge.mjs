@@ -142,7 +142,8 @@
 //   the last turn ended without one, which is what a cancelled turn leaves behind.
 //
 //   agent-send  {agentId: string, text: string, messageId: string, afterResume?: boolean,
-//                turnReportedByHost?: boolean}
+//                turnReportedByHost?: boolean, images?: [{data, mimeType}],
+//                attachments?: [{type: 'text', mimeType: 'text/plain', title?, text}]}
 //            -> {serverId, delivery: {delivered: true, taken: 'started' | 'steered' | 'replaced',
 //                                     turnId: string | null}
 //                        | {delivered: false, refused: 'not-found' | 'archived' | 'closed' | 'busy',
@@ -170,7 +171,10 @@
 //            lookup afterwards fails (`turnId` is then null). `afterResume` says that the
 //            caller has just resumed the agent's session and that the agent has tool servers:
 //            the command then waits TOOL_SERVER_START_MS before it looks at the agent, for the
-//            reason given under `agent-create`.
+//            reason given under `agent-create`. `images` and text `attachments` go with the
+//            message only when a list is given and not empty (paseo_send_attachments.mjs), so a
+//            send without them keeps its options; a malformed entry refuses the payload before
+//            the agent is read.
 //
 //   agent-has-message  {agentId: string, messageId: string}
 //            -> {serverId, present: boolean}
@@ -233,6 +237,7 @@
 import { failure, nonEmpty, optionalText, requiredText, serverIdOf } from './paseo_bridge_primitives.mjs'
 import { openWorkspace } from './paseo_workspaces.mjs'
 import { listLiveAgents } from './paseo_live_agents.mjs'
+import { sendExtras } from './paseo_send_attachments.mjs'
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -837,6 +842,7 @@ async function sendToAgent({ api, daemon }, input) {
   const agentId = requiredText(input, 'agentId')
   const message = requiredText(input, 'text')
   const messageId = requiredText(input, 'messageId')
+  const extras = sendExtras(input)
   const serverId = serverIdOf(daemon)
   const refused = (reason, detail) => ({ serverId, delivery: { delivered: false, refused: reason, detail } })
   if (input.afterResume === true) await toolServerStart()
@@ -870,7 +876,7 @@ async function sendToAgent({ api, daemon }, input) {
   try {
     await api.agents.ref(agentId).send(
       message,
-      inTurn ? { messageId, activeTurnBehavior: 'steer' } : { messageId }
+      inTurn ? { messageId, activeTurnBehavior: 'steer', ...extras } : { messageId, ...extras }
     )
   } catch (error) {
     if (daemon.getConnectionState().status === 'connected') throw error

@@ -1,10 +1,15 @@
 // OR-R042: real mounted review reads over the preserved captured world. The refused answer is
 // captured from the actual route with its receipt; viewport/scroll APIs use jsdom's test shims.
-import { act, fireEvent, waitFor, within } from '@testing-library/react';
+// A selection's failed or refused read is shown in its subject's slot, and the page scrolls once to
+// the subject's heading after it (MIK-R89 v2 rule 9): the reading column scrolls itself (scrollTop),
+// and only the stacked layout (40rem and narrower), where the page around it scrolls, brings the
+// heading into view. A reader who scrolled while it was pending is not moved, and focus the reader
+// moved elsewhere stays there. The selection is made from the tree or from the column (`j`/`k`
+// select blocks since rule 11, and these answers carry none).
+import { act, fireEvent, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import type { ReviewResult } from '../../data/review';
 import {
-  J,
   R6R_ID,
   HBJ_ID,
   SHARED,
@@ -16,10 +21,9 @@ import {
   installWorld,
   open,
   reviewCount,
-  revisionOf,
   selectedNode,
-  step,
   subjectOf,
+  subjectOfLabel,
   world,
 } from './walk.test-utils';
 
@@ -29,7 +33,9 @@ const REFUSED = captured<ReviewResult>('walkUnavailable.refused.captured.json');
 const targetRow = (view: ReturnType<typeof open>) =>
   within(familyBlock(view, R6R_ID))
     .getAllByTestId('review-family-member-open')
-    .find((row) => row.dataset.revision === revisionOf('INV-2E8MG43K'))!;
+    .find((row) => row.dataset.subjectId === subjectOfLabel('INV-2E8MG43K'))!;
+const targetSection = (view: ReturnType<typeof open>) =>
+  view.getAllByTestId('review-subject-section').find((node) => node.dataset.subject === subjectOfLabel('INV-2E8MG43K'))!;
 
 async function viewport(stacked: boolean, run: (scrolled: Element[]) => Promise<void>) {
   const media = window.matchMedia;
@@ -37,7 +43,7 @@ async function viewport(stacked: boolean, run: (scrolled: Element[]) => Promise<
   const scrolled: Element[] = [];
   window.matchMedia = (query) => ({
     ...media(query),
-    matches: stacked && query === '(max-width: 60rem)',
+    matches: stacked && query === '(max-width: 40rem)',
   });
   Element.prototype.scrollIntoView = function () {
     scrolled.push(this);
@@ -52,22 +58,15 @@ async function viewport(stacked: boolean, run: (scrolled: Element[]) => Promise<
 
 const cases = [true, false].flatMap((stacked) =>
   ['failed', 'refused'].flatMap((outcome) =>
-    ['click', 'key'].map((activation) => ({ stacked, outcome, activation })),
+    ['tree', 'column'].map((activation) => ({ stacked, outcome, activation })),
   ),
 );
 
 it.each(cases)(
-  'reveals $outcome after $activation only when stacked=$stacked',
+  'brings the subject heading into view after a $outcome read from the $activation only when stacked=$stacked',
   async ({ stacked, outcome, activation }) => {
     const view = open(SHARED);
     await clickedSecondFamily(view);
-    if (activation === 'key') {
-      fireEvent.click(within(familyBlock(view, R6R_ID)).getByTestId('review-family-open'));
-      await waitFor(
-        () => expect(view.getByTestId('review-center-family').dataset.family).toBe(R6R_ID),
-      );
-      await waitFor(() => expect(document.activeElement).toBe(selectedNode(view)));
-    }
     const previous = world.answer;
     world.answer = (url, asked) =>
       asked === subjectOf(TARGET)
@@ -78,16 +77,18 @@ it.each(cases)(
     const workspace = view.getByTestId('review-workspace');
     const row = targetRow(view);
     const reads = reviewCount();
+    // A pointer moves focus to the control it activates.
+    const control = activation === 'column' ? within(targetSection(view)).getByTestId('review-subject-select') : row;
     await viewport(stacked, async (scrolled) => {
-      if (activation === 'key') await step(view, J, 1);
-      else {
-        row.focus();
-        fireEvent.click(row);
-      }
+      control.focus();
+      fireEvent.click(control);
       const status = await view.findByTestId('review-reading-problem', undefined);
       await act(async () => {});
       expect(status.textContent).toContain('INV-2E8MG43K');
-      expect(scrolled).toEqual(stacked ? [view.getByTestId('review-center-column')] : []);
+      expect(targetSection(view).contains(status)).toBe(true);
+      expect(scrolled).toEqual(stacked ? [targetSection(view)] : []);
+      // The tree marks the requested row, and the failed or refused answer lands focus on it, from
+      // the column's control as from the row itself.
       expect(selectedNode(view)).toBe(row);
       expect(document.activeElement).toBe(row);
       expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
@@ -98,7 +99,7 @@ it.each(cases)(
 );
 
 it.each(['failed', 'refused'])(
-  'does not reveal $outcome after the reader moved focus while pending',
+  'does not move a reader who scrolled and moved focus while the $outcome read was pending',
   async (outcome) => {
     const view = open(SHARED);
     await clickedSecondFamily(view);
@@ -129,6 +130,7 @@ it.each(['failed', 'refused'])(
         row.focus();
         fireEvent.click(row);
         await view.findByTestId('review-reading-pending', undefined);
+        fireEvent.wheel(view.getByTestId('review-center-column'), { deltaY: 120 });
         const elsewhere = view.getByTestId('review-family-filter');
         elsewhere.focus();
         release?.();

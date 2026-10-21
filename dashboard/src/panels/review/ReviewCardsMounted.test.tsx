@@ -1,10 +1,9 @@
-// L81-R1-F18 mounted proof: production clicks through the real workspace drive the
-// cards read. A family click on an unwalked family starts no cards read (the set is not
-// nameable until its subject answers); the center's hook reads it on mount. A member
-// click then reuses the flight with no second request. A changed-set click on a walked
-// family starts its own read at once, before the member subject resolves, and the late
-// first answer neither refetches nor replaces what the reader settled on.
-import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
+// The page's one card read through production clicks (MIK-R89 v2 rule 2, W4; L81-R1-F18's
+// successor). The cards are the opening's read 5: family clicks, member clicks in the centre and a
+// return to the first family read their subjects and never a card set. A card read that fails in
+// transport says so on the subjects (it is not kept) and is not asked again by any selection; a
+// remount asks again (data/reviewTrees.cards.test.ts).
+import { act, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   HBJ_ID,
@@ -16,34 +15,6 @@ import {
 } from './walk.test-utils';
 
 installWorld();
-
-const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
-
-const treesBody = (marker: string, entries: unknown[]) => ({
-  state: 'trees',
-  repository_id: 'agents-remember',
-  master: 'review-navigation',
-  leaf_id: 'review-navigation',
-  knowledge_sides: [],
-  comparison: {
-    schema: 'ar-review-tree-comparison/v1',
-    task_id: 't',
-    leaf_id: 'l',
-    number: 1,
-    marker,
-  },
-  entries,
-});
-
-const oneEntry = {
-  id: 'h1',
-  kind: 'realization',
-  invariant: 'INV-H',
-  invariant_key: 'INV-H',
-  before: { state: 'absent', path: 'h/before.py' },
-  after: { state: 'resolved', path: 'h/after.py' },
-  change: 'changed',
-};
 
 interface Gate {
   url: URL;
@@ -85,17 +56,6 @@ function holdReads(fail: { first: boolean }) {
   return { treesCalls, gates };
 }
 
-const releaseTrees = (gates: Gate[], invariants: string, body: unknown) =>
-  act(async () => {
-    const index = gates.findIndex(
-      (gate) =>
-        gate.kind === 'trees' && gate.url.searchParams.get('invariants') === invariants,
-    );
-    expect(index).toBeGreaterThanOrEqual(0);
-    const [gate] = gates.splice(index, 1);
-    gate.settle(ok(body));
-  });
-
 // Release the held intent whose selector names `wanted`.
 const releaseIntent = (gates: Gate[], wanted: string) =>
   act(async () => {
@@ -109,89 +69,42 @@ const releaseIntent = (gates: Gate[], wanted: string) =>
     gate.settle(await gate.shadow!);
   });
 
-const cardsState = (view: ReturnType<typeof render>) =>
-  view.getByTestId('review-expression-cards').dataset.cardsState;
+// Release every held subject read.
+const releaseAll = (gates: Gate[]) =>
+  act(async () => {
+    for (const gate of gates.splice(0, gates.length)) if (gate.kind === 'intent') gate.settle(await gate.shadow!);
+  });
 
-const cardCount = (view: ReturnType<typeof render>) =>
-  view.getByTestId('review-expression-cards').dataset.cardCount;
-
-describe('mounted member clicks drive the shared cards read', () => {
-  it('starts the changed set before the first subject resolves, with one request per set', async () => {
+describe("selections never read cards", () => {
+  it('keeps the opening card read the only one, and says when it failed', async () => {
     const fail = { first: true };
     const { treesCalls, gates } = holdReads(fail);
     const view = open(R6R);
-    // The subject settles first so the center mounts; its first set fails in
-    // transport and stays uncached.
-    await waitFor(() => expect(gates.filter((gate) => gate.kind === 'intent').length).toBeGreaterThan(0));
-    await act(async () => {
-      for (const gate of gates.splice(0, gates.length)) {
-        if (gate.kind === 'intent') gate.settle(await gate.shadow!);
-      }
-    });
+    await waitFor(() => expect(gates.some((gate) => gate.kind === 'intent')).toBe(true));
+    await releaseAll(gates);
+    // The opening's read 5 failed in transport: the subjects say their locations could not be read.
     await waitFor(() => expect(treesCalls).toHaveLength(1));
-    const rSet = treesCalls[0];
-    await waitFor(() => {
-      expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
-    });
+    await waitFor(() => expect(view.queryAllByTestId('review-subject-cards-unavailable').length).toBeGreaterThan(0));
+    await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined());
 
-    // A family click on an unwalked family starts no cards read: the set is not
-    // nameable until its subject answers. The subject request starts now.
+    // Another family: its subject is read, no card set.
     fireEvent.click(within(familyBlock(view, HBJ_ID)).getByTestId('review-family-open'));
-    // The click handler prefetches synchronously: no cards read starts for the
-    // unwalked family, and flushing settles nothing else into flight.
-    await act(async () => {});
-    expect(treesCalls).toEqual([rSet]);
-    // The family's subject resolves; the center mounts and its hook reads the set.
     await releaseIntent(gates, HBJ_ID);
-    await waitFor(() => expect(treesCalls).toHaveLength(2));
-    const hSet = treesCalls[1];
-    expect(hSet.length).toBeGreaterThan(0);
-    expect(hSet).not.toBe(rSet);
-    await waitFor(() =>
-      expect(view.getByTestId('review-center-family').dataset.family).toBe(HBJ_ID),
-    );
-    // H's cards stay held: the late answer must not disturb what settles next.
-    const member = within(view.getByTestId('review-center-family')).getAllByTestId(
-      'review-center-open-member',
-    )[0];
+    await waitFor(() => expect(view.getByTestId('review-center-family').dataset.family).toBe(HBJ_ID));
+    expect(treesCalls).toHaveLength(1);
+
+    // A member of the shown family, from the centre's roster.
+    const member = within(view.getByTestId('review-center-family-details')).getAllByTestId('review-center-open-member')[0];
     fireEvent.click(member);
-    // The same set reuses the flight: no second request for the member click.
     await act(async () => {});
-    expect(treesCalls).toEqual([rSet, hSet]);
+    await releaseAll(gates);
+    expect(treesCalls).toHaveLength(1);
 
-    // The changed set starts at once, before the member subject resolves. The R6R
-    // family needs no subject request: its admitted answer is kept and reused.
+    // Back to the first family.
     fireEvent.click(within(familyBlock(view, R6R_ID)).getByTestId('review-family-open'));
-    await waitFor(() => expect(treesCalls).toHaveLength(3));
-    expect(treesCalls[2]).toBe(rSet);
-
-    // The changed set settles: ready cards, no pending, selected R6R.
-    await releaseTrees(gates, rSet, treesBody('R-cards', []));
-    await waitFor(() => {
-      expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined();
-      expect(cardsState(view)).toBe('ready');
-    });
-    expect(cardCount(view)).toBe('0');
-
-    // The late first answer lands without a refetch and without replacing the cards.
-    // The member subject still held is the only intent left; release it, then H's cards.
-    await act(async () => {
-      for (const gate of gates.splice(0, gates.length)) {
-        if (gate.kind === 'intent') gate.settle(await gate.shadow!);
-        else gates.push(gate);
-      }
-    });
-    const remaining = gates.filter((gate) => gate.kind === 'trees');
-    expect(remaining).toHaveLength(1);
-    await act(async () => {
-      remaining[0].settle(ok(treesBody('H-cards-late', [oneEntry])));
-    });
-    gates.splice(gates.indexOf(remaining[0]), 1);
-    // The late answer is fully processed inside the act above: no refetch fired
-    // and the settled cards stand.
     await act(async () => {});
-    expect(treesCalls).toEqual([rSet, hSet, rSet]);
-    expect(cardsState(view)).toBe('ready');
-    expect(cardCount(view)).toBe('0');
+    await releaseAll(gates);
+    await waitFor(() => expect(view.getByTestId('review-surface').dataset.reviewPending).toBeUndefined());
+    expect(treesCalls).toHaveLength(1);
   });
 });

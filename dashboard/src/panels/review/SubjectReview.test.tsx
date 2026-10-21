@@ -129,8 +129,10 @@ it('compares an authored successor through the family member route using both au
       .replace(/↵\n/g, '\n');
     expect(text).toBe(payload.knowledge[`${side}_statement`].text);
   }
-  expect(changed.textContent).toContain(selected.before_revision_id);
-  expect(changed.textContent).toContain(selected.after_revision_id);
+  // The two revision ids are Technical details' (MIK-R89 v2 rule 6, amended 9dde2b09).
+  const revisions = view.getByTestId('review-center-member-revisions');
+  expect(revisions.textContent).toContain(selected.before_revision_id);
+  expect(revisions.textContent).toContain(selected.after_revision_id);
   expect(view.queryByTestId('review-center-member-one-sided')).toBeNull();
   expect(view.getByTestId('review-center-member').dataset.family).toBe(
     payload.family_context!.entries[0].family_id,
@@ -147,23 +149,22 @@ it('compares an authored successor through the family member route using both au
   ).toEqual(payload.judgment.rows.map((row) => expect.stringContaining(row.reason!)));
 });
 
-it('keeps confirmed no-family intent, expressions and judgment in pane order', async () => {
+it('keeps confirmed no-family intent and judgment in pane order', async () => {
   serve(null, noFamily);
   expect(noFamily.payload!.family_context!.state).toBe('no_family_recorded');
   const view = mount(noFamily.payload!);
   const center = await view.findByTestId('review-center-member');
-  expect(within(center).getByTestId('review-center-member-family').textContent).toBe(
-    'No recorded family',
-  );
+  // A measured zero is the normal case: nothing names it (MIK-R89 v2 rule 1, amended 9dde2b09).
+  expect(within(center).queryByTestId('review-center-member-family')).toBeNull();
+  expect(view.getByTestId('review-subject-meta').textContent).not.toContain('family');
   const statement = within(center).getByTestId('review-center-member-unchanged');
   expect(statement.textContent).toContain(noFamily.payload!.knowledge.after_statement.text);
-  const expressions = within(center).getByTestId('review-expression-cards');
+  // The subject's code locations are the reading column's blocks under its heading, for every
+  // subject alike (MIK-R89 v2 rule 2); the slot keeps the statement, then the judgment.
+  expect(within(center).queryByTestId('review-expression-cards')).toBeNull();
   const judgment = within(center).getByTestId('review-center-judgment');
   expect(
-    statement.compareDocumentPosition(expressions) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
-  expect(
-    expressions.compareDocumentPosition(judgment) & Node.DOCUMENT_POSITION_FOLLOWING,
+    statement.compareDocumentPosition(judgment) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   expect(judgment.dataset.judgmentState).toBe('none');
   expect(judgment.textContent).toContain(noFamily.payload!.judgment.detail);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 from agents_remember.application.review_candidate_resolution import (
@@ -9,8 +10,9 @@ from agents_remember.application.review_candidate_resolution import (
     recorded_leaf_contract,
     review_context_refusal,
 )
+from agents_remember.application.review_committed_leaf import resolve_review_comparison
 from agents_remember.application.review_comparison_generation import leaf_generation_root
-from agents_remember.application.review_intent_summary import read_review_intent_summary
+from agents_remember.application.review_intent_summary import summarize_review
 from agents_remember.application.review_tree_comparison import comparison_directory
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.changeset_cache import (
@@ -29,7 +31,9 @@ def _repository(path: Path, *, working: bool = False) -> ReadInput:
     return RepositoryRead(path, working=working, references=("HEAD",)) if path.exists() else path
 
 
-def _initial(config: McpRuntimeConfig, repo: str, master: str, leaf: str) -> tuple[ReadInput, ...]:
+def _initial(
+    config: McpRuntimeConfig, repo: str, master: str, leaf: str, number: int | None
+) -> tuple[ReadInput, ...]:
     if review_context_refusal(repo, master, leaf) is not None:
         return ()  # The native reader returns its unchanged refusal; follow no invalid path.
     task_root = config.coordination_root / "tasks" / repo / master
@@ -43,6 +47,11 @@ def _initial(config: McpRuntimeConfig, repo: str, master: str, leaf: str) -> tup
         contract.contract_path.parent / "knowledge-worklist.json",
         _repository(contract.code_repo_path),
     ]
+    if number is not None:
+        # A numbered summary reads that record whether the leaf is live or not (MIK-R89 v2 rule
+        # 10), so the comparison directory, which decides whether the number is recorded at all,
+        # is an input of it as it is of a closed leaf's.
+        inputs.append(comparison_directory(task_root, leaf))
     if contract.code_worktree is None or not contract.code_worktree.exists():
         inputs.extend(
             (comparison_directory(task_root, leaf), leaf_generation_root(task_root, leaf))
@@ -73,12 +82,15 @@ def _resolved(resolved: ReviewCandidateResolution) -> tuple[ReadInput, ...]:
 
 
 def review_intent_summary_port(config: McpRuntimeConfig) -> ReviewIntentSummaryPort:
-    def read(repo: str, master: str, leaf: str, observe: Observe):
+    def read(repo: str, master: str, leaf: str, number: int | None, observe: Observe):
+        # The leaf's own resolution, or its recorded comparison ``number`` (MIK-R89 v2 rule 10).
+        resolve = partial(resolve_review_comparison, config, repo, master, leaf, number)
         with memo_capture_baselines(on_capture=observe_repository_capture):
-            return read_review_intent_summary(
-                config, repo, master, leaf, observe=lambda resolved: observe(_resolved(resolved))
+            return summarize_review(
+                resolve, repo, master, leaf, observe=lambda resolved: observe(_resolved(resolved))
             )
 
     return ReviewIntentSummaryPort(
-        inputs=lambda repo, master, leaf: _initial(config, repo, master, leaf), read=read
+        inputs=lambda repo, master, leaf, number: _initial(config, repo, master, leaf, number),
+        read=read,
     )

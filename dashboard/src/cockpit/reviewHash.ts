@@ -23,6 +23,38 @@ export function reviewHash(target: ChangeSetTarget): string {
   return `#review?${params}`;
 }
 
+// The review page's own part of its hash (MIK-R89 v2 rules 9 and 10): the selection, as rule 13's
+// identity (`sel=`, panels/review/blockIdentity.ts `formatSelection`), and the comparison on screen
+// when it is not the latest (`comparison=<n>`). The page writes it with `history.replaceState`: a
+// selection adds no history entry and fires no `hashchange`, so the reason of the comment in
+// `useReviewHash` below holds, and a reload restores what was selected. The target's own keys
+// (repo, master, leaf, history) are never touched here.
+export interface ReviewHashState {
+  sel: string | null;
+  comparison: number | null;
+}
+
+export function readReviewHashState(hash: string = window.location.hash): ReviewHashState {
+  if (!hash.startsWith('#review?')) return { sel: null, comparison: null };
+  const params = new URLSearchParams(hash.slice('#review?'.length));
+  const raw = params.get('comparison');
+  const number = raw !== null && /^\d+$/.test(raw) ? Number(raw) : null;
+  return { sel: params.get('sel') || null, comparison: number };
+}
+
+export function writeReviewHashState(state: ReviewHashState): void {
+  const hash = window.location.hash;
+  if (!hash.startsWith('#review?')) return;
+  const params = new URLSearchParams(hash.slice('#review?'.length));
+  params.delete('sel');
+  params.delete('comparison');
+  if (state.comparison !== null) params.set('comparison', String(state.comparison));
+  if (state.sel) params.set('sel', state.sel);
+  const next = `#review?${params}`;
+  if (next === hash) return;
+  window.history.replaceState(window.history.state, '', next);
+}
+
 export function useReviewHash(
   setView: (view: 'operations' | 'knowledge') => void,
   setNotesOpen: (open: boolean) => void,

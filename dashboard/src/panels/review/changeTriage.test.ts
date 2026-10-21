@@ -11,6 +11,7 @@ import {
   mergeChangeKinds,
   orderFamilies,
   orderMemberRows,
+  outlineGroups,
 } from './changeTriage';
 import { mergeFamilyContinuation } from './familyWalkMerge';
 import { memberRows } from './FamilyTree';
@@ -29,7 +30,7 @@ const labelled = (entries: ReviewFamilyContextEntry[]) =>
   entries.map((entry) => entry.display_label);
 const only = (result: ReviewResult): ReviewFamilyContextEntry =>
   result.payload!.family_context!.entries.find((entry) => entry.display_label === 'FAM-F00001')!;
-const invariants = (entry: ReviewFamilyContextEntry, order: 'triage' | 'authored') =>
+const invariants = (entry: ReviewFamilyContextEntry, order: 'priority' | 'authored') =>
   orderMemberRows(entry, memberRows(entry), order).map((row) => row.member.display_label);
 
 describe('family triage', () => {
@@ -120,7 +121,7 @@ describe('family triage', () => {
 describe('tree order', () => {
   it('lists changes first by weight then authored position, keeping every sibling', () => {
     // INV-AAAAAA is revised, so it has two rows (one per revision); they stay together.
-    expect(invariants(only(family), 'triage')).toEqual([
+    expect(invariants(only(family), 'priority')).toEqual([
       'INV-AAAAAA',
       'INV-AAAAAA',
       'INV-HHHHHH',
@@ -153,7 +154,7 @@ describe('tree order', () => {
     const entries = shared.payload!.family_context!.entries;
     expect(labelled(entries)).toEqual(['FAM-F00001', 'FAM-F00002']);
     // Both weigh intent (a revised member; a revised guarantee): the context order stands.
-    expect(labelled(orderFamilies(entries, 'triage'))).toEqual(['FAM-F00001', 'FAM-F00002']);
+    expect(labelled(orderFamilies(entries, 'priority'))).toEqual(['FAM-F00001', 'FAM-F00002']);
     // SYNTHETIC: the first family's facts made all-unchanged, so the revised guarantee leads.
     const [first, second] = entries;
     const quiet: ReviewFamilyContextEntry = {
@@ -167,7 +168,7 @@ describe('tree order', () => {
         })),
       },
     };
-    expect(labelled(orderFamilies([quiet, second], 'triage'))).toEqual([
+    expect(labelled(orderFamilies([quiet, second], 'priority'))).toEqual([
       'FAM-F00002',
       'FAM-F00001',
     ]);
@@ -193,7 +194,7 @@ describe('tree order', () => {
     const partial = { ...unchanged(only(page)), family_id: 'partial' };
     expect(familyTriage(complete)!.weight).toBe(0);
     expect(familyTriage(partial)!.weight).toBe(1);
-    expect(orderFamilies([complete, partial], 'triage').map((entry) => entry.family_id)).toEqual([
+    expect(orderFamilies([complete, partial], 'priority').map((entry) => entry.family_id)).toEqual([
       'partial',
       complete.family_id,
     ]);
@@ -234,5 +235,52 @@ describe('roster walk', () => {
     expect(merged.members_total).toBeUndefined();
     expect(mergeChangeKinds(undefined, undefined)).toBeUndefined();
     expect(mergeChangeKinds(a, undefined)).toBe(a);
+  });
+});
+
+// Finding 2: a row is named by its text id wherever a read gives one. Without an outline, the
+// catalogue's label (an invariant's INV- id) names the row; an outline family's member the outline's
+// invariants do not list takes its own outline id, else the catalogue's label. The selector id is the
+// row's key, never its name.
+describe('row names', () => {
+  const catalogue = [
+    { selector_kind: 'invariant' as const, selector_id: '8b1a17ca-96ba-5ede-a09f-abfb11ada0a5', label: 'INV-1XKX9ERN', presence: 'both' as const },
+    { selector_kind: 'family' as const, selector_id: 'f0', label: 'attribution-and-landing-pairing', presence: 'both' as const },
+  ];
+
+  it('names a catalogue row by its label, keeping its selector id as the key', () => {
+    const rows = outlineGroups(undefined, catalogue, [], 'priority').flatMap((group) => [
+      ...(group.family ? [group.family] : []),
+      ...group.members,
+    ]);
+    expect(rows.map((row) => [row.id, row.selectorId])).toEqual([
+      ['attribution-and-landing-pairing', 'f0'],
+      ['INV-1XKX9ERN', '8b1a17ca-96ba-5ede-a09f-abfb11ada0a5'],
+    ]);
+  });
+
+  it("names an outline family's unlisted member by the catalogue's label", () => {
+    const outline = {
+      state: 'outlined' as const,
+      detail: '',
+      families: [
+        {
+          selector_id: 'f0',
+          id: 'FAM-AAAAAA',
+          title: 'A family',
+          change: 'unchanged' as const,
+          members: [
+            { selector_id: '8b1a17ca-96ba-5ede-a09f-abfb11ada0a5', id: '', membership: 'both' as const },
+            { selector_id: 'unlisted-own-id', id: 'INV-OWN', membership: 'both' as const },
+          ],
+        },
+      ],
+      invariants: [],
+    };
+    const [group] = outlineGroups(outline, catalogue, [], 'authored');
+    expect(group.members.map((row) => [row.id, row.title])).toEqual([
+      ['INV-1XKX9ERN', 'INV-1XKX9ERN'],
+      ['INV-OWN', 'INV-OWN'],
+    ]);
   });
 });

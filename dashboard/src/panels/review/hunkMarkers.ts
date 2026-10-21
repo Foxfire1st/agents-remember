@@ -311,8 +311,3 @@ export function markAnchor(
   const below = Math.min(Math.max(hunk.after.start + 1, first), Math.max(first, last));
   return { side: 'after', line: below };
 }
-
-// The whole text of a side, as a window.
-export function wholeSide(lines: number): SideWindow {
-  return { first: 1, last: lines };
-}

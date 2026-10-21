@@ -13,7 +13,9 @@ review composition does not already show, and nothing more (rules 2 and 3):
 * **The entries (MIK-R31).** When the query names invariants, the view answers only their
   realization and proof entries, located on both code sides with each range's excerpt, for the
   reviewer's focused expression cards (:mod:`.review_tree_entries`). The cards of one selection are
-  read on demand, so the leaf-wide view never carries every excerpt of the repository.
+  read on demand, so the leaf-wide view never carries every excerpt of the repository. Each entry
+  also carries its four memory values, read at the after-side index (MIK-R89 v2 rule 3), and the
+  answer's ``entry_memory`` says whether they could be read.
 * **The unexplained-changes lane (MIK-R32).** ``lane`` answers only the lane's two destinations, and
   ``file`` only one changed path's classification (:mod:`.review_unexplained_lane`); the worklist
   view of rule 3 stays in the leaf-wide view beside them.
@@ -63,7 +65,7 @@ from agents_remember.application.review_tree_comparison import (
     ReviewTrees,
     reopen_review_trees,
 )
-from agents_remember.application.review_tree_entries import tree_entries
+from agents_remember.application.review_tree_entries import CardEntries, tree_entries
 from agents_remember.application.review_tree_state import history_rows as _history_rows
 from agents_remember.application.review_tree_state import side_currentness
 from agents_remember.application.review_unexplained_lane import (
@@ -96,7 +98,6 @@ from agents_remember.models.knowledge.review_lane import (
     ReviewFileClassification,
     ReviewUnexplainedLane,
 )
-from agents_remember.models.knowledge.review_tree_entries import ReviewTreeEntry
 from agents_remember.models.knowledge.review_trees import (
     ReviewKnowledgeFileChange,
     ReviewKnowledgeRecordGroup,
@@ -182,7 +183,7 @@ def _read_review_trees(
     if query.lane:
         return _focused(query, trees, lane=unexplained_lane(trees))
     if query.invariants:
-        return _focused(query, trees, entries=tree_entries(trees, query.invariants))
+        return _focused(query, trees, cards=tree_entries(trees, query.invariants))
     return _view(query, contract, trees, processes=processes)
 
 
@@ -338,11 +339,15 @@ def _focused(
     query: ReviewTreesQuery,
     trees: ReviewTrees,
     *,
-    entries: tuple[ReviewTreeEntry, ...] = (),
+    cards: CardEntries | None = None,
     lane: ReviewUnexplainedLane | None = None,
     file_classification: ReviewFileClassification | None = None,
 ) -> ReviewTreesResult:
-    """The comparison and one focused answer: the cards' entries, the lane, or one file."""
+    """The comparison and one focused answer: the cards' entries, the lane, or one file.
+
+    Only the cards' answer carries ``entry_memory`` (MIK-R89 v2 rule 3); the lane and file answers,
+    like the leaf-wide view, are unchanged by it.
+    """
 
     return ReviewTreesResult(
         state="trees",
@@ -352,7 +357,8 @@ def _focused(
         comparison=trees.record,
         knowledge_sides=trees.sides(),
         code_sides=trees.code_sides,
-        entries=entries,
+        entries=() if cards is None else cards.entries,
+        entry_memory=None if cards is None else cards.memory,
         lane=lane,
         file_classification=file_classification,
     )

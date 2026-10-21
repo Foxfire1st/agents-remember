@@ -12,6 +12,7 @@ import {
   readFileClassification,
 } from '../../data/reviewLane';
 import type { MarkTarget } from './hunkMarkers';
+import { useReadGate } from './reading/readGate';
 
 // Where a followed marker sat: the file, the pane that drew it and the owner hunk it marks.
 export interface MarkerAt {
@@ -170,39 +171,53 @@ function useClassificationCache(
   return { classify, peek };
 }
 
-// One path's classification for the pane that draws it: `given` when the caller already holds it
-// (the lane's own read), else the scope's shared read -- only for a changed path of a tree comparison.
-export function useMarkClassification(
+// A path's read through the reading column's gate, unless the scope already holds its answer.
+function gatedClassify(
+  classify: IntentMarkerScopeValue['classify'],
   path: string,
-  active: boolean,
-  given?: ReviewFileClassification,
-): MarkRead {
+  gate: ReturnType<typeof useReadGate>,
+  peek: IntentMarkerScopeValue['peek'] | undefined,
+): Promise<LaneRead<ReviewFileClassification> | null> {
+  const ask = () => classify(path);
+  return gate && peek?.(path) === undefined ? gate.run(async () => ask()) : Promise.resolve(ask());
+}
+
+// One path's classification for the pane that draws it: the scope's shared read -- only for a changed
+// path of a tree comparison.
+export function useMarkClassification(path: string, active: boolean): MarkRead {
   const scope = useContext(IntentMarkerScope);
   const classify = scope?.classify;
-  const asking = active && given === undefined && scope !== null && scope.listed(path);
+  const asking = active && scope !== null && scope.listed(path);
   // An answer is kept with the read that gave it, so another path's or comparison's never draws.
   const [answer, setAnswer] = useState<{
     classify: IntentMarkerScopeValue['classify'];
     path: string;
     read: MarkRead;
   } | null>(null);
+  // On the review page a file's read waits for a place in the reading column's gate (at most
+  // READ_BATCH files at a time); a classification the scope already holds needs none.
+  const gate = useReadGate();
+  const peek = scope?.peek;
   useEffect(() => {
     if (!asking || !classify) return undefined;
-    const pending = classify(path);
-    if (!pending) {
-      setAnswer({ classify, path, read: { phase: 'none' } });
-      return undefined;
-    }
+    const pending = gatedClassify(classify, path, gate, peek);
     let live = true;
     void pending.then((read) => {
-      if (live) setAnswer({ classify, path, read });
+      if (live) setAnswer({ classify, path, read: read ?? { phase: 'none' } });
     });
     return () => {
       live = false;
     };
-  }, [asking, classify, path]);
+  }, [asking, classify, path, gate, peek]);
   if (!scope || !active) return { phase: 'none' };
-  if (given !== undefined) return { phase: 'ready', value: given };
+  return listedRead(scope, path, answer);
+}
+
+function listedRead(
+  scope: IntentMarkerScopeValue,
+  path: string,
+  answer: Parameters<typeof shownRead>[2],
+): MarkRead {
   // A complete inventory that does not list the path: the file is unchanged, and there is nothing to
   // mark. A partial one: the file may have changed, and its marks are not read -- which is said.
   if (!scope.listed(path)) return scope.partial ? { phase: 'unlisted' } : { phase: 'none' };

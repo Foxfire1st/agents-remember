@@ -15,6 +15,7 @@ import type {
 } from '../../data/review';
 import type { MarkTarget } from './hunkMarkers';
 import { IntentMarkerScope } from './intentMarkerScope';
+import { familyStateWords } from './stateWords';
 
 export const ATTRIBUTION_UNKNOWN = 'Attribution unknown';
 
@@ -157,7 +158,7 @@ export function InvariantTargetState({
         <div data-review-content>
           <strong>The review&apos;s family context</strong>
           <p className={muted}>
-            {context.state}: {context.detail}
+            {familyStateWords(context.state)}: {context.detail}
           </p>
         </div>
       ) : null}

@@ -28,6 +28,7 @@ import {
 } from '../../data/changeset';
 import { type ReviewFailure, reviewProblemFromCause } from '../../data/review';
 import { EmptyStateBackdrop } from '../EmptyStateBackdrop';
+import { SidebarToggle, sidebarHandleProps, sidebarPanelProps, useSidebar } from '../../grammar/SidebarToggle';
 import type { ReviewSelectorKind } from '../../data/review';
 import {
   reviewFileBadges,
@@ -699,7 +700,11 @@ function ChangeSetWorkspace({
   leaves,
   onOpenLeaf,
   reviewContext,
+  railOpen = true,
 }: {
+  // The changed-file list's shared toggle hid it (MIK-R89 v2 rule 8): it stays mounted, out of
+  // the row, and the diff takes its width. Narrow, it is the stacked list above the diff.
+  railOpen?: boolean;
   error: ReviewFailure | null;
   data: TaskChangeset | MasterChangeset | null;
   active: { kind: 'code' | 'memory'; path: string; hasSidecar?: boolean } | null;
@@ -729,7 +734,7 @@ function ChangeSetWorkspace({
       autoSaveId={narrow ? 'changeset.narrow' : 'changeset.outer'}
       className={css({ flex: '1', minHeight: '0' })}
     >
-      <Panel {...railSize}>
+      <Panel {...railSize} {...sidebarPanelProps(railOpen)}>
         <ChangeSetRail
           data={data}
           active={active}
@@ -739,7 +744,7 @@ function ChangeSetWorkspace({
           reviewContext={reviewContext}
         />
       </Panel>
-      <PanelResizeHandle className={handle} />
+      <PanelResizeHandle className={handle} {...sidebarHandleProps(railOpen)} />
       <Panel minSize={20}>
         <ChangeSetMainPane
           diff={diff}
@@ -1005,12 +1010,20 @@ export function ChangeSetViewer(
     counters,
     headerLabel,
   } = useChangesetState(props);
+  const rail = useSidebar('changeset', 'left');
   return (
     <div className={screen} data-testid="changeset-viewer" data-kbzone="changeset">
       <header className={header}>
         <button type="button" className={back} onClick={onBack} data-testid="changeset-back">
           {comparison === undefined ? '← back' : '← Back to intent review'}
         </button>
+        <SidebarToggle
+          side="left"
+          open={rail.open}
+          onToggle={rail.toggle}
+          name="Changed files sidebar"
+          testId="sidebar-toggle-changeset-left"
+        />
         <span className={title}>change-set · {headerLabel}</span>
         <ComparisonTreesTag data={data} />
         <SeriesGenerationTag meta={seriesMeta} />
@@ -1019,6 +1032,7 @@ export function ChangeSetViewer(
 
       <ReviewFilters context={reviewContext} data={data} filter={filter} onFilter={setFilter} />
       <ChangeSetWorkspace
+        railOpen={rail.open}
         error={error}
         data={shown}
         diffError={diffError}

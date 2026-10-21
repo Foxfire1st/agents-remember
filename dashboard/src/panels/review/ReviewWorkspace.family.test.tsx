@@ -2,11 +2,16 @@
 // Family selectors are served only their own captured bodies. Bounded invariant captures
 // additionally exercise FamilyReviewCenter's roster projection directly: this is component
 // evidence, not a claim that those bytes answered a family-selector HTTP request.
+// The review page (MIK-R89 v2) retired three cases here: the layout select and Expand full file
+// (rule 4: the layout follows the column's width, "Changes only | Full context" replaces the full
+// file), the rail's maxHeight reveal (the tree keeps its place after a tree click, rule 9:
+// reading/ReviewPage.selection.test.tsx), and the narrow jump route (rule 11: at 390 px the tree
+// stacks above the reading column).
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
-import type { ReviewResult } from '../../data/review';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ReviewResult, ReviewRevisionWriter } from '../../data/review';
 import { REVIEW_PAGED_COLLECTIONS, REVIEW_WALKABLE_COLLECTIONS } from '../../data/review';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
 import { FamilyReviewCenter } from './FamilyReviewCenter';
@@ -44,6 +49,35 @@ const SOURCE_REFUSAL = {
     next_action: 'Read the served source endpoint.',
   },
 };
+// The summary read (read 1 of the review page, MIK-R89 v2 rule 2) was not captured with these
+// bodies: this answer is composed, its change total the first body's own measured source inventory.
+function summaryOf(body: ReviewResult) {
+  const { candidate, source } = body.payload!;
+  return {
+    state: 'counted',
+    operation: 'review-intent-summary',
+    repository_id: candidate.repository_id,
+    master: candidate.master,
+    leaf_id: candidate.leaf_id,
+    counts: {
+      added: 0,
+      removed: 0,
+      invariants: { after_only: 0, before_only: 0 },
+      guarantees: { after_only: 0, before_only: 0 },
+      realization_only: 0,
+      membership_only: 0,
+      unresolved: 0,
+    },
+    attribution: {
+      state: 'counted',
+      changed_total: source.inventory.listed_total,
+      attributed: source.inventory.listed_total,
+      unexplained: 0,
+      attribution_unknown: 0,
+      unmeasured: [],
+    },
+  };
+}
 const family = (body: ReviewResult) => body.payload!.family_context!.entries[0];
 const selected = (body: ReviewResult) => body.payload!.knowledge.revision_selection!;
 const response = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response;
@@ -81,6 +115,9 @@ function serving(first: ReviewResult = FAMILY, next: ReviewResult[] = []) {
       const url = new URL(address, 'http://localhost');
       urls.push(url);
       if (url.pathname.endsWith('/source-content')) return response(SOURCE_REFUSAL);
+      // A real Response: the summary's conditional read keeps the answer's ETag header.
+      if (url.pathname === '/api/review/intent/summary')
+        return new Response(JSON.stringify(summaryOf(first)), { status: 200 });
       if (url.pathname.endsWith('/trees')) {
         if (!url.searchParams.has('invariants'))
           return response(url.searchParams.has('lane') ? LANE : TREES);
@@ -141,13 +178,8 @@ function roster(body: ReviewResult, memberRevisionId?: string) {
       payload={body.payload!}
       selection={{ familyId: entry.family_id, memberRevisionId }}
       layout="split"
-      onLayout={vi.fn()}
-      fullFile={false}
-      onFullFile={vi.fn()}
       onOpenMember={vi.fn()}
       onRosterNext={onRosterNext}
-      openPath={null}
-      onOpenPath={vi.fn()}
       onOpenFromCenter={vi.fn()}
     />,
   );
@@ -175,12 +207,13 @@ it('renders the real family, its authored guarantee and full member statements',
   const view = mount();
   const center = await view.findByTestId('review-center-family');
   expect(view.getAllByTestId('review-family')).toHaveLength(2);
-  expect(view.getByTestId('review-family-tree').querySelector('details')).toBeNull();
+  expect(view.getByTestId('review-tree').querySelector('details')).toBeNull();
   expect(center.dataset.family).toBe(family(FAMILY).family_id);
   expect(view.getByTestId('review-center-guarantee-label').textContent).toBe(
     'Changed guarantee · revision r1 → r3',
   );
-  const members = within(center).getByTestId('review-center-family-members');
+  // The members follow the family's content and its members' code (MIK-R89 v2 rule 1, 9dde2b09).
+  const members = within(view.getByTestId('review-center-family-details')).getByTestId('review-center-family-members');
   expect(within(members).getAllByTestId('review-center-open-member')).toHaveLength(5);
   for (const before of family(FAMILY).before.members) {
     const after = family(FAMILY).after.members.find(
@@ -248,17 +281,14 @@ it('keeps All changes and the complete source population independent of family s
   serving();
   const view = mount();
   const workspace = await view.findByTestId('review-workspace');
-  const all = within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
-    name: /^All changes/,
-  });
-  expect(all.textContent).toContain(String(FAMILY.payload!.source.inventory.listed_total));
+  // The tree's one All changes link (rule 7), counted by the summary read.
+  const all = view.getByTestId('review-all-changes');
+  const total = `All changes ${FAMILY.payload!.source.inventory.listed_total}`;
+  await waitFor(() => expect(all.textContent).toBe(total));
   fireEvent.click(familyButton(view, family(IDENTICAL).family_id));
   await view.findByTestId('review-center-guarantee-unchanged');
-  expect(
-    within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
-      name: /^All changes/,
-    }),
-  ).toBe(all);
+  expect(view.getByTestId('review-all-changes')).toBe(all);
+  expect(all.textContent).toBe(total);
   expect(view.getByTestId('review-workspace')).toBe(workspace);
   expect(view.queryByTestId('review-source-explorer')).toBeNull();
 });
@@ -279,23 +309,129 @@ it('sends the published family cursor and rejects a response from another walk',
   const cursor = next.dataset.continuation!;
   expect(cursor).toBe(family(TRUNCATED).before.page!.continuation);
   fireEvent.click(next);
-  const failure = await view.findByTestId('review-failure');
-  expect(failure.dataset.reviewCode).toBe('comparison_page_unreadable');
+  // The page's other reads may state their own failures; this one is the walk's.
+  await waitFor(() =>
+    expect(
+      view.getAllByTestId('review-failure').map((node) => node.dataset.reviewCode),
+    ).toContain('comparison_page_unreadable'),
+  );
   expect(server.reviews()[1].searchParams.get('continuation')).toBe(cursor);
   expect(server.reviews()[1].searchParams.get('pageOf')).toBe('family_members');
   expect(view.getByTestId('review-retained-generation')).toBeTruthy();
 });
 
-it('keeps expanded full-file and inline layout state across actual family selections', async () => {
-  serving();
-  const view = mount();
-  await view.findByTestId('review-center-family');
-  fireEvent.change(view.getByTestId('review-center-diff-layout'), { target: { value: 'inline' } });
-  fireEvent.click(view.getByTestId('review-center-full-file'));
-  fireEvent.click(familyButton(view, family(IDENTICAL).family_id));
-  await view.findByTestId('review-center-guarantee-unchanged');
-  expect(view.getByTestId('review-workspace').dataset.fullFile).toBe('true');
-  expect(view.getByTestId('review-workspace').dataset.diffLayout).toBe('inline');
+// MIK-R89 v2 rules 1 and 6, amended 9dde2b09 (D396): a selected subject reads content first. The
+// family's meta line, its guarantee's word diff, its recorded steps and judgment stand under its
+// heading; its members' sections follow, then its member roster; its state sentences, its origin
+// and its revision ids are in the closed Technical details.
+const follows = (first: Node, second: Node) =>
+  Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+describe('a selected family reads content first', () => {
+  it('opens with its meta line, guarantee diff, steps and judgment, then its members, then its roster', async () => {
+    serving();
+    const view = mount();
+    const content = await view.findByTestId('review-center-family');
+    const entry = family(FAMILY);
+    const heading = view.getAllByTestId('review-family-heading').find((node) => node.dataset.family === entry.family_id)!;
+    const slot = within(heading).getByTestId('review-subject-slot');
+    const meta = within(slot).getByTestId('review-subject-meta');
+    // Read in full and written by the reviewed task: nothing beyond the kind and the revisions.
+    expect(meta.textContent).toBe('family · revision 1 → 3');
+    const order = [
+      meta,
+      within(content).getByTestId('review-center-guarantee-changed'),
+      within(content).getByTestId('intent-diff-layout-control'),
+      within(content).getByTestId('review-recorded-steps'),
+      within(content).getByTestId('review-family-judgment'),
+    ];
+    const group = heading.closest<HTMLElement>('[data-testid="review-subject-group"]')!;
+    const members = within(group).getAllByTestId('review-subject-section');
+    const after = within(group).getByTestId('review-subject-after-code');
+    order.push(members[0], after, within(after).getByTestId('review-center-family-members'));
+    for (let index = 1; index < order.length; index += 1) expect(follows(order[index - 1], order[index])).toBe(true);
+    // Before the members: no state sentence, origin, revision id, frame or writer line.
+    const before = slot.textContent!;
+    for (const text of [entry.detail, entry.selection.statement, entry.after.family_revision_id!, 'origin', 'introduced by', 'Family comparison details', 'family contexts read', 'Selected'])
+      expect(before).not.toContain(text);
+    expect(within(slot).queryByTestId('review-subject-family-chip')).toBeNull();
+    expect(within(slot).queryByTestId('review-subject-carried')).toBeNull();
+    // All of it stays reachable in the closed fold.
+    const fold = view.getByTestId('review-details') as HTMLDetailsElement;
+    expect(fold.open).toBe(false);
+    const provenance = within(fold).getByTestId('review-subject-provenance').textContent!;
+    for (const text of [entry.detail, entry.selection.statement, entry.after.family_revision_id!, 'introduced by'])
+      expect(provenance).toContain(text);
+  });
+
+  it('shows a partial family read as one short chip that continues the roster walk', async () => {
+    const server = serving(TRUNCATED, [CONTINUED]);
+    const view = mount(TRUNCATED);
+    await view.findByTestId('review-center-member');
+    const meta = within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta');
+    const chip = within(meta).getByTestId('review-subject-family-chip');
+    const page = family(TRUNCATED).before.page!;
+    expect(chip.textContent).toBe(`family context partial · ${page.counts.primary_items_remaining} of ${page.counts.primary_items_total} not shown`);
+    expect(chip.dataset.familyState).toBe('partial');
+    // The family's full sentence is the fold's, not the slot's.
+    expect(view.getByTestId('review-subject-slot').textContent).not.toContain(TRUNCATED.payload!.family_context!.detail);
+    expect(view.getByTestId('review-family-context-detail').textContent).toContain(TRUNCATED.payload!.family_context!.detail);
+    fireEvent.click(chip);
+    await waitFor(() => expect(server.reviews()).toHaveLength(2));
+    expect(server.reviews()[1].searchParams.get('continuation')).toBe(page.continuation);
+    expect(server.reviews()[1].searchParams.get('pageOf')).toBe('family_members');
+  });
+
+  // The source is the after revision's writer, as its tree's history files record it (MIK-R89 v2
+  // rules 1 and 6, 9dde2b09); a writer no file records is said as that, never guessed.
+  const CARRIED: [string, ReviewRevisionWriter, string][] = [
+    ['its recorded writer', { state: 'recorded', owners: ['260928-MIK-L181'], detail: 'revision 3 of FAM-68H10P is the changed row of 260928-MIK-L181' }, 'carried in from 260928-MIK-L181'],
+    ['no recorded writer', { state: 'not_recorded', owners: [], detail: 'no history file records writing revision 3 of FAM-68H10P' }, 'carried in · source not recorded'],
+    ['an unread history', { state: 'unavailable', owners: [], detail: 'the after memory index is incomplete (1 file(s) failed)' }, 'carried in · source unavailable'],
+  ];
+
+  function carriedFamily(writer: ReviewRevisionWriter | null): ReviewResult {
+    const carried = structuredClone(FAMILY);
+    const payload = carried.payload!;
+    payload.judgment = { ...payload.judgment, state: 'none', rows: [], detail: 'This leaf recorded no judgment about this record' };
+    const steps = payload.meaning_effects!.records.find((record) => record.record === family(FAMILY).family_id)!;
+    Object.assign(steps, { state: 'none', steps: [], detail: 'No meaning effect recorded by this leaf' });
+    if (writer) payload.knowledge.revision_selection!.after_writer = writer;
+    return carried;
+  }
+
+  it.each(CARRIED)('names a change the reviewed task did not write by its source: %s', async (_, writer, text) => {
+    const carried = carriedFamily(writer);
+    serving(carried);
+    const view = mount(carried);
+    await view.findByTestId('review-center-family');
+    const meta = within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta');
+    const chip = within(meta).getByTestId('review-subject-carried');
+    expect(chip.textContent).toBe(text);
+    expect(chip.getAttribute('title')).toBe(writer.detail);
+    expect(meta.textContent).toBe(`family · revision 1 → 3 · ${text}`);
+  });
+
+  it('shows no chip for a revision the reviewed task wrote, nor a writer', async () => {
+    const carried = carriedFamily(null);
+    const leaf = carried.payload!.candidate.leaf_id;
+    carried.payload!.knowledge.revision_selection!.after_writer = { state: 'recorded', owners: [leaf], detail: `revision 3 is the changed row of ${leaf}` };
+    serving(carried);
+    const view = mount(carried);
+    await view.findByTestId('review-center-family');
+    const meta = within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta');
+    expect(within(meta).queryByTestId('review-subject-carried')).toBeNull();
+    expect(meta.textContent).toBe('family · revision 1 → 3');
+  });
+
+  it('names an unread source when the read carries no writer', async () => {
+    const carried = carriedFamily(null);
+    serving(carried);
+    const view = mount(carried);
+    await view.findByTestId('review-center-family');
+    const meta = within(view.getByTestId('review-subject-slot')).getByTestId('review-subject-meta');
+    expect(within(meta).getByTestId('review-subject-carried').textContent).toBe('carried in · source not read');
+  });
 });
 
 it('marks the selection and traverses the intact tree by keyboard', async () => {
@@ -311,45 +447,10 @@ it('marks the selection and traverses the intact tree by keyboard', async () => 
   expect(document.activeElement).toBe(members[0]);
 });
 
-it.each([false, true])('reveals an in-tree selection only inside its panel (narrow=%s)', async (narrow) => {
-  // Synthetic geometry tests the mounted caller; real-browser evidence measures actual clipping.
-  vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: narrow && /max-width/.test(query), media: query, onchange: null,
-    addEventListener: vi.fn(), removeEventListener: vi.fn(),
-    addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
-  }));
-  serving();
-  const view = mount();
-  await view.findByTestId('review-center-family');
-  const row = familyButton(view, family(IDENTICAL).family_id);
-  const panel = row.closest<HTMLElement>('[data-review-tree-panel]')!;
-  const surface = view.getByTestId('review-surface');
-  surface.scrollTop = 77;
-  const height = () => Math.min(400, Number.parseFloat(panel.style.maxHeight) || 400);
-  const surfaceBounds = vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({ top: 0, bottom: 300 } as DOMRect);
-  const panelBounds = vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(() => ({ top: 100, bottom: 100 + height() } as DOMRect));
-  const rowBounds = vi.spyOn(row, 'getBoundingClientRect').mockImplementation(() => ({ top: 480 - panel.scrollTop, bottom: 500 - panel.scrollTop } as DOMRect));
-  const focused = vi.spyOn(row, 'focus');
-  try {
-    fireEvent.click(row);
-    await view.findByTestId('review-center-guarantee-unchanged');
-    await waitFor(() => expect(document.activeElement).toBe(row));
-    expect(focused).toHaveBeenCalledWith({ preventScroll: true });
-    expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(300);
-    expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(100);
-    expect(panel.scrollTop).toBeGreaterThan(0);
-    // Keep the existing wide explicit-selection reset; narrow navigation preserves its common
-    // reading position. The new regression is the panel-local reveal at BOTH widths.
-    expect(surface.scrollTop).toBe(narrow ? 77 : 0);
-  } finally {
-    focused.mockRestore(); rowBounds.mockRestore(); panelBounds.mockRestore(); surfaceBounds.mockRestore();
-  }
-});
-
 it('filters by the actual captured label without restating comparison totals', async () => {
   serving();
   const view = mount();
-  await view.findByTestId('review-family-tree');
+  await view.findByTestId('review-tree');
   fireEvent.change(view.getByTestId('review-family-filter'), {
     target: { value: family(FAMILY).display_label!.replaceAll('-', ' ') },
   });
@@ -359,7 +460,7 @@ it('filters by the actual captured label without restating comparison totals', a
   fireEvent.change(view.getByTestId('review-family-filter'), {
     target: { value: 'no-such-family-anywhere' },
   });
-  expect(view.getByText('No rows match “no-such-family-anywhere”.')).toBeTruthy();
+  expect(view.getByTestId('review-tree-scroll').textContent).toContain('Nothing matches “no-such-family-anywhere”.');
 });
 
 it('states the bounded roster as the part of the measured rows it carried, never zero', () => {
@@ -464,8 +565,8 @@ it('retains a bounded before-only revision without claiming the invariant was re
   expect(before).toBeDefined();
   serving(CONTINUED);
   const view = mount(CONTINUED);
-  const tree = await view.findByTestId('review-family-tree');
-  expect(tree.querySelector(`[data-subject-id="${before.invariant_id}"]`)).not.toBeNull();
+  const tree = await view.findByTestId('review-tree');
+  await waitFor(() => expect(tree.querySelector(`[data-subject-id="${before.invariant_id}"]`)).not.toBeNull());
   expect(view.getByTestId('review-center-member-changed').dataset.revisionState).toBe('compared');
   expect(view.queryByTestId('review-center-member-one-sided')).toBeNull();
 });
@@ -480,7 +581,7 @@ it('prints the shared empty-roster sentence once in the reading path, never agai
   );
   expect(
     view
-      .getByTestId('review-family-tree')
+      .getByTestId('review-tree')
       .querySelector('[data-testid="review-center-family-empty"]'),
   ).toBeNull();
 });
@@ -508,8 +609,6 @@ it('keeps reader state across two admitted same-subject continuation requests', 
   fireEvent.change(view.getByTestId('review-family-filter'), {
     target: { value: family(first).display_label },
   });
-  fireEvent.change(view.getByTestId('review-center-diff-layout'), { target: { value: 'inline' } });
-  fireEvent.click(view.getByTestId('review-center-full-file'));
   const workspace = view.getByTestId('review-workspace');
   for (const [index, body] of steps.entries()) {
     const next = view
@@ -526,8 +625,6 @@ it('keeps reader state across two admitted same-subject continuation requests', 
       body.payload!.page!.continued_from,
     );
     expect(view.getByTestId('review-workspace')).toBe(workspace);
-    expect(workspace.dataset.fullFile).toBe('true');
-    expect(workspace.dataset.diffLayout).toBe('inline');
     expect((view.getByTestId('review-family-filter') as HTMLInputElement).value).toBe(
       family(first).display_label,
     );
@@ -561,27 +658,16 @@ it('states the actual added-family side as not recorded, not unreadable or a mea
   expect(view.queryByTestId('review-center-family-empty')).toBeNull();
 });
 
-it('composes the narrow jump route above the intact family tree and focuses the reading column', async () => {
-  serving();
-  const view = mount();
-  const jump = await view.findByTestId('review-jump-to-selection');
-  const tree = view.getByTestId('review-family-tree');
-  expect(jump.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(view.getAllByTestId('review-family')).toHaveLength(2);
-  expect(view.getAllByTestId('review-family-member-open').length).toBeGreaterThan(0);
-  fireEvent.click(jump);
-  expect(document.activeElement).toBe(view.getByTestId('review-center-column'));
-});
-
 it('renders deliberately omitted family context as unavailable, never as a measured zero', async () => {
   const body = structuredClone(MEMBER);
   delete body.payload!.family_context;
   serving(body);
   const view = mount(body);
-  await view.findByTestId('review-family-tree');
-  expect(view.getByTestId('review-scope-families').textContent).toContain(
-    'Family context was not supplied',
-  );
+  await view.findByTestId('review-tree');
+  // An unread family context is the meta line's chip; its sentence is in Technical details
+  // (MIK-R89 v2 rules 1 and 6, amended 9dde2b09).
+  expect((await view.findByTestId('review-subject-family-chip')).textContent).toBe('family context not read');
+  expect(view.getByTestId('review-family-context-detail').textContent).toContain('Family context was not supplied');
   expect(view.getByTestId('review-center-member')).toBeTruthy();
   expect(view.queryByTestId('review-center-family-empty')).toBeNull();
 });

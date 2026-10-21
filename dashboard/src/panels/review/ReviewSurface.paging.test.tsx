@@ -129,6 +129,18 @@ function response(body: unknown): Response {
 // the shipped client built (its URL and query string) rather than a value the test supplied.
 type FetchSignature = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+// The page makes its other opening reads (summary, outline, trees, lane; MIK-R89 v2 rule 2) beside
+// the review read, so a case counts and inspects the review reads by their route.
+const isReviewRead = (input: RequestInfo | URL) =>
+  new URL(String(input), 'http://localhost').pathname === '/api/review/intent';
+const reviewCalls = (fetchFn: { mock: { calls: Parameters<FetchSignature>[] } }) =>
+  fetchFn.mock.calls.filter(([input]) => isReviewRead(input));
+const notServed = () =>
+  response({
+    state: 'refused',
+    refusal: { code: 'not-served', detail: 'Only the review read is part of this check.', next_action: 'Open the review.' },
+  });
+
 const mountSubject = () =>
   render(
     <ReviewSurface
@@ -179,7 +191,8 @@ describe("the review surface's page control", () => {
 
   it('advances with the cursor the server published, and keeps the same collection', async () => {
     let call = 0;
-    const fetchFn = vi.fn<FetchSignature>(async () => {
+    const fetchFn = vi.fn<FetchSignature>(async (input) => {
+      if (!isReviewRead(input)) return notServed();
       call += 1;
       return response(
         reviewed(
@@ -211,8 +224,8 @@ describe("the review surface's page control", () => {
     const view = mountSubject();
     fireEvent.click(await view.findByTestId('review-next-page'));
 
-    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
-    const second = String(fetchFn.mock.calls[1][0]);
+    await waitFor(() => expect(reviewCalls(fetchFn)).toHaveLength(2));
+    const second = String(reviewCalls(fetchFn)[1][0]);
     // The request carries back exactly what the server published: the same collection name and the
     // opaque cursor verbatim, which is what makes the next page a continuation rather than a
     // re-read of page one.
@@ -295,8 +308,8 @@ describe("the review surface's page control", () => {
       target: { value: 'knowledge' },
     });
 
-    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
-    const requested = String(fetchFn.mock.calls[1][0]);
+    await waitFor(() => expect(reviewCalls(fetchFn)).toHaveLength(2));
+    const requested = String(reviewCalls(fetchFn)[1][0]);
     expect(requested).toContain('pageOf=knowledge');
     expect(requested).not.toContain('continuation=');
     const reset = await view.findByTestId('review-page-reset');
@@ -305,8 +318,8 @@ describe("the review surface's page control", () => {
     // The refusal does not dead-end the reader: the first page of the comparison that is there now is
     // one click away, and it is asked as the same collection with no cursor.
     fireEvent.click(view.getByTestId('review-first-page'));
-    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(3));
-    const firstAgain = String(fetchFn.mock.calls[2][0]);
+    await waitFor(() => expect(reviewCalls(fetchFn)).toHaveLength(3));
+    const firstAgain = String(reviewCalls(fetchFn)[2][0]);
     expect(firstAgain).toContain('pageOf=knowledge');
     expect(firstAgain).not.toContain('continuation=');
   });
@@ -477,7 +490,7 @@ describe("the review surface's page control", () => {
     expect(bounds.textContent).toContain('whole review');
     expect(view.queryByTestId('review-next-page')).toBeNull();
     expect(view.queryByTestId('review-first-page')).toBeNull();
-    const requested = String(fetchFn.mock.calls[0][0]);
+    const requested = String(reviewCalls(fetchFn)[0][0]);
     expect(requested).not.toContain('pageOf=');
     expect(requested).toContain('selectorKind=invariant');
     expect(requested).toContain(`selectorId=${SUBJECT}`);

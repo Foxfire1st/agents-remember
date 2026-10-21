@@ -5,10 +5,17 @@
 // Every mark comes from the one per-file classification (MIK-R32) through hunkMarkers.ts, placed on the
 // side line numbers it names. The marks sit in the diff's own gutter (file-viewer/markGutter.tsx); a
 // mark's list opens below the pane. Nothing here edits, comments on or assesses a change.
-import { useContext, useEffect, useId, useState, type ReactNode } from 'react';
+import {
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
 import { css } from '../../../styled-system/css';
-import type { ReviewSourceExpansion, ReviewSourceSide } from '../../data/review';
 import type { ReviewFileClassification } from '../../data/reviewLane';
 import type { ReviewTreeEntrySide } from '../../data/reviewTrees';
 import type { PaneMark, PaneMarks } from '../file-viewer/markGutter';
@@ -23,10 +30,10 @@ import {
   markAnchor,
   occurrenceLabel,
   sidesLabel,
-  wholeSide,
 } from './hunkMarkers';
 import {
   IntentMarkerScope,
+  type IntentMarkerScopeValue,
   type MarkRead,
   type MarkerAt,
   useMarkClassification,
@@ -108,14 +115,12 @@ const toneBadge = css({
 
 export interface PaneMarkInput {
   path: string;
-  // Which pane of the file this is ("file", "lane-full", "card:<key>", a lane window): a return
-  // restores the list and the focus in the pane the marker was followed from.
+  // Which pane of the file this is (a card's excerpt, `card-excerpt:<key>`): a return restores the
+  // list and the focus in the pane the marker was followed from.
   pane: string;
   file: ReviewFileClassification;
   layout: PaneLayout;
   window: PaneWindow;
-  // The pane draws the whole text: a hunk it cannot place lies past the text the read returned.
-  whole?: boolean;
 }
 
 export interface PaneMarking {
@@ -154,7 +159,6 @@ export function usePaneMarking(input: PaneMarkInput | null): PaneMarking {
     return anchor ? [{ mark, anchor }] : [];
   });
   const shown = placed.find((one) => one.mark.key === open)?.mark;
-  const unplaced = input.whole ? marks.hunks.length - placed.length : 0;
   const button = (mark: HunkMark) => (
     <MarkButton
       mark={mark}
@@ -187,7 +191,7 @@ export function usePaneMarking(input: PaneMarkInput | null): PaneMarking {
         }
       />
     ) : null,
-    note: unplaced > 0 ? <PastTextNote count={unplaced} /> : null,
+    note: null,
   };
 }
 
@@ -371,88 +375,6 @@ function FileMarkNote({ marks }: { marks: Extract<FileMarks, { kind: 'file' }> }
   );
 }
 
-function PastTextNote({ count }: { count: number }) {
-  return (
-    <p className={muted} data-testid="review-marks-past-text">
-      {count} hunk(s) lie past the bounded text drawn here and carry no mark in it.
-    </p>
-  );
-}
-
-// -- the source content's diff -----------------------------------------------------------------------
-
-function sideWindow(side: ReviewSourceSide) {
-  return side.state === 'present' && side.text !== undefined
-    ? wholeSide(sideLines(side.text).length)
-    : null;
-}
-
-// The classification describes exactly the blobs this pane draws; otherwise its lines are another
-// file's lines, and no mark is placed.
-export function describesDrawn(
-  file: ReviewFileClassification,
-  drawn: { before?: string; after?: string },
-): boolean {
-  const [before, after] = file.sides;
-  return (
-    (before.blob ?? null) === (drawn.before ?? null) &&
-    (after.blob ?? null) === (drawn.after ?? null)
-  );
-}
-
-// The marks of the landed source-content view of one entry (the explorer's opened file, a card's or
-// the lane's full file): the whole text of each side, in the layout on screen.
-export function useSourceMarking(
-  expansion: ReviewSourceExpansion,
-  layout: PaneLayout,
-  markers?: { pane?: string; classification?: ReviewFileClassification },
-): PaneMarking {
-  const read = useMarkClassification(
-    expansion.path,
-    expansion.status !== 'unchanged',
-    markers?.classification,
-  );
-  const file = read.phase === 'ready' ? read.value : null;
-  const drawn = file && drawnSides(file, expansion) ? file : null;
-  const marking = usePaneMarking(
-    drawn && sourceInput(expansion, drawn, layout, markers?.pane ?? 'file'),
-  );
-  return {
-    ...marking,
-    note: (
-      <>
-        <MarkReadNote read={read} mismatch={file !== null && drawn === null} />
-        {marking.note}
-      </>
-    ),
-  };
-}
-
-function drawnSides(file: ReviewFileClassification, expansion: ReviewSourceExpansion): boolean {
-  return describesDrawn(file, {
-    before: expansion.before.object_id,
-    after: expansion.after.object_id,
-  });
-}
-
-// The whole text of each side; one diff editor per side only when both are drawn as a diff.
-function sourceInput(
-  expansion: ReviewSourceExpansion,
-  file: ReviewFileClassification,
-  layout: PaneLayout,
-  pane: string,
-): PaneMarkInput {
-  const bothDrawn = expansion.before.state === 'present' && expansion.after.state === 'present';
-  return {
-    path: expansion.path,
-    pane,
-    file,
-    layout: bothDrawn ? layout : 'split',
-    window: { before: sideWindow(expansion.before), after: sideWindow(expansion.after) },
-    whole: true,
-  };
-}
-
 // -- a card's excerpt --------------------------------------------------------------------------------
 
 // The lines of one side a card's excerpt draws: its resolved range's text, from its start line.
@@ -488,12 +410,16 @@ function drawnSidesMatch(
 // The marks of a card's excerpt (MIK-R34, with the L32 F5 rule): every owner hunk whose changed lines
 // the excerpt draws, on the sides it draws, from the file's one classification -- only for a file
 // whose two blobs differ, and only where the drawn sides' blobs are the ones the classification names.
+// The classification is read only once the card is in view (`visible`, MIK-R89 v2 rule 2, W5).
 export function useExcerptMarking(
   card: ExcerptCard,
   layout: PaneLayout,
   draws: { before: boolean; after: boolean },
+  visible = true,
 ): PaneMarking {
-  const read = useMarkClassification(card.path, card.before.blob !== card.after.blob);
+  const scope = useContext(IntentMarkerScope);
+  const changed = card.before.blob !== card.after.blob;
+  const read = useMarkClassification(card.path, visible && changed);
   const file = read.phase === 'ready' ? read.value : null;
   const window = {
     before: excerptWindow(card.before, draws.before),
@@ -511,15 +437,62 @@ export function useExcerptMarking(
         }
       : null,
   );
+  const note = (
+    <>
+      <MarkReadNote read={read} mismatch={matches === false} excerpt />
+      {marking.note}
+    </>
+  );
   return {
     ...marking,
-    note: (
-      <>
-        <MarkReadNote read={read} mismatch={matches === false} excerpt />
-        {marking.note}
-      </>
-    ),
+    note: speaksOfMarks(scope, card.path, changed) ? <MarkStateRow>{note}</MarkStateRow> : note,
   };
+}
+
+// An excerpt whose marks can be read, or whose path a partial inventory leaves unread, can say
+// something about its marks: it holds the row for it from its first render on.
+function speaksOfMarks(
+  scope: IntentMarkerScopeValue | null,
+  path: string,
+  changed: boolean,
+): boolean {
+  return scope !== null && changed && (scope.listed(path) || scope.partial);
+}
+
+// The row an excerpt's marks state stands in (MIK-R89 v2 rule 9; ruling 8450399b part 1; D382, D383).
+// It is there, one line tall, before the read starts (the marks wait for the reader's first move, so a
+// card seen at the opening reads only on the page's first scroll, when it may be far above the view),
+// while the read is pending, when it lands, and when it is unavailable or of other content. Its text
+// stays on one line, cut with an ellipsis and whole in the row's title, so no state of the read
+// changes the card's height and the reader's line never moves for it.
+const stateRow = css({
+  display: 'flex',
+  alignItems: 'center',
+  height: '1.5rem',
+  overflow: 'hidden',
+  '& > p': {
+    margin: 0,
+    minWidth: 0,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+});
+
+function MarkStateRow({ children }: { children: ReactNode }) {
+  const row = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = row.current;
+    if (!node) return;
+    const text = node.textContent ?? '';
+    if (text) node.title = text;
+    else node.removeAttribute('title');
+  });
+  return (
+    <div ref={row} className={stateRow} data-testid="review-marks-row">
+      {children}
+    </div>
+  );
 }
 
 // Why a changed file shows no marks yet, or none at all: excerpts name pending marks too (R57 rule 5).

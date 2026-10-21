@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   installBridge,
   PLUGIN_ABILITIES,
+  SHOWING_SETTLE_MS,
   type BridgeClient,
 } from "../../../mcp/src/agents_remember/package_data/paseo_plugin/client/bridge";
 import {
@@ -563,6 +564,74 @@ describe("the control channel inside the frame", () => {
     seedLayout(tab, "agent_live");
     await vi.advanceTimersByTimeAsync(300);
     expect(answers(load.posted)).toEqual([{ source: "ar-plugin", type: "shown", agentId: "live", workspaceId: "wks_leaf" }]);
+  });
+
+  it("tells a dashboard that reads it which chat the compact layout shows as Paseo's own list moves it, and none on a screen without one", async () => {
+    showCompact("chat");
+    const tab = newTab();
+    seedLayout(tab, "agent_live");
+    const load = pageLoad(tab, { href: LEAF_URL });
+    // The page's timers are the test's fake clock.
+    Object.assign(load.page.window, { setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window) });
+    const { client, opened } = fakeClient();
+    installBridge(client, load.page, DASHBOARD);
+    const showing = () => load.posted.map((entry) => entry.data).filter((data) => data.type === "showing");
+    const told = (agentId: string | null) => ({ source: "ar-plugin", type: "showing", agentId });
+
+    // A dashboard that did not say it reads it is told nothing, and nothing is watched for it.
+    touchDom();
+    await vi.advanceTimersByTimeAsync(SHOWING_SETTLE_MS);
+    expect(showing()).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Below the 720 px breakpoint no tab is shown as selected, so no selection is published;
+    // the stored focus of the routed workspace names the chat, as it does for `shown`.
+    load.receive({ type: "ar.hello", capabilities: ["late-answer", "navigated", "on-chat", "load-failed", "pick", "showing"] });
+    expect(showing()).toEqual([told("live")]);
+    expect(load.posted.map((entry) => entry.data).filter((data) => data.type === "selection")).toEqual([{ source: "ar-plugin", type: "selection", agentIds: [] }]);
+
+    // He picks another agent in Paseo's own list: the application stores the new focus and
+    // draws that chat. The plug-in reads it; it navigates nothing itself.
+    seedLayout(tab, "agent_other");
+    touchDom();
+    await vi.advanceTimersByTimeAsync(SHOWING_SETTLE_MS);
+    expect(showing()).toEqual([told("live"), told("other")]);
+    touchDom();
+    await vi.advanceTimersByTimeAsync(SHOWING_SETTLE_MS);
+    expect(showing()).toHaveLength(2);
+    expect(opened).toEqual([]);
+
+    // The agent's screen shows the application's not-found pane: no chat is shown.
+    document.body.innerHTML = '<button data-testid="workspace-tab-switcher-trigger"></button><div data-testid="agent-not-found"></div>';
+    for (const node of document.querySelectorAll("button, div")) {
+      Object.assign(node, { checkVisibility: () => true, getBoundingClientRect: () => ({ width: 160, height: 28 }) });
+    }
+    await vi.advanceTimersByTimeAsync(SHOWING_SETTLE_MS);
+    expect(showing().at(-1)).toEqual(told(null));
+    // The focused tab is no agent's (a terminal): no chat either.
+    showCompact("chat");
+    seedLayout(tab, "terminal_7");
+    touchDom();
+    await vi.advanceTimersByTimeAsync(SHOWING_SETTLE_MS);
+    expect(showing()).toEqual([told("live"), told("other"), told(null)]);
+  });
+
+  it("tells the chat the wide strip shows, and the focused one of split panes", async () => {
+    showTabs(["live"]);
+    const tab = newTab();
+    seedLayout(tab, "agent_live");
+    const load = pageLoad(tab, { href: LEAF_URL });
+    Object.assign(load.page.window, { setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window) });
+    installBridge(fakeClient().client, load.page, DASHBOARD);
+    const showing = () => load.posted.map((entry) => entry.data).filter((data) => data.type === "showing").map((data) => data.agentId);
+    load.receive({ type: "ar.hello", capabilities: ["late-answer", "navigated", "on-chat", "load-failed", "pick", "showing"] });
+    expect(showing()).toEqual(["live"]);
+
+    // Two panes side by side: the stored focus names which of the two visible chats is shown.
+    seedLayout(tab, "agent_other");
+    showTabs(["live", "other"]);
+    await vi.advanceTimersByTimeAsync(SHOWING_SETTLE_MS);
+    expect(showing()).toEqual(["live", "other"]);
   });
 
   it("opens a workspace the runtime knows, and answers workspace-not-found for any other", async () => {

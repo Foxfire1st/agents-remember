@@ -12,6 +12,8 @@ from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
     recorded_leaf_contract,
     refusal,
+    resolve_review_candidate,
+    review_context_refusal,
 )
 from agents_remember.application.review_comparison_generation import (
     ComparisonGenerationManifest,
@@ -24,7 +26,11 @@ from agents_remember.application.review_legacy_comparison import (
     LEGACY_UNAVAILABLE,
     legacy_comparison_resolution,
 )
-from agents_remember.application.review_tree_comparison import reopen_review_trees, tree_resolution
+from agents_remember.application.review_tree_comparison import (
+    ReviewTrees,
+    reopen_review_trees,
+    tree_resolution,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge.review import ReviewRefusal
 
@@ -50,6 +56,45 @@ class ClosedLeafReview:
         return None if generation is None else generation.generation_id
 
 
+def resolve_review_comparison(
+    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str, number: int | None
+) -> ReviewCandidateResolution | ReviewRefusal:
+    """The review one read names: the leaf's own resolution, or its tree comparison ``number``.
+
+    A number always reopens that record (MIK-R89 v2 rule 10), live leaf or not, as the tree view's
+    numbered reads do: the read is a read of the record, never a capture of the open leaf's
+    worktrees, and the legacy generation path is never read in its place. A number the leaf did not
+    record is refused by name.
+    """
+
+    if number is None:
+        return resolve_review_candidate(config, repository_id, master, leaf_id)
+    invalid = review_context_refusal(repository_id, master, leaf_id)
+    if invalid is not None:
+        return invalid
+    contract = recorded_leaf_contract(config, repository_id, master, leaf_id)
+    if contract is None:
+        return _no_enclosure(leaf_id)
+    trees = reopen_review_trees(config.coordination_root, contract, number)
+    if isinstance(trees, ReviewTrees):
+        return tree_resolution(repository_id, contract, trees)
+    return trees or refusal(
+        "candidate_unresolved",
+        f"leaf {leaf_id} records no tree comparison {number}",
+        next_action="name a comparison this leaf recorded, or open the live review",
+        offending_input=str(number),
+    )
+
+
+def _no_enclosure(leaf_id: str) -> ReviewRefusal:
+    return refusal(
+        "candidate_unresolved",
+        "no readable enclosure records this leaf",
+        next_action="name the leaf's existing enclosure",
+        offending_input=leaf_id,
+    )
+
+
 def resolve_committed_leaf_review(
     config: McpRuntimeConfig,
     repository_id: str,
@@ -60,12 +105,7 @@ def resolve_committed_leaf_review(
 ) -> ReviewCandidateResolution | ReviewRefusal:
     contract = recorded_leaf_contract(config, repository_id, master, leaf_id)
     if contract is None:
-        return refusal(
-            "candidate_unresolved",
-            "no readable enclosure records this leaf",
-            next_action="name the leaf's existing enclosure",
-            offending_input=leaf_id,
-        )
+        return _no_enclosure(leaf_id)
     if generation_id is None:
         trees = reopen_review_trees(config.coordination_root, contract)
         if isinstance(trees, ReviewRefusal):

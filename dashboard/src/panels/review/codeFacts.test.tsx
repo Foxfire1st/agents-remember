@@ -1,13 +1,14 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it, afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
-import { FamilyTree } from './FamilyTree';
-import { codeChangesSummary, CodeFactsScrollAnchor, codeFacts } from './codeFacts';
+import { codeChangesCount, codeChangesSummary, CodeFactsScrollAnchor, codeFacts } from './codeFacts';
+import { changeSetModel } from './changeSetOrder';
 import { outlineGroups } from './changeTriage';
 import { useRef, useLayoutEffect } from 'react';
 import type { ReviewTreesRead } from '../../data/reviewTrees';
 import type { ReviewOutline } from '../../data/review';
-import { treeViewStore } from './triageViewPreference';
+import type { ReviewSelection } from './reviewSelection';
+import { ReviewTree } from './tree/ReviewTree';
 
 afterEach(cleanup);
 const outline: ReviewOutline = {
@@ -91,7 +92,7 @@ describe('leaf-wide code facts', () => {
   it('does not relabel unknown recorded meaning as a code-only change', () => {
     const unknown = structuredClone(outline);
     unknown.invariants[1].change = 'unknown';
-    const groups = outlineGroups(unknown, [], [], 'triage', codeFacts(facts, 1));
+    const groups = outlineGroups(unknown, [], [], 'priority', codeFacts(facts, 1));
     const row = groups
       .flatMap((group) => group.members)
       .find((member) => member.selectorId === 'two');
@@ -105,46 +106,59 @@ describe('leaf-wide code facts', () => {
     view.rerender(<ScrollProbe loaded />);
     expect(container.scrollTop).toBe(83);
   });
-  it('adds an unread member without moving the selected node, focus or scroll; traversal reaches it', () => {
-    treeViewStore.getState().setView('changed');
-    const select = vi.fn();
-    const props = {
-      outline,
-      context: { entries: [] } as never,
-      selection: null,
-      subject: { kind: 'invariant', id: 'one' } as const,
-      query: '',
-      onQuery: vi.fn(),
-      onSubjectSelect: select,
-      reviewComparison: 1,
+  it('adds an unread member without moving the selected node, focus or scroll; read 5 then asks for it', () => {
+    const selection: ReviewSelection = { kind: 'subject', subject: { kind: 'invariant', id: 'one' }, family: 'family' };
+    const tree = (read: ReviewTreesRead) => {
+      const model = changeSetModel(
+        { outline, catalogue: [], code: read.phase === 'trees' ? codeFacts(read, 1) : undefined, cards: { state: 'reading' } },
+        'priority',
+        'changed',
+        { selection },
+      );
+      return {
+        model,
+        view: (
+          <div data-kbzone="review">
+            <ReviewTree
+              model={model}
+              selection={selection}
+              onSelect={() => undefined}
+              onOpenGroup={() => undefined}
+              query=""
+              onQuery={() => undefined}
+              allChanges={2}
+              onOpenAllChanges={() => undefined}
+              lane={{ state: 'reading', files: [], counts: { unexplained: 0, unknown: 0 } }}
+              onOpenLane={() => undefined}
+              worklist={{ count: '…', open: false }}
+              onOpenWorklist={() => undefined}
+              codeFacts={{ count: codeChangesCount(outline, read, 1), comparison: 1 }}
+            />
+          </div>
+        ),
+      };
     };
-    const { rerender } = render(
-      <div data-kbzone="review">
-        <FamilyTree {...props} treeRead={{ phase: 'loading' }} />
-      </div>,
-    );
+    const before = tree({ phase: 'loading' });
+    const { rerender } = render(before.view);
+    expect(before.model.shownInvariantIds).toEqual(['one']);
     const selected = screen.getByRole('button', { name: 'INV-AAAAAA Selected changed' });
     selected.focus();
-    const list = screen.getByTestId('review-family-list');
-    list.scrollTop = 83;
+    const scroller = screen.getByTestId('review-tree-scroll');
+    scroller.scrollTop = 83;
     expect(screen.queryByText('code changed')).toBeNull();
-    rerender(
-      <div data-kbzone="review">
-        <FamilyTree {...props} treeRead={facts} />
-      </div>,
-    );
+    const after = tree(facts);
+    rerender(after.view);
     expect(document.activeElement).toBe(selected);
     expect(selected.getAttribute('aria-current')).toBe('true');
-    expect(list.scrollTop).toBe(83);
+    expect(scroller.scrollTop).toBe(83);
     const changed = screen.getByRole('button', { name: 'INV-BBBBBB Code only code changed' });
     expect(changed.dataset.changePrimary).toBe('code changed');
     expect(screen.getByText('2 changed')).toBeTruthy();
-    expect(screen.getByText('1 code changes found.')).toBeTruthy();
-    // Later traversal updates must not announce the earlier code-facts notice again.
-    expect(screen.queryByTestId('review-change-status')?.textContent ?? '').toBe('');
+    expect(screen.getByTestId('review-code-facts-status').textContent).toBe('1 invariant changed only in its code.');
     expect(screen.getByTestId('review-code-facts-status').getAttribute('aria-live')).toBe('polite');
-    fireEvent.keyDown(selected, { key: 'j', code: 'KeyJ' });
-    expect(select).toHaveBeenCalledWith({ kind: 'invariant', id: 'two' }, expect.anything());
+    // The traversal's own status line does not repeat the notice.
+    expect(screen.queryByTestId('review-change-status')).toBeNull();
+    expect(after.model.shownInvariantIds).toEqual(['one', 'two']);
   });
   it('does not use facts of another comparison and distinguishes missing and unavailable', () => {
     expect(codeChangesSummary(outline, { phase: 'loading' }, 1)).toBe('…');

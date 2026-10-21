@@ -446,11 +446,17 @@ describe("the frame's own message burst is bounded before it becomes work (L104-
       const frame = await screen.findByTestId('canvas-frame');
       // The chart's own probe: every message is past the server's 4096-byte body ceiling.
       const oversized = { type: 'open-evidence', reference: 'INV-1', padding: 'x'.repeat(5000) };
-      await act(async () => {
-        for (let index = 0; index < burst; index += 1) dispatchFrameMessage(frame, oversized);
-        await new Promise((resolve) => setTimeout(resolve, 60));
+      const forwarded = () => calls.filter((call) => call.url.endsWith('/messages'));
+      // The listener handles the frame's messages in order: once a message inside the ceiling, sent
+      // right after the burst, is forwarded, the live listener has handled the whole burst.
+      await waitFor(() => {
+        if (forwarded().length === 0) {
+          for (let index = 0; index < burst; index += 1) dispatchFrameMessage(frame, oversized);
+          dispatchFrameMessage(frame, { type: 'open-evidence', reference: 'INV-2' });
+        }
+        expect(forwarded()).toHaveLength(1);
       });
-      expect(calls.filter((call) => call.url.endsWith('/messages'))).toHaveLength(0);
+      expect(forwarded().map((call) => call.body?.reference)).toEqual(['INV-2']);
       // The page's detail is not frozen by the refusal: the panel still shows it.
       expect(screen.getByTestId('canvas-frame')).toBeTruthy();
     });

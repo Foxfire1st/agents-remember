@@ -130,19 +130,22 @@ def task_context_review(
                 state="no_subject_selected",
                 detail=(
                     "no knowledge subject was selected for this review, so no recorded family, "
-                    "guarantee or member roster was resolved; the Source pane carries the complete "
-                    "inventory of the bound source pair independently of any family membership"
+                    "guarantee or member roster was resolved; All changes, the change-set page "
+                    "the review links, carries the complete inventory of the bound source pair "
+                    "independently of any family membership"
                 ),
             ),
             # No subject was selected, so no record's steps are covered; the field is still
             # present, because a current build's answer without it is invalid (MIK-R43 rule 9).
             meaning_effects=ReviewMeaningEffects(records=()),
+            # The status chip's one-sentence reason (MIK-R89 v2 rule 6): it names where the
+            # review page shows the inventory now.
             staleness=ReviewStaleness(
                 state="not_compared",
                 statement=(
                     "no knowledge subject was selected for this review, so no comparison binding "
-                    "exists to be current or stale; the Source pane carries the complete inventory "
-                    "of the bound source pair"
+                    "exists to be current or stale; All changes, the change-set page the review "
+                    "links, carries the complete inventory of the bound source pair"
                 ),
             ),
             submission=submission(stale=False),
@@ -225,21 +228,22 @@ def task_context_detail(
             f"was compared -- and this pair could not have been compared anyway: {unreadable.detail}. "
             f"To act on it: {unreadable.next_action}. "
             "That state is stated here rather than raised, because this review reads no dataset and "
-            "refusing would remove the source review with it; the Source pane carries the complete "
-            "source change inventory of the bound pair"
+            "refusing would remove the source review with it; All changes, the change-set page "
+            "the review links, carries the complete source change inventory of the bound pair"
         )
     absent = missing_dataset_half(resolved)
     if absent is None:
         return (
             "no invariant or family subject was selected for this review, so no knowledge operand "
-            "was compared and none is reported as empty; the Source pane carries the complete source "
-            "change inventory of the bound pair"
+            "was compared and none is reported as empty; All changes, the change-set page the "
+            "review links, carries the complete source change inventory of the bound pair"
         )
     half, database = absent
     return (
         f"no subject was selected and the resolved {half} dataset is absent ({database.name}), so "
-        "no knowledge operand was compared; the Source pane carries the complete source change "
-        "inventory of the bound pair, which does not depend on knowledge availability"
+        "no knowledge operand was compared; All changes, the change-set page the review links, "
+        "carries the complete source change inventory of the bound pair, which does not depend on "
+        "knowledge availability"
     )
 
 

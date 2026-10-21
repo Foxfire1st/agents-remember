@@ -43,12 +43,12 @@ def select_subject_revisions(
     kind, record_id = identity
     before_item = _side_item(items, kind, record_id, "before")
     after_item = _side_item(items, kind, record_id, "after")
-    before = (
-        None
-        if before_item is None or before_item.before is None
-        else before_item.before.revision_id
-    )
-    after = None if after_item is None or after_item.after is None else after_item.after.revision_id
+    before_side = None if before_item is None else before_item.before
+    after_side = None if after_item is None else after_item.after
+    before = None if before_side is None else before_side.revision_id
+    after = None if after_side is None else after_side.revision_id
+    before_version = None if before_side is None else before_side.display_version
+    after_version = None if after_side is None else after_side.display_version
     before_ids = () if before is None else (before,)
     after_ids = () if after is None else (after,)
     state, statement = _selection_description(kind, record_id, before, after)
@@ -59,6 +59,8 @@ def select_subject_revisions(
             state=state,
             before_revision_id=before,
             after_revision_id=after,
+            before_display_version=before_version,
+            after_display_version=after_version,
             before_heads=before_ids,
             after_heads=after_ids,
             before_retained=before_ids,

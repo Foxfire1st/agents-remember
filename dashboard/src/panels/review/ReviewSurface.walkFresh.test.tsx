@@ -1,17 +1,20 @@
-// MIK-R39 rule 9 in the mounted reviewer, on real data (walkReal.capture-provenance.json): which
+// MIK-R39 rule 9 in the mounted review page, on real data (walkReal.capture-provenance.json): which
 // selections keep the walked tree and which start it afresh. The reader has walked to the second
 // family (FAM-2HBJREC2) of the shared member, so the first family (FAM-R6R095RW) is a kept family;
 // each test then makes one selection and reads what the tree shows. `ReviewSurface` is the real
 // component and only `fetch` is stubbed.
+//
+// The page opens with nothing selected and a late catalogue selects nothing (MIK-R89 v2 rule 2). A
+// tree row is revealed in the tree's own scroller by `scrollTop` (treeScroll.ts `revealTreeRow`, here
+// recorded); after a selection's read the reading column scrolls once to the subject's heading (rule
+// 9): by its own `scrollTop`, and in the stacked layout (40rem and narrower) by bringing the heading
+// into view, unless the reader scrolled meanwhile.
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ReviewSurface } from './ReviewSurface';
-import { SUBJECT_HOLD_MS } from './ReviewNavigation';
 import { resetCardCachesForTests } from '../../data/reviewTrees';
 import {
-  HBJ,
   HBJ_ID,
-  K,
   R6R,
   R6R_ID,
   SHARED,
@@ -23,20 +26,36 @@ import {
   familyBlock,
   installWorld,
   keptTags,
+  memberRow,
   open,
   reviewCount,
   selectedName,
   selectedNode,
   settled,
-  step,
+  slotOf,
   subjectOf,
+  subjectOfLabel,
   world,
 } from './walk.test-utils';
+
+// Every tree row the page asks to reveal in the tree's scroller.
+const reveals = vi.hoisted(() => [] as Element[]);
+vi.mock('./treeScroll', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./treeScroll')>();
+  return {
+    ...real,
+    revealTreeRow: (row: HTMLElement | null) => {
+      if (row) reveals.push(row);
+      real.revealTreeRow(row);
+    },
+  };
+});
 
 installWorld();
 afterEach(() => {
   resetCardCachesForTests();
   vi.useRealTimers();
+  reveals.length = 0;
 });
 
 const ZS9 = bodyOf('INV-ZS9ZS878');
@@ -72,7 +91,7 @@ it('All changes opens the comparison viewer and returns without resetting the wa
   const view = await keptState();
   serveTreeRoutes();
   const before = reviewCount();
-  const row = within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
+  const row = within(view.getByTestId('review-tree')).getByRole('button', {
     name: /^All changes/,
   });
   row.focus();
@@ -114,11 +133,6 @@ it('starts afresh at an answer of another comparison and says so', async () => {
   noKept(view);
 });
 
-const memberRow = (view: View, familyId: string, label: string) =>
-  within(familyBlock(view, familyId))
-    .getAllByTestId('review-family-member-open')
-    .find((node) => node.textContent?.includes(label))!;
-
 const refusal = {
   state: 'refused',
   operation: 'read_knowledge_review',
@@ -130,20 +144,21 @@ const refusal = {
   },
 };
 
-it('keeps every row when a selected subject is refused, and starts afresh at the offer of the task context', async () => {
+it('keeps every row when a selected subject is refused, and another row reads from there', async () => {
   const view = await keptState();
   const previous = world.answer;
   world.answer = (url, asked) => (asked === subjectOf(ZS9) ? refusal : previous(url, asked));
   const row = memberRow(view, R6R_ID, 'INV-ZS9ZS878');
   fireEvent.click(row);
   await waitFor(() => expect(view.getByTestId('review-reading-problem')).toBeTruthy());
-  // The tree keeps every row, the selection mark is on the requested row, and k works from it.
+  // The tree keeps every row, the selection mark is on the requested row, and the row before it
+  // reads from there.
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(keptTags(view)).toHaveLength(1);
   expect(selectedNode(view)).toBe(row);
-  row.focus(); // a pointer moves focus to the row it selects
   const before = reviewCount();
-  await step(view, K, 1);
+  fireEvent.click(memberRow(view, R6R_ID, 'INV-2E8MG43K'));
+  await settled(view);
   expect(selectedName(view)).toBe('INV-2E8MG43K');
   expect(reviewCount() - before).toBe(1);
 });
@@ -158,7 +173,9 @@ it('starts afresh at the offer to open the task context after a refusal', async 
   fireEvent.click(offer);
   noKept(view);
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
-  await view.findByTestId('review-center-unselected', undefined);
+  // The task context is shown unselected: no subject's slot and no marked row.
+  await waitFor(() => expect(view.queryByTestId('review-subject-slot')).toBeNull());
+  expect(selectedNode(view)).toBeNull();
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   noKept(view);
 });
@@ -198,13 +215,14 @@ function serveTreeRoutes() {
       file_classification: import('../../data/reviewLane').ReviewFileClassification;
     }
   >('walkReal.file.captured.json');
-  const source = captured<import('../../data/review').ReviewSourceContentResult>(
-    'walkReal.source.captured.json',
-  );
+  // The captured source read supplies only each side's object id and text here.
+  const source = captured<{
+    expansion: Record<'before' | 'after', { object_id?: string; text?: string }>;
+  }>('walkReal.source.captured.json');
   const links = file.file_classification!.hunks[0].links;
   const entrySide = (side: 'before' | 'after') => {
     const link = links.find((one) => one.side === side)!;
-    const operand = source.expansion![side];
+    const operand = source.expansion[side];
     return {
       recorded: true,
       state: 'resolved' as const,
@@ -233,7 +251,6 @@ function serveTreeRoutes() {
     ],
   };
   world.tree = (url) => {
-    if (url.pathname.endsWith('/source-content')) return source;
     if (url.searchParams.get('lane')) return lane;
     if (url.searchParams.get('invariants')) return cards;
     return url.searchParams.get('file') === MERGE_FILE ? file : undefined;
@@ -262,8 +279,9 @@ function serveTreeRoutes() {
 }
 
 it('starts afresh at a followed intent marker, and its return does not bring the kept family back', async () => {
-  const view = await keptState();
+  // The cards are the opening's read, so the card routes are served before the page opens.
   serveTreeRoutes();
+  const view = await keptState();
   // A file marker now belongs to a card. Select the family that records this range first;
   // the other read family remains kept until the marker is followed.
   fireEvent.click(treeRow(view, R6R_ID));
@@ -291,25 +309,9 @@ it('starts afresh at a followed intent marker, and its return does not bring the
   noKept(view);
 });
 
-it('opens on the subject asked for with its own families only, and a late catalogue selects the first family afresh', async () => {
-  vi.useFakeTimers();
-  const catalogue = [R6R, HBJ].map((body) => ({
-    selector_kind: 'family',
-    selector_id: body.payload!.knowledge.revision_selection!.record_id,
-    label: body.payload!.family_context!.entries[0].display_label,
-    presence: 'both',
-  }));
+it('opens with nothing selected, reads no subject, and a late catalogue selects nothing', async () => {
   let release: (() => void) | undefined;
   const held = new Promise<void>((resolve) => (release = resolve));
-  // The catalogue answers after the bounded wait: the task context is read first, then the first
-  // family is selected from the late answer.
-  world.entries = {
-    state: 'entries',
-    entries: catalogue,
-    total_subjects: 2,
-    family_total: 2,
-    invariant_total: 0,
-  };
   const stubbed = globalThis.fetch;
   vi.stubGlobal('fetch', async (address: string, init?: RequestInit) => {
     if (String(address).includes('/entries')) await held;
@@ -324,16 +326,16 @@ it('opens on the subject asked for with its own families only, and a late catalo
       onBack={() => undefined}
     />,
   );
-  await act(async () => { await vi.advanceTimersByTimeAsync(SUBJECT_HOLD_MS); });
-  expect(view.getByTestId('review-center-unselected')).toBeTruthy();
-  // The hold has expired on the controlled clock; await the released read normally.
-  vi.useRealTimers();
+  // The task context is read at once, without waiting for the catalogue, and no subject is.
+  await waitFor(() => expect(world.requests.reviews()).toHaveLength(1));
+  expect(world.requests.reviews()[0].searchParams.has('selectorId')).toBe(false);
   await act(async () => release?.());
-  expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
+  await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
+  await act(async () => {});
   noKept(view);
-  expect((await view.findByTestId('review-center-family', undefined)).dataset.family).toBe(
-    R6R_ID,
-  );
+  expect(selectedNode(view)).toBeNull();
+  expect(view.queryByTestId('review-subject-slot')).toBeNull();
+  expect(world.requests.reviews()).toHaveLength(1);
 });
 
 it('keeps the families and states the subject when the answer composes no family context', async () => {
@@ -350,12 +352,11 @@ it('keeps the families and states the subject when the answer composes no family
   world.answer = (url, asked) => (asked === subjectOf(ZS9) ? bare : previous(url, asked));
   const row = memberRow(view, R6R_ID, 'INV-ZS9ZS878');
   fireEvent.click(row);
-  await waitFor(
-    () =>
-      expect(view.getByTestId('review-center-member-family').textContent).toContain(
-        'No recorded family',
-      ),
-  );
+  await waitFor(() => expect(within(slotOf(view)).getByTestId('review-center-member').dataset.subject).toBe(ZS9_SUBJECT));
+  // A measured zero is the normal case: the slot names no family (MIK-R89 v2 rule 1, amended
+  // 9dde2b09); the tree states the subject's family state.
+  expect(within(slotOf(view)).queryByTestId('review-center-member-family')).toBeNull();
+  expect(within(slotOf(view)).getByTestId('review-subject-meta').textContent).not.toContain('family');
   // No row is removed, and the requested row is still the one marked.
   expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
   expect(keptTags(view)).toHaveLength(2);
@@ -368,22 +369,28 @@ it('keeps the walked tree at the actions rule 9 says change nothing', async () =
   const shown = () => [families(view), keptTags(view)];
   const initial = shown();
   const reads = reviewCount();
-  // The order control and the filter.
-  fireEvent.click(view.getByTestId('review-tree-order'));
+  // The sort control (react-aria's menu asks jsdom for `CSS.escape`) and the view switch.
+  vi.stubGlobal('CSS', { escape: (value: string) => value });
+  fireEvent.click(view.getByTestId('review-tree-sort'));
+  const sort = await view.findAllByTestId('review-tree-sort-option');
+  fireEvent.click(sort.find((option) => option.dataset.sort === 'authored')!);
+  await waitFor(() => expect(view.queryByTestId('review-tree-sort-option')).toBeNull());
   expect(shown()).toEqual(initial);
-  fireEvent.click(view.getByTestId('review-tree-order'));
-  // The view switch and worklist choose no new subject and retain the walked state.
-  fireEvent.click(view.getByTestId('review-tree-view'));
-  fireEvent.click(view.getByTestId('review-tree-view'));
+  const views = within(view.getByTestId('review-tree-view')).getAllByRole('button');
+  fireEvent.click(views[0]);
+  fireEvent.click(views[1]);
   expect(shown()).toEqual(initial);
+  // The worklist chooses no new subject and retains the walked state.
   fireEvent.click(view.getByRole('button', { name: /^Worklist/ }));
   await view.findByTestId('review-worklist-view', undefined);
   expect(shown()).toEqual(initial);
   fireEvent.click(treeRow(view, HBJ_ID));
   await view.findByTestId('review-center-family', undefined);
   expect(shown()).toEqual(initial);
-  // Filtered change-set destinations open over the mounted reviewer and return to it.
-  fireEvent.click(view.getByRole('button', { name: /^Changes without an invariant/ }));
+  // The change-set page opens over the mounted page and returns to it. (This scratch leaf's lane holds
+  // no file without an invariant, so the tree offers no lane destination; All changes is the way.)
+  expect(view.queryByTestId('review-tree-full-page')).toBeNull();
+  fireEvent.click(view.getByTestId('review-all-changes'));
   await view.findByTestId('changeset-viewer', undefined);
   expect(shown()).toEqual(initial);
   fireEvent.click(view.getByTestId('changeset-back'));
@@ -405,38 +412,51 @@ async function recordingScrolls(run: (scrolled: Element[]) => Promise<void>) {
   }
 }
 
+// The tree rows revealed in the tree's own scroller while `run` is in progress.
+async function recordingReveals(run: (revealed: Element[]) => Promise<void>) {
+  reveals.length = 0;
+  await run(reveals);
+}
+
+const STACKED = '(max-width: 40rem)';
+
 it.each([true, false])(
-  'keeps in-tree reveal panel-local in either layout (%s)',
+  "reveals a tree selection in the tree's scroller and lands the column on its heading once (stacked %s)",
   async (stacked) => {
     const media = window.matchMedia;
-    window.matchMedia = (query) => ({
-      ...media(query),
-      matches: stacked && query === '(max-width: 60rem)',
-    });
+    window.matchMedia = (query) => ({ ...media(query), matches: stacked && query === STACKED });
     try {
       const view = open(SHARED);
       await waitFor(() => expect(families(view)).toEqual([R6R_ID, HBJ_ID]));
       const workspace = view.getByTestId('review-workspace');
+      const heading = (family: string) =>
+        view.getAllByTestId('review-family-heading').find((node) => node.dataset.family === family)!;
       await recordingScrolls(async (scrolled) => {
+        reveals.length = 0;
         const reads = reviewCount();
         await clickedSecondFamily(view);
-        // Kept-node reveal is panel-local; it never scrolls the common reading area.
-        // Its measured geometry is pinned in ReviewWorkspace.family.test.tsx.
-        expect(scrolled).toEqual([]);
+        // The tree's reveal is the tree scroller's own; no tree row is ever scrolled into view. The
+        // column scrolls itself to the family's heading, and only the stacked page brings it into view.
+        expect(reveals).toContain(selectedNode(view));
+        expect(scrolled).toEqual(stacked ? [heading(HBJ_ID)] : []);
         expect(document.activeElement).toBe(selectedNode(view));
         expect(reviewCount() - reads).toBe(1);
         expect(view.getByTestId('review-workspace')).toBe(workspace);
-        // A key activation reads the cached shared member and follows the same reveal rule.
+        // The shared member under the first family follows the same rule, at its own heading.
         scrolled.length = 0;
-        await step(view, K, 0);
-        expect(scrolled).toEqual([]);
+        fireEvent.click(memberRow(view, R6R_ID, 'INV-2TQGXFAX'));
+        await settled(view);
+        const section = view
+          .getAllByTestId('review-subject-section')
+          .find((node) => node.dataset.subject === subjectOfLabel('INV-2TQGXFAX'))!;
+        expect(scrolled).toEqual(stacked ? [section] : []);
         expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
         await clickedSecondFamily(view);
         scrolled.length = 0;
         // Re-selecting the same row remains an in-tree gesture and keeps the outline.
         fireEvent.click(treeRow(view, HBJ_ID));
         await settled(view);
-        expect(scrolled).toEqual([]);
+        expect(scrolled.every((node) => !node.closest('[data-review-tree-panel]'))).toBe(true);
         expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
       });
     } finally {
@@ -445,10 +465,10 @@ it.each([true, false])(
   },
 );
 
-it('does not reveal a stacked in-tree answer after the reader moved focus while it was pending', async () => {
+it('does not move a stacked reader who scrolled and moved focus while the answer was pending', async () => {
   const view = await keptState();
   const media = window.matchMedia;
-  window.matchMedia = (query) => ({ ...media(query), matches: query === '(max-width: 60rem)' });
+  window.matchMedia = (query) => ({ ...media(query), matches: query === STACKED });
   let release: (() => void) | undefined;
   const held = new Promise<void>((resolve) => (release = resolve));
   const served = globalThis.fetch;
@@ -458,18 +478,21 @@ it('does not reveal a stacked in-tree answer after the reader moved focus while 
   });
   try {
     await recordingScrolls(async (scrolled) => {
+      reveals.length = 0;
       fireEvent.click(memberRow(view, R6R_ID, 'INV-ZS9ZS878'));
       await view.findByTestId('review-reading-pending', undefined);
+      fireEvent.wheel(view.getByTestId('review-center-column'), { deltaY: 120 });
       const elsewhere = view.getByTestId('review-family-filter');
       elsewhere.focus();
       release?.();
       await waitFor(
         () =>
-          expect(view.getByTestId('review-center-member').textContent).toContain('INV-ZS9ZS878'),
+          expect(within(slotOf(view)).getByTestId('review-center-member').dataset.subject).toBe(ZS9_SUBJECT),
       );
       await act(async () => {});
       expect(document.activeElement).toBe(elsewhere);
       expect(scrolled).toEqual([]);
+      expect(reveals).toEqual([]);
       expect(families(view)).toEqual([R6R_ID, HBJ_ID]);
     });
   } finally {
@@ -480,7 +503,7 @@ it('does not reveal a stacked in-tree answer after the reader moved focus while 
 
 it('brings the selected row into view once the answer of a refresh is shown, without moving focus', async () => {
   const view = await keptState();
-  await recordingScrolls(async (scrolled) => {
+  await recordingReveals(async (scrolled) => {
     const button = view.getByTestId('review-refresh');
     button.focus();
     fireEvent.click(button);
@@ -493,7 +516,7 @@ it('brings the selected row into view once the answer of a refresh is shown, wit
 
 it('waits for the answer of a refresh asked before the effects of the previous answer have run', async () => {
   const view = await keptState();
-  await recordingScrolls(async (scrolled) => {
+  await recordingReveals(async (scrolled) => {
     const button = view.getByTestId('review-refresh');
     const shown = () =>
       view.getByTestId('review-surface').dataset.reviewPending === undefined &&
@@ -521,14 +544,17 @@ it('waits for the answer of a refresh asked before the effects of the previous a
     } finally {
       observer.disconnect();
     }
-    expect(atClick).toEqual([]);
-    await waitFor(() => expect(scrolled).toContain(selectedNode(view)));
+    // The member's own answer revealed its row before the refresh was asked; the refresh's reveal
+    // waits for the refresh's answer.
+    const asked = atClick!.length;
+    expect(scrolled.slice(0, asked)).toEqual(atClick);
+    await waitFor(() => expect(scrolled.slice(asked)).toContain(selectedNode(view)));
   });
 });
 
 it('forgets the scroll a refresh asked for when its read fails, so a later page of the subject leaves the rail alone', async () => {
   const view = await keptState();
-  await recordingScrolls(async (scrolled) => {
+  await recordingReveals(async (scrolled) => {
     const previous = world.answer;
     world.answer = () => new TypeError('fetch failed');
     fireEvent.click(view.getByTestId('review-refresh'));
@@ -553,7 +579,7 @@ it('forgets the scroll a refresh asked for when its read fails, so a later page 
 
 it('brings the selected row into view when the retry of a failed refresh is answered', async () => {
   const view = await keptState();
-  await recordingScrolls(async (scrolled) => {
+  await recordingReveals(async (scrolled) => {
     const previous = world.answer;
     world.answer = () => new TypeError('fetch failed');
     fireEvent.click(view.getByTestId('review-refresh'));
@@ -602,7 +628,7 @@ async function inTheTurnOfAFailedRefresh(view: View, next: () => void) {
 
 it('brings the selected row into view after a refresh asked in the turn that shows a failed read', async () => {
   const view = await keptState();
-  await recordingScrolls(async (scrolled) => {
+  await recordingReveals(async (scrolled) => {
     // The failure which the late effect of that turn sees was on screen when the second refresh was
     // asked. It is not the failure of that refresh, whose request stays.
     await inTheTurnOfAFailedRefresh(view, () =>
@@ -615,7 +641,7 @@ it('brings the selected row into view after a refresh asked in the turn that sho
 
 it('brings the selected row into view when the retry is made in the turn that shows the failed refresh', async () => {
   const view = await keptState();
-  await recordingScrolls(async (scrolled) => {
+  await recordingReveals(async (scrolled) => {
     // The retry comes before the effect that drops the request of the failed refresh, and is the
     // refresh again all the same.
     await inTheTurnOfAFailedRefresh(view, () => fireEvent.click(view.getByTestId('review-retry')));

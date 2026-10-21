@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 from agents_remember.application.knowledge_review import (
-    list_knowledge_review_entries,
+    list_comparison_review_entries,
     read_knowledge_review,
 )
 from agents_remember.application.review_source_content import (
@@ -182,8 +182,8 @@ def _served(fixture: EndpointFixture) -> FastAPI:
         app,
         config,
         lambda request: read_knowledge_review(config, request),
-        lambda repository_id, master, leaf_id: list_knowledge_review_entries(
-            config, repository_id, master, leaf_id
+        lambda repository_id, master, leaf_id, number: list_comparison_review_entries(
+            config, repository_id, master, leaf_id, number
         ),
         lambda request: read_review_source_content(config, request),
     )

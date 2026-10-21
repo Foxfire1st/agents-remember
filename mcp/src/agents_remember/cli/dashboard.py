@@ -22,6 +22,7 @@ import uvicorn
 import agents_remember
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli.dashboard_review_summary import review_intent_summary_port
+from agents_remember.cli.developer_messages import register_developer_chat_routes
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.cli.paseo_bridge import bridge_call
 from agents_remember.cli.role_launch_archive import LeafAgentArchive
@@ -68,6 +69,14 @@ _DEV_HEARTBEAT_ENV = "AR_DASHBOARD_DEV_HEARTBEAT"
 # are force-closed, which is exactly the desired behaviour on shutdown. uvicorn types this as whole
 # seconds (``int | None``), so keep it an int.
 DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS = 3
+
+# A review card read names up to 500 invariant identities in its query (MIK-R89 v2 rule 2, read 5):
+# 500 URL-encoded UUIDs are ~19.5 KB of request line. uvicorn serves HTTP/1.1 through h11 here
+# (httptools is not installed), and h11 refuses a request head that is still incomplete beyond its
+# default 16 KiB (``h11._connection.DEFAULT_MAX_INCOMPLETE_EVENT_SIZE``) -- uvicorn answers that
+# "Invalid HTTP request received." with a 400 -- whenever the head arrives over more than one read.
+# 64 KiB holds the largest card read with room, and still bounds an unterminated head.
+DASHBOARD_H11_MAX_INCOMPLETE_EVENT_SIZE = 64 * 1024
 
 
 def _review_memory_root(
@@ -119,7 +128,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         read_knowledge_reader,
     )
     from agents_remember.application.knowledge_review import (  # noqa: PLC0415 - composition
-        list_knowledge_review_entries,
+        list_comparison_review_entries,
         read_complete_knowledge_review,
     )
     from agents_remember.application.review_source_content import (  # noqa: PLC0415 - composition
@@ -165,19 +174,21 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
             request, lambda: read_complete_knowledge_review(config, request)
         )
 
-    def review_entries_port(repository_id, master, leaf_id):
+    def review_entries_port(repository_id, master, leaf_id, number=None):
         """List the subjects the same resolution can be reviewed on, through the same adapter.
 
         The task view calls this before any subject exists, so it takes the task context alone. It
         resolves through the identical operation the review route uses, which is what keeps the
-        entry a caller is offered and the review it then opens on one candidate.
+        entry a caller is offered and the review it then opens on one candidate. ``number`` names
+        one recorded comparison of the leaf instead (MIK-R89 v2 rule 10).
         """
 
         return recorded_answers.entries(
             repository_id,
             master,
             leaf_id,
-            lambda: list_knowledge_review_entries(config, repository_id, master, leaf_id),
+            number,
+            lambda: list_comparison_review_entries(config, repository_id, master, leaf_id, number),
         )
 
     def review_source_content_port(request):
@@ -209,6 +220,16 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return read_knowledge_reader(config, query)
 
+    def api_routes(app: Any) -> None:
+        """The launcher's routes, then the tray's: seat list, developer send, sent picks."""
+
+        register_role_launch_routes(app, config)
+        # A reference picked on a review comparison is read from the leaf's memory, resolved as
+        # the review reads resolve it (MIK-R188 rule 2; L89 P-T2).
+        register_developer_chat_routes(
+            app, config, leaf_memory_root=partial(_review_memory_root, config)
+        )
+
     return ServingCollaborators(
         host_activity_reconcile=lambda runtime: bridge_call(runtime, "host-activity-snapshot", {}),
         review_memory_root=partial(_review_memory_root, config),
@@ -219,7 +240,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         review_trees=review_trees_port,
         review_trees_shutdown=worklist_processes.shutdown,
         knowledge_reader=knowledge_reader_port,
-        extra_api_routes=partial(register_role_launch_routes, config=config),
+        extra_api_routes=api_routes,
     )
 
 
@@ -373,6 +394,7 @@ def run(args: argparse.Namespace) -> int:
             port=port,
             access_log=not args.no_access_log,
             timeout_graceful_shutdown=DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS,
+            h11_max_incomplete_event_size=DASHBOARD_H11_MAX_INCOMPLETE_EVENT_SIZE,
         )
     finally:
         # The server has stopped, so the throwaway root has no reader left. Closing it here
@@ -415,6 +437,7 @@ def _run_reload_server(args: argparse.Namespace, config_path: str, port: int) ->
         port=port,
         access_log=not args.no_access_log,
         timeout_graceful_shutdown=DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS,
+        h11_max_incomplete_event_size=DASHBOARD_H11_MAX_INCOMPLETE_EVENT_SIZE,
     )
     return 0
 

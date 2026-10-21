@@ -614,7 +614,7 @@ def test_the_route_answers_every_typed_state_in_the_body(
     register_review_summary_route(
         served,
         ReviewIntentSummaryPort(
-            inputs=lambda *_: (), read=lambda repo, master, leaf, observe: answers[leaf]
+            inputs=lambda *_: (), read=lambda repo, master, leaf, number, observe: answers[leaf]
         ),
         ChangesetCache(),
     )

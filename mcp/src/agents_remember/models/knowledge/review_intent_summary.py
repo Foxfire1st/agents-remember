@@ -107,6 +107,9 @@ class ReviewIntentSummaryResult(KnowledgeModel):
     # The unexplained-changes lane's entry count, for a tree comparison only (MIK-R32 rule 9).
     attribution: ReviewLaneSummary | None = None
     unexplained_open: int | None = Field(default=None, ge=0)
+    # The recorded tree comparison these counts describe (MIK-R89 v2 rule 10); none for a summary
+    # with no tree comparison and for a comparison that could not be resolved.
+    comparison: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _require_one_outcome(self) -> ReviewIntentSummaryResult:

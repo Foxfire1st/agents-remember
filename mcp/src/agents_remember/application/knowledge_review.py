@@ -25,6 +25,7 @@ from agents_remember.application.review_change_kinds import with_change_kinds
 from agents_remember.application.review_committed_leaf import (
     closed_leaf_dataset_refusal,
     closed_leaf_limitations,
+    resolve_review_comparison,
 )
 from agents_remember.application.review_comparison_staleness import (
     comparison_identity,
@@ -59,6 +60,7 @@ from agents_remember.application.review_revision_comparison import (
     SubjectRevisionSelection,
     select_subject_revisions,
 )
+from agents_remember.application.review_revision_writers import with_revision_writers
 from agents_remember.application.review_source_inventory import (
     inventory_limitations,
     memo_tree_observations,
@@ -121,6 +123,7 @@ __all__ = [
     "ReviewCandidateResolution",
     "ReviewSurfaceRequest",
     "compose_review",
+    "list_comparison_review_entries",
     "list_knowledge_review_entries",
     "read_complete_knowledge_review",
     "read_knowledge_review",
@@ -219,6 +222,31 @@ def list_knowledge_review_entries(
     """
 
     resolved = resolve_review_candidate(config, repository_id, master, leaf_id, recorded=recorded)
+    return _entries_of(resolved, repository_id, master, leaf_id)
+
+
+def list_comparison_review_entries(
+    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str, number: int | None
+) -> ReviewEntryListResult:
+    """The same catalogue for the comparison one read names (MIK-R89 v2 rule 10).
+
+    ``number`` is one recorded tree comparison of the leaf, reopened from its record live leaf or
+    not; ``None`` is the leaf's own resolution, as :func:`list_knowledge_review_entries` reads it.
+    The answer's ``comparison`` names the number its catalogue and outline describe.
+    """
+
+    resolved = resolve_review_comparison(config, repository_id, master, leaf_id, number)
+    return _entries_of(resolved, repository_id, master, leaf_id)
+
+
+def _entries_of(
+    resolved: ReviewCandidateResolution | ReviewRefusal,
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+) -> ReviewEntryListResult:
+    """One resolution's catalogue and outline, or the refusal that resolution or its pair earns."""
+
     if isinstance(resolved, ReviewRefusal):
         return _entry_refused(repository_id, master, leaf_id, resolved)
     # The pair's own refusals come first and are one answer, stated before any subject is listed so
@@ -250,6 +278,7 @@ def list_knowledge_review_entries(
         invariant_total=invariant_total,
         family_total=len(entries) - invariant_total,
         outline=read_review_outline(resolved),
+        comparison=None if resolved.trees is None else resolved.trees.record.number,
     )
 
 
@@ -373,6 +402,16 @@ def compose_review(
     selected = select_subject_revisions(
         page.items,
         request.selector,
+    )
+    # Who wrote each selected revision, from each tree's own history files: the page names the
+    # source of a change the reviewed leaf did not write (MIK-R89 v2 rules 1 and 6, 9dde2b09).
+    selected = with_revision_writers(
+        selected,
+        before_database=resolved.baseline_database,
+        after_database=resolved.candidate_database,
+        legacy_detail=(
+            None if resolved.trees is not None else knowledge_unavailable_detail(resolved)
+        ),
     )
     # The recorded before/after relationship union is traversed here, from the comparison's own
     # union items, and the source pane renders both of its

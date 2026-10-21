@@ -25,16 +25,22 @@ from agents_remember.application.review_comparison_generation import (
 )
 from agents_remember.application.review_comparison_reopen import reopen_comparison_generation
 from agents_remember.cli.dashboard import serving_collaborators
+from agents_remember.serving.changeset_cache import ChangesetCache
 from agents_remember.serving.review import register_review_routes
+from agents_remember.serving.review_summary import register_review_summary_route
 from agents_remember_test_support.testing.review_git_trees import (
     CODE_FILE,
+    INVARIANT,
+    INVARIANT_PATH,
     LEAF,
     MASTER,
     REPO,
     World,
+    _write,
     build_world,
     commit,
     git,
+    invariant,
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -369,3 +375,65 @@ def test_a_closed_leaf_with_nothing_recorded_is_refused_by_name(closed_fixture: 
     assert refusal["code"] == "candidate_not_live"
     assert "records no comparison" in refusal["detail"]
     assert "record the leaf's landed commit" in refusal["next_action"]
+
+
+def _numbered_reads(world: World):
+    """The entries and summary routes of the production composition, asked one comparison number."""
+
+    collaborators = serving_collaborators(world.config)
+    app = FastAPI()
+    register_review_routes(app, world.config, None, collaborators.knowledge_review_entries)
+    register_review_summary_route(app, collaborators.review_intent_summary, ChangesetCache())
+    client = TestClient(app)
+    task = {"repo": REPO, "master": MASTER, "leaf": LEAF}
+
+    def read(route: str, number: int | None = None):
+        extra = {} if number is None else {"comparison": str(number)}
+        return client.get(f"/api/review/intent/{route}", params={**task, **extra})
+
+    return read
+
+
+def _outlined(body: dict) -> str:
+    """The outline's change of the fixture's invariant."""
+
+    return {one["id"]: one["change"] for one in body["outline"]["invariants"]}[INVARIANT]
+
+
+def test_an_older_comparison_number_serves_that_record_s_outline_and_summary(
+    closed_fixture: World,
+) -> None:
+    """MIK-R89 v2 rule 10: entries and summary read record n, echo n, and keep n's own answer."""
+
+    world = closed_fixture
+    assert _public_resolution(world).trees.record.number == 1  # type: ignore[union-attr]
+    # The second record withdraws the revision; the code edit stays.
+    _write(world.memory_worktree, {INVARIANT_PATH: invariant()})
+    assert _public_resolution(world).trees.record.number == 2  # type: ignore[union-attr]
+    read = _numbered_reads(world)
+    one, two, latest = read("entries", 1), read("entries", 2), read("entries")
+    assert one.status_code == two.status_code == latest.status_code == 200
+    assert (one.json()["comparison"], two.json()["comparison"], latest.json()["comparison"]) == (
+        1,
+        2,
+        2,
+    )
+    assert (_outlined(one.json()), _outlined(two.json())) == ("changed", "unchanged")
+    first, second = read("summary", 1).json(), read("summary", 2).json()
+    assert (first["state"], first["comparison"], first["counts"]["added"]) == ("counted", 1, 1)
+    assert (second["state"], second["comparison"], second["counts"]["added"]) == ("counted", 2, 0)
+    # A number the leaf did not record: the catalogue is refused by name, the summary unavailable.
+    unrecorded = read("entries", 9)
+    assert unrecorded.status_code == 404
+    assert unrecorded.json()["refusal"]["code"] == "candidate_unresolved"
+    assert unrecorded.json()["refusal"]["offending_input"] == "9"
+    for number in (9, -1):
+        refused = read("summary", number)
+        assert refused.status_code == 200 and refused.json()["state"] == "unavailable"
+        assert refused.json()["refusal"]["offending_input"] == str(number)
+        assert "counts" not in refused.json() and "comparison" not in refused.json()
+    # Closed, the catalogue is kept by its record: number 1's kept answer is not number 2's.
+    _close(world)
+    for _ in range(2):
+        assert _outlined(read("entries", 1).json()) == "changed"
+        assert _outlined(read("entries", 2).json()) == "unchanged"

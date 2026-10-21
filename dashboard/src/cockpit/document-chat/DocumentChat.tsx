@@ -7,6 +7,8 @@ import {
   type PaseoFrameUnavailableReason,
 } from '../paseoFrameModel';
 import { RoleChatsPane } from '../RoleChats';
+import { TrayColumnDock } from '../../tray/TrayDock';
+import { usePublishShownChat } from '../../tray/shownChat';
 import { documentLauncherRoles } from './model';
 import { useDocumentChat, type DocumentChatProps, type WarmupAgentPicture } from './state';
 
@@ -34,6 +36,10 @@ const ASKING = "Waiting for the dashboard to name this document's chat…";
 
 function DocumentChatImpl(props: DocumentChatProps) {
   const state = useDocumentChat(props);
+  // The tray's default target for an object pick is the chat this column shows (MIK-R188 rule 7).
+  // The view docks the tray (rule 5) as a sibling right after the frame's wrapper, drawn over the
+  // frame above Paseo's message box: it reads rectangles only and never moves or reloads the frame.
+  usePublishShownChat(props.active && !state.hideFrame && state.target ? { agentId: state.target.agentId } : null);
   const launchControl = state.hasControl ? (
     <button type="button" onClick={state.onToggleLauncher}>
       Launch role
@@ -61,7 +67,9 @@ function DocumentChatImpl(props: DocumentChatProps) {
       available={state.available}
       hideFrame={state.hideFrame}
       asking={state.asking}
+      waitLine={state.waitLine}
       active={props.active}
+      preload={props.preload === true}
       target={state.target}
       onAvailability={state.onAvailability}
       warmupLine={state.warmupLine}
@@ -117,7 +125,9 @@ function DocumentChatView({
   available,
   hideFrame,
   asking,
+  waitLine,
   active,
+  preload,
   target,
   onAvailability,
   warmupLine,
@@ -133,7 +143,9 @@ function DocumentChatView({
   available: boolean;
   hideFrame: boolean;
   asking: boolean;
+  waitLine: string | null;
   active: boolean;
+  preload: boolean;
   target: PaseoAgentTarget | null;
   onAvailability: (available: boolean) => void;
   warmupLine: string | null;
@@ -170,13 +182,15 @@ function DocumentChatView({
       >
         <PaseoChatFrame
           active={active}
+          preload={preload}
           scope={scope}
           target={target}
           page="document"
-          holding={asking ? ASKING : null}
+          holding={asking ? (waitLine ?? ASKING) : null}
           onAvailability={onAvailability}
         />
       </div>
+      <TrayColumnDock visible={active} page="document" />
     </section>
   );
 }

@@ -9,6 +9,7 @@ import type {
   ReviewOutlineMeaning,
   ReviewPayload,
 } from '../../data/review';
+import { muted as quiet, sublabel } from './reading/readingStyles';
 
 const muted = css({ color: 'muted', fontSize: '0.75rem', margin: '0.2rem 0' });
 const prose = css({ overflowWrap: 'anywhere' });
@@ -34,7 +35,27 @@ const badge = css({
   textOverflow: 'ellipsis',
 });
 const list = css({ margin: '0.3rem 0', paddingLeft: '1.1rem', fontSize: '0.78rem' });
+// The block in the reading column (MIK-R89 v2 rule 1, 9498d6e4: the page compared with the mockup by
+// eye): its heading in the column's section-label look (`sublabel`, the mockup's `.label`), unbolded;
+// its steps one quiet line each, as the mockup's
+// `.smeta`, with no list marker: a step's line says its attempt, and an ordinal marker of a list was
+// cut to ".." at the column's edge. The explanations' toggle is quiet text, not a boxed control.
+const labelWeight = css({ fontWeight: 'normal' });
+const steps = css({ margin: '0.3rem 0', display: 'grid', gap: '0.5rem' });
 const stepLine = css({ overflowWrap: 'anywhere' });
+const toggleLook = css({
+  background: 'transparent',
+  border: 'none',
+  padding: 0,
+  color: 'muted',
+  fontFamily: 'inherit',
+  fontSize: '0.72rem',
+  cursor: 'pointer',
+  textDecorationLine: 'underline',
+  textDecorationStyle: 'dotted',
+  textUnderlineOffset: '3px',
+  _hover: { color: 'amber' },
+});
 
 // Rule 6's fixed sentences, in the vocabulary's own order. They explain the label; they
 // do not say whether the curator's judgment is right. The backend pins the same nine
@@ -81,12 +102,14 @@ export function meaningFor(
 }
 
 function StepLine({ step }: { step: RecordMeaningEffects['steps'][number] }) {
-  const label = step.effect ?? 'effect not recorded';
+  const effect = step.effect ?? 'effect not recorded';
   const revision =
     step.revision === undefined ? 'family revision not recorded' : `revision ${step.revision}`;
   return (
-    <li className={stepLine} data-testid="review-recorded-step" data-row={step.row_id}>
-      attempt {step.attempt} · {revision} · {label} · {step.row_id}
+    <div role="listitem" className={stepLine} data-testid="review-recorded-step" data-row={step.row_id}>
+      <p className={quiet} data-testid="review-recorded-step-line">
+        attempt {step.attempt} · {revision} · {effect} · {step.row_id}
+      </p>
       <p className={muted}>{step.reason}</p>
       <p className={muted}>
         {step.closed ? 'history file closed' : 'history file still open'}
@@ -98,7 +121,7 @@ function StepLine({ step }: { step: RecordMeaningEffects['steps'][number] }) {
           row {step.row_id} · {step.history_path}
         </p>
       </details>
-    </li>
+    </div>
   );
 }
 
@@ -108,6 +131,8 @@ function Explanations() {
     <div>
       <button
         type="button"
+        className={toggleLook}
+        data-own-look
         data-testid="review-meaning-explanations-toggle"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -133,15 +158,15 @@ function Explanations() {
 export function RecordedStepsBlock({ answer }: { answer: RecordMeaningEffects }) {
   return (
     <section data-testid="review-recorded-steps">
-      <h3>Recorded steps</h3>
+      <h3 className={`${sublabel} ${labelWeight}`}>Recorded steps</h3>
       {answer.state === 'steps' ? (
         <>
           {answer.steps.length > 1 ? <p className={muted}>{MULTI_STEP_LINE}</p> : null}
-          <ol className={list}>
+          <div role="list" className={steps}>
             {answer.steps.map((step) => (
               <StepLine key={`${step.attempt}:${step.row_id}`} step={step} />
             ))}
-          </ol>
+          </div>
         </>
       ) : (
         <p className={muted} data-testid="review-recorded-steps-state">
@@ -156,7 +181,7 @@ export function RecordedStepsBlock({ answer }: { answer: RecordMeaningEffects })
 export function MissingMeaningEffects() {
   return (
     <section data-testid="review-recorded-steps-missing">
-      <h3>Recorded steps</h3>
+      <h3 className={`${sublabel} ${labelWeight}`}>Recorded steps</h3>
       <p className={muted}>
         The review answer carries no recorded meaning effects: a current build without
         the field is an invalid answer, shown as a failure rather than as no recorded

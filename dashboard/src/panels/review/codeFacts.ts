@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { ReviewOutline } from '../../data/review';
 import type { ReviewCodeChange, ReviewTreesRead } from '../../data/reviewTrees';
+import { TREE_SCROLL_SELECTOR } from './treeScroll';
 
 export function matchingTreeRead(read?: ReviewTreesRead | null, comparison?: number) {
   if (
@@ -76,7 +77,7 @@ export class CodeFactsScrollAnchor extends Component<
       return null;
     const positions: ScrollPosition[] = [];
     let element = this.props.root.current;
-    const list = element?.querySelector<HTMLElement>('[data-testid="review-family-list"]');
+    const list = element?.querySelector<HTMLElement>(TREE_SCROLL_SELECTOR);
     if (list) positions.push({ element: list, top: list.scrollTop, left: list.scrollLeft });
     while (element) {
       positions.push({ element, top: element.scrollTop, left: element.scrollLeft });
@@ -99,6 +100,14 @@ export class CodeFactsScrollAnchor extends Component<
   }
 }
 
+// The notice's words for what `codeChangesCount` counts: invariants whose own record did not change
+// while the code at their locations did (the tree's "code changed" rows). It is no count of changed
+// code: a leaf whose invariants all changed their records counts 0 with code changed under them.
+export function codeFactsNoticeText(count: number): string {
+  if (count === 0) return 'No invariant changed only in its code.';
+  return count === 1 ? '1 invariant changed only in its code.' : `${count} invariants changed only in their code.`;
+}
+
 // Facts enrich the existing tree in place. Do not focus or select a new row.
 export function useCodeFactsNotice(count: number | undefined, comparison?: number): string {
   const seen = useRef<string | undefined>(undefined);
@@ -107,7 +116,7 @@ export function useCodeFactsNotice(count: number | undefined, comparison?: numbe
   useLayoutEffect(() => {
     if (count !== undefined && seen.current !== key) {
       seen.current = key;
-      setNotice({ key, text: `${count} code changes found.` });
+      setNotice({ key, text: codeFactsNoticeText(count) });
     }
   }, [count, key]);
   return notice.key === key ? notice.text : '';

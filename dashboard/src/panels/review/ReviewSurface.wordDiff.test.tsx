@@ -80,13 +80,12 @@ it("word-diffs a tree review's member statement and family guarantee in the cent
   const view = open(invariant);
   const center = await view.findByTestId('review-center-member');
   const passages = await within(center).findAllByTestId('intent-diff');
-  expect(passages.map((node) => node.dataset.field)).toEqual([
-    'guarantee',
-    'statement',
-    'applicability',
-    'conditions.1',
-  ]);
-  const statement = passages[1];
+  // The member's own statement is its content; the guarantee of the family it was selected under
+  // follows its code (MIK-R89 v2 rule 1, amended 9dde2b09).
+  expect(passages.map((node) => node.dataset.field)).toEqual(['statement', 'applicability', 'conditions.1']);
+  const details = view.getByTestId('review-center-member-details');
+  expect(within(details).getAllByTestId('intent-diff').map((node) => node.dataset.field)).toEqual(['guarantee']);
+  const statement = passages[0];
   expect(within(center).getByTestId('review-center-statement-label').textContent).toBe(
     'Changed statement, applicability, conditions, exclusions · revision r2 → r4',
   );
@@ -94,7 +93,7 @@ it("word-diffs a tree review's member statement and family guarantee in the cent
   expect(spoken.replace(/\s+/g, ' ')).toContain(
     'removed: reachable added: authored knowledge write',
   );
-  const guarantee = within(center).getByTestId('review-center-guarantee-changed');
+  const guarantee = within(details).getByTestId('review-center-guarantee-changed');
   expect(guarantee.dataset.wordDiff).toBe('true');
   expect(within(guarantee).getByTestId('review-center-guarantee-label').textContent).toBe(
     'Changed guarantee · revision r1 → r3',
@@ -118,7 +117,8 @@ it("word-diffs a tree review's member statement and family guarantee in the cent
 it('never calls one guarantee revision unchanged when its texts differ, anywhere on a tree review', async () => {
   serve(true);
   const view = open(invariant);
-  const center = await view.findByTestId('review-center-member');
+  await view.findByTestId('review-center-member');
+  const center = view.getByTestId('review-center-member-details');
   expect(within(center).getByTestId('review-center-guarantee-label').textContent).toBe(
     'Changed guarantee · revision r1 → r1 · the same revision on both sides; its text differs',
   );

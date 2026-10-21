@@ -13,6 +13,15 @@ import { SubjectJudgment } from './SubjectReview';
 const writer = { kind: 'invariant', id: '8b1a17ca-96ba-5ede-a09f-abfb11ada0a5' } as const;
 const proofPath = 'mcp/tests/test_knowledge_cutover.py';
 
+// Whether the closed disclosure named `summary` in the section holds the identifier line `line`;
+// answers the disclosure's open state.
+function identifiersOf(section: HTMLElement, summary: string, line: string): boolean {
+  const disclosure = within(section).getByText(summary).closest('details')!;
+  expect(disclosure.dataset.disclosure).toBe('identifiers');
+  expect(within(disclosure).getByText(line)).toBeTruthy();
+  return disclosure.open;
+}
+
 function mountCapture(file: string, subject: ReviewSubject) {
   const body = JSON.parse(readFileSync(
     path.join(path.dirname(new URL(import.meta.url).pathname), file), 'utf8',
@@ -41,7 +50,10 @@ function mountCapture(file: string, subject: ReviewSubject) {
     expect(drawn.getByText(row.reason).closest('details')).toBeNull();
     expect(rows[index].textContent).toContain(`attempt ${row.attempt} · ${row.disposition}`);
     expect(rows[index].textContent).toContain(row.closed ? 'closed' : 'open');
-    expect(drawn.getByText(`${row.subject} · ${row.row_id} · ${row.history_path}`).closest('details')!.open).toBe(false);
+    // A row's identifiers stand in the section's one closed "Judgment identifiers" disclosure, not
+    // in the row (MIK-R86 rule 20: no disclosure per item; MIK-R57 rule 3 keeps them there).
+    expect(rows[index].textContent).not.toContain(row.row_id);
+    expect(identifiersOf(section, 'Judgment identifiers', `${row.subject} · ${row.row_id} · ${row.history_path}`)).toBe(false);
     if (row.covered_entries !== undefined)
       expect(rows[index].textContent).toContain(`${row.covered_entries} covered ${row.covered_entries === 1 ? 'entry' : 'entries'}`);
     if (row.examined_members !== undefined)
@@ -53,7 +65,7 @@ function mountCapture(file: string, subject: ReviewSubject) {
     expect(proofs[index].textContent).toContain(`${proof.path} · ${proof.symbol}`);
     expect(drawn.getByText(proof.facet).closest('details')).toBeNull();
     expect(drawn.getByText(proof.detail).closest('details')).toBeNull();
-    expect(drawn.getByText(`${proof.id} · ${proof.invariant}`).closest('details')!.open).toBe(false);
+    expect(identifiersOf(section, 'Proof identifiers', `${proof.id} · ${proof.invariant}`)).toBe(false);
   }
   return { ...view, payload, section, rows, proofs };
 }

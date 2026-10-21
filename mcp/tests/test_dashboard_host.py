@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import Mock
+from urllib.parse import urlencode
 
+import h11
+import pytest
 from agents_remember.cli import dashboard
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving import daemon
@@ -116,6 +120,63 @@ def test_foreground_serves_without_waiting_for_host_and_sim_skips_it(monkeypatch
     )
     assert dashboard.run(args(reload=True)) == 0
     assert events == ["host background", "reload serve"]
+
+
+def _card_read_head() -> bytes:
+    """The request head of one card read naming the route's maximum of 500 invariants."""
+
+    query = urlencode(
+        {
+            "repo": "agents-remember",
+            "master": "260928_maintained-invariant-knowledge",
+            "leaf": "260928-MIK-L181",
+            "comparison": "8",
+            "invariants": ",".join(str(uuid.UUID(int=number)) for number in range(500)),
+        }
+    )
+    return f"GET /api/review/trees?{query} HTTP/1.1\r\nhost: 127.0.0.1\r\n\r\n".encode()
+
+
+def _parsed_over_two_reads(head: bytes, connection: h11.Connection) -> object:
+    """What one server connection makes of a head that arrives over two reads, as uvicorn feeds it."""
+
+    connection.receive_data(head[:-4])
+    assert connection.next_event() is h11.NEED_DATA
+    connection.receive_data(head[-4:])
+    return connection.next_event()
+
+
+def test_a_500_invariant_card_read_fits_the_dashboard_servers_request_head_limit(
+    monkeypatch, tmp_path
+):
+    """MIK-R89 v2 rule 2 (W6): every serving mode admits the card read's ~19.5 KB head."""
+
+    cfg = config(tmp_path)
+    served: list[dict] = []
+    monkeypatch.setattr(dashboard, "declare_process_role", lambda role: None)
+    monkeypatch.setattr(dashboard, "bind_worktree_services", lambda services: None)
+    monkeypatch.setattr(
+        dashboard, "build_default_worktree_services", lambda *, leaf_agent_archive: None
+    )
+    monkeypatch.setattr(dashboard, "_resolve_settings", lambda args: (str(cfg.config_path), cfg))
+    monkeypatch.setattr(
+        dashboard, "_build_app", lambda args, config: dashboard._DashboardApp(object(), None)
+    )
+    monkeypatch.setattr(dashboard.uvicorn, "run", lambda *a, **k: served.append(k))
+    for name in (dashboard._DEV_CONFIG_ENV, dashboard._DEV_INTERVAL_ENV):
+        monkeypatch.setenv(name, "")  # restored after the reload path writes them
+    # The foreground serve is also the daemon child's (``--host-start-owner``); then reload.
+    assert dashboard.run(args(host_start_owner=4242)) == 0
+    assert dashboard._run_reload_server(args(reload=True), str(cfg.config_path), 9785) == 0
+    limit = dashboard.DASHBOARD_H11_MAX_INCOMPLETE_EVENT_SIZE
+    assert [kwargs["h11_max_incomplete_event_size"] for kwargs in served] == [limit, limit]
+    head = _card_read_head()
+    assert len(head) < limit
+    # h11's own default refuses the head (uvicorn then answers 400); the dashboard's limit reads it.
+    with pytest.raises(h11.RemoteProtocolError):
+        _parsed_over_two_reads(head, h11.Connection(h11.SERVER))
+    ours = h11.Connection(h11.SERVER, max_incomplete_event_size=limit)
+    assert isinstance(_parsed_over_two_reads(head, ours), h11.Request)
 
 
 def test_real_background_function_serves_before_host_outcome_and_logs(

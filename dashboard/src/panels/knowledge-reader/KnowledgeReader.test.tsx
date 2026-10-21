@@ -554,9 +554,13 @@ it('opens links at the top and restores the visit on browser Back', async () => 
 });
 
 it('opens wide citations beside unchanged prose, and phone citations as a page with Browse navigation', async () => {
+  // The developer hid the aside with its shared toggle (MIK-R89 v2 rule 8): a citation opens it.
+  window.localStorage.setItem('cockpit.sidebar.knowledge.right', '0');
   const view = open({ view: 'path', path: INTEGRATE });
   const article = await view.findByTestId('reader-path-view');
   const pane = view.getByTestId('knowledge-view');
+  const aside = view.container.querySelector<HTMLElement>('[data-reader-aside]')!;
+  expect(aside.style.display).toBe('none');
   const marker = within(article)
     .getAllByTestId('reference-marker')
     .find((row) => row.dataset.reference === '1')!;
@@ -564,9 +568,12 @@ it('opens wide citations beside unchanged prose, and phone citations as a page w
   fireEvent.scroll(pane);
   fireEvent.click(marker);
   await view.findByTestId('reader-citation-pane');
+  expect(aside.style.display).not.toBe('none');
+  expect(view.getByTestId('sidebar-toggle-knowledge-right').getAttribute('aria-expanded')).toBe('true');
   expect(pane.scrollTop).toBe(180);
   expect(parseReaderHash(window.location.hash)?.view).toBe('path');
   expect(view.getByTestId('reader-path-view')).toBe(article);
+  window.localStorage.clear();
   cleanup();
   vi.stubGlobal('matchMedia', () => ({
     matches: true,

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ReviewFileClassification } from '../../data/reviewLane';
-import { fileMarks, type HunkMark, markAnchor, occurrenceLabel, wholeSide } from './hunkMarkers';
+import { fileMarks, type HunkMark, markAnchor, occurrenceLabel } from './hunkMarkers';
 
 type Scenario =
   'precuration' | 'curated' | 'before_unread' | 'after_unread' | 'both_unread' | 'partial';
@@ -174,6 +174,8 @@ describe('what each hunk names', () => {
 });
 
 describe('where each mark sits', () => {
+  // The whole text of a side, as a window.
+  const wholeSide = (count: number) => ({ first: 1, last: count });
   const lines = hunks(classified('curated', 'pkg/lines.txt'));
   const whole = { before: wholeSide(6), after: wholeSide(5) };
 

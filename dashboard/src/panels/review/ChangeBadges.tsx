@@ -1,11 +1,11 @@
-// The change-kind badges, family breakdown and triage controls of the family tree (MIK-R33, adopting
-// ICR-R32). Every value rendered here is the server's fact or a count of them (changeTriage.ts);
-// styling uses the existing dashboard tokens, and the words carry the meaning without colour.
+// The change-kind badges and the family breakdown (MIK-R33, adopting ICR-R32). The tree's Sort
+// control is tree/SortMenu.tsx; the previous and next controls left the tree (MIK-R86 v2 rule 8).
+// Every value rendered here is the server's fact or a count of them (changeTriage.ts); styling uses
+// the existing dashboard tokens, and the words carry the meaning without colour.
 
 import { useId } from 'react';
 
 import { css, cx } from '../../../styled-system/css';
-import { ariaKeyshortcuts, bindingFor, useEffectiveKeymap } from '../../data/keymap/preferences';
 import type {
   ReviewChangeKind,
   ReviewChangeMark,
@@ -19,10 +19,8 @@ import {
   type OutlineBadge,
   breakdownText,
 } from './changeTriage';
-import type { TraversalDirection } from './changeTraversal';
 import type { MarkTarget } from './hunkMarkers';
 import { ATTRIBUTION_UNKNOWN, useMemberTarget } from './MarkerTargetState';
-import { type TreeOrder, treeOrderStore } from './triageOrderPreference';
 
 const pill = css({
   display: 'inline-block',
@@ -71,34 +69,6 @@ const why = css({
   marginTop: '0.2rem',
   overflowWrap: 'anywhere',
 });
-// The traversal controls and their status stay in view while the tree scrolls, so an end or a
-// partial family is announced where the reader is looking (the rail, or the page when stacked).
-// Sticky below the workspace's other sticky control, a followed marker's way back, while it is open
-// in the stacked layout (`--review-sticky-top`, set by ReviewWorkspace); else at the top.
-const triageBar = css({
-  position: 'sticky',
-  top: 'var(--review-sticky-top, 0)',
-  zIndex: 1,
-  background: 'bgPanel',
-  borderBottomWidth: '1px',
-  borderBottomStyle: 'solid',
-  borderBottomColor: 'grid',
-  // Padding on both edges keeps the children's margins inside the bar's own background.
-  paddingBlock: '0.2rem',
-  // Stuck under a scroll container's padding (the stacked phone layout), the bar's panel-coloured
-  // shadow covers that strip; in flow it fills the bar's own top margin, so it covers nothing.
-  marginTop: '0.75rem',
-  boxShadow: '0 -0.75rem 0 var(--bg-panel)',
-});
-const controls = css({
-  display: 'flex',
-  flexWrap: 'nowrap',
-  gap: '0.25rem',
-  alignItems: 'center',
-  margin: '0.3rem 0',
-  fontSize: '0.72rem',
-});
-
 function titleOf(kind: ReviewChangeKind, evidence: readonly string[]): string {
   return [`${CHANGE_LABEL[kind]}: ${CHANGE_MEANING[kind]}`, ...evidence].join('\n');
 }
@@ -313,62 +283,6 @@ export function FamilyBreakdown({ triage }: { triage: FamilyTriage | undefined }
     >
       Members by change: {breakdownText(triage)}
     </p>
-  );
-}
-
-// The order choice, the visible next/previous controls and the polite traversal status. The key
-// labels are the keymap owner's effective bindings, so a rebinding shows here too.
-export function TriageControls({
-  order,
-  onMove,
-  status,
-}: {
-  order: TreeOrder;
-  onMove: (direction: TraversalDirection) => void;
-  status: string;
-}) {
-  const keymap = useEffectiveKeymap();
-  const next = bindingFor(keymap, 'review.nextChange');
-  const previous = bindingFor(keymap, 'review.previousChange');
-  return (
-    <div className={triageBar} data-testid="review-triage-bar">
-      <div className={controls} data-testid="review-triage-controls">
-        <button
-          type="button"
-          data-testid="review-tree-order"
-          data-order={order}
-          title="Switch between changes first and the families' authored order"
-          onClick={() =>
-            treeOrderStore.getState().setOrder(order === 'authored' ? 'triage' : 'authored')
-          }
-        >
-          {order === 'authored' ? 'Order: authored' : 'Order: changes first'}
-        </button>
-        <button
-          type="button"
-          data-testid="review-previous-change"
-          title={`Previous change${previous ? ` (${previous.label})` : ''}`}
-          aria-keyshortcuts={previous ? ariaKeyshortcuts(previous.chord) : undefined}
-          onClick={() => onMove(-1)}
-        >
-          ↑ Previous
-        </button>
-        <button
-          type="button"
-          data-testid="review-next-change"
-          title={`Next change${next ? ` (${next.label})` : ''}`}
-          aria-keyshortcuts={next ? ariaKeyshortcuts(next.chord) : undefined}
-          onClick={() => onMove(1)}
-        >
-          ↓ Next
-        </button>
-      </div>
-      {status ? (
-        <p className={muted} role="status" aria-live="polite" data-testid="review-change-status">
-          {status}
-        </p>
-      ) : null}
-    </div>
   );
 }
 

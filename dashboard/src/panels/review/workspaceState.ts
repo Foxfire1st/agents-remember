@@ -1,6 +1,8 @@
-// Local display choices survive subject reads, but do not persist across review openings.
-import { useRef, useState } from 'react';
-import type { DiffMode } from '../changeset/DiffPane';
+// The review page's local display choices: they survive subject reads, but do not persist across
+// review openings. How code is drawn is not here: "Changes only | Full context" is the page's one
+// remembered control (reading/codeContextPreference.ts) and the diff layout follows the reading
+// column's width (reading/useReadingLayout.ts). Nothing here scrolls the page.
+import { useCallback, useRef, useState } from 'react';
 import type { FamilySelection } from './FamilyTree';
 import type { TreeIntent } from './walkedTree';
 
@@ -14,6 +16,8 @@ export interface FocusRequest {
   after: number;
   scrollOnly?: boolean;
   answered?: boolean;
+  // Focus has landed for the selection's failed or refused answer; the request stays for the retry.
+  failureLanded?: boolean;
 }
 
 export interface WorkspaceState {
@@ -21,17 +25,11 @@ export interface WorkspaceState {
   setChosen: (selection: FamilySelection | null) => void;
   query: string;
   setQuery: (next: string) => void;
-  layout: DiffMode;
-  setLayout: (next: DiffMode) => void;
-  fullFile: boolean;
-  setFullFile: (next: boolean) => void;
-  openPath: string | null | undefined;
-  openFromCenter: (path: string) => void;
-  closePath: (path: string | null) => void;
-  // Sets the opened path without moving focus (an intent marker's follow and return).
-  setOpenPath: (path: string | null | undefined) => void;
-  center: React.RefObject<HTMLDivElement | null>;
-  // The unexplained-changes lane destination on screen (and the file it opened), or none.
+  // The reading column's opened groups (MIK-R89 v2 rule 5), by group id.
+  openGroups: ReadonlySet<string>;
+  toggleGroup: (id: string) => void;
+  openGroup: (id: string) => void;
+  // The leaf worklist view on screen in place of the change set (MIK-R86 rule 21), or not.
   worklist: boolean;
   setWorklist: (next: boolean) => void;
   // Set by an explicit selection with the element that had focus then; the answer's focus lands on
@@ -46,55 +44,43 @@ export interface WorkspaceState {
 export function useWorkspaceState(): WorkspaceState {
   const [chosen, setChosen] = useState<FamilySelection | null>(null);
   const [query, setQuery] = useState('');
-  const [layout, setLayout] = useState<DiffMode>(() => window.matchMedia('(max-width: 40rem)').matches ? 'inline' : 'split');
-  const [fullFile, setFullFile] = useState(false);
-  const [openPath, setOpenPath] = useState<string | null>();
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
   const [worklist, setWorklist] = useState(false);
-  const opener = useRef<HTMLElement | null>(null);
-  const center = useRef<HTMLDivElement>(null);
   const focusSelection = useRef<FocusRequest | null>(null);
   const [treeIntent, setTreeIntent] = useState<TreeIntent>({ id: 0, keep: false });
-  const beginSelection = (keepTree: boolean) =>
-    setTreeIntent((previous) => ({ id: previous.id + 1, keep: keepTree }));
-  const openFromCenter = (path: string) => {
-    opener.current = document.activeElement as HTMLElement | null;
-    setOpenPath(path);
-  };
-  const closePath = (path: string | null) => {
-    if (path !== null) opener.current = document.activeElement as HTMLElement | null;
-    setOpenPath(path);
-    if (path === null) opener.current?.focus();
-  };
-  const choose = (selection: FamilySelection | null) => {
+  const beginSelection = useCallback(
+    (keepTree: boolean) => setTreeIntent((previous) => ({ id: previous.id + 1, keep: keepTree })),
+    [],
+  );
+  const toggleGroup = useCallback(
+    (id: string) =>
+      setOpenGroups((previous) => {
+        const next = new Set(previous);
+        if (!next.delete(id)) next.add(id);
+        return next;
+      }),
+    [],
+  );
+  const openGroup = useCallback(
+    (id: string) => setOpenGroups((previous) => (previous.has(id) ? previous : new Set(previous).add(id))),
+    [],
+  );
+  const choose = useCallback((selection: FamilySelection | null) => {
     setChosen(selection);
     setWorklist(false);
-    if (selection) revealCenter(center);
-  };
+  }, []);
   return {
     chosen,
     setChosen: choose,
     query,
     setQuery,
-    layout,
-    setLayout,
-    fullFile,
-    setFullFile,
-    openPath,
-    openFromCenter,
-    closePath,
-    setOpenPath,
-    center,
+    openGroups,
+    toggleGroup,
+    openGroup,
     worklist,
     setWorklist,
     focusSelection,
     treeIntent,
     beginSelection,
   };
-}
-
-// The rail owns its scroll; selecting there restores the common reading position without stealing focus.
-function revealCenter(center: React.RefObject<HTMLDivElement | null>): void {
-  if (window.matchMedia('(max-width: 40rem)').matches) return;
-  const surface = center.current?.closest<HTMLElement>('[data-testid="review-surface"]');
-  if (surface) surface.scrollTop = 0;
 }

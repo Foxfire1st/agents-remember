@@ -67,7 +67,8 @@ describe('wording unchanged', () => {
         .split(row.statement!),
     ).toHaveLength(2);
     expect(view.queryByTestId('diff-pane')).toBeNull();
-    expect(view.getByTestId('review-center-member-revisions').textContent).toContain(NEXT);
+    // The revision ids are Technical details' (MIK-R89 v2 rule 6, amended 9dde2b09).
+    expect(view.container.textContent).not.toContain(NEXT);
   });
 
   it('never labels a condition-only revision unchanged: the changed condition is named', () => {

@@ -1,4 +1,6 @@
-// Current L37 raw tree-route answers: family/member reading and focused expression cards.
+// Current L37 raw tree-route answers: family/member reading, and the reading column's cards (MIK-R89
+// v2 rule 2, W1, W2: each subject's changed locations as one card per entry under its own heading,
+// its unchanged and not comparable locations as two closed groups).
 // Provenance: subjectReview.capture-provenance.json and l86.capture-provenance.json.
 // The full-tree fixture is historical, used only for isolated worklist chrome;
 // these tests do not qualify the separately reported current full-tree refusal.
@@ -90,7 +92,8 @@ it('renders a converted leaf family review from its trees and opens the touched 
   // The family and its whole recorded roster, read from the memory trees' indexes.
   const entry = payload.family_context!.entries[0];
   expect(entry.display_label).toBe('knowledge-write-and-publication-foundation');
-  const members = within(view.getByTestId('review-center-family')).getAllByTestId(
+  // The family's members follow its content and its members' code (MIK-R89 v2 rule 1, 9dde2b09).
+  const members = within(view.getByTestId('review-center-family-details')).getAllByTestId(
     'review-center-open-member',
   );
   expect(members).toHaveLength(
@@ -108,24 +111,33 @@ it('renders a converted leaf family review from its trees and opens the touched 
   );
   const center = await view.findByTestId('review-center-member');
   const statement = within(center).getByTestId('review-center-member-changed');
-  expect(statement.textContent).toContain(touched.before_revision_id);
-  expect(statement.textContent).toContain(touched.after_revision_id);
+  // Both revision ids are Technical details' (rule 6, 9dde2b09).
+  const revisions = view.getByTestId('review-center-member-revisions');
+  expect(revisions.closest('details')?.open).toBe(false);
+  expect(revisions.textContent).toContain(touched.before_revision_id);
+  expect(revisions.textContent).toContain(touched.after_revision_id);
   expect(
     within(statement)
       .getAllByTestId('intent-diff')
       .some((node) => node.dataset.field === 'statement'),
   ).toBe(true);
   expect(center.dataset.family).toBe(entry.family_id);
-  // The member keeps its family's real expression cards, all of its own entries first.
-  const seeded = await within(center).findAllByTestId('review-expression-card');
-  const owners = seeded.map((card) =>
-    within(card)
-      .getAllByTestId('review-card-voice')
-      .map((voice) => voice.dataset.invariant),
-  );
-  expect(owners.slice(0, 7)).toEqual(Array.from({ length: 7 }, () => ['INV-1XKX9ERN']));
-  expect(owners.slice(7).every((names) => !names.includes('INV-1XKX9ERN'))).toBe(true);
-  expect(seeded.some((card) => card.dataset.entries?.includes('RLZ-Y766ENWA'))).toBe(true);
+  // The member's own locations stand under its heading in the column, one card per changed entry;
+  // its not comparable entries are lines of its closed group (W1, rule 5).
+  const section = view
+    .getAllByTestId('review-subject-section')
+    .find((node) => node.dataset.subject === touched.record_id)!;
+  const cards = within(section).getAllByTestId('review-expression-card');
+  expect(cards.map((card) => card.dataset.entries).sort()).toEqual(['PRF-TMK4N3', 'RLZ-6HAWT71R']);
+  const notComparable = within(section)
+    .getAllByTestId('review-location-group')
+    .find((group) => group.dataset.group === 'not-comparable')!;
+  fireEvent.click(within(notComparable).getByTestId('review-location-group-toggle'));
+  expect(
+    within(notComparable)
+      .getAllByTestId('review-location-line')
+      .some((line) => line.dataset.entry === 'RLZ-Y766ENWA'),
+  ).toBe(true);
 });
 
 it('shows the current family as focused cards with changed and unchanged expressions', async () => {
@@ -142,13 +154,14 @@ it('shows the current family as focused cards with changed and unchanged express
     />,
   );
   const center = await view.findByTestId('review-center-family');
-  await waitFor(() =>
-    expect(within(center).getByTestId('review-expression-cards').dataset.cardsState).toBe('ready'),
-  );
-  const section = within(center).getByTestId('review-expression-cards');
-  // The cards read names the review's own comparison and every member of the family.
+  await waitFor(() => expect(view.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
+  // The cards read (read 5) names the review's own comparison and the opening's shown subjects,
+  // the family's two changed members among them, sorted and distinct (W4).
   const read = requested.find((url) => url.searchParams.get('invariants'))!;
   expect(read.searchParams.get('comparison')).toBe('5');
+  const asked = read.searchParams.get('invariants')!.split(',');
+  expect(asked).toEqual([...new Set(asked)].sort());
+  expect(asked).toEqual(expect.arrayContaining(['8b1a17ca-96ba-5ede-a09f-abfb11ada0a5', 'c88cc287-0469-556c-9f42-b742b2377478']));
   // The leaf-wide read is pinned to the same comparison (review F11).
   const leafWide = requested.find(
     (url) =>
@@ -158,29 +171,29 @@ it('shows the current family as focused cards with changed and unchanged express
   )!;
   expect(leafWide.searchParams.get('comparison')).toBe('5');
   expect(leafWide.searchParams.get('history')).toBeNull();
-  expect(read.searchParams.get('invariants')!.split(',')).toHaveLength(3);
-  // No accordion of whole files: the center holds cards, one per (path, range).
-  expect(within(center).queryByTestId('review-expression-diffs')).toBeNull();
-  const all = within(section).getAllByTestId('review-expression-card');
-  expect(all).toHaveLength(12);
-  expect([section.dataset.changedCount, section.dataset.unchangedCount]).toEqual(['3', '6']);
+  // No accordion of whole files: one card per changed entry, under its subject's heading.
+  expect(view.queryByTestId('review-expression-diffs')).toBeNull();
+  const all = view.getAllByTestId('review-expression-card');
+  expect(all.map((card) => card.dataset.entries).sort()).toEqual(['PRF-TMK4N3', 'RLZ-6HAWT71R', 'RLZ-K64BDQNF']);
   const proof = all.find((card) => card.dataset.cardKind === 'proof')!;
   expect(proof.dataset.entries).toBe('PRF-TMK4N3');
-  expect(proof.textContent).toContain('Test proof · facet');
-  const changed = all.find((card) => card.dataset.cardChange === 'changed')!;
-  expect(changed).toBeDefined();
+  expect(within(proof).getByTestId('review-block-role').textContent).toBe('proof');
+  const changed = all.find((card) => card.dataset.cardKind !== 'proof')!;
   expect(within(changed).getByTestId('review-card-excerpt').dataset.excerpt).toBe('diff');
   const rationale = within(changed).getByTestId('review-card-rationales');
   const excerpt = within(changed).getByTestId('review-card-excerpt');
   expect(
     rationale.compareDocumentPosition(excerpt) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  expect(all.some((card) => card.dataset.cardChange === 'unchanged')).toBe(true);
-  // Worklist records have their own view; the subject shows only its own items.
-  const block = within(center).getByTestId('review-subject-worklist');
+  // Unchanged locations are lines of a closed group, never cards (rule 5).
+  const groups = view.getAllByTestId('review-location-group').filter((group) => group.dataset.group === 'unchanged');
+  expect(groups.length).toBeGreaterThan(0);
+  // Worklist records have their own view; the subject shows only its own items, after its code.
+  expect(center).toBeTruthy();
+  const block = within(view.getByTestId('review-center-family-details')).getByTestId('review-subject-worklist');
   expect(block.textContent).toContain('Worklist items about this record');
   expect(requested.some((url) => url.searchParams.has('lane'))).toBe(true);
-  fireEvent.click(view.getByRole('button', { name: /^Worklist/ }));
+  fireEvent.click(view.getByTestId('review-tree-worklist'));
   const knowledge = view.getByTestId('review-worklist-view');
   expect(
     within(knowledge)
@@ -206,13 +219,11 @@ it('takes no planning mark from a leaf-wide read of another comparison (review R
       onBack={() => undefined}
     />,
   );
-  const center = await view.findByTestId('review-center-family');
-  const panel = await within(center).findByTestId('review-subject-worklist');
+  await view.findByTestId('review-center-family');
+  const panel = await within(view.getByTestId('review-center-family-details')).findByTestId('review-subject-worklist');
   expect(panel.textContent).toContain('The available answer belongs to comparison 2.');
-  await waitFor(() =>
-    expect(within(center).getByTestId('review-expression-cards').dataset.cardsState).toBe('ready'),
-  );
-  const voices = within(center).getAllByTestId('review-card-voice');
+  await waitFor(() => expect(view.getAllByTestId('review-expression-card').length).toBeGreaterThan(0));
+  const voices = view.getAllByTestId('review-card-voice');
   expect(voices.length).toBeGreaterThan(0);
   for (const voice of voices) expect(voice.textContent).not.toMatch(/· (planned|unplanned)/);
 });

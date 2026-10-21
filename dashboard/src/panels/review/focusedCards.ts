@@ -1,17 +1,9 @@
-// Focused expression cards (MIK-R31): every code and test location of the selected family's members,
-// grouped by the exact region it names, in the family order of MIK-R01.
-//
-// A card is one (path, range) on each side, never one path: two regions of one file keep two cards
-// and two rationales, and several members' entries at the same path and range share one card that
-// lists each member with its own rationale. Ranges come from the server's MIK-R08 definition 3
-// resolution (data/reviewTrees.ts `ReviewTreeEntry`); nothing here resolves, searches or guesses a
-// range. A side that did not resolve keeps its entry on a card of its own, because "the same range"
-// is not a fact anyone established for it.
-//
-// Order (MIK-R01 rule 4): the seed invariant's entries first (the selected member, when one is
-// selected), then each remaining member by ID; within a member, realizations before proofs, each by
-// path and then ID. A card takes the position of its first entry.
-import type { ReviewFamilyContextEntry } from '../../data/review';
+// The review page's cards (MIK-R31; MIK-R89 v2 W1): one card-read entry is one card, drawn by
+// ExpressionCards.tsx `ReviewBlockCard` from the change-set model's location (changeSetOrder.ts).
+// Ranges come from the server's MIK-R08 definition 3 resolution (data/reviewTrees.ts
+// `ReviewTreeEntry`); nothing here resolves, searches or guesses a range. These are the card's
+// readers: who speaks on it, its first lines, its range label, its sides that are not current and
+// the highlighting language of its path.
 import type { ReviewTreeEntry, ReviewTreeEntrySide } from '../../data/reviewTrees';
 
 export type CardChange = ReviewTreeEntry['change'];
@@ -24,77 +16,6 @@ export interface ExpressionCard {
   before: ReviewTreeEntrySide;
   after: ReviewTreeEntrySide;
   entries: ReviewTreeEntry[];
-}
-
-export interface CardCounts {
-  cards: number;
-  changed: number;
-  unchanged: number;
-  undetermined: number;
-}
-
-const KIND_RANK: Record<ReviewTreeEntry['kind'], number> = { realization: 0, proof: 1 };
-
-function sidePath(entry: ReviewTreeEntry): string {
-  return entry.after.recorded ? entry.after.path : entry.before.path;
-}
-
-// The region one side names: its path and its resolved lines, or its state alone.
-function region(side: ReviewTreeEntrySide): string {
-  if (side.state === 'resolved') return `${side.path}:${side.start_line}-${side.end_line}`;
-  return `${side.path}:${side.state}`;
-}
-
-// Entries share a card only when both sides are established regions: resolved, or a file absent
-// there. An unresolved or unavailable side is not a region, so its entry is keyed by its own ID.
-function cardKey(entry: ReviewTreeEntry): string {
-  const established = (side: ReviewTreeEntrySide) =>
-    side.state === 'resolved' || side.state === 'absent';
-  const own = established(entry.before) && established(entry.after) ? '' : `|${entry.id}`;
-  return `${entry.kind}|${region(entry.before)}|${region(entry.after)}${own}`;
-}
-
-export function orderedEntries(entries: ReviewTreeEntry[], seed?: string): ReviewTreeEntry[] {
-  return [...entries].sort(
-    (left, right) =>
-      Number(right.invariant_key === seed) - Number(left.invariant_key === seed) ||
-      left.invariant.localeCompare(right.invariant) ||
-      KIND_RANK[left.kind] - KIND_RANK[right.kind] ||
-      sidePath(left).localeCompare(sidePath(right)) ||
-      left.id.localeCompare(right.id),
-  );
-}
-
-export function expressionCards(entries: ReviewTreeEntry[], seed?: string): ExpressionCard[] {
-  const cards = new Map<string, ExpressionCard>();
-  for (const entry of orderedEntries(entries, seed)) {
-    const key = cardKey(entry);
-    const card = cards.get(key);
-    if (card) {
-      card.entries.push(entry);
-      continue;
-    }
-    cards.set(key, {
-      key,
-      kind: entry.kind,
-      path: sidePath(entry),
-      change: entry.change,
-      before: entry.before,
-      after: entry.after,
-      entries: [entry],
-    });
-  }
-  return [...cards.values()];
-}
-
-// An unchanged card is excluded from every changed count; an undetermined one is counted apart.
-export function cardCounts(cards: ExpressionCard[]): CardCounts {
-  return {
-    cards: cards.length,
-    changed: cards.filter((card) => card.change === 'changed').length,
-    unchanged: cards.filter((card) => card.change === 'unchanged').length,
-    undetermined: cards.filter((card) => card.change === 'undetermined').length,
-  };
 }
 
 // What one member says on a card: the side that records the entry now (after, else before), with
@@ -136,6 +57,12 @@ export function cardVoice(entry: ReviewTreeEntry): CardVoice {
 // The first line number of each side's excerpt, for a diff whose gutter keeps the file's numbering.
 export function firstLines(card: ExpressionCard): { before: number; after: number } {
   return { before: card.before.start_line ?? 1, after: card.after.start_line ?? 1 };
+}
+
+// The text an excerpt draws: the newline that ends its range's last line starts no line of its own,
+// so a card labelled L1697–1817 draws exactly those 121 rows and no empty row 1818 (R89 evidence 8).
+export function drawnText(excerpt: string): string {
+  return excerpt.endsWith('\n') ? excerpt.slice(0, -1) : excerpt;
 }
 
 export function rangeLabel(side: ReviewTreeEntrySide): string {
@@ -181,43 +108,4 @@ const SUFFIX_LANGUAGES: Record<string, string> = {
 export function languageOfPath(path: string): string {
   const suffix = /\.([A-Za-z0-9]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
   return SUFFIX_LANGUAGES[suffix] ?? 'text';
-}
-
-// How much of a family a card read covers, counted on one side so the two numbers are the same kind
-// of thing: the side recording the most membership rows, its distinct loaded members against its
-// own row count (never above it). `undefined` when the roster is complete (the cards cover every
-// member). Review F2/R2-5: a bounded roster must never read as the whole family.
-export interface CardScope {
-  loaded: number;
-  total: number;
-  missing?: string[];
-}
-
-export function cardScope(entry: ReviewFamilyContextEntry | undefined): CardScope | undefined {
-  if (!entry) return undefined;
-  const all = [entry.before, entry.after];
-  const sides = all.filter((side) => side.state === 'recorded');
-  const missing = all.flatMap((side) => {
-    if (side.state === 'not_recorded') return [];
-    if (side.state !== 'recorded') return [`${side.side} side could not be read: ${side.detail}`];
-    const reasons: string[] = [];
-    if (side.page?.complete === false || side.members.length < side.members_total)
-      reasons.push(`${side.side} side is not fully loaded`);
-    for (const member of side.members)
-      if (member.state !== 'recorded')
-        reasons.push(
-          `${side.side} member ${member.display_label ?? member.member_id} could not be read: ${member.detail}`,
-        );
-    return reasons;
-  });
-  if (!missing.length || !sides.length) return undefined;
-  const widest = sides.reduce((most, side) =>
-    side.members_total > most.members_total ? side : most,
-  );
-  const loaded = new Set(widest.members.map((member) => member.invariant_id ?? member.member_id));
-  return {
-    loaded: Math.min(loaded.size, widest.members_total),
-    total: widest.members_total,
-    missing,
-  };
 }

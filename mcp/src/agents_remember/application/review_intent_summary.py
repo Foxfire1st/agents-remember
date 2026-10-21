@@ -74,7 +74,7 @@ from agents_remember.models.knowledge.review_intent_summary import (
     ReviewIntentSummaryResult,
 )
 
-__all__ = ["intent_summary_of", "read_review_intent_summary"]
+__all__ = ["intent_summary_of", "read_review_intent_summary", "summarize_review"]
 
 # The invariant revision fields compared between two heads: the authored statement and its record
 # status. Display version and provenance differ on every successor, so they are not compared; a
@@ -139,8 +139,32 @@ def read_review_intent_summary(
     recorded comparison), so the counts beside the entry describe the comparison the entry opens.
     """
 
+    return summarize_review(
+        lambda: resolve_review_candidate(config, repository_id, master, leaf_id),
+        repository_id,
+        master,
+        leaf_id,
+        observe=observe,
+    )
+
+
+def summarize_review(
+    resolve: Callable[[], ReviewCandidateResolution | ReviewRefusal],
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    *,
+    observe: Callable[[ReviewCandidateResolution], None] | None = None,
+) -> ReviewIntentSummaryResult:
+    """Summarize the comparison ``resolve`` names, resolved inside this read's one Git-lookup memo.
+
+    The caller chooses the resolution: the leaf's own (:func:`read_review_intent_summary`), or one
+    recorded tree comparison by its number (MIK-R89 v2 rule 10), whose refusal of a number the leaf
+    did not record is ``unavailable`` here. The answer's ``comparison`` names the number counted.
+    """
+
     with memo_git_object_lookups():
-        resolved = resolve_review_candidate(config, repository_id, master, leaf_id)
+        resolved = resolve()
         if isinstance(resolved, ReviewRefusal):
             return _unavailable(repository_id, master, leaf_id, resolved)
         if observe is not None:
@@ -152,6 +176,7 @@ def read_review_intent_summary(
             update={
                 "attribution": lane_summary(resolved.trees),
                 "unexplained_open": stored_unexplained_open(resolved.contract, resolved.trees),
+                "comparison": resolved.trees.record.number,
             }
         )
 

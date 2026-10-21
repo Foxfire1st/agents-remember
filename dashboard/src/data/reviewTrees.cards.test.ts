@@ -1,17 +1,14 @@
-// L81-R1-F18 at the client: the cards read survives the loading unmount and starts early.
-//
-// The loading switch unmounts the cards while a newly selected subject resolves; the kept cards
-// answer used to die with the hook and refetch on remount, and a changed set waited for the
-// subject before its cards request even started. These cases mount the hook with deferred fetch
-// answers: an unchanged set sends no second request through pending or answer, a prefetched
-// changed set is already in flight when its hook mounts, and an old answer never renders under a
-// new question.
+// The review page's read 5 at the client (MIK-R89 v2 rule 2; L81-R1-F18): the cards of the shown
+// subjects, ⌈i/500⌉ chunk reads kept outside the hook. A remount with an unchanged set sends no second
+// request through pending or answer; a changed set is a new question and never shows the old answer;
+// a failed chunk is this mount's to show and is asked again on a remount.
 
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { prefetchCardEntries, useReviewTreeEntries } from './reviewTrees';
-import { resetCardCachesForTests } from './reviewTrees';
+import { IntentEntryRevalidation, useRevalidateIntentEntry } from './intentEntryRevalidation';
+import { CARD_CHUNK, resetCardCachesForTests, useChangeSetCards } from './reviewTrees';
 
 const treesBody = (marker: string) => ({
   state: 'trees',
@@ -51,73 +48,143 @@ function serveDeferred(): { calls: string[]; resolve: (body: unknown) => void } 
   return { calls, resolve: release };
 }
 
-describe("a selection's cards read", () => {
+const cardsOf = (invariants: string[]) =>
+  renderHook(({ wanted }: { wanted: string[] }) => useChangeSetCards('r', 'm', 'l', 1, wanted, true), {
+    initialProps: { wanted: invariants },
+  });
+
+describe("the page's card read", () => {
   it('sends no second request when the same set remounts through pending and answer', async () => {
     const { calls, resolve } = serveDeferred();
-    const props = { invariants: ['INV-A', 'INV-B'] };
-    const first = renderHook(
-      ({ invariants }: { invariants: string[] }) => useReviewTreeEntries('r', 'm', 'l', 1, invariants),
-      { initialProps: props },
-    );
+    const first = cardsOf(['INV-B', 'INV-A']);
     expect(first.result.current).toEqual({ phase: 'loading' });
     expect(calls).toEqual(['INV-A,INV-B']);
-    // The loading switch unmounts the cards while the request is still pending.
     first.unmount();
-    const second = renderHook(
-      ({ invariants }: { invariants: string[] }) => useReviewTreeEntries('r', 'm', 'l', 1, invariants),
-      { initialProps: props },
-    );
+    const second = cardsOf(['INV-A', 'INV-B']);
     expect(second.result.current).toEqual({ phase: 'loading' });
     expect(calls).toEqual(['INV-A,INV-B']);
-    // The shared answer lands once and shows on the remount with no second request.
     await act(async () => {
       resolve(treesBody('first'));
     });
     await waitFor(() =>
-      expect(second.result.current).toEqual({
-        phase: 'trees',
-        trees: expect.objectContaining({ comparison: expect.objectContaining({ marker: 'first' }) }),
-      }),
+      expect(second.result.current).toEqual(
+        expect.objectContaining({ phase: 'cards', comparison: expect.objectContaining({ marker: 'first' }) }),
+      ),
     );
     expect(calls).toEqual(['INV-A,INV-B']);
   });
 
-  it('starts a changed set before its hook mounts, beside the subject request', async () => {
+  it('reads at most CARD_CHUNK invariants at a time', async () => {
     const { calls, resolve } = serveDeferred();
-    // The member click prefetches from the displayed family before the subject resolves.
-    prefetchCardEntries('r', 'm', 'l', 1, ['INV-C']);
-    expect(calls).toEqual(['INV-C']);
-    // The hook mounts later, after the subject answer, and reuses the flight.
-    const mounted = renderHook(() => useReviewTreeEntries('r', 'm', 'l', 1, ['INV-C']));
-    expect(mounted.result.current).toEqual({ phase: 'loading' });
-    expect(calls).toEqual(['INV-C']);
+    const wanted = Array.from({ length: CARD_CHUNK * 2 + 1 }, (_, index) => `INV-${String(index).padStart(4, '0')}`);
+    const mounted = cardsOf(wanted);
+    expect(calls.map((call) => call.split(',').length)).toEqual([CARD_CHUNK, CARD_CHUNK, 1]);
     await act(async () => {
-      resolve(treesBody('prefetched'));
+      resolve(treesBody('chunks'));
     });
-    await waitFor(() =>
-      expect(mounted.result.current).toEqual({
-        phase: 'trees',
-        trees: expect.objectContaining({
-          comparison: expect.objectContaining({ marker: 'prefetched' }),
-        }),
-      }),
-    );
-    expect(calls).toEqual(['INV-C']);
+    await waitFor(() => expect(mounted.result.current).toEqual(expect.objectContaining({ phase: 'cards' })));
   });
 
   it('never shows an old answer under a new question', async () => {
     const { calls, resolve } = serveDeferred();
-    const rendered = renderHook(
-      ({ invariants }: { invariants: string[] }) => useReviewTreeEntries('r', 'm', 'l', 1, invariants),
-      { initialProps: { invariants: ['INV-A'] } },
-    );
+    const rendered = cardsOf(['INV-A']);
     await act(async () => {
       resolve(treesBody('old'));
     });
-    await waitFor(() => expect(rendered.result.current).toEqual(expect.objectContaining({ phase: 'trees' })));
-    // A changed set is a new question: loading, never the old subject's answer.
-    rendered.rerender({ invariants: ['INV-B'] });
+    await waitFor(() => expect(rendered.result.current).toEqual(expect.objectContaining({ phase: 'cards' })));
+    rendered.rerender({ wanted: ['INV-B'] });
     expect(rendered.result.current).toEqual({ phase: 'loading' });
     expect(calls).toEqual(['INV-A', 'INV-B']);
+  });
+
+  it('shows a failed chunk on this mount and asks again on a remount', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (address: string) => {
+        calls.push(new URL(address, 'http://localhost').searchParams.get('invariants') ?? '');
+        return { ok: false, status: 500, json: async () => ({}) } as Response;
+      }),
+    );
+    const first = cardsOf(['INV-A']);
+    await waitFor(() => expect(first.result.current).toEqual(expect.objectContaining({ phase: 'unavailable' })));
+    first.unmount();
+    cardsOf(['INV-A']);
+    await waitFor(() => expect(calls).toEqual(['INV-A', 'INV-A']));
+  });
+
+  // MIK-R89 v2 rule 3, Failure and Recovery: values that failed on a readable after side are this
+  // mount's to show and are never kept; the reader's Refresh reads them again, and an answer with
+  // its values, or one whose after side is the record's own unconverted state, is kept and reused.
+  it('keeps no answer whose memory values failed, and reads it again on a refresh', async () => {
+    const sides = (after: string) => [
+      { side: 'before', state: 'available', tree: 'a'.repeat(40), problems: [] },
+      { side: 'after', state: after, tree: 'b'.repeat(40), problems: [] },
+    ];
+    const memory = (state: string) => ({
+      state,
+      tree: 'b'.repeat(40),
+      ...(state === 'available' ? {} : { reason: 'the after index could not be built' }),
+    });
+    const bodies: object[] = [
+      {
+        ...treesBody('failed'),
+        knowledge_sides: sides('available'),
+        entry_memory: memory('unavailable'),
+      },
+      {
+        ...treesBody('recovered'),
+        knowledge_sides: sides('available'),
+        entry_memory: memory('available'),
+      },
+    ];
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (address: string) => {
+        calls.push(new URL(address, 'http://localhost').searchParams.get('invariants') ?? '');
+        const body = bodies.length > 1 ? bodies.shift() : bodies[0];
+        return { ok: true, status: 200, json: async () => body } as Response;
+      }),
+    );
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(IntentEntryRevalidation, { shown: false, children });
+    const page = renderHook(
+      () => ({
+        cards: useChangeSetCards('r', 'm', 'l', 1, ['INV-A'], true),
+        refresh: useRevalidateIntentEntry(),
+      }),
+      { wrapper },
+    );
+    const shownMemory = () => {
+      const cards = page.result.current.cards;
+      return cards?.phase === 'cards' ? cards.memory?.state : undefined;
+    };
+    await waitFor(() => expect(shownMemory()).toBe('unavailable'));
+    act(() => page.result.current.refresh());
+    await waitFor(() => expect(shownMemory()).toBe('available'));
+    expect(calls).toEqual(['INV-A', 'INV-A']);
+    act(() => page.result.current.refresh());
+    page.unmount();
+    const again = cardsOf(['INV-A']);
+    expect(again.result.current).toEqual(
+      expect.objectContaining({
+        phase: 'cards',
+        memory: expect.objectContaining({ state: 'available' }),
+      }),
+    );
+    expect(calls).toEqual(['INV-A', 'INV-A']);
+    bodies.splice(0, bodies.length, {
+      ...treesBody('unconverted'),
+      knowledge_sides: sides('legacy-unavailable'),
+      entry_memory: memory('unavailable'),
+    });
+    const unconverted = cardsOf(['INV-B']);
+    await waitFor(() =>
+      expect(unconverted.result.current).toEqual(expect.objectContaining({ phase: 'cards' })),
+    );
+    unconverted.unmount();
+    cardsOf(['INV-B']);
+    expect(calls).toEqual(['INV-A', 'INV-A', 'INV-B']);
   });
 });

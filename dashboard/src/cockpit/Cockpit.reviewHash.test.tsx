@@ -52,7 +52,10 @@ it('opens a recorded review link at startup and shows the existing refusal for u
   const surface = await view.findByTestId('review-surface');
   expect(surface.dataset.reviewTarget).toBe('unknown-repo/unknown-master/unknown-leaf');
   expect(surface.dataset.reviewHistory).toBe('recorded');
-  await view.findByText(/This leaf is not known/);
+  // The review read's refusal is the page's outcome; the page's other reads of the unknown target
+  // (the outline, the summary) carry the same owner text where they say why they are unavailable.
+  const refusal = await view.findByTestId('review-refusal');
+  expect(refusal.textContent).toContain('This leaf is not known');
   expect(fetchMock.mock.calls.some(([url]) => url.includes('history=recorded'))).toBe(true);
   fireEvent.click(view.getByTestId('review-back'));
   expect(window.location.hash).toBe('');
@@ -98,10 +101,17 @@ it('browser Back closes the review including its open change-set page, without p
     else if (url.pathname === '/api/changeset/file-diff')
       body = diffs[`${url.searchParams.get('kind') ?? 'code'}:${url.searchParams.get('path')}`];
     else if (url.pathname === '/api/review/trees') {
-      // This hash/back journey deliberately does not qualify focused excerpts. Never
-      // answer an unrelated family's scope with the l86.cards seven-member capture.
+      // This hash/back journey deliberately does not qualify the cards of the page's shown
+      // subjects (read 5): never answer them with the l86.cards seven-member capture.
       if (url.searchParams.has('invariants'))
-        throw new Error('Focused excerpts are outside the hash/back check.');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            state: 'refused',
+            refusal: { code: 'not-served', detail: 'Cards are outside the hash/back check.', next_action: 'Open the review.' },
+          }),
+        } as Response;
       const name = url.searchParams.has('file')
         ? 'classification'
         : url.searchParams.has('lane')
@@ -124,7 +134,7 @@ it('browser Back closes the review including its open change-set page, without p
   });
   vi.stubGlobal('fetch', fetchMock);
   const view = render(<CockpitShell />);
-  await view.findByTestId('review-catalogue-navigation');
+  await view.findByTestId('review-tree');
   const root = view.getByTestId('review-surface');
   const reads = () =>
     fetchMock.mock.calls.filter(
@@ -138,11 +148,8 @@ it('browser Back closes the review including its open change-set page, without p
   });
   expect(view.getByTestId('review-surface')).toBe(root);
   expect(reads()).toBe(before);
-  fireEvent.click(
-    within(view.getByTestId('review-catalogue-navigation')).getByRole('button', {
-      name: /^All changes/,
-    }),
-  );
+  // The one "All changes" link is the tree's (MIK-R89 v2 rule 7).
+  fireEvent.click(within(view.getByTestId('review-tree')).getByTestId('review-all-changes'));
   await view.findByTestId('changeset-viewer');
   expect(window.location.hash).toBe(hash + '&selectorId=outside-subject');
   await act(async () => {

@@ -5,12 +5,15 @@ import {
   useMemo,
   useEffect,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from 'react';
 import { motion } from 'motion/react';
 
 import { cx } from '../../styled-system/css';
-import { shell, topbar, title, statusRow, dim, effectsToggle, railToggle, railToggleButton, caution, connBadge, bodyGrid, rail, RailResizeHandle, viewport, chatsLayer, takeoverBody, useNarrowCockpit } from './layout';
+import { shell, topbar, title, statusRow, dim, effectsToggle, railToggle, railToggleButton, caution, connBadge, bodyGrid, rail, RailResizeHandle, viewport, chatsLayer, takeoverBody, useNarrowCockpit, sidebarStrip, LEFT_RAIL_ID, RIGHT_RAIL_ID } from './layout';
+import { useReviewChat, type ReviewChatColumn } from './reviewChat';
+import { ReviewChatClose, ReviewMain, reviewRailView } from './reviewPage';
 import { useReviewHash, parseReviewHash } from './reviewHash';
 import { RoleChatsPane } from './RoleChats';
 import { clientMatchesServingBuild, servingCommitLabel } from '../data/buildIdentity';
@@ -21,8 +24,8 @@ import type { ConnState } from '../data/store';
 import { dashboardStore, useDashboard } from '../data/store';
 import { connectEvents, connectState } from '../data/stream';
 import { ModeBar } from '../grammar/ModeBar';
+import { SidebarToggle, useSidebar, type SidebarState } from '../grammar/SidebarToggle';
 import { ChangeSetViewer, type ChangeSetTarget } from '../panels/changeset/ChangeSetViewer';
-import { ReviewSurface } from '../panels/review/ReviewSurface';
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from '../data/taskArtifacts';
 import { NotesReaderViewer } from '../panels/notes-reader/NotesReaderViewer';
 import { DetailPanel } from '../panels/detail-panel/DetailPanel';
@@ -38,6 +41,9 @@ import { KnowledgeReader } from '../panels/knowledge-reader/KnowledgeReader';
 import { LifecycleList } from '../panels/lifecycle-list/LifecycleList';
 import { MemoryMirror } from '../panels/MemoryMirror';
 import { DocumentChat } from './document-chat/DocumentChat';
+import { TrayBarSlot, trayBarRow } from '../tray/TrayButton';
+import { TrayLayer } from '../tray/TrayLayer';
+import { usePublishShownPage } from '../tray/shownChat';
 import { usePersistedFlag, usePersistedNumber } from '../panels/file-viewer/usePersistedFlag';
 import { Topology } from '../panels/Topology';
 import type { EngineProcessNode, TaskEntry } from '../types/projection';
@@ -134,6 +140,15 @@ interface CockpitShellState {
   engineProcesses: EngineProcessNode[];
   fullBleed: boolean;
   takeover: boolean;
+  // A review target renders inside the railed grid beside the chat column, not as a takeover
+  // (MIK-R89 v2 rule 12). It stays part of Operations (W23).
+  review: ChangeSetTarget | null;
+  reviewShown: boolean;
+  // The shared sidebar toggles' state (rule 8): Operations' two sidebars, and the review page's
+  // chat column (its tree side is the review surface's own).
+  opsLeft: SidebarState;
+  opsRight: SidebarState;
+  reviewChat: ReviewChatColumn;
   railEnter: Record<string, unknown>;
   setView: (view: CockpitView) => void;
   setSelectedId: (id: string | null) => void;
@@ -147,6 +162,20 @@ interface CockpitShellState {
   setLeftRailWidth: (width: number) => void;
   setRightRailWidth: (width: number) => void;
   setViewedTask: (context: ViewedTaskContext | undefined) => void;
+}
+
+const FULL_BLEED_VIEWS: ReadonlySet<CockpitView> = new Set<CockpitView>(['files', 'knowledge', 'engine', 'topology', 'chats']);
+
+// Which screen the shell shows. A change-set target with a review is the review page inside the
+// railed grid; any other change-set target, and the notes reader, still take the screen over.
+function shellFlags(view: CockpitView, changeSet: ChangeSetTarget | null, notesOpen: boolean) {
+  const review = changeSet?.review ? changeSet : null;
+  return {
+    fullBleed: FULL_BLEED_VIEWS.has(view),
+    takeover: Boolean(changeSet && !review) || notesOpen,
+    review,
+    reviewShown: review !== null && view === 'operations',
+  };
 }
 
 function useCockpitShellState(initialView: CockpitView): CockpitShellState {
@@ -174,13 +203,10 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   const engineProcesses = useDashboard(
     (s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES,
   );
-  const fullBleed =
-    view === 'files' ||
-    view === 'knowledge' ||
-    view === 'engine' ||
-    view === 'topology' ||
-    view === 'chats';
-  const takeover = Boolean(changeSet) || notesOpen;
+  const { fullBleed, takeover, review, reviewShown } = shellFlags(view, changeSet, notesOpen);
+  const opsLeft = useSidebar('operations', 'left');
+  const opsRight = useSidebar('operations', 'right');
+  const reviewChat = useReviewChat(reviewShown ? review : null);
   const railEnter = animate ? RAIL_ENTER : RAIL_ENTER_STILL;
   return {
     view,
@@ -198,6 +224,11 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     engineProcesses,
     fullBleed,
     takeover,
+    review,
+    reviewShown,
+    opsLeft,
+    opsRight,
+    reviewChat,
     railEnter,
     setView,
     setSelectedId,
@@ -303,30 +334,11 @@ function ChangeSetTakeover({
   // the reader stays in the same screen instead of having to find the leaf somewhere else.
   onOpenChangeSet: (target: ChangeSetTarget) => void;
 }) {
+  // A review target never reaches this takeover: it is the review page inside the railed grid.
   return (
     <div className={cx(bodyGrid({ bleed: true }), takeoverBody, 'shell__body')} data-fullbleed={true}>
-      <main
-        className={cx(viewport, 'viewport')}
-        data-view={target.review ? 'intent-review' : 'changeset'}
-      >
-        {target.review ? (
-          // A review target may carry a subject's selector or none at all: the task-context entry
-          // opens the review on the task, and the surface asks for exactly what it was handed. It
-          // may also name the record it is addressed to (ICR-R12): a closed leaf's entry carries
-          // `historical`, and the surface then asks for that leaf's recorded comparison rather than
-          // for a live candidate there is none of.
-          <ReviewSurface
-            repo={target.repo}
-            master={target.master ?? ''}
-            leaf={target.leaf ?? ''}
-            selectorKind={target.review.selectorKind}
-            selectorId={target.review.selectorId}
-            history={target.review.historical ? 'recorded' : undefined}
-            onBack={onBack}
-          />
-        ) : (
-          <ChangeSetViewer {...target} onBack={onBack} onOpenLeaf={onOpenChangeSet} />
-        )}
+      <main className={cx(viewport, 'viewport')} data-view="changeset">
+        <ChangeSetViewer {...target} onBack={onBack} onOpenLeaf={onOpenChangeSet} />
       </main>
     </div>
   );
@@ -369,7 +381,7 @@ function NotesTakeover({
 }
 
 function LeftRail({
-  fullBleed,
+  hidden,
   takeover,
   railEnter,
   leftRailWidth,
@@ -377,7 +389,9 @@ function LeftRail({
   onSelect,
   onResize,
 }: {
-  fullBleed: boolean;
+  // A full-bleed view, the review page (its own tree is its left column) or the developer's
+  // toggle hides the rail; it stays mounted, so its scroll and its open groups survive.
+  hidden: boolean;
   takeover: boolean;
   railEnter: Record<string, unknown>;
   leftRailWidth: number;
@@ -388,29 +402,21 @@ function LeftRail({
   return (
     <motion.aside
       key="rail-left"
+      id={LEFT_RAIL_ID}
       className={cx(rail, 'rail rail--left')}
       transition={RAIL_TRANSITION}
-      style={{ display: fullBleed ? 'none' : 'flex' }}
-      aria-hidden={fullBleed}
+      style={{ display: hidden ? 'none' : 'flex' }}
+      aria-hidden={hidden}
       {...railEnter}
     >
       {/* The native task tree fills the rail; its attention bell opens a layer over it. */}
-      <LifecycleList selectedId={selectedId} onSelect={onSelect} active={!fullBleed && !takeover} />
+      <LifecycleList selectedId={selectedId} onSelect={onSelect} active={!hidden && !takeover} />
       <RailResizeHandle side="left" width={leftRailWidth} onResize={onResize} />
     </motion.aside>
   );
 }
 
-export function RightRail({
-  fullBleed,
-  railEnter,
-  railView,
-  rightRailWidth,
-  setRailView,
-  viewedTask,
-  tasks,
-  onResize,
-}: {
+interface RightRailProps {
   fullBleed: boolean;
   railEnter: Record<string, unknown>;
   railView: 'river' | 'chat';
@@ -419,37 +425,65 @@ export function RightRail({
   viewedTask: ViewedTaskContext | undefined;
   tasks: TaskEntry[];
   onResize: (width: number) => void;
-}) {
+  /** Operations' right sidebar is hidden by its toggle (MIK-R89 v2 rule 8). */
+  hidden?: boolean;
+  /** The review page's chat column (rule 12): this same rail, with the review's task and width. */
+  column?: ReviewChatColumn | null;
+}
+
+/**
+ * How the rail lies on its page. On Operations: shown unless full-bleed or its toggle hid it, the
+ * River|Chat switch, and the viewed task document's chat. On the review page (`column`): the task's
+ * chat only, open or closed by the review's toggle, preloaded while closed, at the review's width.
+ */
+function rightRailView({ fullBleed, hidden, railView, rightRailWidth, onResize, viewedTask }: RightRailProps) {
+  const shown = !fullBleed && !hidden;
+  return {
+    shown,
+    chat: railView === 'chat',
+    river: railView === 'river',
+    style: { display: shown ? 'flex' : 'none' } as CSSProperties,
+    className: cx(rail, 'rail rail--right'),
+    width: rightRailWidth,
+    onResize,
+    handle: { label: undefined, testId: undefined },
+    chatProps: { taskDocumentRef: viewedTask?.taskDocumentRef, preload: undefined, unbound: undefined },
+  };
+}
+
+export function RightRail(props: RightRailProps) {
+  const { railEnter, railView, setRailView, tasks, column = null } = props;
+  const view = column ? reviewRailView(props.fullBleed, column) : rightRailView(props);
   return (
     <motion.aside
       key="rail-right"
-      className={cx(rail, 'rail rail--right')}
+      id={RIGHT_RAIL_ID}
+      className={view.className}
       transition={RAIL_TRANSITION}
-      style={{ display: fullBleed ? 'none' : 'flex' }}
-      aria-hidden={fullBleed}
+      style={view.style}
+      aria-hidden={!view.shown}
+      data-page={column ? 'review' : undefined}
       {...railEnter}
     >
-      <RailResizeHandle side="right" width={rightRailWidth} onResize={onResize} />
-      <RailToggle value={railView} onChange={setRailView} />
+      <RailResizeHandle side="right" width={view.width} onResize={view.onResize} {...view.handle} />
+      {/* The review page's column is the task's chat only: no River|Chat switch, no river. */}
+      {column ? null : <RailToggle value={railView} onChange={setRailView} />}
       {/* MIK-R122: the river keeps its remove-while-chat-shows behaviour, but the chat is
           never unmounted — only hidden — so the single frame stays loaded and keeps the
           developer's draft and scroll position across the toggle. */}
-      {railView === 'river' ? <EventRiver /> : null}
+      {view.river ? <EventRiver /> : null}
+      <ReviewChatClose column={column} />
       <div
         style={{
-          display: railView === 'chat' ? 'flex' : 'none',
+          display: view.chat ? 'flex' : 'none',
           flex: '1',
           minHeight: '0',
           minWidth: '0',
         }}
-        aria-hidden={railView !== 'chat'}
+        aria-hidden={!view.chat}
         data-testid="rail-chat-keepalive"
       >
-        <DocumentChat
-          active={railView === 'chat' && !fullBleed}
-          taskDocumentRef={viewedTask?.taskDocumentRef}
-          tasks={tasks}
-        />
+        <DocumentChat active={view.shown && view.chat} tasks={tasks} {...view.chatProps} />
       </div>
     </motion.aside>
   );
@@ -475,9 +509,37 @@ function ViewLayer({
   );
 }
 
+// Operations' two sidebar toggles (MIK-R89 v2 rule 8, W27): one line over the task document, the
+// task list's toggle first and the right column's last, so each stays at the main column's edge
+// while its sidebar is hidden. It sits outside the memoized DetailPanel, which gains no prop.
+function OperationsSidebarStrip({ left, right }: { left: SidebarState; right: SidebarState }) {
+  return (
+    <div className={sidebarStrip} data-testid="operations-sidebar-strip">
+      <SidebarToggle
+        side="left"
+        open={left.open}
+        onToggle={left.toggle}
+        name="Task list sidebar"
+        controls={LEFT_RAIL_ID}
+        testId="sidebar-toggle-operations-left"
+      />
+      <SidebarToggle
+        side="right"
+        open={right.open}
+        onToggle={right.toggle}
+        name="River and chat sidebar"
+        controls={RIGHT_RAIL_ID}
+        testId="sidebar-toggle-operations-right"
+      />
+    </div>
+  );
+}
+
 function MainLayers({
   view,
   takeover,
+  hidden,
+  sidebars,
   selectedId,
   tasks,
   onOpen,
@@ -487,6 +549,9 @@ function MainLayers({
 }: {
   view: CockpitView;
   takeover: boolean;
+  // The review page is shown in the grid instead: these layers stay mounted and hidden (W23).
+  hidden: boolean;
+  sidebars: { left: SidebarState; right: SidebarState };
   selectedId: string | null;
   tasks: TaskEntry[];
   onOpen: (id: string) => void;
@@ -495,7 +560,12 @@ function MainLayers({
   onViewTask: (context: ViewedTaskContext | undefined) => void;
 }) {
   return (
-    <main className={cx(viewport, 'viewport')} data-view={view}>
+    <main
+      className={cx(viewport, 'viewport')}
+      data-view={view}
+      style={hidden ? { display: 'none' } : undefined}
+      aria-hidden={hidden || undefined}
+    >
       {/* Retained pages have no dashboard entry; initialView tests can still mount their layouts. */}
       {['memory', 'topology', 'hangar'].includes(view) && <ViewBody view={view} onOpen={onOpen} />}
       {view === 'engine' ? (
@@ -506,8 +576,9 @@ function MainLayers({
       {/* Operations' DetailPanel is never unmounted — only hidden — so the drilled-open sub-task
           survives a view switch instead of resetting to the master overview (see `operationsLayer`). */}
       <ViewLayer visible={view === 'operations'} className={operationsLayer}>
+        <OperationsSidebarStrip left={sidebars.left} right={sidebars.right} />
         <DetailPanel
-          active={view === 'operations' && !takeover}
+          active={view === 'operations' && !takeover && !hidden}
           selectedId={selectedId}
           onOpenLifecycle={onOpen}
           onOpenChangeSet={onOpenChangeSet}
@@ -544,14 +615,10 @@ function RailedBody({
     <div
       className={cx(bodyGrid({ bleed: state.fullBleed }), 'shell__body')}
       data-fullbleed={state.fullBleed}
+      data-page={state.reviewShown ? 'review' : undefined}
       style={{
         ...(state.takeover ? { display: 'none' } : {}),
-        // The railed grid uses the persisted rail widths; full-bleed keeps the cva's single column.
-        ...(state.fullBleed
-          ? {}
-          : {
-              gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : `${state.leftRailWidth}px minmax(380px, 1fr) ${state.rightRailWidth}px`,
-            }),
+        ...railedColumns(state, narrow),
       }}
       aria-hidden={state.takeover ? true : undefined}
     >
@@ -561,7 +628,7 @@ function RailedBody({
           as the files/knowledge/chats layers below). display:none drops them from the grid, so the
           full-bleed single column is unaffected. */}
       <LeftRail
-        fullBleed={state.fullBleed}
+        hidden={state.fullBleed || state.reviewShown || !state.opsLeft.open}
         takeover={state.takeover}
         railEnter={state.railEnter}
         leftRailWidth={state.leftRailWidth}
@@ -572,6 +639,8 @@ function RailedBody({
       <MainLayers
         view={state.view}
         takeover={state.takeover}
+        hidden={state.reviewShown}
+        sidebars={{ left: state.opsLeft, right: state.opsRight }}
         selectedId={state.selectedId}
         tasks={state.tasks}
         onOpen={actions.open}
@@ -579,6 +648,16 @@ function RailedBody({
         onOpenNotes={actions.openNotes}
         onViewTask={state.setViewedTask}
       />
+      {/* The review page's slot, just before the right rail: a null slot keeps the rail's place,
+          so showing and leaving the review never moves the rail or its chat frame (rule 12). No
+          wrapper and no key around the rail: either would build a new frame and load it again. */}
+      {state.reviewShown && state.review ? (
+        <ReviewMain
+          target={state.review}
+          chat={{ open: state.reviewChat.open, toggle: state.reviewChat.toggle }}
+          onBack={actions.closeChangeSet}
+        />
+      ) : null}
       <RightRail
         fullBleed={state.fullBleed}
         railEnter={state.railEnter}
@@ -588,9 +667,40 @@ function RailedBody({
         viewedTask={state.viewedTask}
         tasks={state.tasks}
         onResize={state.setRightRailWidth}
+        hidden={!state.opsRight.open}
+        column={state.reviewShown ? state.reviewChat : null}
       />
     </div>
   );
+}
+
+// The railed grid's columns. Operations uses the persisted rail widths and gives a hidden
+// sidebar's width to the task document (rule 8). The review page is its reading column (tree and
+// reading, the review's own grid) and the chat track; a closed or overlying chat keeps a 0 px
+// track and its gutter, which is what rule 11's measured widths assume (W26). Full-bleed keeps the
+// cva's single column; at 40rem and narrower everything is one column.
+function railedColumns(state: CockpitShellState, narrow: boolean): CSSProperties {
+  if (state.fullBleed) return {};
+  if (narrow) return { gridTemplateColumns: 'minmax(0, 1fr)' };
+  if (state.reviewShown) {
+    const chat = state.reviewChat;
+    const track = chat.open && chat.placement === 'grid' ? chat.width : 0;
+    return { gridTemplateColumns: `minmax(0, 1fr) ${track}px`, columnGap: `${chat.gutter}px`, position: 'relative' };
+  }
+  const left = state.opsLeft.open ? `${state.leftRailWidth}px ` : '';
+  const right = state.opsRight.open ? ` ${state.rightRailWidth}px` : '';
+  return { gridTemplateColumns: `${left}${left || right ? 'minmax(380px, 1fr)' : 'minmax(0, 1fr)'}${right}` };
+}
+
+// What the tray writes into a highlighted passage's provenance, and the repository a message to a
+// chat without a task is filed under (MIK-R188 rules 3 and 9). The File Viewer names its own
+// repository (`undefined` leaves it).
+function shownPage(state: CockpitShellState): { page: string; repository: string | null | undefined } {
+  if (state.reviewShown && state.review) return { page: 'Review', repository: state.review.repo };
+  if (state.view === 'files') return { page: 'File Viewer', repository: undefined };
+  if (state.view === 'operations')
+    return { page: 'Operations', repository: state.viewedTask?.taskDocumentRef?.repository ?? null };
+  return { page: VIEWS.find((item) => item.id === state.view)?.label ?? state.view, repository: null };
 }
 
 export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitView } = {}) {
@@ -607,12 +717,14 @@ export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitV
     state.setView,
     state.setSelectedId,
   );
+  const page = shownPage(state);
+  usePublishShownPage(page.page, page.repository);
 
   return (
-    <IntentEntryRevalidation shown={state.view === 'operations' && !state.takeover}>
+    <IntentEntryRevalidation shown={state.view === 'operations' && !state.takeover && !state.reviewShown}>
       <div className={cx(shell, 'cockpit--shell')}>
         <TopBar />
-        {state.changeSet ? (
+        {state.changeSet && !state.review ? (
           <ChangeSetTakeover
             target={state.changeSet}
             onBack={actions.closeChangeSet}
@@ -631,7 +743,13 @@ export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitV
           />
         ) : null}
         <RailedBody state={state} actions={actions} />
-        <ModeBar items={VIEWS} value={state.view} onChange={actions.changeView} label="Views" />
+        {/* The Tray button sits beside the view tabs, outside their group: the bar keeps its four
+            views. The tray's page-wide part lies outside the railed body, which keeps its columns. */}
+        <div className={trayBarRow}>
+          <ModeBar items={VIEWS} value={state.view} onChange={actions.changeView} label="Views" />
+          <TrayBarSlot />
+        </div>
+        <TrayLayer />
       </div>
     </IntentEntryRevalidation>
   );

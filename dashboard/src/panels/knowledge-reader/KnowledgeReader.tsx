@@ -13,13 +13,21 @@ import {
   useState,
   useLayoutEffect,
   memo,
+  type ComponentProps,
   type ReactNode,
   type RefObject,
 } from 'react';
 
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
-import { css } from '../../../styled-system/css';
+import { css, cx } from '../../../styled-system/css';
+import {
+  SidebarToggle,
+  sidebarHandleProps,
+  sidebarPanelProps,
+  useSidebar,
+  type SidebarState,
+} from '../../grammar/SidebarToggle';
 import { fetchRepos } from '../../data/files';
 import {
   parseReaderHash,
@@ -70,6 +78,22 @@ const handle = css({
   cursor: 'col-resize',
   _hover: { background: 'amber' },
 });
+// The document's own column: its sidebar toggles' line, then the scrolling pane.
+const documentColumn = css({ height: '100%', display: 'flex', flexDirection: 'column', minHeight: '0' });
+const fillPane = css({ flex: '1', minHeight: '0' });
+// MIK-R89 v2 rule 8: the tree's toggle at the document's left edge, the aside's at its right edge.
+// Each shows only where the page's own layout shows its sidebar: at 40rem and narrower Browse owns
+// the tree (INV-7XYFX3), and at 70rem and narrower the aside is not drawn beside the text.
+const toggleLine = css({
+  display: 'flex',
+  flexShrink: '0',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  paddingBlock: '0.15rem',
+  background: 'bgPanel',
+  '@media (max-width: 40rem)': { display: 'none' },
+});
+const asideToggle = css({ marginLeft: 'auto', '@media (max-width: 70rem)': { display: 'none' } });
 const body = css({
   flex: '1',
   minHeight: '0',
@@ -226,7 +250,8 @@ export const KnowledgeReader = memo(function KnowledgeReader({
   const { hash, loaded } = useAddressAnswer(address);
   const ready = readyHash(loaded);
   useRestoreReaderScroll(document, ready, restore);
-  const nav = useCitationNavigation(address, go, setCitation, save);
+  const sidebars = useReaderSidebars(setCitation);
+  const nav = useCitationNavigation(address, go, sidebars.cite, save);
   useEffect(() => {
     setCitation(null);
   }, [hash]);
@@ -256,15 +281,7 @@ export const KnowledgeReader = memo(function KnowledgeReader({
           data-browsing={browsing}
           data-picker={isReference(citation)}
         >
-          <Panel defaultSize={24} minSize={12} data-reader-tree>
-            <KnowledgeTree
-              key={`${address.repo}\0${address.commit}`}
-              address={address}
-              onOpen={go}
-              loadRecords={records.load}
-            />
-          </Panel>
-          <PanelResizeHandle className={handle} data-reader-handle />
+          <ReaderTree address={address} go={go} loadRecords={records.load} open={sidebars.tree.open} />
           <ReaderDocument
             paneRef={document}
             hash={hash}
@@ -273,6 +290,7 @@ export const KnowledgeReader = memo(function KnowledgeReader({
             citation={citation}
             ready={ready}
             onClose={() => setCitation(null)}
+            sidebars={sidebars}
           />
         </PanelGroup>
       </div>
@@ -315,6 +333,44 @@ function CitationPane({
         <ViewPane hash={hash} loaded={loaded} />
       )}
     </div>
+  );
+}
+
+// The tree and the aside's shared toggles (MIK-R89 v2 rule 8). A citation opens in the aside, so
+// a citation into a hidden aside shows it (INV-KXT50F: "On this page" yields its pane to cited code).
+function useReaderSidebars(setCitation: (citation: ReferenceItem | ReaderAddress) => void) {
+  const tree = useSidebar('knowledge', 'left');
+  const aside = useSidebar('knowledge', 'right');
+  const openAside = aside.setOpen;
+  const cite = useCallback(
+    (next: ReferenceItem | ReaderAddress) => {
+      openAside(true);
+      setCitation(next);
+    },
+    [setCitation, openAside],
+  );
+  return { tree, aside, cite };
+}
+
+// The explorer, hidden in place by its toggle: the tree keeps its open folders (INV-6QQ5FE).
+function ReaderTree({
+  address,
+  go,
+  loadRecords,
+  open,
+}: {
+  address: ReaderAddress;
+  go: (next: ReaderAddress) => void;
+  loadRecords: ComponentProps<typeof KnowledgeTree>['loadRecords'];
+  open: boolean;
+}) {
+  return (
+    <>
+      <Panel defaultSize={24} minSize={12} data-reader-tree {...sidebarPanelProps(open)}>
+        <KnowledgeTree key={`${address.repo}\0${address.commit}`} address={address} onOpen={go} loadRecords={loadRecords} />
+      </Panel>
+      <PanelResizeHandle className={handle} data-reader-handle {...sidebarHandleProps(open)} />
+    </>
   );
 }
 
@@ -379,6 +435,29 @@ function useVisibleReaderPlace(
   }, [browsing, citation, active, restoreCurrent]);
 }
 
+function ReaderSidebarToggles({ tree, aside }: { tree: SidebarState; aside: SidebarState }) {
+  return (
+    <div className={toggleLine} data-testid="knowledge-sidebar-toggles">
+      <SidebarToggle
+        side="left"
+        open={tree.open}
+        onToggle={tree.toggle}
+        name="Tree sidebar"
+        testId="sidebar-toggle-knowledge-left"
+      />
+      <span className={asideToggle}>
+        <SidebarToggle
+          side="right"
+          open={aside.open}
+          onToggle={aside.toggle}
+          name="Outline sidebar"
+          testId="sidebar-toggle-knowledge-right"
+        />
+      </span>
+    </div>
+  );
+}
+
 function ReaderDocument({
   paneRef,
   hash,
@@ -387,6 +466,7 @@ function ReaderDocument({
   citation,
   ready,
   onClose,
+  sidebars,
 }: {
   paneRef: RefObject<HTMLDivElement | null>;
   hash: string;
@@ -395,20 +475,36 @@ function ReaderDocument({
   citation: ReferenceItem | ReaderAddress | null;
   ready: string;
   onClose: () => void;
+  sidebars: { tree: SidebarState; aside: SidebarState };
 }) {
+  const asideOpen = sidebars.aside.open;
   return (
     <Panel minSize={35} data-reader-content data-testid="knowledge-document-pane">
       <PanelGroup direction="horizontal" autoSaveId="knowledge.document">
         <Panel defaultSize={76} minSize={35} data-reader-document>
-          <div ref={paneRef} className={pane} data-testid="knowledge-view" onScroll={save}>
-            <button type="button" onClick={() => window.history.back()} aria-label="Back">
-              Back
-            </button>
-            <ViewPane hash={hash} loaded={loaded} />
+          <div className={documentColumn}>
+            <ReaderSidebarToggles tree={sidebars.tree} aside={sidebars.aside} />
+            <div ref={paneRef} className={cx(pane, fillPane)} data-testid="knowledge-view" onScroll={save}>
+              <button type="button" onClick={() => window.history.back()} aria-label="Back">
+                Back
+              </button>
+              <ViewPane hash={hash} loaded={loaded} />
+            </div>
           </div>
         </Panel>
-        <PanelResizeHandle className={handle} data-reader-handle data-reader-outline-handle />
-        <Panel defaultSize={24} minSize={12} data-reader-aside data-citation={citation !== null}>
+        <PanelResizeHandle
+          className={handle}
+          data-reader-handle
+          data-reader-outline-handle
+          {...sidebarHandleProps(asideOpen)}
+        />
+        <Panel
+          defaultSize={24}
+          minSize={12}
+          data-reader-aside
+          data-citation={citation !== null}
+          {...sidebarPanelProps(asideOpen)}
+        >
           {citation ? (
             <CitationPane citation={citation} onClose={onClose} />
           ) : (

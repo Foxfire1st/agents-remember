@@ -6,7 +6,6 @@
 //
 // Every type below mirrors one model in models/knowledge/review.py. A field the server omits is
 // absent here rather than defaulted, so an unresolved reference stays unresolved on the client too.
-// The expansion types mirror models/knowledge/review_source_content.py the same way (ICR-R03).
 //
 // TRANSPORT (ICR-R16). This route answers with its typed result and maps a refusal onto a 400/404/503
 // status, so the refusal is in the *body* of a non-2xx response. `getJson` -- the shared client for
@@ -65,6 +64,8 @@ export type {
   ReviewFamilyChanges,
   ReviewRevisionSelection,
   ReviewRevisionSelectionState,
+  ReviewRevisionWriter,
+  ReviewRevisionWriterState,
   ReviewSourceLineRange,
   ReviewSourceLocator,
   ReviewSourceLocatorState,
@@ -252,69 +253,6 @@ export interface ReviewSourcePane {
   unattributed_changed_paths: string[];
   attributed_changed_paths: string[];
   unresolved: ReviewUnresolvedReference[];
-}
-
-// One bound endpoint's content for one listed entry. `state` is the whole truth about what can be
-// rendered: `present` (a regular file's text, carried in `text`), `symlink` (the link target),
-// `absent` (this endpoint holds no entry at the path), `binary`, `submodule` (a recorded pointer
-// with no file bytes) and `unavailable` (the entry could not be read). `text` is present only for
-// the two textual states, so a missing or unrenderable side can never arrive as an empty document.
-export type ReviewSourceSideState =
-  'present' | 'absent' | 'binary' | 'symlink' | 'submodule' | 'unavailable';
-
-export interface ReviewSourceSide {
-  state: ReviewSourceSideState;
-  text?: string;
-  detail: string;
-  object_id?: string;
-  byte_length?: number;
-  truncated: boolean;
-}
-
-// One inventory entry opened: both endpoints' content at the exact generation the listing named.
-// `currentness` says whether that generation is still the pair the leaf's review binds -- the
-// content is the requested generation's either way, and a superseded read never silently becomes a
-// read of the newer one.
-//
-// `path_bound` says which *measured* change set bounded the path: the requested generation's own
-// (`requested_generation`), or -- when that measurement could not be made -- the one this leaf's
-// review publishes (`leaf_change_set`). Two populations are read: a path a measured change set
-// lists, and an unchanged path a realization recorded in the same comparison's knowledge is anchored
-// at (see `admission`; always bounded by `requested_generation`). Every other path is refused, so
-// this field states which measurement was the bound rather than widening the read.
-//
-// `admission` says why the path was opened at all: `changed` for an inventory entry, and
-// `attributed_unchanged` for a path the measured pair did not change that a realization recorded in
-// the same comparison's knowledge is anchored at. The second always has status `unchanged`, is never
-// an inventory entry and never counts as a changed file; a renderer reads this field rather than
-// inferring it from the inventory.
-export type ReviewSourceAdmission = 'changed' | 'attributed_unchanged';
-
-export interface ReviewSourceExpansion {
-  path: string;
-  status: ReviewFileStatus | 'unchanged';
-  mode_change: boolean;
-  language: string;
-  before: ReviewSourceSide;
-  after: ReviewSourceSide;
-  before_code_tree_id: string;
-  after_code_tree_id: string;
-  currentness: 'current' | 'superseded' | 'unmeasured';
-  currentness_detail: string;
-  path_bound: 'requested_generation' | 'leaf_change_set';
-  path_bound_detail: string;
-  admission: ReviewSourceAdmission;
-  admission_detail: string;
-  reference: string;
-  command: string;
-}
-
-export interface ReviewSourceContentResult {
-  state: 'content' | 'refused';
-  operation: string;
-  repository_id: string;
-  expansion?: ReviewSourceExpansion;
-  refusal?: ReviewRefusal;
 }
 
 export interface ReviewStaleness {
@@ -704,6 +642,8 @@ export interface ReviewEntryListResult {
   invariant_total: number;
   family_total: number;
   refusal?: ReviewRefusal;
+  // The recorded comparison the outline describes, when the request named one.
+  comparison?: number;
 }
 
 // The entry read the task view makes before it can offer the Intent review button. It takes the
@@ -713,42 +653,21 @@ export interface ReviewEntryListResult {
 // recorded here"), or `refused` with the owner's own code, reason and next action, which the task
 // view shows beside the entry. The entry itself never depends on this read: it is offered for an
 // admitted live candidate, and a refusal here leaves the task-context review reachable.
+//
+// `comparison` names one recorded comparison of the leaf (MIK-R89 v2 rule 10): the outline of that
+// number, read-only. Without it the route answers for the comparison the review is bound to now.
 export const intentReviewEntries = (
   repo: string,
   master: string,
   leaf: string,
   base = '',
+  comparison?: number,
 ): Promise<ReviewEntryListResult> =>
   getReviewJson<ReviewEntryListResult>(
-    `${base}/api/review/intent/entries?${qs({ repo, master, leaf })}`,
-  );
-
-// One listed entry's actual content at the two bound code trees (ICR-R03). The generation is an
-// *input*: `before`/`after` are the ids the inventory published to this client, echoed back, so the
-// content a reader opens is the content of the generation they were looking at -- never re-resolved
-// from whatever the leaf holds by the time the request lands.
-//
-// The transport maps a refused read onto its 400/404 status idiom WITH the typed refusal in the
-// body, and for this route a refusal is a normal answer (a path outside the measured change set, a
-// baseline that is not this leaf's recorded one). The shared review decode reads the body whatever
-// the status, so a refusal arrives as the typed result it is and only a body that is not this
-// route's answer becomes a failure.
-export const reviewSourceContent = (
-  repo: string,
-  master: string,
-  leaf: string,
-  path: string,
-  beforeCodeTreeId: string,
-  afterCodeTreeId: string,
-  base = '',
-): Promise<ReviewSourceContentResult> =>
-  getReviewJson<ReviewSourceContentResult>(
-    `${base}/api/review/intent/source-content?${qs({
+    `${base}/api/review/intent/entries?${qs({
       repo,
       master,
       leaf,
-      path,
-      beforeCodeTreeId,
-      afterCodeTreeId,
+      ...(comparison === undefined ? {} : { comparison: String(comparison) }),
     })}`,
   );
