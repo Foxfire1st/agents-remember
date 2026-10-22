@@ -65,7 +65,11 @@ export interface SeatWakeWait {
   readonly seat: string;
   readonly ordinal: number;
   readonly dueAt: number;
-  /** The message the seat would be sent; empty for a wait that ends in the parent's line. */
+  /**
+   * The seat-back message this wait holds. A wait that ends in the parent's marked
+   * line sends it there instead, and a limited seat's resume is this message with
+   * the one reset sentence (rule 11).
+   */
   readonly message: string;
   readonly kind: SeatWakeKind;
   /** Resolves when the wait ends: sent, cancelled by a turn start, or dropped. */
@@ -94,6 +98,66 @@ export interface HeldLine {
   readonly task?: string;
   /** The current Manager of the subject's master, when the parent itself goes. */
   readonly alternate?: string | null;
+}
+
+/**
+ * MIK-R190: the two host signals the send-back reads, supplied by whoever holds
+ * them. Absent, nothing changes: no subagent runs and nothing is limited, which
+ * is rule 14's fallback for a host that offers neither.
+ */
+export interface TurnEndedSignals {
+  /** The seat's running provider subagents now (rules 4 and 5). */
+  readonly runningSubagents?: (agentId: string) => number;
+  /** The seat's own `until` while it is limited now, else `null` (rules 11 and 12). */
+  readonly limitedUntil?: (agentId: string, now: Date) => string | null;
+  /**
+   * L184-R1-F13: the role record as it stands now. A deferred action reads it at
+   * its own moment, as it reads the host's state, so one armed for a seat that has
+   * left the record is reclaimed instead of sent.
+   */
+  readonly roleRecord?: () => Readonly<Record<string, TurnEndedFacts>>;
+  /** Rule 5: called once when the seat's count falls from above 0 to 0. */
+  readonly watchSubagents?: (agentId: string, listener: () => void) => void;
+  readonly unwatchSubagents?: (agentId: string, listener: () => void) => void;
+}
+
+/** Rule 5: an end left alone for a running subagent, waiting for it to finish. */
+export interface SubagentLeftAlone {
+  readonly seat: string;
+  readonly ordinal: number;
+  readonly listener: () => void;
+}
+
+/** Rule 11: the one resume armed at a limited seat's `until` plus the lag. */
+export interface PendingLimitResume {
+  readonly seat: string;
+  readonly facts: TurnEndedFacts;
+  /** The standard seat-back message the one reset sentence is added to (rule 11). */
+  readonly base: string;
+  /** The message this resume sends: the base with exactly one reset sentence. */
+  readonly message: string;
+  readonly ordinal: number;
+  until: string;
+  timer: unknown;
+  readonly epoch: number;
+  readonly seatEpoch: number;
+  /**
+   * L184-R1-F07/F09: the scheduling and host ports the arming decision had. A
+   * deferred action keeps them, so a later `until` can arm its own timer and the
+   * send still asks the host's safety gates.
+   */
+  readonly scheduling: TurnEndScheduling;
+  readonly readHost?: HostStateReader;
+}
+
+/** Rule 12: the one timer armed for a limited parent that has a held line. */
+export interface PendingLimitFlush {
+  readonly parent: string;
+  until: string;
+  timer: unknown;
+  readonly epoch: number;
+  /** L184-R1-F06/F13: the ports of the flush that armed it, so it can re-arm and be reclaimed. */
+  readonly scheduling: TurnEndScheduling;
 }
 
 export interface TurnEndedTracker {
@@ -139,6 +203,14 @@ export interface TurnEndedTracker {
    * saw, so a message steered into a running turn does not split that turn.
    */
   readonly turnMarks: Map<string, TurnMark>;
+  /** MIK-R190: the two host signals the send-back reads. */
+  readonly signals: TurnEndedSignals;
+  /** MIK-R190 rule 5: each seat's end left alone for a running subagent. */
+  readonly subagentEnds: Map<string, SubagentLeftAlone>;
+  /** MIK-R190 rule 11: the one armed resume per seat. */
+  readonly resumes: Map<string, PendingLimitResume>;
+  /** MIK-R190 rule 12: the one timer per limited parent that has a held line. */
+  readonly limitFlushes: Map<string, PendingLimitFlush>;
   /** The plugin's own file of rule 7 rows; a no-op when the caller supplies none. */
   readonly append: (row: TurnEndLogRow) => void;
 }
@@ -153,8 +225,20 @@ export const TURN_ENDED_LINE_LIMIT = 1000;
 /** The agent's last line travels shortened to 300 characters (MIK-R172 rule 3). */
 export const TURN_ENDED_LAST_TEXT_LIMIT = 300;
 
-/** Rule 4: at most this many waits may exist at once; past it a new end sheds its own wake. */
+/**
+ * Rule 4: at most this many waits may exist at once; past it a new end sheds its own wake.
+ */
 export const TURN_ENDED_WAIT_LIMIT = 256;
+
+/**
+ * MIK-R190 rules 11, 12 and 15 / CS-6: at most this many deferred actions — the
+ * armed resumes of limited seats and the reset flushes of limited parents, counted
+ * together — may exist at once. A wait is replaced by at most one resume, so the
+ * deferred fleet is held to the send-back's own wait budget rather than growing
+ * with the hours a limit lasts: past it a new deferred action is shed, and its
+ * row says so.
+ */
+export const TURN_ENDED_DEFERRED_LIMIT = TURN_ENDED_WAIT_LIMIT;
 
 /** MIK-R183 rule 5: at most this many send-back messages in a row. */
 export const TURN_ENDED_SENT_BACK_LIMIT = 2;
@@ -167,6 +251,13 @@ export const TURN_ENDED_SEAT_ROLES: ReadonlySet<string> = new Set(["worker", "re
 
 /** MIK-R183 rule 4: the wait after a silent end. */
 export const TURN_ENDED_WAIT_MS = 60_000;
+
+/**
+ * MIK-R190 rules 11 and 12: how long after a provider's `until` the plugin acts.
+ * The provider's reset may lag its own stamp, so the resume and the limited
+ * parent's flush both wait this long past it.
+ */
+export const PROVIDER_LIMIT_RESUME_MS = 60_000;
 
 /**
  * MIK-R183 rule 4: the fixed first line of the message a seat is sent back with.
@@ -261,6 +352,7 @@ const UNKNOWN = "";
 export function createTurnEndedTracker(
   steeringProviders: ReadonlySet<string> = TURN_ENDED_STEERING_PROVIDERS,
   append: (row: TurnEndLogRow) => void = () => {},
+  signals: TurnEndedSignals = {},
 ): TurnEndedTracker {
   return {
     inTurn: new Set(),
@@ -280,6 +372,10 @@ export function createTurnEndedTracker(
     epoch: 0,
     seatEpoch: new Map(),
     turnMarks: new Map(),
+    signals,
+    subagentEnds: new Map(),
+    resumes: new Map(),
+    limitFlushes: new Map(),
     append,
   };
 }
@@ -912,6 +1008,9 @@ export function notSilentReason(
   if (handoff) return "hand-off";
   if (archivedNow(agent.id, states, tracker)) return "archived";
   if (permissionNow(agent.id, states, tracker)) return "permission-wait";
+  // MIK-R190 rule 5: the seat's own provider subagent is still running, so this
+  // end is not silent and no seat message follows at once.
+  if (runningSubagentsNow(tracker, agent.id) > 0) return "subagent-running";
   if (childrenInTurnNow(agent.id, states, tracker)) return "child-in-turn";
   if (isReplyToWaitingSender(own, tracker, states)) return "reply-to-waiting-sender";
   return null;
@@ -1138,14 +1237,29 @@ function parentIsFree(parent: string, tracker: TurnEndedTracker): boolean {
   return !tracker.inTurn.has(parent) && !tracker.permissionWait.has(parent);
 }
 
+/** MIK-R190 rule 4/5: the seat's running provider subagents now, as the publication counts them. */
+function runningSubagentsNow(tracker: TurnEndedTracker, agentId: string): number {
+  return tracker.signals.runningSubagents?.(agentId) ?? 0;
+}
+
+/** MIK-R190 rules 11 and 12: the seat's `until` while the file says it is limited. */
+function limitedUntilNow(tracker: TurnEndedTracker, agentId: string, now: Date): string | null {
+  return tracker.signals.limitedUntil?.(agentId, now) ?? null;
+}
+
 /**
  * Whether the line may be sent to this parent now (MIK-R172@v2 rule 6). A free
  * parent takes it at once. A parent in a turn takes it at once only when the
  * product knows its provider keeps the running turn under a steer; otherwise the
  * line waits for that turn to end, because the host's steer would replace it.
+ *
+ * MIK-R190 rule 12: a parent the limit file names as limited takes no line now,
+ * idle or in a turn — a line delivered into a limit starts a turn that ends at
+ * once on it, which is the "messaging an agent that cannot respond" of row 178.
  */
-function parentMayTakeLineNow(parent: string, tracker: TurnEndedTracker): boolean {
+function parentMayTakeLineNow(parent: string, tracker: TurnEndedTracker, now: Date): boolean {
   if (tracker.permissionWait.has(parent)) return false;
+  if (limitedUntilNow(tracker, parent, now) !== null) return false;
   if (!tracker.inTurn.has(parent)) return true;
   const provider = tracker.providerOf.get(parent) ?? UNKNOWN;
   return provider !== UNKNOWN && tracker.steeringProviders.has(provider);
@@ -1249,6 +1363,10 @@ export function noteTurnStarted(
   // MIK-R183 rule 4: a turn of the seat beginning inside the wait cancels the
   // send-back and the end is not counted; the row is written for rule 7.
   cancelSeatWake(tracker, agent.id, "a turn of the seat started", now);
+  // MIK-R190 rule 11: a turn of the seat that starts first cancels the armed
+  // resume, and rule 5's pending subagent end is judged by the existing rules.
+  cancelLimitResume(tracker, agent.id, now);
+  cancelSubagentLeftAlone(tracker, agent.id);
   if (tracker.started[tracker.started.length - 1] !== agent.id) {
     const seen = tracker.started.indexOf(agent.id);
     if (seen >= 0) tracker.started.splice(seen, 1);
@@ -1274,12 +1392,23 @@ export function notePermissionRequested(agentId: string, tracker: TurnEndedTrack
 /**
  * An agent is archived. What waits for it moves to the alternate its line
  * names (MIK-R172 rule 5), and is dropped when that too is gone.
+ *
+ * MIK-R190 rules 11, 12 and 15 / CS-6: an agent that is archived or closed also
+ * owes no deferred action — its armed resume goes with its timer, and so does any
+ * reset flush armed for it as a parent — so a terminal seat cannot leave a timer
+ * behind it for the rest of a limit.
  */
-export function noteAgentArchived(agentId: string, tracker: TurnEndedTracker): void {
+export function noteAgentArchived(
+  agentId: string,
+  tracker: TurnEndedTracker,
+  now: () => Date = () => new Date(),
+): void {
   rememberDeparted(tracker.archived, agentId);
   tracker.providerOf.delete(agentId);
   tracker.inTurn.delete(agentId);
   tracker.permissionWait.delete(agentId);
+  cancelLimitResume(tracker, agentId, now, "the seat was archived before the resume");
+  dropLimitFlush(tracker, agentId);
   const kept: HeldLine[] = [];
   for (const line of tracker.held) {
     if (line.parent !== agentId && line.subject !== agentId) {
@@ -1346,6 +1475,7 @@ export async function flushHeldLines(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   records?: Readonly<Record<string, TurnEndedFacts>>,
+  scheduling: TurnEndScheduling = {},
 ): Promise<FlushOutcome> {
   // L172-R4-F02: an earlier turn-end callback may still be sending when a later
   // one arrives. The later flush waits for the earlier one, so delivery order is
@@ -1359,7 +1489,7 @@ export async function flushHeldLines(
   tracker.flushing = mine;
   if (previous !== null) await previous;
   try {
-    return await flushOnce(tracker, sender, records);
+    return await flushOnce(tracker, sender, records, scheduling);
   } finally {
     if (tracker.flushing === mine) tracker.flushing = null;
     release();
@@ -1370,7 +1500,9 @@ async function flushOnce(
   tracker: TurnEndedTracker,
   sender: TurnEndedSender,
   records?: Readonly<Record<string, TurnEndedFacts>>,
+  scheduling: TurnEndScheduling = {},
 ): Promise<FlushOutcome> {
+  const now = clockOf(scheduling);
   // A held line whose parent has gone moves to the current Manager of its
   // master, at the moment of sending rather than at the moment it was owed, so
   // an ordinary Manager replacement cannot swallow it (L172-R1-F02).
@@ -1407,8 +1539,14 @@ async function flushOnce(
   }
   keepTurnEndOrder(tracker);
   const claimed = tracker.held.filter(
-    (line) => !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(line.parent, tracker),
+    (line) =>
+      !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(line.parent, tracker, now()),
   );
+  // MIK-R190 rule 12 / L184-R1-F06: every limited parent with a line waiting gets
+  // its one reset timer here, before this flush decides it can send anything. A
+  // flush that claims nothing is the normal case for a limited parent, and quiet
+  // correctness cannot wait for another parent's traffic to reach the loop below.
+  armLimitedParents(tracker, sender, records, now, scheduling);
   if (claimed.length === 0) return { sent: [], failed: [], dropped: [] };
   const owned = new Set<HeldLine>(claimed);
   tracker.held.splice(
@@ -1435,7 +1573,8 @@ async function flushOnce(
     dropped.push(...lines.filter((line) => !tracker.claimed.has(line)));
     const readyNow = new Set(
       valid.filter(
-        (line) => !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(parent, tracker),
+        (line) =>
+          !childrenInTurn(line.subject, tracker) && parentMayTakeLineNow(parent, tracker, now()),
       ),
     );
     requeue.push(...valid.filter((line) => !readyNow.has(line)));
@@ -1450,7 +1589,7 @@ async function flushOnce(
       // L172-R4-F01: the previous message of this same batch may have started a
       // turn in a parent that does not steer. The gate is asked again at every
       // actual send, and what could not be sent stays owed, in order.
-      if (!parentMayTakeLineNow(parent, tracker)) {
+      if (!parentMayTakeLineNow(parent, tracker, now())) {
         for (const unsent of batches.messages.slice(index)) requeue.push(...unsent.lines);
         break;
       }
@@ -1467,7 +1606,100 @@ async function flushOnce(
   for (const line of claimed) tracker.claimed.delete(line);
   if (requeue.length > 0) tracker.held.push(...requeue);
   keepTurnEndOrder(tracker);
+  // MIK-R190 rule 12: a line held for a limited parent gets one timer at that
+  // parent's `until` plus the provider's lag; when it fires and the parent is no
+  // longer limited, the existing flush sends what waits for it in order.
+  armLimitedParents(tracker, sender, records, now, scheduling);
   return { sent, failed, dropped };
+}
+
+/** Rule 12: one timer for each distinct limited parent of the lines still owed. */
+function armLimitedParents(
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  records: Readonly<Record<string, TurnEndedFacts>> | undefined,
+  now: () => Date,
+  scheduling: TurnEndScheduling,
+): void {
+  const parents = new Set<string>();
+  for (const line of tracker.held) {
+    if (parents.has(line.parent)) continue;
+    parents.add(line.parent);
+    armLimitFlush(tracker, line.parent, sender, records, now, scheduling);
+  }
+}
+
+/** Rule 12's one timer per limited parent; a later `until` re-arms it. */
+function armLimitFlush(
+  tracker: TurnEndedTracker,
+  parent: string,
+  sender: TurnEndedSender,
+  records: Readonly<Record<string, TurnEndedFacts>> | undefined,
+  now: () => Date,
+  scheduling: TurnEndScheduling,
+): void {
+  const until = limitedUntilNow(tracker, parent, now());
+  if (until === null) return;
+  const existing = tracker.limitFlushes.get(parent);
+  if (existing !== undefined && existing.until === until) return;
+  if (existing !== undefined) stopTimer(existing.scheduling, existing.timer);
+  else if (!deferredHasRoom(tracker)) {
+    // CS-6 / L184-R1-F13: the deferred fleet is finite; a new timer past it is
+    // shed, and the row rule 7 wants says so. The line itself stays owed.
+    const facts = records?.[parent];
+    if (facts !== undefined) {
+      tracker.append(turnEndRow("send-skipped", facts, parent, 0, "over-capacity", isoWithOffset(now())));
+    }
+    return;
+  }
+  const timerAt = Date.parse(until) + PROVIDER_LIMIT_RESUME_MS;
+  const delay = Math.max(0, timerAt - now().getTime());
+  const pending: PendingLimitFlush = {
+    parent,
+    until,
+    epoch: tracker.epoch,
+    scheduling,
+    timer: undefined as unknown,
+  };
+  tracker.limitFlushes.set(parent, pending);
+  pending.timer = startTimer(
+    scheduling,
+    () => {
+      void fireLimitFlush(pending, tracker, sender, records, now, scheduling);
+    },
+    delay,
+  );
+}
+
+/** Rule 15 / CS-6: the deferred stores together are bounded. */
+function deferredHasRoom(tracker: TurnEndedTracker): boolean {
+  return tracker.resumes.size + tracker.limitFlushes.size < TURN_ENDED_DEFERRED_LIMIT;
+}
+
+async function fireLimitFlush(
+  pending: PendingLimitFlush,
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  records: Readonly<Record<string, TurnEndedFacts>> | undefined,
+  now: () => Date,
+  scheduling: TurnEndScheduling,
+): Promise<void> {
+  if (tracker.limitFlushes.get(pending.parent) !== pending) return;
+  tracker.limitFlushes.delete(pending.parent);
+  // A reload or a shutdown loses the timer, as it loses every held line (rule 12).
+  if (tracker.epoch !== pending.epoch) return;
+  // L184-R1-F13: a parent that left the role record is departed like an archived
+  // one, so its reset flush is reclaimed here rather than flushing to it.
+  const live = tracker.signals.roleRecord?.();
+  if (live !== undefined && !Object.hasOwn(live, pending.parent)) return;
+  const later = limitedUntilNow(tracker, pending.parent, now());
+  if (later !== null) {
+    armLimitFlush(tracker, pending.parent, sender, records, now, scheduling);
+    return;
+  }
+  // A turn event that flushes first makes this a no-op: nothing of this parent's is owed.
+  if (!tracker.held.some((line) => line.parent === pending.parent)) return;
+  await flushHeldLines(tracker, sender, records, scheduling);
 }
 
 export type TurnEndedOutcome =
@@ -1535,6 +1767,64 @@ function cancelSeatWake(
 }
 
 /**
+ * Rule 11: a turn of the seat that starts before the resume fires cancels it, and
+ * the row keeps the fact. The resume is the plugin's own message, so cancelling
+ * it restores no count either. The timer is stopped through the scheduling the
+ * resume was armed with (L184-R1-F07).
+ */
+function cancelLimitResume(
+  tracker: TurnEndedTracker,
+  seat: string,
+  now: () => Date,
+  reason = "a turn of the seat started before the resume",
+): void {
+  const resume = tracker.resumes.get(seat);
+  if (resume === undefined) return;
+  tracker.resumes.delete(seat);
+  stopTimer(resume.scheduling, resume.timer);
+  tracker.append(
+    turnEndRow("wait-cancelled", resume.facts, seat, resume.ordinal, reason, isoWithOffset(now())),
+  );
+}
+
+/**
+ * Rule 12 / CS-6: a parent's deferred flush has nothing left to do once the agent
+ * is terminal, so it is reclaimed with its timer.
+ */
+function dropLimitFlush(tracker: TurnEndedTracker, parent: string): void {
+  const pending = tracker.limitFlushes.get(parent);
+  if (pending === undefined) return;
+  tracker.limitFlushes.delete(parent);
+  stopTimer(pending.scheduling, pending.timer);
+}
+
+/** Rule 5: a turn of the seat started, so the existing rules judge its next end. */
+function cancelSubagentLeftAlone(tracker: TurnEndedTracker, seat: string): void {
+  const held = tracker.subagentEnds.get(seat);
+  if (held === undefined) return;
+  tracker.subagentEnds.delete(seat);
+  tracker.signals.unwatchSubagents?.(seat, held.listener);
+}
+
+/**
+ * L184-R1-F13: a seat that left the product's role record owes no deferred action
+ * either, exactly as an archived one does. Departure is observed by the reads the
+ * plugin already makes — at a turn's end, and at the deferred action's own moment —
+ * so the seat's armed resume and any reset flush armed for it as a parent are
+ * reclaimed there, with their timers, instead of surviving to send at a seat that
+ * is no longer a seat.
+ */
+function reclaimDepartedSeat(
+  tracker: TurnEndedTracker,
+  seat: string,
+  now: () => Date,
+  reason: string,
+): void {
+  cancelLimitResume(tracker, seat, now, reason);
+  dropLimitFlush(tracker, seat);
+}
+
+/**
  * Rule 4: the act goes out only when the wait ends with the seat out of a turn,
  * not archived and owing no permission. A send skipped there writes its row and
  * does not count the end (rule 5).
@@ -1544,12 +1834,41 @@ async function deliverSeatWake(
   tracker: TurnEndedTracker,
   now: () => Date,
   readHost: HostStateReader | undefined,
+  sender: TurnEndedSender,
+  scheduling: TurnEndScheduling,
 ): Promise<void> {
   if (tracker.waits.get(wait.seat) !== wait) return;
   tracker.waits.delete(wait.seat);
   const states = await readHostStates(readHost);
   // Rule 4: a turn start or a shutdown between the timer and this act voids it.
   if (tracker.epoch !== wait.epoch || (tracker.seatEpoch.get(wait.seat) ?? 0) !== wait.seatEpoch) return;
+  // Rule 11: a limited seat gets nothing — no seat message and, from the third end
+  // on, no marked line — and the end is not counted. One resume is armed at its
+  // provider's `until` plus the lag.
+  //
+  // L184-R1-F09: a limit defers a send, it never authorises one. A seat the host
+  // already reports closed or archived, or whose state cannot be read, gets no
+  // resume armed for it either: the resume would have nowhere to go, and the skip
+  // is the row rule 7 wants.
+  const limited = limitedUntilNow(tracker, wait.seat, now());
+  if (limited !== null) {
+    const terminal = hostFactsUnavailable(readHost, states, wait.seat)
+      ? "host-state-unavailable"
+      : archivedNow(wait.seat, states, tracker)
+        ? "archived"
+        : null;
+    if (terminal !== null) {
+      tracker.append(
+        turnEndRow("send-skipped", wait.facts, wait.seat, wait.ordinal, terminal, isoWithOffset(now())),
+      );
+      return;
+    }
+    tracker.append(
+      turnEndRow("send-skipped", wait.facts, wait.seat, wait.ordinal, `provider-limit until ${limited}`, isoWithOffset(now())),
+    );
+    armLimitResume(wait, limited, tracker, sender, now, scheduling, readHost);
+    return;
+  }
   const skipped = hostFactsUnavailable(readHost, states, wait.seat)
     ? "host-state-unavailable"
     : archivedNow(wait.seat, states, tracker)
@@ -1558,7 +1877,9 @@ async function deliverSeatWake(
         ? "permission-wait"
         : inTurnNow(wait.seat, states, tracker)
           ? "in-a-turn"
-          : null;
+          : runningSubagentsNow(tracker, wait.seat) > 0
+            ? "subagent-running"
+            : null;
   if (skipped !== null) {
     tracker.append(turnEndRow("send-skipped", wait.facts, wait.seat, wait.ordinal, skipped, isoWithOffset(now())));
     return;
@@ -1579,6 +1900,157 @@ async function deliverSeatWake(
       ),
     );
   }
+}
+
+/**
+ * Rule 11's one resume. It is armed at the seat's `until` plus the lag, and a
+ * later `until` in the file re-arms it. The resume is the plugin's own message,
+ * so it does not reset the seat's count; a turn of the seat that starts first
+ * cancels it.
+ *
+ * L184-R1-F07/F09: the record keeps the scheduling and host ports of the decision
+ * that armed it — a later `until` must be able to install its own timer, and the
+ * send at the reset must still ask the host's safety gates.
+ */
+function armLimitResume(
+  wait: PendingSeatWake,
+  until: string,
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  now: () => Date,
+  scheduling: TurnEndScheduling,
+  readHost: HostStateReader | undefined,
+): void {
+  if (tracker.resumes.get(wait.seat) === undefined && !deferredHasRoom(tracker)) {
+    // CS-6 / L184-R1-F13: the deferred fleet is finite, so the one deferred action
+    // this seat would take is shed and the row says so. Nothing is left stored.
+    tracker.append(
+      turnEndRow("send-skipped", wait.facts, wait.seat, wait.ordinal, "over-capacity", isoWithOffset(now())),
+    );
+    return;
+  }
+  const resume: PendingLimitResume = {
+    seat: wait.seat,
+    facts: wait.facts,
+    base: wait.message,
+    message: composeLimitResumeMessage(wait.message, until),
+    ordinal: wait.ordinal,
+    until,
+    epoch: tracker.epoch,
+    seatEpoch: tracker.seatEpoch.get(wait.seat) ?? 0,
+    scheduling,
+    ...(readHost === undefined ? {} : { readHost }),
+    timer: undefined as unknown,
+  };
+  installLimitResume(resume, tracker, sender, now);
+}
+
+/**
+ * Rule 11's one timer, installed or replaced: the entry this seat already has is
+ * stopped first, so one seat never holds two timers and one row.
+ */
+function installLimitResume(
+  resume: PendingLimitResume,
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  now: () => Date,
+): void {
+  const existing = tracker.resumes.get(resume.seat);
+  if (existing !== undefined) stopTimer(existing.scheduling, existing.timer);
+  const pending: PendingLimitResume = { ...resume, timer: undefined as unknown };
+  tracker.resumes.set(pending.seat, pending);
+  const delay = Math.max(0, Date.parse(pending.until) + PROVIDER_LIMIT_RESUME_MS - now().getTime());
+  pending.timer = startTimer(
+    pending.scheduling,
+    () => {
+      void fireLimitResume(pending, tracker, sender, now);
+    },
+    delay,
+  );
+}
+
+async function fireLimitResume(
+  resume: PendingLimitResume,
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  now: () => Date,
+): Promise<void> {
+  if (tracker.resumes.get(resume.seat) !== resume) return;
+  tracker.resumes.delete(resume.seat);
+  if (tracker.epoch !== resume.epoch || (tracker.seatEpoch.get(resume.seat) ?? 0) !== resume.seatEpoch) {
+    return;
+  }
+  // L184-R1-F13: the role record is read at this action's own moment, as the
+  // host's state is, so a seat that left it is never sent to — the resume goes
+  // with its timer, and the row says why.
+  const live = tracker.signals.roleRecord?.();
+  if (live !== undefined && !Object.hasOwn(live, resume.seat)) {
+    tracker.append(
+      turnEndRow("send-skipped", resume.facts, resume.seat, resume.ordinal, "left-the-record", isoWithOffset(now())),
+    );
+    return;
+  }
+  // A later `until` in the file re-arms the resume for it — one replacement timer
+  // at that `until` plus the lag, from the same base message, so the reset
+  // sentence is never added twice.
+  const later = limitedUntilNow(tracker, resume.seat, now());
+  if (later !== null) {
+    installLimitResume(
+      { ...resume, until: later, message: composeLimitResumeMessage(resume.base, later) },
+      tracker,
+      sender,
+      now,
+    );
+    return;
+  }
+  // L184-R1-F09: a deferred send asks the same safety gates as any other send —
+  // the host's own state, read at this moment and never polled.
+  const states = await readHostStates(resume.readHost);
+  if (tracker.epoch !== resume.epoch || (tracker.seatEpoch.get(resume.seat) ?? 0) !== resume.seatEpoch) {
+    return;
+  }
+  const skipped = hostFactsUnavailable(resume.readHost, states, resume.seat)
+    ? "host-state-unavailable"
+    : archivedNow(resume.seat, states, tracker)
+      ? "archived"
+      : permissionNow(resume.seat, states, tracker)
+        ? "permission-wait"
+        : inTurnNow(resume.seat, states, tracker)
+          ? "in-a-turn"
+          : runningSubagentsNow(tracker, resume.seat) > 0
+            ? "subagent-running"
+            : null;
+  if (skipped !== null) {
+    tracker.append(
+      turnEndRow("send-skipped", resume.facts, resume.seat, resume.ordinal, skipped, isoWithOffset(now())),
+    );
+    return;
+  }
+  try {
+    await sender.sendMessage(resume.seat, resume.message);
+  } catch (error) {
+    tracker.append(
+      turnEndRow(
+        "seat-message-failed",
+        resume.facts,
+        resume.seat,
+        resume.ordinal,
+        error instanceof Error ? error.message : String(error),
+        isoWithOffset(now()),
+      ),
+    );
+    return;
+  }
+  tracker.append(
+    turnEndRow("limit-resume", resume.facts, resume.seat, resume.ordinal, `provider-limit until ${resume.until}`, isoWithOffset(now())),
+  );
+}
+
+/** Rule 11: the seat-back message with the one added sentence, both kept whole. */
+export function composeLimitResumeMessage(base: string, until: string): string {
+  const added = ` Your provider's usage limit reset at ${until}: go on with your stage.`;
+  const room = Math.max(0, TURN_ENDED_LINE_LIMIT - added.length);
+  return `${base.length <= room ? base : base.slice(0, room)}${added}`;
 }
 
 /**
@@ -1619,8 +2091,12 @@ function scheduleSeatWake(
   });
   const kind: SeatWakeKind = ordinal <= TURN_ENDED_SENT_BACK_LIMIT ? "seat" : "parent-line";
   const delayMs = TURN_ENDED_WAIT_MS;
-  const message =
-    kind === "seat" ? composeSeatWakeMessage(agent.id, facts, lastLineOfTurn(own), helperDispatched) : "";
+  // L184-R1-F10 / rule 11: the seat-back message is composed for every ordinal and
+  // not only for the seat's own act, because a limited seat's deferred resume needs
+  // it whatever this wait would have done: from the third end on the limit
+  // suppresses the parent's marked line, and the resume still has to be the
+  // plugin's own standard message with the ended turn's own last line.
+  const message = composeSeatWakeMessage(agent.id, facts, lastLineOfTurn(own), helperDispatched);
   const wait: PendingSeatWake = {
     seat: agent.id,
     ordinal,
@@ -1638,7 +2114,7 @@ function scheduleSeatWake(
   wait.timer = startTimer(
     scheduling,
     () => {
-      void deliverSeatWake(wait, tracker, now, scheduling.readHost).finally(() => wait.finish());
+      void deliverSeatWake(wait, tracker, now, scheduling.readHost, sender, scheduling).finally(() => wait.finish());
     },
     delayMs,
   );
@@ -1659,6 +2135,7 @@ async function noteParentLine(
   sender: TurnEndedSender,
   sequence: number,
   mark?: { readonly ordinal: number; readonly at: string },
+  scheduling: TurnEndScheduling = {},
 ): Promise<TurnEndedOutcome> {
   const target = resolveWakeParent(agent, facts, records, tracker);
   if (target === null) return { kind: "none" };
@@ -1671,7 +2148,7 @@ async function noteParentLine(
   const alternate = currentManagerOf(facts.task, records, tracker, [agent.id, target.id]);
   const pushed: HeldLine = { subject: agent.id, parent: target.id, line, task: facts.task, alternate, seq: sequence };
   tracker.held.push(pushed);
-  const outcome = await flushHeldLines(tracker, sender, records);
+  const outcome = await flushHeldLines(tracker, sender, records, scheduling);
   const stillHeld = tracker.held.some((held) => held === pushed);
   if (stillHeld) return { kind: "held", parent: target.id };
   // A restart that began one of the agent's own while the line waited behind
@@ -1714,6 +2191,10 @@ export async function noteTurnEnded(
   const sequence = tracker.seq;
   const facts = records[agent.id];
   if (facts === undefined) {
+    // L184-R1-F13: this end reread the whole role record, and the seat it belongs
+    // to is not in it. That is a departure, so the deferred work the seat still
+    // owes is reclaimed now rather than left to fire at a seat that has left.
+    reclaimDepartedSeat(tracker, agent.id, now, "the seat left the role record before the resume");
     const log = tracker.notedMissing.has(agent.id)
       ? undefined
       : `agents-remember turn_ended: agent ${agent.id} is not in the product's agent list (role-agents.json); no parent line is owed for its ended turn`;
@@ -1741,7 +2222,7 @@ export async function noteTurnEnded(
     tracker.turnMarks.delete(oldest.value);
   }
   const own = slice.rows;
-  await flushHeldLines(tracker, sender, records);
+  await flushHeldLines(tracker, sender, records, options);
   if (obsolete()) return { kind: "none" };
 
   const isSeat = TURN_ENDED_SEAT_ROLES.has(facts.role);
@@ -1765,25 +2246,63 @@ export async function noteTurnEnded(
     // A permission wait gives no line at all (MIK-R117, MIK-R172), but rule 7
     // still wants the row that says why the end was left alone.
     if (reason === "permission-wait") return { kind: "none" };
+    // MIK-R190 rule 5: the seat's own subagent is still running, so the end waits
+    // for it to finish instead of being sent back now.
+    if (reason === "subagent-running") {
+      rememberSubagentLeftAlone(agent, facts, own, sequence, records, tracker, sender, options, obsolete);
+    }
     // Rule 4: without the host's facts the plugin does not send; the parent's line
     // is the safe act, as for any end rule 3 leaves alone.
-    return noteParentLine(agent, facts, own, records, tracker, sender, sequence);
+    return noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options);
   }
   if (!isSeat) {
     if (permissionNow(agent.id, states, tracker)) return { kind: "none" };
-    return noteParentLine(agent, facts, own, records, tracker, sender, sequence);
+    return noteParentLine(agent, facts, own, records, tracker, sender, sequence, undefined, options);
   }
 
   // A silent end: one 60-second wait, whatever the count. The first two ends wake
   // the seat; from the third on the same wait ends in the parent's marked line.
   const ordinal = nextSilentEnd(tracker, agent.id);
+  const wait = scheduleSeatWake(
+    agent,
+    facts,
+    own,
+    ordinal,
+    tracker,
+    sender,
+    options,
+    seatWakeDelivery(agent, facts, own, ordinal, sequence, records, tracker, sender, options, obsolete),
+  );
+  // Rule 4's budget shed this end's wake; it keeps its ordinal and sends nothing.
+  if (wait === undefined) return { kind: "none" };
+  return { kind: "waiting", seat: agent.id, ordinal };
+}
+
+/**
+ * What a wait's end does for one seat: the seat's own message, or from the third
+ * end on its parent's marked line (MIK-R183 rules 4 and 5). A send that fails
+ * writes its row and restores no count; a boundary during the send writes none.
+ */
+function seatWakeDelivery(
+  agent: TurnEndedAgent,
+  facts: TurnEndedFacts,
+  own: readonly unknown[],
+  ordinal: number,
+  sequence: number,
+  records: Readonly<Record<string, TurnEndedFacts>>,
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  options: TurnEndOptions,
+  obsolete: () => boolean,
+): (message: string) => Promise<void> {
+  const now = clockOf(options);
   const markedLine = ordinal > TURN_ENDED_SENT_BACK_LIMIT;
-  const wait = scheduleSeatWake(agent, facts, own, ordinal, tracker, sender, options, async (message) => {
+  return async (message: string): Promise<void> => {
     if (markedLine) {
       await noteParentLine(agent, facts, own, records, tracker, sender, sequence, {
         ordinal,
         at: isoWithOffset(now()),
-      });
+      }, options);
       // Rule 4/8: a boundary during the line's own delivery restores no count.
       if (obsolete()) return;
       rememberSilentEnd(tracker, agent.id, ordinal);
@@ -1810,10 +2329,58 @@ export async function noteTurnEnded(
     if (obsolete()) return;
     rememberSilentEnd(tracker, agent.id, ordinal);
     tracker.append(turnEndRow("seat-message", facts, agent.id, ordinal, "no hand-off", isoWithOffset(now())));
-  });
-  // Rule 4's budget shed this end's wake; it keeps its ordinal and sends nothing.
-  if (wait === undefined) return { kind: "none" };
-  return { kind: "waiting", seat: agent.id, ordinal };
+  };
+}
+
+/**
+ * Rule 5: the seat's end was left alone for its running subagent, so that count
+ * reaching zero starts the one 60-second wait of MIK-R183 rule 4 for that end —
+ * no second wait follows, a turn of the seat that starts first cancels it, and
+ * the line quotes the last line of the turn that was left alone. On a provider
+ * that does not resume the parent, nothing else would wake the seat.
+ */
+function rememberSubagentLeftAlone(
+  agent: TurnEndedAgent,
+  facts: TurnEndedFacts,
+  own: readonly unknown[],
+  sequence: number,
+  records: Readonly<Record<string, TurnEndedFacts>>,
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  options: TurnEndOptions,
+  obsolete: () => boolean,
+): void {
+  const previous = tracker.subagentEnds.get(agent.id);
+  if (previous !== undefined) tracker.signals.unwatchSubagents?.(agent.id, previous.listener);
+  const ordinal = nextSilentEnd(tracker, agent.id);
+  const listener = (): void => {
+    if (runningSubagentsNow(tracker, agent.id) > 0) return;
+    const held = tracker.subagentEnds.get(agent.id);
+    if (held === undefined || held.listener !== listener) return;
+    tracker.subagentEnds.delete(agent.id);
+    tracker.signals.unwatchSubagents?.(agent.id, listener);
+    // A turn of the seat that started first is judged by the existing rules.
+    if (obsolete() || tracker.inTurn.has(agent.id)) return;
+    scheduleSeatWake(
+      agent,
+      facts,
+      own,
+      ordinal,
+      tracker,
+      sender,
+      options,
+      seatWakeDelivery(agent, facts, own, ordinal, sequence, records, tracker, sender, options, obsolete),
+    );
+  };
+  tracker.subagentEnds.set(agent.id, { seat: agent.id, ordinal, listener });
+  while (tracker.subagentEnds.size > TURN_ENDED_WAIT_LIMIT) {
+    const oldest = tracker.subagentEnds.keys().next();
+    if (oldest.done === true) break;
+    const evicted = tracker.subagentEnds.get(oldest.value);
+    if (evicted !== undefined) tracker.signals.unwatchSubagents?.(evicted.seat, evicted.listener);
+    tracker.subagentEnds.delete(oldest.value);
+  }
+  tracker.signals.watchSubagents?.(agent.id, listener);
 }
 
 /**
@@ -1828,6 +2395,20 @@ export function cleanupSeatWaits(tracker: TurnEndedTracker, scheduling: TurnEndS
     tracker.waits.delete(seat);
     stopTimer(scheduling, wait.timer);
     wait.finish();
+  }
+  // MIK-R190 rules 5, 11 and 12: a reload loses the subagent watches, the armed
+  // resumes and the limited parents' timers, as it loses every held line.
+  for (const [seat, held] of [...tracker.subagentEnds]) {
+    tracker.subagentEnds.delete(seat);
+    tracker.signals.unwatchSubagents?.(held.seat, held.listener);
+  }
+  for (const [seat, resume] of [...tracker.resumes]) {
+    tracker.resumes.delete(seat);
+    stopTimer(scheduling, resume.timer);
+  }
+  for (const [parent, pending] of [...tracker.limitFlushes]) {
+    tracker.limitFlushes.delete(parent);
+    stopTimer(scheduling, pending.timer);
   }
   tracker.silentEnds.clear();
   tracker.turnMarks.clear();

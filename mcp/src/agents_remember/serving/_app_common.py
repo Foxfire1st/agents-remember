@@ -16,7 +16,10 @@ from agents_remember.serving.background_accounting import BackgroundLedger
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.intent_summary_cache import ReviewIntentSummaryPort
 from agents_remember.serving.knowledge_reader import KnowledgeReaderPort
-from agents_remember.serving.projections.host_activity import HostActivityReconcile
+from agents_remember.serving.projections.host_activity import (
+    HostActivityReconcile,
+    UsageReadPort,
+)
 from agents_remember.serving.projector import ProjectionReplay, Projector
 from agents_remember.serving.review import (
     KnowledgeReviewEntriesPort,
@@ -42,7 +45,9 @@ if TYPE_CHECKING:
 def _encode(data: BaseModel | dict[str, Any]) -> Any:  # pragma: no cover
     """JSON-ready payload: projection nodes dumped by alias (camelCase), markers as-is."""
     if isinstance(data, BaseModel):
-        return data.model_dump(by_alias=True, exclude_none=True)
+        # JSON mode: this payload is written as JSON, and a limited task carries `datetime`
+        # values in `providerLimit` (MIK-R190 rule 13).
+        return data.model_dump(mode="json", by_alias=True, exclude_none=True)
     return data
 
 
@@ -71,7 +76,14 @@ class _ProjectionBodyCache:
         """``projection``'s wire dump (cached per instance; read-only for callers)."""
         entry = self._entry
         if entry is None or entry[0] is not projection:
-            entry = (projection, projection.model_dump(by_alias=True, exclude_none=True))
+            # JSON mode: the wire body is JSON, and a limited task carries `datetime` values in
+            # `providerLimit` (MIK-R190 rule 13). Without it `JSONResponse` raised
+            # `Object of type datetime is not JSON serializable` and `/api/state` answered 500
+            # for every request while any seat was limited.
+            entry = (
+                projection,
+                projection.model_dump(mode="json", by_alias=True, exclude_none=True),
+            )
             self._entry = entry
         return entry[1]
 
@@ -231,6 +243,15 @@ class ServingCollaborators:
     the app factory to preserve route precedence over its catch-all asset mount.
     """
 
+    usage_read: UsageReadPort | None = None
+    """MIK-R190 rule 7's usage read: one bridge process per tick that saw a new end.
+
+    Another port rather than a call the loop makes itself: the bridge caller
+    (:mod:`agents_remember.cli.paseo_bridge`) is a ``cli``-rank module and ``serving`` may not
+    import it (rule 19), so the composition root that already binds this app's Paseo reads binds
+    this one too. Omitting it costs the tick its one read and nothing else -- every send path's
+    own check (rule 9) still sees whatever fact the last read stored."""
+
 
 INFERRED_LIVE_INPUTS = LiveProjectionInputs()
 
@@ -255,6 +276,9 @@ class _ServingRuntime:
     # The always-on background account (MIK-R81 rule 1): the projector and every
     # background loop record their units here; the diagnostics route serves it.
     background_ledger: BackgroundLedger | None = None
+    # MIK-R190 rule 7: the one usage read a tick with a new stamped end makes, as the
+    # composition root bound it (``None`` when this process was given no such port).
+    usage_read: UsageReadPort | None = None
     task_bodies: TaskDocumentBodyCache = field(default_factory=TaskDocumentBodyCache)
 
     @property

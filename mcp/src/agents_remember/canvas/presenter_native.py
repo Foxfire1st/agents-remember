@@ -28,11 +28,20 @@ from agents_remember.canvas.presenter_store import (
     digest_bytes,
     read_bounded,
 )
-from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
+from agents_remember.cli.paseo_bridge import (
+    PaseoBridgeFailure,
+    bridge_call,
+    daemon_configuration,
+)
 from agents_remember.cli.paseo_catalog import read_host_role, resolve_agent_selection
 from agents_remember.cli.role_instructions import launch_choice_metadata
+from agents_remember.errors import PaseoRuntimeFailure
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.serving.paseo.paseo_daemon_config import (
+    CONFIG_FILE,
+    host_provider_extra_args,
+)
 
 TOOL_NAMES = (
     "inputs",
@@ -88,6 +97,7 @@ class NativePresenterHarness:
             raise PresenterRefused(error.code, str(error)) from error
 
     def start(self, attempt: PresenterAttempt, instructions: str, working: Path) -> RunnerReceipt:
+        self._require_confined_host()
         try:
             provider, options = qualified_launch(self._config, attempt.repository_id)
         except PaseoBridgeFailure as error:
@@ -186,6 +196,7 @@ class NativePresenterHarness:
 
     def reconcile(self, attempt: PresenterAttempt, working: Path) -> RunnerReceipt:
         """Repeat the immutable native create, with no settings reread or new identity."""
+        self._require_confined_host()
         prepared = json.loads(
             read_bounded(
                 working / "host/prepared-start.json",
@@ -219,7 +230,36 @@ class NativePresenterHarness:
             execution_id=session_id,
         )
 
+    def _require_confined_host(self) -> None:
+        """Refuse a confined step while the host's provider map gives Claude extra arguments.
+
+        A confined seat runs with exactly the arguments of its confinement, at its start and at
+        every resume (MIK-R192 rule 8). The host merges its configured options into both, and it
+        resumes a stored seat by itself when its chat is shown, which AR cannot check; so the map
+        is read here, in the file and in the running daemon, before the agent runs.
+        """
+        runtime = self._config.paseo_runtime
+        if runtime is None:
+            return
+        try:
+            arguments = host_provider_extra_args(
+                self._config, "claude", read_config=daemon_configuration
+            )
+        except PaseoRuntimeFailure as unread:
+            # A map that was not read is not a clean one: the step refuses before the host is
+            # asked, as it does for a map that names arguments (MIK-R192 rule 8).
+            raise PresenterRefused("presenter-host-map-unread", str(unread)) from unread
+        if not arguments:
+            return
+        raise PresenterRefused(
+            "presenter-host-extra-arguments",
+            f"the host's configuration at {runtime.home / CONFIG_FILE} gives Claude the extra "
+            f"arguments {list(arguments)}; a confined presenter never runs with them. Run "
+            "runtime_install or `agents-remember paseo provision` to write AR's provider map back.",
+        )
+
     def message(self, session_id: str, *, role: str, text: str) -> HostReceipt:
+        self._require_confined_host()
         lane = "system-owner" if role == "system-owner" else "developer"
         message_id = str(uuid.uuid4())
         reply = self._call(
@@ -261,6 +301,13 @@ class NativePresenterHarness:
         )
 
     def resume(self, session_id: str) -> HostReceipt:
+        """Resume the stored seat, at the confinement its start ran with (MIK-R192 rule 8).
+
+        The host lays its configured provider options over a resume exactly as over a start, and
+        resumes the seat with them; so the map is read here, before any host call, as `start`,
+        `reconcile` and `message` read it. A refusal leaves the session as it was.
+        """
+        self._require_confined_host()
         reply = self._call("agent-resume", {"agentId": session_id})
         if reply.get("agent") is None or reply["agent"].get("archivedAt"):
             raise PresenterRefused(

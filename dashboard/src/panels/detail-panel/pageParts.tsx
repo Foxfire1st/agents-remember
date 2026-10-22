@@ -16,7 +16,7 @@ import {
 import { cx } from '../../../styled-system/css';
 import { Markdown } from '../../grammar/Markdown';
 import { StepDot } from './StepDot';
-import type { TaskEntry, TaskStepNode } from '../../types/projection';
+import type { ProviderLimit, TaskEntry, TaskStepNode } from '../../types/projection';
 import { fmtWait } from '../../data/selectors';
 import { useTaskStatusNow } from '../../data/taskStatusClock';
 import {
@@ -64,13 +64,20 @@ export type DocView =
 
 export type StatusTone = 'work' | 'wait' | 'done' | 'gone';
 
-export type TaskStatusKey = TaskEntry['stage'] | NonNullable<TaskEntry['activity']>;
+export type TaskStatusKey =
+  | TaskEntry['stage']
+  | NonNullable<TaskEntry['activity']>
+  // MIK-R190 rule 13: a paused task held up by a seat that hit its provider limit.
+  | 'limited';
 
 const STATUS_WORDS: Record<TaskStatusKey, [StatusTone, string]> = {
   planned: ['wait', 'planned'],
   started: ['wait', 'started'],
   works: ['work', 'works'],
   paused: ['wait', 'paused'],
+  // The server says started, nothing works and a seat is limited: a paused task whose word
+  // counts down. The limit is served; this module never decides that one exists.
+  limited: ['wait', 'rate limited'],
   // Host activity unknown: the row says the task's state only; the header says once that host
   // activity is unavailable.
   unknown: ['wait', 'started'],
@@ -79,8 +86,19 @@ const STATUS_WORDS: Record<TaskStatusKey, [StatusTone, string]> = {
 };
 
 /** Presentation only: stage and activity are already decided by the server. */
-export const taskStatusKey = (task: Pick<TaskEntry, 'stage' | 'activity'>): TaskStatusKey =>
-  task.activity ?? task.stage;
+export const taskStatusKey = (
+  task: Pick<TaskEntry, 'stage' | 'activity' | 'providerLimit'>,
+): TaskStatusKey =>
+  task.activity === 'paused' && task.providerLimit ? 'limited' : (task.activity ?? task.stage);
+
+/** The state underneath the word: a served limit is a paused task, so every count, every group
+ * and the header keep saying paused (MIK-R190 rule 13). */
+export const underlyingStatusKey = (
+  task: Pick<TaskEntry, 'stage' | 'activity' | 'providerLimit'>,
+): TaskStatusKey => {
+  const status = taskStatusKey(task);
+  return status === 'limited' ? 'paused' : status;
+};
 
 export function statusTone(status: TaskStatusKey): StatusTone {
   return STATUS_WORDS[status][0];
@@ -90,13 +108,101 @@ export function statusLabel(status: TaskStatusKey): string {
   return STATUS_WORDS[status][1];
 }
 
-export function StatusWord({ status, testid }: { status: TaskStatusKey; testid?: string }) {
+// The exact served instant, written with its date, its seconds, its fractional seconds and the
+// reader's time zone. Nothing here reads a provider limit for itself: the value is the server's
+// `until` / `resetsAt`, shown as served. Seconds are kept because the served moments are exact: two
+// resets a minute apart are two different instants, and a detail that showed the same time for both
+// would be a false one. Milliseconds are kept for the same reason at the scale the producer sends:
+// `.001000Z` and `.999000Z` are two instants inside one second (F28). A served value finer than a
+// millisecond is not thrown away either — it is written verbatim beside the localized time, so the
+// producer's own precision is never rounded off by this formatter.
+const LIMIT_TIME = new Intl.DateTimeFormat(undefined, {
+  day: 'numeric',
+  fractionalSecondDigits: 3,
+  hour: '2-digit',
+  hour12: false,
+  minute: '2-digit',
+  month: 'short',
+  second: '2-digit',
+  timeZoneName: 'short',
+  year: 'numeric',
+});
+
+// A fractional part longer than three digits: the part past the millisecond is the producer's own
+// remainder. Trailing zeros there are not a difference worth showing; anything else is.
+const SUB_MILLISECOND = /\.(\d{4,})(?=Z|[+-]\d{2}:?\d{2}$|$)/;
+
+export function formatLimitTime(iso: string): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return iso;
+  const shown = LIMIT_TIME.format(at);
+  const finer = SUB_MILLISECOND.exec(iso);
+  return finer !== null && /[1-9]/.test(finer[1].slice(3)) ? `${shown} (served ${iso})` : shown;
+}
+
+/** One line per limited seat: its role and agent, the provider, the window, the exact reset. */
+function limitSeatLines(limit: ProviderLimit): string[] {
+  return limit.seats.map((seat) =>
+    [
+      seat.role,
+      seat.agentId,
+      `${seat.source} · ${seat.account}`,
+      seat.window,
+      `resets ${formatLimitTime(seat.resetsAt)}`,
+    ].join(' · '),
+  );
+}
+
+/** Every served seat on its own line; a limit naming no seat still names its exact end. */
+export function limitLines(limit: ProviderLimit): string[] {
+  const lines = limitSeatLines(limit);
+  return lines.length ? lines : [`until ${formatLimitTime(limit.until)}`];
+}
+
+export function limitHover(limit: ProviderLimit): string {
+  return limitLines(limit).join('\n');
+}
+
+/** The words a surface with no display clock shows, and the exact time it says in its title. */
+export function statusTitle(status: TaskStatusKey, until?: string): string {
+  const word = statusLabel(status);
+  return status === 'limited' && until ? `${word}, until ${formatLimitTime(until)}` : word;
+}
+
+/** The hover of a word with no display clock: the task's own end, then one line per served seat.
+ *
+ * A surface that cannot count down still owes the reader the whole served fact: which seat waits,
+ * on which provider account and window, and the exact moment that window resets (MIK-R190 rule 13).
+ */
+export function statusHover(
+  status: TaskStatusKey,
+  until?: string,
+  limit?: ProviderLimit | null,
+): string {
+  if (status !== 'limited') return statusLabel(status);
+  const end = until ?? limit?.until;
+  const head = end ? `until ${formatLimitTime(end)}` : statusLabel('limited');
+  const seats = limit?.seats?.length ? limitLines(limit) : [];
+  return [head, ...seats].join('\n');
+}
+
+export function StatusWord({
+  status,
+  testid,
+  until,
+  limit,
+}: {
+  status: TaskStatusKey;
+  testid?: string;
+  until?: string;
+  limit?: ProviderLimit | null;
+}) {
   return (
     <span
       className={statusWord({ tone: statusTone(status) })}
       data-status={status}
       data-testid={testid}
-      title={status}
+      title={statusHover(status, until, limit)}
     >
       {statusLabel(status)}
     </span>
@@ -123,6 +229,96 @@ export function TaskStatusClock({
   );
 }
 
+/** The display instant a surface shares with its words and marks; undefined where none is set. */
+export function useTaskStatusInstant(): number | null | undefined {
+  return useContext(StatusClock);
+}
+
+/** The served end of a task's limit, for a surface that can only name it. */
+export function limitUntil(task: TaskEntry | undefined): string | undefined {
+  return task?.providerLimit?.until;
+}
+
+/** The age of the host event, unless a countdown has replaced it. */
+function eventAge(
+  task: TaskEntry,
+  now: number | null | undefined,
+  counting: boolean,
+): number | undefined {
+  if (counting || !task.eventAt || now === undefined || now === null) return undefined;
+  return Math.max(0, (now - Date.parse(task.eventAt)) / 1000);
+}
+
+/** The time left in a served window at one instant; nothing when no window is counting. */
+function windowLeft(
+  status: TaskStatusKey,
+  limit: ProviderLimit | null | undefined,
+  now: number | null | undefined,
+): number | undefined {
+  if (status !== 'limited' || !limit || now == null) return undefined;
+  return secondsLeft(limit.until, now);
+}
+
+/** What one word says at one instant, and the status its mark and tone wear. */
+function taskWordAt(
+  task: TaskEntry,
+  left: number | undefined,
+): { word: string; shown: TaskStatusKey; counting: boolean } {
+  const status = taskStatusKey(task);
+  if (status !== 'limited') return { word: statusLabel(status), shown: status, counting: false };
+  // A surface with no display clock cannot count down; it says the words alone.
+  if (left === undefined) {
+    return { word: statusLabel('limited'), shown: status, counting: false };
+  }
+  if (left > 0) {
+    return { word: `${statusLabel('limited')}: ${fmtWait(left)}`, shown: status, counting: true };
+  }
+  // Never a zero or negative time left: a window the clock has reached is the paused task again.
+  return { word: statusLabel('paused'), shown: 'paused', counting: false };
+}
+
+/** The hover of a word: the served seats, or the host time, or the word itself. */
+function wordTitle(
+  task: TaskEntry,
+  status: TaskStatusKey,
+  left: number | undefined,
+  word: string,
+): string {
+  if (status !== 'limited' || left === 0) return task.eventAt ?? word;
+  return task.providerLimit ? limitHover(task.providerLimit) : statusLabel('limited');
+}
+
+/** What one task's word says at one instant, and the status its mark and tone wear. */
+export interface TaskStatusReading {
+  /** The status the word, the tone and the mark wear at this instant. */
+  shown: TaskStatusKey;
+  /** The words themselves, countdown or host age included. */
+  word: string;
+  /** The hover: the served seats, or the host time, or the word itself. */
+  hover: string;
+}
+
+/** One display instant, one answer: the word, the mark's status and the hover of a task (rule 13).
+ *
+ * A surface that shares this instant can never show one word in its row and another in its hover:
+ * the countdown, the expiry back to `paused` and the served detail are all decided here.
+ */
+export function taskStatusReading(
+  task: TaskEntry,
+  now: number | null | undefined,
+): TaskStatusReading {
+  const status = taskStatusKey(task);
+  const limit = status === 'limited' ? task.providerLimit : undefined;
+  const left = windowLeft(status, limit, now);
+  const { word, shown, counting } = taskWordAt(task, left);
+  const age = eventAge(task, now, counting);
+  return {
+    shown,
+    word: age == null ? word : `${word} ${fmtWait(age)}`,
+    hover: wordTitle(task, status, left, word),
+  };
+}
+
 /** The same served word and event age on every task surface. */
 export function TaskStatusWord({
   task,
@@ -136,24 +332,29 @@ export function TaskStatusWord({
   active?: boolean;
 }) {
   const shared = useContext(StatusClock);
-  const local = useTaskStatusNow(active && shared === undefined && Boolean(task.eventAt));
-  const now = shared ?? local;
   const status = taskStatusKey(task);
-  const word = statusLabel(status);
-  const age = task.eventAt && now !== undefined
-    ? Math.max(0, (now - Date.parse(task.eventAt)) / 1000)
-    : undefined;
+  // A limited word counts down, so it needs the display clock even when the host timed no event.
+  const limit = status === 'limited' ? task.providerLimit : undefined;
+  const local = useTaskStatusNow(active && shared === undefined && Boolean(task.eventAt || limit));
+  const now = shared ?? local;
+  const reading = taskStatusReading(task, now);
   return (
     <span
-      className={statusWord({ tone: statusTone(status), mark })}
-      data-status={status}
+      className={statusWord({ tone: statusTone(reading.shown), mark })}
+      data-status={reading.shown}
       data-testid={testid}
-      title={task.eventAt ?? word}
+      title={reading.hover}
     >
-      {word}
-      {age == null ? '' : ` ${fmtWait(age)}`}
+      {reading.word}
     </span>
   );
+}
+
+/** Whole seconds left in a served window; zero once the display clock has reached it. */
+function secondsLeft(until: string, now: number): number | undefined {
+  const at = Date.parse(until);
+  if (Number.isNaN(at)) return undefined;
+  return Math.max(0, Math.floor((at - now) / 1000));
 }
 
 export function plural(value: number, one: string, many?: string): string {

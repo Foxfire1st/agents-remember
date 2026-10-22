@@ -15,6 +15,7 @@ import tempfile
 import unittest
 import uuid
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -49,6 +50,7 @@ from agents_remember.cli.role_message_files import MessageFileError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.serving.app import create_app
+from agents_remember.serving.paseo.provider_limits import provider_limits_path
 from agents_remember.serving.projector import ProjectionCadence
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -898,6 +900,51 @@ class DeveloperSendTests(RoleToolsTestCase):
             filed = Path(answer["messageFile"]).read_text()
             self.assertIn(new.as_posix(), filed)
             self.assertIn(shared.as_posix(), filed)
+
+    def test_a_limited_target_is_held_with_the_reset_time_it_was_stored_with(self) -> None:
+        """MIK-R190 rule 9 and rule 13: the tray's word names the moment work resumes.
+
+        The reset rides on the waiting row and in the answer the tray reads, to the instant the
+        limit file names: the compact word must not collapse two different resets into one day.
+        """
+
+        request, recipient = self.started("worker", status="idle")
+        reset = (datetime.now(UTC) + timedelta(hours=2)).replace(microsecond=123456)
+        limits = provider_limits_path(self.config)
+        assert limits is not None
+        limits.parent.mkdir(parents=True, exist_ok=True)
+        limits.write_text(
+            json.dumps(
+                {
+                    "schema": "ar-provider-limits/v1",
+                    "reports": {
+                        "claude-max": {
+                            "until": reset.isoformat(),
+                            "sourceLabel": "Claude",
+                            "accountLabel": "Max 20x",
+                            "windows": [
+                                {
+                                    "id": "five_hour",
+                                    "label": "Session",
+                                    "resetsAt": reset.isoformat(),
+                                }
+                            ],
+                            "observedAt": datetime.now(UTC).isoformat(),
+                        }
+                    },
+                    "agents": {recipient: ["claude-max"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        held = self.send(recipient, text="wait for the reset")
+
+        self.assertEqual((held["state"], held["reason"]), ("held", "provider-limit"))
+        self.assertEqual(held["limitedUntil"], reset.isoformat())
+        folder = self.receipt(request)["workspace"]["path"]
+        (row,) = json.loads(store_path_for(folder, recipient).read_text())["messages"]
+        self.assertEqual(row["limitedUntil"], reset.isoformat())
 
     def test_a_held_send_that_ends_undelivered_is_filed_and_logged_undelivered(self) -> None:
         """Rules 9 and 10, Failure and Recovery: a held send whose seat is lost at once, or whose

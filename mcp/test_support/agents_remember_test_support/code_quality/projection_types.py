@@ -42,7 +42,9 @@ NAMED_VOCABULARIES = (
     ("EngineProcessNode", "health", "ProcessHealth"),
 )
 SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "title"})
-SCHEMA_REFINEMENT_KEYWORDS = frozenset({"maxItems", "maxLength", "minLength", "minimum", "pattern"})
+SCHEMA_REFINEMENT_KEYWORDS = frozenset(
+    {"format", "maxItems", "maxLength", "minLength", "minimum", "pattern"}
+)
 """The runtime refinements emitted beside a TypeScript property instead of being enforced."""
 SCHEMA_KEYWORDS = (
     SCHEMA_ANNOTATION_KEYWORDS
@@ -217,7 +219,9 @@ def _schema_allowed_keywords(
     if node.get("type") in {"integer", "number"}:
         allowed = allowed | {"minimum"}
     elif node.get("type") == "string":
-        allowed = allowed | {"maxLength", "minLength", "pattern"}
+        # `format` is the only refinement the served wire states for a textual time; it is kept
+        # as a refinement rather than dropped, so a date-time stays a date-time in both contracts.
+        allowed = allowed | {"format", "maxLength", "minLength", "pattern"}
     return allowed
 
 

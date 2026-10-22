@@ -26,6 +26,7 @@ import {
   TURN_ENDED_PARENT_LIMIT,
   TURN_ENDED_PROVIDER_LIMIT,
   TURN_ENDED_STARTED_LIMIT,
+  PROVIDER_LIMIT_RESUME_MS,
   composeTurnEndedLine,
   createTurnEndedTracker,
   flushHeldLines,
@@ -554,7 +555,7 @@ test("contributed parent-wake handlers keep permission and turn gates and send w
   };
   try {
     registerParentWakeEvents(server);
-    assert.deepEqual([...handlers.keys()], ["agent.turn_started", "agent.turn_ended", "agent.permission_requested", "agent.permission_resolved", "agent.archived"]);
+    assert.deepEqual([...handlers.keys()], ["agent.turn_started", "agent.turn_ended", "agent.permission_requested", "agent.permission_resolved", "agent.archived", "agent.closed"]);
     await note("agent.turn_started", "parent");
     await note("agent.turn_started", "child", "parent");
     await note("agent.turn_ended", "child", "parent");
@@ -1612,6 +1613,7 @@ test("contributed handlers keep a completed silent end quiet until the seat can 
       "agent.permission_requested",
       "agent.permission_resolved",
       "agent.archived",
+      "agent.closed",
     ]);
     const deliver = (kind: string, id: string, parent: string | null, extra: Record<string, unknown> = {}) => {
       handlers.get(kind)?.(
@@ -2409,5 +2411,650 @@ test("L181-C1-F06 (R2): an unreadable or incomplete host listing sends nothing",
     assert.equal(seatMessages(sender.sent).length, 0, "nothing is sent on unread facts");
     assert.equal(rows.filter((row) => row.kind === "send-skipped" && row.reason === "host-state-unavailable").length, 1);
     assert.equal(tracker.silentEnds.size, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MIK-R190 rules 11 and 12: the limited seat's deferred resume and the limited
+// parent's reset flush (L184-R1-F06, F07, F09, F10, F13). Every case drives the
+// real decision with a clock the test moves and a limit map the test rewrites,
+// and keeps every timer in memory: no case waits on real time.
+// ---------------------------------------------------------------------------
+
+/** A clock a limit case moves by hand, with every timer it was given. */
+function movingClock(start: string = WAKE_TIME) {
+  let current = Date.parse(start);
+  const timers: FakeTimer[] = [];
+  return {
+    timers,
+    now: (): Date => new Date(current),
+    setTimeout: (callback: () => void, delayMs: number): unknown => {
+      const timer: FakeTimer = { callback, delayMs, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeout: (handle: unknown): void => {
+      (handle as FakeTimer).cleared = true;
+    },
+    advance: (ms: number): void => {
+      current += ms;
+    },
+    live: (): FakeTimer[] => timers.filter((timer) => !timer.cleared),
+    async fire(): Promise<void> {
+      for (const timer of timers.splice(0)) if (!timer.cleared) timer.callback();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    },
+  };
+}
+
+type MovingClock = ReturnType<typeof movingClock>;
+
+/** The product's limit file as the plugin reads it: one `until` per seat. */
+function limitFile(initial: Record<string, string>) {
+  const untils = new Map<string, string>(Object.entries(initial));
+  return {
+    set(agentId: string, until: string | null): void {
+      if (until === null) untils.delete(agentId);
+      else untils.set(agentId, until);
+    },
+    /** The signal port with the file's own rule: limited while `now` is before `until`. */
+    limitedUntil: (agentId: string, now: Date): string | null => {
+      const until = untils.get(agentId);
+      return until !== undefined && Date.parse(until) > now.getTime() ? until : null;
+    },
+  };
+}
+
+function limitTracker(
+  rows: LogRow[],
+  limits: { readonly limitedUntil: (agentId: string, now: Date) => string | null },
+): TurnEndedTracker {
+  return createTurnEndedTracker(undefined, (row) => rows.push(row as LogRow), {
+    limitedUntil: limits.limitedUntil,
+  });
+}
+
+/** One ended turn on the moving clock, with the host's state where a case reads it. */
+async function runEnd(
+  tracker: TurnEndedTracker,
+  sender: TurnEndedSender,
+  clock: MovingClock,
+  agent: TurnEndedAgent,
+  records: Readonly<Record<string, TurnEndedFacts>>,
+  timeline: readonly unknown[] = [],
+  extra: { readonly readHost?: () => Promise<readonly HostAgentState[] | null> } = {},
+): Promise<{ readonly kind: string }> {
+  return noteTurnEnded(agent, timeline, records, tracker, sender, {
+    outcome: "completed",
+    turnId: null,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    ...(extra.readHost === undefined ? {} : { readHost: extra.readHost }),
+  });
+}
+
+/** The host's state, answered once per decision the plugin makes, and counted. */
+function hostReads(...calls: (readonly HostAgentState[] | null)[]) {
+  let index = 0;
+  const read = async (): Promise<readonly HostAgentState[] | null> => {
+    const answer = calls[Math.min(index, calls.length - 1)];
+    index += 1;
+    return answer;
+  };
+  return { read, count: (): number => index };
+}
+
+test("L184-R1-F06: a limited parent's reset flush is armed even when nothing can be claimed", async (t) => {
+  const UNTIL_1 = "2026-10-19T08:02:00.000Z";
+  const UNTIL_2 = "2026-10-19T08:05:00.000Z";
+
+  await t.test("an idle limited parent flushes once at until+60s, in order, and a later until re-arms it", async () => {
+    const rows: LogRow[] = [];
+    const limits = limitFile({ parent: UNTIL_1 });
+    const tracker = limitTracker(rows, limits);
+    const sender = makeSender();
+    const clock = movingClock();
+    const records = { ...RECORDS, "child-2": CHILD };
+
+    await runEnd(tracker, sender, clock, CHILD_AGENT, records);
+    await runEnd(tracker, sender, clock, { id: "child-2", parentAgentId: "parent" }, records);
+
+    assert.equal(sender.sent.length, 0, "nothing goes into a limited parent");
+    assert.equal(tracker.held.length, 2, "both lines stay owed");
+    assert.equal(tracker.limitFlushes.size, 1, "the limited parent has its one timer");
+    const first = tracker.limitFlushes.get("parent");
+    assert.ok(first !== undefined);
+    assert.equal(first!.until, UNTIL_1);
+    assert.equal(
+      (first!.timer as FakeTimer).delayMs,
+      Date.parse(UNTIL_1) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime(),
+      "the timer waits until+60s",
+    );
+
+    // A later `until` re-arms the one timer instead of adding a second.
+    limits.set("parent", UNTIL_2);
+    clock.advance(Date.parse(UNTIL_1) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.equal(sender.sent.length, 0, "still limited, so nothing is sent");
+    assert.equal(tracker.limitFlushes.size, 1, "one timer, re-armed");
+    const second = tracker.limitFlushes.get("parent");
+    assert.ok(second !== undefined);
+    assert.equal(second!.until, UNTIL_2);
+    assert.equal(
+      (second!.timer as FakeTimer).delayMs,
+      Date.parse(UNTIL_2) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime(),
+      "the re-armed timer waits for the new until+60s",
+    );
+
+    // The reset: the timer alone flushes what waits, once, in turn-end order.
+    limits.set("parent", null);
+    clock.advance(Date.parse(UNTIL_2) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    const lines = sender.sent.filter((sent) => sent.agentId === "parent");
+    assert.equal(lines.length, 1, "one message carries the flush");
+    assert.ok(lines[0].text.indexOf("child") < lines[0].text.indexOf("child-2"), "in turn-end order");
+    assert.equal(tracker.held.length, 0);
+    assert.equal(tracker.limitFlushes.size, 0, "a fired timer leaves nothing armed");
+    await clock.fire();
+    assert.equal(sender.sent.filter((sent) => sent.agentId === "parent").length, 1, "no second flush");
+  });
+
+  await t.test("a limited parent in a turn keeps its one timer, then takes the line when it is free", async () => {
+    const rows: LogRow[] = [];
+    const limits = limitFile({ parent: UNTIL_1 });
+    const tracker = limitTracker(rows, limits);
+    const sender = makeSender();
+    const clock = movingClock();
+    noteTurnStarted({ id: "parent", parentAgentId: null }, tracker);
+
+    await runEnd(tracker, sender, clock, CHILD_AGENT, RECORDS);
+    assert.equal(sender.sent.length, 0, "a limited parent takes no line");
+    assert.equal(tracker.held.length, 1, "the line stays owed");
+    assert.equal(tracker.limitFlushes.size, 1, "the timer exists with no other traffic");
+
+    limits.set("parent", null);
+    clock.advance(Date.parse(UNTIL_1) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.equal(sender.sent.length, 0, "the parent is still in its turn, so the line waits");
+    assert.equal(tracker.held.length, 1, "and it is still owed");
+    assert.equal(tracker.limitFlushes.size, 0, "no timer is left for a reset that has passed");
+
+    // The parent's own turn end is the free moment any flush uses.
+    await runEnd(tracker, sender, clock, PARENT_AGENT, { ...RECORDS, grandparent: PARENT });
+    const lines = sender.sent.filter((sent) => sent.agentId === "parent");
+    assert.equal(lines.length, 1, "the line arrives once the parent is free");
+    assert.ok(lines[0].text.includes("child"));
+  });
+});
+
+test("L184-R1-F07: a later limit reset leaves one replacement resume timer", async (t) => {
+  const UNTIL_1 = "2026-10-19T08:02:00.000Z";
+  const UNTIL_2 = "2026-10-19T08:05:00.000Z";
+  const UNTIL_3 = "2026-10-19T08:09:00.000Z";
+
+  /** One silent end driven to its wait boundary under a limit: one resume armed. */
+  async function armResume() {
+    const rows: LogRow[] = [];
+    const limits = limitFile({ seat: UNTIL_1 });
+    const tracker = limitTracker(rows, limits);
+    const sender = makeSender();
+    const clock = movingClock();
+    await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS);
+    const wait = pendingSeatWake(tracker, "seat");
+    assert.ok(wait !== undefined, "the silent end owes a wait");
+    clock.advance(TURN_ENDED_WAIT_MS);
+    await clock.fire();
+    await wait!.done;
+    return { rows, limits, tracker, sender, clock };
+  }
+
+  await t.test("two extensions converge to one final own-message resume and one row", async () => {
+    const { rows, limits, tracker, sender, clock } = await armResume();
+    assert.equal(sender.sent.length, 0, "a limited seat is not sent back");
+    assert.equal(tracker.resumes.size, 1, "one resume is armed");
+    const armed = tracker.resumes.get("seat");
+    assert.ok(armed !== undefined);
+    assert.equal(
+      (armed!.timer as FakeTimer).delayMs,
+      Date.parse(UNTIL_1) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime(),
+      "the resume waits until+60s",
+    );
+
+    // The file's `until` moves twice before the first timer fires.
+    limits.set("seat", UNTIL_2);
+    clock.advance(Date.parse(UNTIL_1) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.equal(sender.sent.length, 0, "still limited, so nothing is sent");
+    assert.equal(tracker.resumes.size, 1, "still exactly one resume");
+    const second = tracker.resumes.get("seat");
+    assert.ok(second !== undefined);
+    assert.equal((second!.timer as FakeTimer).cleared, false, "the replacement is a scheduled action");
+    assert.equal(
+      (second!.timer as FakeTimer).delayMs,
+      Date.parse(UNTIL_2) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime(),
+      "the replacement waits for the new until+60s",
+    );
+
+    limits.set("seat", UNTIL_3);
+    clock.advance(Date.parse(UNTIL_2) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.equal(tracker.resumes.size, 1, "a second extension still leaves one resume");
+    assert.equal(
+      (tracker.resumes.get("seat")!.timer as FakeTimer).delayMs,
+      Date.parse(UNTIL_3) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime(),
+      "the second replacement waits for the final until+60s",
+    );
+
+    limits.set("seat", null);
+    clock.advance(Date.parse(UNTIL_3) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    const resumed = sender.sent.filter((sent) => sent.agentId === "seat");
+    assert.equal(resumed.length, 1, "one resume reaches the seat");
+    assert.equal(resumed[0].text.match(/usage limit reset at/g)?.length, 1, "exactly one reset sentence");
+    assert.ok(isPluginWakeMessage(resumed[0].text), "the resume is the plugin's own message");
+    const resumeRows = rows.filter((row) => row.kind === "limit-resume");
+    assert.equal(resumeRows.length, 1, "one row");
+    assert.equal(resumeRows[0].reason, `provider-limit until ${UNTIL_3}`, "the row names the final until");
+    assert.equal(tracker.resumes.size, 0, "the fired resume leaves nothing armed");
+    await clock.fire();
+    assert.equal(sender.sent.filter((sent) => sent.agentId === "seat").length, 1, "no second resume");
+  });
+
+  await t.test("a turn of the seat before the reset cancels the replacement timer", async () => {
+    const { rows, limits, tracker, sender, clock } = await armResume();
+    limits.set("seat", UNTIL_2);
+    clock.advance(Date.parse(UNTIL_1) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.equal(tracker.resumes.size, 1, "one replacement is armed");
+    const replacement = tracker.resumes.get("seat");
+    assert.ok(replacement !== undefined);
+
+    noteTurnStarted(SEAT_AGENT, tracker, clock.now);
+    assert.equal(tracker.resumes.size, 0, "the turn start cancels it");
+    assert.equal((replacement!.timer as FakeTimer).cleared, true, "and its timer with it");
+    assert.equal(rows.filter((row) => row.kind === "wait-cancelled").length, 1, "the cancellation is a row");
+
+    clock.advance(Date.parse(UNTIL_2) + PROVIDER_LIMIT_RESUME_MS);
+    await clock.fire();
+    assert.equal(sender.sent.filter((sent) => sent.agentId === "seat").length, 0, "nothing is resumed");
+  });
+});
+
+test("L184-R1-F09: a deferred resume keeps the host's send-time safety gates", async (t) => {
+  const UNTIL = "2026-10-19T08:02:00.000Z";
+
+  /** One silent end to its wait boundary under a limit, with the host's answers as given. */
+  async function armUnderLimit(readHost: () => Promise<readonly HostAgentState[] | null>) {
+    const rows: LogRow[] = [];
+    const limits = limitFile({ seat: UNTIL });
+    const tracker = limitTracker(rows, limits);
+    const sender = makeSender();
+    const clock = movingClock();
+    await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS, [], { readHost });
+    const wait = pendingSeatWake(tracker, "seat");
+    assert.ok(wait !== undefined, "the silent end owes a wait");
+    clock.advance(TURN_ENDED_WAIT_MS);
+    await clock.fire();
+    await wait!.done;
+    return { rows, limits, tracker, sender, clock };
+  }
+
+  /** The reset of every armed resume, and the send it would make. */
+  async function fireResumes(armed: Awaited<ReturnType<typeof armUnderLimit>>): Promise<void> {
+    armed.limits.set("seat", null);
+    armed.clock.advance(Date.parse(UNTIL) + PROVIDER_LIMIT_RESUME_MS);
+    await armed.clock.fire();
+  }
+
+  await t.test("a seat the host reports archived at the wait boundary gets no resume at all", async () => {
+    const reads = hostReads([hostState({ id: "seat" })], [hostState({ id: "seat", archived: true })]);
+    const armed = await armUnderLimit(reads.read);
+    assert.equal(armed.tracker.resumes.size, 0, "no resume is armed for a closed seat");
+    assert.equal(
+      armed.rows.filter((row) => row.kind === "send-skipped" && row.reason === "archived").length,
+      1,
+      "the skip is a row",
+    );
+    await fireResumes(armed);
+    assert.equal(armed.sender.sent.length, 0, "nothing is sent");
+  });
+
+  await t.test("a seat closed after arming is refused at the send, with no polling", async () => {
+    // The reviewer's counterexample: the seat is idle at both earlier reads and the
+    // host's own listing says closed when the reset fires.
+    const reads = hostReads(
+      [hostState({ id: "seat" })],
+      [hostState({ id: "seat" })],
+      [hostState({ id: "seat", archived: true })],
+    );
+    const armed = await armUnderLimit(reads.read);
+    assert.equal(armed.tracker.resumes.size, 1, "the limit defers the send");
+    await fireResumes(armed);
+    assert.equal(armed.sender.sent.length, 0, "a host-known closed seat is never sent");
+    assert.equal(
+      armed.rows.filter((row) => row.kind === "send-skipped" && row.reason === "archived").length,
+      1,
+      "the refusal is a row",
+    );
+    assert.equal(reads.count(), 3, "one read per decision, never a poll");
+    assert.equal(armed.tracker.resumes.size, 0);
+  });
+
+  await t.test("host facts that cannot be read leave the seat alone", async () => {
+    const reads = hostReads([hostState({ id: "seat" })], [hostState({ id: "seat" })], null);
+    const armed = await armUnderLimit(reads.read);
+    assert.equal(armed.tracker.resumes.size, 1);
+    await fireResumes(armed);
+    assert.equal(armed.sender.sent.length, 0, "an unreadable listing sends nothing");
+    assert.equal(
+      armed.rows.filter((row) => row.kind === "send-skipped" && row.reason === "host-state-unavailable").length,
+      1,
+    );
+  });
+
+  await t.test("a permission wait and an active turn each hold the resume back", async () => {
+    const waiting = await armUnderLimit(
+      hostReads(
+        [hostState({ id: "seat" })],
+        [hostState({ id: "seat" })],
+        [hostState({ id: "seat", permissionWait: true })],
+      ).read,
+    );
+    await fireResumes(waiting);
+    assert.equal(waiting.sender.sent.length, 0, "a permission wait takes no resume");
+    assert.equal(
+      waiting.rows.filter((row) => row.kind === "send-skipped" && row.reason === "permission-wait").length,
+      1,
+    );
+
+    const turning = await armUnderLimit(
+      hostReads([hostState({ id: "seat" })], [hostState({ id: "seat" })], [hostState({ id: "seat", inTurn: true })]).read,
+    );
+    await fireResumes(turning);
+    assert.equal(turning.sender.sent.length, 0, "an agent in a turn takes no resume");
+    assert.equal(
+      turning.rows.filter((row) => row.kind === "send-skipped" && row.reason === "in-a-turn").length,
+      1,
+    );
+  });
+
+  await t.test("a reload drops the armed resume and its timer", async () => {
+    const reads = hostReads([hostState({ id: "seat" })], [hostState({ id: "seat" })]);
+    const armed = await armUnderLimit(reads.read);
+    assert.equal(armed.tracker.resumes.size, 1);
+    const resume = armed.tracker.resumes.get("seat");
+    assert.ok(resume !== undefined);
+    cleanupSeatWaits(armed.tracker, armed.clock);
+    assert.equal(armed.tracker.resumes.size, 0, "the reload loses the resume");
+    assert.equal((resume!.timer as FakeTimer).cleared, true, "and its timer");
+    await fireResumes(armed);
+    assert.equal(armed.sender.sent.length, 0, "nothing fires after the boundary");
+  });
+});
+
+test("L184-R1-F10: a third-or-later end's resume carries the standard seat-back message", async () => {
+  const UNTIL = "2026-10-19T08:02:00.000Z";
+  const rows: LogRow[] = [];
+  const limits = limitFile({});
+  const tracker = limitTracker(rows, limits);
+  const sender = makeSender();
+  const clock = movingClock();
+
+  // Two ordinary seat messages, so the third end's own action is the parent's marked line.
+  for (const text of ["one", "two"]) {
+    await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS, [{ type: "assistant_message", text }]);
+    await clock.fire();
+  }
+  assert.equal(tracker.silentEnds.get("seat"), 2, "two ends are counted");
+
+  limits.set("seat", UNTIL);
+  const third = await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS, [
+    { type: "assistant_message", text: "Still open: M18" },
+  ]);
+  assert.equal(third.kind, "waiting", "the third end waits too");
+  const wait = pendingSeatWake(tracker, "seat");
+  assert.ok(wait !== undefined);
+  assert.equal(wait!.kind, "parent-line", "the third end's own action is the parent's line");
+  assert.ok(isPluginWakeMessage(wait!.message), "the wait still holds the standard message");
+
+  clock.advance(TURN_ENDED_WAIT_MS);
+  await clock.fire();
+  await wait!.done;
+  assert.equal(
+    sender.sent.filter((sent) => sent.agentId === "parent").length,
+    0,
+    "a limited seat gives its parent no line",
+  );
+  const resume = tracker.resumes.get("seat");
+  assert.ok(resume !== undefined, "one resume is armed");
+  assert.ok(resume!.message.startsWith(SEAT_WAKE_FIRST_LINE), "the resume keeps the fixed marker");
+  assert.ok(resume!.message.includes("worker"), "the resume names the role");
+  assert.ok(resume!.message.includes(SEAT.task), "the resume names the task");
+  assert.ok(resume!.message.includes("Still open: M18"), "the resume quotes the ended turn's own last line");
+  assert.equal(resume!.message.match(/usage limit reset at/g)?.length, 1, "exactly one reset sentence");
+  assert.ok(isPluginWakeMessage(resume!.message), "the plugin recognises its own resume");
+  assert.ok(resume!.message.length <= TURN_ENDED_LINE_LIMIT, "keeps the limit");
+
+  limits.set("seat", null);
+  clock.advance(Date.parse(UNTIL) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+  await clock.fire();
+  const toSeat = sender.sent.filter((sent) => sent.agentId === "seat");
+  assert.equal(toSeat.length, 3, "two ordinary messages and the resume");
+  assert.ok(toSeat[2].text.includes("Still open: M18"));
+
+  // The next turn begins with the resume as its user message: the run goes on.
+  const runBefore = tracker.silentEnds.get("seat") ?? 0;
+  assert.equal(runBefore, 2, "the limit-suppressed third end counted nothing");
+  const fourth = await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS, [
+    { type: "user_message", text: toSeat[2].text },
+    { type: "assistant_message", text: "Still open: M20" },
+  ]);
+  assert.equal(fourth.kind, "waiting");
+  assert.equal(tracker.silentEnds.get("seat"), runBefore, "the plugin's own resume resets no run");
+  assert.equal(pendingSeatWake(tracker, "seat")?.ordinal, runBefore + 1, "the run goes on from where it was");
+});
+
+test("L184-R1-F13: the deferred resume and parent-flush stores have one fleet budget", async (t) => {
+  const UNTIL = "2026-10-19T09:00:00.000Z";
+
+  function fleet(size: number): Record<string, TurnEndedFacts> {
+    const records: Record<string, TurnEndedFacts> = { parent: PARENT };
+    for (let index = 0; index < size; index += 1) records[`seat-${index}`] = SEAT;
+    return records;
+  }
+
+  await t.test("two converted cohorts stay within the one budget and converge quietly", async () => {
+    for (const size of [128, 512]) {
+      const rows: LogRow[] = [];
+      const limits = limitFile({});
+      for (let index = 0; index < size; index += 1) limits.set(`seat-${index}`, UNTIL);
+      const tracker = limitTracker(rows, limits);
+      const sender = makeSender();
+      const clock = movingClock();
+      const records = fleet(size);
+      for (let index = 0; index < size; index += 1) {
+        await runEnd(tracker, sender, clock, { id: `seat-${index}`, parentAgentId: "parent" }, records);
+        // The send-back's own wait cap admits one cohort at a time; convert each as it fills.
+        if (tracker.waits.size >= TURN_ENDED_WAIT_LIMIT) await clock.fire();
+      }
+      await clock.fire();
+
+      const deferred = tracker.resumes.size + tracker.limitFlushes.size;
+      assert.equal(sender.sent.length, 0, `${size}: a limited fleet is sent nothing`);
+      assert.ok(deferred <= TURN_ENDED_WAIT_LIMIT, `${size}: ${deferred} deferred actions are within the budget`);
+      assert.equal(deferred, Math.min(size, TURN_ENDED_WAIT_LIMIT), `${size}: every one within the bound is kept`);
+      assert.ok(clock.live().length <= TURN_ENDED_WAIT_LIMIT, `${size}: no timer beyond the budget`);
+      assert.equal(
+        rows.filter((row) => row.kind === "send-skipped" && row.reason === "over-capacity").length,
+        Math.max(0, size - TURN_ENDED_WAIT_LIMIT),
+        `${size}: each shed resume says so`,
+      );
+
+      // Quiet convergence: the reset releases exactly the armed ones, once each.
+      for (let index = 0; index < size; index += 1) limits.set(`seat-${index}`, null);
+      clock.advance(Date.parse(UNTIL) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+      await clock.fire();
+      const resumed = sender.sent.filter((sent) => sent.agentId.startsWith("seat-"));
+      assert.equal(resumed.length, Math.min(size, TURN_ENDED_WAIT_LIMIT), `${size}: one resume each`);
+      assert.equal(new Set(resumed.map((sent) => sent.agentId)).size, resumed.length, `${size}: no seat twice`);
+      assert.equal(tracker.resumes.size, 0, `${size}: nothing is left armed`);
+      assert.equal(clock.live().length, 0, `${size}: no timer is left`);
+    }
+  });
+
+  await t.test("a cancellation frees a room in the one budget both stores share", async () => {
+    const rows: LogRow[] = [];
+    const limits = limitFile({});
+    for (let index = 0; index < TURN_ENDED_WAIT_LIMIT; index += 1) limits.set(`seat-${index}`, UNTIL);
+    const tracker = limitTracker(rows, limits);
+    const sender = makeSender();
+    const clock = movingClock();
+    const records = fleet(TURN_ENDED_WAIT_LIMIT);
+    for (let index = 0; index < TURN_ENDED_WAIT_LIMIT; index += 1) {
+      await runEnd(tracker, sender, clock, { id: `seat-${index}`, parentAgentId: "parent" }, records);
+      if (tracker.waits.size >= TURN_ENDED_WAIT_LIMIT) await clock.fire();
+    }
+    await clock.fire();
+    assert.equal(tracker.resumes.size, TURN_ENDED_WAIT_LIMIT, "the budget is filled by the resumes");
+
+    // A limited parent's own reset flush has no room beside them.
+    limits.set("parent", UNTIL);
+    await runEnd(tracker, sender, clock, CHILD_AGENT, RECORDS);
+    assert.equal(tracker.limitFlushes.size, 0, "the two stores are one budget");
+    assert.equal(
+      rows.filter((row) => row.kind === "send-skipped" && row.reason === "over-capacity").length,
+      1,
+      "the shed flush says so, and the line stays owed",
+    );
+    assert.equal(tracker.held.length, 1);
+
+    // A turn of one seat cancels its resume, and the freed room is used.
+    noteTurnStarted({ id: "seat-0", parentAgentId: "parent" }, tracker, clock.now);
+    assert.equal(tracker.resumes.size, TURN_ENDED_WAIT_LIMIT - 1, "the cancelled resume frees its room");
+    await runEnd(tracker, sender, clock, CHILD_AGENT, RECORDS);
+    assert.equal(tracker.limitFlushes.size, 1, "the freed room is used by the parent's flush");
+  });
+
+  await t.test("a seat that left the role record has its armed resume reclaimed at its next end", async () => {
+    const rows: LogRow[] = [];
+    const limits = limitFile({ seat: UNTIL });
+    const tracker = limitTracker(rows, limits);
+    const sender = makeSender();
+    const clock = movingClock();
+    await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS);
+    await clock.fire();
+    const resume = tracker.resumes.get("seat");
+    assert.ok(resume !== undefined, "the limited seat's resume is armed");
+    assert.equal((resume!.timer as FakeTimer).cleared, false);
+
+    // The product removed the seat from its role record: this end's read finds it gone.
+    await runEnd(tracker, sender, clock, SEAT_AGENT, RECORDS);
+    assert.equal(tracker.resumes.size, 0, "the departed seat's resume is reclaimed");
+    assert.equal((resume!.timer as FakeTimer).cleared, true, "and its timer with it");
+    assert.ok(
+      rows.some(
+        (row) =>
+          row.kind === "wait-cancelled" &&
+          row.agent === "seat" &&
+          row.reason === "the seat left the role record before the resume",
+      ),
+      "the row says why",
+    );
+
+    limits.set("seat", null);
+    clock.advance(Date.parse(UNTIL) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.equal(
+      sender.sent.filter((sent) => sent.agentId === "seat").length,
+      0,
+      "nothing is sent to a seat that left the record",
+    );
+    assert.equal(clock.live().length, 0, "and no timer is left");
+  });
+
+  await t.test("a parent that left the role record has its reset flush reclaimed, with no archive", async () => {
+    const rows: LogRow[] = [];
+    const limits = limitFile({ parent: UNTIL });
+    const tracker = limitTracker(rows, limits);
+    const sender = makeSender();
+    const clock = movingClock();
+    await runEnd(tracker, sender, clock, CHILD_AGENT, RECORDS);
+    assert.equal(tracker.limitFlushes.size, 1, "the limited parent has its one timer");
+    const flush = tracker.limitFlushes.get("parent");
+    assert.ok(flush !== undefined);
+    assert.equal((flush!.timer as FakeTimer).cleared, false);
+
+    // The parent left the role record and its own end rereads it; no archive or close.
+    await runEnd(tracker, sender, clock, PARENT_AGENT, { child: CHILD, seat: SEAT });
+    assert.equal(tracker.limitFlushes.size, 0, "the departed parent's flush is reclaimed");
+    assert.equal((flush!.timer as FakeTimer).cleared, true, "and its timer with it");
+
+    limits.set("parent", null);
+    clock.advance(Date.parse(UNTIL) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.equal(
+      sender.sent.filter((sent) => sent.agentId === "parent").length,
+      0,
+      "no flush fires at a parent that left the record",
+    );
+    assert.equal(clock.live().length, 0, "and no timer is left");
+  });
+
+  await t.test("a deferred action reads the role record at its own moment, so a departed seat is never sent", async () => {
+    const rows: LogRow[] = [];
+    const limits = limitFile({ seat: UNTIL });
+    let record: Record<string, TurnEndedFacts> = SEAT_RECORDS;
+    const tracker = createTurnEndedTracker(undefined, (row) => rows.push(row as LogRow), {
+      limitedUntil: limits.limitedUntil,
+      roleRecord: () => record,
+    });
+    const sender = makeSender();
+    const clock = movingClock();
+    await runEnd(tracker, sender, clock, SEAT_AGENT, SEAT_RECORDS);
+    await clock.fire();
+    assert.equal(tracker.resumes.size, 1, "the resume is armed while the seat is in the record");
+
+    // The seat leaves the record while its reset is still ahead: the timer fires,
+    // reads the record then, and reclaims itself instead of re-arming or sending.
+    record = RECORDS;
+    clock.advance(Date.parse(UNTIL) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.equal(tracker.resumes.size, 0, "the departed seat's resume is gone");
+    assert.equal(clock.live().length, 0, "it is not re-armed while the limit still stands");
+    assert.equal(sender.sent.length, 0, "and nothing is sent");
+    assert.equal(
+      rows.filter((row) => row.kind === "send-skipped" && row.agent === "seat" && row.reason === "left-the-record").length,
+      1,
+      "the row says why",
+    );
+  });
+
+  await t.test("a terminal seat's resume is reclaimed with its timer", async () => {
+    const rows: LogRow[] = [];
+    const limits = limitFile({ "seat-0": UNTIL, "seat-1": UNTIL });
+    const tracker = limitTracker(rows, limits);
+    const sender = makeSender();
+    const clock = movingClock();
+    const records = fleet(2);
+    for (const id of ["seat-0", "seat-1"]) {
+      await runEnd(tracker, sender, clock, { id, parentAgentId: "parent" }, records);
+    }
+    await clock.fire();
+    assert.equal(tracker.resumes.size, 2, "two resumes are armed");
+
+    noteAgentArchived("seat-0", tracker, clock.now);
+    assert.equal(tracker.resumes.size, 1, "the terminal seat's resume is reclaimed");
+    assert.equal(clock.live().length, 1, "and its timer with it");
+
+    limits.set("seat-0", null);
+    limits.set("seat-1", null);
+    clock.advance(Date.parse(UNTIL) + PROVIDER_LIMIT_RESUME_MS - clock.now().getTime());
+    await clock.fire();
+    assert.deepEqual(
+      sender.sent.filter((sent) => sent.agentId.startsWith("seat-")).map((sent) => sent.agentId),
+      ["seat-1"],
+      "the terminal seat is never sent",
+    );
   });
 });

@@ -93,9 +93,15 @@ _contract_snapshot_cache = ContractSnapshotCache()
 def write_projection(root: Path, projection: WorkspaceProjection) -> None:
     """Atomically write ``latest-state.json`` + ``latest-metrics.json``."""
     root.mkdir(parents=True, exist_ok=True)
-    _write_json(root / LATEST_STATE, projection.model_dump(by_alias=True, exclude_none=True))
+    # JSON mode: a task's `providerLimit` carries `datetime` values (MIK-R190 rule 13) and this
+    # file is JSON. Without `mode="json"` one limited task made `json.dumps` raise, so every
+    # projection tick failed and nothing served advanced while any seat was limited.
     _write_json(
-        root / LATEST_METRICS, projection.metrics.model_dump(by_alias=True, exclude_none=True)
+        root / LATEST_STATE, projection.model_dump(mode="json", by_alias=True, exclude_none=True)
+    )
+    _write_json(
+        root / LATEST_METRICS,
+        projection.metrics.model_dump(mode="json", by_alias=True, exclude_none=True),
     )
 
 

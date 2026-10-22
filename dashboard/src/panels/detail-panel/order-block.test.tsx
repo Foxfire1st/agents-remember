@@ -9,12 +9,28 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DetailPanel } from './DetailPanel';
 import { GRAPH_REST_MS } from '../sprint-graph/SprintGraphView';
-import type { TaskExecutionNodeView } from '../../types/projection';
+import { formatLimitTime } from './pageParts';
+import type { ProviderLimit, TaskExecutionNodeView } from '../../types/projection';
 import { cells, seedTaskEntries, taskEntry, taskSummary, taskReference } from './test-utils';
 
 const REPO = 'repo-a';
 const SPRINT = `${REPO}/sprint/task.json`;
 const ref = (dir: string) => ({ repository: REPO, path: `${dir}/task.json` });
+
+// MIK-R190 rule 13: the served limit a limited master carries into the order graph.
+const LIMITED: ProviderLimit = {
+  until: '2026-10-21T12:00:00+02:00',
+  seats: [
+    {
+      role: 'worker',
+      agentId: '0f0c1d2e-0000-4000-8000-000000000001',
+      source: 'Claude',
+      account: 'Max 20x',
+      window: 'Session',
+      resetsAt: '2026-10-21T12:00:00+02:00',
+    },
+  ],
+};
 
 function unit(
   dir: string,
@@ -170,6 +186,37 @@ describe('the order of a sprint (rules 3 and 10)', () => {
 
     fireEvent.click(unitOf(container, 'text'));
     expect(onOpenLifecycle).toHaveBeenCalledWith(`taskdoc:${REPO}/text/task.json`);
+  });
+
+  it('names the exact served end on a limited master, since the order graph has no clock', () => {
+    seedSprint();
+    const key = taskReferenceKey(ref('text'));
+    dashboardStore.getState().applyDelta('task', {
+      ...dashboardStore.getState().tasks[key],
+      activity: 'paused',
+      providerLimit: LIMITED,
+    });
+    const { container } = render(<DetailPanel selectedId={`taskdoc:${SPRINT}`} />);
+    const node = unitOf(container, 'text');
+    expect(cells(node)).toEqual(['TEXT', 'Text helpers', 'rate limited', '1/2']);
+    expect(node.getAttribute('title')).toBe(
+      `Text helpers — rate limited, until ${formatLimitTime(LIMITED.until)}`,
+    );
+    // The word's own hover names the end and then the seat that holds it: the graph has no clock,
+    // so the served detail is all a reader can get (MIK-R190 rule 13).
+    expect(node.querySelector('[data-status]')?.getAttribute('title')).toBe(
+      [
+        `until ${formatLimitTime(LIMITED.until)}`,
+        ...LIMITED.seats.map(
+          (seat) =>
+            `${seat.role} · ${seat.agentId} · ${seat.source} · ${seat.account} · ${seat.window} · resets ${formatLimitTime(seat.resetsAt)}`,
+        ),
+      ].join('\n'),
+    );
+    // The accessible name carries the same served end as the sprint graph's box.
+    expect(node.getAttribute('aria-label')).toBe(
+      `TEXT Text helpers, rate limited, until ${formatLimitTime(LIMITED.until)}`,
+    );
   });
 
   it('keeps the whole graph one link away and returns', () => {

@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 
 import { clockTime } from './trayModel';
+import { fmtWait } from '../data/selectors';
+import { formatLimitTime } from '../panels/detail-panel/pageParts';
 import { useChatNames, type ChatName } from './traySeats';
 import type { TraySendOutcome, TrayTargetResult } from './trayStore';
 import * as look from './trayStyles';
@@ -10,10 +12,18 @@ import type { TraySentEntry } from './types';
 
 const sentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
 
-// Each answer names its reason and the server's detail, as the server gave them.
-function resultLine({ delivery }: TrayTargetResult, { label }: ChatName): string {
+// Each answer names its reason and the server's detail, as the server gave them. A hold caused by a
+// provider limit also names the full word and the reset: the compact summary says the time left, and
+// the full view says when, to the exact instant (MIK-R190 rules 9 and 13).
+export function resultLine({ delivery }: TrayTargetResult, { label }: ChatName): string {
   const why = [delivery.reason, delivery.detail].filter(Boolean).join(': ');
   if (delivery.state === 'delivered') return `Delivered to ${label}.`;
+  if (delivery.state === 'held' && delivery.limitedUntil && delivery.reason === 'provider-limit')
+    return (
+      `Held for ${label}: rate limited: ${limitTimeLeft(delivery.limitedUntil)}, ` +
+      `until ${formatLimitTime(delivery.limitedUntil)}. The chat gets it when it can take it; ` +
+      `the tray does not send it again.`
+    );
   if (delivery.state === 'held')
     return `Held for ${label}${why ? ` (${why})` : ''}. The chat gets it when it can take it; the tray does not send it again.`;
   return `${sentence(`Refused by ${label}${why ? `: ${why}` : ''}`)} The picks and your text stay, with this chat as the target.`;
@@ -38,13 +48,48 @@ export function TrayOutcome({ outcome }: { outcome: TraySendOutcome }) {
 // The last Send's answer in a few words, for the minimised line: "Sent: delivered to Manager · 260928-MIK
 // · b1d2c3e4." The full view lists each target's answer.
 export function outcomeSummary(outcome: TraySendOutcome, name: (agentId: string) => ChatName): string {
+  const named = (results: TrayTargetResult[]) =>
+    results.length === 1 ? name(results[0].agentId).label : `${results.length} chats`;
   const part = (state: TrayTargetResult['delivery']['state'], words: string) => {
-    const results = outcome.results.filter((result) => result.delivery.state === state);
+    const results = outcome.results.filter(
+      (result) => result.delivery.state === state && !limitedHold(result.delivery),
+    );
     if (results.length === 0) return null;
-    return `${words} ${results.length === 1 ? name(results[0].agentId).label : `${results.length} chats`}`;
+    return `${words} ${named(results)}`;
   };
-  const parts = [part('delivered', 'delivered to'), part('held', 'held for'), part('refused', 'refused by')].filter(Boolean);
+  // MIK-R190 rule 9 as D399 amends MIK-R188 rule 9: a hold for a provider limit says when the
+  // recipient may take the message instead of the plain word, one part per reset time.
+  const limited = outcome.results.filter((result) => limitedHold(result.delivery));
+  const limitedParts = [...new Set(limited.map((result) => result.delivery.limitedUntil as string))].map(
+    (until) => {
+      const results = limited.filter((result) => result.delivery.limitedUntil === until);
+      return `held · rate limited: ${limitTimeLeft(until)} for ${named(results)}`;
+    },
+  );
+  const parts = [
+    part('delivered', 'delivered to'),
+    part('held', 'held for'),
+    ...limitedParts,
+    part('refused', 'refused by'),
+  ].filter(Boolean);
   return `Sent: ${parts.join(', ')}.`;
+}
+
+// MIK-R190 rule 9 as D399 amends MIK-R188 rule 9, with rule 13's unit: the summary is one compact
+// line, so the reset is named as the time left in that line's own unit — "3h", not a clock time.
+// The full view keeps the exact instant (formatLimitTime) beside it.
+
+/** The time left until a served reset, in the summary's one compact unit; the served string if it will not parse. */
+export function limitTimeLeft(iso: string, now = Date.now()): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return iso;
+  // A reset the clock has passed is no longer a countdown: "0s", never a negative one.
+  return fmtWait(Math.max(0, at - now) / 1000);
+}
+
+/** A held delivery the provider limit set a reset time for. */
+function limitedHold(delivery: TrayTargetResult['delivery']): boolean {
+  return delivery.state === 'held' && delivery.reason === 'provider-limit' && Boolean(delivery.limitedUntil);
 }
 
 // A refusal is named on the line too, each with its reason, as the full view names it (rule 10).

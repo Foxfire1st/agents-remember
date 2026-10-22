@@ -78,6 +78,7 @@ from agents_remember.kernel._agentic_settings_core import (
     AgenticSettings,
     AgenticSettingsError,
     ConcurrencySettings,
+    ExtraArgument,
     LandingSettings,
     LoopComplexity,
     LoopDefaults,
@@ -223,6 +224,7 @@ def load_agentic_settings(
     source = _source_label(sources)
     settings = _parse_orchestration(merged, source=source, sources=sources)
     _attach_role_origins(settings, layers)
+    _attach_harness_extra_args(settings, layers)
     for role, knobs in settings.roles.items():
         role_feature_values(knobs, f"{source}: orchestration.roles.{role}")
         require_distinct_step_up(knobs, settings.spawn_harness)
@@ -319,8 +321,33 @@ def _role_row_origins(
         result[f"featureValues.{key}"] = RoleChoiceOrigin(
             str(source), f"{owner}.featureValues.{key}", provider, model, rank
         )
+    for name in row.get("extraArgs", {}):
+        # MIK-R192: one origin per flag name, so a launch can name the row and file that state it.
+        result[f"extraArgs.{name}"] = RoleChoiceOrigin(
+            str(source), f"{owner}.extraArgs.{name}", provider, model, rank
+        )
     result.update(_step_up_row_origins(row, source, owner, (provider, model, rank)))
     return result
+
+
+def _attach_harness_extra_args(
+    settings: AgenticSettings, layers: list[tuple[Path, dict[str, Any]]]
+) -> None:
+    """Name the file and key of every harness entry a launch may hand over (MIK-R192).
+
+    Harness entries merge key by key like the rest of the block, so the last layer that states a
+    name owns it; the merged parse cannot tell the files apart, and this pass can.
+    """
+    entries: dict[str, dict[str, ExtraArgument]] = {}
+    for path, raw in layers:
+        for harness_id, entry in raw.get("harnesses", {}).items():
+            for name, value in entry.get("extraArgs", {}).items():
+                key = f"orchestration.harnesses.{harness_id}.extraArgs.{name}"
+                entries.setdefault(harness_id, {})[name] = ExtraArgument(
+                    name=name, value=value, key=key, source=str(path)
+                )
+    if entries:
+        settings.harness_extra_args.update(entries)
 
 
 def _step_up_row_origins(
@@ -356,7 +383,7 @@ def _refuse_repository_role_authority(raw: dict[str, Any], path: Path) -> None:
     )
     for owner, roles in families:
         for role, knobs in roles.items():
-            keys = [key for key in ("mode", "notes", "stepUp") if key in knobs]
+            keys = [key for key in ("mode", "notes", "stepUp", "extraArgs") if key in knobs]
             keys.extend(
                 f"featureValues.{key}"
                 for key in knobs.get("featureValues", {})
@@ -366,6 +393,14 @@ def _refuse_repository_role_authority(raw: dict[str, Any], path: Path) -> None:
                 raise AgenticSettingsError(
                     f"{owner}.{role}.{keys[0]} is user-layer only; remove it from {path} and configure the user's settings at {user_agentic_settings_path()} or host profile"
                 )
+    for harness_id, entry in raw.get("harnesses", {}).items():
+        if "extraArgs" in entry:
+            # MIK-R192 rule 3: extra arguments bear on permission, so only the user's layer states
+            # them, including at the harness entry.
+            raise AgenticSettingsError(
+                f"orchestration.harnesses.{harness_id}.extraArgs is user-layer only; remove it "
+                f"from {path} and configure the user's settings at {user_agentic_settings_path()}"
+            )
 
 
 def _read_settings_file(path: Path) -> dict[str, Any] | None:
@@ -469,7 +504,7 @@ def _parse_orchestration(
     _refuse_unknown(
         raw, KNOWN_ORCHESTRATION_FIELDS | UNUSED_ORCHESTRATION_FIELDS, "orchestration", source
     )
-    harness_ids = _parse_harnesses(raw.get("harnesses"), source=source)
+    harness_ids, harness_extra_args = _parse_harnesses(raw.get("harnesses"), source=source)
     gate_raw = raw.get("gateDelegation")
     gate_policy, at_seams = parse_gate_delegation(gate_raw, source=source)
     limit_raw = raw.get("roleMessageLimit")
@@ -493,6 +528,7 @@ def _parse_orchestration(
             raw.get("spawn"), source=source, harness_ids=harness_ids if strict else None
         ),
         harness_ids=harness_ids,
+        harness_extra_args=harness_extra_args,
         unused_keys=unused_orchestration_keys(raw),
         sources=sources,
     )

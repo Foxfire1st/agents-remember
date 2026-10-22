@@ -328,6 +328,11 @@ class HeldMessage:
     MIK-R171 rules 2 and 3). The waiting message keeps that id, so its later delivery
     goes out under an id the host may already record, and a host that records a message
     id once delivers it at most once.
+
+    ``limited_until`` is rule 9's reset time for a message a provider limit holds, as an
+    ISO 8601 time with offset. It is stored on the row itself rather than left to a
+    later read of the limit file: the row is what a restarted process reads back, and
+    the moment this message may be delivered is part of why it waits.
     """
 
     sender_line: str
@@ -336,6 +341,7 @@ class HeldMessage:
     reason: str
     permission: str | None = None
     attempted_message_id: str | None = None
+    limited_until: str | None = None
 
 
 def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage) -> dict[str, Any]:
@@ -349,7 +355,12 @@ def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage
         if attempted and any(row.get("id") == attempted for row in messages):
             # The same attempt is taken twice (a repeat after a stop): one waiting copy.
             mine, total = waiting_counts(store, message.sender_agent_id)
-            return {"heldMessageId": attempted, "waitingMine": mine, "waitingTotal": total}
+            return {
+                "heldMessageId": attempted,
+                "waitingMine": mine,
+                "waitingTotal": total,
+                "limitedUntil": _limited_until_in(store, attempted),
+            }
         if len(messages) >= MAX_HELD_PER_RECIPIENT:
             raise HeldStoreFull(
                 f"Agent {agent_id} already holds {len(messages)} messages, the bound for one "
@@ -366,12 +377,30 @@ def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage
         }
         if message.permission:
             row["permission"] = message.permission
-        if attempted:
-            row["attemptedMessageId"] = attempted
+        if message.attempted_message_id:
+            row["attemptedMessageId"] = message.attempted_message_id
+        if message.limited_until:
+            # Rule 9's reset time rides on the waiting row: why it waits, and until when.
+            row["limitedUntil"] = message.limited_until
         messages.append(row)
         _write_store_file(path, store)
         mine, total = waiting_counts(store, message.sender_agent_id)
-    return {"heldMessageId": message_id, "waitingMine": mine, "waitingTotal": total}
+    return {
+        "heldMessageId": message_id,
+        "waitingMine": mine,
+        "waitingTotal": total,
+        "limitedUntil": row.get("limitedUntil"),
+    }
+
+
+def _limited_until_in(store: dict[str, Any], message_id: str) -> str | None:
+    """The reset time one already-waiting row carries, if it carries one."""
+
+    for row in store.get("messages", []):
+        if row.get("id") == message_id:
+            value = row.get("limitedUntil")
+            return value if isinstance(value, str) and value else None
+    return None
 
 
 class HeldMessageCommitted(Exception):
@@ -756,8 +785,20 @@ def _claimed_batch(
 
 
 def _check_drain_readiness(batch: _DrainBatch) -> None:
-    """Pause when the host cannot take the batch now; claim released on the way out."""
+    """Pause when the host cannot take the batch now; claim released on the way out.
 
+    MIK-R190 rule 10 comes first and before any host read: a limited recipient
+    pauses the drain with ``provider-limit``, so waiting for a limit costs no
+    bridge process. Rule 9 is the same fact the send paths ask. That policy is
+    owned by :mod:`agents_remember.cli.provider_limit_drain` (rule 19); this
+    module keeps only the call site.
+    """
+
+    from agents_remember.cli.provider_limit_drain import (  # noqa: PLC0415
+        pause_for_provider_limit,
+    )
+
+    pause_for_provider_limit(batch)
     reading = read_agent(batch.config, batch.agent_id)
     if not reading.reachable:
         _release_claim(batch.folder, batch.agent_id, batch.claim)

@@ -9,16 +9,29 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from agents_remember.observer.provider_limits import ProviderLimits
+
 HOST_ACTIVITY_FILE = "host-activity.json"
 
 
 class PublishedAgentActivity(BaseModel):
+    """One agent as the plugin publishes it.
+
+    ``state`` and ``eventAt`` keep their meaning — the agent's turn. MIK-R190 rule 2
+    adds two optional subagent fields and still forbids every other: the count is
+    absent at 0, and ``subagentsSince`` is the oldest running subagent's start, so
+    an agent that works only by its subagents has an age of its own. A subagent
+    field never moves ``eventAt``.
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     state: Literal["in-turn", "permission", "idle", "ended"]
     eventAt: datetime | None = None
+    runningSubagents: int | None = Field(default=None, ge=0)
+    subagentsSince: datetime | None = None
 
-    @field_validator("eventAt")
+    @field_validator("eventAt", "subagentsSince")
     @classmethod
     def _aware_time(cls, value: datetime | None) -> datetime | None:
         if value is not None and value.tzinfo is None:
@@ -47,6 +60,10 @@ def read_host_activity_publication(path: Path) -> HostActivityPublication | None
 class TaskAgentActivity:
     task_key: str
     activity: PublishedAgentActivity
+    # MIK-R190 rule 13: a limited task names each of its seats, so the reader keeps the
+    # identity the role record already holds beside the published activity.
+    agent_id: str = ""
+    role: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,3 +71,5 @@ class HostActivitySnapshot:
     known: bool = False
     agents: tuple[TaskAgentActivity, ...] = ()
     ignored_agents: int = 0
+    # MIK-R190 rule 13: the one limited-fact file, read where the serves already reads.
+    limits: ProviderLimits | None = None

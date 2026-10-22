@@ -140,6 +140,9 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     from agents_remember.cli.dashboard_review_reads import (  # noqa: PLC0415 - composition
         RecordedReviewAnswers,
     )
+    from agents_remember.cli.provider_limit_hold import (  # noqa: PLC0415 - composition
+        read_usage_for_agents,
+    )
     from agents_remember.serving.review_answer_reuse import (  # noqa: PLC0415 - composition
         RecordedAnswerReuse,
     )
@@ -232,6 +235,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
     return ServingCollaborators(
         host_activity_reconcile=lambda runtime: bridge_call(runtime, "host-activity-snapshot", {}),
+        usage_read=read_usage_for_agents,
         review_memory_root=partial(_review_memory_root, config),
         knowledge_review=review_port,
         knowledge_review_entries=review_entries_port,

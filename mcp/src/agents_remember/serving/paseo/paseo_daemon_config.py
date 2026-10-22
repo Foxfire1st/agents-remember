@@ -22,15 +22,30 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from agents_remember.serving.paseo.paseo_command import PaseoRuntimeFailure
 from agents_remember.serving.paseo.paseo_plugin_files import AR_HOME_DIRECTORY
 
+if TYPE_CHECKING:
+    from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+
+# The composition root's port for the running daemon's configuration: the bridge's
+# ``daemon-config`` call, bound by the package that may call the bridge (MIK-R192 rule 8).
+type DaemonConfigRead = Callable[["McpRuntimeConfig"], dict[str, Any]]
+
 CONFIG_FILE = "config.json"
 PROVIDER_ENTRIES = "agents.providers"
+# The running daemon's own shape for the same map, and the command that reads it. Paseo's client
+# reports the providers at ``config.providers`` (the catalog reads them there too); the file's
+# ``agents.providers`` is the shape on disk, never the daemon's. A bridge with no such command
+# answers a refusal, and a refused read refuses the start that would record it (MIK-R192 rule 8).
+DAEMON_PROVIDER_ENTRIES = "providers"
+DAEMON_CONFIG_COMMAND = "daemon-config"
+DAEMON_CONFIG_UNVERIFIED = "daemon_config_unverified"
 # Paseo's own tools for creating and messaging agents, which Paseo can add to every agent it
 # runs. Role agents start and message each other through AR's role tools only, so provision
 # writes this setting off instead of leaving it to Paseo's default.
@@ -128,16 +143,103 @@ def provider_denied_tools(home: Path, provider: str) -> tuple[str, ...]:
     Paseo reads them. A missing or unreadable file, entry or list reads as no rule. The rules
     of the entry's own ``disallowedTools`` are not here: Paseo adds those to every agent itself.
     """
-    path = home / CONFIG_FILE
-    value: Any = _configuration(path.read_bytes()) if path.is_file() else None
-    for key in (*PROVIDER_ENTRIES.split("."), provider):
-        value = value.get(key) if isinstance(value, dict) else None
-    entry = value if isinstance(value, dict) else {}
-    options = entry.get("options") if entry.get("options") is not None else entry.get("params")
-    rules = options.get("disallowedTools") if isinstance(options, dict) else None
+    rules = _provider_options(home, provider).get("disallowedTools")
     if not isinstance(rules, list):
         return ()
     return tuple(rule for rule in rules if isinstance(rule, str) and rule)
+
+
+def provider_extra_args(home: Path, provider: str) -> tuple[str, ...]:
+    """The extra command-line arguments ``config.json`` gives one provider's entries (MIK-R192).
+
+    Paseo merges its configured provider options into every start and every resume, so these
+    reach a confined seat that AR cannot check. Read as ``options``, and ``params`` where the
+    entry has none, like the denied tools above; a missing or unreadable file or entry reads as
+    none.
+    """
+    return extra_args_in_options(_provider_options(home, provider))
+
+
+def extra_args_in_options(options: object) -> tuple[str, ...]:
+    """The names of one provider's configured ``extraArgs``, read from its option record."""
+    arguments = options.get("extraArgs") if isinstance(options, dict) else None
+    if not isinstance(arguments, dict):
+        return ()
+    return tuple(name for name in arguments if isinstance(name, str) and name)
+
+
+def host_provider_extra_args(
+    config: McpRuntimeConfig,
+    provider: str,
+    *,
+    read_config: DaemonConfigRead | None = None,
+) -> tuple[str, ...]:
+    """The extra arguments the host's provider map gives ``provider``, in both places it is read.
+
+    The file is read as the denied tools are; the running daemon's map is read through
+    ``read_config``, the port the composition root binds to the bridge's ``daemon-config``
+    command as it reads the profiles. This module ranks below the bridge's caller and never
+    imports it (rule 19). A read that fails refuses: the file's map alone would present a
+    drifted daemon as clean (rule 8).
+    """
+    runtime = config.paseo_runtime
+    if runtime is None:
+        return ()
+    names = list(provider_extra_args(runtime.home, provider))
+    live = daemon_provider_extra_args(config, provider, read_config=read_config)
+    names.extend(name for name in live if name not in names)
+    return tuple(names)
+
+
+def daemon_provider_extra_args(
+    config: McpRuntimeConfig,
+    provider: str,
+    *,
+    read_config: DaemonConfigRead | None = None,
+) -> tuple[str, ...]:
+    """The running daemon's map for one provider, read from the document the daemon reports.
+
+    That document holds the providers at ``providers`` -- Paseo's own client reports them as
+    ``config.providers`` -- so the file's ``agents.providers`` is not its shape. A provider the
+    daemon's map does not name, or one whose entry names no list, gives no argument: that is a
+    map that was read. A read that fails, or a caller with no port, raises instead of answering
+    nothing, so a failed read is never the clean answer (rule 8).
+    """
+    if read_config is None:
+        raise PaseoRuntimeFailure(
+            DAEMON_CONFIG_UNVERIFIED,
+            "config",
+            f"the running daemon's provider map for {provider!r} was not read: no reader was "
+            "supplied, and a map that was not read is not a clean one",
+        )
+    document = read_config(config)
+    return extra_args_in_options(
+        _entry_options(_named(document, DAEMON_PROVIDER_ENTRIES), provider)
+    )
+
+
+def _provider_options(home: Path, provider: str) -> dict[str, Any]:
+    path = home / CONFIG_FILE
+    value: Any = _configuration(path.read_bytes()) if path.is_file() else None
+    return _entry_options(_named(value, PROVIDER_ENTRIES), provider)
+
+
+def _named(document: object, dotted: str) -> object:
+    """Walk a dotted key into a parsed document or a daemon reply; anything missing is ``None``."""
+
+    for key in dotted.split("."):
+        document = document.get(key) if isinstance(document, dict) else None
+    return document
+
+
+def _entry_options(entries: object, provider: str) -> dict[str, Any]:
+    """One provider's option record, ``options``, and ``params`` where the entry has none."""
+
+    entry = entries.get(provider) if isinstance(entries, dict) else None
+    if not isinstance(entry, dict):
+        return {}
+    options = entry.get("options") if entry.get("options") is not None else entry.get("params")
+    return options if isinstance(options, dict) else {}
 
 
 def remove_stale_temporaries(home: Path) -> list[Path]:

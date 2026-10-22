@@ -82,6 +82,7 @@ export function parseDelivery(answer: unknown, messageId: string): TrayDelivery 
     messageFileSha256: textOrNull(value.messageFileSha256),
     ...(typeof value.reason === 'string' ? { reason: value.reason } : {}),
     ...(typeof value.detail === 'string' ? { detail: value.detail } : {}),
+    ...(typeof value.limitedUntil === 'string' ? { limitedUntil: value.limitedUntil } : {}),
   };
 }
 

@@ -172,7 +172,11 @@ type UnsampledMirrorPaths = MirrorOnlyPaths<WorkspaceProjection, typeof snapshot
 //
 // It is injected by the serving app at RESPONSE time (`serving/build_info.py`), not by the
 // reducer, and is absent from the persisted `latest-state.json` this fixture is shaped like.
-type KnownUnsampled = 'projection.servingBuild';
+type KnownUnsampled =
+  | 'projection.servingBuild'
+  // MIK-R190 rule 13: present only while a provider limit holds a task. The recorded fixture was
+  // captured with no limited task, so no assertion in this file can see it yet.
+  | 'projection.tasks[].providerLimit';
 
 /** Fails `tsc -b` naming every mirror path the fixture stopped sampling. */
 function fixtureMustSample<Unsampled extends never>(...unsampledPaths: Unsampled[]): void {

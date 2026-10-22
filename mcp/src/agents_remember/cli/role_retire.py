@@ -23,6 +23,7 @@ from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.structural.agent import RetireChildRequest
+from agents_remember.serving.projections.host_activity import running_subagents
 
 
 class _RetireTerminal(Exception):
@@ -209,6 +210,21 @@ def _archive_retiree(
                 "agent-in-turn",
                 f"Agent {agent_id} is in a turn; it is not retired without the word that the "
                 "turn may be interrupted. Nothing was archived.",
+            )
+        )
+    # MIK-R190 rule 4: archiving an agent cancels its running provider subagents, so a
+    # seat that works only by them is retired only with the same word, and the refusal
+    # names them.
+    subagents = running_subagents(config, agent_id)
+    if subagents > 0 and not request.interrupt_turn:
+        raise _RetireTerminal(
+            _refusal(
+                _task_ref_of(seat.receipt),
+                seat.seat_role,
+                "agent-in-turn",
+                f"Agent {agent_id} has {subagents} running provider subagent(s); archiving it "
+                "cancels them, so it is not retired without the word that its work may be "
+                "interrupted. Nothing was archived.",
             )
         )
     try:

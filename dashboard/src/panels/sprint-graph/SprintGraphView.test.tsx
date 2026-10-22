@@ -2,7 +2,13 @@ import { act, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { dashboardStore } from '../../data/store';
-import type { TaskEntry, TaskExecutionGraphView, TaskExecutionNodeView } from '../../types/projection';
+import type {
+  ProviderLimit,
+  TaskEntry,
+  TaskExecutionGraphView,
+  TaskExecutionNodeView,
+} from '../../types/projection';
+import { formatLimitTime } from '../detail-panel/pageParts';
 import { statusWord } from '../detail-panel/pageStyles';
 import { seedTaskEntries, taskEntry } from '../detail-panel/test-utils';
 import { SprintGraphView } from './SprintGraphView';
@@ -11,6 +17,21 @@ import { leafLineStyles, waveGridStyles } from './styles';
 const MASTER_A = { repository: 'repo-a', path: 'master-a/task.json' };
 const MASTER_B = { repository: 'repo-a', path: 'master-b/task.json' };
 const ATOMIC_F = { repository: 'repo-a', path: 'atomic-f/task.json' };
+
+// MIK-R190 rule 13: the one served provider limit these words can be handed.
+const LIMITED: ProviderLimit = {
+  until: '2026-10-21T12:00:00+02:00',
+  seats: [
+    {
+      role: 'worker',
+      agentId: '0f0c1d2e-0000-4000-8000-000000000001',
+      source: 'Claude',
+      account: 'Max 20x',
+      window: 'Session',
+      resetsAt: '2026-10-21T12:00:00+02:00',
+    },
+  ],
+};
 
 function node(over: Partial<TaskExecutionNodeView>): TaskExecutionNodeView {
   return {
@@ -164,6 +185,34 @@ describe('SprintGraphView (L12-R2/R6/R7)', () => {
       expect(within(missing).queryByTestId('graph-task-status')).toBeNull();
       expect(missing.getAttribute('aria-label')).toContain('task unavailable');
     }
+    // MIK-R190 rule 13: a graph has no display clock, so a limited master says the words and the
+    // exact end of the served window instead of a countdown.
+    act(() =>
+      seedTaskEntries([
+        taskEntry({
+          reference: MASTER_A,
+          stage: 'started',
+          activity: 'paused',
+          providerLimit: LIMITED,
+        }),
+      ]),
+    );
+    const limited = within(master).getByTestId('graph-task-status');
+    expect(limited.textContent).toBe('rate limited');
+    // The word's hover names the end and then every seat that holds it: the box's name keeps the
+    // aggregate end, and the word adds the seat's own provider, window and reset.
+    expect(limited.getAttribute('title')).toBe(
+      [
+        `until ${formatLimitTime(LIMITED.until)}`,
+        ...LIMITED.seats.map(
+          (seat) =>
+            `${seat.role} · ${seat.agentId} · ${seat.source} · ${seat.account} · ${seat.window} · resets ${formatLimitTime(seat.resetsAt)}`,
+        ),
+      ].join('\n'),
+    );
+    expect(master.getAttribute('aria-label')).toBe(
+      `Master A, rate limited, until ${formatLimitTime(LIMITED.until)}`,
+    );
     expect(within(waiting).getByTestId('graph-readiness').textContent).toBe('waiting');
     expect(within(cycle).getByTestId('graph-readiness').textContent).toBe('cycle');
     expect(within(missing).getByTestId('graph-readiness').textContent).toBe('ready');

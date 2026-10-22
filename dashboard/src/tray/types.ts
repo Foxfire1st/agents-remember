@@ -100,6 +100,9 @@ export interface TrayDelivery {
   messageFileSha256: string | null;
   reason?: string;
   detail?: string;
+  // MIK-R190 rule 9 (F20): the reset time a provider-limit hold answers with, as an
+  // ISO 8601 time with offset. It is what lets the tray say "held · rate limited: <time left>".
+  limitedUntil?: string;
 }
 
 // One line of a chat's sent-picks log (`GET /api/role-chats/{agentId}/sent`).

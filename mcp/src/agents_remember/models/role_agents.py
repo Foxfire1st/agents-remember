@@ -231,6 +231,9 @@ class RoleMessageResponse(ToolResponse):
     reportCollection: dict[str, Any] | None = None
     heldReason: str | None = None
     heldMessageId: str | None = None
+    # MIK-R190 rule 9: while a recipient's provider limit holds the message, the
+    # answer names the moment work may resume, as an ISO time with offset.
+    limitedUntil: str | None = None
     waitingMine: int | None = None
     waitingTotal: int | None = None
     recentTerminal: list[dict[str, Any]] | None = None

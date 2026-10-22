@@ -13,6 +13,7 @@ from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_LOOP_MAX_ROUNDS,
     DEFAULT_LOOP_PER_LEVEL,
     DEFAULT_REVIEWER_REUSE,
+    EXTRA_ARGS_HARNESSES,
     HARNESS_IDS,
     KNOWN_CONCURRENCY_FIELDS,
     KNOWN_LANDING_FIELDS,
@@ -26,10 +27,12 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_ROLE_LAUNCH_FIELDS,
     KNOWN_ROLES,
     KNOWN_SPAWN_FIELDS,
+    RESERVED_EXTRA_ARG_NAMES,
     UNUSED_HARNESS_ENTRY_FIELDS,
     UNUSED_ROLE_KNOB_FIELDS,
     AgenticSettingsError,
     ConcurrencySettings,
+    ExtraArgument,
     LandingSettings,
     LoopComplexity,
     LoopDefaults,
@@ -163,12 +166,81 @@ def _parse_roles(
             f"{owner}.{role}",
             source,
         )
+        if "extraArgs" in knobs:
+            _require_extra_args_place(role, knobs.get("harness"), f"{owner}.{role}", source)
         parsed[role] = _role_choices(knobs, f"{owner}.{role}", source)
         if "stepUp" in knobs:
             parsed[role] = replace(
                 parsed[role],
                 step_up=_parse_step_up(knobs["stepUp"], role, f"{owner}.{role}.stepUp", source),
             )
+    return parsed
+
+
+def _require_extra_args_place(role: str, harness: object, owner: str, source: str) -> None:
+    """Refuse ``extraArgs`` where a confined capability states it, or for a harness without support.
+
+    In this build only Claude's host provider takes extra command-line arguments (MIK-R192 rule 4).
+    """
+    if role in CAPABILITY_IDS:
+        raise AgenticSettingsError(
+            f"{owner}.extraArgs is refused: {role} is a confined capability and is never handed "
+            f"extra arguments; remove the key: {source}"
+        )
+    if isinstance(harness, str) and harness and harness not in EXTRA_ARGS_HARNESSES:
+        supported = ", ".join(sorted(EXTRA_ARGS_HARNESSES))
+        raise AgenticSettingsError(
+            f"{owner}.extraArgs is refused: harness {harness!r} takes no extra arguments in this "
+            f"build ({supported} only); remove the key or name a supported harness: {source}"
+        )
+
+
+def _parse_extra_args(
+    raw: object, owner: str, source: str, *, lowest_layer: bool = False
+) -> dict[str, str | bool | None]:
+    """``extraArgs``: flag name (without dashes) -> a string value, ``null``, or ``false``.
+
+    ``false`` removes a name an upper layer states over this one, so it is refused at the harness
+    entry, the lowest layer of these settings (MIK-R192 rules 1 and 3).
+
+    A name is what must be non-empty; its value need not be. The pinned host takes any string,
+    ``""`` included -- the qualified presenter hands Claude ``tools: ''`` itself -- so a string
+    crosses exactly as it was written, empty or blank. Nothing here rewrites the user's value.
+    """
+    entries = _require_object(raw, owner, source)
+    parsed: dict[str, str | bool | None] = {}
+    for name, value in entries.items():
+        if (
+            not isinstance(name, str)
+            or not name
+            or name.startswith("-")
+            or "=" in name
+            or any(character.isspace() for character in name)
+        ):
+            raise AgenticSettingsError(
+                f"{owner} names {name!r}; a flag name is written without its leading dashes, is "
+                f"non-empty, and holds no '=' and no whitespace: {source}"
+            )
+        if name in RESERVED_EXTRA_ARG_NAMES:
+            raise AgenticSettingsError(
+                f"{owner}.{name} is refused: the harness, the host or AR already sets {name!r}; "
+                f"remove the entry: {source}"
+            )
+        if value is False:
+            if lowest_layer:
+                raise AgenticSettingsError(
+                    f"{owner}.{name} is false: a false removes an entry of a lower layer, and "
+                    f"{owner} is the lowest layer of these settings, so there is nothing to "
+                    f"remove; remove the entry: {source}"
+                )
+            parsed[name] = False
+            continue
+        if value is not None and not isinstance(value, str):
+            raise AgenticSettingsError(
+                f"{owner}.{name} must be a string value, null for the bare flag, or false to "
+                f"remove it: {source}"
+            )
+        parsed[name] = value
     return parsed
 
 
@@ -188,11 +260,21 @@ def _role_choices(knobs: dict[str, Any], owner: str, source: str) -> RoleKnobs:
         feature_values=_parse_feature_values(
             knobs.get("featureValues", {}), f"{owner}.featureValues", source
         ),
+        extra_args=_parse_extra_args(knobs["extraArgs"], f"{owner}.extraArgs", source)
+        if "extraArgs" in knobs
+        else {},
     )
 
 
 def _parse_step_up(raw: object, role: str, owner: str, source: str) -> RoleStepUp:
     row = _require_object(raw, owner, source)
+    if "extraArgs" in row:
+        # MIK-R192 rule 3: a step-up row carries no extra arguments; they belong to the role's
+        # own row or to the harness entry.
+        raise AgenticSettingsError(
+            f"{owner}.extraArgs is refused: a step-up row carries no extra arguments; state them "
+            f"on the role's own row or on its harness entry: {source}"
+        )
     _refuse_unknown(row, KNOWN_ROLE_LAUNCH_FIELDS | {"afterTries"}, owner, source)
     if "afterTries" in row and role not in {"worker", "curator"}:
         raise AgenticSettingsError(
@@ -302,16 +384,20 @@ def _parse_concurrency(raw: object, *, source: str) -> ConcurrencySettings:
     return ConcurrencySettings(**parsed)
 
 
-def _parse_harnesses(raw: object, *, source: str) -> tuple[str, ...]:
-    """``orchestration.harnesses``: the effective harness ids.
+def _parse_harnesses(
+    raw: object, *, source: str
+) -> tuple[tuple[str, ...], dict[str, dict[str, ExtraArgument]]]:
+    """``orchestration.harnesses``: the effective harness ids and each entry's extra arguments.
 
     The builtin ids come first; an entry under a new id ADDS that id. An entry is an object;
-    the keys an earlier build read from it are accepted and not read.
+    the keys an earlier build read from it are accepted and not read. ``extraArgs`` is read only
+    for a harness whose host provider takes extra arguments (MIK-R192).
     """
     if raw is None:
-        return HARNESS_IDS
+        return HARNESS_IDS, {}
     block = _require_object(raw, "orchestration.harnesses", source)
     ids = list(HARNESS_IDS)
+    extra_args: dict[str, dict[str, ExtraArgument]] = {}
     for harness_id, value in block.items():
         if not isinstance(harness_id, str) or not harness_id:
             raise AgenticSettingsError(
@@ -319,10 +405,26 @@ def _parse_harnesses(raw: object, *, source: str) -> tuple[str, ...]:
             )
         owner = f"orchestration.harnesses.{harness_id}"
         entry = _require_object(value, owner, source)
-        _refuse_unknown(entry, UNUSED_HARNESS_ENTRY_FIELDS, owner, source)
+        _refuse_unknown(entry, UNUSED_HARNESS_ENTRY_FIELDS | {"extraArgs"}, owner, source)
+        if "extraArgs" in entry:
+            if harness_id not in EXTRA_ARGS_HARNESSES:
+                supported = ", ".join(sorted(EXTRA_ARGS_HARNESSES))
+                raise AgenticSettingsError(
+                    f"{owner}.extraArgs is refused: harness {harness_id!r} takes no extra arguments "
+                    f"in this build ({supported} only); remove the key: {source}"
+                )
+            parsed = _parse_extra_args(
+                entry["extraArgs"], f"{owner}.extraArgs", source, lowest_layer=True
+            )
+            extra_args[harness_id] = {
+                name: ExtraArgument(
+                    name=name, value=item, key=f"{owner}.extraArgs.{name}", source=source
+                )
+                for name, item in parsed.items()
+            }
         if harness_id not in ids:
             ids.append(harness_id)
-    return tuple(ids)
+    return tuple(ids), extra_args
 
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/_agentic_settings_sections.py:369).

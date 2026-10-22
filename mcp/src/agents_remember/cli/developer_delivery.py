@@ -42,6 +42,7 @@ from agents_remember.cli.paseo_role_tools import (
     _send,
     _undelivered,
 )
+from agents_remember.cli.provider_limit_hold import PROVIDER_LIMIT_REASON, provider_limit_hold
 from agents_remember.cli.role_held_messages import (
     MAX_HELD_PER_RECIPIENT,
     HeldMessage,
@@ -66,6 +67,7 @@ _WHY_HELD = {
     "permission-pending": "the recipient waits for a permission decision",
     "recipient-in-turn": "the recipient is in a turn the host cannot write into",
     "host-unreachable": "the Paseo runtime did not answer; the message is held, not lost",
+    "provider-limit": "the recipient's provider limit has not reset; the message is held",
 }
 
 
@@ -99,9 +101,18 @@ def deliver_or_hold(delivery: DeveloperDelivery) -> dict[str, Any]:
     folder = delivery.store_folder
     status = delivery.receipt.get("status")
     if folder is not None and status == "held":
-        return _hold(delivery, reason="held-seat-unopened")
+        # F20: a message queued behind a waiting one is still held by the limit, so its answer
+        # names the reset too; otherwise only the first hold would say when work resumes.
+        return _hold(delivery, reason="held-seat-unopened", limited_until=_limited_until(delivery))
     if folder is not None and waiting_total(folder, delivery.agent_id) > 0:
-        return _hold(delivery, reason="held-behind-waiting")
+        return _hold(delivery, reason="held-behind-waiting", limited_until=_limited_until(delivery))
+    limited = provider_limit_hold(delivery.config, delivery.agent_id)
+    if limited is not None:
+        return _hold(
+            delivery,
+            reason=PROVIDER_LIMIT_REASON,
+            limited_until=str(limited["limitedUntil"]) if limited.get("limitedUntil") else None,
+        )
     try:
         if status in _UNFINISHED_START_STATUSES:
             raise _busy(delivery, "its start has not finished", "start-unfinished")
@@ -178,13 +189,14 @@ def _deliver(delivery: DeveloperDelivery) -> dict[str, Any]:
     return answer
 
 
-def _hold(
+def _hold(  # noqa: PLR0913 - one hold states the message's own reasons
     delivery: DeveloperDelivery,
     *,
     reason: str,
     permission: str | None = None,
     detail: str = "",
     attempted_message_id: str | None = None,
+    limited_until: str | None = None,
 ) -> dict[str, Any]:
     """Take the text into the recipient's held store and drain what waits, as role_message does."""
 
@@ -202,6 +214,7 @@ def _hold(
                 reason=reason,
                 permission=permission,
                 attempted_message_id=attempted_message_id,
+                limited_until=limited_until,
             ),
         )
     except HeldStoreFull as full:
@@ -248,7 +261,7 @@ def _hold(
     waits = {"still-held", "drain-failed", "nothing-waiting", "partially-delivered", ""}
     final = reason if outcome in waits else outcome
     last = str(drain.get("detail") or "") or detail
-    return {
+    held: dict[str, Any] = {
         "state": "held",
         "reason": final,
         "detail": (
@@ -258,6 +271,24 @@ def _hold(
         ),
         "heldMessageId": mine,
     }
+    # MIK-R190 rule 9: the reset time the waiting row carries reaches the caller too, as it does
+    # in role_message's answer -- the tray's word names the moment work resumes (rule 13).
+    until = taken.get("limitedUntil") or limited_until
+    if until:
+        held["limitedUntil"] = until
+    return held
+
+
+def _limited_until(delivery: DeveloperDelivery) -> str | None:
+    """The reset a hold answers with, or ``None`` when the recipient is not limited (F20).
+
+    A message queued behind a waiting one is still held by the provider limit, so its answer carries
+    the reset the same way the first hold's does; the read is the same one the limit branch takes.
+    """
+
+    limited = provider_limit_hold(delivery.config, delivery.agent_id)
+    until = limited.get("limitedUntil") if limited else None
+    return str(until) if until else None
 
 
 def _ended_ids(drain: dict[str, Any]) -> set[str]:

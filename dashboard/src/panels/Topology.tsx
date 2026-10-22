@@ -49,7 +49,9 @@ const tip = css({
   borderRadius: '3px',
   fontSize: '0.7rem',
   color: 'ink',
-  whiteSpace: 'nowrap',
+  // One line per limited seat where a task is held by a provider limit: the canvas has no clock,
+  // so the tip carries the whole served detail.
+  whiteSpace: 'pre-line',
   pointerEvents: 'none',
   opacity: '0',
   transition: 'opacity 0.1s ease',
@@ -85,6 +87,18 @@ const legdot = cva({
       idle: { background: 'dormant' },
     },
   },
+});
+
+// The canvas is a picture: a pointer over a node raises the tip, and the same facts are stated as
+// text for the keyboard and the screen reader. The list is visually hidden, never removed: a
+// selectable node is reachable here as the button the canvas draws (MIK-R190 rule 13).
+const alternative = css({
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'normal',
 });
 
 export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
@@ -138,6 +152,26 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
       <div className={wrap} ref={wrapRef}>
         <canvas ref={canvasRef} className={canvasBox} data-testid="topology-canvas" />
         <div className={tip} ref={tipRef} aria-hidden="true" />
+        <div className={alternative} data-testid="topology-alternative">
+          <h4>Workspace constellation</h4>
+          <ul>
+            {model.map((node, index) => {
+              const target = node.id;
+              const text = `${node.label} — ${node.detail ?? node.sub}`;
+              return (
+                <li key={`${node.kind}-${node.label}-${index}`}>
+                  {target ? (
+                    <button type="button" onClick={() => onSelect(target)}>
+                      {text}
+                    </button>
+                  ) : (
+                    text
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
         <div className={legend}>
           <span>
             <i className={legdot({ tone: 'ok' })} /> ok

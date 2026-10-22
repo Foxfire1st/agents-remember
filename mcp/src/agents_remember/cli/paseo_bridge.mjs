@@ -30,9 +30,25 @@
 //            daemon is reachable and is the configured one; no runtime function is called.
 //
 //   host-activity-snapshot {} -> {serverId, publication: {bootId}}
-//            Reconciles the AR plugin publication with one whole host-agent listing.
+//            Reconciles the AR plugin publication with one whole host-agent listing, and in the
+//            same process lists the running provider subagents of the role agents the host holds
+//            with an open session, handing them to the plugin (MIK-R190 rule 3). A closed or
+//            archived agent is never asked: asking loads its session from storage.
+//
+//   usage-reports {agentIds: [string], leafAgentIds?: [string]} -> {serverId, reports}
+//            One usage read per agent, for the limit only (MIK-R190 rule 7). The client answers
+//            the pinned `{requestId, reports}` envelope. A leaf seat's entry older than 60 s is
+//            refreshed once with that entry's reportIds and no agent (0.12.0 refuses a call that
+//            names both); a shared report is refreshed at most once per batch, and an entry that
+//            already reads error is never forced. One agent's failure is its own `error` and stops
+//            no other. Ids and labels only: an account's own fields never leave the host.
 //
 //   role-profiles {} -> {profiles, readAt}: reads getDaemonConfig only, never writes profiles.
+//
+//   daemon-config {} -> {config, readAt}: the running daemon's own configuration document, as it
+//            reports it. The providers sit at `config.providers` -- the map the catalog reads, and
+//            not the file's `agents.providers` -- so a start can tell a clean live map from a
+//            drifted one (MIK-R192). Reads getDaemonConfig only, never writes it.
 //
 //   workspace-open  {cwd: string, masterProject?: {directory, key, name}, task?: {key, title}}
 //            -> {serverId, preparation?: "created" | "found" | "opened",
@@ -46,7 +62,7 @@
 //
 //   agent-create  {agentId, idempotencyKey, workspaceId, provider, model?, thinkingOptionId?,
 //                  title, labels, prompt?, systemPrompt?, parentAgentId?, modeId?, featureValues?, toolPolicy?,
-//                  providerOptions?: {disallowedTools: [<rule>]},
+//                  providerOptions?: {disallowedTools?: [<rule>], extraArgs?: {<name>: string|null}},
 //                  mcpServers?: {<name>: {type: 'stdio', command, args, env}}}
 //            -> {serverId, existing: boolean, agent: AGENT, creationError?}
 //            One agent under the caller's agent id (a UUID) in that workspace's directory, with
@@ -238,7 +254,7 @@ import { failure, nonEmpty, optionalText, requiredText, serverIdOf } from './pas
 import { openWorkspace } from './paseo_workspaces.mjs'
 import { listLiveAgents } from './paseo_live_agents.mjs'
 import { sendExtras } from './paseo_send_attachments.mjs'
-import { realpathSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -247,9 +263,11 @@ const COMMANDS = {
   catalog: readCatalog,
   'runtime-info': readRuntimeInfo,
   'host-activity-snapshot': readHostActivitySnapshot,
+  'usage-reports': readUsageReports,
   'workspace-open': openWorkspace,
   'agent-create': createAgent,
   'role-profiles': readRoleProfiles,
+  'daemon-config': readDaemonConfig,
   'agent-get': getAgent,
   'agent-archive': archiveAgent,
   'agent-state': readAgentState,
@@ -306,6 +324,11 @@ const TURN_ENDS = { turn_completed: 'finished', turn_failed: 'failed', turn_canc
 // 3.2 s with three agents created at once and 5.3 s with six (261001-PNT master pass, 2026-10-02).
 const TOOL_SERVER_START_MS = 6000
 const FIRST_MESSAGE_SUFFIX = ':first-message'
+// MIK-R190 rule 7: how stale a leaf seat's cached usage entry may be before the bridge refreshes
+// it. Declared with the other constants because `main()` runs inside this module's own top-level
+// await (below): a `const` declared after that point is still in its temporal dead zone while a
+// command executes, so the refresh would throw instead of running.
+const USAGE_REFRESH_AGE_MS = 60000
 // Standard output carries the reply and nothing else: the client's log lines, and anything a
 // command or a package prints through the console, go to standard error.
 const STDERR_LOGGER = { debug() {}, info: logToStderr, warn: logToStderr, error: logToStderr }
@@ -406,6 +429,21 @@ async function readRoleProfiles({ daemon }) {
   return { profiles: reply.config?.agentProfiles ?? [], readAt: new Date().toISOString() }
 }
 
+async function readDaemonConfig({ daemon }) {
+  return daemonConfiguration(await daemon.getDaemonConfig())
+}
+
+// The daemon's configuration document, as the daemon reports it, under the one envelope the
+// caller reads: a reply with no configuration object is a failed read and says so, because a map
+// that was not read must never look like a clean one (MIK-R192 rule 8).
+export function daemonConfiguration(reply) {
+  const config = reply !== null && typeof reply === 'object' ? reply.config : null
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+    throw failure('daemon_config_unreadable', 'The Paseo daemon reported no configuration document.')
+  }
+  return { config, readAt: new Date().toISOString() }
+}
+
 function stillLoading(entry) {
   return {
     id: entry.provider,
@@ -472,9 +510,167 @@ async function readRuntimeInfo({ daemon }) {
   return { serverId: serverIdOf(daemon) }
 }
 
-async function readHostActivitySnapshot({ daemon }) {
+async function readHostActivitySnapshot({ api, daemon }) {
   const publication = await daemon.invokePluginRpc('ar-plugin', 'ar.host-activity-snapshot', {})
+  // MIK-R190 rule 3's second step, in this same process: after the plugin has subscribed and
+  // reconciled, list the running subagents of AR's role agents that the host holds with an open
+  // session and hand them to the plugin. Only a DaemonClient can list them, and a closed or
+  // archived agent is never asked, because asking loads its session from storage.
+  const lists = await listRoleAgentSubagents(api, daemon)
+  if (lists.length > 0) {
+    // L184-R1-F08: the list names the reconciliation it answers, taken from the answer above, so
+    // two snapshots in flight cannot bind one boot's list to the other's still-unanswered slot.
+    const reconcile = publication?.reconcile
+    await daemon.invokePluginRpc('ar-plugin', 'ar.host-activity-subagents', {
+      lists,
+      ...(typeof reconcile === 'number' ? { reconcile } : {}),
+    })
+  }
   return { serverId: serverIdOf(daemon), publication }
+}
+
+// MIK-R190 rule 3: the role record names the agents whose subagents the plugin follows. It is
+// read here rather than asked of the host, so a listing asks only about AR's own seats.
+function readRoleAgentIds() {
+  const home = process.env.PASEO_HOME
+  if (!home || home === '') return []
+  try {
+    const document = JSON.parse(
+      readFileSync(path.join(home, 'agents-remember', 'role-agents.json'), 'utf8')
+    )
+    const agents = document?.agents
+    return agents !== null && typeof agents === 'object' && !Array.isArray(agents)
+      ? Object.keys(agents)
+      : []
+  } catch {
+    return []
+  }
+}
+
+const SUBAGENT_PAGE_LIMIT = 8
+const SUBAGENT_PAGE_SIZE = 200
+
+async function listRoleAgentSubagents(api, daemon) {
+  const wanted = new Set(readRoleAgentIds())
+  if (wanted.size === 0) return []
+  const open = []
+  try {
+    const seen = new Set()
+    let cursor
+    for (let page = 0; page < SUBAGENT_PAGE_LIMIT; page += 1) {
+      const listed = await api.agents.list({
+        filter: { includeArchived: true },
+        page: cursor === undefined ? { limit: SUBAGENT_PAGE_SIZE } : { limit: SUBAGENT_PAGE_SIZE, cursor }
+      })
+      for (const entry of listed?.entries ?? []) {
+        const agent = entry?.agent
+        if (agent?.id === undefined || !wanted.has(agent.id)) continue
+        if (agent.archivedAt || agent.status === CLOSED_SESSION) continue
+        open.push(agent.id)
+      }
+      if (listed?.pageInfo?.hasMore !== true) break
+      const next = listed?.pageInfo?.nextCursor
+      if (next === undefined || next === null || seen.has(next)) break
+      seen.add(next)
+      cursor = next
+    }
+  } catch (error) {
+    logToStderr(
+      { command: 'host-activity-snapshot' },
+      `the host listing failed, so no subagent list was taken: ${text(error?.message ?? error)}`
+    )
+    return []
+  }
+  const lists = []
+  for (const agentId of open) {
+    try {
+      const answer = await daemon.listProviderSubagents(agentId)
+      const subagents = (Array.isArray(answer?.subagents) ? answer.subagents : []).flatMap((sub) =>
+        typeof sub?.id === 'string' && typeof sub?.createdAt === 'string' && typeof sub?.status === 'string'
+          ? [{ id: sub.id, createdAt: sub.createdAt, status: sub.status }]
+          : []
+      )
+      lists.push({ agentId, subagents })
+    } catch (error) {
+      // One agent's failure changes nothing for that agent and stops no other.
+      logToStderr(
+        { command: 'host-activity-snapshot', agentId },
+        `no subagent list for this agent: ${text(error?.message ?? error)}`
+      )
+    }
+  }
+  return lists
+}
+
+// MIK-R190 rule 7: the reports the product judges a limit by. The bridge is the only place that
+// can ask, because only a DaemonClient maps an agent to its usage accounts and can refresh one.
+async function readUsageReports({ daemon }, input) {
+  const agentIds = Array.isArray(input.agentIds) ? input.agentIds.filter((id) => nonEmpty(id)) : []
+  const leaf = new Set(Array.isArray(input.leafAgentIds) ? input.leafAgentIds : [])
+  const reports = []
+  // Rule 7: one forced read per report, however many seats named it in this batch. An account's
+  // report is one report, so two leaf seats on it must not refresh it twice.
+  const refreshed = new Map()
+  for (const agentId of agentIds) {
+    try {
+      const entries = await usageEntriesFor(daemon, agentId, leaf.has(agentId), refreshed)
+      reports.push({ agentId, entries })
+    } catch (error) {
+      // Rule 7: one agent's failure changes nothing for it and does not stop the others.
+      reports.push({ agentId, error: text(error?.message ?? error) || 'usage read failed' })
+    }
+  }
+  return { serverId: serverIdOf(daemon), reports }
+}
+
+async function usageEntriesFor(daemon, agentId, leaf, refreshed) {
+  const cached = await daemon.listUsageReports({ agentId })
+  let entries = usageReportsOf(cached)
+  if (!leaf) return entries.map(projectUsageEntry)
+  for (const entry of entries) {
+    // A forced fetch after a 429 is refused until Retry-After and turns the shared entry into an
+    // error, so an entry that already reads `error` is never forced.
+    if (entry?.report?.status === 'error') continue
+    if (typeof entry?.id !== 'string') continue
+    const shared = refreshed.get(entry.id)
+    if (shared !== undefined) {
+      // Rule 7 bounds a shared report to one refresh: a later seat in this batch reads the row
+      // the earlier seat's refresh already returned, instead of asking the host again.
+      entries = entries.map((row) => (row === entry ? shared : row))
+      continue
+    }
+    const fetchedAt = Date.parse(entry?.fetchedAt ?? '')
+    if (!Number.isFinite(fetchedAt) || Date.now() - fetchedAt <= USAGE_REFRESH_AGE_MS) continue
+    refreshed.set(entry.id, entry)
+    try {
+      // 0.12.0 refuses a call that names both selectors ("agentId and reportIds cannot be
+      // combined"): a forced read selects the report it refreshes, and no agent.
+      const forced = await daemon.listUsageReports({ forceRefresh: true, reportIds: [entry.id] })
+      const fresh = usageReportsOf(forced).find((row) => row?.id === entry.id)
+      if (fresh !== undefined) {
+        refreshed.set(entry.id, fresh)
+        entries = entries.map((row) => (row === entry ? fresh : row))
+      }
+    } catch {
+      // The cache's own entry stands: a failed refresh changes no fact, and this batch does not
+      // ask the host for the same report again.
+    }
+  }
+  return entries.map(projectUsageEntry)
+}
+
+// The pinned client answers `{requestId, reports}`; anything else names no report at all.
+function usageReportsOf(answer) {
+  const reports = answer?.reports
+  return Array.isArray(reports) ? reports : []
+}
+
+// Ids and labels only: an account's own fields never leave the host.
+function projectUsageEntry(entry) {
+  if (entry === null || typeof entry !== 'object') return {}
+  const { account, ...rest } = entry
+  const label = account?.label
+  return { ...rest, ...(typeof label === 'string' ? { account: { label } } : {}) }
 }
 
 async function createAgent({ api, daemon }, input) {
@@ -616,13 +812,55 @@ function agentCreation(input, agentId) {
   // MIK-R132: what keeps the product's other tool server out of this one agent. The one key
   // the pinned host reads for it is disallowedTools of a provider's options; which provider,
   // and where the host reads it, stands in application/agent_binding.py. Nothing else is
-  // handed over under this name.
+  // handed over under this name, apart from MIK-R192's extra harness arguments below.
+  //
+  // MIK-R192 rule 5: extraArgs is the second key admitted here, beside disallowedTools. Each is
+  // checked in its own shape — a flag name without its dashes to a string value or null — and
+  // any other key is still refused.
   let providerOptions = input.providerOptions
-  if (providerOptions !== undefined && (!isRecord(providerOptions) ||
-      Object.keys(providerOptions).some((key) => key !== 'disallowedTools') ||
-      !Array.isArray(providerOptions.disallowedTools) || providerOptions.disallowedTools.length === 0 ||
-      providerOptions.disallowedTools.some((rule) => !nonEmpty(rule)))) {
-    throw failure('invalid_bridge_payload', 'providerOptions must hold disallowedTools as a list of rules and nothing else.')
+  if (providerOptions !== undefined) {
+    if (!isRecord(providerOptions)) {
+      throw failure('invalid_bridge_payload', 'providerOptions must be an object.')
+    }
+    const unexpected = Object.keys(providerOptions).filter(
+      (key) => key !== 'disallowedTools' && key !== 'extraArgs'
+    )
+    if (unexpected.length > 0) {
+      throw failure(
+        'invalid_bridge_payload',
+        `providerOptions admits disallowedTools and extraArgs, and nothing else (got ${unexpected.join(', ')}).`
+      )
+    }
+    if (Object.keys(providerOptions).length === 0) {
+      throw failure('invalid_bridge_payload', 'providerOptions must hold disallowedTools or extraArgs.')
+    }
+    if (
+      Object.hasOwn(providerOptions, 'disallowedTools') &&
+      (!Array.isArray(providerOptions.disallowedTools) ||
+        providerOptions.disallowedTools.length === 0 ||
+        providerOptions.disallowedTools.some((rule) => !nonEmpty(rule)))
+    ) {
+      throw failure('invalid_bridge_payload', 'providerOptions.disallowedTools must be a non-empty list of rules.')
+    }
+    if (Object.hasOwn(providerOptions, 'extraArgs')) {
+      const extraArgs = providerOptions.extraArgs
+      // The value contract is the settings parser's: a flag name without its dashes to a string
+      // value or null, and a string crosses exactly as written -- empty and whitespace-only
+      // values included, which the pinned host accepts and a presenter's own `tools: ''` uses.
+      // A name is what must be non-empty; the value need not be (MIK-R192 rule 1).
+      const wellFormed =
+        isRecord(extraArgs) &&
+        Object.keys(extraArgs).length > 0 &&
+        Object.entries(extraArgs).every(
+          ([name, value]) => extraArgName(name) && (value === null || typeof value === 'string')
+        )
+      if (!wellFormed) {
+        throw failure(
+          'invalid_bridge_payload',
+          'providerOptions.extraArgs must map a flag name without its dashes to a string or null.'
+        )
+      }
+    }
   }
   if (input.labels['ar.capability'] === 'review-presenter') {
     if (provider !== 'claude' || !isRecord(appliedServers) ||
@@ -1166,6 +1404,11 @@ async function findAgent(api, daemon, agentId) {
     )
   }
   return result?.agent?.id === agentId ? result.agent : null
+}
+
+// MIK-R192 rule 5: a flag name as the settings carry it — no leading dashes, no `=`, no whitespace.
+function extraArgName(name) {
+  return typeof name === 'string' && /^[^-\s=][^\s=]*$/.test(name)
 }
 
 function projectAgent(agent) {

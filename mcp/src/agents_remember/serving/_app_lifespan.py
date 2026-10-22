@@ -55,6 +55,7 @@ from agents_remember.serving.heap_diag import (
     start_heap_tracing,
     trim_malloc,
 )
+from agents_remember.serving.projections.host_activity import UsageReadPort
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -160,6 +161,7 @@ async def _held_delivery_loop(runtime: _ServingRuntime) -> None:
 
     ledger = runtime.background_ledger
     seen: dict[str, str] = {}
+    usage_seen: dict[str, str] = {}
     next_sweep = 0.0
     while True:
         # One accounted unit per tick (MIK-R81 rule 1, F01): the worker thread's own CPU is
@@ -174,20 +176,35 @@ async def _held_delivery_loop(runtime: _ServingRuntime) -> None:
                 _held_delivery_tick,
                 runtime.config,
                 seen,
+                usage_seen,
                 sweep=sweep,
+                usage_read=runtime.usage_read,
             )
         except Exception:
             logger.exception("held-message delivery sweep failed; retrying next interval")
         await asyncio.sleep(HELD_TURN_END_TICK_SECONDS)
 
 
-def _held_delivery_tick(config: McpRuntimeConfig, seen: dict[str, str], *, sweep: bool) -> None:
+def _held_delivery_tick(
+    config: McpRuntimeConfig,
+    seen: dict[str, str],
+    usage_seen: dict[str, str] | None = None,
+    *,
+    sweep: bool,
+    usage_read: UsageReadPort | None = None,
+) -> None:
     """One tick of the held-message delivery: the turn ends, and the sweep as fallback.
 
     The host's activity record decides which recipients just ended a turn, and those are
     drained first (MIK-R171 rule 1); the sweep then visits everything the queue names and
     the receipts no holder named. Both are bounded: one small publication and the
     receipts a holder published, then the sweep's own per-tick census budget.
+
+    MIK-R190 rule 7 adds one read before that delivery, and only for a new stamped end
+    (``new_stamped_ends``): the product's limit file is then current for the check every
+    send makes. With no new stamped end there is no read at all — no timer and no
+    periodic read, after a plugin reload too. ``usage_read`` is the composition root's
+    port for that read: ``serving`` may not import the bridge's caller (rule 19).
     """
 
     from agents_remember.cli.role_held_messages import (  # noqa: PLC0415
@@ -195,10 +212,16 @@ def _held_delivery_tick(config: McpRuntimeConfig, seen: dict[str, str], *, sweep
         sweep_held_messages,
     )
     from agents_remember.serving.projections.host_activity import (  # noqa: PLC0415
+        new_stamped_ends,
         turn_ended_agents,
     )
 
     ended = turn_ended_agents(config, seen)
+    if usage_seen is not None:
+        fresh = new_stamped_ends(config, usage_seen)
+        if fresh and usage_read is not None:
+            # The read comes before this tick's delivery to the same agents.
+            usage_read(config, fresh)
     if ended:
         deliver_ended_turns(config, ended)
     if sweep:

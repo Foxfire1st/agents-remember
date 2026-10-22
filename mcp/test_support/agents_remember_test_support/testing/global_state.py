@@ -297,6 +297,11 @@ PROCESS_MUTABLE_STATES = (
         "Forget retained host-publication endings between test modules.",
     ),
     _row(
+        "serving.projections.host_activity",
+        "_ROLE_RECORDS",
+        "Forget retained host role records between test modules.",
+    ),
+    _row(
         "serving.projections.projection_store",
         "_last_task_payload_warn",
         "A preceding module cannot suppress a task-payload warning.",

@@ -3,11 +3,13 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { cx } from '../../../styled-system/css';
 import { useDashboard } from '../../data/store';
 import { taskReferenceKey } from '../../data/taskReference';
-import { StatusWord, statusLabel, taskStatusKey } from '../detail-panel/pageParts';
+import { limitUntil, StatusWord, statusTitle, taskStatusKey, type TaskStatusKey } from '../detail-panel/pageParts';
 import { sameTaskDocumentRef } from '../../data/taskIdentity';
 import { Markdown } from '../../grammar/Markdown';
 import type {
+  ProviderLimit,
   TaskDocumentRef,
+  TaskEntry,
   TaskExecutionGraphView,
   TaskExecutionNodeView,
 } from '../../types/projection';
@@ -151,6 +153,16 @@ function readinessOf(node: TaskExecutionNodeView) {
   return undefined;
 }
 
+/** The master's word, its served end and the served limit itself, for the box and its name. */
+function boxStatus(task: TaskEntry | undefined): {
+  status: TaskStatusKey | undefined;
+  until: string | undefined;
+  limit: ProviderLimit | null | undefined;
+} {
+  if (!task) return { status: undefined, until: undefined, limit: undefined };
+  return { status: taskStatusKey(task), until: limitUntil(task), limit: task.providerLimit };
+}
+
 function GraphBox({
   node,
   marked,
@@ -167,7 +179,7 @@ function GraphBox({
   onToggle: () => void;
 }) {
   const task = useDashboard((state) => state.tasks[taskReferenceKey(node.masterRef)]);
-  const status = task ? taskStatusKey(task) : undefined;
+  const { status, until, limit } = boxStatus(task);
   const readiness = readinessOf(node);
   return (
     <div
@@ -179,7 +191,10 @@ function GraphBox({
       data-fade={faded ? 'true' : 'false'}
       role="button"
       aria-pressed={pressed}
-      aria-label={[node.masterTitle, status ? statusLabel(status) : 'task unavailable'].join(', ')}
+      aria-label={[
+        node.masterTitle,
+        status ? statusTitle(status, until) : 'task unavailable',
+      ].join(', ')}
       tabIndex={0}
       onClick={onToggle}
       onKeyDown={(event) => {
@@ -193,7 +208,9 @@ function GraphBox({
         <span className={boxTitle} data-testid="graph-box-title">
           {node.masterTitle}
         </span>
-        {status && <StatusWord status={status} testid="graph-task-status" />}
+        {status && (
+          <StatusWord status={status} testid="graph-task-status" until={until} limit={limit} />
+        )}
         {readiness && (
           <span className={dependency({ state: readiness })} data-testid="graph-readiness">
             {readiness}

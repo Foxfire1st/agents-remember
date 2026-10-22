@@ -28,6 +28,10 @@ from agents_remember.kernel.primitives.paseo_runtime_settings import (
     PaseoRuntimeSettings,
 )
 from agents_remember.kernel.primitives.runtime_config import ConfigError, McpRuntimeConfig
+from agents_remember.serving.paseo.paseo_daemon_config import (
+    DAEMON_CONFIG_COMMAND,
+    DAEMON_CONFIG_UNVERIFIED,
+)
 from agents_remember.serving.paseo.paseo_process_record import inspect_record, read_process
 from agents_remember.serving.paseo.paseo_remedy import terminal_provision_remedy
 
@@ -124,6 +128,34 @@ def bridge_call(
             BRIDGE_UNAVAILABLE, f"The Paseo bridge could not be started: {error}"
         ) from error
     return _bridge_reply(command, completed)
+
+
+def daemon_configuration(config: McpRuntimeConfig) -> dict[str, Any]:
+    """The running daemon's configuration document, as its own ``daemon-config`` command reads it.
+
+    This is the composition root's port for that read (``serving/paseo/paseo_daemon_config.py``
+    declares it): the bridge's caller ranks above the serving layer, so the serving module takes
+    the reader rather than importing this one. A failed call, and a reply that holds no
+    configuration object, both raise: a map that was not read is not a clean one (MIK-R192 rule 8).
+    """
+
+    try:
+        reply = bridge_call(config, DAEMON_CONFIG_COMMAND, {})
+    except PaseoBridgeFailure as error:
+        raise PaseoRuntimeFailure(
+            DAEMON_CONFIG_UNVERIFIED,
+            "config",
+            f"the running daemon's configuration could not be read ({error.code}): {error}",
+        ) from error
+    document = reply.get("config")
+    if not isinstance(document, dict):
+        raise PaseoRuntimeFailure(
+            DAEMON_CONFIG_UNVERIFIED,
+            "config",
+            "the running daemon answered no configuration document, so its provider map was "
+            "not read",
+        )
+    return document
 
 
 def require_bridge_runtime(config: McpRuntimeConfig) -> PaseoRuntimeSettings:

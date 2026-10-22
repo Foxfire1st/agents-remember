@@ -330,6 +330,16 @@ export interface LifecycleWorkerObservation {
   workerIdentitySha256?: string;
 }
 
+export interface LimitedSeat {
+  account: string;
+  agentId: string;
+  /** JSON Schema refinements: {"format":"date-time"} */
+  resetsAt: string;
+  role: string;
+  source: string;
+  window: string;
+}
+
 export interface Metrics {
   ignoredHostAgents: number;
 }
@@ -370,6 +380,12 @@ export interface ProviderBootNode {
   id: string;
   role: string;
   runtimeState: string;
+}
+
+export interface ProviderLimit {
+  seats: LimitedSeat[];
+  /** JSON Schema refinements: {"format":"date-time"} */
+  until: string;
 }
 
 export interface ProviderNode {
@@ -511,6 +527,7 @@ export interface TaskEntry {
   id: string;
   key: string;
   parent?: string;
+  providerLimit?: ProviderLimit;
   reference?: TaskDocumentRef;
   scope?: string;
   stage: "planned" | "started" | "aborted" | "completed";

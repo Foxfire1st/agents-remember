@@ -1904,6 +1904,47 @@
       "title": "LifecycleWorkerObservation",
       "type": "object"
     },
+    "LimitedSeat": {
+      "additionalProperties": false,
+      "description": "One limited seat of a task, as rule 13's hover names it.",
+      "properties": {
+        "account": {
+          "title": "Account",
+          "type": "string"
+        },
+        "agentId": {
+          "title": "Agentid",
+          "type": "string"
+        },
+        "resetsAt": {
+          "format": "date-time",
+          "title": "Resetsat",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "window": {
+          "title": "Window",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "agentId",
+        "source",
+        "account",
+        "window",
+        "resetsAt"
+      ],
+      "title": "LimitedSeat",
+      "type": "object"
+    },
     "Metrics": {
       "additionalProperties": false,
       "description": "Workspace host-observation diagnostics; task counts belong to task entries.",
@@ -2143,6 +2184,30 @@
         "runtimeState"
       ],
       "title": "ProviderBootNode",
+      "type": "object"
+    },
+    "ProviderLimit": {
+      "additionalProperties": false,
+      "description": "What a task shows in place of ``paused``: the earliest `until`, and its seats.",
+      "properties": {
+        "seats": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/LimitedSeat"
+          },
+          "title": "Seats",
+          "type": "array"
+        },
+        "until": {
+          "format": "date-time",
+          "title": "Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "until"
+      ],
+      "title": "ProviderLimit",
       "type": "object"
     },
     "ProviderNode": {
@@ -2907,6 +2972,17 @@
           ],
           "default": null,
           "title": "Parent"
+        },
+        "providerLimit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderLimit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "reference": {
           "anyOf": [

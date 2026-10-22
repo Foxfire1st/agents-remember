@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
+from agents_remember.observer.provider_limits import ProviderLimit
 
 from . import projection_task_documents as task_documents
 
@@ -520,13 +521,16 @@ def task_documents_body_bytes(docs: list[TaskSummary]) -> int:
 
 
 class TaskState(BaseModel):
-    """The two task facts, computed together once by the task-entry producer."""
+    """The task facts, computed together once by the task-entry producer."""
 
     model_config = ConfigDict(extra="forbid")
 
     stage: Literal["planned", "started", "aborted", "completed"]
     activity: Literal["works", "paused", "unknown"] | None = None
     eventAt: str | None = None
+    # MIK-R190 rule 13: present only when the task is started, nothing of it works
+    # and one of its seats is limited; the dashboard shows it instead of `paused`.
+    providerLimit: ProviderLimit | None = None
 
 
 class TaskCounts(BaseModel):

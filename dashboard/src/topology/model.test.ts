@@ -1,9 +1,25 @@
 import { describe,expect,it } from 'vitest';
 
 import { taskEntrySelectionKey } from '../data/taskReference';
+import { formatLimitTime } from '../panels/detail-panel/pageParts';
 import { taskEntry } from '../test/fixtures/wire';
-import type { EnclosureNode,ProviderNode } from '../types/projection';
+import type { EnclosureNode,ProviderLimit,ProviderNode } from '../types/projection';
 import { activeTopologyInputs,buildTopology } from './model';
+
+// MIK-R190 rule 13: the served limit a limited worktree entry carries.
+const LIMITED: ProviderLimit = {
+  until: '2026-10-21T12:00:00+02:00',
+  seats: [
+    {
+      role: 'worker',
+      agentId: '0f0c1d2e-0000-4000-8000-000000000001',
+      source: 'Claude',
+      account: 'Max 20x',
+      window: 'Session',
+      resetsAt: '2026-10-21T12:00:00+02:00',
+    },
+  ],
+};
 
 const enclosure = (overrides: Partial<EnclosureNode> = {}): EnclosureNode => ({
   enclosure: '/tasks/demo/enclosures/demo/series-contract.md',
@@ -52,6 +68,16 @@ describe('entry worktrees in the topology', () => {
       status: 'warn',
     });
     expect(nodes.some((node) => (node.kind as string) === 'task')).toBe(false);
+  });
+
+  it('says the words and the exact served end on a node that has no clock', () => {
+    const entry = taskEntry({ activity: 'paused', worktrees: [], providerLimit: LIMITED });
+    const nodes = buildTopology([{ entry, enclosure: enclosure() }], []);
+    expect(nodes.find((node) => node.kind === 'wt')).toMatchObject({
+      sub: `worktree · rate limited, until ${formatLimitTime(LIMITED.until)}`,
+      // The tone is paused's: a limit never makes a task look like work.
+      status: 'warn',
+    });
   });
 
   it('joins a worktree provider to its enclosure when worktreeGroup formats differ (path vs basename)', () => {

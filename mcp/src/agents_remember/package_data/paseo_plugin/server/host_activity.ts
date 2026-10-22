@@ -3,13 +3,23 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PluginHandlerContext, PluginLifecycleRegistration } from "@getpaseo/plugin/server";
 import { readRoleAgents } from "./role_agents.ts";
+import type { SubagentTracker } from "./subagents.ts";
 import type { TurnEndedFacts } from "./turn_ended.ts";
 
 export type HostActivityState = "in-turn" | "permission" | "idle" | "ended";
 
+/**
+ * One published agent. `state` and `eventAt` keep their meaning — the agent's
+ * turn — and the two subagent fields never move `eventAt` (MIK-R190 rule 2):
+ * `runningSubagents` is absent at 0 and `subagentsSince` is the oldest running
+ * subagent's `createdAt`, absent at 0. The product's model admits exactly these
+ * four keys and still forbids every other.
+ */
 export interface PublishedAgentActivity {
   state: HostActivityState;
   eventAt?: string;
+  runningSubagents?: number;
+  subagentsSince?: string;
 }
 
 export interface HostActivityPublication {
@@ -70,27 +80,36 @@ function publicationState(facts: AgentFacts): HostActivityState {
  * A boot is unusable until its whole host read succeeds. Events received during that
  * read win over the snapshot; an idle snapshot has no invented event timestamp. */
 export class HostActivityPublisher {
-  readonly bootId: string;
+  private currentBootId: string;
   private complete = false;
   private revision = 0;
   private ignoredEvents = 0;
   private readonly agents = new Map<string, AgentFacts>();
+  /** The subagent fields as last written, so a repeated count writes nothing (rule 2). */
+  private writtenSubagents = "";
 
   private readonly records: () => Readonly<Record<string, TurnEndedFacts>>;
   private readonly write: (publication: HostActivityPublication) => void;
   private readonly now: () => string;
+  private readonly subagents: SubagentTracker | undefined;
 
   constructor(
     records: () => Readonly<Record<string, TurnEndedFacts>>,
     write: (publication: HostActivityPublication) => void,
     now: () => string = () => new Date().toISOString(),
     bootId: string = randomUUID(),
+    subagents?: SubagentTracker,
   ) {
     this.records = records;
     this.write = write;
     this.now = now;
-    this.bootId = bootId;
+    this.currentBootId = bootId;
+    this.subagents = subagents;
     this.publish();
+  }
+
+  get bootId(): string {
+    return this.currentBootId;
   }
 
   note(event: HostActivityEvent, agentId: string, eventAt = this.now(), requestId?: string): void {
@@ -181,7 +200,41 @@ export class HostActivityPublisher {
     this.publish();
   }
 
+  /**
+   * Rule 3: a subscription the client re-established after a lost connection may
+   * have missed updates, so the publication becomes incomplete under a new boot
+   * id and the product reconciles as at a boot. A subagent count survives it: it
+   * is a fact of the host, not of the boot.
+   */
+  invalidate(): void {
+    this.currentBootId = randomUUID();
+    this.complete = false;
+    this.publish();
+  }
+
+  /**
+   * Rule 1/2: write the publication for a subagent change only. An unchanged
+   * count writes nothing, and no subagent field ever moves `eventAt`.
+   */
+  publishSubagents(): void {
+    if (this.subagentSignature() === this.writtenSubagents) return;
+    this.publish();
+  }
+
+  private subagentSignature(): string {
+    if (this.subagents === undefined) return "";
+    const records = this.records();
+    const parts: string[] = [];
+    for (const agentId of Object.keys(records).sort()) {
+      const counts = this.subagents.counts(agentId);
+      if (counts.count === 0) continue;
+      parts.push(`${agentId}:${counts.count}:${counts.since ?? ""}`);
+    }
+    return parts.join("|");
+  }
+
   private publish(records = this.records()): void {
+    this.subagents?.prune(records);
     const published: Record<string, PublishedAgentActivity> = {};
     for (const [id, facts] of this.agents) {
       if (!Object.hasOwn(records, id)) {
@@ -190,9 +243,18 @@ export class HostActivityPublisher {
       }
       const state = publicationState(facts);
       const eventAt = state === "in-turn" || state === "permission" ? facts.turnStartedAt : facts.eventAt;
-      published[id] = { state, ...(eventAt ? { eventAt } : {}) };
+      const counts = this.subagents?.counts(id);
+      published[id] = {
+        state,
+        ...(eventAt ? { eventAt } : {}),
+        ...(counts !== undefined && counts.count > 0 ? { runningSubagents: counts.count } : {}),
+        ...(counts !== undefined && counts.count > 0 && counts.since !== undefined
+          ? { subagentsSince: counts.since }
+          : {}),
+      };
     }
-    this.write({ bootId: this.bootId, complete: this.complete, agents: published, ignoredEvents: this.ignoredEvents });
+    this.writtenSubagents = this.subagentSignature();
+    this.write({ bootId: this.currentBootId, complete: this.complete, agents: published, ignoredEvents: this.ignoredEvents });
   }
 }
 
@@ -211,20 +273,30 @@ function snapshotFacts(agent: ActivityAgentSnapshot, revision: number): AgentFac
   };
 }
 
-export function createHostActivityPublisher(home: string): HostActivityPublisher {
+export function createHostActivityPublisher(
+  home: string,
+  subagents?: SubagentTracker,
+): HostActivityPublisher {
   const target = hostActivityPath(home);
-  return new HostActivityPublisher(() => readRoleAgents(home), publication => {
-    mkdirSync(dirname(target), { recursive: true });
-    const staging = `${target}.tmp`;
-    writeFileSync(staging, JSON.stringify(publication) + "\n", "utf8");
-    renameSync(staging, target);
-  });
+  return new HostActivityPublisher(
+    () => readRoleAgents(home),
+    publication => {
+      mkdirSync(dirname(target), { recursive: true });
+      const staging = `${target}.tmp`;
+      writeFileSync(staging, JSON.stringify(publication) + "\n", "utf8");
+      renameSync(staging, target);
+    },
+    undefined,
+    undefined,
+    subagents,
+  );
 }
 
 /** Kept separate from parent-wake handlers: each catches its own write error. */
 export function registerHostActivityEvents(
   server: Pick<PluginLifecycleRegistration, "on">,
   publisher: HostActivityPublisher,
+  subagents?: SubagentTracker,
 ): void {
   const events: HostActivityEvent[] = [
     "agent.turn_started", "agent.turn_ended", "agent.permission_requested",
@@ -235,6 +307,8 @@ export function registerHostActivityEvents(
       try {
         const requestId = "requestId" in event ? event.requestId : "request" in event ? event.request.id : undefined;
         const eventAt = "archivedAt" in event ? event.archivedAt : undefined;
+        // Rule 1: the parent's archive or close drops its subagents.
+        if (kind === "agent.archived" || kind === "agent.closed") subagents?.dropAgent(event.agent.id);
         publisher.note(kind, event.agent.id, eventAt, requestId);
       } catch (error) {
         console.error("agents-remember host activity publication failed", error);

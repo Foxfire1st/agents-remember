@@ -59,7 +59,9 @@ def _strip_volatile(value: Any) -> Any:
 
 def _stable_dump(model: BaseModel) -> Any:
     """One node's stable form: the wire dump (by-alias, none-free) minus volatile ages."""
-    return _strip_volatile(model.model_dump(by_alias=True, exclude_none=True))
+    # JSON mode: this form is compared and streamed as JSON, and a limited task carries
+    # `datetime` values in `providerLimit` (MIK-R190 rule 13).
+    return _strip_volatile(model.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
 @dataclass(frozen=True)

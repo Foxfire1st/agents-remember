@@ -42,7 +42,7 @@ import { GroupViewBody, SprintRowsViewBody, TaskChildrenBlock, TaskNowBlock } fr
 import { dirName, docChain, furtherSections, labelWithId, registerTables } from './model';
 import { TaskDirectGrant } from './directGrant';
 import { page } from './pageStyles';
-import { TaskStatusClock } from './pageParts';
+import { TaskStatusClock, taskStatusKey } from './pageParts';
 
 export interface ReaderProps {
   entry: DocumentTaskEntry;
@@ -66,8 +66,13 @@ export function TaskReader({
       .filter((dependency) => !dependency.gone && dependency.reference)
       .map((dependency) => props.tasks[taskReferenceKey(dependency.reference!)]),
   ];
+  // A served limit counts down on the page as a timed event does, so a limited entry opens the
+  // shared clock even when the host timed no event on it (MIK-R190 rule 13).
+  const counting = shown.some(
+    (entry) => Boolean(entry?.eventAt) || (entry ? taskStatusKey(entry) === 'limited' : false),
+  );
   return (
-    <TaskStatusClock active={active && shown.some((entry) => Boolean(entry?.eventAt))}>
+    <TaskStatusClock active={active && counting}>
       <TaskPage
         key={props.entry.key}
         {...props}

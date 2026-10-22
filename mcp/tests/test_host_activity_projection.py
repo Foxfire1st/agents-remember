@@ -112,6 +112,32 @@ def test_a_new_host_boot_and_a_new_dashboard_each_require_the_whole_read(tmp_pat
     bridge.assert_called_once()
 
 
+def test_an_older_reconciliation_answer_cannot_certify_a_boot(tmp_path: Path) -> None:
+    """L184-R1-F08: the reply's own reconciliation number decides, not the order it arrived in.
+
+    A plugin answer names the reconciliation it began. If a later boot's answer is an *earlier*
+    number, that reply lost the race: the file may already hold the newer publication, and the
+    answer must not certify it. Before this repair only the boot id was compared, so an old-first
+    reply consumed the newer answer and the activity was served from a list that never answered it.
+    """
+
+    home = tmp_path / "host"
+    config = runtime_config(tmp_path, home)
+    publish(home, "boot-a")
+    answers = [
+        {"publication": {"bootId": "boot-a", "reconcile": 5}},
+        {"publication": {"bootId": "boot-b", "reconcile": 4}},
+    ]
+    intake = host_activity.HostActivityInput(supervisor_armed=lambda: True)
+    with patch.object(intake, "_reconcile", side_effect=answers) as bridge:
+        assert intake.read(config).known
+        assert intake._reconciled_reconcile == 5
+        publish(home, "boot-b")
+        assert not intake.read(config).known
+        assert bridge.call_count == 2
+        assert intake._reconciled_boot is None
+
+
 def test_idle_heartbeats_do_not_read_activity_or_launch_another_snapshot(tmp_path: Path) -> None:
     home = tmp_path / "host"
     config = runtime_config(tmp_path, home)

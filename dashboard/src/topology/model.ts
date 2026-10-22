@@ -1,5 +1,11 @@
 import { taskEntrySelectionKey } from '../data/taskReference';
-import { statusLabel,statusTone,taskStatusKey } from '../panels/detail-panel/pageParts';
+import {
+  limitLines,
+  limitUntil,
+  statusTitle,
+  statusTone,
+  taskStatusKey,
+} from '../panels/detail-panel/pageParts';
 // The coordination-topology model (mc2 harvest #4): a deterministic radial tree derived from
 // the projection — workspace core → source checkouts (inner ring) → active worktree enclosures
 // (outer ring), with provider satellites orbiting their scoped parent. The view is bounded to
@@ -9,7 +15,7 @@ import { statusLabel,statusTone,taskStatusKey } from '../panels/detail-panel/pag
 // stable across snapshots and unit-testable without a canvas.
 
 import { engineState,type TaskWorktree } from '../data/selectors';
-import type { ProviderNode } from '../types/projection';
+import type { ProviderNode, TaskEntry } from '../types/projection';
 
 // The constellation's own colour-bearing vocabulary, declared as a tuple with the type derived —
 // so every table keyed by it (`constel.ts`'s palette) and every test that iterates it reads ONE
@@ -29,6 +35,8 @@ export interface ConstelNode {
   status: ConstelStatus;
   label: string;
   sub: string;
+  /** The whole served detail, one line per limited seat where there is one: the hover's body. */
+  detail?: string;
   id: string | null; // task selection key → Operations (null when not selectable)
   px: number; // screen position, filled by the renderer's layout()
   py: number;
@@ -102,6 +110,29 @@ function providerParent(
       : ws;
 }
 
+/** What one worktree node says: its label, its word, and the whole served detail of a limit.
+ *
+ * No clock on a canvas: the words, the exact end and each limited seat's provider, window and
+ * reset go into the node's hover tip and its accessible text (MIK-R190 rule 13).
+ */
+function worktreeFields(
+  entry: TaskEntry | undefined,
+  fallbackLabel: string,
+  cleanup: string,
+): { label: string; sub: string; detail?: string; id: string | null } {
+  if (!entry) {
+    return { label: fallbackLabel, sub: `worktree · ${cleanup} cleanup`, id: null };
+  }
+  const sub = `worktree · ${statusTitle(taskStatusKey(entry), limitUntil(entry))}`;
+  const limit = taskStatusKey(entry) === 'limited' ? entry.providerLimit : undefined;
+  return {
+    label: entry.title,
+    sub,
+    ...(limit ? { detail: [sub, ...limitLines(limit)].join('\n') } : {}),
+    id: taskEntrySelectionKey(entry.key),
+  };
+}
+
 export function buildTopology(worktrees: TaskWorktree[], providers: ProviderNode[]): ConstelNode[] {
   const nodes: ConstelNode[] = [];
   const add = (node: Omit<ConstelNode, 'px' | 'py'>): number => {
@@ -145,11 +176,11 @@ export function buildTopology(worktrees: TaskWorktree[], providers: ProviderNode
         poff: 0,
         base: 3.1,
         status,
-        label: entry?.title ?? (enclosure.taskName || enclosure.enclosure),
-        sub: entry
-          ? `worktree · ${statusLabel(taskStatusKey(entry))}`
-          : `worktree · ${enclosure.cleanup} cleanup`,
-        id: entry ? taskEntrySelectionKey(entry.key) : null,
+        ...worktreeFields(
+          entry,
+          enclosure.taskName || enclosure.enclosure,
+          enclosure.cleanup,
+        ),
       });
       wtIdxByGroup.set(groupKey(enclosure.worktreeGroup), wtIdx);
     });

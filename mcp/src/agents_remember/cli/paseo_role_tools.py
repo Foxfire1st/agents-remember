@@ -66,6 +66,7 @@ from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
 from agents_remember.cli.paseo_launch import StartingAgent
 from agents_remember.cli.paseo_role_wait import SentMessage, wait_for_turn
 from agents_remember.cli.paseo_status import read_agent
+from agents_remember.cli.provider_limit_hold import PROVIDER_LIMIT_REASON, provider_limit_hold
 from agents_remember.cli.role_activity import resume_role_agent
 from agents_remember.cli.role_held_messages import (
     MAX_HELD_PER_RECIPIENT,
@@ -987,6 +988,17 @@ def _deliver_or_hold(send: _MessageSend) -> dict[str, Any]:
     """Deliver one message, or hold it behind what waits (MIK-R100 rules 4/4a/4b)."""
 
     located = send.located
+    # MIK-R190 rule 9: the one check, before anything reaches the host. A limited
+    # recipient's message is held with the reason and the reset time, idle or not;
+    # rule 10 delivers it after that moment. The presenter's own send is the one
+    # path outside this (it holds no role seat).
+    limit = provider_limit_hold(send.config, send.recipient.agent_id)
+    if limit is not None:
+        return _hold_for_seat(
+            send,
+            reason=PROVIDER_LIMIT_REASON,
+            limited_until=str(limit["limitedUntil"]),
+        )
     if located is not None and located[1].get("status") == "held":
         return _hold_for_seat(send, reason="held-seat-unopened")
     if located is not None and waiting_total(located[2], send.recipient.agent_id) > 0:
@@ -1073,13 +1085,14 @@ def _hold_for_unresolved(
     )
 
 
-def _hold_for_seat(
+def _hold_for_seat(  # noqa: PLR0913 -- each fact of the wait rides the take, per reason
     send: _MessageSend,
     *,
     reason: str,
     permission: str | None = None,
     detail: str = "",
     attempted_message_id: str | None = None,
+    limited_until: str | None = None,
 ) -> dict[str, Any]:
     """Queue one message for its recipient and drain what waits (MIK-R100 rules 4/4a/4b).
 
@@ -1087,6 +1100,10 @@ def _hold_for_seat(
     and was not answered for this message (a lost connection, a timeout, a turn the
     runtime replaced): the waiting copy keeps it, so a later delivery goes out under an
     id the host may already record and is delivered at most once (MIK-R171 rule 3).
+
+    ``limited_until`` is rule 9's reset time when a provider limit is why the message
+    waits; it is written on the waiting row itself, so the reason and the moment it
+    names survive a restart together.
     """
 
     located = send.located
@@ -1109,6 +1126,7 @@ def _hold_for_seat(
                 reason=reason,
                 permission=permission,
                 attempted_message_id=attempted_message_id,
+                limited_until=limited_until,
             ),
         )
     except HeldStoreFull as full:
@@ -1292,6 +1310,7 @@ def _held_answer(
         "permission-pending": "the recipient waits for a permission decision",
         "recipient-in-turn": "the recipient is in a turn the host cannot write into",
         "host-unreachable": "the Paseo runtime did not answer; the message is held, not lost",
+        PROVIDER_LIMIT_REASON: "the recipient's provider usage limit holds it",
     }.get(reason, detail or reason)
     if reason == "permission-pending":
         # Rule 4a names the permission as the host names it, or "not supplied":
@@ -1323,6 +1342,16 @@ def _held_answer(
         result["permission"] = permission
     else:
         result["permission"] = None
+    if reason == PROVIDER_LIMIT_REASON:
+        # MIK-R190 rule 9: the answer repeats the reset time the waiting row carries --
+        # the row was written by this take, so the answer and the store agree. A later
+        # limit-file read only adds the sentence explaining it.
+        limit = provider_limit_hold(send.config, send.recipient.agent_id)
+        result["limitedUntil"] = taken.get("limitedUntil") or (
+            limit["limitedUntil"] if limit is not None else None
+        )
+        if limit is not None:
+            result["detail"] = f"{result['detail']} {limit['detail']}"
     if send.withdrawn is not None:
         result["withdrawnHeldMessageId"] = send.withdrawn
     if send.collection is not None:

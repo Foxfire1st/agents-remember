@@ -18,7 +18,9 @@
  * reload starts afresh (rule 8).
  */
 import type { PluginLifecycleRegistration } from "@getpaseo/plugin/server";
+import { limitedUntil, readProviderLimits } from "./provider_limits.ts";
 import { readRoleAgents } from "./role_agents.ts";
+import type { SubagentTracker } from "./subagents.ts";
 import { createTurnEndLog } from "./turn_log.ts";
 import {
   TURN_ENDED_STEERING_PROVIDERS,
@@ -30,6 +32,7 @@ import {
   noteTurnEnded,
   noteTurnStarted,
   type HostAgentState,
+  type TurnEndedSignals,
 } from "./turn_ended.ts";
 
 /**
@@ -51,6 +54,8 @@ const HOST_STATE_AGENT_LIMIT = HOST_STATE_PAGE_LIMIT * HOST_STATE_PAGE_SIZE;
 export interface ParentWakeOptions {
   /** The daemon home; the environment's `PASEO_HOME` when absent. */
   readonly home?: string;
+  /** MIK-R190 rules 4 and 5: the seat's running provider subagents. */
+  readonly subagents?: SubagentTracker;
 }
 
 /** The host's agents, as rule 3 and rule 4's send read them. */
@@ -118,8 +123,32 @@ export function registerParentWakeEvents(
   server: Pick<PluginLifecycleRegistration, "on">,
   options: ParentWakeOptions = {},
 ): () => void {
-  const log = createTurnEndLog(options.home ?? process.env.PASEO_HOME);
-  const turns = createTurnEndedTracker(TURN_ENDED_STEERING_PROVIDERS, (row) => log.append(row));
+  const home = options.home ?? process.env.PASEO_HOME;
+  const log = createTurnEndLog(home);
+  const subagents = options.subagents;
+  // MIK-R190: the two host signals the send-back reads — the seat's own running
+  // subagents, and the one file that says a seat is limited and until when. The
+  // file is read only where a decision needs it: at the wait's end, at the parent
+  // gate and when a resume fires (rule 15 keeps every timer out of it).
+  const signals: TurnEndedSignals = {
+    ...(subagents === undefined
+      ? {}
+      : {
+          runningSubagents: (agentId: string) => subagents.count(agentId),
+          watchSubagents: (agentId: string, listener: () => void) => subagents.watch(agentId, listener),
+          unwatchSubagents: (agentId: string, listener: () => void) =>
+            subagents.unwatch(agentId, listener),
+        }),
+    limitedUntil: (agentId: string, now: Date) => limitedUntil(readProviderLimits(home), agentId, now),
+    // L184-R1-F13: the role record, read where a deferred action decides, so a
+    // seat that has left it is reclaimed with its timer instead of being sent to.
+    roleRecord: () => readRoleAgents(home),
+  };
+  const turns = createTurnEndedTracker(
+    TURN_ENDED_STEERING_PROVIDERS,
+    (row) => log.append(row),
+    signals,
+  );
 
   server.on("agent.turn_started", (event) => {
     noteTurnStarted(
@@ -181,7 +210,15 @@ export function registerParentWakeEvents(
     noteAgentArchived(event.agent.id, turns);
   });
 
-  // Rule 8: the plugin's cleanup clears every pending wait, so a reload starts
-  // afresh and no wait fires after it.
+  // L184-R1-F09: close is the other terminal lifecycle path, and it is the one the
+  // wake tracker did not hear. It is treated as archive, as the host's own listing
+  // does (`status === "closed"` is archived), so no deferred resume survives it.
+  server.on("agent.closed", (event) => {
+    noteAgentArchived(event.agent.id, turns);
+  });
+
+  // MIK-R183 rule 8: the plugin's cleanup clears every pending wait, so a reload starts
+  // afresh and no wait fires after it. MIK-R190 adds the subagent watches, the armed
+  // resumes and the limited parents' timers to what the boundary clears.
   return () => cleanupSeatWaits(turns);
 }

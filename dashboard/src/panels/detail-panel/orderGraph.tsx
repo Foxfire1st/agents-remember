@@ -21,7 +21,7 @@ useReducedMotion,
 useRestHighlight,
 } from '../sprint-graph/SprintGraphView';
 import { liveChildCount } from './indexRows';
-import { Block,MoreLink,StatusWord,SubHead,plural,statusLabel,taskStatusKey,type DocView } from './pageParts';
+import { Block,MoreLink,StatusWord,SubHead,limitUntil,plural,statusTitle,taskStatusKey,type DocView } from './pageParts';
 import {
 dim,
 orderCount,
@@ -143,6 +143,11 @@ function OrderNode({
   const status = master ? taskStatusKey(master) : undefined;
   const meta = nodeMeta(node, master);
   const tone = toneOf(node, master);
+  // A unit with no display clock cannot count down, so its accessible name carries the exact
+  // served end beside the word it shows (MIK-R190 rule 13).
+  const label = master
+    ? `${[master.id, node.masterTitle].filter(Boolean).join(' ')}, ${statusTitle(taskStatusKey(master), limitUntil(master))}`
+    : `${node.masterTitle}, task unavailable`;
   return (
     <button
       type="button"
@@ -153,14 +158,18 @@ function OrderNode({
       data-tone={tone}
       data-mark={mark}
       data-fade={fade ? 'true' : 'false'}
-      title={`${node.masterTitle} — ${status ? statusLabel(status) : 'task unavailable'}`}
+      // A surface with no display clock cannot count down: it names the exact end instead.
+      title={`${node.masterTitle} — ${status ? statusTitle(status, limitUntil(master)) : 'task unavailable'}`}
       // A unit whose master is not projected keeps its mark and its place; it opens nothing.
       aria-disabled={master ? undefined : true}
+      aria-label={label}
       onClick={() => master && handlers.onJump(taskEntrySelectionKey(master.key))}
     >
       {master ? <span className={orderNodeId({ state: tone })}>{master.id}</span> : null}
       <span className={orderNodeTitle}>{node.masterTitle}</span>
-      {status ? <StatusWord status={status} /> : null}
+      {status ? (
+        <StatusWord status={status} until={limitUntil(master)} limit={master?.providerLimit} />
+      ) : null}
       {meta ? <span className={orderNodeMeta({ state: tone })}>{meta}</span> : null}
     </button>
   );

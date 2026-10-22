@@ -35,6 +35,7 @@ from agents_remember.cli.role_launch_receipts import (
 from agents_remember.cli.role_step_up_decisions import record_step_up
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
+from agents_remember.serving.projections.host_activity import running_subagents
 
 _CLOSED_STATUSES = frozenset({"completed", "failed", "stopped"})
 
@@ -198,20 +199,8 @@ def _reconcile_leaf_occupancy(
                     "Nothing was archived."
                 ),
             )
-        _require_step_up_idle(reading, holder, replacement)
-        if (
-            reading.turn_active or reading.lifecycle == "running"
-        ) and not replacement.interrupt_turn:
-            # Rule 8, as in retirement: a holder in a turn is replaced only with
-            # the word that its turn may be interrupted.
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Agent {holder} is in a turn; it is not replaced without the word that "
-                    "the turn may be interrupted. Nothing was archived. Start again naming "
-                    "the interruption, or retire it first with retire_child."
-                ),
-            )
+        _require_step_up_idle(config, reading, holder, replacement)
+        _require_holder_interruptible(config, reading, holder, replacement.interrupt_turn)
         current["replaceAuthorizedBy"] = caller
 
         current["replaceAuthorizedAt"] = _now_iso()
@@ -233,6 +222,43 @@ def _reconcile_leaf_occupancy(
     )
 
 
+def _require_holder_interruptible(
+    config: McpRuntimeConfig,
+    reading: AgentReading,
+    holder: str,
+    interrupt_turn: bool,
+) -> None:
+    """Rule 8, and MIK-R190 rule 4: a working holder is replaced only on the word.
+
+    A holder in a turn, and a holder that works only by its own running subagents,
+    are both the same case: replacing it archives it, and archiving cancels the
+    turn and the subagents.
+    """
+
+    if interrupt_turn:
+        return
+    if reading.turn_active or reading.lifecycle == "running":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Agent {holder} is in a turn; it is not replaced without the word that "
+                "the turn may be interrupted. Nothing was archived. Start again naming "
+                "the interruption, or retire it first with retire_child."
+            ),
+        )
+    subagents = running_subagents(config, holder)
+    if subagents > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Agent {holder} has {subagents} running provider subagent(s); replacing "
+                "it archives it and cancels them, so it is not replaced without the word "
+                "that its work may be interrupted. Nothing was archived. Start again "
+                "naming the interruption, or retire it first with retire_child."
+            ),
+        )
+
+
 def require_step_up_archive_idle(
     config: McpRuntimeConfig, receipt: dict[str, Any], launch_call: dict[str, Any]
 ) -> None:
@@ -252,10 +278,15 @@ def require_step_up_archive_idle(
             f"Retry the same request when the host is reachable. {reading.unreachable_reason}"
         )
     if reading.found and not reading.archived:
-        _require_step_up_idle(reading, holder, _Replacement(step_up=True))
+        _require_step_up_idle(config, reading, holder, _Replacement(step_up=True))
 
 
-def _require_step_up_idle(reading: AgentReading, holder: str, replacement: _Replacement) -> None:
+def _require_step_up_idle(
+    config: McpRuntimeConfig,
+    reading: AgentReading,
+    holder: str,
+    replacement: _Replacement,
+) -> None:
     if not replacement.step_up:
         return
     if reading.pending_permission:
@@ -267,6 +298,19 @@ def _require_step_up_idle(reading: AgentReading, holder: str, replacement: _Repl
         raise HTTPException(
             status_code=409,
             detail=f"Agent {holder} is busy in a turn; step-up never interrupts it. Start again after its turn; nothing was archived.",
+        )
+    # MIK-R190 rule 4: a holder that works only by its own running subagents is busy
+    # too — archiving it cancels them, and a step-up never interrupts.
+    subagents = running_subagents(config, holder)
+    if subagents > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Agent {holder} is busy: {subagents} running provider subagent(s). "
+                "A step-up never interrupts work; start again when they have finished, "
+                "or retire it first with retire_child and the word that its work may be "
+                "interrupted. Nothing was archived."
+            ),
         )
 
 

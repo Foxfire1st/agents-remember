@@ -17,11 +17,17 @@ import { taskEntrySelectionKey } from '../../data/taskReference';
 import { Panel } from '../../grammar/Panel';
 import type { TaskEntry } from '../../types/projection';
 import {
+  limitUntil,
   statusLabel,
+  statusTitle,
   statusTone,
   taskStatusKey,
+  taskStatusReading,
   TaskStatusWord,
   TaskStatusClock,
+  underlyingStatusKey,
+  useTaskStatusInstant,
+  type TaskStatusReading,
 } from '../detail-panel/pageParts';
 import { dim } from '../detail-panel/pageStyles';
 import { TaskGroupDisclosure } from '../TaskGroupDisclosure';
@@ -255,7 +261,13 @@ function LifecycleListImpl({
   };
   return (
     <TaskStatusClock
-      active={active && Object.values(tasks).some((entry) => Boolean(entry.eventAt))}
+      // A limited row counts down, so it needs the clock even when the host timed no event.
+      active={
+        active &&
+        Object.values(tasks).some(
+          (entry) => Boolean(entry.eventAt) || taskStatusKey(entry) === 'limited',
+        )
+      }
     >
       <Panel
         head={<TaskPivotBar count={Object.keys(tasks).length} pivot={pivot} onPivot={setPivot} />}
@@ -351,15 +363,16 @@ function RowCaret({
   );
 }
 
-function RowMark({ entry }: { entry: TaskEntry }) {
-  const status = taskStatusKey(entry);
+function RowMark({ entry, reading }: { entry: TaskEntry; reading: TaskStatusReading }) {
   return (
     <span
       className={markCell}
-      aria-label={`Task progress: ${statusLabel(status)}`}
+      // The mark speaks the word the row shows at the same display instant, with the exact served
+      // end beside it while the seat is limited (MIK-R190 rule 13).
+      aria-label={`Task progress: ${statusTitle(reading.shown, limitUntil(entry))}`}
       data-testid="task-state"
     >
-      <span className={statusDot({ tone: statusTone(status) })} aria-hidden="true" />
+      <span className={statusDot({ tone: statusTone(reading.shown) })} aria-hidden="true" />
     </span>
   );
 }
@@ -450,11 +463,15 @@ function TaskRowLine({
   // MIK-R175 rule 1: no `title` on the row line or on the figure box, because either one is an
   // ancestor of the step dots and the browser would show it over them. The hover text lives on
   // the cells beside the marks instead (rule 2), so the rest of the row keeps it.
-  const hover = rowHover(entry);
+  // MIK-R190 rule 13: the hover, the mark and the word read the one shared display instant, so a
+  // reached window says paused in all three at once.
+  const now = useTaskStatusInstant();
+  const reading = taskStatusReading(entry, now);
+  const hover = rowHover(entry, now);
   return (
     <div className={rowLine} style={indent(row.depth)}>
       <RowCaret item={item} flat={flat} onToggleRow={onToggleRow} />
-      <RowMark entry={entry} />
+      <RowMark entry={entry} reading={reading} />
       {id ? (
         <span className={rowIdCell({ long: flat })} title={hover}>
           {id}
@@ -573,7 +590,7 @@ function groupedEntries(tasks: Record<string, TaskEntry>, pivot: Pivot): Map<str
   const seen = new Set<string>();
   for (const root of Object.values(tasks)) {
     if (pivot === 'repo' && root.parent && tasks[root.parent]) continue;
-    const key = pivot === 'repo' ? (root.reference?.repository ?? '') : taskStatusKey(root);
+    const key = pivot === 'repo' ? (root.reference?.repository ?? '') : underlyingStatusKey(root);
     const members = byKey.get(key) ?? [];
     appendMembers(root, tasks, pivot, seen, members);
     byKey.set(key, members);
@@ -591,7 +608,7 @@ function groupRows(
   return [...groupedEntries(tasks, pivot)]
     .map(([key, members]) => ({
       key,
-      label: pivot === 'repo' ? key : statusLabel(taskStatusKey(members[0])),
+      label: pivot === 'repo' ? key : statusLabel(underlyingStatusKey(members[0])),
       count: members.length,
       items:
         pivot === 'repo'

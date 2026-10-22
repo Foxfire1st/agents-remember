@@ -341,7 +341,7 @@ function updateHoverTip(scene: ConstelScene, els: { wrap: HTMLElement; tip: HTML
     const nd = scene.nodes[scene.hovered];
     tip.style.left = `${nd.px}px`;
     tip.style.top = `${nd.py}px`;
-    tip.textContent = `${nd.label} — ${nd.sub}`;
+    tip.textContent = `${nd.label} — ${nd.detail ?? nd.sub}`;
     tip.style.opacity = "1";
     wrap.style.cursor = nd.id ? "pointer" : "default";
   } else {

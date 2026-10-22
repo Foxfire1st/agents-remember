@@ -6,10 +6,15 @@ import posixpath
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.observer.host_activity import HostActivitySnapshot, PublishedAgentActivity
+from agents_remember.observer.host_activity import (
+    HostActivitySnapshot,
+    PublishedAgentActivity,
+    TaskAgentActivity,
+)
 from agents_remember.observer.projection import (
     EnclosureNode,
     TaskCounts,
@@ -18,6 +23,11 @@ from agents_remember.observer.projection import (
     TaskListDisagreement,
     TaskState,
     TaskSummary,
+)
+from agents_remember.observer.provider_limits import (
+    ProviderLimits,
+    now_utc,
+    task_provider_limit,
 )
 
 _STAGES = {
@@ -69,28 +79,70 @@ class TaskEntries:
     unbound_enclosures: list[EnclosureNode]
 
 
+@dataclass(frozen=True)
+class TaskLimitFacts:
+    """What rule 13 needs beside a task's activity: the one file, and the task's seats."""
+
+    limits: ProviderLimits
+    seats: Iterable[TaskAgentActivity] = ()
+    now: datetime | None = None
+
+
 def task_state(
     status: str,
     agents: Iterable[PublishedAgentActivity],
     *,
     host_known: bool,
+    limited: TaskLimitFacts | None = None,
 ) -> TaskState:
-    """Terminal/planned stage wins; only a whole host observation can say paused."""
+    """Terminal/planned stage wins; only a whole host observation can say paused.
+
+    MIK-R190 rule 4: an agent works when it is in a turn (``in-turn`` or
+    ``permission``) or when it has a running provider subagent and has not ended —
+    which is what Paseo's own workspace list shows. Rule 13 adds the task's
+    provider limit beside it, from the one limited-fact file.
+    """
+
     stage = _STAGES[status]
     if stage != "started":
         return TaskState.model_validate({"stage": stage})
     if not host_known:
         return TaskState(stage="started", activity="unknown")
     observed = list(agents)
-    working = [agent for agent in observed if agent.state in {"in-turn", "permission"}]
+    working = [agent for agent in observed if _works(agent)]
     contributors = working or observed
-    times = [agent.eventAt for agent in contributors if agent.eventAt is not None]
+    times = [event for event in (_event_of(agent) for agent in contributors) if event is not None]
     event = max(times) if times else None
+    activity = "works" if working else "paused"
+    provider = (
+        task_provider_limit(limited.limits, limited.seats, limited.now or now_utc())
+        if not working and limited is not None
+        else None
+    )
     return TaskState(
         stage="started",
-        activity="works" if working else "paused",
+        activity=activity,
         eventAt=event.isoformat() if event is not None else None,
+        providerLimit=provider,
     )
+
+
+def _works(agent: PublishedAgentActivity) -> bool:
+    """MIK-R190 rule 4: in a turn, or with a running subagent and not ended."""
+
+    if agent.state in {"in-turn", "permission"}:
+        return True
+    return agent.state != "ended" and (agent.runningSubagents or 0) > 0
+
+
+def _event_of(agent: PublishedAgentActivity) -> datetime | None:
+    """The time the published word runs from: the turn's start, else the oldest subagent."""
+
+    if agent.state in {"in-turn", "permission"}:
+        return agent.eventAt
+    if agent.state != "ended" and (agent.runningSubagents or 0) > 0:
+        return agent.subagentsSince or agent.eventAt
+    return agent.eventAt
 
 
 def task_counts(tasks: Iterable[TaskEntry]) -> TaskCounts:
@@ -102,14 +154,24 @@ def task_counts(tasks: Iterable[TaskEntry]) -> TaskCounts:
     return counts
 
 
+def _limit_facts(
+    host: HostActivitySnapshot, seats: list[TaskAgentActivity]
+) -> TaskLimitFacts | None:
+    """Rule 13's inputs, when the publication carried the one file at all."""
+
+    return None if host.limits is None else TaskLimitFacts(host.limits, tuple(seats))
+
+
 def build_task_entries(
     sources: list[TaskDocumentSource],
     enclosures: list[EnclosureNode],
     host: HostActivitySnapshot,
 ) -> TaskEntries:
     agents: dict[str, list[PublishedAgentActivity]] = defaultdict(list)
+    seats: dict[str, list[TaskAgentActivity]] = defaultdict(list)
     for agent in host.agents:
         agents[agent.task_key].append(agent.activity)
+        seats[agent.task_key].append(agent)
     by_key: dict[str, TaskEntry] = {}
     by_binding: dict[tuple[str, str, str], TaskEntry] = {}
     for source in sources:
@@ -129,7 +191,12 @@ def build_task_entries(
                 }
             )
         )
-        state = task_state(doc.status, agents[ref.key], host_known=host.known)
+        state = task_state(
+            doc.status,
+            agents[ref.key],
+            host_known=host.known,
+            limited=_limit_facts(host, seats[ref.key]),
+        )
         entry = TaskEntry(
             **state.model_dump(),
             key=ref.key,
@@ -158,7 +225,12 @@ def build_task_entries(
             key = ref.key if ref is not None else f"{parent.key}#{row.id}"
             child = by_key.get(key)
             if child is None:
-                state = task_state(row.status, agents[key], host_known=host.known)
+                state = task_state(
+                    row.status,
+                    agents[key],
+                    host_known=host.known,
+                    limited=_limit_facts(host, seats[key]),
+                )
                 child = TaskEntry(
                     **state.model_dump(), key=key, reference=ref, id=row.id, title=row.title
                 )

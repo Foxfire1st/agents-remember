@@ -48,6 +48,7 @@ from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     bridge_call,
 )
+from agents_remember.kernel._agentic_settings_core import EXTRA_ARGS_HARNESSES
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.modules.quality.dagger_authority import HOST_REGISTRY_ROOT_ENV
@@ -441,14 +442,51 @@ def build_launch_call(launch: RoleLaunch) -> dict[str, Any]:
     # What keeps the product's other server out of this one agent (MIK-R132). The host reads
     # the provider options of the create request; the record beside the agent definition
     # stays with the product: the receipt keeps it and the role-start answer derives from it.
+    # The extra harness arguments the settings state travel in the same provider options
+    # (MIK-R192); the bridge admits them beside the rules, each in its own shape.
     servers = [TOOL_SERVER_NAME] if launch.accepts_tool_servers else []
     server_exclusion = launch_server_exclusion(launch.provider, servers=tuple(servers))
-    agent.update(exclusion_agent_options(server_exclusion, host_denied=launch.host_denied_tools))
+    agent.update(
+        _provider_options(
+            exclusion_agent_options(server_exclusion, host_denied=launch.host_denied_tools),
+            launch,
+        )
+    )
+    extra_arguments = extra_arguments_record(launch)
     return {
         **({"archiveAgentId": launch.replaces_agent_id} if launch.replaces_agent_id else {}),
         "workspace": workspace_call(launch.context, launch.folder),
         "agent": agent,
+        **({"extraArguments": extra_arguments} if extra_arguments else {}),
         **({"serverExclusion": server_exclusion} if server_exclusion is not None else {}),
+    }
+
+
+def _provider_options(options: dict[str, Any], launch: RoleLaunch) -> dict[str, Any]:
+    """The create request's provider options, with the settings' extra arguments beside its rules."""
+    extra = launch.session_options.get("extraArgs")
+    entries = extra.get("entries") if isinstance(extra, dict) else None
+    if not entries or launch.provider not in EXTRA_ARGS_HARNESSES:
+        return options
+    provider_options = dict(options.get("providerOptions") or {})
+    provider_options["extraArgs"] = dict(entries)
+    return {**options, "providerOptions": provider_options}
+
+
+def extra_arguments_record(launch: RoleLaunch) -> dict[str, Any]:
+    """The extra arguments the settings gave this launch, each with its source (MIK-R192 rule 7).
+
+    The plan of the launch's resolution carries what it takes, what a role entry removed, and the
+    role entries it does not take; this is the part the receipt records. A launch without them
+    records nothing.
+    """
+    extra = launch.session_options.get("extraArgs")
+    if not isinstance(extra, dict):
+        return {}
+    return {
+        key: extra[key]
+        for key in ("arguments", "removed", "notTaken", "notTakenReason", "hostConfiguration")
+        if extra.get(key)
     }
 
 
@@ -539,6 +577,13 @@ def applied_to_agent(call: dict[str, Any]) -> dict[str, Any]:
         **(
             {"serverExclusion": call["serverExclusion"]}
             if isinstance(call.get("serverExclusion"), dict)
+            else {}
+        ),
+        # MIK-R192: every extra argument this start received, with its source, and the role
+        # entries it did not take. A start without them records none.
+        **(
+            {"extraArguments": call["extraArguments"]}
+            if isinstance(call.get("extraArguments"), dict)
             else {}
         ),
     }

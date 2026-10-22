@@ -207,6 +207,15 @@ unexpected shape is never echoed into a report. The settings file itself is the
 place that holds a private value, so protect it accordingly. The other five
 facts carry no secret.
 
+A provider entry states no `extraArgs` for Claude, and none for an entry that
+`extends` it: `options.extraArgs` and `params.extraArgs` are refused when the
+settings load, naming this file, the key and
+`orchestration.harnesses.claude.extraArgs`. The host lays its configured provider
+options over every start and every resume, including the resumes of a confined
+presenter that AR cannot check, so extra arguments for AR's seats go through
+`orchestration` instead (MIK-R192; see
+`orchestration.harnesses.<harness>.extraArgs` below).
+
 The install brings the whole build-locked host tree with `npm ci` and the
 product's own Node26.11.1, checked against the official archive SHA before
 unpacking. Supported host platform: Linux x86_64 with `/proc` only. Node lives
@@ -550,6 +559,7 @@ Paseo role launches read these choices from the host's running catalog, not a bu
 | `featureValues` | `featureValues` | Boolean for each toggle; option ID for each selection |
 | `serviceTier` | `featureValues.service_tier` | Speed selection; `fast` normalizes to native `priority` |
 | `notes` | `notes` (host page: When to use) | User's plain instruction text; user layer/profile only |
+| `extraArgs` | provider options `extraArgs` | Extra command-line arguments for the agent's harness, such as `--chrome` (MIK-R192, below) |
 | `stepUp` | none | One user-layer alternative with the same launch fields and optional `afterTries`; never nested. |
 | `launchArgs`, `promptKeywords`, `sessionCommands` | none | Accepted; no code reads them in this build. `server_info` names the ones a file holds under `unusedSettingsKeys`. |
 
@@ -599,7 +609,16 @@ Each first start reads the host's profiles through a read-only bridge call. A pr
 role when its `name` equals the role ID exactly; the first match in host order wins and the record
 names skipped matches. Host `id`, `icon` and `color` are not launch choices: ID/name identify the
 profile in provenance; AR owns role titles and labels. If profiles cannot be read, role settings
-are used and the unavailable-read reason is recorded. The launch never reads or edits `config.json`.
+are used and the unavailable-read reason is recorded. Profile resolution reads the host's profiles
+through the bridge and writes no file of the host's: it never reads or edits `config.json`.
+
+One read of that file is not profile resolution, and it is read-only. A start repeats the tool
+rules the daemon's `config.json` denies in the provider's entry, so a start that hands rules of its
+own does not put the user's out of force; a start, a confined step and the review presenter's
+resume also read the `extraArgs` that file gives the provider, because the host lays its configured
+provider options over every start and every resume (MIK-R192). Both reads are of the file Paseo
+owns: nothing in a launch creates, changes or deletes it, and the settings are the place a user
+states either fact (see `orchestration.harnesses.<harness>.extraArgs` below).
 
 For agent/model/effort and speed features, resolution is explicit start selection, host profile,
 our settings, host default. For mode, it is host profile, our settings, the named least
@@ -677,7 +696,188 @@ may name. The fields an earlier build read from an entry (`name`, `command`, `ar
 `effortFlag`, `effortFlagValues`, `effortSessionValues`, `effortSessionCommand`) stay accepted but
 no code reads them in this build; `server_info` names the ones a file holds under
 `unusedSettingsKeys`. Any other field is refused. The host's catalog names the agent kinds, models
-and efforts a role can use.
+and efforts a role can use. `extraArgs` is the one field an entry may also state (MIK-R192).
+
+### orchestration.harnesses.<harness>.extraArgs, orchestration.roles.<role>.extraArgs
+
+MIK-R192. Extra command-line arguments for the agent's harness, for a capability that AR has no
+setting for. The developer's case is `--chrome`: it gives a Claude seat the Claude in Chrome
+browser tools (`{"chrome": null}`).
+
+**The three places.** `orchestration.harnesses.<harness>.extraArgs` holds the arguments for every
+role started on that harness. `orchestration.roles.<role>.extraArgs` holds them for one role, and
+`orchestration.rolesPerLevel.<level>.<role>.extraArgs` for one role at one level. The three are
+laid key by key: a per-level role entry over the role entry, and the role entry over the harness
+entry. The boolean `false` at an upper layer removes a name it inherited; it removes settings
+entries only, is never sent, and is refused at the harness entry, which has no lower layer to
+remove from. `extraArgs` itself must be an object; `extraArgs: null` is refused.
+
+**The shape.** An object from a flag name to one of three values:
+
+- a string: sent as `--name value`;
+- `null`: sent as the bare flag, `--name`;
+- `false`: removes an entry of that name inherited from a lower layer; never sent.
+
+A name is written WITHOUT its leading dashes. It is non-empty, and holds no dash at its start, no
+`=` and no whitespace. Any other value type is refused. The value itself may be empty or blank: a
+string is carried exactly as the settings file writes it, so `{"tools": ""}` is the empty value the
+qualified presenter hands Claude itself. Every refusal names the settings file and the key.
+
+```json
+{
+  "orchestration": {
+    "harnesses": { "claude": { "extraArgs": { "chrome": null } } },
+    "roles": {
+      "reviewer": { "harness": "claude", "extraArgs": { "chrome": false } },
+      "investigator": { "harness": "claude", "extraArgs": { "name": "investigator" } }
+    }
+  }
+}
+```
+
+Every Claude seat is handed `--chrome`; a Reviewer is not; an Investigator is handed
+`--chrome --name investigator`. The arguments reach the harness through the host's provider
+options (`providerOptions.extraArgs` of the create request), and the host keeps them with the agent
+for its whole life, across a resume and a reload, as it keeps every provider option of a start. A
+settings change applies to agents started after it.
+
+**Layering and which harness a start uses.** Harness entries apply to the harness the start
+actually uses, whatever chose it: the start call, the host role, the settings, a step-up, or the
+host's first offered agent. Role entries belong to the role's settings harness -- the row's
+`harness`, else `orchestration.spawn.harness` -- as its model does. If the start uses another
+harness, the role entries are not taken and the start record says so; with no settings harness at
+all, none is taken and the record says so.
+
+**Which harnesses take them.** In this build only Claude's host provider takes extra arguments
+(the host contract's `EXTRA_ARGS_PROVIDER_IDS`); Codex's provider options are structured, and the
+ACP providers (Hermes) and Pi are configured by their command list. So a harness entry for any
+other harness, and a role or per-level row whose own `harness` is any other harness, is refused
+when the settings load, naming the harness, the key and the file.
+
+**Reserved names.** A name that AR, the host or the harness already sets, or that would change the
+harness's authority or its session as a whole, is refused when the settings load, naming the key.
+The list guards the user's own file against mistakes; it is no security boundary, because that file
+is the user's authority. It is kept here and in the code
+(`RESERVED_EXTRA_ARG_NAMES` in `kernel/_agentic_settings_core.py`), and a test compares the two.
+The names come from the Agent SDK 0.3.246's spawn and the Claude Code 2.1.303 CLI's `--help`; the
+host runs `claude` from `PATH`:
+
+<!-- MIK-R192 reserved names: kept in step with RESERVED_EXTRA_ARG_NAMES by a test -->
+```text
+add-dir
+agent
+agents
+allow-dangerously-skip-permissions
+allowed-tools
+allowedTools
+append-system-prompt
+append-system-prompt-file
+background
+bare
+betas
+bg
+brief
+channels
+cloud
+continue
+dangerously-skip-permissions
+debug
+debug-file
+debug-to-stderr
+desktop
+disable-slash-commands
+disallowed-tools
+disallowedTools
+effort
+environment
+exclude-dynamic-system-prompt-sections
+fallback-model
+file
+fork-session
+forward-subagent-text
+from-pr
+hard-fail
+ide
+include-hook-events
+include-partial-messages
+input-format
+json-schema
+managed-settings
+max-budget-usd
+max-thinking-tokens
+max-turns
+mcp-config
+model
+no-session-persistence
+output-format
+permission-mode
+permission-prompts
+permission-prompt-tool
+plugin-dir
+plugin-dir-no-mcp
+plugin-url
+print
+remote-control
+replay-user-messages
+restricted
+resume
+resume-drops-turn
+resume-session-at
+safe-mode
+session-id
+session-mirror
+setting-sources
+settings
+strict-mcp-config
+system-prompt
+system-prompt-file
+system-prompt-snapshot
+task-budget
+teleport
+thinking
+thinking-display
+tmux
+tools
+verbose
+workload
+worktree
+```
+<!-- /MIK-R192 reserved names -->
+
+**Who may state them.** Extra arguments bear on permission, so only the user's own settings file
+carries them, at any of the three places: a repository's `system/settings.json` that states
+`extraArgs` refuses when the settings load, naming the file and the key. A start call is no source
+(`role_start` and the launcher's route take no extra arguments), and a host role carries none. A
+`stepUp` row that states `extraArgs` is refused by name.
+
+**Confined capabilities receive none.** The review presenter -- and the explainer seat built on it
+-- runs with exactly the arguments of its confinement, at its start and at every resume.
+`orchestration.roles.review-presenter.extraArgs`, and the same key per level, is refused when the
+settings load, and a Claude harness entry is never applied to it.
+
+**`paseoRuntime.providers` carries no extra arguments for Claude.** This is the one closure, and it
+is structural. The host merges its configured provider options into every start and every resume,
+and it resumes a stored seat by itself when its chat is shown, without AR. AR cannot check those
+resumes, so the configured map must hold no `extraArgs`: `paseoRuntime.providers.<id>.options.extraArgs`
+and `...params.extraArgs` are refused when the settings load, for the Claude provider and for every
+entry that `extends` it, naming the file, the key and
+`orchestration.harnesses.claude.extraArgs` as the place for extra arguments. AR writes
+`agents.providers` whole from the settings at every provision (`runtime_install`,
+`agents-remember paseo provision`), so a provisioned host holds no such entry. Before each confined
+step AR reads the host's map in two places -- the daemon's `config.json` and the running daemon's
+map through the bridge -- and refuses the step if either holds `extraArgs` for Claude, naming the
+host's configuration file, the arguments and the provision that restores it. The cost of this
+route: the settings cannot give `--chrome` to the Claude chats the developer starts in the host
+himself, outside AR.
+
+**What the record shows.** Each start records every extra argument it received with its source --
+harness entry, role entry or per-level entry, and the settings file -- and lists the role entries it
+did not take. A Claude start also notes `extraArgs` found in the host's provider map, with the
+source "host configuration", and goes on. A start without extra arguments records none.
+
+**The old keys stay unused.** `orchestration.roles.<role>.launchArgs` and
+`orchestration.harnesses.<harness>.argv` remain accepted and unread (MIK-R113 rule 4); an old file
+does not start to apply under this build.
 
 ### orchestration.agentNotifier
 

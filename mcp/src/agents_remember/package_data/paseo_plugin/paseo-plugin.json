@@ -2,6 +2,6 @@
   "id": "ar-plugin",
   "description": "Agents Remember integration for the Paseo runtime that AR provisions.",
   "requirements": {
-    "paseo": ">=0.11.1"
+    "paseo": ">=0.12.0"
   }
 }

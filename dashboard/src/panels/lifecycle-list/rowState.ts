@@ -1,5 +1,10 @@
 import type { TaskEntry } from '../../types/projection';
-import { statusLabel, taskStatusKey } from '../detail-panel/pageParts';
+import {
+  limitLines,
+  statusLabel,
+  taskStatusReading,
+  type TaskStatusKey,
+} from '../detail-panel/pageParts';
 import { docProgress } from './docProgress';
 
 /** Own work precedes waiting work; authored order breaks ties in each band. */
@@ -44,8 +49,20 @@ export function progressFigure(entry: TaskEntry): string {
   return progress.total > 0 ? `${progress.done}/${progress.total}` : '';
 }
 
-export function rowHover(entry: TaskEntry): string {
+/** The served limit, when the row's word is limited at this instant: one line per seat. */
+function limitHoverLines(entry: TaskEntry, status: TaskStatusKey): string[] {
+  if (status !== 'limited' || !entry.providerLimit) return [];
+  return limitLines(entry.providerLimit);
+}
+
+/** The row's hover at the display instant the row's word and mark read (MIK-R190 rule 13).
+ *
+ * Without an instant a clockless caller still names the served seats; with one, a window the
+ * clock has reached puts the row back to the paused state it already stated, in the hover too.
+ */
+export function rowHover(entry: TaskEntry, now?: number | null): string {
   const { progress, progressNoun } = docProgress(entry);
+  const reading = taskStatusReading(entry, now);
   const extra = [
     progress.abandoned ? `${progress.abandoned} abandoned` : '',
     progress.discarded ? `${progress.discarded} discarded` : '',
@@ -57,7 +74,9 @@ export function rowHover(entry: TaskEntry): string {
   return [
     entry.title,
     entry.summary ? '' : 'This task document is not authored yet.',
-    `State: ${statusLabel(taskStatusKey(entry))}`,
+    `State: ${statusLabel(reading.shown)}`,
+    // MIK-R190 rule 13: a limited row says who waits beside the state it already stated.
+    ...limitHoverLines(entry, reading.shown),
     `Stage: ${entry.stage}`,
     entry.reference ? `Repo: ${entry.reference.repository}` : '',
     entry.summary?.currentStep ? `Current step: ${entry.summary.currentStep}` : '',

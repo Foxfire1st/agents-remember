@@ -21,6 +21,7 @@ from agents_remember.cli.paseo_bridge import (
     require_bridge_runtime,
 )
 from agents_remember.cli.role_instructions import launch_choice_metadata
+from agents_remember.cli.role_launch_defaults import extra_args_plan
 from agents_remember.cli.role_step_up import label_step_up_choices
 from agents_remember.kernel._agentic_settings_core import (
     NON_PERMISSION_FEATURES,
@@ -350,8 +351,19 @@ def resolve_agent_selection(
     )
     if "service_tier" in features:
         options["serviceTier"] = features["service_tier"]
+    # MIK-R192: the extra harness arguments this start takes, with where each came from, and the
+    # role entries it does not take. They are handed to the host with the create request and
+    # recorded in the start's receipt.
+    _attach_extra_args(options, defaults, agent_id)
     label_step_up_choices(options, defaults)
     return agent_id, options
+
+
+def _attach_extra_args(options: dict[str, Any], defaults: dict[str, Any], agent_id: str) -> None:
+    """Add the extra harness arguments this start takes, if it takes any (MIK-R192)."""
+    extra_args = extra_args_plan(defaults.get("extraArgs"), agent_id)
+    if extra_args:
+        options["extraArgs"] = extra_args
 
 
 def _setting_value(

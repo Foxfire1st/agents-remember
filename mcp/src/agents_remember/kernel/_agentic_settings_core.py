@@ -20,6 +20,7 @@ from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
 )
+from agents_remember.kernel.primitives.paseo_host_contract import EXTRA_ARGS_PROVIDER_IDS
 from agents_remember.kernel.primitives.user_settings_location import (
     UserSettingsLocationError,
     require_user_settings_path,
@@ -120,8 +121,101 @@ KNOWN_ROLE_LAUNCH_FIELDS = frozenset(
         "mode",
         "featureValues",
         "notes",
+        "extraArgs",
     }
 )
+# MIK-R192: the harnesses whose host provider takes extra command-line arguments in this build,
+# taken from the host contract; a harness entry, a role row or a per-level row that names any
+# other harness is refused when the settings load.
+EXTRA_ARGS_HARNESSES = frozenset(EXTRA_ARGS_PROVIDER_IDS)
+# MIK-R192 rule 2: names that AR, the host or the harness already sets, or that would change the
+# harness's authority or its session as a whole. Kept in step with the reference page by a test
+# that reads the list out of docs/reference/settings-json.md. It guards the user's own file
+# against mistakes; it is no security boundary, because that file is the user's authority.
+RESERVED_EXTRA_ARG_NAMES = frozenset(
+    {
+        # Set by the harness's spawn or by AR.
+        "model",
+        "fallback-model",
+        "effort",
+        "thinking",
+        "max-thinking-tokens",
+        "thinking-display",
+        "betas",
+        "permission-mode",
+        "permission-prompt-tool",
+        "resume",
+        "continue",
+        "session-id",
+        "fork-session",
+        "resume-session-at",
+        "resume-drops-turn",
+        "session-mirror",
+        "no-session-persistence",
+        "mcp-config",
+        "strict-mcp-config",
+        "setting-sources",
+        "managed-settings",
+        "channels",
+        "allowedTools",
+        "allowed-tools",
+        "disallowedTools",
+        "disallowed-tools",
+        "tools",
+        "agent",
+        "input-format",
+        "output-format",
+        "include-partial-messages",
+        "include-hook-events",
+        "json-schema",
+        "verbose",
+        "debug",
+        "debug-file",
+        "debug-to-stderr",
+        "hard-fail",
+        "max-turns",
+        "max-budget-usd",
+        "task-budget",
+        "plugin-dir-no-mcp",
+        "workload",
+        "replay-user-messages",
+        # Changing the harness's authority or its session as a whole.
+        "dangerously-skip-permissions",
+        "allow-dangerously-skip-permissions",
+        "permission-prompts",
+        "print",
+        "settings",
+        "add-dir",
+        "agents",
+        "plugin-dir",
+        "plugin-url",
+        "system-prompt",
+        "system-prompt-file",
+        "append-system-prompt",
+        "append-system-prompt-file",
+        "system-prompt-snapshot",
+        "remote-control",
+        "bare",
+        "safe-mode",
+        "restricted",
+        "worktree",
+        "tmux",
+        "cloud",
+        "teleport",
+        "bg",
+        "background",
+        "ide",
+        "brief",
+        "from-pr",
+        "file",
+        "desktop",
+        "environment",
+        "disable-slash-commands",
+        "exclude-dynamic-system-prompt-sections",
+        "forward-subagent-text",
+    }
+)
+
 # R71 rule 20: unknown features carry permission authority until explicitly classified.
 KNOWN_ROLE_KNOB_FIELDS = KNOWN_ROLE_LAUNCH_FIELDS | {"stepUp"}
 NON_PERMISSION_FEATURES = frozenset({"service_tier", "fast_mode"})
@@ -206,11 +300,26 @@ class RoleChoiceOrigin:
 
 
 @dataclass(frozen=True)
+class ExtraArgument:
+    """One extra harness argument as the settings state it, with the key and file that state it.
+
+    ``value`` is the flag's value (sent as ``--name value``), ``None`` for the bare flag, or
+    ``False`` for an entry that removes a name inherited from a lower layer and is never sent.
+    """
+
+    name: str
+    value: str | bool | None
+    key: str
+    source: str
+
+
+@dataclass(frozen=True)
 class RoleKnobs:
     """One role's knob overrides (``orchestration.roles.<role>``); ``None`` = role-file default.
 
     ``harness``/``model``/``effort`` are free strings HERE. A launch validates provider and model
-    choices against the host's catalog.
+    choices against the host's catalog. ``extra_args`` keeps each layer's ``false`` marker until a
+    launch lays the role entry over the harness entry (MIK-R192).
     """
 
     harness: str | None = None
@@ -220,6 +329,7 @@ class RoleKnobs:
     mode: str | None = None
     feature_values: dict[str, str | bool] = field(default_factory=dict)
     notes: str | None = None
+    extra_args: dict[str, str | bool | None] = field(default_factory=dict)
     origins: dict[str, RoleChoiceOrigin] = field(default_factory=dict, compare=False, repr=False)
     step_up: RoleStepUp | None = None
 
@@ -312,6 +422,9 @@ class AgenticSettings:
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
     landing: LandingSettings = field(default_factory=LandingSettings)
     quality_gate: QualityGateSettings = field(default_factory=QualityGateSettings)
+    # MIK-R192: the extra harness arguments stated for every role of one harness, keyed by harness
+    # id and then by flag name, each with the key and file that state it.
+    harness_extra_args: dict[str, dict[str, ExtraArgument]] = field(default_factory=dict)
     # MIK-R117: the bound on the characters of one role_message text, read per
     # call so a changed number holds for the next call without a restart.
     role_message_limit: int = DEFAULT_ROLE_MESSAGE_LIMIT
@@ -350,6 +463,7 @@ class AgenticSettings:
             mode=override.mode or base.mode,
             feature_values={**base.feature_values, **override.feature_values},
             notes=override.notes or base.notes,
+            extra_args={**base.extra_args, **override.extra_args},
             origins={**base.origins, **override.origins},
             step_up=override.step_up or base.step_up,
         )

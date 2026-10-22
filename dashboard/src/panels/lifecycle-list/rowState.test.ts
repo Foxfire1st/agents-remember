@@ -1,6 +1,38 @@
 import { expect, it } from 'vitest';
+import { formatLimitTime, taskStatusKey } from '../detail-panel/pageParts';
+import type { ProviderLimit } from '../../types/projection';
 import { progressFigure, rowHover, shortTaskId } from './rowState';
 import { hierarchy, task, taskMap } from './test-utils';
+
+const WINDOW: ProviderLimit = {
+  until: '2026-10-21T12:00:00+02:00',
+  seats: [
+    {
+      role: 'worker',
+      agentId: '0f0c1d2e-0000-4000-8000-000000000001',
+      source: 'Claude',
+      account: 'Max 20x',
+      window: 'Session',
+      resetsAt: '2026-10-21T12:00:00+02:00',
+    },
+  ],
+};
+
+it('keeps the row state line and adds each limited seat under it', () => {
+  const entry = task('L', { providerLimit: WINDOW });
+  expect(taskStatusKey(entry)).toBe('limited');
+  const lines = rowHover(entry).split('\n');
+  const state = lines.indexOf('State: rate limited');
+  expect(state).toBeGreaterThan(-1);
+  // The limit joins the hover the row already had; it does not replace it.
+  expect(lines).toContain('Stage: started');
+  expect(lines.slice(state + 1, state + 2)).toEqual([
+    `worker · 0f0c1d2e-0000-4000-8000-000000000001 · Claude · Max 20x · Session · resets ${formatLimitTime(WINDOW.until)}`,
+  ]);
+  // A task with no served limit keeps its hover exactly as it was.
+  expect(rowHover(task('plain'))).toContain('State: paused');
+  expect(rowHover(task('plain'))).not.toContain('resets ');
+});
 
 it('formats only served identity, counts and status', () => {
   const { master, leaf, entries } = hierarchy();

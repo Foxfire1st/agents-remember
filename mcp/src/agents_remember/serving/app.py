@@ -128,6 +128,7 @@ def _build_serving_runtime(
         review_memory_root=collaborators.review_memory_root,
         review_trees_shutdown=collaborators.review_trees_shutdown,
         background_ledger=ledger,
+        usage_read=collaborators.usage_read,
     )
     # The serving daemon samples labeled provider
     # containers on its own cadence (decoupled from the 1s projection tick) into

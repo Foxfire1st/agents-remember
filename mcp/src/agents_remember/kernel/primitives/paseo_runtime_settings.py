@@ -17,13 +17,26 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
+from agents_remember.kernel.primitives.paseo_host_contract import (
+    EXTRA_ARGS_PROVIDER_IDS,
+    PASEO_VERSION,
+)
+from agents_remember.kernel.primitives.user_settings_location import (
+    UserSettingsLocationError,
+    user_settings_path,
+)
 
 KNOWN_PASEO_RUNTIME_FIELDS = frozenset(
     {"installPrefix", "home", "listen", "version", "providers", "embed"}
 )
 KNOWN_PASEO_EMBED_FIELDS = frozenset({"dashboardOrigin", "frameBaseUrl"})
 NO_PASEO_RUNTIME_CONFIGURED = "no Paseo runtime configured"
+# MIK-R192 rule 8: the host hands its configured provider options to every start and every resume,
+# and resumes a stored seat by itself when its chat is shown. So the map AR writes into a
+# provisioned host carries no extra arguments for a provider whose entry carries them, nor for an
+# entry that extends it; the user's extra arguments belong at this orchestration key instead.
+EXTRA_ARGS_PROVIDER_ID = next(iter(EXTRA_ARGS_PROVIDER_IDS), "")
+EXTRA_ARGS_PLACE = f"orchestration.harnesses.{EXTRA_ARGS_PROVIDER_ID}.extraArgs"
 
 _LISTEN_ADDRESS = re.compile(r"(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):(?P<port>\d{1,5})")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -154,7 +167,49 @@ def _provider_entries(value: object) -> dict[str, dict[str, Any]]:
             raise PaseoRuntimeSettingsError(
                 "paseoRuntime.providers must map each non-empty provider id to an object"
             )
+    _refuse_configured_extra_args(value)
     return dict(value)
+
+
+def _refuse_configured_extra_args(entries: dict[str, dict[str, Any]]) -> None:
+    """Refuse ``extraArgs`` in the configured options of that provider and of any entry extending it."""
+    if not EXTRA_ARGS_PROVIDER_ID:
+        return
+    for provider_id, entry in entries.items():
+        if not _reaches_extra_args_provider(provider_id, entries, frozenset()):
+            continue
+        for block_name in ("options", "params"):
+            block = entry.get(block_name)
+            if isinstance(block, dict) and "extraArgs" in block:
+                raise PaseoRuntimeSettingsError(
+                    f"paseoRuntime.providers.{provider_id}.{block_name}.extraArgs is refused in "
+                    f"{_settings_file_text()}: the host lays its configured provider options over "
+                    "every start and every resume, including a confined presenter that AR cannot "
+                    f"check. State extra arguments at {EXTRA_ARGS_PLACE} in the user's settings "
+                    "instead."
+                )
+
+
+def _reaches_extra_args_provider(
+    provider_id: str, entries: dict[str, dict[str, Any]], seen: frozenset[str]
+) -> bool:
+    """Whether an entry is that provider or is one the chain of ``extends`` reaches it from."""
+    if provider_id == EXTRA_ARGS_PROVIDER_ID:
+        return True
+    if provider_id in seen:
+        return False
+    entry = entries.get(provider_id)
+    parent = entry.get("extends") if isinstance(entry, dict) else None
+    if not isinstance(parent, str) or not parent:
+        return False
+    return _reaches_extra_args_provider(parent, entries, seen | {provider_id})
+
+
+def _settings_file_text() -> str:
+    try:
+        return str(user_settings_path())
+    except UserSettingsLocationError:
+        return "the user's settings file"
 
 
 def _embed_list(value: object) -> tuple[PaseoEmbedEntry, ...]:
