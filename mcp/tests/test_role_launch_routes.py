@@ -17,6 +17,7 @@ from agents_remember.cli import (
     role_launch_receipts,
     role_launch_routes,
 )
+from agents_remember.cli.role_handover_file import planned_handover_file
 from agents_remember.cli.role_launch_preparation import (
     ROLE_START_OPERATIONS,
 )
@@ -154,6 +155,12 @@ class MessageBindingProjectionTests(unittest.TestCase):
             reference = role_launch_receipts._message_binding_projection_reference(
                 config, request_id, binding
             )
+            # The complete hand-over the real builder returns with its message: its reference and
+            # the text that file holds, planned by the product's own planner (MIK-R193 rule 2).
+            handover = {"schema": "ar-role-handover/v1", "requestId": str(request_id)}
+            handover_file, handover_file_content = planned_handover_file(
+                (root / "report.md").as_posix(), handover
+            )
             prepared = {
                 "prompt": "prepared prompt",
                 "capsuleOperation": "planning",
@@ -161,6 +168,8 @@ class MessageBindingProjectionTests(unittest.TestCase):
                 "taskDocumentDigest": "task-document-digest",
                 "taskReportPath": (root / "report.md").as_posix(),
                 "canonicalTaskReportPath": (root / "report.md").as_posix(),
+                "handoverFile": handover_file,
+                "handoverFileContent": handover_file_content,
                 "messageBindingProjection": {
                     "requestId": str(request_id),
                     "binding": binding,

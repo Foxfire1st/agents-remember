@@ -1,10 +1,11 @@
 """The product's one record of a provider limit, and how a task shows it.
 
 MIK-R190 rule 8 makes ``<PASEO_HOME>/agents-remember/provider-limits.json`` the
-only place a limit is kept. Its one writer is the product (``serving/paseo``);
-every reader in rules 9 to 13 reads that file and nothing else stores a limit.
-This module is the read side and sits at ``observer`` so that the one status
-function can use it without an upward import (rule 19).
+only place a limit is kept. Its one writer is the product's runtime, in
+``serving.paseo.provider_limits``; every reader in rules 9 to 13 reads that file
+and nothing else stores a limit. This module is the read side and sits at
+``observer`` so that the one status function can use it without an upward import
+(rule 19).
 
 The file holds, per report id, the moment work may resume, the report's source
 and account labels, the exhausted windows and when the fact was observed; and,

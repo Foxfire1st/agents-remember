@@ -101,6 +101,20 @@ HANDOVER_TEMPLATE_FILES = (
     "templates/conversation-handover-packet.md",
 )
 
+#: The one operation whose messaging passage MIK-R193 rule 8 keeps once, in the Worker role it is
+#: delivered with: the delivered Worker text is that role plus this operation, so its markers are
+#: read there (MIK-R203 rule 3). Every other surface file states them in its own words.
+DELIVERED_WITH_WORKER_ROLE = "operations/implementation.md"
+
+
+def delivered_text(root: Path, relative: str, text: str) -> str:
+    """What a seat reading one surface file actually receives (MIK-R203 rule 3)."""
+
+    if relative != DELIVERED_WITH_WORKER_ROLE:
+        return text
+    return f"{text}\n{(root / 'roles/worker.md').read_text()}"
+
+
 #: The roles whose handover the launch code compiles (seven public capsules).
 COMPILED_ROLES = (
     "architect",
@@ -268,7 +282,9 @@ def scan(roots: list[Path], files: tuple[str, ...]) -> tuple[list[str], list[str
             text = path.read_text()
             short = f"{label}/{relative}"
             detail = curator_message_step(root) if relative == "roles/curator.md" else ""
-            for marker in missing_markers(relative, text):
+            # The operation's own file may leave the passage to the role it is delivered with
+            # (MIK-R203 rule 3); the forbidden scan still reads this file's own lines only.
+            for marker in missing_markers(relative, delivered_text(root, relative, text)):
                 if marker in {"`body`", "`attach`"} and marker in detail:
                     continue
                 missing.append(f"{short}: missing {marker!r}")

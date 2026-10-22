@@ -66,8 +66,11 @@ def preflight(path: Path, body: bytes, refusal: str) -> None:
     except OSError as error:
         raise ValueError(refusal) from error
     if not stat.S_ISREG(mode):
-        # A link, a directory or a device at the artifact's own name is never written through.
-        raise ValueError("The task handover artifact path is not a regular file.")
+        # A link, a directory or a device at the artifact's own name is never written through,
+        # and the caller's words say what to put right: the takeover material, the artifact and
+        # the complete hand-over each pass a refusal that names their own file and its remedy
+        # (MIK-R193 rule 4), so a fixed sentence here would drop what the caller said.
+        raise ValueError(refusal)
     holds_exactly(path, body, refusal)
 
 
