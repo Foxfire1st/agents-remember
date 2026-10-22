@@ -81,8 +81,10 @@ MEMORY_MESSAGE = "260918-TSIP-L9: the extension leaf's memory"
 # This module drives a whole master lifecycle in-process, so the unit population is where it
 # runs -- and the unit population is over its declared rail. That is not this module's defect and
 # it is not this module's edit to make: the budget surface is `260918-TSIP-L7`'s (the raise to
-# 3000/600), `260918-TSIP-L13`'s (the developer's second ruling, 4000/1000) and now
-# `260928-MIK-L146`'s (the developer's word D226, 5000/1000). Named, counted,
+# 3000/600), `260918-TSIP-L13`'s (the developer's second ruling, 4000/1000),
+# `260928-MIK-L146`'s (the developer's word D226, 5000/1000) and `260928-MIK-L193`'s (the
+# developer's word D460, unit lane 6000 -> 10000 with the 1000 integration rail unchanged).
+# Named, counted,
 # with the owner and the rule -- repaired => remove the entry in the same change; never delete the
 # constant, never widen it (the `ENVELOPE_LOSING_RAISERS` shape in `test_tool_entry_point_sweep.py`).
 #
@@ -90,11 +92,11 @@ MEMORY_MESSAGE = "260918-TSIP-L9: the extension leaf's memory"
 # below is a plain assertion that the declaration is at least the ruling. While the raise is
 # still in flight it reports that fact instead of failing on someone else's pending edit.
 # ---------------------------------------------------------------------------------------
-RULED_UNIT_BUDGET = 6000
+RULED_UNIT_BUDGET = 10000
 RULED_INTEGRATION_BUDGET = 1000
 BUDGET_RAIL_PENDING = (
-    "260928-MIK-L146",
-    "the declared pair is below the developer's ruled 6000/1000; the ceiling raise has not landed "
+    "260928-MIK-L193",
+    "the declared pair is below the developer's ruled 10000/1000; the ceiling raise has not landed "
     "on this base and `mcp/tests/test_suite_budget.py` is red for it",
 )
 

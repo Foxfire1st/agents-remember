@@ -480,6 +480,12 @@ class BudgetAgreementTests(unittest.TestCase):
         Removing an entry from ``STALE_CLAIMS`` on repair is the rule; leaving nothing behind would
         turn a repair into a gap. This is the other direction: the live sentence must state the
         DECLARED pair, and it is the one site the sweep found that this leaf owns.
+
+        The SENTENCE is the one the card actually carries -- it opens "Ordinary development
+        supports isolated host pytest" and states the pair as "<n> unit and <n> integration cases"
+        beside its ``pyproject.toml`` line citation. ``260928-MIK-L193`` reconciled this sentence
+        contract: the expectation is written to the card's own words, so the test and the card
+        state the same pair, and a raise that only moves the numbers keeps both true.
         """
         root = live_onboarding_root()
         if root is None:
@@ -493,16 +499,15 @@ class BudgetAgreementTests(unittest.TestCase):
             (
                 line
                 for line in text.splitlines()
-                if line.startswith("Ordinary Python development is supported directly")
+                if line.startswith("Ordinary development supports isolated host pytest")
             ),
             "",
         )
         self.assertTrue(sentence, "T56: the repaired sentence is gone from mcp/overview.md")
-        self.assertIn(f"`unit_case_budget = {declared['unit']}`", sentence, "T56: unit missing")
         self.assertIn(
-            f"`integration_case_budget = {declared['integration']}`",
+            f"{declared['unit']:,} unit and {declared['integration']:,} integration cases",
             sentence,
-            "T56: integration missing",
+            "T56: the declared pair is not stated",
         )
         lines = self.declared_lines()
         self.assertIn(
@@ -514,7 +519,7 @@ class BudgetAgreementTests(unittest.TestCase):
 
     def test_the_declaration_is_the_ceiling_this_module_screens(self) -> None:
         """The authority is one file, and the screen reads it rather than a copy."""
-        self.assertEqual(self.declared(), {"unit": 6000, "integration": 1000})
+        self.assertEqual(self.declared(), {"unit": 10000, "integration": 1000})
         budget_test = (MCP_TESTS / "test_suite_budget.py").read_text("utf-8")
         self.assertIn(f"STUB_UNIT = {self.declared()['unit']}", budget_test)
         self.assertIn(f"STUB_INTEGRATION = {self.declared()['integration']}", budget_test)
