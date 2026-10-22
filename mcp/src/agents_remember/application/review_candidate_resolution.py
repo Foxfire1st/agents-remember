@@ -194,9 +194,13 @@ def resolve_review_candidate(
         # cycle with a type annotation on it.
         from agents_remember.application.review_committed_leaf import (  # noqa: PLC0415 - cycle
             resolve_committed_leaf_review,
+            resolve_recorded_leaf_review,
         )
 
-        return resolve_committed_leaf_review(config, repository_id, master, leaf_id)
+        # ``recorded`` names *which record* the caller reads (ICR-R12), and that record is the leaf's
+        # published comparison, never the pair its enclosure records as delivered (MIK-R195).
+        resolve = resolve_recorded_leaf_review if recorded else resolve_committed_leaf_review
+        return resolve(config, repository_id, master, leaf_id)
     if not contract.code_base_commit:
         return refusal(
             "candidate_unresolved",

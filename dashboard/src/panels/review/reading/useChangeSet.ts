@@ -20,6 +20,7 @@ import {
   useChangeSetCards,
   useReviewTrees,
   type ChangeSetCardsRead,
+  type ReviewDeliveredComparison,
   type ReviewTreeComparison,
   type ReviewTreesRead,
 } from '../../../data/reviewTrees';
@@ -40,10 +41,14 @@ import { useTreeView } from '../triageViewPreference';
 const REVIEW_SUMMARY_FACTS = 'review-page';
 
 export interface ChangeSetReads {
-  // The comparison on screen, the leaf's latest number, and whether an older one is shown read-only.
+  // The comparison on screen, the number the review opens by default (a landed leaf's delivered
+  // pair, MIK-R195), the leaf's highest recorded number, and whether another one is shown read-only.
   number: number | undefined;
+  resolved: number | undefined;
   latest: number | undefined;
   older: boolean;
+  // Whether the comparison on screen is what the leaf delivered, and that pair's identities.
+  delivered: ReviewDeliveredComparison | null;
   summary: IntentSummaryRead;
   leafTrees: ReviewTreesRead | null;
   comparison: ReviewTreeComparison | null;
@@ -91,15 +96,36 @@ function modelCards(
   return { state: 'ready', entries: read.entries, comparison: named, memory: read.memory };
 }
 
+// What the page says about delivery when the read that carries it did not answer. A refused or
+// failed leaf-wide read used to collapse to `null`, which reads on the page exactly like a matching
+// pair: nothing said. It is stated instead, with no link, because the delivered default cannot be
+// offered from a comparison whose own read failed (MIK-R195 F07).
+const UNREADABLE_DELIVERY: string =
+  'The delivery this comparison should be checked against could not be read, so whether it is the pair the leaf delivered cannot be said here.';
+
+function deliveredOf(
+  read: ReviewTreesRead | null,
+  trees: ReturnType<typeof matchingTreeRead>,
+  number: number | undefined,
+): ReviewDeliveredComparison | null {
+  if (trees) return trees.delivered ?? null;
+  if (read?.phase === 'unavailable' && number !== undefined)
+    return { state: 'unavailable', statement: UNREADABLE_DELIVERY, shown: number };
+  return null;
+}
+
 function useComparisonNumbers(frame: ReviewPayload | null, chosen: number | null) {
-  const latest = frame ? treeComparisonNumber(frame.limitations) : undefined;
-  const number = chosen ?? latest;
-  return { latest, number, older: chosen !== null && latest !== undefined && chosen !== latest };
+  // The task context names the comparison the review opens by default; on a landed leaf that is the
+  // delivered pair its own resolution bound, not necessarily the highest recorded number (MIK-R195).
+  const resolved = frame ? treeComparisonNumber(frame.limitations) : undefined;
+  const number = chosen ?? resolved;
+  return { resolved, number, older: chosen !== null && resolved !== undefined && chosen !== resolved };
 }
 
 export function useChangeSet(input: ChangeSetInput): ChangeSetReads {
   const { repo, master, leaf, catalogue, walked } = input;
-  const { latest, number, older } = useComparisonNumbers(input.frame, input.chosen);
+  const first = useComparisonNumbers(input.frame, input.chosen);
+  const { number, older } = first;
   const summary = useIntentReviewSummary(repo, master, leaf, REVIEW_SUMMARY_FACTS, number, number !== undefined);
   const leafTrees = useReviewTrees(repo, master, leaf, { comparison: number }, number !== undefined);
   const lane = useReviewLane(repo, master, leaf, number);
@@ -107,6 +133,9 @@ export function useChangeSet(input: ChangeSetInput): ChangeSetReads {
   const view = useTreeView();
   const trees = matchingTreeRead(leafTrees, number);
   const comparison = trees?.comparison ?? null;
+  // The menu lists every number the leaf recorded; the trees answer names the highest of them.
+  const latest = trees?.latest ?? first.resolved;
+  const delivered = deliveredOf(leafTrees, trees, number);
   const read4Settled = leafTrees !== null && leafTrees.phase !== 'loading';
   const base = useMemo<Omit<ChangeSetInputs, 'cards'>>(
     () => ({
@@ -130,5 +159,5 @@ export function useChangeSet(input: ChangeSetInput): ChangeSetReads {
     () => changeSetModel({ ...base, cards }, sort, view, { selection: input.selection, walked }),
     [base, cards, sort, view, input.selection, walked],
   );
-  return { number, latest, older, summary, leafTrees, comparison, lane, cards, model };
+  return { number, resolved: first.resolved, latest, older, delivered, summary, leafTrees, comparison, lane, cards, model };
 }

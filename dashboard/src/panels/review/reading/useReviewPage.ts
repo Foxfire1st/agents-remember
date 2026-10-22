@@ -29,6 +29,9 @@ export interface PageReads {
   master: string;
   leaf: string;
   history?: ReviewHistory;
+  // Leave the recorded frame the target named, so the page reads its own default again (the landed
+  // leaf's delivered comparison). The delivered link is that request (MIK-R195 F06).
+  leaveHistory: () => void;
   navigation: ReviewNavigation;
   workspace: WorkspaceState;
   // The last admitted answer of the task context, and the answer for the subject on screen.
@@ -158,15 +161,28 @@ export function useReviewPage(reads: PageReads) {
     () => [...blockStops(changeSet.model), ...laneStops(laneHunks(changeSet.lane, lanes.files), lanePaths(changeSet.lane))],
     [changeSet.model, changeSet.lane, lanes.files],
   );
-  const latest = changeSet.latest;
-  // Another number shows that comparison read-only, unselected (rule 10, W17).
+  // The comparison the page opens by default: the leaf's resolved one, which a landed leaf's
+  // delivered pair is (MIK-R195 rule 2). Any other number shows that comparison read-only (W17).
+  const resolved = changeSet.resolved;
+  // A number names a comparison inside the frame the page was opened in; it is not the same request
+  // as "open the delivered pair". The older-comparison control passes the number this frame resolves
+  // to, which in a recorded frame is the recorded comparison, so it keeps its own meaning here.
   const chooseComparison = useCallback(
-    (number: number) => {
-      setChosen(number === latest ? null : number);
+    (number: number | null) => {
+      setChosen(number === null || number === resolved ? null : number);
       select(null, { keepTree: false });
     },
-    [latest, select, setChosen],
+    [resolved, select, setChosen],
   );
+  // The delivered view is the page's own default, and every control that opens *it* -- the mismatch
+  // line and now the menu's delivered row (MIK-R195 F06) -- leaves a recorded frame as well as
+  // clearing the chosen number. Clearing only the number left the page reading the recorded
+  // comparison the target had asked for.
+  const leaveHistory = reads.leaveHistory;
+  const chooseDelivered = useCallback(() => {
+    leaveHistory();
+    chooseComparison(null);
+  }, [chooseComparison, leaveHistory]);
   // A tree group row opens that group in the column and brings it into view (rule 5).
   const openWorkspaceGroup = workspace.openGroup;
   const arm = scroll.arm;
@@ -178,7 +194,7 @@ export function useReviewPage(reads: PageReads) {
     },
     [openWorkspaceGroup, arm],
   );
-  return { chosen, chooseComparison, walk, walked, scroller, selection, select, changeSet, outsideLine, lanes, stops, openGroup };
+  return { chosen, chooseComparison, chooseDelivered, walk, walked, scroller, selection, select, changeSet, outsideLine, lanes, stops, openGroup };
 }
 
 export type ReviewPageState = ReturnType<typeof useReviewPage>;

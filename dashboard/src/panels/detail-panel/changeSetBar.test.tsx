@@ -81,11 +81,12 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
     },
   });
 
-  it('offers the Intent review for a closed leaf, bound to its recorded comparison', async () => {
+  it('offers the Intent review for a closed leaf, bound to the comparison it delivered', async () => {
     // The packet's defect: a cleaned leaf's Intent Review answered candidate_not_live. The entry that
-    // opens it must exist for a leaf with no live enclosure, and it must name the record it is
-    // addressed to -- the leaf's own durable generation -- rather than the live candidate. It is one
-    // compact control with the comparison's changed-intent counts and no subject picker beside it.
+    // opens it must exist for a leaf with no live enclosure, and it must ask for the page's own
+    // default -- on a landed leaf the pair it delivered, which is not necessarily its last numbered
+    // record (MIK-R195). It is one compact control with the comparison's changed-intent counts and
+    // no subject picker beside it.
     stubCounters(summary(2, 1));
     closedLeaf();
     const onOpenChangeSet = vi.fn();
@@ -103,13 +104,13 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
       repo: 'agents-remember',
       master: '260628_operations-integration',
       leaf: '260628-L4a',
-      review: { historical: true },
+      review: {},
     });
   });
 
   it("keeps the closed leaf's Intent review when its knowledge is unavailable", async () => {
     // The summary is a label and never the gate: a closed leaf whose record holds no knowledge still
-    // opens the review on its recorded comparison (the task-context entry).
+    // opens the review on its own default comparison (the task-context entry).
     stubCounters({
       state: 'unavailable',
       operation: 'read_review_intent_summary',
@@ -134,7 +135,7 @@ describe('DetailPanel doc-reader change-set bar (L4a)', () => {
       repo: 'agents-remember',
       master: '260628_operations-integration',
       leaf: '260628-L4a',
-      review: { historical: true },
+      review: {},
     });
   });
 

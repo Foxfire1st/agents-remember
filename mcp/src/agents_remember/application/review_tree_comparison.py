@@ -53,7 +53,10 @@ from agents_remember.application.knowledge_worklist.base_cache import (
     default_base_cache_directory,
 )
 from agents_remember.application.knowledge_worklist.leaf import paired_memory_commit
-from agents_remember.kernel.atomic_write import atomic_write_bytes
+from agents_remember.application.review_comparison_publication import (
+    publication_refusal,
+    publish_comparison_record,
+)
 from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
@@ -675,13 +678,20 @@ def _recorded(
     if pinned is not None:
         return pinned
     path = directory / f"{number}.json"
-    if path.is_file():
-        # A concurrent reader of the very same new comparison recorded it first (MIK-R42): its
-        # record is the comparison, and it is the one every reader answers with.
+    published = publish_comparison_record(
+        path, canonical_json_bytes(record.model_dump(mode="json", by_alias=True))
+    )
+    if not published:
+        # Another process published this number first. A record is immutable, so the bytes that won
+        # are the comparison: this reader answers with that record, never with a second write of the
+        # same number (MIK-R195 F05). A number now naming other trees is refused, not overwritten.
         raced = comparison_records(contract.task_root, draft.leaf_id)
-        if raced and raced[-1].number == number and raced[-1].same_trees(draft):
-            return raced[-1], path
-    atomic_write_bytes(path, canonical_json_bytes(record.model_dump(mode="json", by_alias=True)))
+        winner = (
+            raced[-1]
+            if raced and raced[-1].number == number and raced[-1].same_trees(draft)
+            else None
+        )
+        return (winner, path) if winner is not None else publication_refusal(draft.leaf_id, number)
     return record, path
 
 

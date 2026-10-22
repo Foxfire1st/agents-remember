@@ -11,6 +11,7 @@ import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components';
 import { css } from '../../../../styled-system/css';
 import { AddToTray, addToTrayHost } from '../../../tray/AddToTray';
 import type { TrayPickInput } from '../../../tray/types';
+import type { ReviewDeliveredComparison } from '../../../data/reviewTrees';
 import { shortLeafId } from '../ReviewHeader';
 import { localTime } from './statusChipModel';
 
@@ -81,13 +82,20 @@ export interface ComparisonSelectorProps {
   leaf: string;
   // The number on screen; null until the trees answer names one.
   shown: number | null;
+  // The comparison the page opens by default: a landed leaf's delivered pair (MIK-R195 rule 2).
+  resolved: number | null;
+  // The pair the leaf delivered, when its enclosure records one; its row opens the default view.
+  delivered: Pick<ReviewDeliveredComparison, 'state' | 'comparison'> | null;
   // When the number on screen was recorded (the trees answer's `recorded_at`); null until it is read.
   recordedAt: string | null;
   // The reader's current date, for the recorded time's form (statusChipModel.ts `localTime`).
   now: Date;
-  // The leaf's latest recorded number; the list is 1 … latest.
+  // The leaf's highest recorded number; the list is 1 … latest.
   latest: number | null;
-  onChoose: (number: number) => void;
+  onChoose: (number: number | null) => void;
+  // The delivered row's own request: open the pair the leaf delivered, which is the page's default
+  // and not one of the frame's numbers (MIK-R195 F06).
+  onChooseDelivered: () => void;
   pick: TrayPickInput | null;
   // The selector's button, which the status popover hangs from as well (StatusChip.tsx).
   buttonRef?: Ref<HTMLButtonElement>;
@@ -97,13 +105,17 @@ interface OptionProps {
   number: number;
   shown: number | null;
   latest: number | null;
+  delivered: number | undefined;
   recordedAt: string | null;
   now: Date;
-  choose: (number: number) => void;
+  choose: (number: number | null) => void;
 }
 
-// One number's row: the number, its recorded time where a read gives it, and its state.
-function ComparisonOption({ number, shown, latest, recordedAt, now, choose }: OptionProps) {
+// One number's row: the number, its recorded time where a read gives it, and its state. The number
+// whose four trees are the delivered pair says so rather than "latest": a landed leaf's delivery need
+// not be its highest record (MIK-R195 rule 3).
+function ComparisonOption({ number, shown, latest, delivered, recordedAt, now, choose }: OptionProps) {
+  const state = number === delivered ? 'delivered' : number === latest ? 'latest' : 'read-only';
   return (
     <li>
       <button
@@ -116,19 +128,57 @@ function ComparisonOption({ number, shown, latest, recordedAt, now, choose }: Op
       >
         <span>#{number}</span>
         <span>{number === shown && recordedAt ? localTime(recordedAt, now) : ''}</span>
-        <span>{number === latest ? 'latest' : 'read-only'}</span>
+        <span>{state}</span>
       </button>
     </li>
   );
 }
 
-export function ComparisonSelector({ leaf, shown, recordedAt, now, latest, onChoose, pick, buttonRef }: ComparisonSelectorProps) {
+// The delivered pair's own row: the page's default view, whichever number holds that pair. A leaf
+// whose delivery cannot be established gets no row, because no view could be offered (rule 5).
+function DeliveredOption({
+  shown,
+  resolved,
+  delivered,
+  choose,
+}: {
+  shown: number | null;
+  resolved: number | null;
+  delivered: Pick<ReviewDeliveredComparison, 'comparison'>;
+  choose: (number: number | null) => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className={item}
+        data-testid="review-comparison-delivered"
+        data-number={delivered.comparison}
+        aria-current={shown === resolved ? 'true' : undefined}
+        onClick={() => choose(null)}
+      >
+        <span>delivered</span>
+        <span>{delivered.comparison === undefined ? '' : `#${delivered.comparison}`}</span>
+        <span>{shown === resolved ? 'shown' : 'default'}</span>
+      </button>
+    </li>
+  );
+}
+
+export function ComparisonSelector({ leaf, shown, resolved, delivered, recordedAt, now, latest, onChoose, onChooseDelivered, pick, buttonRef }: ComparisonSelectorProps) {
   const [open, setOpen] = useState(false);
   const headingId = useId();
   const numbers = latest === null ? [] : Array.from({ length: latest }, (_, index) => latest - index);
-  const choose = (number: number) => {
+  const choose = (number: number | null) => {
     setOpen(false);
     if (number !== shown) onChoose(number);
+  };
+  const offered = delivered !== null && delivered.state !== 'unavailable' ? delivered : null;
+  // The delivered row asks for the pair itself, so it closes the menu and leaves the frame through
+  // the page's own delivered action rather than choosing a number.
+  const chooseDelivered = () => {
+    setOpen(false);
+    if (offered?.comparison !== shown) onChooseDelivered();
   };
   return (
     <span className={`${anchor} ${addToTrayHost}`} data-testid="review-comparison">
@@ -147,8 +197,20 @@ export function ComparisonSelector({ leaf, shown, recordedAt, now, latest, onCho
               Comparisons of {shortLeafId(leaf)}
             </div>
             <ul>
+              {offered ? (
+                <DeliveredOption shown={shown} resolved={resolved} delivered={offered} choose={chooseDelivered} />
+              ) : null}
               {numbers.map((number) => (
-                <ComparisonOption key={number} number={number} shown={shown} latest={latest} recordedAt={recordedAt} now={now} choose={choose} />
+                <ComparisonOption
+                  key={number}
+                  number={number}
+                  shown={shown}
+                  latest={latest}
+                  delivered={offered?.comparison}
+                  recordedAt={recordedAt}
+                  now={now}
+                  choose={choose}
+                />
               ))}
             </ul>
             <p className={hint}>Choosing an older number shows that comparison read-only.</p>

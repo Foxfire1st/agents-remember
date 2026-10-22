@@ -22,6 +22,7 @@ from agents_remember.application.review_comparison_reopen import (
     ComparisonReopen,
     reopen_comparison_generation,
 )
+from agents_remember.application.review_delivered_comparison import delivered_default
 from agents_remember.application.review_legacy_comparison import (
     LEGACY_UNAVAILABLE,
     legacy_comparison_resolution,
@@ -33,6 +34,7 @@ from agents_remember.application.review_tree_comparison import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge.review import ReviewRefusal
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @dataclass(frozen=True)
@@ -103,17 +105,97 @@ def resolve_committed_leaf_review(
     *,
     generation_id: str | None = None,
 ) -> ReviewCandidateResolution | ReviewRefusal:
-    contract = recorded_leaf_contract(config, repository_id, master, leaf_id)
+    """A closed leaf's review: the pair it delivered, or a named record of it (MIK-R195 rule 2).
+
+    Opening a landed leaf's review without an explicit historical selection opens the delivered
+    comparison, not the last numbered record, which may predate curation. A named generation, and
+    :func:`resolve_recorded_leaf_review`, address the leaf's recorded comparison instead. A leaf that
+    records no delivery keeps the recorded default it had; a delivery the enclosure claims and this
+    read cannot establish is answered by the delivered resolution's own refusal, never by that
+    default.
+    """
+
+    return _committed_read(
+        config,
+        _Address(repository_id, master, leaf_id),
+        LeafReviewRead(generation_id=generation_id),
+    )
+
+
+def resolve_recorded_leaf_review(
+    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
+) -> ReviewCandidateResolution | ReviewRefusal:
+    """The leaf's published comparison record: the historical read ICR-R12 addresses.
+
+    ``recorded`` here is the caller's own statement of *which record it is reading*. It never opens
+    the delivered pair in place of that record, because the two are different facts about the leaf.
+    """
+
+    return _committed_read(
+        config, _Address(repository_id, master, leaf_id), LeafReviewRead(delivered=False)
+    )
+
+
+@dataclass(frozen=True)
+class _Address:
+    """The canonical task context one closed-leaf read names."""
+
+    repository_id: str
+    master: str
+    leaf_id: str
+
+
+@dataclass(frozen=True)
+class LeafReviewRead:
+    """Which comparison a closed leaf's read addresses: the delivered pair, or a recorded one."""
+
+    delivered: bool = True
+    generation_id: str | None = None
+
+
+def _committed_read(
+    config: McpRuntimeConfig, address: _Address, read: LeafReviewRead
+) -> ReviewCandidateResolution | ReviewRefusal:
+    contract = recorded_leaf_contract(
+        config, address.repository_id, address.master, address.leaf_id
+    )
     if contract is None:
-        return _no_enclosure(leaf_id)
-    if generation_id is None:
-        trees = reopen_review_trees(config.coordination_root, contract)
-        if isinstance(trees, ReviewRefusal):
-            return trees
-        if trees is not None:
-            return tree_resolution(repository_id, contract, trees)
+        return _no_enclosure(address.leaf_id)
+    if read.generation_id is None:
+        default = _default_read(config, address.repository_id, contract, read)
+        if default is not None:
+            return default
+    return _generation_read(config, address, contract, read.generation_id)
+
+
+def _default_read(
+    config: McpRuntimeConfig,
+    repository_id: str,
+    contract: WorktreeContract,
+    read: LeafReviewRead,
+) -> ReviewCandidateResolution | ReviewRefusal | None:
+    """The delivered comparison, or -- for a leaf with none, or a recorded read -- its own record."""
+
+    if read.delivered:
+        landed = delivered_default(repository_id, contract)
+        if landed is not None:
+            return landed
+    trees = reopen_review_trees(config.coordination_root, contract)
+    if isinstance(trees, ReviewRefusal) or trees is None:
+        return trees
+    return tree_resolution(repository_id, contract, trees)
+
+
+def _generation_read(
+    config: McpRuntimeConfig,
+    address: _Address,
+    contract: WorktreeContract,
+    generation_id: str | None,
+) -> ReviewCandidateResolution | ReviewRefusal:
+    """The recorded generation's own comparison, or the source range the enclosure recorded."""
+
     reopened = reopen_comparison_generation(
-        config, repository_id, master, leaf_id, generation_id=generation_id
+        config, address.repository_id, address.master, address.leaf_id, generation_id=generation_id
     )
     if reopened.refusal is not None and (generation_id is not None or reopened.state != "absent"):
         return reopened.refusal

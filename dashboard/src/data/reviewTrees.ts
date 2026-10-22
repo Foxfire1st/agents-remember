@@ -234,12 +234,37 @@ export interface ReviewItemVerdict {
   reason?: string;
 }
 
+// Whether the comparison on screen is what the leaf delivered, and what the leaf delivered when it
+// is not (MIK-R195). `comparison` is the number of the recorded comparison whose four trees are the
+// delivered pair, when the leaf holds one; `statement` is the one line the page states, and it says
+// nothing about whether an earlier record's own count or statement was right.
+export type DeliveredComparisonState = 'delivered' | 'differs' | 'unavailable';
+
+export interface ReviewDeliveredComparison {
+  state: DeliveredComparisonState;
+  statement: string;
+  comparison?: number;
+  shown?: number;
+  code_base_tree?: string;
+  code_candidate_tree?: string;
+  code_candidate_commit?: string;
+  memory_base_tree?: string;
+  memory_candidate_tree?: string;
+  memory_candidate_commit?: string;
+  detail?: string;
+}
+
 export interface ReviewTreesResult {
   state: 'trees' | 'not-converted' | 'refused';
   repository_id: string;
   master: string;
   leaf_id: string;
   comparison?: ReviewTreeComparison;
+  // The highest comparison number the leaf recorded (the comparison menu's list). A landed leaf's
+  // resolved comparison is its delivered pair, which need not be the highest number (MIK-R195).
+  latest?: number;
+  // Whether the comparison on screen is what the leaf delivered, with that pair's exact identities.
+  delivered?: ReviewDeliveredComparison;
   knowledge_sides: ReviewKnowledgeSide[];
   // Present on a reopened comparison; a live one was just captured.
   code_sides?: ReviewCodeSide[];

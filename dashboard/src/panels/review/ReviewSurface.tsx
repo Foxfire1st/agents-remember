@@ -10,6 +10,7 @@ import { ReviewHeader } from './ReviewHeader';
 import { recordLabelOf } from './ReviewScopeHeader';
 import { matchingTreeRead } from './codeFacts';
 import { useReviewTrees } from '../../data/reviewTrees';
+import { useReviewHistory } from './useReviewHistory';
 import { useReviewMemoryWatch } from '../../data/reviewMemoryWatch';
 import type { ReviewChangeContext } from '../changeset/reviewChangeSet';
 import { ReviewChangeSetNavigation, type OpenReviewChanges } from './changeSetNavigation';
@@ -627,8 +628,11 @@ function useSurface({
   leaf,
   selectorKind: initialKind,
   selectorId: initialId,
-  history,
+  history: initialHistory,
 }: ReviewTarget) {
+  // Which record the surface reads (ICR-R12), as state the page can leave: the delivered link asks
+  // for the page's own default again, which only clears the recorded frame (MIK-R195 F06).
+  const { history, leaveHistory } = useReviewHistory(initialHistory);
   const { navigation, chosen, setChosen } = useComparisonNavigation({
     ...{ repo, master, leaf, selectorKind: initialKind, selectorId: initialId, history },
   });
@@ -668,7 +672,7 @@ function useSurface({
   const answer = shown ?? frame;
   const bound = answer ? { ...navigation, catalogue: catalogueForComparison(navigation.catalogue, answer) } : navigation;
   return {
-    ...{ repo, master, leaf, history, navigation: bound, instead, setInstead, page, setPage, workspace },
+    ...{ repo, master, leaf, history, leaveHistory, navigation: bound, instead, setInstead, page, setPage, workspace },
     ...{ chosen, setChosen },
     ...{ frame, coherent, shown, read, carried: cycle.carried, refreshReview, retryReview, problem, reading },
     openTaskContext,
@@ -726,7 +730,8 @@ function PageDetails({ props }: { props: PageProps & { reads: Surface } }) {
       master={reads.master}
       leaf={reads.leaf}
       comparison={page.changeSet.comparison}
-      latest={page.changeSet.latest}
+      latest={page.changeSet.resolved}
+      delivered={page.changeSet.delivered}
       frame={reads.frame}
       shown={shown}
       status={readingState(reads.reading)}

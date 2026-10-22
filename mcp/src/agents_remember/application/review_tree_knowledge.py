@@ -53,6 +53,10 @@ from agents_remember.application.review_candidate_resolution import (
     recorded_leaf_contract,
     resolve_review_candidate,
 )
+from agents_remember.application.review_delivered_comparison import (
+    delivered_notice,
+    recorded_latest,
+)
 from agents_remember.application.review_leaf_view_memo import (
     LeafViewParts,
     leaf_view_key,
@@ -192,23 +196,41 @@ def _comparison(
 ) -> tuple[WorktreeContract, ReviewTrees] | ReviewRefusal | None:
     """The comparison a query names: a recorded number, or the review's own resolution.
 
-    A leaf-wide read that names a number is pinned to that comparison. When the number is the one
-    the review resolves to now, the resolution is used as it is (a live leaf keeps its computed
-    worklist); any other number is reopened from its record. A focused read (the cards' named
-    invariants, the lane, one file) needs only the trees, so it always reopens.
+    A leaf-wide read that names a number is pinned to that comparison. On a live leaf whose resolved
+    number is that one, the resolution is used as it is (the live worklist stays computed); every
+    other numbered read reopens the number's record. A focused read (the cards' named invariants, the
+    lane, one file) needs only the trees, so it always reopens.
+
+    A *closed* leaf's numbered read never resolves the default first: that resolution records the
+    delivered comparison, so asking for an older number -- or for a number the leaf never recorded --
+    used to publish a new record nobody asked for (F04). The record a reader asked for is the only
+    thing such a read touches.
     """
 
     if query.number is None:
         return _resolved(config, query)
-    if not query.focused:
-        current = _resolved(config, query)
-        if isinstance(current, tuple) and current[1].record.number == query.number:
-            return current
     contract = recorded_leaf_contract(config, query.repository_id, query.master, query.leaf_id)
     if contract is None:
         return _no_contract(query.master, query.leaf_id)
+    if not query.focused and _is_live(contract):
+        current = _resolved(config, query)
+        if isinstance(current, tuple) and current[1].record.number == query.number:
+            return current
     reopened = reopen_review_trees(config.coordination_root, contract, query.number)
     return reopened if not isinstance(reopened, ReviewTrees) else (contract, reopened)
+
+
+def _is_live(contract: WorktreeContract) -> bool:
+    """Whether this enclosure still has a live candidate, whose resolution computes rather than reads.
+
+    Only a live leaf's resolution may run beside a numbered read: its worklist is the captured
+    candidate's own, and the record it answers with is the one the number names. A closed leaf's
+    default resolution *records* the delivered comparison, which a read of some other number must
+    never do.
+    """
+
+    worktree = contract.code_worktree
+    return worktree is not None and worktree.exists()
 
 
 def _resolved(
@@ -247,6 +269,8 @@ def _view(
         master=query.master,
         leaf_id=record.leaf_id,
         comparison=record,
+        latest=recorded_latest(contract),
+        delivered=delivered_notice(contract, record),
         knowledge_sides=trees.sides(),
         code_sides=trees.code_sides,
         currentness=snake_keys(side_currentness(trees)),

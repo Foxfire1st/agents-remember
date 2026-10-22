@@ -177,12 +177,20 @@ class World:
     code_base: str
     memory_base: str
 
-    def contract(self, *, live: bool = True, **recorded: str) -> Path:
+    def contract(
+        self,
+        *,
+        live: bool = True,
+        closeout: dict[str, str] | None = None,
+        integration: dict[str, str] | None = None,
+        **recorded: str,
+    ) -> Path:
         enclosure = self.task_root / "enclosures" / LEAF.lower()
         enclosure.mkdir(parents=True, exist_ok=True)
         path = enclosure / "series-contract.md"
         code_worktree = self.code_worktree if live else self.root / "removed-code"
         memory_worktree = self.memory_worktree if live else self.root / "removed-memory"
+        cells = {"status": "not-started", **(closeout or {}), **recorded}
         lines = [
             "---",
             "schema: ar-series-contract/v1",
@@ -219,10 +227,14 @@ class World:
             f"  ledger: {memory_worktree / 'memory.md'}",
             "",
             "closeout:",
-            "  status: not-started",
         ]
-        if recorded:
-            lines += [f"  {key}: {value}" for key, value in recorded.items()]
+        lines += [f"  {key}: {value}" for key, value in cells.items()]
+        if integration:
+            lines += [
+                "",
+                "integration:",
+                *(f"  {key}: {value}" for key, value in integration.items()),
+            ]
         path.write_text("\n".join([*lines, "---", ""]), encoding="utf-8")
         return path
 

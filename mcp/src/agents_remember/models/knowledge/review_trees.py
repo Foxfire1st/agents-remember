@@ -256,6 +256,36 @@ class ReviewEntryMemoryState(KnowledgeModel):
 
 
 ReviewTreesState = Literal["trees", "not-converted", "refused"]
+DeliveredComparisonState = Literal["delivered", "differs", "unavailable"]
+
+
+class ReviewDeliveredComparison(KnowledgeModel):
+    """The pair a landed leaf delivered, and whether the comparison on screen is that pair (MIK-R195).
+
+    The four delivered sides are what the enclosure's own delivery records establish: the recorded
+    code base, the commit the landing produced, the recorded memory base and the memory content
+    commit the closeout published. They are read here so a reader can compare identities; they are
+    never a review of that pair, and using them grants no review, curation or semantic acceptance.
+
+    ``state`` is ``delivered`` when the shown comparison's four trees are exactly this pair,
+    ``differs`` when they are another pair (an earlier record, or a stale record that used to be the
+    default), and ``unavailable`` when the delivery the enclosure records cannot be established --
+    ``detail`` then names the endpoint or record that failed, and no pair is claimed.
+    ``comparison`` is the number of the recorded comparison whose four trees are this pair, when the
+    leaf holds one; a pair no record has been opened for yet names none.
+    """
+
+    state: DeliveredComparisonState
+    statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    comparison: int | None = Field(default=None, ge=0)
+    shown: int | None = Field(default=None, ge=0)
+    code_base_tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    code_candidate_tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    code_candidate_commit: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    memory_base_tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    memory_candidate_tree: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    memory_candidate_commit: str | None = Field(default=None, pattern=GIT_OBJECT_PATTERN)
+    detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
 
 
 class ReviewTreesResult(KnowledgeModel):
@@ -273,6 +303,11 @@ class ReviewTreesResult(KnowledgeModel):
     master: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     leaf_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     comparison: ReviewTreeComparisonRecord | None = None
+    # The highest comparison number this leaf recorded: the comparison menu's list. A landed leaf's
+    # resolved ``comparison`` is its delivered pair, which need not be the highest number (MIK-R195).
+    latest: int | None = Field(default=None, ge=0)
+    # Whether the comparison on screen is what the leaf delivered, and the delivered identities.
+    delivered: ReviewDeliveredComparison | None = None
     knowledge_sides: tuple[ReviewKnowledgeSide, ...] = ()
     code_sides: tuple[ReviewCodeSide, ...] = ()
     currentness: dict[str, dict[str, Any]] | None = None

@@ -25,6 +25,7 @@ import { ReviewTree } from '../tree/ReviewTree';
 import { ComparisonSelector } from '../top-line/ComparisonSelector';
 import { StatusChip } from '../top-line/StatusChip';
 import { chipFacts, type ChipInput } from '../top-line/statusChipModel';
+import { DeliveredLine } from '../ReviewScopeHeader';
 import { planningMarks } from '../worklistGroups';
 import { worklistAnswer } from '../worklistState';
 import { changeSetPick } from '../../../tray/pickBuilders';
@@ -96,7 +97,7 @@ function slotChosen(reads: PageReads): FamilySelection | null {
 function PageSlot({ props, layout }: { props: PageProps; layout: DiffMode }) {
   const { reads, page } = props;
   const { changeSet } = page;
-  const older = changeSet.older && changeSet.latest !== undefined ? { latest: changeSet.latest } : null;
+  const older = changeSet.older && changeSet.resolved !== undefined ? { latest: changeSet.resolved } : null;
   return (
     <SelectedSlot
       shown={reads.shown}
@@ -257,15 +258,16 @@ export function PageNotes({
           {page.outsideLine}
         </p>
       ) : null}
-      {changeSet.older && changeSet.latest !== undefined ? (
+      {changeSet.older && changeSet.resolved !== undefined ? (
         <p className={muted} data-testid="review-older-comparison">
-          Comparison #{changeSet.number} is shown read-only; statements and judgments are read on the latest comparison #
-          {changeSet.latest}.{' '}
-          <button type="button" data-testid="review-latest-comparison" onClick={() => page.chooseComparison(changeSet.latest ?? 0)}>
-            Show #{changeSet.latest}
+          Comparison #{changeSet.number} is shown read-only; statements and judgments are read on comparison #
+          {changeSet.resolved}.{' '}
+          <button type="button" data-testid="review-latest-comparison" onClick={() => page.chooseComparison(changeSet.resolved ?? 0)}>
+            Show #{changeSet.resolved}
           </button>
         </p>
       ) : null}
+      <DeliveredLine delivered={changeSet.delivered} onOpen={page.chooseDelivered} />
     </>
   );
 }
@@ -288,7 +290,7 @@ export function TopLineControls({ props }: { props: PageProps }) {
     ...taskContextRead(reads),
     payload: reads.frame,
     comparison: changeSet.comparison,
-    latest: changeSet.latest ?? null,
+    latest: changeSet.resolved ?? null,
     now,
   });
   const repository = repositoryOf(reads.repo, changeSet.leafTrees, changeSet.number);
@@ -300,10 +302,13 @@ export function TopLineControls({ props }: { props: PageProps }) {
       <ComparisonSelector
         leaf={reads.leaf}
         shown={changeSet.number ?? null}
+        resolved={changeSet.resolved ?? null}
+        delivered={changeSet.delivered}
         recordedAt={changeSet.comparison?.recorded_at ?? null}
         now={now}
         latest={changeSet.latest ?? null}
         onChoose={page.chooseComparison}
+        onChooseDelivered={page.chooseDelivered}
         pick={changeSet.comparison ? changeSetPick({ repository, comparison: changeSet.comparison }) : null}
         buttonRef={comparisonButton}
       />

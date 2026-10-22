@@ -9,10 +9,10 @@
 // chip, and its slot carries its facts.
 import { css } from '../../../../styled-system/css';
 import type { ReviewFailure, ReviewOrigin, ReviewPayload, ReviewSelectorKind } from '../../../data/review';
-import type { ReviewTreeComparison, ReviewTreeEntry } from '../../../data/reviewTrees';
+import type { ReviewDeliveredComparison, ReviewTreeComparison, ReviewTreeEntry } from '../../../data/reviewTrees';
 import { movementRecord } from '../ReviewMovement';
 import { ReviewRecordIdentities } from '../ReviewRecordPanes';
-import { ScopeRecords, type SubjectReadState } from '../ReviewScopeHeader';
+import { DeliveredFacts, ScopeRecords, type SubjectReadState } from '../ReviewScopeHeader';
 import { familyStateWords } from '../stateWords';
 
 const details = css({
@@ -45,6 +45,9 @@ export interface TechnicalDetailsProps {
   // The leaf's latest comparison: the task context's movement and limitation records are its own, so
   // under an older comparison they are labelled with this number, not with the one on screen.
   latest?: number;
+  // The pair the leaf delivered, when its enclosure records one (MIK-R195): whether the comparison
+  // on screen is that pair, and the delivered identities when it is not.
+  delivered?: ReviewDeliveredComparison | null;
   // The last admitted payload of the task context, and whether the selected subject's own read is
   // pending or unanswered (its identities then are not shown as that subject's).
   frame: ReviewPayload | null;
@@ -201,6 +204,7 @@ export function TechnicalDetails(props: TechnicalDetailsProps) {
         {frame ? (
           <ScopeRecords payload={frame} repo={props.repo} master={props.master} leaf={props.leaf} status={status} />
         ) : null}
+        <DeliveredFacts delivered={props.delivered} />
         {shown && status === null && props.subject && props.instead === null ? <SubjectProvenance payload={shown} /> : null}
         {shown ? <ReviewRecordIdentities payload={shown} /> : null}
         <EntryIdentifiers entries={props.entries} />

@@ -163,12 +163,10 @@ export function IntentReviewEntry({
   onOpen: (target: ChangeSetTarget) => void;
 }) {
   const read = useIntentReviewSummary(repo, master, leaf, facts);
-  const target: ChangeSetTarget = {
-    repo,
-    master,
-    leaf,
-    review: live ? {} : { historical: true },
-  };
+  // A landed leaf opens its review on the pair it delivered, which is the page's own default -- not
+  // the leaf's last numbered record. The task entry used to ask every closed leaf for the recorded
+  // comparison, which no delivered link could then escape (MIK-R195 F06).
+  const target: ChangeSetTarget = { repo, master, leaf, review: {} };
   return (
     <>
       <button
