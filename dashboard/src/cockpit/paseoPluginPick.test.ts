@@ -1,6 +1,7 @@
-// The tray's part of the AR plugin's control channel (MIK-R188 rules 3–5, evidence 2): the
-// "⊕ add" offer on highlighted chat text and its pick, copy on highlight, the one notice for an
-// unreadable chat page, the message box's rectangle and the tray's reserved height. Its source
+// The tray's part of the AR plugin's control channel (MIK-R188 rules 3–5, MIK-R197, evidence 2):
+// the "⊕ add" offer on highlighted chat text and its pick, copy on highlight, the one notice for an
+// unreadable chat page, the message box's rectangle — its vertical edge and its horizontal extent in
+// a split layout — and the tray's reserved height, which pads the chat's own scroll root. Its source
 // is client/pick.ts beside client/bridge.ts; the DOM below is the pinned Paseo 0.11.1 web build's
 // (index-32cec38dd4de4493a1d5392537c1e464.js): the scroll root `agent-chat-scroll`, the rows'
 // `data-history-row-id` and `data-message-id`, the message nodes' test ids and
@@ -62,10 +63,24 @@ function record(node: Element, item: Record<string, unknown>) {
 }
 
 /** The chat as the pinned web build draws it, with Paseo's message box below it. */
-function drawChat(options: { rowIds?: boolean; records?: boolean; messageBox?: boolean; tab?: string | null; gap?: boolean } = {}) {
+function drawChat(options: {
+  rowIds?: boolean;
+  records?: boolean;
+  messageBox?: boolean;
+  tab?: string | null;
+  gap?: boolean;
+  // Paseo's sidebar and a terminal pane beside the chat, as the Chats view draws the split layout.
+  split?: boolean;
+  box?: { left: number; top: number; width: number; height: number };
+} = {}) {
   const row = (id: string) => (options.rowIds === false ? "" : ` data-message-id="${id}"`);
   document.body.innerHTML =
     (options.tab === null ? "" : `<button data-testid="workspace-tab-agent_${options.tab ?? MANAGER}" aria-selected="true"></button>`) +
+    // The split layout's other panes: neither is the chat, so neither carries the scroll root.
+    (options.split
+      ? `<aside data-testid="sidebar" id="paseo-sidebar"><p>Workspaces</p></aside>` +
+        `<div data-testid="terminal-pane" id="terminal-pane"><pre>$ npm test</pre></div>`
+      : "") +
     `<div data-testid="agent-chat-scroll" id="agent-chat-scroll-web-dom-scroll"><div>` +
     // Text in the scroll root outside every row (the older-history slot, a separator).
     (options.gap ? `<div data-testid="older-history-slot"><p id="gap">Load older messages</p></div>` : "") +
@@ -81,9 +96,15 @@ function drawChat(options: { rowIds?: boolean; records?: boolean; messageBox?: b
   if (options.records !== false) {
     for (const node of document.querySelectorAll("[data-history-row-id]")) record(node, ITEMS[node.getAttribute("data-history-row-id")!]);
   }
-  const box = { top: 812, height: 64, width: 400 };
+  const box = options.box ?? { left: 0, top: 812, width: 400, height: 64 };
   for (const node of document.querySelectorAll("button, #agent-chat-scroll-web-dom-scroll")) {
     Object.assign(node, { checkVisibility: () => true, getBoundingClientRect: () => ({ top: 0, width: 400, height: 28 }) });
+  }
+  // The split layout's other panes measure themselves: 240 px of sidebar and a 480 px terminal.
+  const paneRect = (left: number, width: number) => ({ left, top: 0, width, height: 900 });
+  for (const [id, left, width] of [["paseo-sidebar", 0, 240], ["terminal-pane", 240, 480]] as const) {
+    const pane = document.getElementById(id);
+    if (pane) Object.assign(pane, { getBoundingClientRect: () => paneRect(left, width) });
   }
   const input = document.querySelector('[data-testid="message-input-root"]');
   if (input) Object.assign(input, { getBoundingClientRect: () => ({ ...box }) });
@@ -425,7 +446,7 @@ describe("the message box and the tray's space", () => {
     expect(frame.sent("composer")).toEqual([]);
 
     frame.trayDashboard({ copyOnHighlight: false, picks: true });
-    expect(frame.sent("composer")).toEqual([{ source: "ar-plugin", type: "composer", top: 812, height: 64, frameHeight: 900 }]);
+    expect(frame.sent("composer")).toEqual([{ source: "ar-plugin", type: "composer", left: 0, width: 400, top: 812, height: 64, frameHeight: 900 }]);
 
     // A longer draft grows the box upwards.
     Object.assign(box, { top: 780, height: 96 });
@@ -438,10 +459,99 @@ describe("the message box and the tray's space", () => {
     frame.resize();
     await flush();
     expect(frame.sent("composer")).toEqual([
-      { source: "ar-plugin", type: "composer", top: 812, height: 64, frameHeight: 900 },
-      { source: "ar-plugin", type: "composer", top: 780, height: 96, frameHeight: 900 },
-      { source: "ar-plugin", type: "composer", top: 580, height: 96, frameHeight: 700 },
+      { source: "ar-plugin", type: "composer", left: 0, width: 400, top: 812, height: 64, frameHeight: 900 },
+      { source: "ar-plugin", type: "composer", left: 0, width: 400, top: 780, height: 96, frameHeight: 900 },
+      { source: "ar-plugin", type: "composer", left: 0, width: 400, top: 580, height: 96, frameHeight: 700 },
     ]);
+  });
+
+  it("reports the box's own left and width beside Paseo's sidebar and terminal, and posts again when only they change", async () => {
+    // The split layout of the Chats view: a 240 px sidebar, a 480 px terminal, and the chat's box
+    // from 320 px (240 + 480 of pane, a wider chat column) at 560 px wide.
+    const box = drawChat({ split: true, box: { left: 320, top: 812, width: 560, height: 64 } });
+    const frame = framedChat();
+    Object.assign(frame.window, { innerWidth: 1440, innerHeight: 900 });
+    frame.trayDashboard({ copyOnHighlight: false, picks: true });
+    expect(frame.sent("composer")).toEqual([
+      { source: "ar-plugin", type: "composer", left: 320, width: 560, top: 812, height: 64, frameHeight: 900 },
+    ]);
+
+    // The terminal pane is dragged wider: the box keeps its vertical edge and loses width. That is a
+    // report of its own, so the dock follows the box rather than staying where it was.
+    Object.assign(box, { left: 320, width: 400 });
+    const observer = frame.resizeObservers.find((entry) => entry.targets.length > 0)!;
+    observer.callback();
+    await flush();
+    expect(frame.sent("composer")).toEqual([
+      { source: "ar-plugin", type: "composer", left: 320, width: 560, top: 812, height: 64, frameHeight: 900 },
+      { source: "ar-plugin", type: "composer", left: 320, width: 400, top: 812, height: 64, frameHeight: 900 },
+    ]);
+  });
+
+  it("reports the box's new position when the layout moves it without resizing it", async () => {
+    // The real native transition (L189-F01): Paseo's sidebar closes, the chat's pane widens by 160 px
+    // and the box shifts left by 160 px with its own width unchanged, so the box's own size observer
+    // says nothing and only the layout around it changed.
+    const box = drawChat({ box: { left: 696, top: 812, width: 820, height: 64 } });
+    const frame = framedChat();
+    frame.trayDashboard({ copyOnHighlight: false, picks: true });
+    expect(frame.sent("composer")).toEqual([
+      { source: "ar-plugin", type: "composer", left: 696, width: 820, top: 812, height: 64, frameHeight: 900 },
+    ]);
+
+    // The container the box sits in grows by the same 160 px. That container's observer is the
+    // notification the layout gives; nothing observes the box's own size differently than before.
+    const pane = document.getElementById("agent-chat-scroll-web-dom-scroll")!.parentElement!;
+    const containerObserver = frame.resizeObservers.find((entry) => entry.targets.includes(pane));
+    expect(containerObserver).toBeDefined();
+    box.left = 536;
+    Object.assign(pane, { getBoundingClientRect: () => ({ left: 320, top: 36, width: 1732, height: 894 }) });
+    containerObserver!.callback();
+    await flush();
+    expect(frame.sent("composer")).toEqual([
+      { source: "ar-plugin", type: "composer", left: 696, width: 820, top: 812, height: 64, frameHeight: 900 },
+      { source: "ar-plugin", type: "composer", left: 536, width: 820, top: 812, height: 64, frameHeight: 900 },
+    ]);
+
+    // A move that resizes nothing at all, told as a class change on a container: the attribute watch
+    // re-measures it too, so the tray follows either way.
+    box.left = 400;
+    pane.setAttribute("class", "pane pane-sidebar-closed");
+    await flush();
+    expect(frame.sent("composer").at(-1)).toEqual({
+      source: "ar-plugin",
+      type: "composer",
+      left: 400,
+      width: 820,
+      top: 812,
+      height: 64,
+      frameHeight: 900,
+    });
+    // An unchanged layout still posts nothing, however often the observers fire.
+    const sentNow = frame.sent("composer").length;
+    containerObserver!.callback();
+    pane.setAttribute("class", "pane pane-sidebar-closed again");
+    await flush();
+    expect(frame.sent("composer")).toHaveLength(sentNow);
+  });
+
+  it("reserves the tray's height on the chat's scroll root alone, in a split layout", () => {
+    drawChat({ split: true, box: { left: 320, top: 812, width: 560, height: 64 } });
+    const frame = framedChat();
+    frame.trayDashboard({ copyOnHighlight: false, picks: true });
+    frame.receive({ type: "ar.tray-space", height: 120 });
+    // The chat's own scroll root is padded, so its last message can be scrolled above the tray.
+    const root = document.getElementById("agent-chat-scroll-web-dom-scroll")!;
+    expect(getComputedStyle(root).paddingBottom).toBe("120px");
+    // Paseo's sidebar and terminal pane stand beside the chat: their padding is their own, and the
+    // page itself is not padded either.
+    for (const id of ["paseo-sidebar", "terminal-pane"]) {
+      expect(getComputedStyle(document.getElementById(id)!).paddingBottom).not.toBe("120px");
+    }
+    expect(getComputedStyle(document.body).paddingBottom).not.toBe("120px");
+
+    frame.receive({ type: "ar.tray-space", height: 0 });
+    expect(getComputedStyle(root).paddingBottom).not.toBe("120px");
   });
 
   it("reserves the tray's height above the message box and releases it at 0", () => {
@@ -483,9 +593,9 @@ describe("the message box and the tray's space", () => {
 
     const input = document.createElement("div");
     input.setAttribute("data-testid", "message-input-root");
-    Object.assign(input, { getBoundingClientRect: () => ({ top: 820, height: 56, width: 400 }) });
+    Object.assign(input, { getBoundingClientRect: () => ({ left: 0, top: 820, height: 56, width: 400 }) });
     document.body.append(input);
     await flush();
-    expect(frame.sent("composer")).toEqual([{ source: "ar-plugin", type: "composer", top: 820, height: 56, frameHeight: 900 }]);
+    expect(frame.sent("composer")).toEqual([{ source: "ar-plugin", type: "composer", left: 0, width: 400, top: 820, height: 56, frameHeight: 900 }]);
   });
 });

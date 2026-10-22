@@ -1,10 +1,12 @@
 // Where the tray lives (MIK-R188 rule 5).
 //
 // - In the chat column the tray is AR's own element, outside the frame, drawn over it directly above
-//   the top edge of Paseo's message box. The plug-in reports that edge through the frame channel
-//   (cockpit/frameTrayChannel.ts); the dock asks the frame to keep the tray's height free above the
-//   box (`ar.tray-space`), so the tray never covers the box. When the box cannot be read, the tray
-//   sits below the frame (the frame gives up its height) with one named notice.
+//   the top edge of Paseo's message box and with that box's own width and left edge — not the
+//   frame's, which in the Chats view also holds Paseo's sidebar and a terminal pane (MIK-R197). The
+//   plug-in reports that edge through the frame channel (cockpit/frameTrayChannel.ts); the dock asks
+//   the frame to keep the tray's height free above the box (`ar.tray-space`), so the tray never
+//   covers the box. When the box cannot be read, the tray sits below the frame (the frame gives up
+//   its height) with one named notice.
 // - On pages without a chat column (Knowledge, File Viewer, and wherever the column is hidden) the
 //   same panel docks at the bottom right, above the bottom bar.
 // - Shown, the tray is minimised to one line, "⊕ Attached · n", or expanded to its full view
@@ -22,6 +24,7 @@ import { createStore } from 'zustand/vanilla';
 
 import { css } from '../../styled-system/css';
 import {
+  composerExtent,
   composerUnavailableText,
   setTraySpace,
   useComposerEdge,
@@ -67,13 +70,19 @@ function composerEdgeTop(frame: DOMRect, composer: Extract<ComposerEdge, { kind:
 
 // Where the docked tray goes, relative to the dock's own anchor (a zero-height box at the frame's
 // bottom edge): over the frame, its bottom edge `DOCK_GAP` pixels above the message box's top edge.
+// Across, it takes the box's own column: the box's left edge and width, as its plug-in measured
+// them inside the frame, moved into the anchor's coordinates (MIK-R197 rule 3). A frame that holds
+// a sidebar or a terminal pane beside the chat is wider than the chat, so the frame's own edge is
+// used only when the plug-in of an older host reports no extent, which keeps the placement it had.
+// No minimum and no clamp: the box lies inside the frame.
 // Null: the box is not measured, or the frame is not drawn (a placeholder shows instead).
 export function dockPlacement(anchor: DOMRect, frame: DOMRect | null, composer: ComposerEdge | undefined): DockPlacement | null {
   if (composer?.kind !== 'measured' || !frame || frame.height === 0 || frame.width === 0) return null;
   const edge = composerEdgeTop(frame, composer);
+  const extent = composerExtent(composer);
   return {
-    left: frame.left - anchor.left,
-    width: frame.width,
+    left: extent ? frame.left + extent.left - anchor.left : frame.left - anchor.left,
+    width: extent ? extent.width : frame.width,
     bottom: anchor.top - edge + DOCK_GAP,
     maxHeight: Math.max(0, edge - frame.top - 2 * DOCK_GAP),
   };

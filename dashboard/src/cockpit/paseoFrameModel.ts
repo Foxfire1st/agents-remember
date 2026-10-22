@@ -60,15 +60,23 @@ export type PaseoPluginMessage =
   | PaseoTrayMessage;
 
 /**
- * The tray's part of the channel (MIK-R188 rules 3 and 5; the plug-in's client/pick.ts): a chat
- * text pick with its provenance (its message's time is always there: the plug-in posts no pick
- * without it), the one notice that chat text picks are off, and the message box's rectangle
+ * The tray's part of the channel (MIK-R188 rules 3 and 5, MIK-R197; the plug-in's client/pick.ts):
+ * a chat text pick with its provenance (its message's time is always there: the plug-in posts no
+ * pick without it), the one notice that chat text picks are off, and the message box's rectangle
  * inside the frame (or why it cannot be read) for the tray's dock above it.
+ *
+ * `left` and `width` are the box's horizontal extent inside the frame, in its CSS pixels: the pair
+ * is optional because a plug-in of an older host posts the vertical edge alone, and the dock then
+ * keeps the frame-wide placement it always had (MIK-R197 rules 1-3).
  */
+export type PaseoComposerMessage =
+  | { type: "composer"; left: number; width: number; top: number; height: number; frameHeight: number }
+  | { type: "composer"; top: number; height: number; frameHeight: number };
+
 export type PaseoTrayMessage =
   | { type: "pick"; text: string; agentId: string; messageId: string | null; messageTime: string }
   | { type: "pick-unavailable"; reason: string }
-  | { type: "composer"; top: number; height: number; frameHeight: number }
+  | PaseoComposerMessage
   | { type: "composer-unavailable"; reason: string };
 
 const PASEO_PLUGIN_SOURCE = "ar-plugin";
@@ -346,11 +354,25 @@ function pickMessage(message: Record<string, unknown>): PaseoTrayMessage | null 
   return { type: "pick", text: pickText, agentId, messageId, messageTime };
 }
 
-function composerMessage(message: Record<string, unknown>): PaseoTrayMessage | null {
+/** The box's horizontal extent, accepted only as a pair of finite numbers with a width (MIK-R197 rule 2). */
+function composerExtent(message: Record<string, unknown>): { left: number; width: number } | null {
+  const { left, width } = message;
+  if (typeof left !== "number" || !Number.isFinite(left)) return null;
+  if (typeof width !== "number" || !Number.isFinite(width) || width <= 0) return null;
+  return { left, width };
+}
+
+function composerMessage(message: Record<string, unknown>): PaseoComposerMessage | null {
   const { top, height, frameHeight } = message;
   if (typeof top !== "number" || typeof height !== "number" || typeof frameHeight !== "number") return null;
   if (!Number.isFinite(top) || !Number.isFinite(height) || !Number.isFinite(frameHeight)) return null;
-  return height >= 0 && frameHeight > 0 ? { type: "composer", top, height, frameHeight } : null;
+  if (height < 0 || frameHeight <= 0) return null;
+  // A partial pair, a non-finite value or a non-positive width is dropped: the vertical fields stay,
+  // and the dock keeps the frame-wide placement, as for a plug-in that reports no extent at all.
+  const extent = composerExtent(message);
+  return extent
+    ? { type: "composer", ...extent, top, height, frameHeight }
+    : { type: "composer", top, height, frameHeight };
 }
 
 /** The chat the frame shows: an agent id, or `null` for none; anything else is no message. */

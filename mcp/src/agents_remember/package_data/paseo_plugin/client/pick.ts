@@ -9,7 +9,7 @@ import type { PluginPage } from "./page";
 //                      { type: "ar.tray-space", height }              the tray's height; 0 releases it
 //   app -> dashboard   { source: "ar-plugin", type: "pick", text, agentId, messageId, messageTime }
 //                      { source: "ar-plugin", type: "pick-unavailable", reason }      once
-//                      { source: "ar-plugin", type: "composer", top, height, frameHeight }
+//                      { source: "ar-plugin", type: "composer", left, width, top, height, frameHeight }
 //                      { source: "ar-plugin", type: "composer-unavailable", reason }  once per loss
 //
 // Chat text: a highlight inside the chat copies it when the dashboard said so (`execCommand` in
@@ -17,11 +17,15 @@ import type { PluginPage } from "./page";
 // pick. Nothing here calls `removeAllRanges()` or moves focus: the offer swallows its own
 // `mousedown`, so the selection and the focus stay where they were.
 //
-// The message box: its rectangle inside the frame is posted on the dashboard's hello, when the
-// box changes size (ResizeObserver) and when the frame is resized, so the dashboard draws the
-// tray outside the frame, directly above the box. The tray's height is reserved above the box as
-// padding at the end of the chat's scroll root, so the last message can always be scrolled
-// above the tray.
+// The message box: its rectangle inside the frame — its horizontal extent (`left`, `width`) and
+// its vertical edge (`top`, `height`) — is posted on the dashboard's hello, when the box changes
+// size, when the layout moves it (both observed over the box and its containers, because Paseo's
+// sidebar closing moves the box with its width unchanged) and when the frame is resized, so the
+// dashboard draws the tray outside the frame, directly above the box and as wide as it (MIK-R197). In
+// a layout that holds a sidebar or a terminal pane beside the chat, the box is narrower than the
+// frame, so the frame's own edge does not say where the tray goes. The tray's height is reserved
+// above the box as padding at the end of the chat's scroll root, so the last message can always be
+// scrolled above the tray.
 //
 // Pinned, unsupported Paseo 0.11.1 DOM adapter (the pinned server package's web build
 // index-32cec38dd4de4493a1d5392537c1e464.js, read in its source on 2026-10-19, the rows' records
@@ -99,12 +103,28 @@ function closestOf(element: any, selector: string): any {
   return element && typeof element.closest === "function" ? element.closest(selector) : null;
 }
 
-function visibleBox(element: any): { top: number; height: number; width: number } | null {
+/**
+ * An element's ancestors inside its page, from its parent up to and including the root element. A
+ * layout that moves the element without resizing it resizes one of these instead (L189-F01).
+ */
+function ancestorsOf(element: any): any[] {
+  const chain: any[] = [];
+  const root = element?.ownerDocument?.documentElement ?? null;
+  let node = element?.parentElement ?? null;
+  while (node && node !== root) {
+    chain.push(node);
+    node = node.parentElement ?? null;
+  }
+  if (root) chain.push(root);
+  return chain;
+}
+
+function visibleBox(element: any): { left: number; top: number; width: number; height: number } | null {
   if (!element || typeof element.getBoundingClientRect !== "function") return null;
   const rect = element.getBoundingClientRect();
   if (typeof rect?.width !== "number" || typeof rect?.height !== "number") return null;
   if (rect.width <= 0 || rect.height <= 0) return null;
-  return { top: Number(rect.top) || 0, height: rect.height, width: rect.width };
+  return { left: Number(rect.left) || 0, top: Number(rect.top) || 0, width: rect.width, height: rect.height };
 }
 
 /** The highlighted text of the page right now with its range, or `null` for none. */
@@ -312,6 +332,7 @@ function startComposerWatch(page: PluginPage, post: Post) {
   let started = false;
   let element: any = null;
   let resizes: any = null;
+  let shifts: any = null;
   let mutations: any = null;
   let last = "";
   let chatDrawn = false;
@@ -330,6 +351,8 @@ function startComposerWatch(page: PluginPage, post: Post) {
   const detach = () => {
     resizes?.disconnect();
     resizes = null;
+    shifts?.disconnect();
+    shifts = null;
     element = null;
   };
   const tellMissing = (reason: string) => {
@@ -348,7 +371,14 @@ function startComposerWatch(page: PluginPage, post: Post) {
     clearMissingTimer();
     missing = null;
     const frameHeight = Math.round(Number(page.window.innerHeight) || 0);
-    const message = { type: "composer", top: Math.round(box.top), height: Math.round(box.height), frameHeight };
+    const message = {
+      type: "composer",
+      left: Math.round(box.left),
+      width: Math.round(box.width),
+      top: Math.round(box.top),
+      height: Math.round(box.height),
+      frameHeight,
+    };
     const key = JSON.stringify(message);
     if (key === last) return;
     last = key;
@@ -358,8 +388,16 @@ function startComposerWatch(page: PluginPage, post: Post) {
     const found = [...page.document.querySelectorAll(MESSAGE_BOX)].find((node) => visibleBox(node) !== null);
     if (!found) return false;
     element = found;
+    // Paseo's layout can move the box without resizing it: closing the sidebar widens the chat's pane,
+    // so the box shifts left with its own width unchanged and the box's own observer says nothing. The
+    // box's containers are therefore watched too — their size changes when the layout around the box
+    // does — and their class/style changes cover a move that resizes none of them (MIK-R197 rules 1-3,
+    // L189-F01).
+    const chain = ancestorsOf(found);
     resizes = new page.window.ResizeObserver(() => measure());
-    resizes.observe(found);
+    for (const node of [found, ...chain]) resizes.observe(node);
+    shifts = new page.window.MutationObserver(() => measure());
+    for (const node of [found, ...chain]) shifts.observe(node, { attributes: true, attributeFilter: ["class", "style"] });
     measure();
     return true;
   };

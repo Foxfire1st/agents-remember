@@ -170,6 +170,50 @@ describe("the tray's part of the frame channel", () => {
     expect(parsePluginMessage({ source: "ar-plugin", type: "pick-unavailable" })).toBeNull();
   });
 
+  it("takes the box's own left and width as a pair", () => {
+    const frame = railFrame();
+    const box = () => frameTrayStore.getState().composer.document;
+    frame.says({ type: "ready", capabilities: PICKING });
+    // A box narrower than its frame, as the Chats view draws it beside the sidebar and the terminal.
+    frame.says({ type: "composer", left: 240, width: 620, top: 812, height: 64, frameHeight: 900 });
+    expect(box()).toEqual({ kind: "measured", left: 240, width: 620, top: 812, height: 64, frameHeight: 900 });
+  });
+
+  // Kept behaviour, run on its own so a base build can execute it: the three cases below hold before
+  // and after MIK-R197 (L189-F03).
+  it("drops a partial, non-finite or non-positive pair and keeps the vertical edge", () => {
+    const frame = railFrame();
+    const box = () => frameTrayStore.getState().composer.document;
+    frame.says({ type: "ready", capabilities: PICKING });
+    for (const pair of [
+      { left: 240 },
+      { width: 620 },
+      { left: 240, width: 0 },
+      { left: 240, width: -620 },
+      { left: Number.NaN, width: 620 },
+      { left: 240, width: Number.POSITIVE_INFINITY },
+      { left: "240", width: 620 },
+      { left: 240, width: null },
+    ]) {
+      frame.says({ type: "composer", top: 812, height: 64, frameHeight: 900, ...pair });
+      expect(box()).toEqual({ kind: "measured", top: 812, height: 64, frameHeight: 900 });
+    }
+  });
+
+  it("keeps a composer message without the pair valid", () => {
+    const frame = railFrame();
+    frame.says({ type: "ready", capabilities: PICKING });
+    // A plug-in of an older host posts the vertical edge alone: that message stays a measured box.
+    frame.says({ type: "composer", top: 800, height: 56, frameHeight: 900 });
+    expect(frameTrayStore.getState().composer.document).toEqual({ kind: "measured", top: 800, height: 56, frameHeight: 900 });
+    expect(parsePluginMessage({ source: "ar-plugin", type: "composer", top: 800, height: 56, frameHeight: 900 })).toEqual({
+      type: "composer",
+      top: 800,
+      height: 56,
+      frameHeight: 900,
+    });
+  });
+
   it("takes down a page's pick notice when a pick from that page arrives", () => {
     const frame = railFrame();
     frame.says({ type: "ready", capabilities: PICKING });

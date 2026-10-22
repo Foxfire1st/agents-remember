@@ -15,6 +15,9 @@ const FRAME = rect(1400, 100, 500, 800);
 const ANCHOR = rect(1400, 900, 500, 0);
 const BOX = rect(1400, 600, 500, 240);
 const MEASURED: ComposerEdge = { kind: 'measured', top: 680, height: 120, frameHeight: 800 };
+// A box narrower than its frame, as the Chats view draws it: Paseo's sidebar and a terminal pane
+// stand beside the chat, so the box's left edge is not the frame's.
+const MEASURED_EXTENT: ComposerEdge = { kind: 'measured', top: 680, height: 120, frameHeight: 800, left: 120, width: 300 };
 
 function Column({ visible = true }: { visible?: boolean }) {
   return (
@@ -64,6 +67,48 @@ describe('the tray dock', () => {
     });
     expect(dockPlacement(ANCHOR, FRAME, undefined)).toBeNull();
     expect(dockPlacement(ANCHOR, rect(0, 0, 0, 0), MEASURED)).toBeNull();
+  });
+
+  it('takes the message box’s own left and width, with the frame only as their origin', () => {
+    // The anchor does not share the frame's left edge, so a missing subtraction shows.
+    const anchor = rect(1380, 900, 540, 0);
+    expect(dockPlacement(anchor, FRAME, MEASURED_EXTENT)).toEqual({
+      left: 1400 + 120 - 1380,
+      width: 300,
+      bottom: 900 - 780 + DOCK_GAP,
+      maxHeight: 780 - 100 - 2 * DOCK_GAP,
+    });
+    // A box wider than nothing is taken as measured, with no minimum and no clamp: at the frame's
+    // own edge the formula gives the frame's left and the box's width.
+    expect(dockPlacement(ANCHOR, FRAME, { kind: 'measured', top: 680, height: 120, frameHeight: 800, left: 0, width: 500 })).toEqual({
+      left: 0,
+      width: 500,
+      bottom: 900 - 780 + DOCK_GAP,
+      maxHeight: 780 - 100 - 2 * DOCK_GAP,
+    });
+    // No clamp either: what the plug-in measured is what the dock takes, however wide (the box lies
+    // inside the frame, so nothing needs bounding).
+    expect(dockPlacement(ANCHOR, FRAME, { kind: 'measured', top: 680, height: 120, frameHeight: 800, left: 0, width: 640 })).toMatchObject({
+      left: 0,
+      width: 640,
+    });
+  });
+
+  it('docks over the box’s own column in a layout whose frame is wider than its chat', () => {
+    frameTrayStore.setState({ composer: { document: MEASURED_EXTENT } });
+    render(<Column />);
+    const dock = screen.getByTestId('tray-column-dock');
+    expect(dock.getAttribute('data-dock')).toBe('above-composer');
+    const box = dock.firstElementChild as HTMLElement;
+    // The frame starts at 1400 and the anchor at 1400 too: the box's own left edge (120) shows.
+    expect([box.style.left, box.style.width]).toEqual(['120px', '300px']);
+  });
+
+  it('keeps today’s frame-wide placement when the plug-in reports no extent', () => {
+    frameTrayStore.setState({ composer: { document: MEASURED } });
+    render(<Column />);
+    const box = screen.getByTestId('tray-column-dock').firstElementChild as HTMLElement;
+    expect([box.style.left, box.style.width]).toEqual(['0px', '500px']);
   });
 
   it('docks in the chat column above the composer and reserves the tray’s height there', () => {

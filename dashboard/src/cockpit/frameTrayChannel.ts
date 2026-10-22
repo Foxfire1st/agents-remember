@@ -29,7 +29,9 @@
 //   useComposerEdge(page), usePickNotice(page), useFrameChat(page)   React hooks over the store
 // The composer rectangle is in the frame's own viewport (CSS pixels from the frame's top edge);
 // `frameHeight` is the frame's height as the plug-in measured it, so a rectangle measured for
-// another frame height can be told apart.
+// another frame height can be told apart. `left` and `width` are the box's horizontal extent in the
+// same pixels, and they arrive as a pair or not at all (MIK-R197): without them the tray keeps the
+// frame-wide placement, as it had it before that requirement.
 //
 // For paseoFrameControl.ts only: frameTrayReady(page, abilities, post), receiveFrameTray(page,
 // message), clearFrameTray(page), setFrameChat(page, agentId). A frame that is ready with a
@@ -38,11 +40,12 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
-import { PICK_ABILITY, type PaseoTrayMessage, type PluginAbilities } from "./paseoFrameModel";
+import { PICK_ABILITY, type PaseoComposerMessage, type PaseoTrayMessage, type PluginAbilities } from "./paseoFrameModel";
 
 export type FramePage = "chats" | "document";
 
 export type ComposerEdge =
+  | { kind: "measured"; top: number; height: number; frameHeight: number; left: number; width: number }
   | { kind: "measured"; top: number; height: number; frameHeight: number }
   | { kind: "unavailable"; reason: string };
 
@@ -113,6 +116,16 @@ export function composerUnavailableText(reason: string): string {
 export const useComposerEdge = (page: FramePage): ComposerEdge | undefined =>
   useStore(frameTrayStore, (state) => state.composer[page]);
 
+/**
+ * The message box's own horizontal extent inside the frame, when its plug-in reported the accepted
+ * pair; `null` for a plug-in of an older host, which reports the vertical edge alone (MIK-R197
+ * rules 2 and 3).
+ */
+export function composerExtent(composer: ComposerEdge | undefined): { left: number; width: number } | null {
+  if (composer?.kind !== "measured" || !("width" in composer) || !("left" in composer)) return null;
+  return { left: composer.left, width: composer.width };
+}
+
 export const usePickNotice = (page: FramePage): string | undefined =>
   useStore(frameTrayStore, (state) => state.pickNotice[page]);
 
@@ -139,6 +152,14 @@ export function setFrameChat(page: FramePage, agentId: string | null | undefined
   frameTrayStore.setState({ chat: agentId === undefined ? withoutPage(chat, page) : { ...chat, [page]: agentId } });
 }
 
+/** The measured box: its vertical edge always, its horizontal extent only when the plug-in posted it. */
+function measuredComposer(message: PaseoComposerMessage): ComposerEdge {
+  const vertical = { kind: "measured" as const, top: message.top, height: message.height, frameHeight: message.frameHeight };
+  return "width" in message && "left" in message
+    ? { ...vertical, left: message.left, width: message.width }
+    : vertical;
+}
+
 /** A tray message of the frame on `page`, after the controller checked its origin and window. */
 export function receiveFrameTray(page: FramePage, message: PaseoTrayMessage): void {
   const state = frameTrayStore.getState();
@@ -155,7 +176,7 @@ export function receiveFrameTray(page: FramePage, message: PaseoTrayMessage): vo
       break;
     case "composer":
       frameTrayStore.setState({
-        composer: { ...state.composer, [page]: { kind: "measured", top: message.top, height: message.height, frameHeight: message.frameHeight } },
+        composer: { ...state.composer, [page]: measuredComposer(message) },
       });
       break;
     case "composer-unavailable":
