@@ -29,6 +29,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     RepositoryScope,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     TaskDocument,
     completion_blockers,
@@ -44,6 +45,7 @@ from agents_remember.tasks import (
     write_task_docs,
 )
 from agents_remember.tasks.master_sync import derived_master_status, plan_master_sync
+from agents_remember.tasks.sprint_rows import sprint_census
 
 
 def _doc(**over: Any) -> TaskDocument:
@@ -329,6 +331,83 @@ class RowStatusReflectsLandingTests(unittest.TestCase):
             status="planning", steps=[{"id": "S1", "title": "One", "status": "done"}]
         )
         self.assertEqual(derived_master_status(marked_but_planned), "planning")
+
+
+class SprintCensusDocumentScopeTests(unittest.TestCase):
+    """MIK-R209: only ``<task root>/<folder>/task.json`` is a task document.
+
+    A file named ``task.json`` deeper inside a task folder is never read, counted or
+    listed -- not as a commander, not as a retirement record, and not as an unreadable
+    document. The archive, enclosures and the master's own document stay excluded, a
+    document at the task root itself is no folder document either, and a symlinked task
+    folder is not another task document.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tasks = Path(self._tmp.name) / "tasks" / "repo"
+        self.master_ref = TaskDocumentRef(repository="repo", path="master/task.json")
+        self.master = _master(id="MASTER", slug="master", title="Human master")
+        write_task_doc(self.tasks / "master", self.master)
+        write_task_doc(
+            self.tasks / "sprint",
+            _master(
+                id="SPRINT",
+                slug="sprint",
+                title="Sprint",
+                orchestrates=["master"],
+                subTasks=[
+                    {
+                        "number": "1",
+                        "name": "Human master",
+                        "status": "planning",
+                        "masterRef": self.master_ref.model_dump(mode="json"),
+                    }
+                ],
+            ),
+        )
+
+    def _census(self):
+        return sprint_census(
+            self.tasks,
+            self.tasks / "master" / "task.json",
+            self.master_ref,
+            self.master,
+        )
+
+    def _write_deep(self, relative: str, text: str) -> None:
+        path = self.tasks / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def test_deep_files_are_neither_read_nor_counted_nor_listed(self) -> None:
+        sprint = (self.tasks / "sprint" / "task.json").read_text(encoding="utf-8")
+        for relative in (
+            "master/notes/reports/worker/run/task.json",
+            "sprint/notes/reports/worker/run/task.json",
+            "0_archive/master/notes/task.json",
+            "enclosures/leaf/task.json",
+        ):
+            self._write_deep(relative, sprint)
+        self._write_deep("task.json", sprint)
+        self._write_deep(
+            "master/notes/reports/retirement/task.json",
+            '{"subTasks": [{"retirement": {"masterRef": '
+            '{"repository": "repo", "path": "master/task.json"}}}]}',
+        )
+        self._write_deep("master/notes/reports/broken/task.json", '{"orchestrates": ["master"]')
+        census = self._census()
+        self.assertEqual(census.commanding, (self.tasks / "sprint" / "task.json",))
+        self.assertEqual(census.recording, ())
+        self.assertEqual(census.unreadable, ())
+
+    def test_a_symlinked_task_folder_is_not_another_task_document(self) -> None:
+        (self.tasks / "alias").symlink_to(self.tasks / "sprint", target_is_directory=True)
+        census = self._census()
+        self.assertEqual(census.commanding, (self.tasks / "sprint" / "task.json",))
+        self.assertEqual(census.recording, ())
+        self.assertEqual(census.unreadable, ())
 
 
 class RenderTests(unittest.TestCase):

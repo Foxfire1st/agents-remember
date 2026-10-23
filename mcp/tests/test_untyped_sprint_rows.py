@@ -24,7 +24,7 @@ from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 from test_master_retirement import World
-from test_task_execution_topology import REPOSITORY
+from test_task_execution_topology import REPOSITORY, _master
 
 pytestmark = pytest.mark.integration
 
@@ -316,3 +316,54 @@ def test_finalize_reads_only_the_documents_it_needs(world):
         assert str(sprint) in " ".join(refused["blockers"]) and world.snapshot() == before
     sprint.write_text(intact)
     assert _finalize(world, "master-a")["state"] == "finalized"
+
+
+def _deep_sprint_copy(world: SeatWorld, master: str = "master-a") -> Path:
+    """The evidence copy that blocked the master (issues row 259): a nested sprint document."""
+    deep = world.tasks / master / "notes" / "reports" / "worker" / "run" / "task.json"
+    deep.parent.mkdir(parents=True)
+    deep.write_bytes((world.tasks / "sprint" / "task.json").read_bytes())
+    return deep
+
+
+def _set_master_field(world: SeatWorld, **fields: Any) -> dict[str, Any]:
+    with tool_call_context("task_doc", {"operation": "set_field"}, config=world.cfg):
+        return task_doc_payload(
+            world.cfg,
+            TaskDocTarget(repo_id=REPOSITORY, task_name="master-a"),
+            operation="set_field",
+            edit=TaskDocEdit(fields=fields),
+            call=TaskDocCall(),
+        )
+
+
+def test_a_deep_sprint_copy_does_not_refuse_the_masters_own_write(world):
+    """Only ``<task root>/<folder>/task.json`` could give master-a a second commander (MIK-R209)."""
+    _deep_sprint_copy(world)
+    answer = _set_master_field(world, title="Renamed master")
+    assert answer["ok"] is True, answer
+    assert read_task_doc(world.tasks / "master-a" / "task.json").title == "Renamed master"
+
+
+def test_finalization_ignores_a_deep_sprint_copy(world):
+    _deep_sprint_copy(world)
+    preview = _finalize(world, "master-a", dry_run=True)
+    assert preview["state"] == "would-finalize", preview
+    done = _finalize(world, "master-a")
+    assert done["state"] == "finalized", done
+    assert (world.tasks / "master-a").is_dir()
+
+
+def test_a_second_direct_sprint_document_still_refuses_the_masters_own_write(world):
+    write_task_doc(
+        world.tasks / "sprint2",
+        _master(identity="sprint2", orchestrates=["master-a"]).model_copy(
+            update={"integrationBranch": "super"}
+        ),
+    )
+    before = world.snapshot()
+    answer = _set_master_field(world, title="Renamed master")
+    assert answer["ok"] is False
+    assert answer["code"] == "master-sync-failed"
+    assert "several commanding sprints" in str(answer["error"])
+    assert world.snapshot() == before

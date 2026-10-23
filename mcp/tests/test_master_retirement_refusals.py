@@ -185,8 +185,8 @@ def test_a_master_document_that_cannot_be_read_refuses_every_request_and_is_name
 
 
 @pytest.mark.parametrize("field", ["orchestrates", "subTasks"])
-def test_a_task_document_with_a_malformed_list_field_refuses_and_is_named(world, field):
-    document = world.tasks / "unrelated" / "notes" / "task.json"
+def test_a_direct_task_document_with_a_malformed_list_field_refuses_and_is_named(world, field):
+    document = world.tasks / "unrelated" / "task.json"
     document.parent.mkdir(parents=True)
     document.write_text(json.dumps({"kind": "master", field: "not a list"}))
     before = world.snapshot()
@@ -199,6 +199,15 @@ def test_a_task_document_with_a_malformed_list_field_refuses_and_is_named(world,
         "task_doc", {"operation": "retire_master", "dry_run": True}, config=world.cfg
     ):
         assert _whole(world.retire(dry_run=True))["state"] == "would-retire"
+
+
+def test_a_deep_copy_that_cannot_be_read_does_not_stop_a_retirement(world):
+    """Only a direct task document can block a retirement (MIK-R209)."""
+    document = world.tasks / "master-a" / "notes" / "reports" / "worker" / "task.json"
+    document.parent.mkdir(parents=True)
+    document.write_text('{"kind": "master", "orchestrates": ["master-a"')
+    done = world.retire()
+    assert done["ok"] and (world.tasks / "0_archive" / "master-a").is_dir()
 
 
 def test_a_request_addressed_to_an_unreadable_document_names_it_before_anything_else(world):

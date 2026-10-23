@@ -120,12 +120,16 @@ class SprintCensus:
 def sprint_census(
     repository_tasks: Path, master_path: Path, master_ref: TaskDocumentRef, master: TaskDocument
 ) -> SprintCensus:
-    """Find every ``task.json`` that commands the master or records its retirement.
+    """Find every direct ``task.json`` that commands the master or records its retirement.
 
-    The two callers read the unreadable ones differently, and both on purpose. Finalization
-    cannot archive anything, so a broken document elsewhere in the tree stops it only when its
-    text names the master. A retirement archives a folder and cannot be undone, so it is stopped
-    by every document it cannot read.
+    Only ``<repository tasks>/<folder>/task.json`` is a task document. A file named
+    ``task.json`` deeper inside a task folder -- notes, reports, role reports, evidence,
+    mirrors -- is not one, and is never read, counted or reported.
+
+    The callers read the unreadable ones differently, and on purpose. Finalization and the
+    master sync stop only on a document whose text names the master, because neither archives
+    anything. Retirement and sprint archival stop on every document they cannot read, because
+    an archive cannot be undone. The archive-skip fact reads only ``commanding``.
     """
 
     names = {master_path.parent.name, master.id, master.title}
@@ -135,7 +139,12 @@ def sprint_census(
     recording: list[Path] = []
     naming: list[Path] = []
     other: list[Path] = []
-    for path in sorted(repository_tasks.rglob("task.json")):
+    for path in sorted(repository_tasks.glob("*/task.json")):
+        if path.parent.is_symlink():
+            # The recursive walk this census replaced did not descend into a symlinked
+            # task folder, and the closed-folder, archive and projection enumerators
+            # here also leave one out: a link is not another task folder.
+            continue
         parts = path.relative_to(repository_tasks).parts
         if ARCHIVE_DIR in parts or ENCLOSURES_DIR in parts or path.resolve(strict=False) == own:
             continue
