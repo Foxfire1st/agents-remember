@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -27,7 +29,12 @@ from agents_remember.cli import (
     role_launch_workspace,
 )
 from agents_remember.cli.paseo_catalog import forget_launcher_catalogs
-from agents_remember.cli.paseo_launch import RoleLaunch, agent_title, build_launch_call
+from agents_remember.cli.paseo_launch import (
+    RECOVERY_NOTE_LIMIT,
+    RoleLaunch,
+    agent_title,
+    build_launch_call,
+)
 from agents_remember.cli.role_launch_preparation import RoleHandoverRequest
 from agents_remember.cli.role_launch_receipts import _message_binding_projection_reference, digest
 from agents_remember.cli.role_launch_workspace import _start_leaf_enclosure
@@ -43,6 +50,7 @@ from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document import TaskEnclosureRef
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
+from agents_remember.worktrees.role_handover_locator import locator_directory
 from fastapi import HTTPException
 from paseo_launch_test_support import (
     CATALOG,
@@ -249,12 +257,15 @@ class PaseoLaunchTestCase(GivenToAgentExpectations):
         self.replace(paseo_launch, "launching_source_root", return_value=self.source)
         # A launch writes no harness configuration; the user's home is watched for one as well.
         # The launching process has both variables that keep a process from writing into the
-        # checkout it runs from.
-        (self.root / "home").mkdir()
+        # checkout it runs from. The home is a short one, as a real account's is, because the
+        # product keeps each launch's hand-over locator under it (MIK-R208): the report folder
+        # may be as deep as the checkout, and the locator must not grow with it.
+        self.home = Path(tempfile.mkdtemp(prefix="arh-", dir="/tmp")).resolve()
+        self.addCleanup(shutil.rmtree, self.home, True)
         home = patch.dict(
             os.environ,
             {
-                "HOME": (self.root / "home").as_posix(),
+                "HOME": self.home.as_posix(),
                 "GIT_OPTIONAL_LOCKS": "0",
                 "PYTHONPYCACHEPREFIX": (self.root / "pycache").as_posix(),
             },
@@ -580,6 +591,14 @@ class RoleFolderAndIdentityTests(PaseoLaunchTestCase):
                 | task_documents
             ),
         )
+        # The user's home holds each launch's locator, and no other file at all.
+        locators = self.home / "projects" / ".agents-remember" / "handover-locators"
+        self.assertEqual(
+            sorted(path.name for path in locators.iterdir() if path.is_symlink()),
+            sorted({saved["requestId"] for _, saved, _, _ in observed}),
+        )
+        self.assertEqual([path for path in self.home.rglob("*") if path.is_file()], [])
+        self.assertFalse((self.home / ".claude").exists())
         self.assertEqual(
             self.runtime.workspaces,
             {
@@ -781,6 +800,11 @@ class RolePreparationChildTests(PaseoLaunchTestCase):
                 )
 
     def test_a_child_that_refuses_fails_or_does_not_end_refuses_the_launch(self) -> None:
+        self.replace(
+            role_launch_workspace,
+            "_leaf_contract_path",
+            return_value=Path("/fixture/series-contract.md"),
+        )
         refusal = json.dumps(
             {
                 "ok": False,
@@ -833,7 +857,7 @@ class RolePreparationChildTests(PaseoLaunchTestCase):
                 self.assertEqual(error.status_code, 409)
                 for reason in reasons:
                     self.assertIn(reason, str(error.detail))
-                self.assertLessEqual(len(str(error.detail)), 800)
+                self.assertLessEqual(len(str(error.detail)), 800, str(error.detail))
                 self.assertEqual(len(calls), 1)
         self.assertEqual(self.enclosures.start_calls, [])
         self.assertEqual(self.runtime.launch_calls(), [])
@@ -1252,6 +1276,97 @@ class LaunchFeatureValuesTests(unittest.TestCase):
     def test_tier_alone_sets_only_its_key(self) -> None:
         call = build_launch_call(self.launch({"serviceTier": "new"}))
         self.assertEqual(call["agent"]["featureValues"], {"service_tier": "new"})
+
+
+class DeepLaunchFolderTests(PaseoLaunchTestCase):
+    """MIK-R208: a launch's recovery note fits however deep its report folder is."""
+
+    def compile_at(self, *parts: str) -> None:
+        """Compile as the real compilation does, for a report folder of the given parts."""
+
+        def compiled(handover: RoleHandoverRequest) -> dict[str, Any]:
+            report = self.root.joinpath(*parts) / f"{handover.request_id}.md"
+            return {
+                **self.compile_handover(handover),
+                "taskReportPath": report.as_posix(),
+                "canonicalTaskReportPath": report.as_posix(),
+            }
+
+        self.replace(role_launch_preparation, "_compile_handover", compiled)
+
+    def test_the_note_and_the_path_it_names_tell_the_same_at_any_depth(self) -> None:
+        # One launch per role: a second start of the same seat is refused while the first is not
+        # archived, which this case is not about.
+        cases = (
+            ("beside the checkout", "reviewer", ("reports",)),
+            (
+                "deeper than the note's whole budget",
+                "worker",
+                ("reports", *(("d" * 45 + str(number)) for number in range(6))),
+            ),
+        )
+        lengths: list[int] = []
+        named: list[str] = []
+        beside: list[int] = []
+        for label, role, parts in cases:
+            with self.subTest(label):
+                self.compile_at(*parts)
+                request = self.request(role)
+                self.assertEqual(self.dispatch(request)[1]["status"], "running")
+                receipt = self.receipt(request)
+                artifact = receipt["handoverArtifact"]
+                stored = Path(artifact["canonicalPath"])
+                report = Path(receipt["report"]["path"])
+                # The artifact keeps its own name and bytes beside the report, write-once.
+                self.assertEqual(stored.parent, report.parent)
+                self.assertEqual(stored.name, f"{report.stem}.handover.txt")
+                self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
+                self.assertEqual(stat.S_IMODE(stored.stat().st_mode), 0o444)
+                # The path the agent is given is the request's own locator, whatever the depth.
+                self.assertEqual(
+                    Path(artifact["path"]).parent, locator_directory(str(request.request_id))
+                )
+                self.assertEqual(Path(artifact["path"]).read_text(encoding="utf-8"), self.prompt)
+                note = self.runtime.launch_calls()[-1][1]["systemPrompt"]
+                self.assertLessEqual(len(note), RECOVERY_NOTE_LIMIT, note)
+                self.assertIn(
+                    f"Assignment file: {artifact['path']} (SHA-256 {artifact['sha256']}).", note
+                )
+                first_line = self.runtime.launch_calls()[-1][1]["prompt"].splitlines()[0]
+                self.assertIn(f"{artifact['path']} (SHA-256 {artifact['sha256']})", first_line)
+                self.assertIn(request.role, note)
+                # No part of the folder the report lives in is in the note at either depth.
+                self.assertNotIn(self.root.joinpath(*parts).as_posix(), note)
+                lengths.append(len(note) - len(str(request.role)))
+                named.append(artifact["path"])
+                beside.append(len(stored.as_posix()))
+        # The deep case is the requirement's: the artifact beside its report is longer than 318
+        # characters, and the note is not one character longer than at the shallow one.
+        self.assertLess(beside[0], 318)
+        self.assertGreaterEqual(beside[1], 318)
+        self.assertEqual(
+            lengths[0], lengths[1], "the note is one length at either depth, the role aside"
+        )
+        self.assertEqual(len(named[0]), len(named[1]))
+
+    def test_a_locator_that_would_lead_elsewhere_refuses_the_launch_before_it_starts(self) -> None:
+        # A name this product did not make for this folder: a collision or a retarget.
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        request = self.request("worker")
+        locator = locator_directory(str(request.request_id))
+        locator.parent.mkdir(parents=True, exist_ok=True)
+        locator.symlink_to(elsewhere, target_is_directory=True)
+
+        error = self.refused(request)
+
+        self.assertEqual(error.status_code, 409)
+        self.assertIn("does not lead to this request's report folder", str(error.detail))
+        # Nothing started, no receipt, no file written anywhere, and the alias is as it stood.
+        self.assertEqual(self.runtime.launch_calls(), [])
+        self.assertFalse(self.receipt_path(request).exists())
+        self.assertEqual(list(elsewhere.iterdir()), [])
+        self.assertEqual(locator.resolve(), elsewhere.resolve())
 
 
 if __name__ == "__main__":

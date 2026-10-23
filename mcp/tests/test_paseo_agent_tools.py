@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,7 @@ from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.worktrees.role_handover_locator import locator_directory
 from test_paseo_launch import PaseoLaunchTestCase
 
 PACKAGE = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
@@ -802,7 +804,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             request = self.request("worker")
             self.runtime.fail("agent-create", "paseo_bridge_timeout")
             self.assertEqual(self.dispatch(request)[1]["status"], "unknown")
-            artifact = Path(self.artifact(request)["path"])
+            artifact = Path(self.artifact(request)["canonicalPath"])
             written = artifact.stat()
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
             first, second = (call[1] for call in self.runtime.calls if call[0] == "agent-create")
@@ -815,7 +817,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             request = self.request("manager")
             self.runtime.fail("agent-create", "paseo_daemon_unreachable")
             self.dispatch(request)
-            artifact = Path(self.artifact(request)["path"])
+            artifact = Path(self.artifact(request)["canonicalPath"])
             artifact.unlink()
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
             self.assertEqual(artifact.read_text(encoding="utf-8"), self.prompt)
@@ -826,7 +828,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             with self.subTest("an artifact the request already has", case=label):
                 # The process ended after the artifact was written and before the receipt was.
                 request = self.request("architect")
-                artifact = Path(self.artifact(request)["path"])
+                artifact = Path(self.artifact(request)["canonicalPath"])
                 artifact.write_text(content, encoding="utf-8")
                 written = artifact.stat()
                 self.runtime.calls.clear()
@@ -854,7 +856,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 request = self.request(role)
                 self.runtime.fail("agent-create", "paseo_daemon_unreachable")
                 self.dispatch(request)
-                artifact = Path(self.artifact(request)["path"])
+                artifact = Path(self.artifact(request)["canonicalPath"])
                 artifact.unlink()
                 artifact.write_text("another assignment", encoding="utf-8")
                 saved = self.receipt_path(request).read_bytes()
@@ -880,7 +882,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             request = self.request("investigator")
             self.runtime.fail("agent-create", "paseo_bridge_timeout")
             self.dispatch(request)
-            artifact = Path(self.artifact(request)["path"])
+            artifact = Path(self.artifact(request)["canonicalPath"])
             artifact.unlink()
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
             self.assertEqual(artifact.read_text(encoding="utf-8"), self.prompt)
@@ -923,14 +925,21 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
     def test_a_leaf_retry_restores_a_missing_report_folder(self) -> None:
         request, saved, access, stored = self.unresolved_leaf_launch()
         reference = saved["handoverArtifact"]
+        locator = locator_directory(str(request.request_id))
         self.assertTrue(access.is_dir() and not access.is_symlink())
-        self.assertEqual(Path(reference["path"]), stored)
+        self.assertEqual(Path(reference["path"]).parent, locator)
+        self.assertEqual(Path(reference["canonicalPath"]), stored)
         shutil.rmtree(access)
         self.assertFalse(access.exists())
+        # The report folder went with its artifact; the retry makes it again behind the same
+        # locator, so the path the agent was given opens the file it names.
         self.assertEqual(self.dispatch(request)[1]["status"], "running")
         self.assertTrue(access.is_dir() and not access.is_symlink())
         self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
-        self.assertEqual(self.receipt(request)["handoverArtifact"]["path"], stored.as_posix())
+        self.assertEqual(Path(reference["path"]).read_text(encoding="utf-8"), self.prompt)
+        self.assertEqual(
+            self.receipt(request)["handoverArtifact"]["canonicalPath"], stored.as_posix()
+        )
 
     def test_a_leaf_retry_refuses_a_changed_artifact_until_it_is_deleted(self) -> None:
         request, _saved, _access, stored = self.unresolved_leaf_launch()
@@ -1030,7 +1039,10 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         with self.subTest("the receipt as the launch wrote it gets the retry through"):
             role_launch_receipts._write_receipt(path, saved)
             self.assertEqual(self.dispatch(request)[1]["status"], "running")
-            self.assertEqual(self.receipt(request)["handoverArtifact"]["path"], stored.as_posix())
+            self.assertEqual(
+                Path(self.receipt(request)["handoverArtifact"]["canonicalPath"]).as_posix(),
+                stored.as_posix(),
+            )
             self.assertTrue(access.is_dir() and not access.is_symlink())
 
     def test_a_conflicting_complete_handover_refuses_before_the_text_is_created(self) -> None:
@@ -1047,6 +1059,7 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
                 self.prompt,
                 '{"schema": "ar-role-handover/v1"}\n',
                 expected=_planned_sha('{"schema": "ar-role-handover/v1"}\n', report),
+                request_id=str(uuid.uuid4()),
             )
         self.assertFalse(text_artifact.exists(), "the refusal created the text artifact first")
         self.assertEqual(target.read_text(encoding="utf-8"), '{"schema": "another hand-over"}\n')
@@ -1233,8 +1246,10 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
         self.assertTrue(access.is_dir() and not access.is_symlink())
         created = self.runtime.launch_calls()[-1][1]
         digest = hashlib.sha256(self.prompt.encode("utf-8")).hexdigest()
-        # The agent is told the paths it can reach from inside its enclosure, everywhere.
-        reachable = (access / "role-launch" / f"{name}.handover.txt").as_posix()
+        # The agent is told the paths it can reach from inside its enclosure, everywhere: the
+        # complete hand-over beside the report, and the artifact through its request's locator.
+        stored = (access / "role-launch" / f"{name}.handover.txt").as_posix()
+        reachable = (locator_directory(str(request.request_id)) / f"{name}.handover.txt").as_posix()
         complete = (access / "role-launch" / f"{name}.handover.json").as_posix()
         environment = created["mcpServers"]["agents-remember-task"]["env"]
         self.assertEqual(environment["AR_REPORT_PATH"], report.as_posix())
@@ -1253,14 +1268,15 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
             self.receipt(request)["handoverArtifact"],
             {
                 "path": reachable,
-                "canonicalPath": reachable,
+                "canonicalPath": stored,
                 "sha256": digest,
                 "bytes": len(self.prompt.encode("utf-8")),
             },
         )
-        stored = access / "role-launch" / f"{name}.handover.txt"
-        self.assertEqual(stored.read_text(encoding="utf-8"), self.prompt)
-        self.assertEqual(stat.S_IMODE(stored.stat().st_mode), 0o444)
+        stored_file = Path(stored)
+        self.assertEqual(stored_file.read_text(encoding="utf-8"), self.prompt)
+        self.assertEqual(Path(reachable).read_text(encoding="utf-8"), self.prompt)
+        self.assertEqual(stat.S_IMODE(stored_file.stat().st_mode), 0o444)
         # The complete hand-over object is written beside it, read-only and complete.
         handover_file = Path(complete)
         self.assertEqual(stat.S_IMODE(handover_file.stat().st_mode), 0o444)

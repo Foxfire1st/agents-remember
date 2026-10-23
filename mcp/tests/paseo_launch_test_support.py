@@ -17,6 +17,7 @@ from agents_remember.cli.role_handover_artifacts import artifact_line
 from agents_remember.kernel.primitives.paseo_host_contract import PASEO_VERSION
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleDispatchRequest
+from agents_remember.worktrees.role_handover_locator import locator_directory
 from paseo_runtime_test_support import runtime_settings, write_shared_runtime
 
 SERVER_ID = "srv_configured"
@@ -240,14 +241,23 @@ class GivenToAgentExpectations(unittest.TestCase):
     def receipt(self, request: RoleDispatchRequest) -> dict[str, Any]:
         raise NotImplementedError
 
-    def artifact(self, request: RoleDispatchRequest) -> dict[str, Any]:
-        """The reference of the handover artifact a launch of ``request`` writes."""
+    def locator(self, request: RequestId) -> Path:
+        """The bounded locator this request publishes the message's artifact under."""
 
-        path = (self.root / "reports" / f"{request.request_id}.handover.txt").as_posix()
+        return locator_directory(str(request.request_id))
+
+    def artifact(self, request: RoleDispatchRequest) -> dict[str, Any]:
+        """The reference of the handover artifact a launch of ``request`` writes.
+
+        The file is written beside the report; the agent reaches it through the request's own
+        locator, which is the path the recovery note and the first message's first line name.
+        """
+
+        name = f"{request.request_id}.handover.txt"
         body = self.prompt.encode("utf-8")
         return {
-            "path": path,
-            "canonicalPath": path,
+            "path": (self.locator(request) / name).as_posix(),
+            "canonicalPath": (self.root / "reports" / name).as_posix(),
             "sha256": hashlib.sha256(body).hexdigest(),
             "bytes": len(body),
         }

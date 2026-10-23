@@ -247,8 +247,10 @@ def launching_source_root() -> Path:
 def recovery_note(context: RoleLaunchContext, artifact: dict[str, Any]) -> str:
     """Role, task references, and where the complete first message is stored; no task content.
 
-    The note never exceeds ``RECOVERY_NOTE_LIMIT`` characters. The artifact's path and SHA-256
-    are always complete; task references that would not fit are shortened (``_fitted``).
+    The note never exceeds ``RECOVERY_NOTE_LIMIT`` characters. The locator it names and the
+    SHA-256 are always complete; the locator is the product's own link of the report folder
+    (:mod:`agents_remember.worktrees.role_handover_locator`), so its length does not depend on how deep
+    that folder is. Task references that would not fit are shortened (``_fitted``).
     """
 
     references = [
@@ -277,7 +279,9 @@ def recovery_note(context: RoleLaunchContext, artifact: dict[str, Any]) -> str:
     if len(text) > RECOVERY_NOTE_LIMIT:
         raise ValueError(
             f"The recovery note of this launch cannot name its handover artifact within "
-            f"{RECOVERY_NOTE_LIMIT} characters; the artifact path is too long."
+            f"{RECOVERY_NOTE_LIMIT} characters: the role's task references and the artifact's "
+            "locator together exceed it. The locator has a fixed length, so the folder the "
+            "handover lives in is not the cause."
         )
     return text
 

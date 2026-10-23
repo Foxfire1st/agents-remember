@@ -31,6 +31,7 @@ from agents_remember.cli.role_handover_file import (
     handover_file_refusal,
     restore_handover_file,
 )
+from agents_remember.cli.role_instruction_details import validate_instruction_detail_artifacts
 
 
 class HandoverFileRefusal(ValueError):
@@ -70,6 +71,7 @@ def restore_launch_files(receipt_path: Path, receipt: dict[str, Any], message: s
         preflight(*step_up_target, takeover_refusal(step_up_target[0]))
     if file_target is not None:
         preflight(*file_target, handover_file_refusal(file_target[0]))
+    validate_instruction_detail_artifacts(receipt)
     restore_handover_artifact(
         artifact if isinstance(artifact, dict) else {},
         message,

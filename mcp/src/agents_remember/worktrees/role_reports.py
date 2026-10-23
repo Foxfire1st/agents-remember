@@ -18,10 +18,17 @@ from typing import Any
 from agents_remember.cli.role_message_files import MESSAGES_LINK
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.atomic_write import atomic_replace
+from agents_remember.worktrees.role_handover_locator import (
+    locator_directory,
+    locator_root,
+    remove_locator,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ROLE_REPORT_DIRECTORY = "role-reports"
 LEGACY_ROLE_REPORT_ALIAS = "task-reports"
+# The locators the launches of the folders being removed published; only the aliases go.
+HANDOVER_LOCATOR_DIRECTORY = "handover-locators"
 MAX_COLLECTION_FILES = 10_000
 MAX_COLLECTION_BYTES = 2 * 1024**3
 
@@ -214,11 +221,44 @@ def collect_group_reports(contract: WorktreeContract, *, dry_run: bool) -> dict[
     return result
 
 
+def _remove_group_locators(contract: WorktreeContract, *, dry_run: bool) -> dict[str, object]:
+    """Remove the launches' locators of this group's role folders, and only those aliases.
+
+    Each request folder under ``role-reports/<role>/`` names the launch whose handover it holds,
+    and that launch's locator is the alias of its report folder. The report folders themselves
+    are collected and removed by this call's own steps; a locator that leads anywhere else is
+    left standing and reported.
+    """
+
+    reports = contract.worktree_group / ROLE_REPORT_DIRECTORY
+    entries: list[dict[str, Any]] = []
+    if reports.is_dir() and not reports.is_symlink():
+        for role_folder in sorted(reports.iterdir()):
+            if not role_folder.is_dir() or role_folder.is_symlink():
+                continue
+            for request_folder in sorted(role_folder.iterdir()):
+                if request_folder.is_dir():
+                    entries.append(
+                        remove_locator(
+                            locator_directory(request_folder.name),
+                            within=contract.worktree_group,
+                            dry_run=dry_run,
+                        )
+                    )
+    removed = [entry for entry in entries if entry["reason"] is None]
+    return {
+        "path": locator_root().as_posix(),
+        "would_remove" if dry_run else "removed": bool(removed),
+        "reason": None if removed else "already-absent",
+    }
+
+
 def remove_group_role_folders(
     contract: WorktreeContract, *, dry_run: bool
 ) -> dict[str, dict[str, object]]:
     collect_group_reports(contract, dry_run=dry_run)
     result: dict[str, dict[str, object]] = {}
+    result[HANDOVER_LOCATOR_DIRECTORY] = _remove_group_locators(contract, dry_run=dry_run)
     for name in (ROLE_REPORT_DIRECTORY, "scratch", LEGACY_ROLE_REPORT_ALIAS, "task-documents"):
         path = contract.worktree_group / name
         present = path.exists() or path.is_symlink()
@@ -279,6 +319,9 @@ def close_execution_role_folders(receipt: dict[str, Any]) -> None:
         raise RoleReportCollectionError(
             f"Execution folder {execution} became a link; preserve it before removal"
         )
+    # The launch's locator goes with the folder it leads into, and only the alias does: the
+    # report folder inside `execution` is collected above and removed below.
+    remove_locator(locator_directory(str(receipt["requestId"])), within=execution)
     if execution.exists():
         shutil.rmtree(execution)
     receipt["reportCollection"] = {**collection, "state": "collected-closed"}

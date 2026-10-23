@@ -57,6 +57,7 @@ from agents_remember.cli.role_launch_workspace import (
     _leaf_contract_path,
     _resolve_workspace,
 )
+from agents_remember.cli.role_report_preparation import role_report_path as _role_report_path
 from agents_remember.cli.role_step_up_runtime import selected_defaults
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
@@ -89,9 +90,6 @@ ROLE_START_TOOL = "role_start"
 ROLE_MESSAGE_TOOL = "role_message"
 # The name under which a harness may carry the AR tool server of another installation.
 OTHER_INSTALLATION_TOOL_SERVER = "agents-remember"
-# The folder a role's report and handover artifact are written in: under a task's notes/reports,
-# or under the Projects folder's own report folder for a taskless role.
-REPORTS_DIRECTORY = "role-launch"
 # The launch's tool server as a harness that prefixes tool names spells it, and one of its tools.
 _UNDERSCORED_TOOL_SERVER = TOOL_SERVER_NAME.replace("-", "_")
 _PREFIXED_TOOL_SERVER = f"mcp__{_UNDERSCORED_TOOL_SERVER}"
@@ -1095,23 +1093,3 @@ def _role_assignment(
         f"{selected.ref.repository}:{selected.ref.path}. Follow its current requirements, references, "
         f"steps and the effective role instructions. Write the role handoff to {report_path}."
     )
-
-
-def _role_report_path(
-    context: RoleLaunchContext,
-    workspace: dict[str, str],
-    *,
-    request_id: uuid.UUID | None = None,
-) -> str:
-    if request_id is None:
-        raise ValueError("A role report requires its durable requestId.")
-    report_root = Path(workspace["taskReportAccessRoot"]) / REPORTS_DIRECTORY
-    selected = context.effective_task
-    if selected is None:
-        report_root = report_root / context.role
-    report_name = (
-        f"{selected.document.id}-{context.role}-{request_id}.md" if selected else f"{request_id}.md"
-    )
-    report = report_root / report_name
-    report.parent.mkdir(parents=True, exist_ok=True)
-    return report.as_posix()

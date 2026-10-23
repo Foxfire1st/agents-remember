@@ -16,7 +16,6 @@ from agents_remember.application.role_launch_context import (
     resolve_role_launch_context,
 )
 from agents_remember.cli.role_answers import alias_response
-from agents_remember.cli.role_launch_preparation import REPORTS_DIRECTORY
 from agents_remember.cli.role_launch_receipts import (
     EXECUTIONS_DIRECTORY,
     REPORT_ACCESS_LINK,
@@ -24,6 +23,7 @@ from agents_remember.cli.role_launch_receipts import (
     _receipt_address_matches,
     _receipt_path,
 )
+from agents_remember.cli.role_report_preparation import REPORTS_DIRECTORY
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig

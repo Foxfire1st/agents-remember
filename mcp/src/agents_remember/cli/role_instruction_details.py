@@ -88,8 +88,10 @@ def _require_detail_target(receipt: dict[str, Any], reference: dict[str, Any], p
     source_hash = hashlib.sha256(reference["sourcePath"].encode("utf-8")).hexdigest()
     given_report = Path(report["path"])
     given_artifact = given_report.with_suffix(".handover.txt")
+    # The artifact's own file sits beside the report; the path the agent was given reaches it
+    # through a link (a launch's own locator, or the report-access link of its enclosure).
     if (
-        Path(artifact["path"]) != given_artifact
+        Path(artifact["path"]).resolve() != given_artifact.resolve()
         or Path(artifact["canonicalPath"]).name != given_artifact.name
     ):
         raise _detail_refusal(reference, "the saved handover is not beside its report")

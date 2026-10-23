@@ -164,7 +164,6 @@ def _restore_launch_handover(
         validate_instruction_detail_artifacts(current)
         return
     _rebind_report_access(current)
-    validate_instruction_detail_artifacts(current)
     restore_launch_files(path, current, _restored_message(current, launch_call))
 
 

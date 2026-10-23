@@ -529,6 +529,7 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
         prompt,
         prepared["handoverFileContent"],
         expected=prepared["handoverFile"],
+        request_id=str(request.request_id),
     )
     launch_call = build_launch_call(
         RoleLaunch(
