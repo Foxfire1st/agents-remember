@@ -214,6 +214,8 @@ def project_and_write(
             engine_process_facts=inputs.engine_process_facts,
             engine_start_progress=inputs.engine_start_progress,
             attention_dismissals=inputs.attention_dismissals,
+            native_attention=inputs.native_attention,
+            task_entries=inputs.task_entries,
         ),
     )
     _warn_if_task_documents_payload_over_budget(projection, now=moment)

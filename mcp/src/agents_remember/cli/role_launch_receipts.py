@@ -42,6 +42,7 @@ from agents_remember.cli.role_launch_choices import (
 from agents_remember.cli.role_launch_outcome import publish_launch_outcome
 from agents_remember.cli.role_receipt_listing import taskless_execution_receipts
 from agents_remember.cli.role_step_up_decisions import record_step_up
+from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import canonical_role
@@ -58,8 +59,6 @@ from agents_remember.worktrees.role_reports import (
     collect_execution_reports,
 )
 
-# Where this line keeps its receipts, under a task's or the coordination root's notes/reports.
-EXECUTIONS_DIRECTORY = "paseo-native-executions"
 # The schema name every receipt of this line carries; a file without it is not read as a receipt.
 RECEIPT_SCHEMA = "ar-role-execution/v1"
 # The link in a leaf's enclosure group folder through which its agents reach the task's reports.

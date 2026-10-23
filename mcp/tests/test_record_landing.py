@@ -21,6 +21,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.application.worktree_tools import worktree_sync_tool
+from agents_remember.controlplane.attention_notices import read_notice_store
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.models.knowledge_files.canonical import canonical_text
 from agents_remember.tasks import SubTaskRef, TaskDocument, write_task_doc
@@ -336,3 +337,47 @@ class RecordLandingTests(unittest.TestCase):
             stored = load_contract(contract.contract_path)
             self.assertEqual(stored.integration_status, "checkpointed")
             self.assertEqual(stored.cleanup, "pending")
+
+
+class TerminalNoticeCaptureTests(unittest.TestCase):
+    """MIK-R200 rule 5: the final landing is a notice; history, dry runs and retries are not."""
+
+    def notices(self, contract: WorktreeContract):
+        store = read_notice_store(contract.coordination_root)
+        assert store is not None
+        return store
+
+    def test_one_final_record_publishes_one_landed_notice_and_an_exact_retry_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = _fixture(Path(tmp))
+            landed = _commit_on(contract.code_repo_path, "super", "landed.txt")
+            contract = _synced(Path(tmp), contract)
+
+            before = self.notices(contract)
+            self.assertEqual((before.notices, before.pending), ([], []))
+
+            _record(contract, landed_code_commit=landed)
+
+            store = self.notices(contract)
+            self.assertEqual(len(store.notices), 1)
+            self.assertEqual(store.notices[0].kind, "task-landed")
+            self.assertIn(landed, store.notices[0].occurrenceId)
+            self.assertEqual(store.notices[0].taskKey, "repo/master/task.json")
+            self.assertEqual(store.pending, [])
+
+            # The same landing recorded again refuses natively and adds no second occurrence.
+            again = _record(contract, landed_code_commit=landed)
+            self.assertEqual(again.payload["state"], "already-recorded")
+            self.assertEqual(len(self.notices(contract).notices), 1)
+
+    def test_a_dry_run_publishes_no_notice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = _fixture(Path(tmp))
+            landed = _commit_on(contract.code_repo_path, "super", "landed.txt")
+            contract = _synced(Path(tmp), contract)
+
+            result = _record(contract, landed_code_commit=landed, dry_run=True)
+
+            self.assertEqual(result.payload["state"], "would-record")
+            store = self.notices(contract)
+            self.assertEqual((store.notices, store.pending), ([], []))

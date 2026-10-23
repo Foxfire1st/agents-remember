@@ -21,6 +21,10 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalStore,
     AttentionObservation,
 )
+from agents_remember.observer.native_attention import (
+    NativeAttentionFacts,
+    observe_terminal_notices,
+)
 from agents_remember.observer.projection import (
     CloseoutQueueNode,
     DriftSnapshotNode,
@@ -33,7 +37,12 @@ from agents_remember.observer.projection import (
     SetupSummaryNode,
     ToolReportNode,
 )
-from agents_remember.observer.task_entries import TaskDocumentSource
+from agents_remember.observer.reducer import enclosure_actions
+from agents_remember.observer.task_entries import (
+    TaskDocumentSource,
+    TaskEntries,
+    build_task_entries,
+)
 from agents_remember.observer.worktree_provider_admission import (
     active_enclosure_worktree_groups,
     admitted_worktree_groups,
@@ -48,6 +57,7 @@ from agents_remember.serving.projections.host_activity import (
     HostActivityReconcile,
     HostActivitySnapshot,
 )
+from agents_remember.serving.projections.native_attention import NativeAttentionInput
 from agents_remember.serving.projections.snapshots import (
     read_drift_snapshots,
     read_enclosures,
@@ -100,6 +110,13 @@ class ProjectionDomain(StrEnum):
     START_PROGRESS = "start-progress"
     TOOL_REPORTS = "tool-reports"
     HOST_ACTIVITY = "host-activity"
+    # L190-R1-F10/F11: the two native stores the attention queue reads beside the host
+    # publication -- one small activation record per series contract plus the terminal notice
+    # store, and the held-message queue the delivery machinery names its holders in. Both have
+    # real watcher roots (see ``change_watcher.projection_input_roots``), and their values are
+    # exactly the invalidation tokens the native reader gates its file reads on.
+    ATTENTION_CONTROLPLANE = "attention-controlplane"
+    ATTENTION_HELD = "attention-held"
 
 
 logger = logging.getLogger(__name__)
@@ -107,6 +124,13 @@ logger = logging.getLogger(__name__)
 
 ALL_PROJECTION_DOMAINS = frozenset(ProjectionDomain)
 HEALING_PROJECTION_DOMAINS = ALL_PROJECTION_DOMAINS - {ProjectionDomain.HOST_ACTIVITY}
+
+#: The native reader's file-backed domains (L190-R1-F10/F11): the only two whose stores a pass
+#: may re-read. A pass hands them to the reader as its invalidation set, so an age-only
+#: heartbeat -- which names none of them -- reaches no store at all.
+NATIVE_ATTENTION_DOMAINS = frozenset(
+    {ProjectionDomain.ATTENTION_CONTROLPLANE, ProjectionDomain.ATTENTION_HELD}
+)
 
 
 class ProjectionRefreshKind(StrEnum):
@@ -252,6 +276,10 @@ class ProjectionInputs:
     attention_dismissals: dict[str, AttentionDismissalRecord]
     active_worktree_groups: list[str]
     host_activity: HostActivitySnapshot
+    native_attention: NativeAttentionFacts
+    # L190-R1-F04: the canonical task list this pass already built, so the stall clock and the
+    # stall rows read one relation and the join is done once per pass rather than twice.
+    task_entries: TaskEntries | None = None
 
 
 @dataclass(frozen=True)
@@ -337,6 +365,10 @@ class ProjectionInputState:
         )
         self._host_activity = HostActivitySnapshot()
         self._host_activity_started = False
+        self._native_attention_reader = NativeAttentionInput()
+        self._native_attention = NativeAttentionFacts()
+        self._native_attention_started = False
+        self._task_entries: TaskEntries | None = None
 
     def read(
         self,
@@ -410,8 +442,47 @@ class ProjectionInputState:
 
         observations: list[AttentionObservation] = []
         self._refresh_providers(config, pass_, providers, observations)
+        # MIK-R200 rule 9: the five native facts are re-derived from retained inputs and the
+        # files their owners publish into -- no host poll, no second timer, no store sweep.
+        # L190-R1-F11: the pass names the native domains that actually moved, so the reader
+        # re-parses a store only on its owning invalidation; an age-only heartbeat names none
+        # and every retained fact (with the deadline evaluation derived from it) stands.
+        entries = build_task_entries(
+            self._task_sources,
+            [
+                enclosure.model_copy(update={"actions": enclosure_actions(enclosure)})
+                for enclosure in self._enclosures
+            ],
+            self._host_activity,
+        )
+        self._task_entries = entries
+        self._native_attention = self._native_attention_reader.read(
+            config,
+            host=self._host_activity,
+            task_entries=entries,
+            now=pass_.now,
+            refreshed=self._native_refreshed(pass_.refresh),
+        )
+        self._native_attention_started = True
         self._refresh_engine_facts(config, pass_, engines, landing_state=readers.landing_state)
         self._refresh_drift(config, pass_, observations)
+        # MIK-R200 rule 7: the two notice kinds own their acknowledgements through this same
+        # observation list -- kept while their unchanged occurrence is retained, reclaimed when
+        # the bounded store drops it. An unreadable notice store supplies no observation, so it
+        # can end no acknowledgement.
+        if self._native_attention.notices_complete:
+            notice_observations = {
+                kind: AttentionObservation(kind, pass_.now)
+                for kind in ("task-landed", "task-abandoned")
+            }
+            for kind, observation in notice_observations.items():
+                observe_terminal_notices(
+                    tuple(
+                        notice for notice in self._native_attention.notices if notice.kind == kind
+                    ),
+                    {kind: observation},
+                )
+            observations.extend(notice_observations.values())
         self._refresh_progress(config, pass_, observations)
         self._refresh_workspace(pass_, observer_root=observer_root, observations=observations)
 
@@ -446,7 +517,28 @@ class ProjectionInputState:
             attention_dismissals=self._attention_dismissals,
             active_worktree_groups=sorted(engine_groups),
             host_activity=self._host_activity,
+            native_attention=self._native_attention,
+            task_entries=self._task_entries,
         )
+
+    def _native_refreshed(self, refresh: ProjectionRefresh) -> frozenset[ProjectionDomain] | None:
+        """The native domains whose stores this pass may re-read (L190-R1-F10/F11).
+
+        ``None`` means "everything": the reader has not run yet, so each file-backed kind is
+        read once. Afterwards a pass names exactly the native domains it saw move -- ``None``
+        never returns again for a state that has already read them. A change names the
+        intersection of the wake's domains with :data:`NATIVE_ATTENTION_DOMAINS` (empty when
+        an unrelated input moved), a heartbeat names nothing, and a full pass -- whose domains
+        are the healing set -- names both. The reader keeps whatever it was not told to
+        re-read, so an age-only heartbeat reaches no store. A full pass also bounds the one
+        case a single domain cannot settle on its own: an interrupted notice whose native
+        verdict needs the task tree settles on that heal within the watcher's five-minute
+        full-refresh bound.
+        """
+
+        if not self._native_attention_started:
+            return None
+        return frozenset(refresh.domains & NATIVE_ATTENTION_DOMAINS)
 
     def _surfaces_stale(self, now: datetime) -> bool:
         """Whether the retained repo surfaces outlived their freshness bound."""

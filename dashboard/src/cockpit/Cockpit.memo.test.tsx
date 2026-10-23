@@ -141,7 +141,11 @@ describe('persistent layers skip the setView reconcile (260721 tab-switch CPU)',
     // A full mode-bar sweep — railed↔full-bleed grid flips in both directions. Before the fix
     // EVERY layer reconciled on each of these clicks; now the memo gate holds wherever the
     // layer's props are unchanged, so a switch costs only the shell's style/layout flip.
-    for (const [name, detailRenders] of [['Chats', 2], ['File Viewer', 2], ['Operations', 3]] as const) {
+    for (const [name, detailRenders] of [
+      ['Chats', 2],
+      ['File Viewer', 2],
+      ['Operations', 3],
+    ] as const) {
       fireEvent.click(view.getByRole('radio', { name }));
       // Only hide/show reaches the persistent page, so its shared clock can stop.
       expect(counts.detailPanel).toBe(detailRenders);
@@ -160,7 +164,8 @@ describe('persistent layers skip the setView reconcile (260721 tab-switch CPU)',
     // is the list's rendered collection, not the rail, and the visibility edges never reach it.
     // It renders once, when it mounts. Hiding the rail renders the list's controller alone: the
     // collection's gate holds everything under it still. Showing the rail renders the collection
-    // again, and the bell's own memo gate stops that render: it has no selection callback.
+    // again, and the bell's own memo gate stops that render: the handlers it takes are the shell's
+    // stable ones (the list's selection callback, and the bell's way into a chat).
     expect(counts.attentionQueue).toBe(1);
   });
 

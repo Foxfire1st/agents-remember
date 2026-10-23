@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ATTENTION_ITEM_CLASSES,
   ATTENTION_LANES,
   ATTENTION_SEVERITIES,
   PROCESS_FACT_STATES,
@@ -286,6 +287,7 @@ const VOCABULARIES: Record<
   ],
   'projection.analytics.attentionQueue[].severity': ATTENTION_SEVERITIES,
   'projection.analytics.attentionQueue[].lane': ATTENTION_LANES,
+  'projection.analytics.attentionQueue[].itemClass': ATTENTION_ITEM_CLASSES,
   'projection.analytics.engineProcesses[].health': PROCESS_HEALTHS,
   'projection.analytics.engineProcesses[].codeSource.factState': PROCESS_FACT_STATES,
   'projection.analytics.engineProcesses[].codeWorktree.factState': PROCESS_FACT_STATES,

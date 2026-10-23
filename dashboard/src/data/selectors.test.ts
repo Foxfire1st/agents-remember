@@ -32,6 +32,8 @@ describe('selectQueue', () => {
       severity: 'info',
       lane: 'repo',
       title: 'Drift requires repair',
+      itemClass: 'operational',
+      dismissible: true,
     };
     expect(
       selectQueue({
@@ -51,6 +53,8 @@ describe('selectQueue', () => {
       severity: 'warn',
       lane: 'repo',
       title: '1 actionable drift in repo',
+      itemClass: 'operational',
+      dismissible: true,
     };
     expect(
       selectQueue({

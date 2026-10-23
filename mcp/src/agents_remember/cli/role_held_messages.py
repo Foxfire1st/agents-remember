@@ -1,4 +1,4 @@
-"""Durably held role messages and the process that delivers them (MIK-R100 rules 4a/4b).
+"""The process that delivers durably held role messages (MIK-R100 rules 4a/4b).
 
 A message the host cannot take now -- the recipient's start has not finished, it waits
 at a permission prompt, or it is in a turn the host cannot write into -- is held by the
@@ -6,16 +6,13 @@ product instead of refused, and delivered when the recipient can be written to. 
 seat (rule 2) is the same store with its handover still unopened: its first drain
 delivers the handover and everything held for it in one turn (rule 4).
 
-The store is one JSON file per recipient inside the recipient's own working folder, in
-a part of it that belongs to the product (MIK-R71 rules 13 to 15): the text of a waiting
-message lives only there, so removing the working folder removes the store. What stays
-after a message ends is one line in the recipient's launch record (its receipt): the
-sender, the time, and how it ended. The store holds only messages that still wait.
-
-Bounds (rule 4a): at most twenty held messages for one recipient, each no larger than
-what ``role_message`` admitted when it was taken; a message beyond that is refused as
-busy and none is dropped to make room. No message expires by time; each ends delivered,
-not delivered because the recipient is archived or gone, or withdrawn by its sender.
+What a waiting message *is* on disk -- the store file's name, schema and bounds, the one
+small queue of holders, the terminal lines a message leaves in its recipient's launch
+record, and the bounded discovery that finds the stores that exist -- belongs to
+:mod:`agents_remember.controlplane.held_store_layout`: this module writes through it, and the
+native attention queue reads it (MIK-R200 rule 3). What stays here is delivery: the claim
+that makes one batch, the drain that sends it, the record of how each message ended, and
+the sweep that drives the drains.
 
 Delivery: one process delivers (``drain_held`` under the store file's lock, so no two
 deliveries to one recipient run at once). Everything held for a recipient goes in one
@@ -27,7 +24,7 @@ before each drain; the dashboard sweep runs that read every
 ``HELD_DELIVERY_SWEEP_SECONDS``.
 
 Two things make a waiting message reachable without another message being sent to the
-recipient (MIK-R171 rule 1). Every holder names its receipt in one small bounded queue
+recipient (MIK-R171 rule 1). Every holder names its receipt in the one small bounded queue
 (``note_held_receipt``), and the sweep drains that queue before it walks the receipts,
 so a receipt that holds messages is visited ahead of the others. And the dashboard reads
 the host's own activity record: the agents whose turn it reports ended are drained
@@ -37,16 +34,10 @@ sweep stays the fallback for everything the record does not show.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
-import os
-import tempfile
-import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,37 +57,83 @@ from agents_remember.cli.role_launch_receipts import (
     _restore_launch_handover,
     _write_receipt,
 )
+from agents_remember.controlplane.held_store_discovery import (
+    ReceiptWalk as _CandidateWalk,
+)
+from agents_remember.controlplane.held_store_discovery import (
+    receipt_roots,
+)
+from agents_remember.controlplane.held_store_layout import (
+    MAX_HELD_PER_RECIPIENT,
+    STALE_CLAIM_SECONDS,
+    HeldMessage,
+    HeldMessageCommitted,
+    HeldStoreFull,
+    _clear_pending_lines,
+    _now_iso,
+    _read_store_counts,
+    _read_store_file,
+    _stage_pending_lines,
+    _store_endpoints,
+    _write_store_file,
+    combined_message_id,
+    combined_text,
+    end_waiting_as,
+    forget_held_receipt,
+    held_queue_receipts,
+    hold_message,
+    live_claim,
+    note_held_receipt,
+    record_lines,
+    recount_waiting_for,
+    sender_terminal_lines,
+    store_path_for,
+    waiting_counts,
+    waiting_total,
+    withdraw_message,
+)
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.serving.projections.host_activity import agent_in_turn
 
-# The store schema every file of one recipient carries.
-HELD_STORE_SCHEMA = "ar-held-messages/v1"
-# Rule 4a: at most this many held messages wait for one recipient.
-MAX_HELD_PER_RECIPIENT = 20
-# How many terminal lines a receipt keeps; the store itself keeps no ended text.
-MAX_HELD_RECORD_LINES = 30
+# The store's own names are re-exported here on purpose: this module was their home, and its
+# callers and tests import them from it. They are listed so the surface stays one thing a reader
+# can see, and so a linter does not read a kept name as a leftover import.
+__all__ = [
+    "EXECUTIONS_DIRECTORY",
+    "MAX_HELD_PER_RECIPIENT",
+    "STALE_CLAIM_SECONDS",
+    "HeldMessage",
+    "HeldMessageCommitted",
+    "HeldStoreFull",
+    "_read_store_counts",
+    "_read_store_file",
+    "_write_store_file",
+    "combined_text",
+    "end_waiting_as",
+    "held_queue_receipts",
+    "hold_message",
+    "note_held_receipt",
+    "record_lines",
+    "recount_waiting_for",
+    "sender_terminal_lines",
+    "waiting_counts",
+    "waiting_total",
+    "withdraw_message",
+]
+
+# The store's own names -- schema, bounds, queue, terminal lines -- live in one owner
+# (``controlplane/held_store_layout.py``) so this delivery line and the attention queue read one
+# definition of the product's layout (MIK-R200 rule 3; rule 12). What stays beside the
+# sweep here is only how often it looks.
 # How often the dashboard sweep reads every recipient with waiting messages: the stated
 # delay with which an answered prompt, an ended turn, or a finished start is observed.
 HELD_DELIVERY_SWEEP_SECONDS = 15.0
-# A claim older than this is retried: the process that claimed it never delivered.
-STALE_CLAIM_SECONDS = 120.0
 # How often the dashboard reads the host's activity record for a turn end (MIK-R171
 # rule 1): one stat, and one small file read when it changed.
 HELD_TURN_END_TICK_SECONDS = 3.0
 # At most this many recipients are drained for a turn end per tick.
 HELD_TURN_END_MAX_DRAINS = 32
-
-# The queue of receipts that hold messages (MIK-R171 rule 1). Every holder names its
-# receipt in one small file; the sweep drains that file's receipts before it walks the
-# rest, so a receipt with waiting messages is visited ahead of the others. It is a
-# runtime working surface and never the record: an entry is dropped when its receipt
-# holds nothing, when it is older than HELD_QUEUE_MAX_AGE_SECONDS, and beyond
-# HELD_QUEUE_MAX_ENTRIES; losing it costs one later sweep visit, never a message.
-HELD_QUEUE_SCHEMA = "ar-held-message-queue/v1"
-HELD_QUEUE_FILE = "held-message-queue.json"
-HELD_QUEUE_MAX_ENTRIES = 512
-HELD_QUEUE_MAX_AGE_SECONDS = 24 * 60 * 60
 
 logger = logging.getLogger(__name__)
 
@@ -105,342 +142,10 @@ _END_NOT_DELIVERED = "not-delivered-archived-or-gone"
 _END_WITHDRAWN = "withdrawn"
 
 
-def product_held_dir(workspace_path: str | Path) -> Path:
-    """The product-owned part of a working folder that keeps held messages."""
+def _live_claim(store: dict[str, Any]) -> str | None:
+    """The store's delivery claim when one is live; ``None`` when absent or stale."""
 
-    return Path(workspace_path) / ".ar-product" / "held-messages"
-
-
-def store_path_for(workspace_path: str | Path, agent_id: str) -> Path:
-    """The store file of one recipient; only an AR-minted id names one."""
-
-    try:
-        key = str(uuid.UUID(agent_id))
-    except ValueError as error:
-        raise ValueError(f"{agent_id!r} is not an agent id: AR agent ids are UUIDs.") from error
-    if key != agent_id:
-        raise ValueError(f"{agent_id!r} is not an agent id: AR agent ids are UUIDs.")
-    return product_held_dir(workspace_path) / f"{agent_id}.json"
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def _blank_store(agent_id: str) -> dict[str, Any]:
-    return {
-        "schema": HELD_STORE_SCHEMA,
-        "agentId": agent_id,
-        "messages": [],
-        "updatedAt": _now_iso(),
-    }
-
-
-def _read_store_file(path: Path, agent_id: str) -> dict[str, Any]:
-    try:
-        body = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return _blank_store(agent_id)
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError(f"The held-message store {path} is unreadable: {error}") from error
-    if not isinstance(body, dict) or body.get("schema") != HELD_STORE_SCHEMA:
-        raise ValueError(f"The held-message store {path} is malformed.")
-    if body.get("agentId") != agent_id:
-        raise ValueError(f"The held-message store {path} names another recipient.")
-    messages = body.get("messages")
-    if not isinstance(messages, list):
-        raise ValueError(f"The held-message store {path} has no message list.")
-    body["messages"] = [row for row in messages if isinstance(row, dict)]
-    return body
-
-
-def _write_store_file(path: Path, store: dict[str, Any]) -> None:
-    store["updatedAt"] = _now_iso()
-    _write_json_atomic(path, store)
-
-
-def held_queue_path(config: McpRuntimeConfig) -> Path:
-    """The one file that names the receipts holding messages (MIK-R171 rule 1)."""
-
-    return config.coordination_root / "temp" / HELD_QUEUE_FILE
-
-
-def _write_json_atomic(path: Path, body: dict[str, Any]) -> None:
-    """Replace one small product file whole; a reader sees the old body or the new one."""
-
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    payload = (json.dumps(body, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        Path(temporary).replace(path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
-
-
-def _read_queue(path: Path) -> dict[str, str]:
-    """The queue as receipt path to the time it was named; unreadable reads as empty."""
-
-    try:
-        body = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(body, dict) or body.get("schema") != HELD_QUEUE_SCHEMA:
-        return {}
-    entries = body.get("entries")
-    if not isinstance(entries, dict):
-        return {}
-    return {
-        key: value
-        for key, value in entries.items()
-        if isinstance(key, str) and isinstance(value, str)
-    }
-
-
-def _live_queue(entries: dict[str, str], now: datetime | None = None) -> dict[str, str]:
-    """The entries still worth a visit: recent enough, oldest first, at most the bound."""
-
-    moment = now or datetime.now(UTC)
-    recent: list[tuple[str, str]] = []
-    for path, stamped in entries.items():
-        try:
-            age = (moment - datetime.fromisoformat(stamped)).total_seconds()
-        except ValueError:
-            continue
-        if age <= HELD_QUEUE_MAX_AGE_SECONDS:
-            recent.append((stamped, path))
-    recent.sort()
-    return {path: stamped for stamped, path in recent[-HELD_QUEUE_MAX_ENTRIES:]}
-
-
-def _update_queue(config: McpRuntimeConfig, change: Callable[[dict[str, str]], bool]) -> None:
-    """Apply one change to the queue under its lock; a failure costs only a later visit."""
-
-    path = held_queue_path(config)
-    try:
-        with exclusive_file_lock(path, "held-message queue"):
-            entries = _live_queue(_read_queue(path))
-            if change(entries) is False:
-                return
-            _write_json_atomic(path, {"schema": HELD_QUEUE_SCHEMA, "entries": entries})
-    except (OSError, ValueError) as error:
-        # The store already holds the message; the queue only orders the sweep's visits.
-        logger.warning("The held-message queue %s could not be written: %s", path, error)
-
-
-def note_held_receipt(config: McpRuntimeConfig, receipt_path: Path) -> None:
-    """Name one receipt that holds messages, so a sweep visits it before the others."""
-
-    def note(entries: dict[str, str]) -> bool:
-        entries[receipt_path.as_posix()] = _now_iso()
-        return True
-
-    _update_queue(config, note)
-
-
-def forget_held_receipt(config: McpRuntimeConfig, receipt_path: Path) -> None:
-    """Forget one receipt that holds nothing now; an absent entry changes nothing."""
-
-    def forget(entries: dict[str, str]) -> bool:
-        return entries.pop(receipt_path.as_posix(), None) is not None
-
-    _update_queue(config, forget)
-
-
-def held_queue_receipts(config: McpRuntimeConfig) -> list[Path]:
-    """The receipts that hold messages, the oldest visit first (MIK-R171 rule 1).
-
-    Reading is lock-free: the queue is replaced whole, so a reader sees one complete
-    body. Stale and surplus entries are left out here and dropped by the next write.
-    """
-
-    return [Path(path) for path in _live_queue(_read_queue(held_queue_path(config)))]
-
-
-def waiting_total(workspace_path: str | Path, agent_id: str) -> int:
-    """How many messages still wait for one recipient; unreadable counts as none.
-
-    A missing store reads as empty without creating anything: an ordinary delivery
-    stores nothing.
-    """
-
-    try:
-        path = store_path_for(workspace_path, agent_id)
-    except ValueError:
-        return 0
-    try:
-        if not path.is_file():
-            return 0
-    except OSError:
-        return 0
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError:
-            return 0
-        return len(store.get("messages", []))
-
-
-def waiting_counts(store: dict[str, Any], sender_agent_id: str | None = None) -> tuple[int, int]:
-    """How many messages of one sender, and in all, still wait."""
-
-    messages = store.get("messages", [])
-    total = len(messages)
-    mine = (
-        sum(1 for row in messages if row.get("senderAgentId") == sender_agent_id)
-        if sender_agent_id
-        else 0
-    )
-    return mine, total
-
-
-def combined_text(messages: list[dict[str, Any]]) -> str:
-    """One delivery for all that is held (D114): each under its sender's line, in order."""
-
-    return "\n\n".join(f"{row['senderLine']}\n{row['text']}" for row in messages)
-
-
-def combined_message_id(messages: list[dict[str, Any]]) -> str:
-    """The stable id of one batch: a retry after a crash redelivers under the same id."""
-
-    digest = hashlib.sha256(
-        json.dumps(
-            [row["id"] for row in messages], ensure_ascii=False, separators=(",", ":")
-        ).encode("utf-8")
-    ).hexdigest()[:32]
-    return f"held-batch:{digest}"
-
-
-class HeldStoreFull(ValueError):
-    """A further message is refused as busy: the recipient already holds the bound."""
-
-
-@dataclass(frozen=True, slots=True)
-class HeldMessage:
-    """One message taken into the store: who sent what text, and why it waits.
-
-    ``attempted_message_id`` is the host id of a send the host did not answer (a refusal
-    as host-unreachable, a timeout or an unknown outcome;
-    MIK-R171 rules 2 and 3). The waiting message keeps that id, so its later delivery
-    goes out under an id the host may already record, and a host that records a message
-    id once delivers it at most once.
-
-    ``limited_until`` is rule 9's reset time for a message a provider limit holds, as an
-    ISO 8601 time with offset. It is stored on the row itself rather than left to a
-    later read of the limit file: the row is what a restarted process reads back, and
-    the moment this message may be delivered is part of why it waits.
-    """
-
-    sender_line: str
-    sender_agent_id: str
-    text: str
-    reason: str
-    permission: str | None = None
-    attempted_message_id: str | None = None
-    limited_until: str | None = None
-
-
-def hold_message(workspace_path: str | Path, agent_id: str, message: HeldMessage) -> dict[str, Any]:
-    """Take one message the host cannot take now; refuse a message beyond the bound."""
-
-    path = store_path_for(workspace_path, agent_id)
-    with exclusive_file_lock(path, "held-message store"):
-        store = _read_store_file(path, agent_id)
-        messages = store["messages"]
-        attempted = message.attempted_message_id
-        if attempted and any(row.get("id") == attempted for row in messages):
-            # The same attempt is taken twice (a repeat after a stop): one waiting copy.
-            mine, total = waiting_counts(store, message.sender_agent_id)
-            return {
-                "heldMessageId": attempted,
-                "waitingMine": mine,
-                "waitingTotal": total,
-                "limitedUntil": _limited_until_in(store, attempted),
-            }
-        if len(messages) >= MAX_HELD_PER_RECIPIENT:
-            raise HeldStoreFull(
-                f"Agent {agent_id} already holds {len(messages)} messages, the bound for one "
-                "recipient; none was dropped to make room."
-            )
-        message_id = attempted or str(uuid.uuid4())
-        row: dict[str, Any] = {
-            "id": message_id,
-            "senderLine": message.sender_line,
-            "senderAgentId": message.sender_agent_id,
-            "text": message.text,
-            "takenAt": _now_iso(),
-            "reason": message.reason,
-        }
-        if message.permission:
-            row["permission"] = message.permission
-        if message.attempted_message_id:
-            row["attemptedMessageId"] = message.attempted_message_id
-        if message.limited_until:
-            # Rule 9's reset time rides on the waiting row: why it waits, and until when.
-            row["limitedUntil"] = message.limited_until
-        messages.append(row)
-        _write_store_file(path, store)
-        mine, total = waiting_counts(store, message.sender_agent_id)
-    return {
-        "heldMessageId": message_id,
-        "waitingMine": mine,
-        "waitingTotal": total,
-        "limitedUntil": row.get("limitedUntil"),
-    }
-
-
-def _limited_until_in(store: dict[str, Any], message_id: str) -> str | None:
-    """The reset time one already-waiting row carries, if it carries one."""
-
-    for row in store.get("messages", []):
-        if row.get("id") == message_id:
-            value = row.get("limitedUntil")
-            return value if isinstance(value, str) and value else None
-    return None
-
-
-class HeldMessageCommitted(Exception):
-    """A waiting message already committed to delivery cannot be withdrawn."""
-
-    def __init__(self, message_id: str) -> None:
-        super().__init__(message_id)
-        self.message_id = message_id
-
-
-def withdraw_message(
-    workspace_path: str | Path, agent_id: str, message_id: str, sender_agent_id: str
-) -> dict[str, Any] | None:
-    """End one waiting message of its sender as withdrawn; ``None`` when not waiting.
-
-    Withdrawal and delivery claim ownership have one observable winner: a message
-    under a live claim is already committed to delivery and raises
-    :class:`HeldMessageCommitted` instead of being reported withdrawn. A stale
-    claim belongs to a dead drain and is cleared with the withdrawal.
-    """
-
-    path = store_path_for(workspace_path, agent_id)
-    with exclusive_file_lock(path, "held-message store"):
-        store = _read_store_file(path, agent_id)
-        if _live_claim(store) is not None:
-            raise HeldMessageCommitted(message_id)
-        ended = None
-        for index, row in enumerate(store["messages"]):
-            if row.get("id") == message_id and row.get("senderAgentId") == sender_agent_id:
-                ended = store["messages"].pop(index)
-                break
-        cleared = (
-            store.pop("deliveryClaim", None) is not None
-            or store.pop("deliveryClaimAt", None) is not None
-            or store.pop("deliveryClaimIds", None) is not None
-        )
-        if ended is None and not cleared:
-            return None
-        _write_store_file(path, store)
-        return ended
+    return live_claim(store, STALE_CLAIM_SECONDS)
 
 
 def _remove_ids(
@@ -476,101 +181,6 @@ def _remove_ids(
             store.pop("deliveryClaimIds", None)
         _write_store_file(path, store)
     return removed
-
-
-def end_waiting_as(workspace_path: str | Path, agent_id: str) -> list[dict[str, Any]]:
-    """End every waiting message (archived or gone); the texts are deleted."""
-
-    path = store_path_for(workspace_path, agent_id)
-    with exclusive_file_lock(path, "held-message store"):
-        store = _read_store_file(path, agent_id)
-        ended = list(store["messages"])
-        store["messages"] = []
-        store.pop("deliveryClaim", None)
-        store.pop("deliveryClaimAt", None)
-        store.pop("deliveryClaimIds", None)
-        _write_store_file(path, store)
-    return ended
-
-
-def record_lines(
-    receipt: dict[str, Any], ended: list[dict[str, Any]], how: str
-) -> list[dict[str, Any]]:
-    """One line per ended message for the launch record: sender, time, how it ended.
-
-    Lines are deduplicated by message id: a staged end flushed twice, or a
-    record retried after a partial write, never writes the same end twice.
-    """
-
-    lines = receipt.get("heldMessageLines")
-    if not isinstance(lines, list):
-        lines = []
-        receipt["heldMessageLines"] = lines
-    have = {line.get("messageId") for line in lines if isinstance(line, dict)}
-    now = _now_iso()
-    for row in ended:
-        if not isinstance(row, dict) or row.get("id") in have:
-            continue
-        have.add(row.get("id"))
-        lines.append(
-            {
-                "messageId": row.get("id"),
-                "sender": row.get("senderLine"),
-                "senderAgentId": row.get("senderAgentId"),
-                "time": now,
-                "how": how,
-            }
-        )
-    del lines[: max(0, len(lines) - MAX_HELD_RECORD_LINES)]
-    return [line for line in lines if isinstance(line, dict)]
-
-
-def _pending_line(row: dict[str, Any], how: str) -> dict[str, Any]:
-    """One staged end, carrying its own outcome for a later line write."""
-
-    return {
-        "messageId": row.get("id"),
-        "sender": row.get("senderLine"),
-        "senderAgentId": row.get("senderAgentId"),
-        "time": _now_iso(),
-        "how": how,
-    }
-
-
-def _stage_pending_lines(
-    workspace_path: str | Path, agent_id: str, ended: list[dict[str, Any]], how: str
-) -> bool:
-    """Persist ended rows for a later line write; ``True`` when they are staged.
-
-    Staging shares the store's atomic write with nothing else to lose: a
-    receipt write that fails after the texts left the store still leaves the
-    ends recoverable. A later flush deduplicates by message id.
-    """
-
-    try:
-        path = store_path_for(workspace_path, agent_id)
-    except ValueError:
-        return False
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError:
-            return False
-        staged = store.get("pendingLines")
-        if not isinstance(staged, list):
-            staged = []
-            store["pendingLines"] = staged
-        have = {entry.get("messageId") for entry in staged if isinstance(entry, dict)}
-        for row in ended:
-            if not isinstance(row, dict) or row.get("id") in have:
-                continue
-            have.add(row.get("id"))
-            staged.append(_pending_line(row, how))
-        try:
-            _write_store_file(path, store)
-        except OSError:
-            return False
-    return True
 
 
 def _flush_pending_lines(
@@ -617,36 +227,6 @@ def _flush_pending_lines(
     except (ValueError, OSError):
         return False
     return True
-
-
-def sender_terminal_lines(
-    receipt: dict[str, Any], sender_agent_id: str, limit: int = 10
-) -> list[dict[str, Any]]:
-    """What a sender reads about its ended messages at its next call (rule 4a)."""
-
-    lines = receipt.get("heldMessageLines")
-    if not isinstance(lines, list):
-        return []
-    mine = [
-        line
-        for line in lines
-        if isinstance(line, dict) and line.get("senderAgentId") == sender_agent_id
-    ]
-    return mine[-limit:]
-
-
-def _live_claim(store: dict[str, Any]) -> str | None:
-    """The store's delivery claim when one is live; ``None`` when absent or stale."""
-
-    claim = store.get("deliveryClaim")
-    claimed_at = store.get("deliveryClaimAt")
-    if not isinstance(claim, str) or not isinstance(claimed_at, str):
-        return None
-    try:
-        age = (datetime.now(UTC) - datetime.fromisoformat(claimed_at)).total_seconds()
-    except ValueError:
-        return None
-    return claim if age < STALE_CLAIM_SECONDS else None
 
 
 def _claim_batch(
@@ -897,25 +477,6 @@ def _confirmed(batch: _DrainBatch) -> list[dict[str, Any]]:
             }
         )
     return survivors
-
-
-def _read_store_counts(
-    workspace_path: str | Path, agent_id: str, sender_agent_id: str
-) -> tuple[int, int]:
-    """The (mine, total) waiting now; an unreadable store counts as none."""
-
-    try:
-        path = store_path_for(workspace_path, agent_id)
-    except ValueError:
-        return 0, 0
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError:
-            return 0, 0
-        rows = [row for row in store.get("messages", []) if isinstance(row, dict)]
-    mine = sum(1 for row in rows if row.get("senderAgentId") == sender_agent_id)
-    return mine, len(rows)
 
 
 def _open_held_seat(batch: _DrainBatch) -> dict[str, Any]:
@@ -1324,75 +885,6 @@ SWEEP_MAX_DRAINS_PER_TICK = 32
 SWEEP_MAX_RECEIPT_READS_PER_TICK = 32
 """At most this many receipts are read in one sweep tick, idle ones included."""
 
-_SKIPPED_SWEEP_DIRS = frozenset({"history", "message-bindings"})
-"""Receipt subtrees the sweep never walks: archived records and bindings."""
-
-
-def _walk_candidate_paths(root: Path):
-    """Lazily yield candidate receipt paths under one root, in a stable order.
-
-    A lazy ``os.scandir`` walk, one directory listing at a time: no recursive
-    glob, no full path set, no sort of the whole fleet. Each directory's names
-    are ordered so every pass visits the same sequence; ``history`` and
-    ``message-bindings`` subtrees are never descended into, exactly as the old
-    census filtered them after enumeration. Nothing is read: names alone
-    decide. A missing or unreadable directory ends its branch, never the tick.
-    """
-
-    try:
-        with os.scandir(root) as it:
-            entries = sorted(it, key=lambda entry: entry.name)
-    except OSError:
-        return
-    for entry in entries:
-        try:
-            is_dir = entry.is_dir(follow_symlinks=False)
-        except OSError:
-            continue
-        if is_dir:
-            if entry.name in _SKIPPED_SWEEP_DIRS:
-                continue
-            yield from _walk_candidate_paths(Path(entry.path))
-        elif entry.name.endswith(".json"):
-            yield entry.path
-
-
-class _CandidateWalk:
-    """One root's resumable candidate walk, shared across sweep ticks.
-
-    The generator suspends between yields holding no open directory: every
-    level's listing is materialized and closed before its entries go out, so a
-    suspended walk is only frames and names. ``take`` pulls the next paths up
-    to a per-tick budget; an exhausted walk reports done and the next tick
-    starts a fresh pass, so added receipts join at the next pass and removed
-    ones read as no work. Rotation across ticks therefore visits every receipt
-    without ever constructing the fleet's full path set.
-    """
-
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self._gen = _walk_candidate_paths(root)
-        self.done = False
-
-    def take(self, budget: int) -> list[str]:
-        """The next candidate paths, at most ``budget`` of them."""
-
-        paths: list[str] = []
-        while len(paths) < budget and not self.done:
-            try:
-                paths.append(next(self._gen))
-            except StopIteration:
-                self.done = True
-        return paths
-
-    def close(self) -> None:
-        """Release a suspended walk (tests reset between passes)."""
-
-        self.done = True
-        close = getattr(self._gen, "close", None)
-        if callable(close):
-            close()
-
 
 _sweep_walks: dict[str, dict[str, _CandidateWalk]] = {}
 """Coordination root to its executions roots' resumable walks, one pass at a time."""
@@ -1411,13 +903,7 @@ def _reset_sweep_cursor() -> None:
 def _executions_roots(config: McpRuntimeConfig) -> list[Path]:
     """The executions directories whose receipts one sweep tick may visit."""
 
-    roots = [config.coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY]
-    roots.extend(
-        sorted(
-            (config.coordination_root / "tasks").glob(f"**/notes/reports/{EXECUTIONS_DIRECTORY}")
-        )
-    )
-    return [root for root in roots if root.is_dir()]
+    return receipt_roots(config.coordination_root)
 
 
 def _sweep_walks_for(config: McpRuntimeConfig) -> list[_CandidateWalk]:
@@ -1612,45 +1098,6 @@ def _sweep_receipt(config: McpRuntimeConfig, path: Path) -> str | None:
     return "still-held"
 
 
-def _store_endpoints(receipt: dict[str, Any]) -> tuple[str, str] | None:
-    """The (folder, agent) owning one receipt's held-message store, if named."""
-
-    workspace = receipt.get("workspace")
-    execution = receipt.get("execution")
-    folder = workspace.get("path") if isinstance(workspace, dict) else None
-    agent_id = execution.get("agentId") if isinstance(execution, dict) else None
-    if not isinstance(folder, str) or not folder or not isinstance(agent_id, str):
-        return None
-    try:
-        store_path_for(folder, agent_id)
-    except ValueError:
-        return None
-    return folder, agent_id
-
-
-def _clear_pending_lines(workspace_path: str | Path, agent_id: str, ids: list[str]) -> None:
-    """Forget staged ends the receipt now records; best-effort, never raises."""
-
-    try:
-        path = store_path_for(workspace_path, agent_id)
-    except ValueError:
-        return
-    with suppress(OSError, ValueError), exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError:
-            return
-        staged = store.get("pendingLines")
-        if not isinstance(staged, list):
-            return
-        store["pendingLines"] = [
-            entry
-            for entry in staged
-            if not isinstance(entry, dict) or entry.get("messageId") not in ids
-        ]
-        _write_store_file(path, store)
-
-
 def _stage_and_record_ends(
     current: dict[str, Any], result: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], tuple[str, str] | None]:
@@ -1702,7 +1149,7 @@ def apply_drain_to_receipt(path: Path, result: dict[str, Any]) -> bool:
             detail=str(result.get("detail") or "The held seat can never take its first message."),
             updatedAt=_now_iso(),
         )
-    _recount_waiting(current)
+    recount_waiting_for(current)
     try:
         _write_receipt(path, current)
     except OSError:
@@ -1723,42 +1170,6 @@ def _refresh_waiting_count(path: Path) -> None:
         return
     if current is None:
         return
-    _recount_waiting(current)
+    recount_waiting_for(current)
     with suppress(OSError):
         _write_receipt(path, current)
-
-
-def recount_waiting_for(receipt: dict[str, Any]) -> None:
-    """Recount one receipt's waiting messages from its store (line writers use this)."""
-
-    _recount_waiting(receipt)
-
-
-def _recount_waiting(receipt: dict[str, Any]) -> None:
-    workspace = receipt.get("workspace")
-    execution = receipt.get("execution")
-    folder = workspace.get("path") if isinstance(workspace, dict) else None
-    agent_id = execution.get("agentId") if isinstance(execution, dict) else None
-    if not isinstance(folder, str) or not isinstance(agent_id, str):
-        receipt["heldWaiting"] = 0
-        return
-    if not Path(folder).is_dir():
-        # A removed working folder holds nothing; counting never recreates it.
-        receipt["heldWaiting"] = 0
-        return
-    try:
-        path = store_path_for(folder, agent_id)
-    except ValueError:
-        receipt["heldWaiting"] = 0
-        return
-    with exclusive_file_lock(path, "held-message store"):
-        try:
-            store = _read_store_file(path, agent_id)
-        except ValueError as error:
-            # The count is left as it stands rather than published as zero: a store that
-            # cannot be read is not a store that holds nothing (MIK-R171 rule 5).
-            logger.warning(
-                "The held-message count of agent %s could not be refreshed: %s.", agent_id, error
-            )
-            return
-        receipt["heldWaiting"] = len(store.get("messages", []))

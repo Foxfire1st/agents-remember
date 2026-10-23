@@ -18,8 +18,11 @@ an unfinished master's accumulated line. It is deliberately unreachable from her
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from agents_remember.worktrees.activation.atomic_series_activation import (
     AtomicSeriesActivationError,
+    mark_atomic_series_pause,
     observe_atomic_series,
 )
 from agents_remember.worktrees.activation.atomic_series_activation_release import (
@@ -114,10 +117,12 @@ def pause_result(
                 ),
             ),
         )
+    release_stamp = datetime.now(UTC).replace(microsecond=0).isoformat()
     try:
-        released = release_atomic_series_selection(contract)
+        release_atomic_series_selection(contract, paused_at=release_stamp)
+        paused = mark_atomic_series_pause(contract, timestamp=release_stamp)
     except AtomicSeriesActivationError as error:
-        already_stopped = _already_stopped_result(contract, error)
+        already_stopped = _already_stopped_result(contract, error, release_stamp=release_stamp)
         if already_stopped is not None:
             return already_stopped
         return WorktreeCommandResult(
@@ -128,12 +133,14 @@ def pause_result(
                 detail=_RELEASE_REFUSAL_DETAIL.get(error.status, error.detail),
             ),
         )
-    return WorktreeCommandResult(0, _paused_payload(contract, released.source_fact()))
+    return WorktreeCommandResult(0, _paused_payload(contract, paused.source_fact()))
 
 
 def _already_stopped_result(
     contract: WorktreeContract,
     error: AtomicSeriesActivationError,
+    *,
+    release_stamp: str,
 ) -> WorktreeCommandResult | None:
     """The already-stopped success, or None when this refusal is a real one.
 
@@ -142,7 +149,9 @@ def _already_stopped_result(
     and the very same observation answers it: no record at this contract's own address means
     the plane is vacant, which is exactly the state a release leaves behind, so the master is
     already stopped. The observation is taken rather than assumed, so a record that appeared or
-    became unreadable between the two reads still refuses instead of reporting a stop.
+    became unreadable between the two reads still refuses instead of reporting a stop. The pause
+    fact is written onto that vacant record all the same: the developer's stop is a fact about
+    this master whether or not a selection happened to be held.
     """
 
     if error.status != SELECTION_MISSING_STATUS:
@@ -150,7 +159,8 @@ def _already_stopped_result(
     observed = observe_atomic_series(contract)
     if observed.state != "vacant":
         return None
-    return WorktreeCommandResult(0, _already_vacant_payload(contract, observed.source_fact()))
+    marked = mark_atomic_series_pause(contract, timestamp=release_stamp)
+    return WorktreeCommandResult(0, _already_vacant_payload(contract, marked.source_fact()))
 
 
 def _already_vacant_payload(

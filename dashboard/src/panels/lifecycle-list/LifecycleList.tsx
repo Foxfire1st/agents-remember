@@ -16,6 +16,7 @@ import { dashboardStore, useDashboard } from '../../data/store';
 import { taskEntrySelectionKey } from '../../data/taskReference';
 import { Panel } from '../../grammar/Panel';
 import type { TaskEntry } from '../../types/projection';
+import type { AttentionAgentTarget } from '../AttentionQueue';
 import {
   limitUntil,
   statusLabel,
@@ -213,6 +214,7 @@ export const LifecycleList = memo(
   LifecycleListImpl,
   (previous, next) =>
     previous.selectedId === next.selectedId &&
+    previous.onOpenAgent === next.onOpenAgent &&
     ((previous.active === false && next.active === false) ||
       (previous.active === next.active && previous.onSelect === next.onSelect)),
 );
@@ -226,15 +228,63 @@ interface OperationGroup {
   items: TreeItem[];
 }
 
+// The column's head: the pivot switch and the attention bell. This is where a bell row's served
+// identity becomes the column's own navigation (L190-R1-F08, L190-R1-F09).
+//
+// A task row names the exact task document it is about; the list's selection is the taskdoc
+// identity every row here already uses (`taskEntrySelectionKey`), and the Operations page resolves
+// a task only from that identity (detail-panel/state.ts). The bell's key is therefore mapped here
+// and nowhere else — passing the raw key would select nothing.
+//
+// An agent row names an exact agent, and the rail has no chat surface of its own: the dashboard's
+// chat target belongs to the shell (the Chats view's launcher selection and its embedded frame).
+// So the way in is the shell's (`onOpenAgent`), and the row's served identities travel with it —
+// the seat's role is the selection's role and its task document is the selection's document. This
+// panel never writes the observed-chat channel (`frameTrayChannel.setFrameChat`): that records the
+// chat a frame reports showing, not a navigation request, and writing it would both fail to move
+// the frame and misstate the chat on screen.
+function TaskPivotHead({
+  count,
+  pivot,
+  onPivot,
+  onSelect,
+  onOpenAgent,
+}: {
+  count: number;
+  pivot: Pivot;
+  onPivot: (pivot: Pivot) => void;
+  onSelect: (key: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
+}) {
+  // One identity per shell callback: the bell's memo gate compares this prop, and a rebuild per
+  // render would re-render the bell on every visibility edge (the 260721 tab-switch cost).
+  const openTask = useCallback((key: string) => onSelect(taskEntrySelectionKey(key)), [onSelect]);
+  return (
+    <TaskPivotBar
+      count={count}
+      pivot={pivot}
+      onPivot={onPivot}
+      onOpenTask={openTask}
+      onOpenAgent={onOpenAgent}
+    />
+  );
+}
+
+/** What the column takes from its shell: its selection, and the ways in to a subject. */
+export interface LifecycleListProps {
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  /** The shell's way into an agent's chat; the row's exact seat and document travel with it. */
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
+  active?: boolean;
+}
+
 function LifecycleListImpl({
   selectedId,
   onSelect,
+  onOpenAgent,
   active = true,
-}: {
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  active?: boolean;
-}) {
+}: LifecycleListProps) {
   const subscribe = useCallback(
     (changed: () => void) => (active ? dashboardStore.subscribe(changed) : () => {}),
     [active],
@@ -270,7 +320,15 @@ function LifecycleListImpl({
       }
     >
       <Panel
-        head={<TaskPivotBar count={Object.keys(tasks).length} pivot={pivot} onPivot={setPivot} />}
+        head={
+          <TaskPivotHead
+            count={Object.keys(tasks).length}
+            pivot={pivot}
+            onPivot={setPivot}
+            onSelect={onSelect}
+            onOpenAgent={onOpenAgent}
+          />
+        }
         className={sizing}
       >
         <div ref={listRef} data-active={active}>

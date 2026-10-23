@@ -24,6 +24,15 @@ if TYPE_CHECKING:
     pass
 
 
+class TerminalCommit(Protocol):
+    """The native terminal result that closes a rollbackable publication."""
+
+    @property
+    def committed(self) -> bool: ...
+
+    def publish(self) -> None: ...
+
+
 class TerminalGuard(Protocol):
     """The citation-cache terminal fence surface worktrees consume."""
 
@@ -34,6 +43,7 @@ class TerminalGuard(Protocol):
         outcome: Literal["completed", "abandoned"],
         publish: Callable[[], None],
         rollback_publish: Callable[[], None],
+        commit: TerminalCommit | None = None,
     ) -> Any: ...
 
 
@@ -430,6 +440,7 @@ __all__ = [
     "ProviderLifecyclePort",
     "ReviewArtifactCleanupPort",
     "ReviewArtifactCleanupRequest",
+    "TerminalCommit",
     "TerminalGuard",
     "WorktreeServices",
     "WorktreeServicesUnboundError",

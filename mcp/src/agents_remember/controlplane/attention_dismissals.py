@@ -42,7 +42,17 @@ class AttentionDismissalRecord(DurableRecord):
     @field_validator("kind")
     @classmethod
     def supported_kind(cls, value: str) -> str:
-        if value not in {"actionable-drift", "provider-down", "failed-setup", "blocked-start"}:
+        # MIK-R200 rule 7: the two terminal notice kinds are acknowledged once per occurrence
+        # through this same owner. The three live native causes are deliberately absent: their
+        # dismissal is refused, so a row of theirs is not even a document this store reads.
+        if value not in {
+            "actionable-drift",
+            "provider-down",
+            "failed-setup",
+            "blocked-start",
+            "task-landed",
+            "task-abandoned",
+        }:
             raise ValueError("the attention kind is no longer published")
         return value
 

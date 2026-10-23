@@ -13,6 +13,7 @@ from typing import Any
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalRecord
 from agents_remember.observer.host_activity import HostActivitySnapshot
+from agents_remember.observer.native_attention import NativeAttentionFacts
 from agents_remember.observer.projection import (
     CloseoutQueueNode,
     DriftSnapshotNode,
@@ -25,7 +26,7 @@ from agents_remember.observer.projection import (
     SetupSummaryNode,
     ToolReportNode,
 )
-from agents_remember.observer.task_entries import TaskDocumentSource
+from agents_remember.observer.task_entries import TaskDocumentSource, TaskEntries
 
 
 @dataclass(frozen=True)
@@ -65,3 +66,8 @@ class AnalyticalInputs:
     engine_process_facts: list[EngineProcessFacts] = field(default_factory=list)
     engine_start_progress: list[dict[str, Any]] = field(default_factory=list)
     attention_dismissals: dict[str, AttentionDismissalRecord] = field(default_factory=dict)
+    # The five native facts, bounded and complete-or-retained (MIK-R200 rules 1-6).
+    native_attention: NativeAttentionFacts = field(default_factory=NativeAttentionFacts)
+    # The canonical task list already joined this pass, when the caller built it (L190-R1-F04):
+    # the stall clock read the same relation, so the rows must be built from it too.
+    task_entries: TaskEntries | None = None

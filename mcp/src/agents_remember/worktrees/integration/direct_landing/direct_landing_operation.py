@@ -15,6 +15,10 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
 )
+from agents_remember.worktrees.attention_terminal_notices import (
+    begin_direct_landed_notice,
+    confirm_notice,
+)
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
@@ -93,6 +97,24 @@ class DirectLandingRuntime:
 
     def finish(self, result: dict[str, object]) -> LifecycleOperationRecord:
         stamp = _stamp()
+        # MIK-R200 rule 5 and F05: a completed direct-landing generation is one native occurrence
+        # of the leaf this generation was admitted for. The series contract is only the enclosure
+        # that publishes it, so the subject comes from the immutable accepted input's
+        # leafTaskDocumentRef -- the reference the route proved belongs to this series -- and never
+        # from the contract's own (master) task document. The intent is taken before the completion
+        # row and confirmed after it, so a recovery neither loses nor doubles it.
+        admitted = (
+            self.record.input
+            if isinstance(self.record.input, DirectLandingOperationInput)
+            else None
+        )
+        occurrence = begin_direct_landed_notice(
+            self.contract,
+            leaf_reference=admitted.leafTaskDocumentRef if admitted is not None else None,
+            code_commit=str(result.get("codeCommit") or ""),
+            operation_key=self.record.operationKey,
+            generation=self.record.generation,
+        )
         self.record = self.store.update(
             lambda record: record.model_copy(
                 update={
@@ -107,6 +129,7 @@ class DirectLandingRuntime:
                 }
             )
         )
+        confirm_notice(self.contract, occurrence)
         return self.record
 
     def cancel_unpublished(self, *, status: str, detail: str) -> LifecycleOperationRecord:

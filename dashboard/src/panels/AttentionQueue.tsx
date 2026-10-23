@@ -12,6 +12,7 @@ import {
   ATTENTION_SEVERITIES,
   type AttentionItem,
   type AttentionSeverity,
+  type TaskDocumentRef,
 } from '../types/projection';
 import { dim } from './detail-panel/pageStyles';
 
@@ -22,8 +23,13 @@ import { dim } from './detail-panel/pageStyles';
 // the model and effort control): it has a bound of its own, scrolls inside it, and closes by
 // Escape, by a click outside and by the bell.
 //
-// Each entry shows its location as plain text. The × and "Clear all" POST the current
-// source occurrence's acknowledgement; the server owns dismissal identity.
+// Each entry shows its location as plain text, and names what it is about: the canonical task
+// document it opens, and the exact agent it concerns. Those are the row's own served identities;
+// the surface that can actually navigate owns the identity mapping (the tree's selection key, the
+// shell's chat target). The × and "Clear all" POST the current source occurrence's
+// acknowledgement; the server owns dismissal identity. Only a dismissible entry (an operational
+// one or a notice) carries a ×: an action clears when its native cause ends, so the server would
+// refuse the acknowledgement (409 `not-dismissible`), and the view never offers it.
 //
 // The measures are the task page's text sizes (MIK-R163 rule 1); see
 // lifecycle-list/columnLook.ts.
@@ -197,6 +203,17 @@ const where = cva({
     },
   },
 });
+// The subject line: the place, then the row's own controls for what it names. The place keeps its
+// ellipsis and the controls keep their width, so a narrow rail never hides the way in.
+const subject = css({
+  gridColumn: '2 / 5',
+  display: 'flex',
+  alignItems: 'baseline',
+  columnGap: '0.3938rem',
+  minWidth: '0',
+});
+const placeText = css({ flex: '1 1 auto', minWidth: '0' });
+const subjectControl = css({ flex: 'none' });
 
 const KIND_WORDS: Record<AttentionSeverity, string> = {
   alarm: 'alarm',
@@ -224,6 +241,9 @@ function dismissAttentionItem(
   setDismissing: (updater: (prev: ReadonlySet<string>) => ReadonlySet<string>) => void,
   setFailed: (failed: boolean) => void,
 ): void {
+  // An action clears only when its native cause ends; the server refuses its acknowledgement, so
+  // the view never asks, and never suppresses it locally either.
+  if (!item.dismissible) return;
   if (dismissing.has(item.id)) return;
   setFailed(false);
   dashboardStore.getState().suppressAttention([item.id]);
@@ -250,13 +270,15 @@ function clearAllAttention(
   setClearing: (value: boolean) => void,
   setFailed: (failed: boolean) => void,
 ): void {
-  if (clearing || items.length === 0) return;
+  // Only dismissible entries take part: an action item is not an acknowledgement.
+  const targets = items.filter((item) => item.dismissible);
+  if (clearing || targets.length === 0) return;
   setFailed(false);
-  const ids = items.map((item) => item.id);
+  const ids = targets.map((item) => item.id);
   dashboardStore.getState().suppressAttention(ids);
   setClearing(true);
   void Promise.all(
-    items.map(async (item) => ({
+    targets.map(async (item) => ({
       id: item.id,
       status: await postAttentionDismiss(dismissPayload(item)),
     })),
@@ -305,18 +327,88 @@ function BellIcon({ filled }: { filled: boolean }) {
   );
 }
 
+// The agent a row names, as the surface that can open a chat needs it (MIK-R200 rule 8): the exact
+// served agent id, and the seat and document the dashboard's chat target is built from — the
+// launcher's selection is `{role, taskDocumentRef}` and its frame target is the execution of that
+// selection. A taskless seat carries no document, and never gets a task invented for it.
+export interface AttentionAgentTarget {
+  agentId: string;
+  role?: string;
+  taskKey?: string;
+  taskReference?: TaskDocumentRef;
+}
+
+export function agentTargetOf(item: AttentionItem): AttentionAgentTarget | null {
+  if (item.agentId === undefined) return null;
+  return {
+    agentId: item.agentId,
+    ...(item.agentRole !== undefined ? { role: item.agentRole } : {}),
+    ...(item.taskKey !== undefined ? { taskKey: item.taskKey } : {}),
+    ...(item.taskReference !== undefined ? { taskReference: item.taskReference } : {}),
+  };
+}
+
+// A row's way in to what it names. The task link is its own control and the agent's is a second
+// one, so a row that names both offers both; a taskless agent row offers the agent only. The
+// controls stay off when no handler can take them: a link that cannot open its subject is worse
+// than none (L190-R1-F09).
+function SubjectLinks({
+  entry,
+  onOpenTask,
+  onOpenAgent,
+}: {
+  entry: AttentionItem;
+  onOpenTask?: (taskKey: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
+}) {
+  const taskKey = entry.taskKey;
+  const agent = agentTargetOf(entry);
+  return (
+    <>
+      {taskKey !== undefined && onOpenTask ? (
+        <button
+          type="button"
+          className={cx(where({ link: true }), subjectControl)}
+          onClick={() => onOpenTask(taskKey)}
+          data-testid="attn-open"
+          aria-label={`Open task ${taskKey}`}
+          title={`Open task ${taskKey}`}
+        >
+          task
+        </button>
+      ) : null}
+      {agent && onOpenAgent ? (
+        <button
+          type="button"
+          className={cx(where({ link: true }), subjectControl)}
+          onClick={() => onOpenAgent(agent)}
+          data-testid="attn-open-agent"
+          aria-label={`Open agent ${agent.agentId}`}
+          title={`Open chat with ${agent.agentId}`}
+        >
+          agent
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 function AttentionRow({
   entry,
   place,
   nowMs,
   dismissing,
   onDismiss,
+  onOpenTask,
+  onOpenAgent,
 }: {
   entry: AttentionItem;
   place: string;
   nowMs: number;
   dismissing: boolean;
   onDismiss: (item: AttentionItem) => void;
+  onOpenTask?: (taskKey: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
 }) {
   const cause = causeForAttention(entry);
   const waited = fmtWait(servedAgeSeconds(entry, entry.waitSeconds, nowMs));
@@ -336,7 +428,7 @@ function AttentionRow({
       </span>
       <span className={what}>{cause}</span>
       <span className={cx(age, dim)}>{waited}</span>
-      {
+      {entry.dismissible ? (
         <button
           type="button"
           className={dismissButton}
@@ -348,8 +440,13 @@ function AttentionRow({
         >
           ×
         </button>
-      }
-      <span className={where()}>{place}</span>
+      ) : null}
+      <span className={subject}>
+        <span className={cx(where(), placeText)} data-testid="attn-place">
+          {place}
+        </span>
+        <SubjectLinks entry={entry} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} />
+      </span>
     </li>
   );
 }
@@ -357,9 +454,13 @@ function AttentionRow({
 function AttentionLayer({
   queue,
   bodyRef,
+  onOpenTask,
+  onOpenAgent,
 }: {
   queue: readonly AttentionItem[];
   bodyRef: RefObject<HTMLElement | null>;
+  onOpenTask?: (taskKey: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
 }) {
   // Wait times advance locally between emissions — the change gate no longer re-serves the queue
   // every tick just because the waits aged. The clock runs only while the layer is open: a
@@ -368,6 +469,9 @@ function AttentionLayer({
   const [clearing, setClearing] = useState(false);
   const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set());
   const [failed, setFailed] = useState(false);
+  // "Clear all" offers what only a place can clear: the notices and the operational entries. The
+  // heading and the bell still count the whole queue, actions included.
+  const dismissible = queue.filter((entry) => entry.dismissible);
   // An entry that goes takes its × and the keyboard's focus with it. The layer takes the focus
   // first, so the keyboard stays in it: Escape still closes it and Tab goes on inside.
   const keepFocus = () => bodyRef.current?.focus();
@@ -382,7 +486,7 @@ function AttentionLayer({
             <span className={nothing}>nothing waiting</span>
           )}
         </h2>
-        {queue.length > 0 ? (
+        {dismissible.length > 0 ? (
           <button
             type="button"
             className={columnTabButton}
@@ -412,6 +516,8 @@ function AttentionLayer({
                   keepFocus();
                   dismissAttentionItem(target, dismissing, setDismissing, setFailed);
                 }}
+                onOpenTask={onOpenTask}
+                onOpenAgent={onOpenAgent}
               />
             );
           })}
@@ -421,7 +527,7 @@ function AttentionLayer({
   );
 }
 
-function AttentionQueueImpl() {
+function AttentionQueueImpl({ onOpenTask, onOpenAgent }: AttentionQueueProps) {
   const queue = useDashboard(selectQueue);
   const [open, setOpen] = useState(false);
   const [bound, setBound] = useState<number | undefined>(undefined);
@@ -465,14 +571,26 @@ function AttentionQueueImpl() {
           aria-label="Attention"
           data-testid="attention-queue"
         >
-          <AttentionLayer queue={queue} bodyRef={bodyRef} />
+          <AttentionLayer
+            queue={queue}
+            bodyRef={bodyRef}
+            onOpenTask={onOpenTask}
+            onOpenAgent={onOpenAgent}
+          />
         </Dialog>
       </Popover>
     </DialogTrigger>
   );
 }
 
-// Memoized (tab-switch CPU): the bell sits in the head of a persistent rail panel. Its one prop
-// keeps its identity, so the task list's own renders stop at this gate; the queue's store
-// subscription still drives the bell's updates.
+// The ways out of the layer, optional so the queue stays usable where nothing can navigate: a row
+// renders a control only when the handler AND the identity it needs are both there.
+export interface AttentionQueueProps {
+  onOpenTask?: (taskKey: string) => void;
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
+}
+
+// Memoized (tab-switch CPU): the bell sits in the head of a persistent rail panel. The queue's
+// store subscription still drives the bell's updates; the open handlers come from the column and
+// only change when its own props do.
 export const AttentionQueue = memo(AttentionQueueImpl);

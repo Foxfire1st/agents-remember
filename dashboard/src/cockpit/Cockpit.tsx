@@ -2,8 +2,9 @@ import { statusLabel, type TaskStatusKey } from '../panels/detail-panel/pagePart
 import {
   memo,
   useCallback,
-  useMemo,
   useEffect,
+  useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
@@ -16,6 +17,7 @@ import { useReviewChat, type ReviewChatColumn } from './reviewChat';
 import { ReviewChatClose, ReviewMain, reviewRailView } from './reviewPage';
 import { useReviewHash, parseReviewHash } from './reviewHash';
 import { RoleChatsPane } from './RoleChats';
+import { seatChatTarget, type AgentChatTarget } from './roleChatTarget';
 import { clientMatchesServingBuild, servingCommitLabel } from '../data/buildIdentity';
 import { humanizeDuration } from '../data/conversation/format';
 import { startScreenWakeLock } from '../data/screenWakeLock';
@@ -39,6 +41,7 @@ import { FileViewer } from '../panels/file-viewer/FileViewer';
 import { Hangar } from '../panels/Hangar';
 import { KnowledgeReader } from '../panels/knowledge-reader/KnowledgeReader';
 import { LifecycleList } from '../panels/lifecycle-list/LifecycleList';
+import type { AttentionAgentTarget } from '../panels/AttentionQueue';
 import { MemoryMirror } from '../panels/MemoryMirror';
 import { DocumentChat } from './document-chat/DocumentChat';
 import { TrayBarSlot, trayBarRow } from '../tray/TrayButton';
@@ -150,6 +153,9 @@ interface CockpitShellState {
   opsRight: SidebarState;
   reviewChat: ReviewChatColumn;
   railEnter: Record<string, unknown>;
+  // The bell's way into an agent's chat (L190-R1-F09): the shell names the exact seat, and the
+  // Chats view shows it. The rail itself owns no chat surface, so it only forwards this.
+  agentChat: AgentChatTarget | null;
   setView: (view: CockpitView) => void;
   setSelectedId: (id: string | null) => void;
   setChangeSet: (target: ChangeSetTarget | null) => void;
@@ -162,6 +168,7 @@ interface CockpitShellState {
   setLeftRailWidth: (width: number) => void;
   setRightRailWidth: (width: number) => void;
   setViewedTask: (context: ViewedTaskContext | undefined) => void;
+  setAgentChat: (target: AgentChatTarget | null) => void;
 }
 
 const FULL_BLEED_VIEWS: ReadonlySet<CockpitView> = new Set<CockpitView>(['files', 'knowledge', 'engine', 'topology', 'chats']);
@@ -197,6 +204,9 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   const [rightRailWidth, setRightRailWidth] = usePersistedNumber('cockpit.rail-right-w', 300);
   const animate = useShouldAnimate();
   const [viewedTask, setViewedTask] = useState<ViewedTaskContext | undefined>(undefined);
+  // The chat the attention bell asked for (L190-R1-F09). One request object per click: the Chats
+  // pane applies it, and only a new click (or the developer's own selection) moves it again.
+  const [agentChat, setAgentChat] = useState<AgentChatTarget | null>(null);
   const viewedLeafKey = viewedTask?.leafKey;
   const taskMap = useDashboard((s) => s.tasks);
   const tasks = useMemo(() => Object.values(taskMap), [taskMap]);
@@ -230,6 +240,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     opsRight,
     reviewChat,
     railEnter,
+    agentChat,
     setView,
     setSelectedId,
     setChangeSet,
@@ -239,7 +250,46 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     setLeftRailWidth,
     setRightRailWidth,
     setViewedTask,
+    setAgentChat,
   };
+}
+
+// The Operations page's own way in: a row's document key, and the view a document is read in.
+function useOpenDocument(
+  setChangeSet: (target: ChangeSetTarget | null) => void,
+  setNotesOpen: (open: boolean) => void,
+  setSelectedId: (id: string | null) => void,
+  setView: (view: CockpitView) => void,
+): (id: string) => void {
+  return useCallback(
+    (id: string) => {
+      setChangeSet(null);
+      setNotesOpen(false);
+      setSelectedId(id);
+      setView('operations');
+    },
+    [setChangeSet, setNotesOpen, setSelectedId, setView],
+  );
+}
+
+// The bell's way into a chat (L190-R1-F09). It is the shell's one agent navigation: the row's
+// exact seat becomes the Chats view's request, and the view it needs is Chats — through the same
+// `changeView` every tab uses. The request is what the Chats pane's frame target is built from;
+// nothing here writes the observed-chat channel, so the chat on screen changes only when the
+// frame answers that it shows the agent.
+function useOpenAgentChat(
+  changeView: (next: CockpitView) => void,
+  setAgentChat: (target: AgentChatTarget | null) => void,
+): (seat: AttentionAgentTarget) => void {
+  // One identity for the whole session: the handler crosses two memo gates (the rail's list and
+  // the bell panel), so a function rebuilt per render would re-render both on every shell state
+  // change — the tab-switch cost the 260721 memo gate exists to prevent.
+  const latest = useRef({ changeView, setAgentChat });
+  latest.current = { changeView, setAgentChat };
+  return useCallback((seat: AttentionAgentTarget) => {
+    latest.current.setAgentChat(seatChatTarget(seat));
+    latest.current.changeView('chats');
+  }, []);
 }
 
 function useCockpitShellActions(
@@ -252,9 +302,11 @@ function useCockpitShellActions(
   setNotesOpen: (open: boolean) => void,
   setView: (view: CockpitView) => void,
   setSelectedId: (id: string | null) => void,
+  setAgentChat: (target: AgentChatTarget | null) => void,
 ): {
   setRailView: (next: 'river' | 'chat') => void;
   open: (id: string) => void;
+  openAgentChat: (seat: AttentionAgentTarget) => void;
   changeView: (next: CockpitView) => void;
   openChangeSet: (target: ChangeSetTarget) => void;
   openNotes: (target: NotesReaderTarget) => void;
@@ -266,15 +318,7 @@ function useCockpitShellActions(
     (next: 'river' | 'chat') => setChatRail(next === 'chat'),
     [setChatRail],
   );
-  const open = useCallback(
-    (id: string) => {
-      setChangeSet(null);
-      setNotesOpen(false);
-      setSelectedId(id);
-      setView('operations');
-    },
-    [setChangeSet, setNotesOpen, setSelectedId, setView],
-  );
+  const open = useOpenDocument(setChangeSet, setNotesOpen, setSelectedId, setView);
   const changeView = useCallback(
     (next: CockpitView) => {
       setChangeSet(null);
@@ -283,6 +327,8 @@ function useCockpitShellActions(
     },
     [setChangeSet, setNotesOpen, setView],
   );
+  // The bell's way into a chat (L190-R1-F09).
+  const openAgentChat = useOpenAgentChat(changeView, setAgentChat);
   const openChangeSet = useCallback(
     (target: ChangeSetTarget) => {
       setNotesOpen(false);
@@ -313,6 +359,7 @@ function useCockpitShellActions(
   return {
     setRailView,
     open,
+    openAgentChat,
     changeView,
     openChangeSet,
     openNotes,
@@ -387,6 +434,7 @@ function LeftRail({
   leftRailWidth,
   selectedId,
   onSelect,
+  onOpenAgent,
   onResize,
 }: {
   // A full-bleed view, the review page (its own tree is its left column) or the developer's
@@ -397,6 +445,8 @@ function LeftRail({
   leftRailWidth: number;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** The shell's way into an agent's chat: the bell's row names the exact seat (L190-R1-F09). */
+  onOpenAgent: (seat: AttentionAgentTarget) => void;
   onResize: (width: number) => void;
 }) {
   return (
@@ -409,8 +459,14 @@ function LeftRail({
       aria-hidden={hidden}
       {...railEnter}
     >
-      {/* The native task tree fills the rail; its attention bell opens a layer over it. */}
-      <LifecycleList selectedId={selectedId} onSelect={onSelect} active={!hidden && !takeover} />
+      {/* The native task tree fills the rail; its attention bell opens a layer over it. The bell's
+          agent rows are the rail's way into a chat, so the shell's handler travels with them. */}
+      <LifecycleList
+        selectedId={selectedId}
+        onSelect={onSelect}
+        onOpenAgent={onOpenAgent}
+        active={!hidden && !takeover}
+      />
       <RailResizeHandle side="left" width={leftRailWidth} onResize={onResize} />
     </motion.aside>
   );
@@ -542,6 +598,7 @@ function MainLayers({
   sidebars,
   selectedId,
   tasks,
+  agentChat,
   onOpen,
   onOpenChangeSet,
   onOpenNotes,
@@ -554,6 +611,8 @@ function MainLayers({
   sidebars: { left: SidebarState; right: SidebarState };
   selectedId: string | null;
   tasks: TaskEntry[];
+  /** The chat the shell was asked for by its exact agent (the attention bell, L190-R1-F09). */
+  agentChat: AgentChatTarget | null;
   onOpen: (id: string) => void;
   onOpenChangeSet: (target: ChangeSetTarget) => void;
   onOpenNotes: (target: NotesReaderTarget) => void;
@@ -597,7 +656,7 @@ function MainLayers({
       </ViewLayer>
       {/* Role chats stay mounted across dashboard view switches. */}
       <ViewLayer visible={view === 'chats'} className={chatsLayer}>
-        <RoleChatsPane active={view === 'chats' && !takeover} tasks={tasks} />
+        <RoleChatsPane active={view === 'chats' && !takeover} tasks={tasks} openChat={agentChat} />
       </ViewLayer>
     </main>
   );
@@ -634,6 +693,7 @@ function RailedBody({
         leftRailWidth={state.leftRailWidth}
         selectedId={state.selectedId}
         onSelect={actions.open}
+        onOpenAgent={actions.openAgentChat}
         onResize={state.setLeftRailWidth}
       />
       <MainLayers
@@ -643,6 +703,7 @@ function RailedBody({
         sidebars={{ left: state.opsLeft, right: state.opsRight }}
         selectedId={state.selectedId}
         tasks={state.tasks}
+        agentChat={state.agentChat}
         onOpen={actions.open}
         onOpenChangeSet={actions.openChangeSet}
         onOpenNotes={actions.openNotes}
@@ -716,6 +777,7 @@ export function CockpitShell({ initialView = 'chats' }: { initialView?: CockpitV
     state.setNotesOpen,
     state.setView,
     state.setSelectedId,
+    state.setAgentChat,
   );
   const page = shownPage(state);
   usePublishShownPage(page.page, page.repository);

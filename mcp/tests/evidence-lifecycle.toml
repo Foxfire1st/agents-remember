@@ -155,6 +155,12 @@ consumers = [
   "mcp/tests/test_atomic_series_chain_pair_order.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_atomic_write.py",
+  "mcp/tests/test_attention_discovery.py",
+  "mcp/tests/test_attention_native_inputs.py",
+  "mcp/tests/test_attention_native_kinds.py",
+  "mcp/tests/test_attention_notice_publication.py",
+  "mcp/tests/test_attention_notice_store.py",
+  "mcp/tests/test_attention_quiescence.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_background_accounting.py",
@@ -286,6 +292,8 @@ consumers = [
   "mcp/tests/test_governing_overview_resolution.py",
   "mcp/tests/test_held_delivery_tick_cost.py",
   "mcp/tests/test_held_queue.py",
+  "mcp/tests/test_held_store_authority.py",
+  "mcp/tests/test_held_store_partial_rows.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_history_ownership.py",
   "mcp/tests/test_host_activity_projection.py",
@@ -425,6 +433,7 @@ consumers = [
   "mcp/tests/test_mik_r53_report_only_rules.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_models.py",
+  "mcp/tests/test_native_refresh_wiring.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_next_step_address_binding.py",
   "mcp/tests/test_no_grant_closeout_parity.py",
@@ -636,6 +645,9 @@ consumers = [
   "mcp/tests/test_telemetry_store.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_terminal_notice_commit_recovery.py",
+  "mcp/tests/test_terminal_notice_recovery.py",
+  "mcp/tests/test_terminal_notice_subject.py",
   "mcp/tests/test_terminal_preview_expectation.py",
   "mcp/tests/test_terminal_refusal_leaves_everything.py",
   "mcp/tests/test_tool_answer_guard.py",
@@ -1014,6 +1026,7 @@ consumers = [
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_terminal_notice_commit_recovery.py",
   "mcp/tests/test_terminal_refusal_leaves_everything.py",
   "mcp/tests/test_tool_answer_rows_citation.py",
   "mcp/tests/test_tool_answer_rows_l111.py",
@@ -1624,6 +1637,12 @@ consumers = [
   "mcp/tests/test_atomic_series_chain_pair_order.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_atomic_write.py",
+  "mcp/tests/test_attention_discovery.py",
+  "mcp/tests/test_attention_native_inputs.py",
+  "mcp/tests/test_attention_native_kinds.py",
+  "mcp/tests/test_attention_notice_publication.py",
+  "mcp/tests/test_attention_notice_store.py",
+  "mcp/tests/test_attention_quiescence.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_background_accounting.py",
@@ -1755,6 +1774,8 @@ consumers = [
   "mcp/tests/test_governing_overview_resolution.py",
   "mcp/tests/test_held_delivery_tick_cost.py",
   "mcp/tests/test_held_queue.py",
+  "mcp/tests/test_held_store_authority.py",
+  "mcp/tests/test_held_store_partial_rows.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_history_ownership.py",
   "mcp/tests/test_host_activity_projection.py",
@@ -1894,6 +1915,7 @@ consumers = [
   "mcp/tests/test_mik_r53_report_only_rules.py",
   "mcp/tests/test_missing_master_tool_answers.py",
   "mcp/tests/test_models.py",
+  "mcp/tests/test_native_refresh_wiring.py",
   "mcp/tests/test_native_retire.py",
   "mcp/tests/test_next_step_address_binding.py",
   "mcp/tests/test_no_grant_closeout_parity.py",
@@ -2105,6 +2127,9 @@ consumers = [
   "mcp/tests/test_telemetry_store.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_terminal_notice_commit_recovery.py",
+  "mcp/tests/test_terminal_notice_recovery.py",
+  "mcp/tests/test_terminal_notice_subject.py",
   "mcp/tests/test_terminal_preview_expectation.py",
   "mcp/tests/test_terminal_refusal_leaves_everything.py",
   "mcp/tests/test_tool_answer_guard.py",
@@ -2683,6 +2708,7 @@ permanence_rationale = "The helper owns reusable enclosure construction for adop
 replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::test_contract_publish_failure_rolls_back_docs_and_landing"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_attention_notice_publication.py",
   "mcp/tests/test_cleanup_completed_contract_remains.py",
   "mcp/tests/test_cleanup_repeated_archive_ready.py",
   "mcp/tests/test_enclosure_adoption.py",
@@ -2693,6 +2719,9 @@ consumers = [
   "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_reopen_series_extension.py",
+  "mcp/tests/test_terminal_notice_commit_recovery.py",
+  "mcp/tests/test_terminal_notice_recovery.py",
+  "mcp/tests/test_terminal_notice_subject.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
 ]
 
@@ -2771,6 +2800,8 @@ permanence_rationale = "The provision, status and stop commands are judged by wh
 replacement_contract = "contract:paseo-runtime-command-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_attention_discovery.py",
+  "mcp/tests/test_attention_native_inputs.py",
   "mcp/tests/test_dashboard_host.py",
   "mcp/tests/test_developer_messages.py",
   "mcp/tests/test_held_queue.py",
@@ -2876,6 +2907,7 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundary_controls.py",
   "mcp/tests/test_knowledge_read_boundary_roster.py",
   "mcp/tests/test_master_chain_public_routes.py",
+  "mcp/tests/test_terminal_notice_commit_recovery.py",
 ]
 
 [[artifact]]

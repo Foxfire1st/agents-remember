@@ -11,21 +11,34 @@ through the pacer so unrelated inputs stay retained instead of rebuilding the wh
 The authoritative input list (R1), derived reader-by-reader from
 ``observer.projection_store.project_and_write``:
 
-========================================  =====================================================
-watched root                              readers it feeds
-========================================  =====================================================
-``<coord>/tasks``                         native task sources, contracts and engine facts
-``activity_directory(config)``           native host activity publication
-``<obs>/workspace``                       attention dismissals
-``<obs>/drift``                           read_drift_snapshots
-``<coord>/logs/providers/status``         workspace provider ``current.json`` (read_providers)
-``<coord>/logs/providers/setup``          read_setup_summaries
-``<coord>/temp/worktree-start``           read_start_progress_entries
-``<coord>/temp/tool-reports``             read_tool_reports
-========================================  =====================================================
+==============================================  =================================================
+watched root                                    readers it feeds
+==============================================  =================================================
+``<coord>/tasks``                               native task sources, contracts and engine facts
+``activity_directory(config)``                  native host activity publication
+``<obs>/workspace``                             attention dismissals
+``<obs>/drift``                                 read_drift_snapshots
+``<coord>/logs/providers/status``               workspace provider ``current.json``
+``<coord>/logs/providers/setup``                read_setup_summaries
+``<coord>/temp/worktree-start``                 read_start_progress_entries
+``<coord>/temp/tool-reports``                   read_tool_reports
+``<coord>/controlplane/atomic-series-activation``  native pause records (attent. control plane)
+``<coord>/controlplane`` (non-recursive)        the terminal notice store
+``<coord>/temp`` (non-recursive)                the held-message queue (attent. held stores)
+==============================================  =================================================
 
-(``<obs>`` = ``<coord>/logs/observer``.) Deliberately NOT watched -- heartbeat-covered
-blind spots:
+(``<obs>`` = ``<coord>/logs/observer``.) The last three roots are the native attention
+stores the queue reads beside the host publication (L190-R1-F10). Two of them are watched
+**without recursion** on a second lane of the same generation: their parent directories are
+bounded (one small JSON file each) but their subtrees are not -- ``<coord>/temp`` carries the
+product's scratch trees (hundreds of thousands of files on a busy installation) and
+``<coord>/controlplane`` carries the lifecycle archives. Recursing into either would register
+the whole tree with inotify, exactly the watch cost this module exists to remove; watching the
+parent shallowly sees the one store file each reader consumes. The activation records are a
+single directory of at most ``MAX_PAUSE_RECORDS`` small files, so that one is watched
+recursively like every other root.
+
+Deliberately NOT watched -- heartbeat-covered blind spots:
 
 * the per-repo memory roots (route coverage / ledgers): they sit
   behind ``REPO_SURFACE_REFRESH_TTL_SECONDS`` already, and their onboarding trees
@@ -43,10 +56,14 @@ Self-trigger safety: the projection's own per-tick outputs (``latest-state.json`
 ``latest-metrics.json`` and their ``*.tmp`` siblings) live at the observer root, *outside*
 every watched subdirectory, so a tick cannot re-wake itself. Inside ``<obs>/workspace``
 the non-input churn (the raw event river + cursor/lock) is name-filtered, and the
-control-plane lockfiles are suffix-filtered in every watched directory (every durable-store
-append and every rewrite opens one ``a+b``, and none is an input). TTL-gated writers that
-run inside a tick (event retention, provider current-state refresh) cost at most one
-debounced echo tick per TTL window, whose diff emits nothing.
+lockfiles are suffix-filtered in every watched directory -- including the two native stores
+added for L190-R1-F10 (``attention-notices.json.lock``, ``held-message-queue.json.lock``):
+every durable-store append and every rewrite opens one ``a+b``, and none is an input. TTL-gated
+writers that run inside a tick (event retention, provider current-state refresh) cost at most
+one debounced echo tick per TTL window, whose diff emits nothing. The same bound covers the one
+native write a tick can make: settling an interrupted terminal notice rewrites the notice store
+through the writer it shares with the worktree operations (so it carries no own-write note), and
+the echo tick that follows publishes the state the settling tick already produced.
 
 Freshness bounds (unchanged SSE semantics): a write into a quiet world becomes an SSE
 delta within ``debounce + projection time``. Live ticks rest after completing for the greater
@@ -68,6 +85,7 @@ refreshes. Completed ticks still rest, so failed notifications cannot restore co
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -160,13 +178,92 @@ _EXCLUDED_WORKSPACE_NAMES = frozenset(
     }
 )
 
-#: The suffix ``kernel.file_lock.lock_path_for`` gives a ``.jsonl`` control-plane log,
+#: The suffix ``kernel.file_lock.lock_path_for`` appends to a guarded resource's whole name,
 #: DERIVED from that function rather than spelled out, so the filter cannot fall out of step
 #: with the lock naming.
 #:
-#: Every durable rewrite takes its sibling lock, including attention cleanup.
-#: These lockfiles are never projection inputs, wherever the store lives.
-_DURABLE_LOG_LOCK_SUFFIX = lock_path_for(Path("log.jsonl")).name.removeprefix("log")
+#: Every durable rewrite takes its sibling lock, including attention cleanup and the two
+#: native stores watched here (``attention-notices.json.lock``, ``held-message-queue.json.lock``).
+#: These lockfiles are never projection inputs, wherever the store lives -- and a lock
+#: acquisition must never wake the projector, or every reader visit would echo one.
+_LOCK_SUFFIX = lock_path_for(Path("resource")).name.removeprefix("resource")
+
+
+def attention_activation_root(config: McpRuntimeConfig) -> Path:
+    """The one directory of native atomic-series activation records (the pause facts)."""
+
+    return config.coordination_root / "controlplane" / "atomic-series-activation"
+
+
+def attention_controlplane_root(config: McpRuntimeConfig) -> Path:
+    """The control plane's own directory: the terminal notice store sits directly in it."""
+
+    return config.coordination_root / "controlplane"
+
+
+def attention_held_root(config: McpRuntimeConfig) -> Path:
+    """The held-message queue's parent: every hold and every drain writes the queue.
+
+    The delivery machinery names a holder in this queue when it takes a message and forgets
+    it when the store empties (``note_held_receipt`` / ``forget_held_receipt``), so the
+    recipient stores the reader visits are reached without watching the per-worktree
+    ``.ar-product/held-messages`` trees. A withdrawal rewrites the store and its receipt line
+    without a queue write; it is covered by the next held-domain event or, at the latest, the
+    five-minute full refresh -- the same bound every un-watched scratch surface keeps.
+    """
+
+    return config.coordination_root / "temp"
+
+
+#: The directory `cli/role_launch_receipts.py` writes per-request role receipts into; a named
+#: receipt is also a held-message receipt, so its write is a held-domain event (L190-R1-F10).
+HELD_RECEIPT_DIRECTORY = "paseo-native-executions"
+
+
+def held_receipt_root(config: McpRuntimeConfig) -> Path:
+    """Where taskless seats keep their held receipts, so a withdrawal there is watched.
+
+    A taskless receipt lives at ``notes/reports/paseo-native-executions/<role>/sessions/
+    <request>.json`` and a task-bound one inside its task's own ``notes/reports`` tree. The
+    task-bound shape is already under the recursive ``tasks`` root; this root covers the
+    taskless shape, which nothing watched before (L190-R1-F10).
+    """
+
+    return config.coordination_root / "notes" / "reports" / HELD_RECEIPT_DIRECTORY
+
+
+def is_held_receipt(path: Path) -> bool:
+    """Whether one path is the held-message receipt of a seat (task-bound or taskless).
+
+    The held reader is woken by these writes because the store itself sits in a workspace
+    product tree the projection deliberately does not watch, while every store mutation is
+    accompanied by a receipt write here.
+    """
+
+    parts = path.parts
+    if path.suffix != ".json":
+        return False
+    try:
+        index = parts.index("notes")
+    except ValueError:
+        return False
+    return (
+        len(parts) > index + 3
+        and parts[index + 1] == "reports"
+        and parts[index + 2] == HELD_RECEIPT_DIRECTORY
+    )
+
+
+def shallow_projection_input_roots(config: McpRuntimeConfig) -> frozenset[Path]:
+    """The roots watched **without** recursion (L190-R1-F10).
+
+    These two parents are bounded directories (one small store file each) whose subtrees are
+    not: recursing into them would register the product's scratch trees and the lifecycle
+    archives with the kernel watcher. The rest of :func:`projection_input_roots` stays
+    recursive, as it always was.
+    """
+
+    return frozenset({attention_controlplane_root(config), attention_held_root(config)})
 
 
 def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
@@ -186,6 +283,14 @@ def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
         coordination_root / "logs" / "providers" / "setup",
         coordination_root / "temp" / "worktree-start",
         coordination_root / "temp" / "tool-reports",
+        # L190-R1-F10: the native attention stores, on their real paths. The two parents are
+        # partitioned out to the shallow lane by :func:`shallow_projection_input_roots`.
+        attention_activation_root(config),
+        attention_controlplane_root(config),
+        attention_held_root(config),
+        # L190-R1-F10: taskless held receipts, so a withdrawal outside a queue write still
+        # reaches the held reader. The task-bound shape is already under ``tasks``.
+        held_receipt_root(config),
     ]
     activity = activity_directory(config)
     if activity is not None:
@@ -203,8 +308,8 @@ def is_projection_input_event(path: str) -> bool:
     """Filter one raw watch event down to genuine projection inputs.
 
     Drops atomic-write temp files, dot-prefixed sidecar temps, the projection's own outputs,
-    every control-plane lockfile (:data:`_DURABLE_LOG_LOCK_SUFFIX`, in any watched directory),
-    and the ``workspace/`` non-input churn (see :data:`_EXCLUDED_WORKSPACE_NAMES`).
+    every lockfile (:data:`_LOCK_SUFFIX`, in any watched directory), and the ``workspace/``
+    non-input churn (see :data:`_EXCLUDED_WORKSPACE_NAMES`).
 
     Drops directory events (F08/L166): a directory mtime change carries no content no
     reader consumes -- every file write inside a watched root would otherwise wake the
@@ -215,7 +320,7 @@ def is_projection_input_event(path: str) -> bool:
     name = os.path.basename(path.rstrip("/\\"))
     if name.endswith(".tmp") or name.startswith("."):
         return False
-    if name.endswith(_DURABLE_LOG_LOCK_SUFFIX):
+    if name.endswith(_LOCK_SUFFIX):
         return False
     if name in _EXCLUDED_NAMES:
         return False
@@ -262,6 +367,15 @@ def projection_domains_for_paths(
             coordination_root / "temp" / "tool-reports",
             ProjectionDomain.TOOL_REPORTS,
         ),
+        (
+            coordination_root / "controlplane",
+            ProjectionDomain.ATTENTION_CONTROLPLANE,
+        ),
+        (
+            coordination_root / "temp",
+            ProjectionDomain.ATTENTION_HELD,
+        ),
+        (held_receipt_root(config), ProjectionDomain.ATTENTION_HELD),
     ]
     activity = activity_directory(config)
     if activity is not None:
@@ -274,6 +388,11 @@ def projection_domains_for_paths(
             if path == root or root in path.parents:
                 domains.add(domain)
                 matched = True
+                # L190-R1-F10: a held receipt also invalidates the held reader, whichever root
+                # happens to hold it first -- the task-bound shape lives under ``tasks``, so
+                # stopping at that root used to drop the receipt's held meaning entirely.
+                if is_held_receipt(path):
+                    domains.add(ProjectionDomain.ATTENTION_HELD)
                 break
         if not matched:
             return ALL_PROJECTION_DOMAINS
@@ -681,6 +800,45 @@ class ChangePacer:
             self._full_published_while_degraded = True
 
 
+class _WatchRegistration:
+    """Whether this generation's watches are established, shared by both lanes (L190-R1-F10).
+
+    Detection is live once *either* lane has yielded a batch, which is the same evidence the
+    single-lane generation used. The reconcile notification rides the same flip, so a
+    re-established watch after a root move re-covers every domain exactly once.
+    """
+
+    def __init__(self) -> None:
+        self._established = False
+
+    @property
+    def established(self) -> bool:
+        return self._established
+
+    def establish(self, pacer: WakeTarget, reconcile: bool) -> None:
+        if self._established:
+            return
+        self._established = True
+        pacer.set_watcher_healthy(True)
+        if reconcile:
+            pacer.notify_change(ALL_PROJECTION_DOMAINS)
+
+
+@dataclass(frozen=True)
+class _LaneContext:
+    """What every lane of one watch generation shares (L190-R1-F10).
+
+    ``failures`` is shared by the native lanes: a lane records there instead of
+    raising, so the other lane and the root refresher still stop and drain cleanly.
+    """
+
+    pacer: WakeTarget
+    stop: asyncio.Event
+    failures: list[BaseException]
+    registration: _WatchRegistration
+    reconcile: bool
+
+
 class ProjectionInputWatcher:
     """Watch the projection-input roots and drive a :class:`ChangePacer`.
 
@@ -742,12 +900,82 @@ class ProjectionInputWatcher:
             established_before = True
 
     async def _watch_once(self, roots: list[Path], pacer: WakeTarget, *, reconcile: bool) -> None:
-        """One watch generation over a fixed root set; returns when the set moved."""
+        """One watch generation over a fixed root set; returns when the set moved.
+
+        The generation runs up to two lanes over the same stop event (L190-R1-F10): the
+        ordinary recursive lane, and a shallow lane for the two bounded parents whose
+        subtrees are too large to register with the kernel watcher. A lane with no roots is
+        not started, so a coordination tree with neither store pays nothing for the second
+        lane and the single-lane behaviour is unchanged.
+        """
         assert watchfiles is not None
         stop = asyncio.Event()
         failure: list[BaseException] = []
-        refresher = asyncio.create_task(self._supervise_roots(roots, stop, failure))
-        registered = False
+        root_failure: list[BaseException] = []
+        shallow = shallow_projection_input_roots(self._config)
+        recursive_roots = [path for path in roots if path not in shallow]
+        shallow_roots = [path for path in roots if path in shallow]
+        refresher = asyncio.create_task(self._supervise_roots(roots, stop, root_failure))
+        context = _LaneContext(
+            pacer=pacer,
+            stop=stop,
+            failures=failure,
+            registration=_WatchRegistration(),
+            reconcile=reconcile,
+        )
+        lanes = [
+            asyncio.create_task(
+                self._watch_lane(group, recursive=recursive, label=label, context=context)
+            )
+            for group, recursive, label in (
+                (recursive_roots, True, "recursive"),
+                (shallow_roots, False, "shallow"),
+            )
+            if group
+        ]
+        try:
+            # Both lanes end on the shared stop event: the supervisor's root move, an
+            # abnormal lane death, or this generation's cancellation.
+            await asyncio.gather(*lanes)
+        finally:
+            stop.set()
+            refresher.cancel()
+            for lane in lanes:
+                lane.cancel()
+            try:
+                await refresher
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("watch-root refresher failed during watcher shutdown")
+            for lane in lanes:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await lane
+        if root_failure:
+            failure = root_failure
+        if failure:
+            # A dead root refresher may have missed moved roots (F10); a registered
+            # native watch may have missed changes. Reconcile both, after the drain.
+            # A lane failing before registration leaves ordinary degraded pacing intact.
+            if root_failure or context.registration.established:
+                pacer.notify_change(ALL_PROJECTION_DOMAINS)
+            raise failure[0]
+
+    async def _watch_lane(
+        self,
+        roots: list[Path],
+        *,
+        recursive: bool,
+        label: str,
+        context: _LaneContext,
+    ) -> None:
+        """One ``awatch`` over one root group; its death ends the generation loudly.
+
+        Each lane keeps its own deferred-echo set: an unjudged own-write effect is re-judged
+        on that lane's next pass, and ``yield_on_timeout`` guarantees that pass arrives even
+        with no further changes.
+        """
+        assert watchfiles is not None
         deferred: set[tuple[Change, str]] = set()
         try:
             async for changes in watchfiles.awatch(
@@ -755,8 +983,8 @@ class ProjectionInputWatcher:
                 watch_filter=self._watch_filter(),
                 debounce=_AWATCH_DEBOUNCE_MS,
                 step=_AWATCH_STEP_MS,
-                stop_event=stop,
-                recursive=True,
+                stop_event=context.stop,
+                recursive=recursive,
                 # Coordination writers require a local POSIX filesystem. WSL's automatic
                 # polling scans that entire tree even though native inotify covers it.
                 force_polling=False,
@@ -765,11 +993,8 @@ class ProjectionInputWatcher:
                 ignore_permission_denied=True,
                 yield_on_timeout=True,
             ):
-                if not registered:
-                    pacer.set_watcher_healthy(True)
-                    registered = True
-                    if reconcile:
-                        pacer.notify_change(ALL_PROJECTION_DOMAINS)
+                # The first batch from either lane is what proves detection is live.
+                context.registration.establish(context.pacer, context.reconcile)
                 if changes or deferred:
                     # Our own files never wake our own projector (MIK-R81 rule 3): drop
                     # the echo of a file this process wrote itself. An outside write to
@@ -778,25 +1003,17 @@ class ProjectionInputWatcher:
                     # refresh (MIK-R81 rule 5). The native kind travels into the echo
                     # decision: arrivals never ride a directory voucher and a delete
                     # is never a write echo (F07).
-                    deferred = await self._consume_input_changes(changes | deferred, pacer)
-            if not stop.is_set():
-                raise RuntimeError("native projection watch ended unexpectedly")
-        finally:
-            stop.set()
-            refresher.cancel()
-            try:
-                await refresher
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception("watch-root refresher failed during watcher shutdown")
-        if failure:
-            # The root refresh died while the watch was live (F10): the root set may have
-            # moved unwatched, so reconcile everything, then ride the standard outage
-            # path -- reported down with a stable downSince plus the 30-second retry --
-            # instead of staying live on possibly-obsolete roots with running=True.
-            pacer.notify_change(ALL_PROJECTION_DOMAINS)
-            raise failure[0]
+                    deferred = await self._consume_input_changes(changes | deferred, context.pacer)
+            if not context.stop.is_set():
+                context.failures.append(
+                    RuntimeError(f"native projection watch ended unexpectedly ({label})")
+                )
+                context.stop.set()
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            context.failures.append(exc)
+            context.stop.set()
 
     async def _consume_input_changes(
         self, changes: set[tuple[Change, str]], pacer: WakeTarget

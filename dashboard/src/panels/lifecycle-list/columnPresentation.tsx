@@ -3,7 +3,7 @@ import { ToggleButton, ToggleButtonGroup } from 'react-aria-components';
 import { css, cva } from '../../../styled-system/css';
 export type Pivot = 'repo' | 'phase';
 import { columnTabButton } from '../../grammar/viewTabLook';
-import { AttentionQueue } from '../AttentionQueue';
+import { AttentionQueue, type AttentionAgentTarget } from '../AttentionQueue';
 
 export const sizing = css({ flex: '1 1 0', minWidth: '0', overflowX: 'hidden' });
 // The head is one line at the column's own width. A rail that was dragged narrower gets the
@@ -173,10 +173,16 @@ export function TaskPivotBar({
   count,
   pivot,
   onPivot,
+  onOpenTask,
+  onOpenAgent,
 }: {
   count: number;
   pivot: Pivot;
   onPivot: (pivot: Pivot) => void;
+  /** A bell row's canonical task key; the column's selection identity is the caller's to map. */
+  onOpenTask: (taskKey: string) => void;
+  /** The shell's way into an agent's chat, or absent where no chat can be opened. */
+  onOpenAgent?: (target: AttentionAgentTarget) => void;
 }) {
   return (
     <div className={headRow}>
@@ -200,7 +206,7 @@ export function TaskPivotBar({
             BY PHASE
           </ToggleButton>
         </ToggleButtonGroup>
-        <AttentionQueue />
+        <AttentionQueue onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} />
       </div>
     </div>
   );

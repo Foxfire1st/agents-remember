@@ -6,6 +6,7 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { taskEntry, taskSummary } from '../test/fixtures/wire';
+import { frameTrayStore } from './frameTrayChannel';
 import { shownStore } from '../tray/shownChat';
 import { EMPTY_TRAY } from '../tray/trayPersistence';
 import { trayStore } from '../tray/trayStore';
@@ -96,6 +97,7 @@ beforeEach(() => {
   sessionStorage.clear();
   trayStore.setState({ ...EMPTY_TRAY, open: false, refusal: null, outcome: null, deferDefault: false, pendingDefault: false });
   shownStore.setState({ chat: null, page: null, repository: null });
+  frameTrayStore.setState({ chat: {}, composer: {}, pickNotice: {}, traySpace: {}, pickListeners: 0 });
 });
 
 afterEach(() => {
@@ -179,5 +181,42 @@ describe("the Chats page's shown chat for the tray's default", () => {
 
     act(() => void trayStore.getState().add(OBJECT_PICK));
     expect(trayStore.getState().targets).toEqual([]);
+  });
+});
+
+describe('the shown chat on a column that has not reported once yet (L190-R1-F09)', () => {
+  // The exact chat a surface named (the bell's row): its agent, with no seat role — so the
+  // launcher's own selection stays the architect's run, whose execution names another agent.
+  // The frame is asked for the named agent; asking it is not the frame showing it.
+  const REQUESTED = { agentId: WORKER.agentId };
+
+  it('names no chat before the frame acknowledges one, then exactly the acknowledged chat', async () => {
+    stubBackend(AVAILABLE);
+    const { container } = render(<RoleChatsPane active tasks={[SPRINT]} openChat={REQUESTED} />);
+    await settle();
+
+    // The descriptor answered — the frame is mounted and its availability was drawn — and the
+    // column has not reported once. Availability was drawn before any acknowledgement, so it
+    // names no chat: the store is empty, not the requested target and not the execution's agent.
+    expect(container.querySelector("[data-testid='paseo-frame']")).not.toBeNull();
+    expect(frameTrayStore.getState().chat.chats).toBeUndefined();
+    expect(shownStore.getState().chat).toBeNull();
+
+    const frame = chatsFrame(container);
+    frame.says({ type: 'ready', capabilities: CURRENT });
+    await settle();
+    // The named agent is what the frame was asked for, though the launcher shows another
+    // execution: the request still publishes nothing.
+    expect(frame.opened()).toEqual([WORKER.agentId]);
+    expect(shownStore.getState().chat).toBeNull();
+
+    // The frame's own answer is the only thing that names a chat, and it names exactly its agent.
+    frame.says({ type: 'shown', agentId: WORKER.agentId });
+    await settle();
+    expect(shownStore.getState().chat).toEqual({ agentId: WORKER.agentId });
+
+    // Paseo's own list moves the frame to another chat: the reported chat replaces the old one.
+    frame.says({ type: 'selection', agentIds: [ARCHITECT.agentId] });
+    expect(shownStore.getState().chat).toEqual({ agentId: ARCHITECT.agentId });
   });
 });

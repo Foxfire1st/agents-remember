@@ -347,14 +347,24 @@ describe('workspace rollup reads the native task counts', () => {
     expect(text).toContain('1 works');
     expect(text).toContain('0 paused');
     expect(text).not.toContain('host activity unavailable');
-    act(() => dashboardStore.setState({ taskCounts: {
-      ...dashboardStore.getState().taskCounts, unknown: 1,
-    } }));
+    act(() =>
+      dashboardStore.setState({
+        taskCounts: {
+          ...dashboardStore.getState().taskCounts,
+          unknown: 1,
+        },
+      }),
+    );
     expect(view.getByTestId('task-counts').textContent).toContain('host activity unavailable');
     expect(view.getByTestId('task-counts').textContent).not.toContain('works');
-    act(() => dashboardStore.setState({ taskCounts: {
-      ...dashboardStore.getState().taskCounts, unknown: 0,
-    } }));
+    act(() =>
+      dashboardStore.setState({
+        taskCounts: {
+          ...dashboardStore.getState().taskCounts,
+          unknown: 0,
+        },
+      }),
+    );
     expect(view.getByTestId('task-counts').textContent).not.toContain('host activity unavailable');
   });
 });
@@ -798,6 +808,8 @@ describe('the left rail shows task status and attention severity together', () =
       lane: 'repo',
       title: '6 actionable drift',
       waitSeconds: 900,
+      itemClass: 'operational',
+      dismissible: true,
       repoId: 'repo-a',
     },
   ];

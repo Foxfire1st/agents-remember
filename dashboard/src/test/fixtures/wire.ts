@@ -185,6 +185,8 @@ const BASE_ATTENTION: AttentionItem = {
   severity: SERVED_ATTENTION.severity,
   lane: SERVED_ATTENTION.lane,
   title: SERVED_ATTENTION.title,
+  itemClass: SERVED_ATTENTION.itemClass,
+  dismissible: SERVED_ATTENTION.dismissible,
 };
 
 /**

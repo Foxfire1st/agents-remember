@@ -1,7 +1,5 @@
 {
-  "activeWorktreeGroups": [
-    "sim-group"
-  ],
+  "activeWorktreeGroups": ["sim-group"],
   "analytics": {
     "attentionQueue": [
       {
@@ -12,7 +10,9 @@
         "repoId": "agents-remember",
         "severity": "alarm",
         "title": "Code index is down",
-        "waitSeconds": 300
+        "waitSeconds": 300,
+        "itemClass": "operational",
+        "dismissible": true
       },
       {
         "id": "actionable-drift:agents-remember:main",
@@ -23,7 +23,9 @@
         "detail": "branch main · memory /memory/ar-agents-remember · report /tmp/drift-report.md · checked 2026-06-14T08:59:00+00:00",
         "waitSeconds": 12.0,
         "repoId": "agents-remember",
-        "actionableFingerprint": "d32d0daec29e1f08e6a7af97063c01f282c51f0d70a9267aba328776b219dba3"
+        "actionableFingerprint": "d32d0daec29e1f08e6a7af97063c01f282c51f0d70a9267aba328776b219dba3",
+        "itemClass": "operational",
+        "dismissible": true
       },
       {
         "id": "blocked-start:sim-group",
@@ -32,7 +34,38 @@
         "lane": "worktree",
         "title": "Worktree start blocked",
         "detail": "Fixture prerequisite is unavailable",
-        "enclosure": "sim-group"
+        "enclosure": "sim-group",
+        "itemClass": "operational",
+        "dismissible": true
+      },
+      {
+        "id": "permission-wait:agent-7",
+        "kind": "permission-wait",
+        "severity": "warn",
+        "lane": "agent",
+        "title": "Agent waits for permission",
+        "agentId": "agent-7",
+        "agentRole": "worker",
+        "promptId": "prompt-7",
+        "heldMessageId": "message-7",
+        "itemClass": "action",
+        "dismissible": false,
+        "waitSeconds": 45
+      },
+      {
+        "id": "task-landed:L190:occ-1",
+        "kind": "task-landed",
+        "severity": "info",
+        "lane": "task",
+        "title": "Leaf L190 landed",
+        "taskKey": "L190",
+        "taskReference": {
+          "path": "L190/task.json",
+          "repository": "agents-remember"
+        },
+        "occurrenceId": "occ-1",
+        "itemClass": "notice",
+        "dismissible": true
       }
     ],
     "driftSnapshots": [
@@ -92,10 +125,7 @@
           "factState": "observed",
           "path": "/worktrees/agents-remember/sim-group"
         },
-        "completedPhases": [
-          "worktree-add",
-          "cgc-seed"
-        ],
+        "completedPhases": ["worktree-add", "cgc-seed"],
         "currentPhase": "grepai-clone",
         "edges": [
           {
@@ -185,9 +215,7 @@
         },
         "seedFallback": false,
         "setupState": "complete",
-        "sourceFiles": [
-          "/tasks/sim/enclosures/sim/series-contract.md"
-        ],
+        "sourceFiles": ["/tasks/sim/enclosures/sim/series-contract.md"],
         "sourceLineage": {
           "edges": [
             {
@@ -296,9 +324,7 @@
         "memoryWorktree": {
           "factState": "not-applicable"
         },
-        "missingFacts": [
-          "memory-worktree"
-        ],
+        "missingFacts": ["memory-worktree"],
         "phase": "provider-setup",
         "providers": [
           {
@@ -376,14 +402,10 @@
           "branch": "sim/SIM-4",
           "factState": "observed"
         },
-        "completedPhases": [
-          "worktree-add"
-        ],
+        "completedPhases": ["worktree-add"],
         "edges": [],
         "enclosure": "failed-enclosure",
-        "failedPhases": [
-          "cgc-seed"
-        ],
+        "failedPhases": ["cgc-seed"],
         "health": "failed",
         "humanReviewStatus": "pending",
         "id": "failed-enclosure",
@@ -499,10 +521,7 @@
         "ledgerRowCount": 0,
         "ledgerRows": [],
         "memoryMode": "external",
-        "missingFacts": [
-          "code-source",
-          "code-worktree"
-        ],
+        "missingFacts": ["code-source", "code-worktree"],
         "phase": "unknown",
         "providers": [],
         "repoName": "agents-remember",
@@ -525,11 +544,7 @@
           "branch": "sim/SIM-8",
           "factState": "observed"
         },
-        "completedPhases": [
-          "worktree-add",
-          "cgc-seed",
-          "grepai-clone"
-        ],
+        "completedPhases": ["worktree-add", "cgc-seed", "grepai-clone"],
         "edges": [],
         "enclosure": "complete-enclosure",
         "failedPhases": [],
@@ -641,9 +656,7 @@
             "repository": "agents-remember"
           },
           "priority": "low",
-          "reasons": [
-            "door-scheduling-provenance-stale"
-          ],
+          "reasons": ["door-scheduling-provenance-stale"],
           "taskDocumentRef": {
             "path": "master-b/leaf-b.json",
             "repository": "agents-remember"
@@ -703,9 +716,7 @@
           "approval": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
           "worker": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
           "recommendedAction": "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab",
-          "legalControls": [
-            "7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab"
-          ]
+          "legalControls": ["7189175ecf5c8cf07076fdd0fa8baf9cda9a81bf27865ed8e105d358ed3981ab"]
         },
         "kind": "closeout",
         "status": "failed",
@@ -872,9 +883,7 @@
         "componentBindings": {
           "approval": "a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2",
           "worker": "a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2",
-          "legalControls": [
-            "a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2"
-          ]
+          "legalControls": ["a3119b1285b75a0ea1d1f3507cc457448627800a3ec53f7c120a025b827a2bc2"]
         },
         "kind": "closeout",
         "status": "queued",
@@ -951,9 +960,7 @@
           "approval": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
           "worker": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
           "recommendedAction": "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1",
-          "legalControls": [
-            "022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1"
-          ]
+          "legalControls": ["022c44d824eb102397dd7975505ffa0230c0f09d234230d5d6d667bcecb6e8e1"]
         },
         "kind": "closeout",
         "status": "running",
@@ -1039,9 +1046,7 @@
           "approval": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
           "worker": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
           "recommendedAction": "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51",
-          "legalControls": [
-            "943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51"
-          ]
+          "legalControls": ["943056f531c1839f0d7b57778defa99a613dc3437f38725410a99bf6545e9a51"]
         },
         "kind": "closeout",
         "status": "running",
@@ -1127,9 +1132,7 @@
           "approval": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
           "worker": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
           "recommendedAction": "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047",
-          "legalControls": [
-            "585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047"
-          ]
+          "legalControls": ["585ec4dc5b87c9c19a07e372f2ec9f9e05849e854b971a2bf36514431b0fa047"]
         },
         "kind": "closeout",
         "status": "running",
@@ -1215,9 +1218,7 @@
           "approval": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
           "worker": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
           "recommendedAction": "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea",
-          "legalControls": [
-            "cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea"
-          ]
+          "legalControls": ["cb098248cdd4f5714c3ee9400d2dc2fa5f4ea54a15bb9c27c854a5c0f95f71ea"]
         },
         "kind": "closeout",
         "status": "running",
@@ -1581,9 +1582,7 @@
           "approval": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
           "worker": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
           "recommendedAction": "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1",
-          "legalControls": [
-            "1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1"
-          ]
+          "legalControls": ["1db0324d4f8f596f8b42146c2ed069a0981acfb80225f0cf0e6caaae4524c0a1"]
         },
         "kind": "integrate",
         "status": "running",
@@ -1665,9 +1664,7 @@
           "approval": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
           "worker": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
           "recommendedAction": "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd",
-          "legalControls": [
-            "2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd"
-          ]
+          "legalControls": ["2bb81ddf11e811c8cba043a62604662580cb673e6b3c98cc095c874c2f63afdd"]
         },
         "kind": "integrate",
         "status": "running",
@@ -2093,9 +2090,7 @@
         "executionWaves": []
       },
       "worktrees": [],
-      "children": [
-        "agents-remember/sim/01.json"
-      ],
+      "children": ["agents-remember/sim/01.json"],
       "counts": {
         "planned": 0,
         "started": 1,
@@ -2227,9 +2222,7 @@
           }
         ],
         "objective": "keep the mirror honest",
-        "requirements": [
-          "the guard fails when the server grows a field"
-        ],
+        "requirements": ["the guard fails when the server grows a field"],
         "design": "two directions, both checked",
         "codeExamples": [
           {
@@ -2249,12 +2242,8 @@
             "product_record": false
           }
         ],
-        "openQuestions": [
-          "which vocabularies still have no runtime tuple?"
-        ],
-        "references": [
-          "mcp/src/agents_remember/observer/projection.py"
-        ],
+        "openQuestions": ["which vocabularies still have no runtime tuple?"],
+        "references": ["mcp/src/agents_remember/observer/projection.py"],
         "discardedCount": 1,
         "discardedSubTasks": [
           {
@@ -2310,9 +2299,7 @@
         "nonGoals": "This simulated document does not exercise a live coordinator.",
         "acceptance": "The sampled contract remains type checked.",
         "completedAt": "2026-06-14T08:50:00+00:00",
-        "waitsFor": [
-          "SIM-2"
-        ],
+        "waitsFor": ["SIM-2"],
         "waitsForTasks": [
           {
             "id": "SIM-2",
@@ -2376,9 +2363,7 @@
               "approval": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
               "worker": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
               "recommendedAction": "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa",
-              "legalControls": [
-                "9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa"
-              ]
+              "legalControls": ["9eefe288007962f56d20cf0bbda805767559d9859a1d73e5044c3eb7548110fa"]
             },
             "kind": "closeout",
             "status": "failed",
@@ -2561,10 +2546,7 @@
         "openQuestions": [],
         "references": [],
         "sections": [],
-        "orchestrates": [
-          "sim-master-a",
-          "sim-master-b"
-        ],
+        "orchestrates": ["sim-master-a", "sim-master-b"],
         "seats": [
           {
             "role": "orchestrator",
@@ -2586,9 +2568,7 @@
                 "repository": "agents-remember",
                 "path": "sim-master-a/task.json"
               },
-              "leafIds": [
-                "SIM-A-L1"
-              ]
+              "leafIds": ["SIM-A-L1"]
             },
             {
               "kind": "segment",
@@ -2596,9 +2576,7 @@
                 "repository": "agents-remember",
                 "path": "sim-master-b/task.json"
               },
-              "leafIds": [
-                "SIM-B-L1"
-              ]
+              "leafIds": ["SIM-B-L1"]
             }
           ],
           "edges": [
@@ -2630,9 +2608,7 @@
                 "repository": "agents-remember",
                 "path": "sim-master-a/task.json"
               },
-              "leafIds": [
-                "SIM-A-L1"
-              ]
+              "leafIds": ["SIM-A-L1"]
             }
           ],
           [
@@ -2642,9 +2618,7 @@
                 "repository": "agents-remember",
                 "path": "sim-master-b/task.json"
               },
-              "leafIds": [
-                "SIM-B-L1"
-              ]
+              "leafIds": ["SIM-B-L1"]
             }
           ]
         ],
@@ -2658,12 +2632,8 @@
                 "path": "sim-master-a/task.json"
               },
               "masterTitle": "Sim Master A",
-              "leafIds": [
-                "SIM-A-L1"
-              ],
-              "leafTitles": [
-                "Shared framework"
-              ],
+              "leafIds": ["SIM-A-L1"],
+              "leafTitles": ["Shared framework"],
               "waveIndex": 1,
               "frontierState": "in-flight",
               "cycle": false,
@@ -2678,12 +2648,8 @@
                 "path": "sim-master-b/task.json"
               },
               "masterTitle": "Sim Master B",
-              "leafIds": [
-                "SIM-B-L1"
-              ],
-              "leafTitles": [
-                "Dependent work"
-              ],
+              "leafIds": ["SIM-B-L1"],
+              "leafTitles": ["Dependent work"],
               "waveIndex": 2,
               "frontierState": "waiting",
               "executionNature": "organizational",
@@ -2707,12 +2673,8 @@
                 "path": "sim-master-a/task.json"
               },
               "masterTitle": "Sim Master A",
-              "leafIds": [
-                "SIM-A-L1"
-              ],
-              "leafTitles": [
-                "Shared framework"
-              ],
+              "leafIds": ["SIM-A-L1"],
+              "leafTitles": ["Shared framework"],
               "waveIndex": 1,
               "frontierState": "landed",
               "executionNature": "organizational",
@@ -2726,12 +2688,8 @@
                 "path": "sim-master-b/task.json"
               },
               "masterTitle": "Sim Master B",
-              "leafIds": [
-                "SIM-B-L1"
-              ],
-              "leafTitles": [
-                "Dependent work"
-              ],
+              "leafIds": ["SIM-B-L1"],
+              "leafTitles": ["Dependent work"],
               "waveIndex": 2,
               "frontierState": "ready",
               "executionNature": "atomic",

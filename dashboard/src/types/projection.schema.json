@@ -110,7 +110,7 @@
     },
     "AttentionItem": {
       "additionalProperties": false,
-      "description": "One thing that needs the human, decided by the reducer (note 06, slice 05).\n\nA ranked cross-section of the structural tree + analytics signals -- the\nhome-screen attention queue. Computed server-side so every client (dashboard,\nTUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never\na client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the\nstructural tree so the UI can couple a queue item to its operation-tree node.",
+      "description": "One thing that needs the human, decided by the reducer (note 06, slice 05).\n\nA ranked cross-section of the structural tree + analytics signals -- the\nhome-screen attention queue. Computed server-side so every client (dashboard,\nTUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never\na client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the\nstructural tree so the UI can couple a queue item to its operation-tree node.\n\nMIK-R200 rules 7 and 8 give every row its subject and its own dismissal rule.\n``itemClass`` says which rule it obeys: an ``action`` is a live native cause that\nclears only when that cause ends and cannot be acknowledged away; a ``notice`` is a\nterminal occurrence the developer acknowledges once; ``operational`` is a surviving\npre-existing kind, acknowledged until its source observes recovery. ``dismissible``\nis the same fact in the form a client control reads. ``taskKey``/``taskReference``\nand ``agentId``/``agentRole`` name the actual subject -- never matched by title, and\na taskless seat keeps ``taskKey`` absent rather than inventing one.",
       "properties": {
         "actionableFingerprint": {
           "anyOf": [
@@ -124,6 +124,30 @@
           "default": null,
           "title": "Actionablefingerprint"
         },
+        "agentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentid"
+        },
+        "agentRole": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentrole"
+        },
         "detail": {
           "anyOf": [
             {
@@ -135,6 +159,11 @@
           ],
           "default": null,
           "title": "Detail"
+        },
+        "dismissible": {
+          "default": true,
+          "title": "Dismissible",
+          "type": "boolean"
         },
         "enclosure": {
           "anyOf": [
@@ -148,9 +177,25 @@
           "default": null,
           "title": "Enclosure"
         },
+        "heldMessageId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Heldmessageid"
+        },
         "id": {
           "title": "Id",
           "type": "string"
+        },
+        "itemClass": {
+          "$ref": "#/$defs/AttentionItemClass",
+          "default": "operational"
         },
         "kind": {
           "title": "Kind",
@@ -158,6 +203,30 @@
         },
         "lane": {
           "$ref": "#/$defs/AttentionLane"
+        },
+        "occurrenceId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurrenceid"
+        },
+        "promptId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Promptid"
         },
         "providerId": {
           "anyOf": [
@@ -186,6 +255,29 @@
         "severity": {
           "$ref": "#/$defs/AttentionSeverity"
         },
+        "taskKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Taskkey"
+        },
+        "taskReference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "title": {
           "title": "Title",
           "type": "string"
@@ -213,10 +305,20 @@
       "title": "AttentionItem",
       "type": "object"
     },
+    "AttentionItemClass": {
+      "enum": [
+        "action",
+        "notice",
+        "operational"
+      ],
+      "type": "string"
+    },
     "AttentionLane": {
       "enum": [
         "repo",
-        "worktree"
+        "worktree",
+        "agent",
+        "task"
       ],
       "type": "string"
     },

@@ -22,6 +22,11 @@ class PublishedAgentActivity(BaseModel):
     absent at 0, and ``subagentsSince`` is the oldest running subagent's start, so
     an agent that works only by its subagents has an age of its own. A subagent
     field never moves ``eventAt``.
+
+    MIK-R200 rule 2 adds the one field a permission wait needs to be an occurrence: the
+    plugin publishes the ids of the native prompts that are still unanswered, absent when none
+    are, so the attention queue can keep one row per outstanding prompt and end exactly the
+    occurrence that was answered. The prompt's arguments are never published.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -30,6 +35,7 @@ class PublishedAgentActivity(BaseModel):
     eventAt: datetime | None = None
     runningSubagents: int | None = Field(default=None, ge=0)
     subagentsSince: datetime | None = None
+    permissionPrompts: tuple[str, ...] = ()
 
     @field_validator("eventAt", "subagentsSince")
     @classmethod
@@ -73,3 +79,6 @@ class HostActivitySnapshot:
     ignored_agents: int = 0
     # MIK-R190 rule 13: the one limited-fact file, read where the serves already reads.
     limits: ProviderLimits | None = None
+    # MIK-R200 rule 4 (L190-R1-F04): the native boot the listing belongs to. A clock that
+    # spans two boots spans an interval nobody observed, so a change here breaks it.
+    boot_id: str | None = None

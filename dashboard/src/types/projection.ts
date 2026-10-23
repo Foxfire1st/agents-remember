@@ -9,8 +9,11 @@
 export const ATTENTION_SEVERITIES = ["alarm", "warn", "info"] as const;
 export type AttentionSeverity = (typeof ATTENTION_SEVERITIES)[number];
 
-export const ATTENTION_LANES = ["repo", "worktree"] as const;
+export const ATTENTION_LANES = ["repo", "worktree", "agent", "task"] as const;
 export type AttentionLane = (typeof ATTENTION_LANES)[number];
+
+export const ATTENTION_ITEM_CLASSES = ["action", "notice", "operational"] as const;
+export type AttentionItemClass = (typeof ATTENTION_ITEM_CLASSES)[number];
 
 export const PROCESS_FACT_STATES = ["observed", "derived", "planned", "missing", "stale", "not-applicable"] as const;
 export type ProcessFactState = (typeof PROCESS_FACT_STATES)[number];
@@ -38,14 +41,23 @@ export interface Analytics {
 
 export interface AttentionItem {
   actionableFingerprint?: string;
+  agentId?: string;
+  agentRole?: string;
   detail?: string;
+  dismissible: boolean;
   enclosure?: string;
+  heldMessageId?: string;
   id: string;
+  itemClass: AttentionItemClass;
   kind: string;
   lane: AttentionLane;
+  occurrenceId?: string;
+  promptId?: string;
   providerId?: string;
   repoId?: string;
   severity: AttentionSeverity;
+  taskKey?: string;
+  taskReference?: TaskDocumentRef;
   title: string;
   waitSeconds?: number;
 }

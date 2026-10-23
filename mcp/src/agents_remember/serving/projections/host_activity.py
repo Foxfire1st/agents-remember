@@ -314,6 +314,8 @@ class HostActivityInput:
             + len(publication.agents.keys() - records.keys()),
             # MIK-R190 rule 13: the one limited-fact file, read beside the publication.
             limits=read_provider_limits_file(directory),
+            # MIK-R200 rule 4: the boot this listing was observed in.
+            boot_id=publication.bootId,
         )
 
 

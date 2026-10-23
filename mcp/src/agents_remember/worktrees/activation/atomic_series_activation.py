@@ -212,6 +212,66 @@ def publish_atomic_series_selection(
         )
 
 
+def mark_atomic_series_pause(
+    contract: WorktreeContract,
+    *,
+    timestamp: str | None = None,
+) -> AtomicSeriesActivationObservation:
+    """Record the explicit pause on this contract's own activation snapshot.
+
+    MIK-R200 rule 4 keeps the pause fact at the record ``worktree_pause`` already owns instead
+    of inventing a second stop store. The pause releases the selection first, so the record it
+    marks is vacant; a master that held no selection already stands where a release leaves it,
+    and the mark is written onto that record (created vacant when the master was never selected)
+    because the developer's stop is still a fact about it. Only a vacant record is marked: an
+    active selection means the release did not happen, and this refuses rather than claim a stop.
+    """
+
+    ACTIVATION_OWNERSHIP.check_declared_writer()
+    _require_canonical_series_contract(contract)
+    fingerprint = contract_fingerprint(contract)
+    path = activation_path(contract.coordination_root, contract)
+    stamp = timestamp or _now_iso()
+    with exclusive_access(path, ACTIVATION_OWNERSHIP):
+        previous = observe_atomic_series_path(contract, path)
+        if previous.state == "unreadable":
+            raise AtomicSeriesActivationError(
+                "atomic-series-activation-pause-unreadable",
+                previous.detail or "the activation snapshot is unreadable and cannot be marked",
+            )
+        record = previous.record
+        if record is not None and record.state == "vacant" and record.pausedAt is not None:
+            # Already marked: a second stop of the same master changes nothing, so it writes
+            # nothing. The released pause leaves the record already marked.
+            return previous
+        if record is not None and record.state != "vacant":
+            raise AtomicSeriesActivationError(
+                "atomic-series-activation-pause-not-released",
+                "a pause is marked only after the selection it stops has been released",
+            )
+        marked = (
+            AtomicSeriesActivationRecord(
+                contractFingerprint=fingerprint,
+                selectedMaster=series_master_ref(contract),
+                contractPath=contract.contract_path.resolve().as_posix(),
+                state="vacant",
+                revision=1,
+                selectedAt=stamp,
+                pausedAt=stamp,
+            )
+            if record is None
+            else record.model_copy(update={"revision": record.revision + 1, "pausedAt": stamp})
+        )
+        atomic_write_text(path, marked.model_dump_json(indent=2) + "\n")
+        return AtomicSeriesActivationObservation(
+            contract.contract_path,
+            fingerprint,
+            path,
+            "vacant",
+            marked,
+        )
+
+
 def require_selected_atomic_series(
     contract: WorktreeContract,
     *,

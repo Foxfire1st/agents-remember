@@ -56,7 +56,8 @@ DirectGrantNode = task_documents.DirectGrantNode
 
 
 type AttentionSeverity = Literal["alarm", "warn", "info"]
-type AttentionLane = Literal["repo", "worktree"]
+type AttentionLane = Literal["repo", "worktree", "agent", "task"]
+type AttentionItemClass = Literal["action", "notice", "operational"]
 type ProcessFactState = Literal[
     "observed", "derived", "planned", "missing", "stale", "not-applicable"
 ]
@@ -289,6 +290,15 @@ class AttentionItem(BaseModel):
     TUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never
     a client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the
     structural tree so the UI can couple a queue item to its operation-tree node.
+
+    MIK-R200 rules 7 and 8 give every row its subject and its own dismissal rule.
+    ``itemClass`` says which rule it obeys: an ``action`` is a live native cause that
+    clears only when that cause ends and cannot be acknowledged away; a ``notice`` is a
+    terminal occurrence the developer acknowledges once; ``operational`` is a surviving
+    pre-existing kind, acknowledged until its source observes recovery. ``dismissible``
+    is the same fact in the form a client control reads. ``taskKey``/``taskReference``
+    and ``agentId``/``agentRole`` name the actual subject -- never matched by title, and
+    a taskless seat keeps ``taskKey`` absent rather than inventing one.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -305,6 +315,17 @@ class AttentionItem(BaseModel):
     providerId: str | None = None
     # Complete actionable findings from the native drift producer, excluding its clock.
     actionableFingerprint: str | None = None
+    itemClass: AttentionItemClass = "operational"
+    dismissible: bool = True
+    # The canonical task this row opens (its entry key and the document it names).
+    taskKey: str | None = None
+    taskReference: TaskDocumentRef | None = None
+    # The actual agent and native occurrence identities a row names, when it has them.
+    agentId: str | None = None
+    agentRole: str | None = None
+    promptId: str | None = None
+    heldMessageId: str | None = None
+    occurrenceId: str | None = None
 
 
 class CommitRefNode(BaseModel):

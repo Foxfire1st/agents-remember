@@ -3,11 +3,13 @@
 Pure and deterministic: every source contributes one small builder and the
 queue sorts by (severity, wait, id). Provider/setup/start dismissals hold until
 their native reader observes recovery or removal. Drift occurrence is carried by
-its persisted source signal.
+its persisted source signal. The five native kinds live in ``_attention_native``;
+this module owns the one queue, its ranking and the one dismissal rule.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from agents_remember.controlplane.attention_dismissals import (
@@ -19,7 +21,9 @@ from agents_remember.observer.projection import (
     DriftSnapshotNode,
     ProviderNode,
     SetupProgressNode,
+    TaskEntry,
 )
+from agents_remember.observer.reducer_impl._attention_native import native_attention_items
 from agents_remember.observer.reducer_impl._processes import _str_or_none
 from agents_remember.observer.reducer_impl._types import AnalyticalInputs
 
@@ -32,6 +36,8 @@ _PROVIDER_DOWN: frozenset[str] = frozenset({"stopped", "failed", "error"})
 def build_attention_queue(
     providers: list[ProviderNode],
     given: AnalyticalInputs,
+    tasks: list[TaskEntry] | None = None,
+    now: datetime | None = None,
 ) -> list[AttentionItem]:
     """The home-screen attention queue: a ranked cross-section of what needs the human.
 
@@ -46,15 +52,25 @@ def build_attention_queue(
     ``given.attention_dismissals`` is the reconciled current acknowledgement map.
     Source cleanup owns observed recovery/removal; this pure fold only suppresses
     a matching current item. It never infers recovery from age or a missing node.
+
+    ``tasks`` are the joined task entries, so a stall and a notice carry the canonical task
+    they open; ``now`` is the pass clock the stall deadline is evaluated at. A live native
+    cause (``itemClass == "action"``) is never suppressed by an acknowledgement: rule 7 says it
+    clears only when its cause ends, and the backend refuses the dismissal too.
     """
     items = [
         *_provider_attention(providers),
         *_drift_attention(given.drift_snapshots),
         *_setup_attention(given.setup_progress),
         *_start_attention(given.engine_start_progress),
+        *native_attention_items(
+            given.native_attention,
+            list(tasks or []),
+            now or datetime.now().astimezone(),
+        ),
     ]
     dismissed = given.attention_dismissals
-    items = [item for item in items if not _is_dismissed(item, dismissed)]
+    items = [item for item in items if not item.dismissible or not _is_dismissed(item, dismissed)]
     items.sort(
         key=lambda item: (_SEVERITY_RANK.get(item.severity, 9), -(item.waitSeconds or 0.0), item.id)
     )

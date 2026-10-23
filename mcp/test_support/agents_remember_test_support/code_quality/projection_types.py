@@ -38,6 +38,7 @@ DEFINITION_RENAMES = {
 NAMED_VOCABULARIES = (
     ("AttentionItem", "severity", "AttentionSeverity"),
     ("AttentionItem", "lane", "AttentionLane"),
+    ("AttentionItem", "itemClass", "AttentionItemClass"),
     ("CommitRefNode", "factState", "ProcessFactState"),
     ("EngineProcessNode", "health", "ProcessHealth"),
 )
@@ -446,6 +447,7 @@ def _vocabulary_block(schema: Mapping[str, object]) -> tuple[str, dict[tuple[str
     constants = (
         "ATTENTION_SEVERITIES",
         "ATTENTION_LANES",
+        "ATTENTION_ITEM_CLASSES",
         "PROCESS_FACT_STATES",
         "PROCESS_HEALTHS",
     )

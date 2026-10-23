@@ -109,7 +109,7 @@ def task_state(
     if not host_known:
         return TaskState(stage="started", activity="unknown")
     observed = list(agents)
-    working = [agent for agent in observed if _works(agent)]
+    working = [agent for agent in observed if agent_works(agent)]
     contributors = working or observed
     times = [event for event in (_event_of(agent) for agent in contributors) if event is not None]
     event = max(times) if times else None
@@ -127,8 +127,12 @@ def task_state(
     )
 
 
-def _works(agent: PublishedAgentActivity) -> bool:
-    """MIK-R190 rule 4: in a turn, or with a running subagent and not ended."""
+def agent_works(agent: PublishedAgentActivity) -> bool:
+    """MIK-R190 rule 4: in a turn, or with a running subagent and not ended.
+
+    The one definition of "this agent is working": the task state, the stall predicate
+    (MIK-R200 rule 4) and the pause suppression all read it here.
+    """
 
     if agent.state in {"in-turn", "permission"}:
         return True

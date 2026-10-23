@@ -90,10 +90,14 @@ def project_workspace(
         given.setup_progress,
         given.engine_start_progress,
     )
-    tasks = build_task_entries(given.task_sources, enriched, given.host_activity)
+    # L190-R1-F04: one canonical join per pass. The input reader builds it so the stall clock and
+    # these rows share one relation; a caller that supplies none still gets the join here.
+    tasks = given.task_entries or build_task_entries(
+        given.task_sources, enriched, given.host_activity
+    )
     analytics = build_analytics(
         given,
-        attention_queue=build_attention_queue(providers, given),
+        attention_queue=build_attention_queue(providers, given, tasks.tasks, now),
         engine_processes=engine_processes,
     )
     return WorkspaceProjection(

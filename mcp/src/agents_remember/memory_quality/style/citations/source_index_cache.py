@@ -15,12 +15,15 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Literal, Protocol
+from typing import TYPE_CHECKING, BinaryIO, Literal, Protocol
 from uuid import uuid4
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
 from agents_remember.worktrees.worktree_contract import load_contract
+
+if TYPE_CHECKING:
+    from agents_remember.worktrees.services import TerminalCommit
 
 LOCK_TIMEOUT_SECONDS = 30.0
 MANAGED_ROOT_RELATIVE = Path("temp/citation-source-index/managed")
@@ -202,11 +205,12 @@ class TerminalNamespaceGuard:
         outcome: Literal["completed", "abandoned"],
         publish: Callable[[], None],
         rollback_publish: Callable[[], None],
+        commit: TerminalCommit | None = None,
     ) -> dict[str, object]:
         if self.completed:
             raise CitationCacheError("terminal citation cache guard was already completed")
         if self.authority is None:
-            return self._complete_without_namespace(publish, rollback_publish)
+            return self._complete_without_namespace(publish, rollback_publish, commit)
         authority = self.authority
         result: dict[str, object] = {
             "namespace": authority.namespace_id,
@@ -214,6 +218,7 @@ class TerminalNamespaceGuard:
             "removed": False,
         }
         self._quarantine_live_namespace(authority, result)
+        retired: Path | None = None
         try:
             retired = self._commit_terminal_boundary(
                 authority,
@@ -221,7 +226,14 @@ class TerminalNamespaceGuard:
                 publish=publish,
                 result=result,
             )
+            if commit is not None:
+                commit.publish()
         except BaseException as error:
+            if commit is not None and commit.committed:
+                self.completed = True
+                raise
+            if retired is not None:
+                self.tombstone = retired
             self._rollback_precommit(authority, rollback_publish, error)
             raise
         # The terminal contract, persistent fence state, and non-live retired identity are
@@ -259,10 +271,16 @@ class TerminalNamespaceGuard:
         self,
         publish: Callable[[], None],
         rollback_publish: Callable[[], None],
+        commit: TerminalCommit | None = None,
     ) -> dict[str, object]:
         try:
             publish()
+            if commit is not None:
+                commit.publish()
         except BaseException as error:
+            if commit is not None and commit.committed:
+                self.completed = True
+                raise
             try:
                 rollback_publish()
             except BaseException as rollback_error:

@@ -18,6 +18,8 @@ const items: AttentionItem[] = [
     lane: 'repo',
     title: 'Provider cgc down',
     detail: 'stopped',
+    itemClass: 'operational',
+    dismissible: true,
   }),
   attentionItem({
     id: 'actionable-drift:repo:main',
@@ -26,6 +28,8 @@ const items: AttentionItem[] = [
     lane: 'repo',
     title: '1 actionable drift in repo',
     repoId: 'repo',
+    itemClass: 'operational',
+    dismissible: true,
   }),
   attentionItem({
     id: 'failed-setup:group',
@@ -33,6 +37,8 @@ const items: AttentionItem[] = [
     severity: 'alarm',
     lane: 'worktree',
     title: 'Provider setup needs attention',
+    itemClass: 'operational',
+    dismissible: true,
   }),
   attentionItem({
     id: 'blocked-start:/worktrees/group',
@@ -41,8 +47,49 @@ const items: AttentionItem[] = [
     lane: 'worktree',
     title: 'Worktree start blocked',
     detail: 'no exact ledger mapping for selected code base commit',
+    itemClass: 'operational',
+    dismissible: true,
   }),
 ];
+
+// An action: it clears only when its native cause ends, so it is neither dismissible nor listed by
+// "Clear all". It names an agent and no task.
+const permissionWait = attentionItem({
+  id: 'permission-wait:agent-7',
+  kind: 'permission-wait',
+  severity: 'warn',
+  lane: 'agent',
+  title: 'Agent waits for permission',
+  agentId: 'agent-7',
+  agentRole: 'worker',
+  itemClass: 'action',
+  dismissible: false,
+});
+
+// An action that names a task: the row opens the task, and still cannot be dismissed.
+const taskStalled = attentionItem({
+  id: 'task-stalled:L191',
+  kind: 'task-stalled',
+  severity: 'alarm',
+  lane: 'task',
+  title: 'Leaf L191 is stalled',
+  taskKey: 'L191',
+  itemClass: 'action',
+  dismissible: false,
+});
+
+// A notice: one acknowledgement per occurrence.
+const taskLanded = attentionItem({
+  id: 'task-landed:L190:occ-1',
+  kind: 'task-landed',
+  severity: 'info',
+  lane: 'task',
+  title: 'Leaf L190 landed',
+  taskKey: 'L190',
+  occurrenceId: 'occ-1',
+  itemClass: 'notice',
+  dismissible: true,
+});
 
 function seed(queue: AttentionItem[]) {
   dashboardStore
@@ -184,5 +231,144 @@ describe('AttentionQueue bell (MIK-R144 rule 3a)', () => {
     expect(view.getByTestId('attention-bell').getAttribute('aria-expanded')).toBe('false');
     expect(view.getByTestId('attention-bell').textContent).toBe('1');
     expect(postAttentionDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe('an action clears only when its cause ends', () => {
+  it('offers no × and Clear all passes over it while still clearing a mixed queue', async () => {
+    vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
+    seed([permissionWait, taskLanded]);
+    const view = renderOpen();
+    expect(view.getAllByTestId('attn-item')).toHaveLength(2);
+    const actionRow = view
+      .getAllByTestId('attn-item')
+      .find((row) => row.textContent?.includes(permissionWait.title));
+    if (!actionRow) throw new Error('the action row did not render');
+    expect(actionRow.querySelector("[data-testid='attn-dismiss']")).toBeNull();
+    expect(view.getAllByTestId('attn-dismiss')).toHaveLength(1);
+
+    fireEvent.click(view.getByTestId('attn-clear'));
+    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(1));
+    expect(postAttentionDismiss).toHaveBeenCalledExactlyOnceWith({
+      itemId: taskLanded.id,
+      kind: taskLanded.kind,
+    });
+    expect(postAttentionDismiss).not.toHaveBeenCalledWith(
+      expect.objectContaining({ itemId: permissionWait.id }),
+    );
+
+    // The action is still there; the notice is gone.
+    expect(view.getAllByTestId('attn-item')).toHaveLength(1);
+    expect(view.getByText(permissionWait.title)).toBeTruthy();
+    expect(view.queryByText(taskLanded.title)).toBeNull();
+    // The heading and the bell still count the whole queue.
+    expect(view.getByTestId('attention-queue').textContent).toContain('1 waiting');
+    expect(view.getByTestId('attention-bell').textContent).toBe('1');
+  });
+
+  it('shows an all-action queue with rows and no Clear all', () => {
+    seed([permissionWait, taskStalled]);
+    const view = renderOpen();
+    expect(view.getAllByTestId('attn-item')).toHaveLength(2);
+    expect(view.queryByTestId('attn-clear')).toBeNull();
+    expect(view.queryByTestId('attn-dismiss')).toBeNull();
+    expect(view.getByTestId('attention-bell').textContent).toBe('2');
+  });
+
+  it('stays visible even when its id was suppressed locally', () => {
+    seed([permissionWait]);
+    dashboardStore.getState().suppressAttention([permissionWait.id]);
+    const view = renderOpen();
+    expect(view.getByText(permissionWait.title)).toBeTruthy();
+    expect(view.getByTestId('attention-bell').textContent).toBe('1');
+  });
+});
+
+describe('a notice is acknowledged once per occurrence', () => {
+  it('dismisses once and hides', async () => {
+    vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
+    seed([taskLanded]);
+    const view = renderOpen();
+    fireEvent.click(view.getByTestId('attn-dismiss'));
+    expect(view.queryByText(taskLanded.title)).toBeNull();
+    expect(view.getByTestId('attention-queue').textContent).toContain('nothing waiting');
+    await waitFor(() =>
+      expect(postAttentionDismiss).toHaveBeenCalledExactlyOnceWith({
+        itemId: taskLanded.id,
+        kind: taskLanded.kind,
+      }),
+    );
+  });
+
+  it('shows the next distinct occurrence after the previous was acknowledged', async () => {
+    vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
+    seed([taskLanded]);
+    const view = renderOpen();
+    fireEvent.click(view.getByTestId('attn-dismiss'));
+    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(1));
+
+    const next = attentionItem({
+      ...taskLanded,
+      id: 'task-landed:L190:occ-2',
+      occurrenceId: 'occ-2',
+      title: 'Leaf L190 landed again',
+    });
+    seed([next]);
+    await waitFor(() => expect(view.getByText(next.title)).toBeTruthy());
+    expect(view.getByTestId('attention-bell').textContent).toBe('1');
+    expect(view.getByTestId('attn-dismiss')).toBeTruthy();
+  });
+});
+
+describe('a row opens its actual subject', () => {
+  it('opens the exact task key of a task row', () => {
+    const onOpenTask = vi.fn();
+    seed([taskStalled, permissionWait]);
+    const view = render(<AttentionQueue onOpenTask={onOpenTask} />);
+    fireEvent.click(view.getByTestId('attention-bell'));
+    const taskLink = view.getByTestId('attn-open');
+    expect(taskLink.getAttribute('aria-label')).toContain(taskStalled.taskKey);
+    fireEvent.click(taskLink);
+    expect(onOpenTask).toHaveBeenCalledExactlyOnceWith('L191');
+  });
+
+  it('opens the exact agent of an agent row, and a taskless agent row has no task link', () => {
+    const onOpenTask = vi.fn();
+    const onOpenAgent = vi.fn();
+    seed([permissionWait, taskLanded]);
+    const view = render(<AttentionQueue onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} />);
+    fireEvent.click(view.getByTestId('attention-bell'));
+
+    const agentRow = view
+      .getAllByTestId('attn-item')
+      .find((row) => row.textContent?.includes(permissionWait.title));
+    if (!agentRow) throw new Error('the agent row did not render');
+    expect(agentRow.querySelector("[data-testid='attn-open']")).toBeNull();
+    const agentLink = agentRow.querySelector("[data-testid='attn-open-agent']");
+    if (!(agentLink instanceof HTMLElement)) throw new Error('the agent row has no way in');
+    expect(agentLink.getAttribute('aria-label')).toContain('agent-7');
+    fireEvent.click(agentLink);
+    expect(onOpenAgent).toHaveBeenCalledExactlyOnceWith({ agentId: 'agent-7', role: 'worker' });
+    expect(onOpenTask).not.toHaveBeenCalled();
+
+    // The notice names a task only: it has the task link and no agent link.
+    const noticeRow = view
+      .getAllByTestId('attn-item')
+      .find((row) => row.textContent?.includes(taskLanded.title));
+    if (!noticeRow) throw new Error('the notice row did not render');
+    expect(noticeRow.querySelector("[data-testid='attn-open-agent']")).toBeNull();
+    expect(noticeRow.querySelector("[data-testid='attn-open']")).toBeTruthy();
+  });
+
+  it('renders no way in when no handler is supplied', () => {
+    seed([taskStalled, permissionWait]);
+    const view = renderOpen();
+    expect(view.queryByTestId('attn-open')).toBeNull();
+    expect(view.queryByTestId('attn-open-agent')).toBeNull();
+    // The place text stays for every row.
+    expect(view.getAllByTestId('attn-place').map((place) => place.textContent)).toEqual([
+      'task',
+      'agent',
+    ]);
   });
 });

@@ -302,6 +302,7 @@ export function PaseoChatFrame(props: PaseoChatFrameProps) {
       control={state.control}
       agentProblem={state.agentProblem}
       pluginNotice={state.pluginNotice}
+      scope={props.scope}
       wait={wait}
       onRetry={retry}
     />
@@ -325,6 +326,8 @@ interface EmbeddedFrameProps {
   control: PaseoControlState;
   agentProblem: string | null;
   pluginNotice: string | null;
+  /** The launcher selection this frame is steered for; a change means another execution shows. */
+  scope: string;
   wait: FrameWait;
   onRetry: () => void;
 }
@@ -335,6 +338,7 @@ function EmbeddedFrame(props: EmbeddedFrameProps) {
     frame,
     frameRef,
     control,
+    scope,
     wait,
   } = props;
   // A chat that goes out of reach while the keyboard is in it gives the keyboard back.
@@ -349,6 +353,10 @@ function EmbeddedFrame(props: EmbeddedFrameProps) {
       /* MIK-R122 rule 7: the generation rises by exactly one per document load, so tests
          can read the number of loads. Only load() bumps it; message switches never do. */
       data-generation={frame.generation}
+      /* The selection the frame is steered for, as its own identity: the seat's role and the
+         document a chat belongs to — otherwise unreadable, and the difference between "this
+         seat's chat" and "another seat of the same document". */
+      data-scope={scope}
     >
       <FrameNotices {...props} />
       <div className={frameBody}>

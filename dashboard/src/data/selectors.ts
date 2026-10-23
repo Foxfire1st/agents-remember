@@ -36,7 +36,10 @@ export const selectQueue = (state: DashboardState): readonly AttentionItem[] => 
     return cachedVisibleQueue;
   cachedQueueSource = queue;
   cachedSuppressedSource = suppressed;
-  cachedVisibleQueue = queue.filter((item) => !suppressed[item.id]);
+  // Suppression names an acknowledgement, and only a dismissible entry has one. A non-dismissible
+  // entry (an action) is hidden from view by nothing but its native cause ending: a stale or
+  // out-of-band id must never take it off the queue.
+  cachedVisibleQueue = queue.filter((item) => !(item.dismissible && suppressed[item.id]));
   return cachedVisibleQueue;
 };
 
