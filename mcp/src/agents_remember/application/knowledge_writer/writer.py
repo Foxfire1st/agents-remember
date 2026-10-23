@@ -321,17 +321,21 @@ def _trace_items(worklist: Mapping[str, Any] | None) -> tuple[tuple[str, str], .
 def _onboarding_sources(
     worklist: Mapping[str, Any] | None,
 ) -> dict[str, tuple[str, ...]]:
-    """The persisted worklist's onboarding items' covered sources, by subject (MIK-R53 rule 1).
+    """The source set the gate compares for each onboarding subject (MIK-R53 rule 1).
 
-    An overview row's sources are the files its item covers; a file card's path comes from its
-    subject. Without a persisted worklist no overview row can bind its sources.
+    An onboarding_trace item's sources take precedence. Otherwise an uncovered unexplained
+    item's sourceBlobs supplies its whole group (da612e11); the writer reads each blob at C.
+    With neither item, a file card still binds its own path and an overview cannot bind sources.
     """
 
     found: dict[str, tuple[str, ...]] = {}
+    trace_subjects: set[str] = set()
     for item in (worklist or {}).get("items") or ():
         if not isinstance(item, Mapping) or item.get("kind") != "onboarding_trace":
             continue
         subject = item.get("subject")
+        if isinstance(subject, str):
+            trace_subjects.add(subject)
         facts = item.get("facts")
         sources = facts.get("sources") if isinstance(facts, Mapping) else None
         if (
@@ -340,7 +344,38 @@ def _onboarding_sources(
             and all(isinstance(one, str) for one in sources)
         ):
             found[subject] = tuple(sources)
-    return found
+    return _unexplained_onboarding_sources(worklist, trace_subjects) | found
+
+
+def _unexplained_onboarding_sources(
+    worklist: Mapping[str, Any] | None, trace_subjects: set[str]
+) -> dict[str, tuple[str, ...]]:
+    """Union the uncovered source groups per trace subject, without overriding a trace item."""
+
+    groups: dict[str, set[str]] = {}
+    for item in (worklist or {}).get("items") or ():
+        if not isinstance(item, Mapping) or item.get("kind") not in _UNEXPLAINED_KINDS:
+            continue
+        facts = item.get("facts")
+        if not isinstance(facts, Mapping):
+            continue
+        coverage, trace, blobs = (
+            facts.get("coverage"),
+            facts.get("onboardingTrace"),
+            facts.get("sourceBlobs"),
+        )
+        if not (
+            isinstance(coverage, Mapping)
+            and coverage.get("state") == "uncovered"
+            and isinstance(trace, Mapping)
+            and isinstance(subject := trace.get("subject"), str)
+            and subject not in trace_subjects
+            and isinstance(blobs, Mapping)
+            and all(isinstance(path, str) for path in blobs)
+        ):
+            continue
+        groups.setdefault(subject, set()).update(blobs)
+    return {subject: tuple(sorted(paths)) for subject, paths in groups.items()}
 
 
 def _onboarding_counted(worklist: Mapping[str, Any] | None) -> dict[str, bool]:

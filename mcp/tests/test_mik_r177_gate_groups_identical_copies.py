@@ -24,6 +24,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+from agents_remember.application.knowledge_gate.predicates import GateContext, unexplained_row_open
 from agents_remember.application.knowledge_worklist import (
     leaf_onboarding_trace_sides,
     leaf_worklist,
@@ -414,3 +416,115 @@ def test_a_single_source_card_is_the_same_item_in_the_worklist_and_the_gate(
     result, findings = _gate(world, contract, changed, dict(known["identicalChanges"]), changed)
     assert findings == [] and result.ok
     assert _by_subject(result)[subject].sources == (CODE_FILE,)
+
+
+def test_an_existing_trace_item_keeps_priority_over_unexplained_source_groups(
+    tmp_path: Path,
+) -> None:
+    """The trace's own sources win even when unexplained group metadata names another source."""
+
+    world = build_world(tmp_path)
+    contract = _grouped_leaf(world)
+    known = leaf_worklist(contract)
+    assert known is not None
+    subject = f"onboarding:{SKILL}"
+    trace = _trace_item(known, subject)
+    conflicting = [
+        item
+        for item in known["items"]
+        if item["kind"] in ("unexplained_hunk", "unexplained_file")
+        and item["facts"].get("onboardingTrace", {}).get("subject") == subject
+    ]
+    assert conflicting
+    live_blob = worktree_code_blobs(world.code, [CODE_FILE])[CODE_FILE]
+    assert live_blob is not None
+    for item in conflicting:
+        item["facts"]["sourceBlobs"] = {CODE_FILE: live_blob}
+    report = _writer(world, [_row(subject), _row(OVERVIEW_SUBJECT)], known)
+    assert report.state == "written", report.render()
+    row = _stored_row(world, subject)
+    assert {source.path: source.blob for source in row.sources or ()} == trace["facts"][
+        "sourceBlobs"
+    ]
+    changed = sorted({str(change["path"]) for change in known["changes"]})
+    result, findings = _gate(world, contract, changed, dict(known["identicalChanges"]), [])
+    assert not findings and result.ok
+
+
+@pytest.mark.parametrize(
+    ("deleted", "live"),
+    [
+        (("mirrors/a.md", "mirrors/b.md", "mirrors/c.md"), None),
+        (("mirrors/a.md",), "benchmarks/README.md"),
+        (("mirrors/a.md",), None),
+    ],
+    ids=["several-deleted", "two-members-one-live", "single-path"],
+)
+def test_a_cardless_group_row_binds_every_source_the_unexplained_gate_compares(
+    tmp_path: Path, deleted: tuple[str, ...], live: str | None
+) -> None:
+    """da612e11: real Writer -> unchanged gate, with actual candidate blobs and no cards.
+
+    The mixed live/deleted case explicitly supplies that persisted source-set shape; it
+    does not claim the native equal-blob grouping producer emits mixed candidate blobs.
+    """
+
+    world = build_world(tmp_path)
+    paths = (*deleted, *((live,) if live is not None else ()))
+    write(world.code, {path: BODY for path in paths})
+    commit_all(world.code, "uncarded source group at the base")
+    code_head = git(world.code, "rev-parse", "HEAD")
+    git(world.memory, "commit", "-q", "--allow-empty", "-m", f"base\n\nCode-Commit: {code_head}")
+    contract = _rebased(world, code_head, git(world.memory, "rev-parse", "HEAD"))
+    for path in deleted:
+        (world.code / path).unlink()
+    if live is not None:
+        write(world.code, {live: "# Retained canonical documentation\n"})
+    known = leaf_worklist(contract)
+    assert known is not None and known["state"] == "complete"
+    subject = f"onboarding:{deleted[0]}"
+    assert not any(item.get("subject") == subject for item in known["items"])
+    items = [
+        item
+        for item in known["items"]
+        if item["kind"] in ("unexplained_hunk", "unexplained_file")
+        and item["facts"].get("onboardingTrace", {}).get("subject") == subject
+    ]
+    assert items and all(item["facts"]["coverage"]["state"] == "uncovered" for item in items)
+    blobs = {
+        path: blob or ABSENT for path, blob in worktree_code_blobs(world.code, list(paths)).items()
+    }
+    assert all(blobs[path] == ABSENT for path in deleted)
+    if live is not None:
+        assert blobs[live] != ABSENT
+        for item in items:
+            item["facts"]["sourceBlobs"] = dict(blobs)
+            item["facts"]["onboardingTrace"]["sourceBlobs"] = dict(blobs)
+    else:
+        assert all(item["facts"]["onboardingTrace"]["sourceBlobs"] == blobs for item in items)
+    report = _writer(
+        world,
+        [
+            {
+                "subject": subject,
+                "disposition": "no_impact",
+                "reason": "No cards exist for the deleted mirrors or retained documentation; the whole source group needs no onboarding edit.",
+            }
+        ],
+        known,
+    )
+    assert report.state == "written", report.render()
+    row = _stored_row(world, subject)
+    assert {source.path: source.blob for source in row.sources or ()} == blobs
+    history = HistoryFile.model_validate(
+        json.loads((world.memory / f"knowledge/history/{LEAF_ID}.json").read_text())
+    )
+    context = GateContext(
+        owner=LEAF_ID, history=history, candidate=cast(Any, None), code=cast(Any, None)
+    )
+    assert all(unexplained_row_open(item, context) is None for item in items)
+    assert all(
+        not (world.memory / f"onboarding/{path}.{suffix}").exists()
+        for path in paths
+        for suffix in ("md", "json")
+    )
