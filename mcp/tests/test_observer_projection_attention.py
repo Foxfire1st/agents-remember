@@ -140,7 +140,7 @@ def remaining_attention_sources(kind: str) -> tuple[list[ProviderNode], Analytic
     return providers, AnalyticalInputs(setup_progress=setup, engine_start_progress=starts)
 
 
-def test_attention_ranking_keeps_alarm_above_warning_and_then_wait_and_id() -> None:
+def test_attention_ranking_lists_the_newest_entry_first_and_breaks_ties_by_id() -> None:
     providers, given = remaining_attention_sources("provider-down")
     providers = [
         providers[0].model_copy(update={"id": name, "snapshotStaleSeconds": age})
@@ -159,11 +159,13 @@ def test_attention_ranking_keeps_alarm_above_warning_and_then_wait_and_id() -> N
         ],
     )
     queue = build_attention_queue(providers, given)
+    # MIK-R200@v2 rule 2a: the queue ranks by age alone, newest first, with the id breaking a
+    # tie -- a drift entry that names no age counts as zero rather than sinking to the bottom.
     assert [item.id for item in queue] == [
+        "actionable-drift:repo:main",
+        "provider-down:z",
         "provider-down:a",
         "provider-down:b",
-        "provider-down:z",
-        "actionable-drift:repo:main",
     ]
 
 

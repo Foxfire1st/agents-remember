@@ -373,11 +373,31 @@ class FirstStartPreparationTests(RoleToolsTestCase):
             first = self.start(self.architect, "worker", request_id=request_id)
             self.assertTrue(first["ok"], first)
             self.assertEqual(first["preparation"], {"enclosure": "created", "workspace": "created"})
-            self.assertEqual(self.enclosures.start_calls[0].parent_task, "master")
+            # MIK-R210 rule 4: a master's parent is its sprint. The recorded value here names the
+            # master's own folder, which is not an edge of the master's admission, so the enclosure
+            # is nested under the sprint and the recorded value is read but not fed back.
+            self.assertEqual(self.enclosures.start_calls[0].parent_task, "sprint")
             read.assert_called_once_with(series)
             repeat = self.start(self.architect, "worker", request_id=request_id)
         self.assertEqual(repeat["agentId"], first["agentId"])
         self.assertEqual(len(self.enclosures.start_calls), 1)
+
+    def test_start_honours_a_recorded_parent_that_names_another_folder(self) -> None:
+        series = self.master.path.parent / "series-contract.md"
+        series.parent.mkdir(parents=True, exist_ok=True)
+        series.write_text("contract selected by the production reader\n", encoding="utf-8")
+        request_id = uuid.uuid4()
+        with patch.object(
+            role_launch_workspace,
+            "load_contract",
+            return_value=SimpleNamespace(parent_task_name="earlier-sprint"),
+        ) as read:
+            first = self.start(self.architect, "worker", request_id=request_id)
+            self.assertTrue(first["ok"], first)
+            # Only the self-named value is refused; a recorded parent that names another folder is
+            # the folder the leaf is nested under, so the field still carries a real edge.
+            self.assertEqual(self.enclosures.start_calls[0].parent_task, "earlier-sprint")
+            read.assert_called_once_with(series)
 
     def test_preparation_refusals_keep_exact_status_reason_and_repair_on_role_start(self) -> None:
         cases = {

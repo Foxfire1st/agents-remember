@@ -291,14 +291,16 @@ class AttentionItem(BaseModel):
     a client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the
     structural tree so the UI can couple a queue item to its operation-tree node.
 
-    MIK-R200 rules 7 and 8 give every row its subject and its own dismissal rule.
-    ``itemClass`` says which rule it obeys: an ``action`` is a live native cause that
-    clears only when that cause ends and cannot be acknowledged away; a ``notice`` is a
-    terminal occurrence the developer acknowledges once; ``operational`` is a surviving
-    pre-existing kind, acknowledged until its source observes recovery. ``dismissible``
-    is the same fact in the form a client control reads. ``taskKey``/``taskReference``
-    and ``agentId``/``agentRole`` name the actual subject -- never matched by title, and
-    a taskless seat keeps ``taskKey`` absent rather than inventing one.
+    MIK-R200@v2 rules 7 and 8 give every row its subject and its dismissal rule. Every published
+    row is dismissed once per occurrence, so ``dismissible`` is true for all of them: the
+    acknowledgement hides exactly that occurrence and changes nothing at its cause. ``itemClass``
+    says only how the occurrence also ends -- an ``action`` is a live native cause that clears when
+    that cause ends, a ``notice`` is a terminal occurrence the bounded notice store retains,
+    ``operational`` is a surviving pre-existing kind whose source observes recovery. ``dismissible``
+    stays in the published contract so a served row states its own dismissibility instead of
+    leaving a client to infer it from the kind. ``taskKey``/``taskReference`` and
+    ``agentId``/``agentRole`` name the actual subject -- never matched by title, and a taskless
+    seat keeps ``taskKey`` absent rather than inventing one.
     """
 
     model_config = ConfigDict(extra="forbid")

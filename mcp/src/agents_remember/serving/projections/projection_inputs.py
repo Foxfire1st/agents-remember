@@ -38,6 +38,10 @@ from agents_remember.observer.projection import (
     ToolReportNode,
 )
 from agents_remember.observer.reducer import enclosure_actions
+from agents_remember.observer.reducer_impl._attention_native import (
+    native_attention_items,
+    stall_occurrences,
+)
 from agents_remember.observer.task_entries import (
     TaskDocumentSource,
     TaskEntries,
@@ -464,6 +468,9 @@ class ProjectionInputState:
             refreshed=self._native_refreshed(pass_.refresh),
         )
         self._native_attention_started = True
+        # MIK-R200@v2 rule 7: a live cause's acknowledgement is reclaimed by the observation
+        # that its occurrence ended -- the same pass that publishes or withholds the row.
+        self._observe_native_kinds(entries, pass_.now, observations)
         self._refresh_engine_facts(config, pass_, engines, landing_state=readers.landing_state)
         self._refresh_drift(config, pass_, observations)
         # MIK-R200 rule 7: the two notice kinds own their acknowledgements through this same
@@ -739,6 +746,45 @@ class ProjectionInputState:
         # Completeness governs acknowledgement adoption/removal, not visibility:
         # a failed sibling read cannot hide a valid changed occurrence.
         self._drift_snapshots = snapshots
+
+    def _observe_native_kinds(
+        self, entries: TaskEntries, now: datetime, observations: list[AttentionObservation]
+    ) -> None:
+        """The live native kinds' own occurrence ends (MIK-R200@v2 rule 7).
+
+        Dismissing a live cause hides exactly one occurrence, so the acknowledgement must leave
+        when that occurrence ends: the prompt is answered, the message is delivered or withdrawn,
+        or the task's agent takes a turn and the idle interval it acknowledged is over. The proof
+        is the same complete observation that publishes the row, and the identities are the rows
+        themselves -- ``native_attention_items`` is the one owner of every occurrence id, so an
+        occurrence can never be published under one identity and reclaimed under another.
+
+        An incomplete observation supplies no proof of an end. An unreadable host publication, an
+        unreadable hold store, or an unknown host (which holds no stall interval at all) leaves
+        every acknowledgement of that kind in place. A row that is still published is never
+        reported healthy either: a live cause cannot be acknowledged out of existence, only out
+        of sight, so nothing here reclaims a row that this same pass derives.
+        """
+
+        published: dict[str, set[str]] = {}
+        for row in native_attention_items(self._native_attention, entries.tasks, now):
+            published.setdefault(row.kind, set()).add(row.id)
+        # A stall row appears only once its deadline passes, but its interval is live from the
+        # moment the task goes idle. The acknowledgement names the interval, so the interval --
+        # not the row -- is what must still exist for it to be kept.
+        published["task-stalled"] = set(stall_occurrences(self._native_attention, entries.tasks))
+        complete = {
+            "permission-wait": self._native_attention.permissions_complete,
+            "held-message": self._native_attention.held_complete,
+            "task-stalled": self._host_activity.known,
+        }
+        for kind, whole in complete.items():
+            if not whole:
+                continue
+            observation = AttentionObservation(kind, now)
+            for item_id in published.get(kind, ()):
+                observation.observe(item_id)
+            observations.append(observation)
 
     def _refresh_workspace(
         self, pass_: RefreshPass, *, observer_root: Path, observations: list[AttentionObservation]

@@ -36,10 +36,10 @@ export const selectQueue = (state: DashboardState): readonly AttentionItem[] => 
     return cachedVisibleQueue;
   cachedQueueSource = queue;
   cachedSuppressedSource = suppressed;
-  // Suppression names an acknowledgement, and only a dismissible entry has one. A non-dismissible
-  // entry (an action) is hidden from view by nothing but its native cause ending: a stale or
-  // out-of-band id must never take it off the queue.
-  cachedVisibleQueue = queue.filter((item) => !(item.dismissible && suppressed[item.id]));
+  // Suppression is the view's own record that the human acknowledged an occurrence. Every entry
+  // is one acknowledgement per occurrence (MIK-R200 rule 7), so a suppressed id hides its row
+  // whatever the entry's kind: nothing else may keep a read entry on the queue.
+  cachedVisibleQueue = queue.filter((item) => !suppressed[item.id]);
   return cachedVisibleQueue;
 };
 

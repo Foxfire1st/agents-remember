@@ -15,6 +15,7 @@ from pathlib import Path
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.tasks import ReviewState
 from agents_remember.tasks.document import TaskDocument
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.store import (
     json_path_for,
     read_task_doc,
@@ -31,6 +32,8 @@ from .integration.lifecycle.lifecycle_operation_location import (
     reserve_new_lifecycle_operation_location,
     resume_new_lifecycle_operation_location,
 )
+from .modules.args import WorktreeArgs
+from .modules.cleanup import cleanup_result
 from .modules.git import branch_commit, branch_exists, is_ancestor, require_git, run_git
 from .modules.guidance import (
     recovery_guidance,
@@ -317,7 +320,32 @@ def _series_landing_reconstruction(
     )
 
 
-def _series_ref_recut(side: _SeriesSide, *, in_flight: bool) -> _SeriesRefRecut | str:
+def _commanding_sprint_state(contract: WorktreeContract) -> tuple[str, str] | None:
+    """The sprint that commands this master, and the status it records, or ``None``.
+
+    A master's branches are restored from its sprint's integration branch, so a missing source
+    branch is either a moved line or a sprint that is no longer active. The reopen says which,
+    because "this branch does not exist" alone leaves the reader to guess whether the sprint
+    it belongs to even owns the lane any more.
+    """
+
+    topology = TaskDocumentTopology(contract.coordination_root)
+    try:
+        master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
+        sprint_ref = topology.parent(master_ref)
+        if sprint_ref is None:
+            return None
+        return sprint_ref.key, topology.resolve(sprint_ref).document.status
+    except (OSError, TaskDocumentRefError, ValueError):
+        return None
+
+
+def _series_ref_recut(
+    side: _SeriesSide,
+    *,
+    in_flight: bool,
+    sprint: tuple[str, str] | None = None,
+) -> _SeriesRefRecut | str:
     """Plan one side's re-cut, reconstruction, or adoption -- or return the blocker forbidding it.
 
     Four decisions, in this order, and the order is the whole design:
@@ -342,9 +370,16 @@ def _series_ref_recut(side: _SeriesSide, *, in_flight: bool) -> _SeriesRefRecut 
     """
 
     if not side.source_branch or not branch_exists(side.repo, side.source_branch):
+        closed = (
+            f" Its commanding sprint {sprint[0]!r} records status {sprint[1]!r}: a sprint that is "
+            "no longer active no longer carries the integration branch its masters are "
+            "restored from."
+            if sprint is not None and sprint[1] != "inProgress"
+            else ""
+        )
         return (
             f"the {side.side} series source branch {side.source_branch!r} does not exist in "
-            f"{side.repo}."
+            f"{side.repo}.{closed}"
         )
     if not side.work_branch:
         return f"the {side.side} series integration branch is not recorded in the contract."
@@ -526,19 +561,31 @@ def _series_reopen_plan(
     if contract.leaf_id:
         blockers.append(f"series contract carries a leaf id {contract.leaf_id!r}.")
     live = _series_is_live_unaddressed(contract)
+    # A completed master whose cleanup was never run is reopenable: cleanup is housekeeping over
+    # worktrees and branches that the closeout already retired from the record, so a reopen that
+    # has a finished closeout and a finished integration behind it does not need a manual
+    # worktree_cleanup first (ruling 7dc3b6d2, defect (b)). Everything else that is not terminal
+    # still refuses.
+    completed_uncleaned = (
+        contract.cleanup == "pending"
+        and contract.closeout_status == "completed"
+        and contract.integration_status == "completed"
+    )
     if (
         not live
         and not _series_is_reset_tombstone(contract)
         and contract.cleanup not in TERMINAL_SERIES_CLEANUP
+        and not completed_uncleaned
     ):
         blockers.append(
             f"series cleanup is {contract.cleanup!r}, not a terminal series state "
             f"({', '.join(sorted(TERMINAL_SERIES_CLEANUP))})."
         )
     in_flight = _series_in_flight(contract)
+    sprint = _commanding_sprint_state(contract)
     recuts: list[_SeriesRefRecut] = []
     for side in _series_reopen_sides(contract):
-        planned = _series_ref_recut(side, in_flight=in_flight)
+        planned = _series_ref_recut(side, in_flight=in_flight, sprint=sprint)
         if isinstance(planned, str):
             blockers.append(planned)
         else:
@@ -766,12 +813,49 @@ def _series_start_guidance(plan: _SeriesReopenPlan, summary: str) -> dict[str, o
     }
 
 
-def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> WorktreeCommandResult:
-    """Reopen one terminal atomic series as a single journaled, CAS-guarded operation."""
+def _collect_completed_uncleaned(
+    contract: WorktreeContract, *, dry_run: bool
+) -> WorktreeCommandResult | None:
+    """Collect a completed master whose cleanup was never run, before reopening it.
+
+    ``cleanup: pending`` on a finished closeout is housekeeping left undone, not a lifecycle
+    state: the enclosure root is still on disk, and the successor generation the reopen publishes
+    can only be reserved once it is collected. ``task_reopen`` therefore runs the same terminal
+    collection ``worktree_cleanup`` runs -- through that transaction, so the archive stays the one
+    authority over the contract -- and then reopens exactly as it does for a cleaned master.
+    Sending the operator away to clean up by hand was the refusal ruling 7dc3b6d2 defect (b)
+    removed.
+    """
+
+    if contract.kind != "series" or contract.cleanup != "pending":
+        return None
+    if contract.closeout_status != "completed" or contract.integration_status != "completed":
+        return None
+    result = cleanup_result(
+        WorktreeArgs(
+            contract_path=contract.contract_path,
+            approved=not dry_run,
+            dry_run=dry_run,
+            teardown_providers=False,
+        )
+    )
+    if dry_run or result.returncode == 0:
+        return None
+    return result
+
+
+def _admitted_series_reopen(
+    contract: WorktreeContract, *, dry_run: bool
+) -> WorktreeCommandResult | WorktreeContract:
+    """The contract this reopen plans against, or the refusal that stops it before anything runs.
+
+    A series contract that carries the removed mode is reopened nowhere (MIK-R50 R3c): the way out
+    is the new-master escape, not a reset. A completed master whose cleanup was never run is
+    collected here first, so the reopen continues against the same terminal generation a cleaned
+    master presents (ruling 7dc3b6d2, defect (b)).
+    """
 
     if contract.memory_mode != "external":
-        # A series contract that carries the removed mode is reopened nowhere
-        # (MIK-R50 R3c): the way out is the new-master escape, not a reset.
         fields = opt_out_result_fields(
             subject_for_contract(contract),
             "task_reopen",
@@ -785,6 +869,24 @@ def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> Workt
                 **fields,
             },
         )
+    collected = _collect_completed_uncleaned(contract, dry_run=dry_run)
+    if collected is not None:
+        return collected
+    if dry_run:
+        return contract
+    # The collection above rewrote the contract through the cleanup transaction; plan against
+    # what it left behind, not against the copy read before it ran.
+    return load_contract(contract.contract_path)
+
+
+def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> WorktreeCommandResult:
+    """Reopen one terminal atomic series as a single journaled, CAS-guarded operation."""
+
+    admitted = _admitted_series_reopen(contract, dry_run=dry_run)
+    if isinstance(admitted, WorktreeCommandResult):
+        return admitted
+    contract = admitted
+
     plan = _series_reopen_plan(contract)
     if isinstance(plan, WorktreeCommandResult):
         return plan

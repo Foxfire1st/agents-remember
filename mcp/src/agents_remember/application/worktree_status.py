@@ -63,6 +63,7 @@ from agents_remember.worktrees.integration.lifecycle.observation.projection impo
     current_operation_projections,
 )
 from agents_remember.worktrees.modules.guidance import WorktreeStatusPayload
+from agents_remember.worktrees.reopen import _start_preview_args
 from agents_remember.worktrees.sync_transaction_state import observe_sync_operation
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
@@ -462,6 +463,9 @@ def _project_terminal_contract_status(
 ) -> None:
     authority = accepted.authority
     archive = authority.archive
+    if authority.state == "reopen-reset":
+        _project_reopened_contract_status(result, accepted)
+        return
     completed = authority.state == "cleanup-completed"
     status = "terminal-cleanup-completed" if completed else "terminal-archive-ready"
     result.update(
@@ -499,6 +503,55 @@ def _project_terminal_contract_status(
             ),
         }
     )
+
+
+def _project_reopened_contract_status(
+    result: dict[str, Any],
+    accepted: TerminalConfiguredContractAccepted,
+) -> None:
+    """Project a task that was reopened from its archived generation as reopened, not terminal.
+
+    The archive still proves the generation that was collected, and it stays the authority for
+    it (``terminalArchive`` below), but the surviving contract is the reopen's own reset: the
+    task is open again under the same id and its worktrees are gone until the next start. It is
+    *not* a terminal generation to clean up, which is what the two states above it name -- a
+    start that read it as one refused the task the developer had just reopened.
+    """
+
+    authority = accepted.authority
+    archive = authority.archive
+    result.update(
+        {
+            "ok": True,
+            "state": "reopened",
+            "status": "reopened",
+            "summary": (
+                "The task was reopened under its original id: its enclosure generation was "
+                "reset and its worktrees are gone. worktree_start recreates them off the "
+                "current source tips; the archived generation stays proven."
+            ),
+            "terminalArchive": {
+                "state": "terminal-archive-proven",
+                "cleanupOperation": archive.cleanupOperation,
+                "cleanupArguments": archive.cleanupArguments.model_dump(mode="json"),
+                "cleanupRequestId": archive.cleanupRequestId,
+                "archivePath": accepted.locator.terminalArchivePath,
+                "archiveSha256": accepted.locator.terminalArchiveSha256,
+                "receiptPath": accepted.locator.terminalReceiptPath,
+                "contractState": authority.state,
+            },
+            "nextAction": "start_reopened_task",
+            "nextTool": "worktree_start",
+        }
+    )
+    try:
+        next_args: dict[str, object] | None = _start_preview_args(accepted.contract)
+    except ValueError:
+        # A task root outside the coordination tasks folder cannot be addressed by a start's
+        # own arguments; the tool is still the answer, and the reopen that got here named them.
+        next_args = None
+    if next_args is not None:
+        result["nextArgs"] = next_args
 
 
 def _terminal_cleanup_next_args(

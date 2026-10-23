@@ -12,7 +12,6 @@ from agents_remember.observer.projection import (
 )
 from agents_remember.observer.reducer_impl._attention import (
     _PROVIDER_DOWN,
-    _SEVERITY_RANK,
     _drift_attention,
     _drift_attention_detail,
     _is_dismissed,
@@ -162,7 +161,6 @@ __all__ = [
     "_ROLE_ORDER",
     "_SETUP_DONE",
     "_SETUP_FAILED",
-    "_SEVERITY_RANK",
     "_START_PHASE",
     "AnalyticalInputs",
     "WorkspaceStructure",

@@ -49,7 +49,7 @@
         "promptId": "prompt-7",
         "heldMessageId": "message-7",
         "itemClass": "action",
-        "dismissible": false,
+        "dismissible": true,
         "waitSeconds": 45
       },
       {

@@ -60,13 +60,13 @@ def _ago(seconds: float) -> str:
     return (NOW - timedelta(seconds=seconds)).isoformat()
 
 
-def _queue(facts: NativeAttentionFacts, tasks: list[TaskEntry] | None = None):
+def _queue(facts: NativeAttentionFacts, tasks: list[TaskEntry] | None = None, now=None):
     dismissed: dict[str, AttentionDismissalRecord] = {}
     return build_attention_queue(
         [],
         AnalyticalInputs(native_attention=facts, attention_dismissals=dismissed),
         tasks or [],
-        NOW,
+        now or NOW,
     )
 
 
@@ -92,7 +92,7 @@ def _case_test_two_prompts_for_one_agent_are_two_stable_rows() -> None:
     ]
     assert first == second, "the same publication must not drift between passes"
     assert {item.itemClass for item in first} == {"action"}
-    assert {item.dismissible for item in first} == {False}
+    assert {item.dismissible for item in first} == {True}
 
 
 def _case_test_an_empty_agent_list_produces_no_permission_row() -> None:
@@ -149,7 +149,7 @@ def _case_test_a_held_message_names_its_row_and_only_its_safe_reason() -> None:
     assert row.waitSeconds == 600.0
     assert row.taskKey == LEAF_KEY
     assert row.itemClass == "action"
-    assert row.dismissible is False
+    assert row.dismissible is True
 
 
 def _case_test_a_second_held_message_is_a_second_row() -> None:
@@ -162,19 +162,20 @@ def _case_test_a_second_held_message_is_a_second_row() -> None:
         "held-message:agent-2:msg-2",
     ]
     assert {row.itemClass for row in rows} == {"action"}
-    assert {row.dismissible for row in rows} == {False}
+    assert {row.dismissible for row in rows} == {True}
 
 
 # --- C. stall (rule 4) -------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("idle_seconds", "expected"), [(899, []), (900, ["task-stalled:" + LEAF_KEY])]
-)
-def test_stall_starts_at_exactly_the_settled_deadline(idle_seconds, expected) -> None:
+@pytest.mark.parametrize("idle_seconds", [899, 900])
+def test_stall_starts_at_exactly_the_settled_deadline(idle_seconds) -> None:
     facts = NativeAttentionFacts(stall_clocks={LEAF_KEY: _ago(idle_seconds)})
 
-    assert [row.id for row in _queue(facts, [_task(event_at=None)])] == expected
+    # The deadline counts the watch; the identity names the interval it opened (v2 rule 7).
+    assert [row.id for row in _queue(facts, [_task(event_at=None)])] == (
+        [] if idle_seconds < STALL_SECONDS else [f"task-stalled:{LEAF_KEY}:{_ago(idle_seconds)}"]
+    )
 
 
 def _case_test_a_stall_row_opens_its_task_and_reports_the_idle_age() -> None:
@@ -182,22 +183,21 @@ def _case_test_a_stall_row_opens_its_task_and_reports_the_idle_age() -> None:
 
     (row,) = _queue(facts, [_task(event_at=None)])
 
-    assert row.id == f"task-stalled:{LEAF_KEY}"
+    assert row.id == f"task-stalled:{LEAF_KEY}:{_ago(STALL_SECONDS)}"
     assert row.taskKey == LEAF_KEY
     assert row.taskReference == _ref()
     assert row.waitSeconds == STALL_SECONDS
     assert row.itemClass == "action"
-    assert row.dismissible is False
+    assert row.dismissible is True
 
 
 def _case_test_the_stall_detail_does_not_move_while_only_the_age_grows() -> None:
     """L190-R1-F12: the stable form of a stalled row is a function of the cause alone."""
 
-    first = NativeAttentionFacts(stall_clocks={LEAF_KEY: _ago(STALL_SECONDS)})
-    later = NativeAttentionFacts(stall_clocks={LEAF_KEY: _ago(STALL_SECONDS + 60)})
+    facts = NativeAttentionFacts(stall_clocks={LEAF_KEY: _ago(STALL_SECONDS)})
 
-    (before,) = _queue(first, [_task(event_at=None)])
-    (after,) = _queue(later, [_task(event_at=None)])
+    (before,) = _queue(facts, [_task(event_at=None)])
+    (after,) = _queue(facts, [_task(event_at=None)], now=NOW + timedelta(seconds=60))
 
     assert before.detail == after.detail
     assert before.id == after.id
@@ -238,7 +238,7 @@ def _case_test_an_old_task_event_stamp_never_dates_the_stall_interval() -> None:
         [_task(event_at=_ago(STALL_SECONDS * 4))],
     )
 
-    assert [row.id for row in watched] == [f"task-stalled:{LEAF_KEY}"]
+    assert [row.id for row in watched] == [f"task-stalled:{LEAF_KEY}:{_ago(STALL_SECONDS * 4)}"]
 
 
 # --- D. pause suppression ----------------------------------------------------
@@ -264,7 +264,9 @@ def _case_test_the_same_child_still_stalls_when_no_key_is_paused() -> None:
     tasks = [_master("repo/master.json"), child]
     facts = NativeAttentionFacts(stall_clocks={LEAF_KEY: _ago(STALL_SECONDS)})
 
-    assert [row.id for row in _queue(facts, tasks)] == [f"task-stalled:{LEAF_KEY}"]
+    assert [row.id for row in _queue(facts, tasks)] == [
+        f"task-stalled:{LEAF_KEY}:{_ago(STALL_SECONDS)}"
+    ]
 
 
 def _case_test_an_unrelated_paused_master_suppresses_nothing() -> None:
@@ -281,7 +283,9 @@ def _case_test_an_unrelated_paused_master_suppresses_nothing() -> None:
         stall_clocks={LEAF_KEY: _ago(STALL_SECONDS), other_child: _ago(STALL_SECONDS)},
     )
 
-    assert [row.id for row in _queue(facts, tasks)] == [f"task-stalled:{LEAF_KEY}"]
+    assert [row.id for row in _queue(facts, tasks)] == [
+        f"task-stalled:{LEAF_KEY}:{_ago(STALL_SECONDS)}"
+    ]
 
 
 # --- E. notices (rules 5 and 6) ----------------------------------------------
@@ -392,21 +396,21 @@ def _case_test_ranking_holds_across_a_mixed_native_queue() -> None:
 
     assert [row.id for row in queue] == [
         "provider-down:cgc",
-        f"task-stalled:{LEAF_KEY}",
-        "held-message:agent-2:msg-1",
+        "task-landed:abc",
+        "permission-wait:agent-1:p1",
         "permission-wait:agent-1:p0",
         "permission-wait:agent-1:p2",
-        "permission-wait:agent-1:p1",
-        "task-landed:abc",
+        "held-message:agent-2:msg-1",
+        f"task-stalled:{LEAF_KEY}:{_ago(STALL_SECONDS)}",
     ]
     assert [row.severity for row in queue] == [
         "alarm",
-        "warn",
-        "warn",
-        "warn",
-        "warn",
-        "warn",
         "info",
+        "warn",
+        "warn",
+        "warn",
+        "warn",
+        "warn",
     ]
 
 

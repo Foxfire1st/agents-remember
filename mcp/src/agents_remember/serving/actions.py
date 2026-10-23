@@ -109,18 +109,10 @@ def _dismiss_action_outcome(
     published = next((row for row in projection.analytics.attentionQueue if row.id == item), None)
     if published is None:
         return ActionOutcome(404, {"status": "unknown-item", "itemId": item})
-    if not published.dismissible:
-        # MIK-R200 rule 7: a live native cause clears only when its cause ends. The server
-        # refuses the acknowledgement itself, so a stale page cannot suppress one either.
-        return ActionOutcome(
-            409,
-            {
-                "status": "not-dismissible",
-                "detail": "this attention item clears when its native cause ends; it cannot be acknowledged away",
-                "itemId": item,
-                "kind": published.kind,
-            },
-        )
+    # MIK-R200@v2 rule 7: every published entry is acknowledged once per occurrence, so the
+    # backend accepts the dismissal of every published kind and refuses only an item this
+    # projection does not publish. The acknowledgement hides the occurrence; it changes nothing
+    # at its cause, which ends on its own native fact.
     if context.kind != published.kind:
         return ActionOutcome(400, {"status": "item-kind-mismatch", "itemId": item})
     intent_body: dict[str, Any] = {

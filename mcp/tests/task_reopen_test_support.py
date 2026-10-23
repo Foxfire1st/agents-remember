@@ -278,7 +278,7 @@ def _completed_leaf_contract(workspace: Path) -> WorktreeContract:
         task,
         leaf=LeafIdentity(
             worktree_name="01-demo-leaf",
-            leaf_id="260698-l1",
+            leaf_id="260698-L1",
             lifecycle_id="LC-OLD",
         ),
         code=RepoBranchPlan(
@@ -306,7 +306,7 @@ def _completed_leaf_contract(workspace: Path) -> WorktreeContract:
         contract,
         contract.contract_path.read_text(encoding="utf-8"),
     )
-    terminalize_test_enclosure(location)
+    terminalize_test_enclosure(location, cleanup=True)
     return contract
 
 

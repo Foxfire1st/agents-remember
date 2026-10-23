@@ -148,6 +148,25 @@ class _PauseWalk:
             self._walk.close()
 
 
+def _turn_ends(host: HostActivitySnapshot) -> dict[str, tuple[str, ...]]:
+    """The published turn-end stamps of the agents bound to each task (MIK-R200@v2 rule 7).
+
+    ``eventAt`` is the agent's own turn transition, so the latest stamp a task's bound agents
+    published is when that task's idle interval began. It is the one stall identity a restarted
+    reader derives again from the same publication, and it moves when a turn ends, which is what
+    makes the next interval a different occurrence. A seat the publication gives no transition
+    for contributes nothing rather than a guessed stamp.
+    """
+
+    stamps: dict[str, set[str]] = {}
+    for seat in host.agents:
+        stamp = seat.activity.eventAt
+        if stamp is None or not seat.task_key:
+            continue
+        stamps.setdefault(seat.task_key, set()).add(stamp.isoformat())
+    return {key: tuple(sorted(values)) for key, values in stamps.items()}
+
+
 class _Stamp(NamedTuple):
     size: int
     mtime_ns: int
@@ -229,6 +248,7 @@ class NativeAttentionInput:
             notices=self._notices,
             notices_complete=self._notices_complete,
             stall_clocks=dict(self._stall_clocks),
+            turn_ends=_turn_ends(host),
         )
 
     def _due(self, kind: str, changed: set[str] | None, domain: str) -> bool:

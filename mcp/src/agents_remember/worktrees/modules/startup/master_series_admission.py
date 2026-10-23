@@ -350,7 +350,10 @@ def _same_master_task_edge(
             existing.contract_path.resolve() == path.resolve(),
             existing.task_artifact.resolve() == expected_task_artifact.resolve(),
             existing.worktree_group.resolve() == expected_worktree_group.resolve(),
-            existing.parent_task_name == spec.parent_task_name,
+            # ``parent_task_name`` is deliberately not an edge: a master's parent is its sprint,
+            # and a contract written before 2026-09-29 records the master's own name there. The
+            # field stays on the contract for the readers that resolve it (a leaf's master edge,
+            # the leaf-id lookup), but it cannot decide whether a start is this master's.
             existing.parent_contract_path is None,
             existing.leaf_id == "",
             existing.lifecycle_id == "",
@@ -414,7 +417,6 @@ def _master_series_expected_edges(
             "contractPath": path.resolve().as_posix(),
             "taskArtifact": expected_task_artifact.resolve().as_posix(),
             "worktreeGroup": expected_worktree_group.resolve().as_posix(),
-            "parentTaskName": spec.parent_task_name,
             "parentContractPath": None,
             "leafId": "",
             "lifecycleId": "",
@@ -452,7 +454,6 @@ def _master_series_observed_edges(existing: WorktreeContract) -> dict[str, objec
             "contractPath": existing.contract_path.resolve().as_posix(),
             "taskArtifact": existing.task_artifact.resolve().as_posix(),
             "worktreeGroup": existing.worktree_group.resolve().as_posix(),
-            "parentTaskName": existing.parent_task_name,
             "parentContractPath": (
                 existing.parent_contract_path.resolve().as_posix()
                 if existing.parent_contract_path is not None

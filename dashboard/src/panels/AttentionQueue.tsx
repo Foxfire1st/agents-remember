@@ -27,9 +27,9 @@ import { dim } from './detail-panel/pageStyles';
 // document it opens, and the exact agent it concerns. Those are the row's own served identities;
 // the surface that can actually navigate owns the identity mapping (the tree's selection key, the
 // shell's chat target). The × and "Clear all" POST the current source occurrence's
-// acknowledgement; the server owns dismissal identity. Only a dismissible entry (an operational
-// one or a notice) carries a ×: an action clears when its native cause ends, so the server would
-// refuse the acknowledgement (409 `not-dismissible`), and the view never offers it.
+// acknowledgement; the server owns dismissal identity. Every entry is one acknowledgement per
+// occurrence (MIK-R200 rule 7): whatever its kind, a row carries a × and "Clear all" takes the
+// whole queue, because the human who has read an entry is the one who decides it is read.
 //
 // The measures are the task page's text sizes (MIK-R163 rule 1); see
 // lifecycle-list/columnLook.ts.
@@ -241,9 +241,6 @@ function dismissAttentionItem(
   setDismissing: (updater: (prev: ReadonlySet<string>) => ReadonlySet<string>) => void,
   setFailed: (failed: boolean) => void,
 ): void {
-  // An action clears only when its native cause ends; the server refuses its acknowledgement, so
-  // the view never asks, and never suppresses it locally either.
-  if (!item.dismissible) return;
   if (dismissing.has(item.id)) return;
   setFailed(false);
   dashboardStore.getState().suppressAttention([item.id]);
@@ -270,8 +267,9 @@ function clearAllAttention(
   setClearing: (value: boolean) => void,
   setFailed: (failed: boolean) => void,
 ): void {
-  // Only dismissible entries take part: an action item is not an acknowledgement.
-  const targets = items.filter((item) => item.dismissible);
+  // Every entry is one acknowledgement of its own occurrence (MIK-R200 rule 7), so every entry
+  // takes part: the queue is cleared whole.
+  const targets = items;
   if (clearing || targets.length === 0) return;
   setFailed(false);
   const ids = targets.map((item) => item.id);
@@ -428,19 +426,17 @@ function AttentionRow({
       </span>
       <span className={what}>{cause}</span>
       <span className={cx(age, dim)}>{waited}</span>
-      {entry.dismissible ? (
-        <button
-          type="button"
-          className={dismissButton}
-          onClick={() => onDismiss(entry)}
-          disabled={dismissing}
-          data-testid="attn-dismiss"
-          aria-label={`Dismiss ${cause}: ${place}`}
-          title="Dismiss"
-        >
-          ×
-        </button>
-      ) : null}
+      <button
+        type="button"
+        className={dismissButton}
+        onClick={() => onDismiss(entry)}
+        disabled={dismissing}
+        data-testid="attn-dismiss"
+        aria-label={`Dismiss ${cause}: ${place}`}
+        title="Dismiss"
+      >
+        ×
+      </button>
       <span className={subject}>
         <span className={cx(where(), placeText)} data-testid="attn-place">
           {place}
@@ -469,9 +465,9 @@ function AttentionLayer({
   const [clearing, setClearing] = useState(false);
   const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set());
   const [failed, setFailed] = useState(false);
-  // "Clear all" offers what only a place can clear: the notices and the operational entries. The
-  // heading and the bell still count the whole queue, actions included.
-  const dismissible = queue.filter((entry) => entry.dismissible);
+  // "Clear all" takes the whole queue: every entry is its own acknowledgement, and the heading
+  // counts the same entries.
+  const clearable = queue.length > 0;
   // An entry that goes takes its × and the keyboard's focus with it. The layer takes the focus
   // first, so the keyboard stays in it: Escape still closes it and Tab goes on inside.
   const keepFocus = () => bodyRef.current?.focus();
@@ -486,7 +482,7 @@ function AttentionLayer({
             <span className={nothing}>nothing waiting</span>
           )}
         </h2>
-        {dismissible.length > 0 ? (
+        {clearable ? (
           <button
             type="button"
             className={columnTabButton}

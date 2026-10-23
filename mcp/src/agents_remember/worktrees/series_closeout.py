@@ -626,17 +626,55 @@ def _require_chain_origin(
     elif root.code_base_commit != series.code_base_commit or (
         series.memory_mode == "external" and root.memory_base_commit != series.memory_base_commit
     ):
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            f"master {series.task_id!r}: the oldest landed leaf {root.leaf_id!r} starts at code "
-            f"{root.code_base_commit} / memory {root.memory_base_commit}, not at the master's "
-            f"recorded base code {series.code_base_commit} / memory {series.memory_base_commit}. "
-            "Correct the code_base_commit and memory_base_commit cells of that leaf's "
-            "series-contract.md or of the master's, or run worktree_sync on the master, then "
-            "retry closeout",
+        # A leaf that landed, was reopened and then landed again restarts its arc at the
+        # position its reopen handed it, which is a later commit on the master's own line. The
+        # chain origin is therefore the master's line, not one exact commit: the two positions
+        # have to lie on one line (either direction, as the reconciled branch above reads them),
+        # and a position off that line still refuses. Requiring equality here used to force a
+        # hand-edit of the leaf's recorded base to repair a state the product itself created
+        # (ruling 7dc3b6d2, defect (a)).
+        _require_chain_origin_on_line(
+            series.code_repo_path,
+            root.code_base_commit,
+            series.code_base_commit,
+            _Leg(side="code", leaf_id=root.leaf_id),
         )
+        if series.memory_mode == "external":
+            _require_chain_origin_on_line(
+                _memory_repository(series),
+                root.memory_base_commit,
+                series.memory_base_commit,
+                _Leg(side="memory", leaf_id=root.leaf_id),
+            )
     for leaf in ordered:
         _require_leaf_starts_on_the_chain(series, root, leaf)
+
+
+def _require_chain_origin_on_line(
+    repository: Path,
+    left: str,
+    right: str,
+    leg: _Leg,
+) -> None:
+    """Refuse a chain origin that is not on the master's line at its recorded base."""
+
+    if not left or not right:
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"master is missing the {leg.side} base of its oldest landed leaf {leg.leaf_id!r} "
+            f"(leaf {left or 'unrecorded'} / master {right or 'unrecorded'}), so the chain origin "
+            "cannot be proved. Land the leaf with worktree_integrate, then retry closeout",
+        )
+    if is_ancestor(repository, left, right) or is_ancestor(repository, right, left):
+        return
+    raise CloseoutQueueError(
+        "atomic-series-leaf-chain-invalid",
+        f"master: the oldest landed leaf {leg.leaf_id!r} starts at {leg.side} {left}, which "
+        f"is not on the master's own line at its recorded base {right}. The chain origin is "
+        "the master's line, so the leaf's base has to be that commit or a descendant of it; land "
+        "the leaf on the master's line with worktree_integrate, or run worktree_sync on the "
+        "master, then retry closeout",
+    )
 
 
 def _series_pre_sync_base(series: WorktreeContract) -> tuple[str, str]:

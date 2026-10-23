@@ -1,10 +1,16 @@
 """Attention queue: rank what needs the human from the reduced surfaces.
 
 Pure and deterministic: every source contributes one small builder and the
-queue sorts by (severity, wait, id). Provider/setup/start dismissals hold until
-their native reader observes recovery or removal. Drift occurrence is carried by
-its persisted source signal. The five native kinds live in ``_attention_native``;
-this module owns the one queue, its ranking and the one dismissal rule.
+queue sorts by (age, id) -- the newest entry on top. Provider/setup/start
+dismissals hold until their native reader observes recovery or removal. Drift
+occurrence is carried by its persisted source signal. The five native kinds live
+in ``_attention_native``; this module owns the one queue, its ranking and the
+one dismissal rule.
+
+MIK-R200@v2 rule 7: every published entry is acknowledged once per occurrence,
+so this fold suppresses any current item whose exact occurrence was acknowledged.
+A live native cause that ends keeps nothing to hide -- its occurrence is gone,
+and the source's own complete observation reclaims the acknowledgement.
 """
 
 from __future__ import annotations
@@ -29,7 +35,6 @@ from agents_remember.observer.reducer_impl._types import AnalyticalInputs
 
 # --- attention queue (slice 05) ----------------------------------------------
 
-_SEVERITY_RANK: dict[str, int] = {"alarm": 0, "warn": 1, "info": 2}
 _PROVIDER_DOWN: frozenset[str] = frozenset({"stopped", "failed", "error"})
 
 
@@ -41,22 +46,23 @@ def build_attention_queue(
 ) -> list[AttentionItem]:
     """The home-screen attention queue: a ranked cross-section of what needs the human.
 
-    Pure and deterministic -- a total sort by (severity, wait, id) -- so the served
+    Pure and deterministic -- a total sort by (age, id), youngest first -- so the served
     projection and sim replay stay byte-identical. Every ``waitSeconds`` is an age the
     reducer/readers already computed server-side (``staleSeconds`` /
-    ``snapshotStaleSeconds`` / ``heartbeatAgeSeconds``), never a client's render time.
-    The taxonomy is extensible (North-Star Constraint 7): each source contributes one
-    small builder. Enclosure-derived items (pending review / worktree debt) are the
-    hangar's job (5c).
+    ``snapshotStaleSeconds`` / ``heartbeatAgeSeconds``), never a client's render time. An
+    entry that carries no age counts as zero: the row cannot say when its occurrence began,
+    so it is not ranked below one that can (v2 rule 2a). The taxonomy is extensible
+    (North-Star Constraint 7): each source contributes one small builder. Enclosure-derived
+    items (pending review / worktree debt) are the hangar's job (5c).
 
     ``given.attention_dismissals`` is the reconciled current acknowledgement map.
     Source cleanup owns observed recovery/removal; this pure fold only suppresses
     a matching current item. It never infers recovery from age or a missing node.
 
     ``tasks`` are the joined task entries, so a stall and a notice carry the canonical task
-    they open; ``now`` is the pass clock the stall deadline is evaluated at. A live native
-    cause (``itemClass == "action"``) is never suppressed by an acknowledgement: rule 7 says it
-    clears only when its cause ends, and the backend refuses the dismissal too.
+    they open; ``now`` is the pass clock the stall deadline is evaluated at. Any published entry
+    can be acknowledged (v2 rule 7), so the acknowledgement alone decides what is hidden; a live
+    cause is not exempt, and dismissing one changes nothing at the cause itself.
     """
     items = [
         *_provider_attention(providers),
@@ -70,10 +76,8 @@ def build_attention_queue(
         ),
     ]
     dismissed = given.attention_dismissals
-    items = [item for item in items if not item.dismissible or not _is_dismissed(item, dismissed)]
-    items.sort(
-        key=lambda item: (_SEVERITY_RANK.get(item.severity, 9), -(item.waitSeconds or 0.0), item.id)
-    )
+    items = [item for item in items if not _is_dismissed(item, dismissed)]
+    items.sort(key=lambda item: (item.waitSeconds or 0.0, item.id))
     return items
 
 

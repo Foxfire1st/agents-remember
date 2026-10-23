@@ -37,10 +37,8 @@ def _task() -> TaskEntry:
     )
 
 
-def _queue_at(now: datetime, started_ago: float):
-    facts = NativeAttentionFacts(
-        stall_clocks={LEAF_KEY: (NOW - timedelta(seconds=started_ago)).isoformat()}
-    )
+def _queue_at(now: datetime, start: datetime):
+    facts = NativeAttentionFacts(stall_clocks={LEAF_KEY: start.isoformat()})
     return build_attention_queue([], _inputs(facts), [_task()], now)
 
 
@@ -48,31 +46,31 @@ def _inputs(facts: NativeAttentionFacts) -> AnalyticalInputs:
     return AnalyticalInputs(native_attention=facts)
 
 
-def _projection(now: datetime, started_ago: float) -> WorkspaceProjection:
+def _projection(now: datetime, start: datetime) -> WorkspaceProjection:
     return WorkspaceProjection(
         generatedAt=now.isoformat(),
         tasks=[_task()],
-        analytics=Analytics(attentionQueue=_queue_at(now, started_ago)),
+        analytics=Analytics(attentionQueue=_queue_at(now, start)),
     )
 
 
 def test_quiet_minutes_emit_no_delta_and_the_threshold_emits_one() -> None:
-    # The row is already published: it crossed the deadline a minute ago.
-    before = _projection(NOW, STALL_SECONDS + 60)
+    # The row is already published: it crossed the deadline a minute ago. One interval, one
+    # identity (v2 rule 7) -- only the pass clock moves as the minutes pass.
+    start = NOW - timedelta(seconds=STALL_SECONDS + 60)
+    before = _projection(NOW, start)
 
-    quiet = diff_projection(before, _projection(NOW + timedelta(minutes=1), STALL_SECONDS + 120))
+    quiet = diff_projection(before, _projection(NOW + timedelta(minutes=1), start))
     assert quiet == []
 
-    quiet_again = diff_projection(
-        before, _projection(NOW + timedelta(minutes=7), STALL_SECONDS + 480)
-    )
+    quiet_again = diff_projection(before, _projection(NOW + timedelta(minutes=7), start))
     assert quiet_again == []
 
     # Entry at the deadline is a membership change, and it is emitted exactly once.
-    below = _projection(NOW, STALL_SECONDS - 1)
-    entered = diff_projection(below, _projection(NOW, STALL_SECONDS))
+    below = _projection(NOW, NOW - timedelta(seconds=STALL_SECONDS - 1))
+    entered = diff_projection(below, _projection(NOW, NOW - timedelta(seconds=STALL_SECONDS)))
     assert [event.event for event in entered] == ["analytics"]
 
     # Clearing is a membership change too.
-    cleared = diff_projection(_projection(NOW, STALL_SECONDS + 5), _projection(NOW, 0))
+    cleared = diff_projection(_projection(NOW, start), _projection(NOW, NOW))
     assert [event.event for event in cleared] == ["analytics"]

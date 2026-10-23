@@ -52,8 +52,9 @@ const items: AttentionItem[] = [
   }),
 ];
 
-// An action: it clears only when its native cause ends, so it is neither dismissible nor listed by
-// "Clear all". It names an agent and no task.
+// An action that names an agent and no task, served with the flag the v1 build published for a
+// live cause: the page must not gate on it. One acknowledgement per occurrence (MIK-R200 rule 7)
+// means its row carries the × and "Clear all" takes it whatever the flag says.
 const permissionWait = attentionItem({
   id: 'permission-wait:agent-7',
   kind: 'permission-wait',
@@ -66,7 +67,7 @@ const permissionWait = attentionItem({
   dismissible: false,
 });
 
-// An action that names a task: the row opens the task, and still cannot be dismissed.
+// An action that names a task: the row opens the task, and acknowledges once per occurrence.
 const taskStalled = attentionItem({
   id: 'task-stalled:L191',
   kind: 'task-stalled',
@@ -234,53 +235,99 @@ describe('AttentionQueue bell (MIK-R144 rule 3a)', () => {
   });
 });
 
-describe('an action clears only when its cause ends', () => {
-  it('offers no × and Clear all passes over it while still clearing a mixed queue', async () => {
-    vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
+describe('an entry of any kind is acknowledged once per occurrence (MIK-R200 rule 7)', () => {
+  it('offers a × on every row, the action row included', () => {
     seed([permissionWait, taskLanded]);
     const view = renderOpen();
     expect(view.getAllByTestId('attn-item')).toHaveLength(2);
+    expect(view.getAllByTestId('attn-dismiss')).toHaveLength(2);
     const actionRow = view
       .getAllByTestId('attn-item')
       .find((row) => row.textContent?.includes(permissionWait.title));
     if (!actionRow) throw new Error('the action row did not render');
-    expect(actionRow.querySelector("[data-testid='attn-dismiss']")).toBeNull();
-    expect(view.getAllByTestId('attn-dismiss')).toHaveLength(1);
-
-    fireEvent.click(view.getByTestId('attn-clear'));
-    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(1));
-    expect(postAttentionDismiss).toHaveBeenCalledExactlyOnceWith({
-      itemId: taskLanded.id,
-      kind: taskLanded.kind,
-    });
-    expect(postAttentionDismiss).not.toHaveBeenCalledWith(
-      expect.objectContaining({ itemId: permissionWait.id }),
-    );
-
-    // The action is still there; the notice is gone.
-    expect(view.getAllByTestId('attn-item')).toHaveLength(1);
-    expect(view.getByText(permissionWait.title)).toBeTruthy();
-    expect(view.queryByText(taskLanded.title)).toBeNull();
-    // The heading and the bell still count the whole queue.
-    expect(view.getByTestId('attention-queue').textContent).toContain('1 waiting');
-    expect(view.getByTestId('attention-bell').textContent).toBe('1');
+    expect(actionRow.querySelector("[data-testid='attn-dismiss']")).toBeTruthy();
   });
 
-  it('shows an all-action queue with rows and no Clear all', () => {
+  it('dismisses the action row alone, posting its own id and kind', async () => {
+    vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
+    seed([permissionWait, taskLanded]);
+    const view = renderOpen();
+    const actionRow = view
+      .getAllByTestId('attn-item')
+      .find((row) => row.textContent?.includes(permissionWait.title));
+    if (!actionRow) throw new Error('the action row did not render');
+    const control = actionRow.querySelector("[data-testid='attn-dismiss']");
+    if (!(control instanceof HTMLElement)) throw new Error('the action row has no ×');
+
+    fireEvent.click(control);
+    // The row goes at once, and the notice beside it stays.
+    expect(view.queryByText(permissionWait.title)).toBeNull();
+    expect(view.getByText(taskLanded.title)).toBeTruthy();
+    expect(view.getByTestId('attention-bell').textContent).toBe('1');
+    await waitFor(() =>
+      expect(postAttentionDismiss).toHaveBeenCalledExactlyOnceWith({
+        itemId: permissionWait.id,
+        kind: 'permission-wait',
+      }),
+    );
+  });
+
+  it('Clear all over an all-action queue is offered and posts one dismissal per row', async () => {
+    vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
     seed([permissionWait, taskStalled]);
     const view = renderOpen();
-    expect(view.getAllByTestId('attn-item')).toHaveLength(2);
-    expect(view.queryByTestId('attn-clear')).toBeNull();
-    expect(view.queryByTestId('attn-dismiss')).toBeNull();
-    expect(view.getByTestId('attention-bell').textContent).toBe('2');
+    fireEvent.click(view.getByTestId('attn-clear'));
+    expect(view.queryAllByTestId('attn-item')).toHaveLength(0);
+    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(2));
+    expect(postAttentionDismiss).toHaveBeenCalledWith({
+      itemId: permissionWait.id,
+      kind: 'permission-wait',
+    });
+    expect(postAttentionDismiss).toHaveBeenCalledWith({
+      itemId: taskStalled.id,
+      kind: 'task-stalled',
+    });
   });
 
-  it('stays visible even when its id was suppressed locally', () => {
-    seed([permissionWait]);
+  it('hides a locally suppressed action, from the layer and from the bell', () => {
+    seed([permissionWait, taskLanded]);
     dashboardStore.getState().suppressAttention([permissionWait.id]);
     const view = renderOpen();
-    expect(view.getByText(permissionWait.title)).toBeTruthy();
+    expect(view.queryByText(permissionWait.title)).toBeNull();
+    expect(view.getAllByTestId('attn-item')).toHaveLength(1);
+    expect(view.getByText(taskLanded.title)).toBeTruthy();
     expect(view.getByTestId('attention-bell').textContent).toBe('1');
+  });
+
+  it('clears a mixed queue in full and says nothing waiting', async () => {
+    vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
+    seed([permissionWait, taskStalled, taskLanded]);
+    const view = renderOpen();
+    fireEvent.click(view.getByTestId('attn-clear'));
+    expect(view.queryAllByTestId('attn-item')).toHaveLength(0);
+    expect(view.getByTestId('attention-queue').textContent).toContain('nothing waiting');
+    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(3));
+    for (const item of [permissionWait, taskStalled, taskLanded])
+      expect(postAttentionDismiss).toHaveBeenCalledWith({ itemId: item.id, kind: item.kind });
+  });
+
+  it('still offers the × on an entry served with the old non-dismissible flag', async () => {
+    vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
+    const legacy = attentionItem({
+      ...permissionWait,
+      id: 'permission-wait:agent-9',
+      dismissible: false,
+    });
+    seed([legacy]);
+    const view = renderOpen();
+    fireEvent.click(view.getByTestId('attn-dismiss'));
+    expect(view.queryByText(legacy.title)).toBeNull();
+    await waitFor(() =>
+      expect(postAttentionDismiss).toHaveBeenCalledExactlyOnceWith({
+        itemId: legacy.id,
+        kind: legacy.kind,
+      }),
+    );
   });
 });
 

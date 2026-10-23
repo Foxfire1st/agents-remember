@@ -28,11 +28,23 @@ from agents_remember.worktrees.worktree_contract import ContractError, load_cont
 
 
 def _recorded_parent(context: RoleLaunchContext) -> str:
+    """The task folder that commands the leaf's master: its sprint.
+
+    A master's parent is its sprint. A series contract written before 2026-09-29 records the
+    master's *own* name in ``parent_task_name``, and feeding that back as the nested task folder
+    resolves the leaf under ``<master>/<master>`` -- a folder that does not exist. The recorded
+    value is therefore used only when it names a folder other than the master's own, and the
+    sprint's folder is the answer otherwise.
+    """
+
     assert context.master is not None and context.sprint is not None
+    master_folder = context.master.path.parent.name
     path = series_contract_path(context.master.path.parent)
-    return (
-        load_contract(path).parent_task_name if path.exists() else context.sprint.path.parent.name
-    )
+    if path.exists():
+        recorded = load_contract(path).parent_task_name
+        if recorded and recorded != master_folder:
+            return recorded
+    return context.sprint.path.parent.name
 
 
 def _preparation_refusal(
@@ -267,7 +279,8 @@ def _ensure_leaf_enclosure(
         config,
         TaskRef(repo_id=leaf.ref.repository, contract_path=contract_path.as_posix()),
     )
-    if str(status.get("state") or status.get("status") or "") in (
+    state = str(status.get("state") or status.get("status") or "")
+    if state in (
         "terminal-cleanup-completed",
         "terminal-archive-ready",
     ):
@@ -277,16 +290,26 @@ def _ensure_leaf_enclosure(
             + " A role cannot run in this terminal generation; preview and apply task_reopen before repeating this start.",
             f"task_reopen(contract_path={contract_path.as_posix()!r}, dry_run=True)",
         )
-    if status.get("ok") is not True and not contract_path.exists():
+    # A reopened leaf sits in its own state: the reset contract is durable and the archived
+    # generation it came from stays proven, but the worktrees the cleanup removed are still
+    # gone. The start path is what recreates them (``cleanup: reopened`` starts fresh), so this
+    # is the same prepared start a leaf with no enclosure takes, not a refusal.
+    if (status.get("ok") is not True and not contract_path.exists()) or state == "reopened":
+        planned_name = (
+            f"{slugify(leaf.document.slug)[:40]}-"
+            f"{hashlib.sha256(leaf.ref.key.encode('utf-8')).hexdigest()[:10]}"
+        )
         created = _start_leaf_enclosure(
             config,
             TaskIdentity(
                 repo_id=leaf.ref.repository,
                 task_name=task_root.name,
-                worktree_name=(
-                    f"{slugify(leaf.document.slug)[:40]}-"
-                    f"{hashlib.sha256(leaf.ref.key.encode('utf-8')).hexdigest()[:10]}"
-                ),
+                # A reopened leaf keeps the worktree name its contract already owns, so the
+                # restart re-creates the same group and branches instead of renaming the leaf's
+                # identity under a caller that only asked for a seat.
+                worktree_name=(_recorded_worktree_name(contract_path) or planned_name)
+                if state == "reopened"
+                else planned_name,
                 leaf_id=leaf.document.id,
                 parent_task=parent_task,
             ),
@@ -302,6 +325,15 @@ def _ensure_leaf_enclosure(
         raise _preparation_refusal(status, contract_path, leaf.ref.repository)
     status = {**status, "enclosurePreparation": preparation}
     return contract_path, status
+
+
+def _recorded_worktree_name(contract_path: Path) -> str:
+    """The worktree name this enclosure already owns, or ``""`` when it cannot be read."""
+
+    try:
+        return load_contract(contract_path).code_worktree.name
+    except (ContractError, MemoryModeUnsupportedError, OSError, UnicodeError, ValueError):
+        return ""
 
 
 def _start_leaf_enclosure(config: McpRuntimeConfig, identity: TaskIdentity) -> dict[str, Any]:

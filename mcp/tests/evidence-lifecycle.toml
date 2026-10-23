@@ -156,6 +156,7 @@ consumers = [
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_atomic_write.py",
   "mcp/tests/test_attention_discovery.py",
+  "mcp/tests/test_attention_dismissals_v2.py",
   "mcp/tests/test_attention_native_inputs.py",
   "mcp/tests/test_attention_native_kinds.py",
   "mcp/tests/test_attention_notice_publication.py",
@@ -640,6 +641,7 @@ consumers = [
   "mcp/tests/test_task_projection.py",
   "mcp/tests/test_task_provider_limit_windows.py",
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_cycle.py",
   "mcp/tests/test_task_reopen_series_extension.py",
   "mcp/tests/test_task_reports_listing.py",
   "mcp/tests/test_task_scoped_mcp.py",
@@ -1024,6 +1026,7 @@ consumers = [
   "mcp/tests/test_task_doc_ordinary_l111.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_cycle.py",
   "mcp/tests/test_task_reopen_series_extension.py",
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
@@ -1640,6 +1643,7 @@ consumers = [
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_atomic_write.py",
   "mcp/tests/test_attention_discovery.py",
+  "mcp/tests/test_attention_dismissals_v2.py",
   "mcp/tests/test_attention_native_inputs.py",
   "mcp/tests/test_attention_native_kinds.py",
   "mcp/tests/test_attention_notice_publication.py",
@@ -2124,6 +2128,7 @@ consumers = [
   "mcp/tests/test_task_projection.py",
   "mcp/tests/test_task_provider_limit_windows.py",
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_cycle.py",
   "mcp/tests/test_task_reopen_series_extension.py",
   "mcp/tests/test_task_reports_listing.py",
   "mcp/tests/test_task_scoped_mcp.py",
@@ -2722,6 +2727,7 @@ consumers = [
   "mcp/tests/test_master_retirement_readiness.py",
   "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_cycle.py",
   "mcp/tests/test_task_reopen_series_extension.py",
   "mcp/tests/test_terminal_notice_commit_recovery.py",
   "mcp/tests/test_terminal_notice_recovery.py",
@@ -2805,6 +2811,7 @@ replacement_contract = "contract:paseo-runtime-command-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_attention_discovery.py",
+  "mcp/tests/test_attention_dismissals_v2.py",
   "mcp/tests/test_attention_native_inputs.py",
   "mcp/tests/test_dashboard_host.py",
   "mcp/tests/test_developer_messages.py",
@@ -3140,6 +3147,7 @@ replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::te
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_cycle.py",
   "mcp/tests/test_task_reopen_series_extension.py",
 ]
 

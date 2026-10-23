@@ -9,6 +9,7 @@ from typing import Literal
 from agents_remember.models.lifecycles.enclosure import (
     LifecycleEnclosureLocator,
     TerminalWorktreeAbandonArguments,
+    TerminalWorktreeCleanupArguments,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocation,
@@ -75,14 +76,32 @@ def publish_test_enclosure(contract: WorktreeContract, text: str) -> LifecycleOp
 
 def terminalize_test_enclosure(
     location: LifecycleOperationLocation,
+    *,
+    cleanup: bool = False,
 ) -> LifecycleEnclosureLocator:
-    """Drive the production archive/readback/receipt seam, then cut after deletion."""
+    """Drive the production archive/readback/receipt seam, then cut after deletion.
 
-    result = terminal_archive_required_result(
-        _contract_for_location(location),
-        operation="worktree_abandon",
-        arguments=TerminalWorktreeAbandonArguments(force=False),
-        dry_run=False,
+    ``cleanup`` archives the generation as a *completed cleanup* rather than an abandonment:
+    that is the operation a finished, landed, cleaned-up task leaves behind, and the one whose
+    archive a reopen resets. The default stays abandonment, which is what the addressability
+    cases beside this helper pin.
+    """
+
+    contract = _contract_for_location(location)
+    result = (
+        terminal_archive_required_result(
+            contract,
+            operation="worktree_cleanup",
+            arguments=TerminalWorktreeCleanupArguments(teardown_providers=False),
+            dry_run=False,
+        )
+        if cleanup
+        else terminal_archive_required_result(
+            contract,
+            operation="worktree_abandon",
+            arguments=TerminalWorktreeAbandonArguments(force=False),
+            dry_run=False,
+        )
     )
     assert result.returncode == 0, result.payload
     shutil.rmtree(location.worktree_group)

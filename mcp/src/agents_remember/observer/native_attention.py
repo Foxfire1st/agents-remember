@@ -90,6 +90,11 @@ class NativeAttentionFacts:
     # stops being eligible (bound work, pause, an unknown observation, a boot change) loses its
     # entry, so the interval can only be one an observation actually covered (rule 4).
     stall_clocks: dict[str, str] = field(default_factory=dict)
+    # Task key -> the published turn-end stamps of the agents bound to it (MIK-R200@v2 rule 7).
+    # The latest one is the native start of that task's idle interval: a turn ends the interval,
+    # moves the stamp, and therefore names the next occurrence -- and a reader that restarted
+    # derives the same stamp again from the same publication.
+    turn_ends: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def task_lineage(key: str, parent_of: dict[str, str | None]) -> frozenset[str]:

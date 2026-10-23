@@ -6,9 +6,11 @@ lifecycle prose, matches a title, or invents a task for a taskless seat: every r
 canonical task key and reference it opens, or the agent it names and no task at all.
 
 Two rules separate the kinds for the client. ``permission-wait``, ``held-message`` and
-``task-stalled`` are live causes: they clear only when their native cause ends, they are not
-dismissible, and the backend refuses a dismissal of one. ``task-landed`` and ``task-abandoned``
-are notices: one acknowledgement per occurrence, and a later distinct occurrence is its own row.
+``task-stalled`` are live causes: they clear when their native cause ends, and their ``itemClass``
+says so. ``task-landed`` and ``task-abandoned`` are notices. Under MIK-R200@v2 rule 7 both classes
+are acknowledged once per occurrence through the same dismissal owner -- the developer reads an
+entry once -- so every row here is dismissible, and what differs is only how its occurrence ends
+and how its identity is named.
 """
 
 from __future__ import annotations
@@ -49,7 +51,11 @@ def _permission_items(
     tasks: list[TaskEntry],
     now: datetime,
 ) -> list[AttentionItem]:
-    """One row per unanswered native prompt, at the agent that is waiting (rule 2)."""
+    """One row per unanswered native prompt, at the agent that is waiting (rule 2).
+
+    Its occurrence identity is the agent and the prompt (v2 rule 7), so answering that prompt ends
+    it, and a second prompt at the same agent is a second entry.
+    """
 
     by_key = {task.key: task for task in tasks}
     items: list[AttentionItem] = []
@@ -65,7 +71,7 @@ def _permission_items(
                 detail=None,
                 waitSeconds=_age(now, prompt.since),
                 itemClass="action",
-                dismissible=False,
+                dismissible=True,
                 taskKey=task.key if task is not None else None,
                 taskReference=task.reference if task is not None else None,
                 agentId=prompt.agent_id,
@@ -81,7 +87,11 @@ def _held_items(
     tasks: list[TaskEntry],
     now: datetime,
 ) -> list[AttentionItem]:
-    """One row per message the product actually holds (rule 3): no body, no attachment."""
+    """One row per message the product actually holds (rule 3): no body, no attachment.
+
+    Its occurrence identity is the held message itself (v2 rule 7): native delivery or withdrawal
+    ends it, and another held message is another entry.
+    """
 
     by_key = {task.key: task for task in tasks}
     items: list[AttentionItem] = []
@@ -97,7 +107,7 @@ def _held_items(
                 detail=_held_reason(message),
                 waitSeconds=_age(now, _parse_stamp(message.taken_at)),
                 itemClass="action",
-                dismissible=False,
+                dismissible=True,
                 taskKey=task.key if task is not None else None,
                 taskReference=task.reference if task is not None else None,
                 agentId=message.recipient_agent_id,
@@ -106,6 +116,44 @@ def _held_items(
             )
         )
     return items
+
+
+def stall_occurrences(facts: NativeAttentionFacts, tasks: list[TaskEntry]) -> frozenset[str]:
+    """The identity of every started task's current idle interval (MIK-R200@v2 rule 7).
+
+    A stall acknowledgement names one interval, so the live identities are the tasks that are
+    idle *now* -- whether or not the settled deadline has passed. A task that resumed work, took
+    an explicit pause, or began a new interval after a turn leaves this set, and that is the proof
+    that its acknowledgement is over. The deadline is deliberately not part of the identity: a
+    reader that restarted counts the 900 seconds again from its own watch, and the row it will
+    publish names the very interval the developer already read.
+    """
+
+    return frozenset(
+        f"task-stalled:{task.key}:{start}" for task, start in _stall_candidates(facts, tasks)
+    )
+
+
+def _stall_candidates(
+    facts: NativeAttentionFacts, tasks: list[TaskEntry]
+) -> list[tuple[TaskEntry, str]]:
+    """Every started task that is idle right now, with the identity of that idle interval.
+
+    One owner for the eligibility the stall row and the stall acknowledgement both read, so the
+    row that is published and the interval that is reclaimed can never be two different things.
+    """
+
+    parent_of = {task.key: task.parent for task in tasks}
+    candidates: list[tuple[TaskEntry, str]] = []
+    for task in tasks:
+        if task.stage != "started" or task.activity != "paused":
+            continue
+        if _paused(task_lineage(task.key, parent_of), facts.paused_task_keys):
+            continue
+        start = _interval_start(task, facts)
+        if start is not None:
+            candidates.append((task, start))
+    return candidates
 
 
 def _stall_items(
@@ -120,16 +168,16 @@ def _stall_items(
     agent works -- a permission wait and a running subagent both count as work, so neither
     duplicates a stall row. An explicit pause suppresses the master the developer stopped and
     every started child bound to it by the canonical parent chain, and nothing else.
+
+    The 900 seconds are counted from the reader's own watch (L190-R1-F04), while the occurrence
+    identity names the interval's start (v2 rule 7): a resumed bound turn ends the occurrence, so
+    the next idle interval is a new entry rather than one the developer's earlier acknowledgement
+    still hides.
     """
 
-    parent_of = {task.key: task.parent for task in tasks}
     items: list[AttentionItem] = []
-    for task in tasks:
-        if task.stage != "started" or task.activity != "paused":
-            continue
-        if _paused(task_lineage(task.key, parent_of), facts.paused_task_keys):
-            continue
-        since = _idle_since(task, facts)
+    for task, start in _stall_candidates(facts, tasks):
+        since = _parse_stamp(facts.stall_clocks.get(task.key))
         if since is None:
             continue
         idle = max(0.0, (now - since).total_seconds())
@@ -137,7 +185,7 @@ def _stall_items(
             continue
         items.append(
             AttentionItem(
-                id=f"task-stalled:{task.key}",
+                id=f"task-stalled:{task.key}:{start}",
                 kind="task-stalled",
                 severity="warn",
                 lane="task",
@@ -147,7 +195,7 @@ def _stall_items(
                 detail="no bound agent has held a turn for the settled interval",
                 waitSeconds=idle,
                 itemClass="action",
-                dismissible=False,
+                dismissible=True,
                 taskKey=task.key,
                 taskReference=task.reference,
             )
@@ -199,16 +247,35 @@ def _paused(lineage: set[str] | frozenset[str], paused: frozenset[str]) -> bool:
     return bool(lineage & paused)
 
 
-def _idle_since(task: TaskEntry, facts: NativeAttentionFacts) -> datetime | None:
-    """When this task's continuous eligible silence started, or None when nobody can say.
+def _interval_start(task: TaskEntry, facts: NativeAttentionFacts) -> str | None:
+    """The stamp that names one idle interval: when the task's last bound turn ended.
 
-    L190-R1-F04: only the interval the reader itself observed counts. A task-event stamp is
-    the last event of the task's own contributors, which may be far older than the moment the
-    task became eligible -- it cannot date an interval nobody watched -- so it is not used here.
+    MIK-R200@v2 rule 7 names a stall's occurrence by the task *and the start of that idle
+    interval*. The publication dates that moment itself -- its bound agents' own ``eventAt``
+    turn transition -- so a turn ends the interval and moves the identity with it, and a reader
+    that restarted after the developer dismissed the entry derives the same stamp again and the
+    acknowledgement keeps hiding the interval it acknowledged.
+
+    A task with no bound agent falls back to its own last event stamp, then to the reader's own
+    watch (``stall_clocks``) -- the one stamp a restart cannot reproduce. Nothing here dates the
+    900-second deadline: L190-R1-F04 keeps that on the watch, because a stamp older than the
+    interval cannot date an interval nobody observed.
     """
 
-    stamp = facts.stall_clocks.get(task.key)
-    return _parse_stamp(stamp) if stamp else None
+    latest: str | None = None
+    latest_at: datetime | None = None
+    for stamp in facts.turn_ends.get(task.key, ()):
+        parsed = _parse_stamp(stamp)
+        if parsed is None:
+            continue
+        if latest_at is None or parsed > latest_at:
+            latest, latest_at = stamp, parsed
+    if latest is not None:
+        return latest
+    turn_end = _parse_stamp(task.eventAt)
+    if turn_end is not None and turn_end.tzinfo is not None:
+        return task.eventAt
+    return facts.stall_clocks.get(task.key)
 
 
 def _agent_label(role: str | None) -> str:

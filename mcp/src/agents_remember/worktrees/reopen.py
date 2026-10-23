@@ -53,6 +53,9 @@ from .integration.integration_ref_transaction import (
     IntegratedCommits,
     require_integrated_memory_ancestry,
 )
+from .integration.lifecycle.lifecycle_enclosure_terminal import (
+    restartable_predecessor_contract,
+)
 from .integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
     require_terminal_lifecycle_predecessor,
@@ -78,6 +81,7 @@ from .task_fact_publication import (
     preview_contract_task_facts,
     publish_task_fact_mutation,
 )
+from .task_resolver import series_contract_path
 from .worktree_contract import (
     WorktreeContract,
     load_contract,
@@ -137,6 +141,47 @@ def _response_guidance(
     return {**guidance, "nextStep": {"summary": summary, **guidance}}
 
 
+def _already_reopened_result(
+    contract: WorktreeContract, *, dry_run: bool
+) -> WorktreeCommandResult | None:
+    """Answer a repeat ``task_reopen`` on a leaf that already carries the reopen tombstone.
+
+    A reopened leaf is not a completed one, so the "fully landed leaf" preflight refused it --
+    and the refusal named three cells the reopen itself had just cleared. The task is already
+    where a second reopen would put it (``restartable_predecessor_contract``), so the honest
+    answer is the reopen's own answer with the same next step and no write: the caller that
+    repeated the call, or an interrupted first call resumed, continues at the start.
+    """
+
+    if contract.cleanup != "reopened" or not restartable_predecessor_contract(contract):
+        return None
+    if _live_worktree_blockers(contract):
+        # A started generation is somebody's live work: it is not a reset that has not happened.
+        return None
+    summary = (
+        "Leaf task is already reopened under its original id: nothing was changed. Edit the "
+        "doc's steps via task_doc, then preview worktree_start with this same leaf id to "
+        "recreate the worktrees off the current source tips."
+    )
+    return WorktreeCommandResult(
+        0,
+        {
+            **_contract_reopen_facts(contract),
+            "state": "would-reopen" if dry_run else "reopened",
+            "doc": None,
+            "frozenLanding": _clear_frozen_landing(contract, dry_run=True),
+            "projectionEffects": [],
+            "summary": summary,
+            **_response_guidance(
+                "start_reopened_task",
+                tool="worktree_start",
+                args=_start_preview_args(contract),
+                summary=summary,
+            ),
+        },
+    )
+
+
 def reopen_required_start_result(contract: WorktreeContract) -> WorktreeCommandResult:
     """Route ``worktree_start`` on a cleaned leaf to its explicit state reset."""
     summary = (
@@ -164,9 +209,14 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
     contract = load_contract(contract_path)
     if contract.kind == "series":
         return reopen_series(contract, dry_run=dry_run)
-    refusal = _reopen_preflight_refusal(contract)
-    if refusal is not None:
-        return refusal
+    # A task already carrying the reopen tombstone answers `reopened` again; every other state
+    # goes through the preflight, which still owns what "a fully landed leaf" means.
+    for answer in (
+        _already_reopened_result(contract, dry_run=dry_run),
+        _reopen_preflight_refusal(contract),
+    ):
+        if answer is not None:
+            return answer
     try:
         require_terminal_lifecycle_predecessor(contract)
     except LifecycleOperationLocationError as error:
@@ -294,13 +344,20 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
     try:
         require_parent_series(contract, operation="task_reopen")
     except RuntimeError as exc:
+        detail = str(exc)
+        parent = contract.parent_contract_path or series_contract_path(contract.task_root)
+        if "parent series contract" in detail and not parent.exists():
+            # The developer's precondition (D519): the leaf's master is there. When it is not,
+            # the answer names the exact file that is missing rather than only the rule that
+            # wants it, so the reader can see what to restore.
+            detail = f"{detail} (missing at {parent.as_posix()})"
         return WorktreeCommandResult(
             2,
             {
                 "state": "blocked",
                 **status_payload(contract),
-                "blockers": [str(exc)],
-                "summary": f"Reopen refused before resetting task state: {exc}",
+                "blockers": [detail],
+                "summary": f"Reopen refused before resetting task state: {detail}",
             },
         )
 
@@ -408,10 +465,21 @@ def _reopen_blockers(contract: WorktreeContract) -> list[str]:
         blockers.append(f"integration is {contract.integration_status!r}, not completed.")
     if contract.cleanup != "completed":
         blockers.append(f"cleanup is {contract.cleanup!r}, not completed.")
-    for label, worktree in (("code", contract.code_worktree), ("memory", contract.memory_worktree)):
-        if worktree is not None and worktree.exists():
-            blockers.append(f"the {label} worktree still exists at {worktree.as_posix()}.")
+    blockers.extend(_live_worktree_blockers(contract))
     return blockers
+
+
+def _live_worktree_blockers(contract: WorktreeContract) -> list[str]:
+    """Why this contract is still somebody's live generation, in either worktree's words."""
+
+    return [
+        f"the {label} worktree still exists at {worktree.as_posix()}."
+        for label, worktree in (
+            ("code", contract.code_worktree),
+            ("memory", contract.memory_worktree),
+        )
+        if worktree is not None and worktree.exists()
+    ]
 
 
 def _plan_leaf_doc_reset(

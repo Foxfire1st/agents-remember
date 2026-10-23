@@ -283,15 +283,29 @@ def _case_test_an_empty_store_publishes_nothing_and_notices_survive_a_reread(tmp
     assert [row.id for row in _queue(tmp_path)] == [notice.occurrenceId]
 
 
-def _case_test_only_the_terminal_kinds_can_be_acknowledged() -> None:
-    record = AttentionDismissalRecord(
-        itemId="task-abandoned:" + LEAF_KEY,
-        kind="task-abandoned",
-        dismissedAt="2026-10-22T12:00:00Z",
-    )
-    assert record.kind == "task-abandoned"
+def _case_test_every_published_kind_can_be_acknowledged() -> None:
+    """MIK-R200@v2 rule 7: the three live causes are acknowledged like the notices."""
 
-    for refused in ("permission-wait", "held-message", "task-stalled"):
+    for kind in (
+        "task-abandoned",
+        "task-landed",
+        "permission-wait",
+        "held-message",
+        "task-stalled",
+        "provider-down",
+        "actionable-drift",
+        "failed-setup",
+        "blocked-start",
+    ):
+        record = AttentionDismissalRecord(
+            itemId=f"{kind}:" + LEAF_KEY,
+            kind=kind,
+            dismissedAt="2026-10-22T12:00:00Z",
+        )
+        assert record.kind == kind
+
+    # A kind this build does not publish is refused, so an older row is never read as current.
+    for refused in ("task-stalled-v2", "message-held", "attention"):
         with pytest.raises(ValidationError):
             AttentionDismissalRecord(
                 itemId=f"{refused}:whatever",
@@ -954,7 +968,7 @@ def test_rule_5_one_notice_per_native_occurrence(subtests, tmp_path, monkeypatch
         ),
         (
             "only the terminal kinds can be acknowledged",
-            lambda **fixtures: _case_test_only_the_terminal_kinds_can_be_acknowledged(
+            lambda **fixtures: _case_test_every_published_kind_can_be_acknowledged(
                 **_take(
                     fixtures,
                 )
