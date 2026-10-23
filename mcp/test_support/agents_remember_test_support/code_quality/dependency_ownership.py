@@ -129,9 +129,14 @@ REPOSITORY_TEST_INPUT_CONSUMERS: dict[Path, frozenset[Path]] = {
         }
     ),
     CODEX_CONFIG_PATH: frozenset({}),
+    # Every test that loads the layering contract is a consumer of layers.toml. The
+    # two L184 added were missing here, so the graph refused the declaration as a
+    # lifecycle-consumer-mismatch instead of naming all four (MIK-R206 item 6).
     LAYERS_CONTRACT_PATH: frozenset(
         {
             Path("mcp/tests/test_layering.py"),
+            Path("mcp/tests/test_paseo_daemon_config_guard.py"),
+            Path("mcp/tests/test_provider_limit_layering.py"),
             Path("mcp/tests/test_structural_limits.py"),
         }
     ),

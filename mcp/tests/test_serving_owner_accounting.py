@@ -223,6 +223,11 @@ class ProductionOwnerClockTests(unittest.IsolatedAsyncioTestCase):
                 config=config,
                 observer_root=Path(tmp),
                 clock=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+                # The fake runtime carries the port the real ``_ServingRuntime`` has
+                # (``_app_common.py``: ``usage_read: UsageReadPort | None = None``).
+                # Without it the held sweep's call raised AttributeError, was swallowed
+                # by the loop's except, and never accounted a unit (MIK-R206 items 2-4).
+                usage_read=None,
             )
             for case in _cases(cast(_ServingRuntime, fields), config):
                 modes = [("success", None)]

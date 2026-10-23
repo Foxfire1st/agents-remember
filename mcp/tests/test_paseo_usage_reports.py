@@ -31,10 +31,28 @@ from paseo_runtime_test_support import write_shared_runtime
 SERVER_ID = "srv_configured"
 WORKER = "f3c1a2b4-5d6e-4f70-8a91-b2c3d4e5f607"
 REVIEWER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
-NOW = datetime.now(UTC)
-STALE = (NOW - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
-FRESH = NOW.isoformat().replace("+00:00", "Z")
-RESET = (NOW + timedelta(hours=2)).isoformat().replace("+00:00", "Z")
+
+
+# Timestamps are taken when a case runs, never at import (MIK-R206 item 1). The
+# bridge judges freshness against its own clock when the case calls it, so a stamp
+# frozen at import ages by however long the module sat imported before the case
+# ran and turns a fresh entry stale — the whole-lane failure. The 60-second
+# production threshold and the fresh/stale contrast are unchanged.
+def _stamp(moment: datetime) -> str:
+    return moment.isoformat().replace("+00:00", "Z")
+
+
+def _fresh() -> str:
+    return _stamp(datetime.now(UTC))
+
+
+def _stale() -> str:
+    return _stamp(datetime.now(UTC) - timedelta(minutes=5))
+
+
+def _reset() -> str:
+    return _stamp(datetime.now(UTC) + timedelta(hours=2))
+
 
 FAKE_DAEMON_CLIENT = """
 import { appendFileSync, readFileSync } from 'node:fs'
@@ -83,10 +101,11 @@ export function createPaseoApi() {
 def _entry(
     report_id: str,
     *,
-    fetched_at: str = STALE,
+    fetched_at: str | None = None,
     used: float = 100.0,
     status: str = "available",
 ) -> dict[str, Any]:
+    fetched_at = _stale() if fetched_at is None else fetched_at
     report: dict[str, Any] = {"status": status}
     if status == "available":
         report["windows"] = [
@@ -96,7 +115,7 @@ def _entry(
                 "summary": True,
                 "usedPct": used,
                 "remainingPct": 100.0 - used,
-                "resetsAt": RESET,
+                "resetsAt": _reset(),
             }
         ]
     else:
@@ -194,11 +213,12 @@ class UsageReportsScriptTests(unittest.TestCase):
         assert "email" not in json.dumps(row)
 
     def test_a_stale_leaf_entry_is_refreshed_by_report_id_alone(self) -> None:
+        fresh = _fresh()
         reply = self.call(
             {"agentIds": [WORKER], "leafAgentIds": [WORKER]},
             entries={WORKER: [_entry("claude-max")]},
             refresh={"claude-max": _entry("claude-max", used=40.0)},
-            refreshedAt=FRESH,
+            refreshedAt=fresh,
         )
 
         forced = [call for call in self.recorded() if "reportIds" in call["options"]]
@@ -207,12 +227,12 @@ class UsageReportsScriptTests(unittest.TestCase):
         assert "agentId" not in forced[0]["options"]
         # The refreshed report is what the product judges, not the stale cache row.
         assert self.rows(reply)[WORKER]["entries"][0]["report"]["windows"][0]["usedPct"] == 40.0
-        assert self.rows(reply)[WORKER]["entries"][0]["fetchedAt"] == FRESH
+        assert self.rows(reply)[WORKER]["entries"][0]["fetchedAt"] == fresh
 
     def test_a_fresh_entry_is_not_refreshed(self) -> None:
         reply = self.call(
             {"agentIds": [WORKER], "leafAgentIds": [WORKER]},
-            entries={WORKER: [_entry("claude-max", fetched_at=FRESH)]},
+            entries={WORKER: [_entry("claude-max", fetched_at=_fresh())]},
         )
 
         assert [call for call in self.recorded() if "reportIds" in call["options"]] == []
@@ -246,7 +266,7 @@ class UsageReportsScriptTests(unittest.TestCase):
                 REVIEWER: [_entry("claude-max")],
             },
             refresh={"claude-max": _entry("claude-max", used=40.0)},
-            refreshedAt=FRESH,
+            refreshedAt=_fresh(),
         )
 
         forced = [call for call in self.recorded() if "reportIds" in call["options"]]
@@ -270,15 +290,16 @@ class UsageReportsScriptTests(unittest.TestCase):
         assert [entry["id"] for entry in rows[REVIEWER]["entries"]] == ["claude-max"]
 
     def test_a_refresh_that_answers_nothing_leaves_the_cached_entry_in_place(self) -> None:
+        stale = _stale()
         reply = self.call(
             {"agentIds": [WORKER], "leafAgentIds": [WORKER]},
-            entries={WORKER: [_entry("claude-max")]},
+            entries={WORKER: [_entry("claude-max", fetched_at=stale)]},
             refresh={},
         )
 
         entry = self.rows(reply)[WORKER]["entries"][0]
         assert entry["id"] == "claude-max"
-        assert entry["fetchedAt"] == STALE
+        assert entry["fetchedAt"] == stale
 
     def test_no_agent_asks_for_no_read(self) -> None:
         reply = self.call({"agentIds": []})
