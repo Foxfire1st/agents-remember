@@ -3,18 +3,6 @@
   "analytics": {
     "attentionQueue": [
       {
-        "id": "provider-down:codegraphcontext-code",
-        "kind": "provider-down",
-        "lane": "repo",
-        "providerId": "codegraphcontext-code",
-        "repoId": "agents-remember",
-        "severity": "alarm",
-        "title": "Code index is down",
-        "waitSeconds": 300,
-        "itemClass": "operational",
-        "dismissible": true
-      },
-      {
         "id": "actionable-drift:agents-remember:main",
         "kind": "actionable-drift",
         "severity": "warn",
@@ -125,23 +113,19 @@
           "factState": "observed",
           "path": "/worktrees/agents-remember/sim-group"
         },
-        "completedPhases": ["worktree-add", "cgc-seed"],
-        "currentPhase": "grepai-clone",
         "edges": [
           {
-            "detail": "seeded from the worktree checkout",
-            "fromNode": "code-worktree",
-            "id": "cgc-seed",
-            "kind": "cgc-seed",
-            "label": "CGC seed",
+            "detail": "worktree copied from the code source",
+            "fromNode": "code-source",
+            "id": "code-worktree-add",
+            "kind": "worktree-add",
+            "label": "add code worktree",
             "state": "complete",
-            "toNode": "cgc-engine"
+            "toNode": "code-worktree"
           }
         ],
         "enclosure": "sim-enclosure",
-        "failedPhases": [],
         "health": "running",
-        "heartbeatAgeSeconds": 4,
         "humanReviewStatus": "pending",
         "id": "sim-enclosure",
         "integrationStatus": "not-started",
@@ -201,21 +185,10 @@
         "missingFacts": [],
         "nextAction": "worktree_sync",
         "phase": "worktree-started",
-        "providers": [
-          {
-            "factState": "observed",
-            "id": "codegraphcontext-code",
-            "role": "code",
-            "runtimeState": "nominal"
-          }
-        ],
         "repoName": "agents-remember",
-        "retryArgs": {
-          "group": "sim-group"
-        },
-        "seedFallback": false,
-        "setupState": "complete",
-        "sourceFiles": ["/tasks/sim/enclosures/sim/series-contract.md"],
+        "sourceFiles": [
+          "/tasks/sim/enclosures/sim/series-contract.md"
+        ],
         "sourceLineage": {
           "edges": [
             {
@@ -305,10 +278,8 @@
           "branch": "sim/SIM-2",
           "factState": "missing"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "disabled-memory-enclosure",
-        "failedPhases": [],
         "health": "nominal",
         "humanReviewStatus": "pending",
         "id": "disabled-memory-enclosure",
@@ -326,16 +297,7 @@
         },
         "missingFacts": ["memory-worktree"],
         "phase": "provider-setup",
-        "providers": [
-          {
-            "factState": "planned",
-            "id": "grepai-memory",
-            "role": "memory",
-            "runtimeState": "missing"
-          }
-        ],
         "repoName": "agents-remember",
-        "seedFallback": true,
         "sourceFiles": [],
         "sourceLineage": {
           "edges": [],
@@ -360,10 +322,8 @@
           "branch": "sim/SIM-3",
           "factState": "observed"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "blocked-enclosure",
-        "failedPhases": [],
         "health": "blocked",
         "humanReviewStatus": "pending-review",
         "id": "blocked-enclosure",
@@ -375,9 +335,7 @@
         "memoryMode": "disabled",
         "missingFacts": [],
         "phase": "commit-approval-pending",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
         "sourceLineage": {
           "edges": [],
@@ -402,10 +360,8 @@
           "branch": "sim/SIM-4",
           "factState": "observed"
         },
-        "completedPhases": ["worktree-add"],
         "edges": [],
         "enclosure": "failed-enclosure",
-        "failedPhases": ["cgc-seed"],
         "health": "failed",
         "humanReviewStatus": "pending",
         "id": "failed-enclosure",
@@ -417,11 +373,9 @@
         "memoryMode": "external",
         "missingFacts": [],
         "phase": "provider-setup",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
-        "summary": "cgc seed failed",
+        "summary": "code worktree add failed",
         "taskId": "SIM-4",
         "taskName": "failed-setup",
         "worktreeGroup": "failed-group"
@@ -438,10 +392,8 @@
           "branch": "sim/SIM-5",
           "factState": "stale"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "stale-enclosure",
-        "failedPhases": [],
         "health": "stale",
         "humanReviewStatus": "pending",
         "id": "stale-enclosure",
@@ -453,11 +405,9 @@
         "memoryMode": "external",
         "missingFacts": [],
         "phase": "sync-needed",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
-        "summary": "setup heartbeat has not advanced",
+        "summary": "sync probe has not advanced",
         "taskId": "SIM-5",
         "taskName": "stale-heartbeat",
         "worktreeGroup": "stale-group"
@@ -474,10 +424,8 @@
           "branch": "sim/SIM-6",
           "factState": "observed"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "skipped-enclosure",
-        "failedPhases": [],
         "health": "skipped",
         "humanReviewStatus": "pending",
         "id": "skipped-enclosure",
@@ -489,11 +437,9 @@
         "memoryMode": "disabled",
         "missingFacts": [],
         "phase": "worktree-started",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
-        "summary": "provider setup skipped by contract",
+        "summary": "memory lane skipped by contract",
         "taskId": "SIM-6",
         "taskName": "skipped-setup",
         "worktreeGroup": "skipped-group"
@@ -508,10 +454,8 @@
         "codeWorktree": {
           "factState": "missing"
         },
-        "completedPhases": [],
         "edges": [],
         "enclosure": "unknown-enclosure",
-        "failedPhases": [],
         "health": "unknown",
         "humanReviewStatus": "pending",
         "id": "unknown-enclosure",
@@ -523,9 +467,7 @@
         "memoryMode": "external",
         "missingFacts": ["code-source", "code-worktree"],
         "phase": "unknown",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
         "summary": "no probe could run",
         "taskId": "SIM-7",
@@ -544,10 +486,8 @@
           "branch": "sim/SIM-8",
           "factState": "observed"
         },
-        "completedPhases": ["worktree-add", "cgc-seed", "grepai-clone"],
         "edges": [],
         "enclosure": "complete-enclosure",
-        "failedPhases": [],
         "health": "complete",
         "humanReviewStatus": "approved",
         "id": "complete-enclosure",
@@ -559,9 +499,7 @@
         "memoryMode": "external",
         "missingFacts": [],
         "phase": "completed",
-        "providers": [],
         "repoName": "agents-remember",
-        "seedFallback": false,
         "sourceFiles": [],
         "summary": "landed on origin/main",
         "taskId": "SIM-8",
@@ -594,30 +532,6 @@
         "repository": "agents-remember",
         "route": "mcp/src/agents_remember/observer",
         "sourceFilesInScope": 24
-      }
-    ],
-    "setupProgress": [
-      {
-        "completedCount": 4,
-        "currentPhase": "grepai-clone",
-        "failedPhases": [],
-        "group": "sim-group",
-        "heartbeatAgeSeconds": 4,
-        "state": "complete"
-      }
-    ],
-    "setupSummaries": [
-      {
-        "action": "provider_setup",
-        "generatedAt": "2026-06-14T08:58:00+00:00",
-        "ok": true,
-        "ready": true,
-        "resultCounts": {
-          "configured": 2,
-          "failed": 0
-        },
-        "snapshotStaleSeconds": 180,
-        "state": "complete"
       }
     ],
     "toolReports": [
@@ -1973,29 +1887,6 @@
   "metrics": {
     "ignoredHostAgents": 0
   },
-  "providers": [
-    {
-      "id": "codegraphcontext-code",
-      "indexingState": "indexed",
-      "ok": true,
-      "repoId": "agents-remember",
-      "role": "code",
-      "scope": "workspace",
-      "state": "ready",
-      "watcherUp": true
-    },
-    {
-      "id": "grepai-memory",
-      "indexingState": "indexed",
-      "ok": true,
-      "role": "memory",
-      "scope": "worktree",
-      "snapshotStaleSeconds": 3.5,
-      "state": "ready",
-      "watcherUp": true,
-      "worktreeGroup": "sim-group"
-    }
-  ],
   "taskCounts": {
     "planned": 3,
     "started": 2,
@@ -2821,7 +2712,7 @@
   "checkoutBinding": {
     "state": "disposable-coordination-root",
     "worktree": "/worktrees/agents-remember/sim-leaf",
-    "coordinationRoot": "/worktrees/agents-remember/provider-runtime/dev-ar-coordination",
+    "coordinationRoot": "/worktrees/agents-remember/sim-worktree/dev-ar-coordination",
     "configuredRoot": "/configured/coordination",
     "remedy": "run the installed command for the configured root, or declare the test mode for scratch work; --config does not change the binding"
   },

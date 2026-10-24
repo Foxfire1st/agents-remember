@@ -428,47 +428,6 @@ export const fleetingChoice = css({
 // it carries real flow (DB clone / index seed). Cyan; GSAP animates its cx, gated by useShouldAnimate.
 export const conduitChevron = css({ fill: "token(colors.cyan)" });
 
-export const engineRow = css({
-  display: "flex",
-  alignItems: "center",
-  gap: "0.45rem",
-});
-
-export const engineSilhouette = cva({
-  base: {
-    width: "1.4rem",
-    height: "2.4rem",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: "amber",
-    borderRadius: "2px",
-    background:
-      "repeating-linear-gradient(0deg, token(colors.bg) 0 4px, transparent 4px 8px)",
-    flexShrink: "0",
-  },
-  variants: {
-    runtimeState: {
-      // Active engine = GREEN (booted, running) — green/go, distinct from amber=warning, red=error, empty=off.
-      nominal: {
-        borderColor: "mint",
-        background: "repeating-linear-gradient(0deg, token(colors.mint) 0 4px, transparent 4px 8px)",
-      },
-      configured: { borderColor: "dormant", opacity: "0.7" }, // configured but not running → empty/off
-      indexing: {
-        borderColor: "cyan",
-        background:
-          "repeating-linear-gradient(0deg, token(colors.cyan) 0 4px, transparent 4px 8px)",
-      },
-      down: { borderColor: "alarm", animation: "pulse 0.6s steps(1) infinite" },
-      unknown: { borderColor: "dormant", borderStyle: "dotted", opacity: "0.6" },
-    },
-  },
-});
-
-export const engineMeta = css({ display: "grid", gap: "0.1rem", minWidth: "0" });
-export const engineName = css({ color: "ink", fontSize: "0.74rem" });
-export const engineState = css({ color: "muted", fontSize: "0.66rem" });
-
 // --- boot timeline -----------------------------------------------------------
 
 export const timeline = css({
@@ -558,15 +517,6 @@ export const missingTitle = css({
   fontSize: "0.68rem",
   letterSpacing: "0.05em",
   textTransform: "uppercase",
-});
-
-export const phaseLineList = css({
-  display: "grid",
-  gap: "0.15rem",
-  margin: "0",
-  padding: "0",
-  listStyle: "none",
-  fontSize: "0.68rem",
 });
 
 export const emptyState = css({

@@ -16,8 +16,8 @@
 // `fixtures/snapshot.json` and annotated with the mirror type, so it is pinned from both sides at
 // once: a required field the server adds fails to compile until it is filled, and it can only be
 // filled from a served row. Only the REQUIRED fields are carried. Optionals (`staleSeconds`,
-// `seedFallback`, …) are left off on purpose: a default nobody asked for would silently change
-// what a test is measuring.
+// `detail`, …) are left off on purpose: a default nobody asked for would silently change what a
+// test is measuring.
 //
 // BE PRECISE ABOUT WHAT PINS WHAT. `snapshot.json` is NOT generated; it remains a hand-maintained
 // sampled payload. The producer-to-TypeScript link is generated and checked, while this file and
@@ -48,7 +48,6 @@ import type {
   AttentionItem,
   EnclosureNode,
   EngineProcessNode,
-  ProviderNode,
   TaskEntry,
   TaskSummary,
   WorkspaceProjection,
@@ -72,7 +71,6 @@ function demandServed<Node>(row: Node | undefined, what: string): Node {
   return row;
 }
 const SERVED_ENCLOSURE = demandServed(SERVED.enclosures[0], 'enclosures[0]');
-const SERVED_PROVIDER = demandServed(SERVED.providers[0], 'providers[0]');
 const SERVED_TASK_ENTRY = demandServed(SERVED.tasks[0], 'tasks[0]');
 const SERVED_TASK_SUMMARY = demandServed(
   SERVED.tasks.find((entry) => entry.summary?.form === 'task')?.summary,
@@ -104,14 +102,6 @@ const BASE_ENCLOSURE: EnclosureNode = {
   codeWorktreeExists: SERVED_ENCLOSURE.codeWorktreeExists,
   memoryWorktreeExists: SERVED_ENCLOSURE.memoryWorktreeExists,
   actions: [],
-};
-
-const BASE_PROVIDER: ProviderNode = {
-  id: SERVED_PROVIDER.id,
-  state: SERVED_PROVIDER.state,
-  watcherUp: SERVED_PROVIDER.watcherUp,
-  indexingState: SERVED_PROVIDER.indexingState,
-  scope: SERVED_PROVIDER.scope,
 };
 
 const BASE_TASK_SUMMARY: TaskSummary = {
@@ -167,10 +157,6 @@ const BASE_ENGINE_PROCESS: EngineProcessNode = {
   closeoutStatus: SERVED_ENGINE_PROCESS.closeoutStatus,
   integrationStatus: SERVED_ENGINE_PROCESS.integrationStatus,
   cleanup: SERVED_ENGINE_PROCESS.cleanup,
-  completedPhases: [],
-  failedPhases: [],
-  seedFallback: SERVED_ENGINE_PROCESS.seedFallback,
-  providers: [],
   edges: [],
   landing: [],
   actions: [],
@@ -196,8 +182,6 @@ const BASE_ATTENTION: AttentionItem = {
  */
 export const EMPTY_ANALYTICS: Analytics = {
   driftSnapshots: [],
-  setupSummaries: [],
-  setupProgress: [],
   routeCoverage: [],
   toolReports: [],
   ledgers: [],
@@ -210,13 +194,6 @@ export function enclosure<O extends Partial<EnclosureNode> = NoOverrides>(
 ): EnclosureNode {
   const over: Partial<EnclosureNode> = overrides ?? {};
   return { ...BASE_ENCLOSURE, ...over };
-}
-
-export function provider<O extends Partial<ProviderNode> = NoOverrides>(
-  overrides?: Overrides<O, ProviderNode>,
-): ProviderNode {
-  const over: Partial<ProviderNode> = overrides ?? {};
-  return { ...BASE_PROVIDER, ...over };
 }
 
 export function taskSummary<O extends Partial<TaskSummary> = NoOverrides>(
@@ -285,7 +262,6 @@ export function projection<O extends Partial<WorkspaceProjection> = NoOverrides>
       paused: 0,
       unknown: 0,
     },
-    providers: [],
     activeWorktreeGroups: [],
     ...rest,
     metrics: metrics ?? { ignoredHostAgents: 0 },

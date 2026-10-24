@@ -45,15 +45,15 @@ work, use the full shape.
 
 | ID | Kind | Source / Query | Claim Proven | Limits |
 |----|------|----------------|--------------|--------|
-| E-01 | Semantics | query: "<query text>" | F-01 | Does not prove runtime behavior. |
+| E-01 | Semantics | route index + onboarding search: "<query text>" | F-01 | Does not prove runtime behavior. |
 | E-02 | Intent | onboarding: `<path>`; source: `<path>` | F-02 | Covers committed HEAD only. |
-| E-03 | Relationship | cgc callees/deps: `<anchor>` | F-01 | Does not prove hidden business intent. |
+| E-03 | Relationship | native search: callers/deps of `<anchor>` | F-01 | Does not prove hidden business intent. |
 
 ## Proof Inventory
 
 - Onboarding docs read:
-- Semantic queries performed:
-- Code graph queries performed:
+- Route-index and onboarding searches performed:
+- Native code searches performed (callers, callees, deps):
 - Source files inspected:
 - External references checked:
 - Executable validations run:
@@ -86,8 +86,8 @@ work, use the full shape.
 ## Proof Inventory
 
 - Onboarding docs read:
-- Semantic queries performed:
-- Code graph queries performed:
+- Route-index and onboarding searches performed:
+- Native code searches performed (callers, callees, deps):
 - Source files inspected:
 
 ## Remaining Truth Gaps
@@ -101,8 +101,8 @@ work, use the full shape.
 
 ## Evidence Kinds
 
-- `Semantics`: fuzzy routing through GrepAI or onboarding search.
-- `Relationship`: CodeGraphContext callers, callees, dependencies, impact, or neighboring structure.
+- `Semantics`: fuzzy routing over onboarding text — the route index plus a capped native search.
+- `Relationship`: native search for callers, callees, dependencies, impact, or neighboring structure.
 - `Intent`: paired onboarding plus bounded source confirmation for contracts, invariants, behavioral expectations, or branch-valid truths.
 - `External`: domain documentation, standards, issues, PRs, release notes, or other non-repo references.
 - `Executable`: reproduction steps, tests, scripts, command output, or generated validation artifacts.

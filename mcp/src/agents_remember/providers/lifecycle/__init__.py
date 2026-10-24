@@ -16,7 +16,6 @@ _EXPORT_MODULES = (
     "agents_remember.providers.lifecycle.host_ports",
     "agents_remember.providers.lifecycle.process_status",
     "agents_remember.providers.lifecycle.provider_settings",
-    "agents_remember.providers.lifecycle.result_rendering",
     "agents_remember.providers.lifecycle.runtime_environment",
     "agents_remember.providers.lifecycle.state_files",
     "agents_remember.providers.lifecycle.watchers",

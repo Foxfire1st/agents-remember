@@ -9,4 +9,4 @@ Use these pages for common operational tasks after the runtime is installed.
 - [Adopt Existing Memory](adopt-existing-memory.md)
 - [Make the First Conversion](first-conversion.md)
 - [Carry Memory From a Branch](carryover-from-branch.md)
-- [Providers](providers.md)
+- [Providers](providers.md) — retired search providers; cleanup of old installs.

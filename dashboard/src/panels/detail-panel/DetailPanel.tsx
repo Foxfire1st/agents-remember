@@ -1,4 +1,4 @@
-// The selected task entry, its document reader, and its worktree/provider facts.
+// The selected task entry, its document reader, and its worktree/checkout facts.
 // state.ts owns selection; taskDocPanels.tsx composes the page.
 import { memo } from 'react';
 

@@ -57,13 +57,12 @@ class AttentionDismissalRecord(DurableRecord):
     @classmethod
     def supported_kind(cls, value: str) -> str:
         # MIK-R200@v2 rule 7: every published kind is acknowledged through this same owner once
-        # per occurrence -- the two terminal notices, the three live native causes, and the
-        # operational kinds R199 leaves published. A retired kind (a row written by an earlier
-        # build) is still refused, so its acknowledgement is not read as a current one.
+        # per occurrence -- the two terminal notices, the three live native causes, and the two
+        # operational kinds left after MIK-R199 retired the provider-only ones. A retired kind
+        # (a row written by an earlier build) is still refused, so its acknowledgement is not
+        # read as a current one.
         if value not in {
             "actionable-drift",
-            "provider-down",
-            "failed-setup",
             "blocked-start",
             "permission-wait",
             "held-message",
@@ -130,6 +129,11 @@ class AttentionObservation:
         if self.covers(record) and record.actionableFingerprint is None and fingerprint:
             return record.model_copy(update={"actionableFingerprint": fingerprint})
         return record
+
+
+def _raw_row_count(path: Path) -> int:
+    """How many non-empty rows the file holds, before the tolerant read drops any."""
+    return sum(1 for line in read_log_text(path).splitlines() if line.strip())
 
 
 class AttentionDismissalStore:
@@ -206,6 +210,7 @@ class AttentionDismissalStore:
         ATTENTION_DISMISSAL_OWNERSHIP.check_declared_writer()
         by_kind = {observation.kind: observation for observation in observations}
         with exclusive_access(self.log_path(), ATTENTION_DISMISSAL_OWNERSHIP):
+            raw_rows = _raw_row_count(self.log_path())
             records = self.read()
             current = {record.itemId: record for record in records}
             kept = _bounded(
@@ -217,7 +222,12 @@ class AttentionDismissalStore:
                 ]
             )
             bounded = {record.itemId: record for record in kept}
-            if len(bounded) != len(records) or bounded != current:
+            # A row the tolerant read dropped -- malformed, or a kind that admission now refuses
+            # (the retired provider kinds) -- is disposable state with no reader left. It must
+            # leave the file here, including the all-retired case where the fold is empty and
+            # bounded == current, or the bytes are re-read and re-parsed on every tick forever.
+            dropped = raw_rows - len(records)
+            if dropped or len(bounded) != len(records) or bounded != current:
                 try:
                     self._replace(kept)
                 except OSError:

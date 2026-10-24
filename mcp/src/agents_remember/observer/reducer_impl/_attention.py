@@ -1,11 +1,11 @@
 """Attention queue: rank what needs the human from the reduced surfaces.
 
 Pure and deterministic: every source contributes one small builder and the
-queue sorts by (age, id) -- the newest entry on top. Provider/setup/start
-dismissals hold until their native reader observes recovery or removal. Drift
-occurrence is carried by its persisted source signal. The five native kinds live
-in ``_attention_native``; this module owns the one queue, its ranking and the
-one dismissal rule.
+queue sorts by (age, id) -- the newest entry on top. Drift and start dismissals
+hold until their native reader observes recovery or removal. Drift occurrence is
+carried by its persisted source signal. The five native kinds live in
+``_attention_native``; this module owns the one queue, its ranking and the one
+dismissal rule.
 
 MIK-R200@v2 rule 7: every published entry is acknowledged once per occurrence,
 so this fold suppresses any current item whose exact occurrence was acknowledged.
@@ -25,8 +25,6 @@ from agents_remember.controlplane.attention_dismissals import (
 from agents_remember.observer.projection import (
     AttentionItem,
     DriftSnapshotNode,
-    ProviderNode,
-    SetupProgressNode,
     TaskEntry,
 )
 from agents_remember.observer.reducer_impl._attention_native import native_attention_items
@@ -35,11 +33,8 @@ from agents_remember.observer.reducer_impl._types import AnalyticalInputs
 
 # --- attention queue (slice 05) ----------------------------------------------
 
-_PROVIDER_DOWN: frozenset[str] = frozenset({"stopped", "failed", "error"})
-
 
 def build_attention_queue(
-    providers: list[ProviderNode],
     given: AnalyticalInputs,
     tasks: list[TaskEntry] | None = None,
     now: datetime | None = None,
@@ -65,9 +60,7 @@ def build_attention_queue(
     cause is not exempt, and dismissing one changes nothing at the cause itself.
     """
     items = [
-        *_provider_attention(providers),
         *_drift_attention(given.drift_snapshots),
-        *_setup_attention(given.setup_progress),
         *_start_attention(given.engine_start_progress),
         *native_attention_items(
             given.native_attention,
@@ -96,24 +89,6 @@ def _is_dismissed(item: AttentionItem, dismissals: dict[str, AttentionDismissalR
         or dismissal.actionableFingerprint is None
         or item.actionableFingerprint == dismissal.actionableFingerprint
     )
-
-
-def _provider_attention(providers: list[ProviderNode]) -> list[AttentionItem]:
-    """A down/crashed provider -- the 2026-06-09 invisible fire, made an alarm."""
-    return [
-        AttentionItem(
-            id=f"provider-down:{provider.id}",
-            kind="provider-down",
-            severity="alarm",
-            lane="repo",
-            title=f"Provider {provider.id} down",
-            detail=provider.state,
-            waitSeconds=provider.snapshotStaleSeconds,
-            providerId=provider.id,
-        )
-        for provider in providers
-        if provider_condition(provider) == "failed"
-    ]
 
 
 def _drift_attention(drift_snapshots: list[DriftSnapshotNode]) -> list[AttentionItem]:
@@ -149,24 +124,6 @@ def _drift_attention_detail(drift: DriftSnapshotNode) -> str:
     return " · ".join(parts)
 
 
-def _setup_attention(setup_progress: list[SetupProgressNode]) -> list[AttentionItem]:
-    """A provider-setup boot that failed or went stale mid-flight."""
-    return [
-        AttentionItem(
-            id=f"failed-setup:{setup.group}",
-            kind="failed-setup",
-            severity="alarm" if setup.failedPhases else "warn",
-            lane="worktree",
-            title="Provider setup needs attention",
-            detail=setup.currentPhase,
-            waitSeconds=setup.heartbeatAgeSeconds,
-            enclosure=setup.group,
-        )
-        for setup in setup_progress
-        if setup_condition(setup) == "failed"
-    ]
-
-
 def _start_attention(start_progress: list[dict[str, Any]]) -> list[AttentionItem]:
     """A ``worktree_start`` gated before its contract was written -- the same master-caution the agent
     raises in chat (§9). Only blocked entries are alarms; a happy-path progress beat (no
@@ -190,37 +147,6 @@ def _start_attention(start_progress: list[dict[str, Any]]) -> list[AttentionItem
             )
         )
     return items
-
-
-def provider_condition(provider: ProviderNode) -> str:
-    """A provider recurs only after an explicit healthy observation, then failure."""
-    if provider.ok is False or provider.state in _PROVIDER_DOWN:
-        return "failed"
-    if provider.ok is True or provider.state in {"running", "ready", "healthy"}:
-        return "healthy"
-    return "unknown"
-
-
-def setup_condition(setup: SetupProgressNode) -> str:
-    """A setup recurs only after observed running/completed work, then failure."""
-    if setup.failedPhases or setup.state in {"failed", "stale"}:
-        return "failed"
-    return "healthy" if setup.state in {"running", "completed"} else "unknown"
-
-
-def observe_providers(nodes: list[ProviderNode], observation: AttentionObservation | None) -> None:
-    if observation is not None:
-        for node in nodes:
-            observation.observe(
-                f"provider-down:{node.id}", healthy=provider_condition(node) == "healthy"
-            )
-
-
-def observe_setup(node: SetupProgressNode, observation: AttentionObservation | None) -> None:
-    if observation is not None:
-        observation.observe(
-            f"failed-setup:{node.group}", healthy=setup_condition(node) == "healthy"
-        )
 
 
 def observe_start(entry: dict[str, Any], observation: AttentionObservation | None) -> None:

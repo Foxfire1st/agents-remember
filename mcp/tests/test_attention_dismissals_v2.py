@@ -137,10 +137,8 @@ def _tasks(result: ProjectionInputs) -> list[TaskEntry]:
 
 def _queue(result: ProjectionInputs, *, now: datetime = NOW) -> list[AttentionItem]:
     return build_attention_queue(
-        result.providers,
         AnalyticalInputs(
             drift_snapshots=result.drift_snapshots,
-            setup_progress=result.setup_progress,
             engine_start_progress=result.engine_start_progress,
             native_attention=result.native_attention,
             attention_dismissals=result.attention_dismissals,

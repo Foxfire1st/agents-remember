@@ -23,8 +23,9 @@ This page walks through what that buys:
 - **Staleness you can prove** — a note records the commit it was checked against,
   so whether it still holds is a Git fact, not a guess.
 - **Search that helps *find* memory without ever becoming the memory** — semantic
-  and code-graph lookup are optional accelerators layered over the same
-  reviewable Markdown.
+  and code-graph lookup were optional accelerators layered over the same
+  reviewable Markdown; both providers are retired, so by-path reads carry the
+  product.
 - **Memory that moves through Git like code** — isolated worktrees, an
   all-or-nothing merge across code and memory, and provider indexes that clone
   into a worktree instead of rebuilding.
@@ -70,9 +71,9 @@ source of truth that no one reviews.
 
 Agents Remember takes the opposite stance. The durable memory of record is plain
 Markdown under Git: versioned, diffable, reviewable, and bound to the code by
-construction. Semantic and graph search still exist — but as opt-in accelerators
-for *finding* a note, never as the thing you trust. What you trust is the note,
-and whether Git says it still matches the code.
+construction. Semantic and graph search were optional accelerators for *finding*
+a note — both are retired now, and neither was ever the thing you trust. What
+you trust is the note, and whether Git says it still matches the code.
 
 ## The core idea: the path is the address
 
@@ -196,11 +197,11 @@ what the agent already knows, and a router that picks among them.
 - **By path** — the agent has a file in hand; the note is at its mirror address.
   Always available, needs nothing extra.
 - **By meaning** — the concept is known but the file is not. A semantic search
-  runs over the path-mirrored *onboarding*, so a fuzzy match returns a note whose
-  path then names the exact code file. Meaning becomes an address.
+  over the path-mirrored *onboarding* returned a note whose path then named the
+  exact code file. Its provider is retired, so that route has no engine now.
 - **By relationship** — an anchor is known but its connections are not. A
-  code-relationship graph answers callers, callees, dependencies, complexity, and
-  symbol lookups around that anchor.
+  code-relationship graph answered callers, callees, dependencies, complexity,
+  and symbol lookups around that anchor. That provider is retired too.
 
 The router chooses the *shape* of the missing context first, then the cheapest
 substrate that fits:
@@ -213,9 +214,8 @@ substrate that fits:
 
 These compose. A triage task can start from an anchor in a ticket, use the
 relationship graph to map nearby structure, then switch to intent to learn the
-code truths that make a change safe. And the whole stack degrades gracefully: the
-semantic and graph providers are opt-in and Dockerized, so with neither running
-the router still works on by-path and intent alone.
+code truths that make a change safe. Both provider-backed substrates are
+retired, so the router works on by-path and intent alone.
 
 The discipline that holds it together: provider output is *candidate routing
 evidence, not proof*. Source files, verified onboarding, drift checks, and
@@ -307,10 +307,9 @@ started this way only when the developer names the role and the task. The result
 request → trust-checkpoint → reframe-research → decide → build → close
 ```
 
-Before any code changes, the agent resolves context, checks drift and provider
-state, reframes the request into the best version of the task, gathers evidence,
-and waits for the developer to agree on that framing. Only then does it decide
-*how* to build:
+Before any code changes, the agent resolves context, checks drift, reframes the
+request into the best version of the task, gathers evidence, and waits for the
+developer to agree on that framing. Only then does it decide *how* to build:
 
 - a **research-only** answer that changes no code, or
 - a **durable task** with its own plan, checklist, and decision log — chat is
@@ -345,8 +344,8 @@ That server is a single process exposing a focused set of typed tools, and the
 boundary between them is the trust boundary:
 
 - **Read-only tools** compute facts with no side effects — orienting on a
-  repository, checking drift, summarizing provider health, querying the graph or
-  the semantic index, previewing a closeout. The agent can call these freely.
+  repository, checking drift, previewing a closeout. The agent can call these
+  freely.
 - **Mutating tools** — anything that writes Git history — are commit-gated. They
   run only behind an explicit intent note and a paired preview, and the preview
   is literally the apply path with the commit switched off. What you approve in a
@@ -413,9 +412,10 @@ The main loop is by-path memory, drift checks, and approval-gated updates. Real
 repositories also need the edge-case machinery that keeps that loop from
 becoming fragile:
 
-- **MCP authority settings** declare which repositories and providers the server
-  may touch, where transcripts go, which timeout caps apply, and how configured
-  roots stay inside allowed workspace paths.
+- **MCP authority settings** declare which repositories the server may touch
+  (old provider keys are reported once as unused), where transcripts go, which
+  timeout caps apply, and how configured roots stay inside allowed workspace
+  paths.
 - **Memory baseline adoption** lets an existing external-memory repo become the
   first ledgered baseline only after drift/status review and explicit acceptance
   when the memory is not proven current.
@@ -469,8 +469,8 @@ what your team already knows.
   gates.
 - [Architecture](architecture.md) — runtime, coordination, and memory
   repos.
-- [Providers](guides/providers.md) — the optional semantic and code-graph
-  providers.
+- [Providers](guides/providers.md) — the retired semantic and code-graph
+  providers, and how leftover state from an older install is cleaned up.
 - [External Memory](guides/use-external-memory.md) — separate memory repos and
   the ledger.
 - [Workflows](workflows.md) — the agent lifecycles and their build modes.

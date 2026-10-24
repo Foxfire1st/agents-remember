@@ -43,10 +43,10 @@ It owns installed skills, installed `AGENTS.md` templates, task files, notes, wo
 Agents reach memory through three substrates, matched to what they already know.
 
 - **By path** — when an agent has a file in hand, its note is located directly from the path: `src/foo/bar.ts` → `<memory-root>/onboarding/src/foo/bar.ts.md`. No lookup, ranking, or index step — the path *is* the address. Reads stay predictable, and unrelated-but-similar material stays out of context.
-- **By meaning** — when the concept is known but the file is not, semantic search over the memory finds candidate notes. This is the reverse of `code → onboarding`: a vague description leads to an onboarding note, whose path then names the code file, with pointers to the surrounding logic.
-- **By relationship** — when an anchor is known but its connections are not, a code-relationship graph answers callers, callees, and dependencies.
+- **By meaning** — when the concept is known but the file is not, semantic search over the memory found candidate notes. Its provider is retired, so this route has no engine now. This is the reverse of `code → onboarding`: a vague description led to an onboarding note, whose path then named the code file, with pointers to the surrounding logic.
+- **By relationship** — when an anchor is known but its connections are not, a code-relationship graph answered callers, callees, and dependencies. That provider is retired too.
 
-By-path notes are the core and need nothing extra; meaning and relationship are opt-in providers. The router that chooses among them is described next (it names the three *Intent*, *Semantics*, and *Relationship*). Whatever the route, what becomes *durable* memory is still drift-checked and approval-gated — finding is not the same as trusting.
+By-path notes are the core and need nothing extra. Meaning and relationship were served by two opt-in providers that are now retired, so by-path is the route with an engine today. The router that chooses among them is described next (it names the three *Intent*, *Semantics*, and *Relationship*). Whatever the route, what becomes *durable* memory is still drift-checked and approval-gated — finding is not the same as trusting.
 
 ## Retrieval Strategy Substrates
 
@@ -59,11 +59,12 @@ does the agent need next, and in what shape should that context arrive? It then
 chooses the memory substrate that best fits that intent.
 
 - `Semantics`: use when the concept is known, but the structure or location is
-  unknown. A semantic memory provider can search memory repos for candidate
-  routes or files.
+  unknown. A semantic memory provider searched memory repos for candidate
+  routes or files; that provider is retired, so this route has no engine now.
 - `Relationship`: use when an anchor is known, but the surrounding
   relationships, impact paths, callers, callees, or dependencies are unknown. A
-  relationship provider can search code structure for candidate connections.
+  relationship provider searched code structure for candidate connections; that
+  provider is retired too.
 - `Intent`: use when an anchor or location is known, but the hidden contracts,
   invariants, behavioral expectations, branch-valid truths, or code intent are
   unknown. Onboarding plus bounded source confirmation is the default substrate

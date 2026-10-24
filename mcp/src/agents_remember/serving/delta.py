@@ -3,7 +3,7 @@
 A transport-side concern kept out of the reducer: ``project_and_write`` produces full
 :class:`WorkspaceProjection` snapshots, and this module turns two consecutive snapshots
 into the minimal set of per-entity change events the ``state`` SSE channel emits. The
-reference-keyed task entries and id-keyed enclosures/providers makes the diff a simple by-key compare; the client merges each named
+reference-keyed task entries and id-keyed enclosures makes the diff a simple by-key compare; the client merges each named
 event into its store by the same key. Output ordering is deterministic (upserts in
 projection order, removals sorted) so replay/sim fixtures compare byte-for-byte.
 
@@ -76,7 +76,6 @@ class StableProjectionState:
     enclosures: dict[str, Any]
     tasks: dict[str, Any]
     task_counts: Any
-    providers: dict[str, Any]
     active_worktree_groups: list[str]
     metrics: Any
     analytics: Any
@@ -88,7 +87,6 @@ def stable_projection_state(projection: WorkspaceProjection) -> StableProjection
         tasks={item.key: _stable_dump(item) for item in projection.tasks},
         task_counts=_stable_dump(projection.taskCounts),
         enclosures={item.enclosure: _stable_dump(item) for item in projection.enclosures},
-        providers={item.id: _stable_dump(item) for item in projection.providers},
         active_worktree_groups=list(projection.activeWorktreeGroups),
         metrics=_stable_dump(projection.metrics),
         analytics=_stable_dump(projection.analytics),
@@ -100,7 +98,7 @@ class DeltaEvent:
     """One named SSE delta: an upserted projection node, or a removal marker.
 
     ``event`` is the SSE event name the client listens on (``task``,
-    ``task.removed``, ``enclosure``, ``provider``, ``metrics``, ``analytics``).
+    ``task.removed``, ``enclosure``, ``metrics``, ``analytics``).
     ``data`` is the upserted node (a projection ``BaseModel``) or, for a removal, a
     ``{key: id}`` marker.
     """
@@ -136,9 +134,6 @@ def diff_projection(
         deltas.append(DeltaEvent("taskCounts", current.taskCounts))
     deltas += _collection_deltas(
         "enclosure", current.enclosures, prev.enclosures, cur.enclosures, key="enclosure"
-    )
-    deltas += _collection_deltas(
-        "provider", current.providers, prev.providers, cur.providers, key="id"
     )
     if prev.active_worktree_groups != cur.active_worktree_groups:
         # A bare list isn't a node with a key, so it rides as a whole-value replacement

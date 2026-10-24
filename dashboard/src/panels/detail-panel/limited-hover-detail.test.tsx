@@ -116,7 +116,7 @@ it('carries both served seats into the constellation node and its accessible tex
       activeWorktreeGroups: [bound.worktreeGroup],
     }),
   );
-  const [worktree] = buildTopology([{ entry, enclosure: bound }], []).filter(
+  const [worktree] = buildTopology([{ entry, enclosure: bound }]).filter(
     (candidate) => candidate.kind === 'wt',
   );
 

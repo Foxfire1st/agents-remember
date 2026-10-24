@@ -22,27 +22,25 @@ from agents_remember.observer.projection import (
     LedgerNode,
     LedgerRefNode,
     RouteCoverageNode,
-    SetupProgressNode,
-    SetupSummaryNode,
     ToolReportNode,
 )
-from agents_remember.observer.reducer_impl._attention import observe_setup, observe_start
-from agents_remember.providers.setup_progress import progress_status, read_setup_progress
+from agents_remember.observer.reducer_impl._attention import observe_start
 from agents_remember.serving.projections.drift_snapshots import read_drift_snapshot
 from agents_remember.serving.projections.paths import (
     drift_snapshot_dir,
 )
 from agents_remember.serving.projections.snapshots_impl._common import (
-    _as_float,
     _as_int,
-    _current_phase_text,
     _file_age_seconds,
     _read_json,
     _report_label,
     _text_or_none,
     surface_paths,
 )
-from agents_remember.worktrees.start_progress import read_start_progress
+from agents_remember.worktrees.start_progress import (
+    is_retired_start_progress,
+    read_start_progress,
+)
 
 
 def read_start_progress_entries(
@@ -62,6 +60,10 @@ def read_start_progress_entries(
         if payload is None:
             if observation is not None:
                 observation.complete = False
+            continue
+        if is_retired_start_progress(payload):
+            # A retired provider gate is obsolete, not unreadable: skip it without marking the
+            # observation incomplete, so it reaches neither attention nor the process map.
             continue
         observe_start(payload, observation)
         updated = payload.get("updatedAt")
@@ -133,91 +135,6 @@ def read_drift_snapshots(
                 healthy=node.actionableCount == 0,
                 fingerprint=node.actionableFingerprint,
             )
-    return nodes
-
-
-def read_setup_summaries(
-    coordination_root: Path, *, now: datetime
-) -> list[SetupSummaryNode]:  # pragma: no cover
-    """Surface 2: the latest provider-setup summary per action.
-
-    Reads ``logs/providers/setup/last-<action>.json`` (the compact summary the
-    setup run writes); the ``-full`` debug copies are skipped.
-    """
-    directory = coordination_root / "logs" / "providers" / "setup"
-    if not directory.is_dir():
-        return []
-    nodes: list[SetupSummaryNode] = []
-    for path in sorted(directory.glob("last-*.json")):
-        if path.name.endswith("-full.json"):
-            continue
-        payload = _read_json(path)
-        if payload is None:
-            continue
-        generated = payload.get("generatedAt")
-        raw_counts = payload.get("resultCounts")
-        ok_value = payload.get("ok")
-        ready_value = payload.get("ready")
-        nodes.append(
-            SetupSummaryNode(
-                action=str(payload.get("action") or path.stem.removeprefix("last-")),
-                ok=ok_value if isinstance(ok_value, bool) else None,
-                ready=ready_value if isinstance(ready_value, bool) else None,
-                state=_text_or_none(payload.get("state")),
-                generatedAt=generated if isinstance(generated, str) else None,
-                snapshotStaleSeconds=age_seconds(generated, now)
-                if isinstance(generated, str)
-                else None,
-                resultCounts=(
-                    {str(key): _as_int(value) for key, value in raw_counts.items()}
-                    if isinstance(raw_counts, dict)
-                    else {}
-                ),
-            )
-        )
-    return nodes
-
-
-def read_setup_progress_nodes(  # pragma: no cover
-    coordination_root: Path,
-    *,
-    now: datetime,
-    active_worktree_groups: set[str] | None = None,
-    observation: AttentionObservation | None = None,
-) -> list[SetupProgressNode]:
-    """Surface 3: each worktree group's live provider-setup progress.
-
-    Projected through the producer's own ``progress_status`` so a ``running`` group
-    whose heartbeat went stale reads ``stale`` -- the boot-sequence widget data.
-    """
-    worktrees_root = coordination_root / "worktrees"
-    nodes: list[SetupProgressNode] = []
-    if observation is not None:
-        for group_path in surface_paths(worktrees_root, "*/*", observation):
-            if group_path.is_dir():
-                observation.observe(f"failed-setup:{group_path.name}")
-    for path in surface_paths(
-        worktrees_root, "*/*/provider-runtime/setup-progress.json", observation
-    ):
-        group = path.parent.parent.name
-        progress = read_setup_progress(path)
-        if progress is None:
-            if observation is not None:
-                observation.complete = False
-            continue
-        status = progress_status(progress, clock=lambda: now)
-        completed = progress.get("completedPhases")
-        node = SetupProgressNode(
-            group=group,
-            state=str(status.get("state", "unknown")),
-            currentPhase=_current_phase_text(status.get("currentPhase")),
-            heartbeatAgeSeconds=_as_float(status.get("heartbeatAgeSeconds")),
-            completedCount=len(completed) if isinstance(completed, list) else 0,
-            failedPhases=[str(line) for line in status.get("failedPhases", []) or []],
-        )
-        observe_setup(node, observation)
-        if active_worktree_groups is None or group in active_worktree_groups:
-            nodes.append(node)
     return nodes
 
 

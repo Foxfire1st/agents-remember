@@ -1,6 +1,6 @@
 // The constellation renderer (ported from mc2's buildConstel/layout/frame). Imperative canvas
 // over the pure ConstelNode model: starfield, ring guides, parent→child edges, comets on live
-// edges, provider satellites, pulsing nodes, hover hit-testing + click-through. React owns mount,
+// edges, pulsing nodes, hover hit-testing + click-through. React owns mount,
 // sizing, and the projection→model adapter; this stays imperative. Under the effect-freeze flag
 // it renders a single static frame (no rAF) so screenshots and visual assertions are stable.
 
@@ -33,7 +33,6 @@ export function constelColors(cssVar: CssVarReader): Record<ConstelStatus, strin
     core: cssVar("--ink", "#e8e8e8"),
     ok: cssVar("--cyan", "#7fd6ff"),
     warn: cssVar("--amber", "#e8a020"),
-    crit: cssVar("--alarm", "#ff3322"),
     idle: cssVar("--dormant", "#7a3030"),
   };
 }
@@ -54,7 +53,6 @@ interface Star {
 }
 
 const TAU = Math.PI * 2;
-const PROV_R = 26; // provider satellite orbit radius around the core
 
 interface ConstelScene {
   ctx: CanvasRenderingContext2D;
@@ -65,7 +63,6 @@ interface ConstelScene {
   comets: Comet[];
   nodes: ConstelNode[];
   T: number;
-  provSpin: number;
   lastComet: number;
   hovered: number;
   colors: Record<ConstelStatus, string>;
@@ -95,14 +92,8 @@ function layoutNodes(scene: ConstelScene): void {
   const cy = scene.ch / 2;
   const R = Math.min(scene.cw, scene.ch) * 0.44;
   for (const nd of scene.nodes) {
-    if (nd.kind === "prov") {
-      const par = scene.nodes[nd.parent];
-      nd.px = par.px + Math.cos(nd.poff + scene.provSpin) * PROV_R;
-      nd.py = par.py + Math.sin(nd.poff + scene.provSpin) * PROV_R;
-    } else {
-      nd.px = cx + Math.cos(nd.ang) * nd.rf * R;
-      nd.py = cy + Math.sin(nd.ang) * nd.rf * R;
-    }
+    nd.px = cx + Math.cos(nd.ang) * nd.rf * R;
+    nd.py = cy + Math.sin(nd.ang) * nd.rf * R;
   }
 }
 
@@ -170,7 +161,7 @@ function drawNode(scene: ConstelScene, nd: ConstelNode, idx: number): void {
 function spawnComet(scene: ConstelScene): void {
   const pool: number[] = [];
   for (let i = 0; i < scene.nodes.length; i++) {
-    if (scene.nodes[i].parent >= 0 && scene.nodes[i].kind !== "prov") pool.push(i);
+    if (scene.nodes[i].parent >= 0) pool.push(i);
   }
   if (!pool.length) return;
   const ci = pool[Math.floor(Math.random() * pool.length)];
@@ -214,11 +205,7 @@ function drawEdges(scene: ConstelScene): void {
   for (const nd of scene.nodes) {
     if (nd.parent < 0) continue;
     const par = scene.nodes[nd.parent];
-    if (nd.kind === "prov") {
-      ctx.globalAlpha = 0.1;
-      ctx.strokeStyle = nd.status === "ok" ? scene.edge : statusColor(scene, nd.status);
-      ctx.lineWidth = 0.6;
-    } else if (nd.kind === "wt") {
+    if (nd.kind === "wt") {
       // The enclosure node now carries the lifecycle status — colour its edge when not ok
       // (the signal the old task-rim edge used to provide before the rim was folded in).
       ctx.globalAlpha = nd.status === "ok" ? 0.16 : 0.3;
@@ -280,11 +267,8 @@ function drawCore(scene: ConstelScene, cx: number, cy: number): void {
   ctx.globalAlpha = 1;
 }
 
-function drawNodes(scene: ConstelScene, providerPass: boolean): void {
-  for (let i = 0; i < scene.nodes.length; i++) {
-    const isProvider = scene.nodes[i].kind === "prov";
-    if (isProvider === providerPass) drawNode(scene, scene.nodes[i], i);
-  }
+function drawNodes(scene: ConstelScene): void {
+  for (let i = 0; i < scene.nodes.length; i++) drawNode(scene, scene.nodes[i], i);
 }
 
 function drawLabels(scene: ConstelScene): void {
@@ -316,9 +300,8 @@ function renderScene(scene: ConstelScene): void {
   drawEdges(scene);
   if (!scene.frozen) drawComets(scene);
 
-  drawNodes(scene, true);
   drawCore(scene, cx, cy);
-  drawNodes(scene, false);
+  drawNodes(scene);
   drawLabels(scene);
 }
 
@@ -424,7 +407,6 @@ export function mountConstel(
     comets: [],
     nodes: initial, // swappable via update() so projection ticks never remount the renderer
     T: 0,
-    provSpin: 0,
     lastComet: 0,
     hovered: -1,
     colors: constelColors(v),
@@ -435,7 +417,6 @@ export function mountConstel(
 
   function frame(): void {
     scene.T += 16;
-    scene.provSpin += 0.004;
     if (scene.cw && scene.nodes.length) {
       layoutNodes(scene);
       renderScene(scene);

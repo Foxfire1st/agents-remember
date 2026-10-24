@@ -1,70 +1,97 @@
-# Providers
+# Providers (Retired)
 
-Agents Remember ships two optional context providers. They are opt-in: enable
-them in the MCP settings, and they run as Docker services.
+Agents Remember no longer ships its two optional context providers. Both are
+**retired** (MIK-R112): no product path installs, enables, starts, indexes, or
+queries them, the MCP tools that queried them left the surface, and the provider
+lifecycle CLI is gone. This page is the retirement account: what the two
+providers were, what an older installation can still leave behind, and how that
+leftover state is reported and cleaned up.
 
-| Provider id | Capability | What it indexes |
-| --- | --- | --- |
-| `codegraphcontext-code` (CGC) | code-relationship search | your code repository |
-| `grepai-memory` (grepai) | semantic-memory search | the memory / onboarding |
+| Provider id | Was | Indexed | State |
+| --- | --- | --- | --- |
+| `codegraphcontext-code` (CGC) | code-relationship search | your code repository | retired |
+| `grepai-memory` (grepai) | semantic-memory search | the memory / onboarding | retired |
 
-CGC answers structural questions (who calls this, what does this depend on);
-grepai answers "where is the memory about X" over onboarding content.
+CGC answered structural questions (who calls this, what does this depend on);
+grepai answered "where is the memory about X" over onboarding content. Neither
+answers anything now. Finding knowledge runs on by-path memory, onboarding
+notes, and drift checks, with the harness's own search tools for source code.
 
-## Requirements
+Durable memory was never theirs: Markdown + Git, drift-checked and
+approval-gated, whatever surfaced a candidate. The providers were only ever
+accelerators for *finding* knowledge, never the source of truth.
 
-- **Docker** running on the host (both providers run as containers).
-- **Ollama** with a pulled embedding model for `grepai-memory` (grepai's embedder
-  runs against Ollama). CGC does not need Ollama.
+## What remains
 
-If Docker is not running, nothing provider-side starts; if Ollama is not
-reachable, grepai indexes nothing. Operation is retired (see below); these
-requirements matter only for leftover processes from older installations.
+Five things still touch the retired providers. None of them revives one.
 
-## Enable
+1. **Cleanup of an older installation, on explicit request.** `runtime_install`
+   never deletes provider runtime folders. It reports the leftover folders with
+   the size of each tree; deletion belongs to the separate `providers-remove`
+   command, and nothing is removed unless you run it:
 
-Add the providers you want to the MCP settings `providers` block:
+   ```text
+   agents-remember providers-remove --dry-run
+   agents-remember providers-remove
+   ```
 
-```json
-{
-  "providers": {
-    "codegraphcontext-code": {},
-    "grepai-memory": {}
-  }
-}
-```
+   `--dry-run` reports the folders and their sizes and stops nothing. Without
+   it, the command stops the configured watchers first, then removes the
+   provider runtime folders, printing each folder's size and the total bytes
+   freed. It refuses
+   — and removes nothing — when its watcher stop fails, when a live process
+   still holds a folder open (it names the pid and command), or when the
+   provider root or a deletion target escapes the owned tree. Exit status is
+   non-zero on any of those refusals, and `0` when nothing remained or
+   everything was removed.
 
-Omit a provider (or the whole block) to run without it. See the
-[settings reference](../reference/settings-json.md) for the full shape.
+2. **Old settings keys, read and reported once.** The settings `providers`
+   block still parses so an older installation keeps loading, but its keys
+   never count as enabled and drive nothing. `runtime_install` reports them once
+   as unused (`unusedProviderKeys`, mirrored by `server_info`); remove the block
+   when the older installation is retired, or omit it entirely for a clean
+   installation.
 
-## Operation retired (MIK-R112)
+3. **An old watcher, stopped.** `runtime_install` stops leftover provider
+   watcher processes; that stop is its only watcher action. A failed stop is
+   recorded in the install result and the install continues.
 
-The provider tools left the surface: no product path installs, starts, or
-watches the two providers, and the provider lifecycle CLI is removed.
-`runtime_install` stops leftover watcher processes as its only watcher
-action and reports enabled provider keys once as unused; verify with
-`server_info`:
+4. **A periodic safety check over leftovers.** The provider-degradation
+   detector still samples the central provider metrics log and writes its state
+   under `<coordinationRoot>/logs/observer/providers/`. At `critical`, with
+   `failSafeEnabled` set, it can degrade and stop a leftover stack. It is a
+   safety check, not a revival: it starts nothing, and it is not a dashboard
+   provider view — there is no provider panel to read.
 
-```text
-server_info()
-```
+5. **Unrelated host configuration.** `.paseoRuntime.providers` in the global
+   agentic settings file lists the *model* providers (ACP harnesses) that the
+   Paseo host launches. It is live configuration with no relationship to the
+   retired search providers, and nothing on this page changes it.
 
-The settings `providers` block still parses so older installations keep
-loading, but enabled keys drive nothing. Keep the block only to document
-which keys an older installation carried; omit it (or the whole block)
-for a clean installation. If Docker is not running, nothing provider-side
-starts; grepai simply indexes nothing.
+## Requirements, only for leftovers
 
-## Troubleshooting
+- **Docker** running on the host, only to inspect or clear leftover provider
+  containers from an older installation.
+- **Ollama** with a pulled embedding model (`nomic-embed-text`) was grepai's
+  embedder, run as a Docker container. Nothing pulls or needs it now; it
+  matters only when clearing an old install.
 
-- **Old provider keys present** — `server_info` reports them once as
-  unused, and the install result carries the same list. Remove them from
-  settings when the older installation is retired.
-- **Leftover watcher processes** — `runtime_install` stops them before
-  refreshing the runtime tree; a failed stop is recorded in the install
-  result and the install continues.
-- **\"run runtime_install before provider operations\"** — the provider
-  runner integrity check failed; run `runtime_install()` first.
+Nothing provider-side ever started without Docker, and grepai indexed nothing
+without Ollama. With both providers retired, these requirements describe
+leftover state only.
 
-Providers are optional: Agents Remember's memory, onboarding, drift, and task
-workflows all work without them. They add faster code/memory search on top.
+## Troubleshooting leftovers
+
+- **Old provider keys present** — `server_info` reports them once as unused, and
+  the install result carries the same list. Remove them from settings when the
+  older installation is retired.
+- **Leftover watcher processes** — `runtime_install` stops them before refreshing
+  the runtime tree; a failed stop is recorded in the install result and the
+  install continues.
+- **Leftover runtime folders** — `runtime_install` reports them with their sizes.
+  `agents-remember providers-remove --dry-run` lists them again and stops
+  nothing; the same command without `--dry-run` deletes them, and refuses while
+  a live process holds one open or a watcher stop fails.
+
+Memory, onboarding, drift, and task workflows all work without the retired
+providers.

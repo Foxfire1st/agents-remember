@@ -11,7 +11,7 @@ served contract honest.
 The shapes are client-agnostic (North-Star #2): a dashboard, a future TUI, and
 an orchestrating agent are equal clients. The state tree is expressed as linked
 one reference-keyed task collection with child references and bound worktree
-facts, plus unbound enclosures and providers. Clients read these published
+facts, plus unbound enclosures. Clients read these published
 relationships without reconstructing task membership or activity.
 """
 
@@ -117,36 +117,6 @@ class EnclosureNode(BaseModel):
     actions: list[ActionAvailability] = Field(default_factory=list)
 
 
-class ProviderNode(BaseModel):
-    """One provider's current-state snapshot (data surfaces 1 and 4).
-
-    ``snapshotStaleSeconds`` is the age of the ``current.json`` file: provider
-    state is call-triggered and stale between calls, so the reducer surfaces how
-    old the snapshot is rather than pretending it is live. Workspace providers
-    can be aggregate nodes or repo-covered nodes when the provider snapshot
-    carries per-repo evidence. Worktree providers carry ``worktreeGroup`` and
-    bind to their isolated enclosure.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    state: str
-    ok: bool | None = None
-    watcherUp: bool = False
-    indexingState: str = "unknown"
-    snapshotStaleSeconds: float | None = None
-    # Binding (slice 5c + task 12 S2): a provider is either workspace-scoped or
-    # part of a worktree's isolated stack. Workspace providers can carry repoId
-    # when current-state has repo coverage evidence (CGC watcher rows, GrepAI
-    # targetRepos); worktreeGroup remains the join key back to an enclosure and
-    # takes precedence over repoId client-side.
-    scope: str = "workspace"  # "workspace" | "worktree"
-    role: str | None = None  # "code" (CGC) | "memory" (GrepAI)
-    repoId: str | None = None
-    worktreeGroup: str | None = None
-
-
 class Metrics(BaseModel):
     """Workspace host-observation diagnostics; task counts belong to task entries."""
 
@@ -160,8 +130,8 @@ class DriftSnapshotNode(BaseModel):
 
     The reducer never classifies drift (that is git-per-sidecar -- far too costly for
     a poll-cadence write); it reads the snapshot the memory_quality drift run
-    persisted and surfaces ``snapshotStaleSeconds`` (age of ``checkedAt``), exactly
-    like a provider tile. The full per-sidecar rows stay in the snapshot file; the
+    persisted and surfaces ``snapshotStaleSeconds`` (age of ``checkedAt``), the same
+    age honesty every snapshot-backed surface carries. The full per-sidecar rows stay in the snapshot file; the
     projection carries only the classification counts a gauge needs.
     """
 
@@ -177,37 +147,6 @@ class DriftSnapshotNode(BaseModel):
     memoryRoot: str | None = None
     reportPath: str | None = None
     snapshotStaleSeconds: float | None = None
-
-
-class SetupSummaryNode(BaseModel):
-    """The latest provider-setup outcome for one action (slice 3b, surface 2)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    action: str
-    ok: bool | None = None
-    ready: bool | None = None
-    state: str | None = None
-    generatedAt: str | None = None
-    snapshotStaleSeconds: float | None = None
-    resultCounts: dict[str, int] = Field(default_factory=dict)
-
-
-class SetupProgressNode(BaseModel):
-    """A worktree group's live provider-setup progress (slice 3b, surface 3).
-
-    Projected through ``setup_progress.progress_status``, so a ``running`` group
-    whose heartbeat went stale reads ``stale`` -- the boot-sequence widget data.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    group: str
-    state: str
-    currentPhase: str | None = None
-    heartbeatAgeSeconds: float | None = None
-    completedCount: int = 0
-    failedPhases: list[str] = Field(default_factory=list)
 
 
 class RouteCoverageNode(BaseModel):
@@ -314,7 +253,6 @@ class AttentionItem(BaseModel):
     waitSeconds: float | None = None
     enclosure: str | None = None
     repoId: str | None = None
-    providerId: str | None = None
     # Complete actionable findings from the native drift producer, excluding its clock.
     actionableFingerprint: str | None = None
     itemClass: AttentionItemClass = "operational"
@@ -353,28 +291,12 @@ class CommitRefNode(BaseModel):
     factState: ProcessFactState = "missing"
 
 
-class ProviderBootNode(BaseModel):
-    """One isolated engine in a worktree's provider runtime: CGC (code) or GrepAI (memory).
-
-    The boot *sequence* (seed/clone/watcher phases) lives on the owning
-    :class:`EngineProcessNode` because provider setup is one progress file per worktree
-    group; this node is the engine's identity + its current runtime health.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    role: str  # "code" (CGC) | "memory" (GrepAI)
-    runtimeState: str  # nominal | indexing | down | configured | missing | unknown
-    factState: ProcessFactState = "observed"
-
-
 class EngineProcessEdge(BaseModel):
     """One conduit in the process map, with a state-backed visual treatment (slice 5e).
 
-    Edges are derived from facts, never decoration: a ``cgc-seed`` edge reads ``running``
-    only while the seed phase is live, ``failed`` on a failed phase, ``planned`` before it
-    starts -- so an animated conduit always means an observed transition.
+    Edges are derived from facts, never decoration: a worktree-add edge reads ``complete``
+    only where the checkout was observed, ``planned`` before it starts -- so an animated
+    conduit always means an observed transition.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -419,11 +341,11 @@ class LandingRefNode(BaseModel):
 class EngineProcessNode(BaseModel):
     """One worktree enclosure as a state-backed process -- the Engine Room's unit (slice 5e).
 
-    Composed (like ``attentionQueue``) from the contract + status guidance + provider boot +
-    lifecycle, **not** read from a new file. The center of the Engine Room is this enclosure,
-    not a provider card: the official source line, the code/memory worktrees, the contract
-    coupling them, and the two isolated engines bound to that worktree group. ``health`` and
-    the per-side ``factState``s carry the observed/derived/planned/missing honesty 5e demands.
+    Composed (like ``attentionQueue``) from the contract + status guidance +
+    lifecycle, **not** read from a new file. The center of the Engine Room is this enclosure:
+    the official source line, the code/memory worktrees and the contract coupling them.
+    ``health`` and the per-side ``factState``s carry the observed/derived/planned/missing
+    honesty 5e demands.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -465,16 +387,6 @@ class EngineProcessNode(BaseModel):
     # (read from the official ledger); None until carried. Display-only -- 5k renders the seam.
     carryoverDoneAt: str | None = None
 
-    # Provider boot: one setup-progress sequence per worktree group (slice 3b reused).
-    setupState: str | None = None  # running|stale|failed|failed-unchecked|ok|complete|prepared
-    currentPhase: str | None = None
-    completedPhases: list[str] = Field(default_factory=list)
-    failedPhases: list[str] = Field(default_factory=list)
-    heartbeatAgeSeconds: float | None = None
-    seedFallback: bool = False
-    retryArgs: dict[str, Any] | None = None
-
-    providers: list[ProviderBootNode] = Field(default_factory=list)
     edges: list[EngineProcessEdge] = Field(default_factory=list)
     # The successful-landing arc -- remote/PR refs observed during closeout/integration (5h). Empty
     # until the lifecycle reaches a landing phase or when no probe could run.
@@ -495,7 +407,7 @@ class EngineProcessFacts:
     An *input* carrier, not a served node: ``contract`` is the pure ``contract_payload``
     dump (branches, commits, paths, gate states); ``guidance`` is the pure
     ``lifecycle_guidance`` (phase + next operation); ``status`` is the best-effort
-    ``status_payload`` (worktree existence, dirty flags, base freshness, provider boot) or
+    ``status_payload`` (worktree existence, dirty flags, base freshness) or
     ``None`` when its git probes could not run. Defined here -- the module both the I/O reader
     (:mod:`agents_remember.observer.snapshots`) and the pure
     :func:`agents_remember.observer.reducer.build_engine_processes` already import -- so the
@@ -611,8 +523,8 @@ class TaskEntry(TaskState):
 class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 
-    Kept apart from the structural task/enclosure/provider tree so the
-    client-agnostic core stays small. Converted drift counts, provider setup/progress,
+    Kept apart from the structural task/enclosure tree so the
+    client-agnostic core stays small. Converted drift counts,
     route coverage, tool reports and memory-ledger currency describe the retained analytics.
 
     ``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*
@@ -623,19 +535,17 @@ class Analytics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     driftSnapshots: list[DriftSnapshotNode] = Field(default_factory=list)
-    setupSummaries: list[SetupSummaryNode] = Field(default_factory=list)
-    setupProgress: list[SetupProgressNode] = Field(default_factory=list)
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
     toolReports: list[ToolReportNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
     attentionQueue: list[AttentionItem] = Field(default_factory=list)
     # The enclosure-centered Engine Room process map (slice 5e): one node per worktree
-    # enclosure, derived from contract, status guidance and provider boot.
+    # enclosure, derived from contract and status guidance.
     engineProcesses: list[EngineProcessNode] = Field(default_factory=list)
 
 
 class WorkspaceProjection(BaseModel):
-    """The resolved tasks, unbound worktrees, providers, counts and analytics."""
+    """The resolved tasks, unbound worktrees, counts and analytics."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -644,7 +554,6 @@ class WorkspaceProjection(BaseModel):
     tasks: list[TaskEntry] = Field(default_factory=list)
     taskCounts: TaskCounts = Field(default_factory=TaskCounts)
     enclosures: list[EnclosureNode] = Field(default_factory=list)
-    providers: list[ProviderNode] = Field(default_factory=list)
     # Worktree-group basenames admitted by their nonterminal enclosure contracts.
     # Engine Room and Topology use the same active_enclosure_worktree_groups
     # membership. This is operational admission, never a task-stage source.

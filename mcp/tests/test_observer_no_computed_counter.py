@@ -57,7 +57,7 @@ class NoComputedCounterTests(unittest.TestCase):
             }
             (root / "latest-state.json").write_text(json.dumps(old))
             proj = project_workspace(
-                structure=WorkspaceStructure(enclosures=[], providers=[]),
+                structure=WorkspaceStructure(enclosures=[]),
                 now=FRESH,
             )
             write_projection(root, proj)
@@ -69,7 +69,7 @@ class NoComputedCounterTests(unittest.TestCase):
 
     def test_workspace_metrics_carry_no_token_total(self) -> None:
         proj = project_workspace(
-            structure=WorkspaceStructure(enclosures=[], providers=[]),
+            structure=WorkspaceStructure(enclosures=[]),
             now=FRESH,
         )
         self.assertNotIn("totalTokens", proj.metrics.model_dump())

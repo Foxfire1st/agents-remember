@@ -8,12 +8,14 @@ Response-model convention (one place, deliberately two tiers):
   slim agent answer ``SlimContextPacket``; the whole ``ContextPacketV2`` stays
   behind the answer's log) and ``server_info`` are the
   exemplars; new AR-owned responses should follow them.
-- Tools that surface provider-native / raw diagnostic detail (CodeGraphContext,
-  GrepAI, Docker, watcher output) use a FLEXIBLE model
+- Tools that surface provider-native / raw diagnostic detail (a worktree command's
+  own output, skill installation, benchmark runs, memory-quality detail) use a FLEXIBLE model
   (``FlexibleResponseModel`` / ``FlexibleToolResponse``, ``extra="allow"``) ON
-  PURPOSE: that payload is owned by the upstream provider and must not be
-  rejected when the provider adds a field. This is a tolerated-drift surface,
+  PURPOSE: that payload is owned by the upstream producer and must not be
+  rejected when the producer adds a field. This is a tolerated-drift surface,
   not an un-validated one -- the envelope (ok/operation/tokens) is still typed.
+  The retired CGC/GrepAI search-provider tools are not part of this tier: they are
+  gone, not merely flexible.
 
 Application entry points return plain dicts; ``_tool_payload`` validates them against the
 model registered here and finalizes token counts. Pick STRICT unless the

@@ -22,10 +22,10 @@ Research-only answers, minimal `w-02-light-task-workflow` tasks, and master + li
 Three ways, matched to what the agent already knows:
 
 - **By path** — when it has the file in hand, the note is at a deterministic path (`src/foo/bar.ts` → `<memory-root>/onboarding/src/foo/bar.ts.md`). No ranking, embedding threshold, or index step — the path is the address, so reads stay predictable.
-- **By meaning** — when it knows the concept but not the file, semantic search over the memory returns candidate notes.
-- **By relationship** — when it knows an anchor but not its connections, a code graph answers callers, callees, and dependencies.
+- **By meaning** — when it knows the concept but not the file, semantic search over the memory was the route; its provider is retired, so this route has no engine now.
+- **By relationship** — when it knows an anchor but not its connections, a code graph answered callers, callees, and dependencies; that provider is retired too.
 
-By-path needs nothing extra; meaning and relationship are opt-in providers. See [Concepts](concepts.md) and [Providers](guides/providers.md).
+By-path needs nothing extra, and it is the route with an engine today. See [Concepts](concepts.md) and [Providers](guides/providers.md) — the providers page is now a retirement and old-install cleanup account.
 
 ### Is this just documentation?
 
@@ -121,7 +121,7 @@ Task workflow systems organize work. Agents Remember primarily preserves codebas
 
 ### How is this different from vector memory or graph memory?
 
-It isn't an alternative to them — it uses them. Semantic search over the memory and a code-relationship graph are first-class (opt-in) substrates for *finding* memory. What's distinctive is what memory *is*: durable notes that are versioned, reviewable, diffable, drift-checked against source, and updated only after approved work lands — independent of how they were found.
+It isn't an alternative to them — it used them. Semantic search over the memory and a code-relationship graph were first-class substrates for *finding* memory; both providers are retired, so by-path reads carry that job now. What's distinctive is what memory *is*: durable notes that are versioned, reviewable, diffable, drift-checked against source, and updated only after approved work lands — independent of how they were found.
 
 ## What This Is Not
 
@@ -133,4 +133,4 @@ The durable memory of record is not:
 - a replacement for READMEs, docstrings, or architecture docs
 - a reason to skip human approval
 
-It is a Markdown and Git based memory convention with skills that help agents follow it consistently. The optional providers (semantic search, code graph) build derived indexes *over* that memory and code to help find it — they do not replace it as the source of truth.
+It is a Markdown and Git based memory convention with skills that help agents follow it consistently. The former providers (semantic search, code graph) built derived indexes *over* that memory and code to help find it — they never replaced it as the source of truth, and they are retired now.

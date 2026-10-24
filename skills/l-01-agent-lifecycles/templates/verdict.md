@@ -246,7 +246,7 @@ The master owner records its review begin and result on the canonical master doc
 ## Lens 2 — Scoped Implementation Evidence
 - targeted leaf acceptance: current | failing:<which>
 - full quality/test suite: not run unless explicitly requested — <request/result if any>
-- regressions vs the past (route indexes · CGC · GrepAI): none | <finding>
+- regressions vs the past (route indexes · native search): none | <finding>
 - backing evidence file: <quality/impact report path>
 
 ## Lens 3 — Onboarding vs Code
@@ -314,7 +314,7 @@ reviewer does not.
 ## Lens 2 — Scoped Implementation Evidence
 - targeted branch evidence: pass | failing:<which> | not-run:<reason>
 - full system/tools.md suite: not run unless explicitly requested — <request/result if any>
-- branch-wide regressions vs the past and across masters (route indexes · CGC · GrepAI): none | <finding>
+- branch-wide regressions vs the past and across masters (route indexes · native search): none | <finding>
 - backing evidence file: <quality/impact report path>
 
 ## Lens 3 — Onboarding vs Code

@@ -259,7 +259,7 @@ def _runtime(tmp_path, port):
         _config(tmp_path),
         ProjectionCadence(interval=100),
         LIVE_PROJECTION_CLOCK,
-        LiveProjectionInputs(provider_state=False, landing_state=False, change_watch=False),
+        LiveProjectionInputs(landing_state=False, change_watch=False),
         ServingCollaborators(review_memory_root=port),
     )
     return runtime
@@ -364,9 +364,7 @@ def test_app_factory_passes_the_connection_root_port(tmp_path):
 
     app = create_app(
         _config(tmp_path),
-        live_inputs=LiveProjectionInputs(
-            provider_state=False, landing_state=False, change_watch=False
-        ),
+        live_inputs=LiveProjectionInputs(landing_state=False, change_watch=False),
         collaborators=ServingCollaborators(review_memory_root=port),
     )
     endpoint = _stream_endpoint(app)
@@ -403,9 +401,7 @@ def test_real_http_disconnect_retires_native_watch_before_server_shutdown(tmp_pa
 
     app = create_app(
         _config(tmp_path),
-        live_inputs=LiveProjectionInputs(
-            provider_state=False, landing_state=False, change_watch=False
-        ),
+        live_inputs=LiveProjectionInputs(landing_state=False, change_watch=False),
         collaborators=ServingCollaborators(review_memory_root=root),
     )
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning", timeout_graceful_shutdown=1))

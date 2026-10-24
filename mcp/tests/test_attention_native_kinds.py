@@ -21,7 +21,7 @@ from agents_remember.observer.native_attention import (
     NativeAttentionFacts,
     PermissionWait,
 )
-from agents_remember.observer.projection import ProviderNode, TaskEntry
+from agents_remember.observer.projection import TaskEntry
 from agents_remember.observer.reducer import AnalyticalInputs, build_attention_queue
 
 NOW = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
@@ -63,7 +63,6 @@ def _ago(seconds: float) -> str:
 def _queue(facts: NativeAttentionFacts, tasks: list[TaskEntry] | None = None, now=None):
     dismissed: dict[str, AttentionDismissalRecord] = {}
     return build_attention_queue(
-        [],
         AnalyticalInputs(native_attention=facts, attention_dismissals=dismissed),
         tasks or [],
         now or NOW,
@@ -334,30 +333,25 @@ def _case_test_acknowledging_one_occurrence_leaves_a_later_one_visible() -> None
         attention_dismissals=dismissed,
     )
 
-    assert build_attention_queue([], given, [_task()], NOW) == []
+    assert build_attention_queue(given, [_task()], NOW) == []
 
     given = AnalyticalInputs(
         native_attention=NativeAttentionFacts(notices=(first, later), notices_complete=True),
         attention_dismissals=dismissed,
     )
-    assert [row.id for row in build_attention_queue([], given, [_task()], NOW)] == [
-        "task-landed:def"
-    ]
+    assert [row.id for row in build_attention_queue(given, [_task()], NOW)] == ["task-landed:def"]
 
     given = AnalyticalInputs(
         native_attention=NativeAttentionFacts(notices=(later,), notices_complete=True),
         attention_dismissals=dismissed,
     )
-    assert [row.id for row in build_attention_queue([], given, [_task()], NOW)] == [
-        "task-landed:def"
-    ]
+    assert [row.id for row in build_attention_queue(given, [_task()], NOW)] == ["task-landed:def"]
 
 
 # --- F. the real reducer path ranks a mixed queue ----------------------------
 
 
 def _case_test_ranking_holds_across_a_mixed_native_queue() -> None:
-    provider = ProviderNode(id="cgc", state="failed", ok=False, snapshotStaleSeconds=5)
     tasks = [_task(event_at=None)]
     facts = NativeAttentionFacts(
         permissions=(
@@ -388,14 +382,12 @@ def _case_test_ranking_holds_across_a_mixed_native_queue() -> None:
     )
 
     queue = build_attention_queue(
-        [provider],
         AnalyticalInputs(native_attention=facts),
         tasks,
         NOW,
     )
 
     assert [row.id for row in queue] == [
-        "provider-down:cgc",
         "task-landed:abc",
         "permission-wait:agent-1:p1",
         "permission-wait:agent-1:p0",
@@ -404,7 +396,6 @@ def _case_test_ranking_holds_across_a_mixed_native_queue() -> None:
         f"task-stalled:{LEAF_KEY}:{_ago(STALL_SECONDS)}",
     ]
     assert [row.severity for row in queue] == [
-        "alarm",
         "info",
         "warn",
         "warn",

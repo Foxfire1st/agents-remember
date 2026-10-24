@@ -23,6 +23,7 @@ from agents_remember.serving.change_watcher import (
     ChangePacer,
     ProjectionInputWatcher,
 )
+from agents_remember.serving.projections.paths import drift_snapshot_dir
 from agents_remember.serving.projections.projection_inputs import (
     ALL_PROJECTION_DOMAINS,
     HEALING_PROJECTION_DOMAINS,
@@ -104,7 +105,13 @@ class _CommonFailureMatrix:
         self.attempts = {"discovery": 0, "native": 0, "refresh": 0}
         self.clock = watcher_module.time.monotonic()
         self.runner: asyncio.Task[None] | None = None
-        self.new_root = root / "logs" / "providers" / "status"
+        # MIK-R199 removed logs/providers/{status,setup} from the watched roots (no surviving
+        # projection reader reads them), so the root this matrix makes appear late is one
+        # projection_input_roots still returns: the drift snapshot directory, whose reader is
+        # the drift projection. The property is unchanged -- a root that does not exist during
+        # the outage, appears while the watcher is down, and is registered on the next attempt.
+        self.new_root = drift_snapshot_dir(root)
+        self.new_root_file = self.new_root / "repo__main.json"
 
     def roots(self, cfg: McpRuntimeConfig) -> list[Path]:
         self.attempts["discovery"] += 1
@@ -135,7 +142,7 @@ class _CommonFailureMatrix:
         yield set()
         if len(self.retry_stamps) == 2:
             assert watcher_module.watchfiles is not None
-            yield {(watcher_module.watchfiles.Change.modified, str(self.new_root / "current.json"))}
+            yield {(watcher_module.watchfiles.Change.modified, str(self.new_root_file))}
             self.recovered.set()
         await stop_event.wait()
 
@@ -160,7 +167,7 @@ class _CommonFailureMatrix:
         self.case.assertIn(watcher_module.ProjectionDomain.TASKS, self.pacer._pending_domains)
         if len(self.retry_stamps) == 2:
             self.new_root.mkdir(parents=True)
-            (self.new_root / "current.json").write_text("{}")
+            self.new_root_file.write_text("{}")
         await self.real_sleep(0)
 
     async def run(self) -> None:
@@ -182,9 +189,7 @@ class _CommonFailureMatrix:
                 self.case.assertTrue(self.pacer.watcher_healthy)
                 self.case.assertIsNone(self.pacer.watcher_down_since)
                 self.case.assertIn(self.new_root, self.registered_roots[-1])
-                self.case.assertIn(
-                    str(self.new_root / "current.json"), self.pacer._pending_distinct_set
-                )
+                self.case.assertIn(str(self.new_root_file), self.pacer._pending_distinct_set)
                 self.case.assertIn(
                     watcher_module.ProjectionDomain.TASKS, self.pacer._pending_domains
                 )

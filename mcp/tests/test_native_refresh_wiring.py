@@ -394,7 +394,7 @@ def _case_test_a_pass_builds_the_canonical_task_list_once_and_the_rows_reuse_it(
         task_entries=state._task_entries,
     )
     projection = project_workspace(
-        structure=WorkspaceStructure(enclosures=[], providers=[]), given=given, now=NOW
+        structure=WorkspaceStructure(enclosures=[]), given=given, now=NOW
     )
     assert joins["reducer"] == 0, "the reducer reused the canonical entries"
     assert projection.tasks == []

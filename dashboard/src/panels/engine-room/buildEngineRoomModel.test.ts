@@ -21,10 +21,6 @@ function node(over: Partial<EngineProcessNode> = {}): EngineProcessNode {
     closeoutStatus: 'not-started',
     integrationStatus: 'not-started',
     cleanup: 'pending',
-    completedPhases: [],
-    failedPhases: [],
-    seedFallback: false,
-    providers: [],
     edges: [],
     landing: [],
     ledgerRows: [],
@@ -46,7 +42,7 @@ describe('buildEngineRoomModel', () => {
     expect(Object.keys(model.processes[0] ?? {}).sort()).toEqual(['enclosureKey', 'node']);
   });
 
-  it('builds no provider fallback from an empty process surface (MIK-R112)', () => {
+  it('builds nothing from an empty process surface — no synthesized fallback pod', () => {
     const model = buildEngineRoomModel([]);
     expect(model.processes).toHaveLength(0);
   });

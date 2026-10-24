@@ -1,5 +1,4 @@
 import { css } from "../../../styled-system/css";
-import { fmtWait } from "../../data/selectors";
 import { Affordance } from "../../grammar/Affordance";
 import type { CommitRefNode, EngineProcessNode } from "../../types/projection";
 import {
@@ -11,7 +10,6 @@ import {
   factChip,
   missingNotice,
   missingTitle,
-  phaseLineList,
   sectionLabel,
 } from "./styles";
 
@@ -37,11 +35,6 @@ function CommitRow({ label, refNode }: { label: string; refNode: CommitRefNode }
 }
 
 export function DiagnosticsPanel({ node }: { node: EngineProcessNode }) {
-  // 5k F3 — during the power-down (cleanup-pending / abandon) the runtimes are being torn down, so the
-  // diagnostics must not keep reading "ok": show "powering down" and de-emphasize the (now-stale)
-  // lines. Derived from `phase` on the frontend (the live runtime is pre-05m, so it sends no power-down signal).
-  const poweringDown = node.phase === "cleanup-pending" || node.phase === "abandoned";
-  const setupLine = setupLineFor(node, poweringDown);
   return (
     <div className={diagPanel} data-testid="diagnostics">
       <span className={sectionLabel}>Diagnostics</span>
@@ -62,15 +55,6 @@ export function DiagnosticsPanel({ node }: { node: EngineProcessNode }) {
           <span className={diagValue}>{node.sourceLineage.state}</span>
         </div>
       ) : null}
-      {setupLine ? (
-        <div className={diagRow}>
-          <span className={diagKey}>Setup</span>
-          <span className={diagValue}>{setupLine}</span>
-        </div>
-      ) : null}
-      {node.completedPhases.length > 0 || node.failedPhases.length > 0 ? (
-        <PhaseLineList node={node} poweringDown={poweringDown} />
-      ) : null}
       <DiagnosticActionRow node={node} />
       {node.missingFacts.length > 0 ? <MissingFacts facts={node.missingFacts} /> : null}
       {node.sourceFiles.length > 0 ? (
@@ -82,43 +66,6 @@ export function DiagnosticsPanel({ node }: { node: EngineProcessNode }) {
         </div>
       ) : null}
     </div>
-  );
-}
-
-function setupLineFor(node: EngineProcessNode, poweringDown: boolean): string {
-  return poweringDown
-    ? ["powering down", node.currentPhase].filter(Boolean).join(" · ")
-    : [
-        node.setupState,
-        node.heartbeatAgeSeconds !== undefined
-          ? `heartbeat ${fmtWait(node.heartbeatAgeSeconds)}`
-          : undefined,
-        node.currentPhase,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-}
-
-function PhaseLineList({
-  node,
-  poweringDown,
-}: {
-  node: EngineProcessNode;
-  poweringDown: boolean;
-}) {
-  return (
-    <ul className={phaseLineList}>
-      {node.completedPhases.map((line) => (
-        <li key={line} className={css({ color: poweringDown ? "muted" : "mint" })}>
-          {poweringDown ? "◦" : "✓"} {line}
-        </li>
-      ))}
-      {node.failedPhases.map((line) => (
-        <li key={line} className={css({ color: "alarm" })}>
-          ✗ {line}
-        </li>
-      ))}
-    </ul>
   );
 }
 

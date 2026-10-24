@@ -2,7 +2,7 @@
 
 The filesystem watcher names which projection domain changed. This module retains one
 bounded snapshot of each reader domain so a host activity write does not re-enumerate task
-documents, drift snapshots, provider setup, and Engine Room facts. Each domain is replaced
+documents, drift snapshots, and Engine Room facts. Each domain is replaced
 as a whole when invalidated; deletion therefore reclaims retained rows on that same refresh.
 """
 
@@ -31,10 +31,7 @@ from agents_remember.observer.projection import (
     EnclosureNode,
     EngineProcessFacts,
     LedgerNode,
-    ProviderNode,
     RouteCoverageNode,
-    SetupProgressNode,
-    SetupSummaryNode,
     ToolReportNode,
 )
 from agents_remember.observer.reducer import enclosure_actions
@@ -49,7 +46,6 @@ from agents_remember.observer.task_entries import (
 )
 from agents_remember.observer.worktree_provider_admission import (
     active_enclosure_worktree_groups,
-    admitted_worktree_groups,
 )
 from agents_remember.serving.projections.contract_snapshot import (
     ContractSnapshot,
@@ -66,9 +62,6 @@ from agents_remember.serving.projections.snapshots import (
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
-    read_providers,
-    read_setup_progress_nodes,
-    read_setup_summaries,
     read_start_progress_entries,
     read_tool_reports,
     refresh_engine_process_landing,
@@ -110,7 +103,6 @@ class ProjectionDomain(StrEnum):
     TASKS = "tasks"
     WORKSPACE = "workspace"
     DRIFT = "drift"
-    PROVIDERS = "providers"
     START_PROGRESS = "start-progress"
     TOOL_REPORTS = "tool-reports"
     HOST_ACTIVITY = "host-activity"
@@ -266,10 +258,7 @@ def _is_canonical_task_doc(tasks_root: Path, path: Path) -> bool:
 @dataclass(frozen=True)
 class ProjectionInputs:
     enclosures: list[EnclosureNode]
-    providers: list[ProviderNode]
     drift_snapshots: list[DriftSnapshotNode]
-    setup_summaries: list[SetupSummaryNode]
-    setup_progress: list[SetupProgressNode]
     route_coverage: list[RouteCoverageNode]
     tool_reports: list[ToolReportNode]
     ledgers: list[LedgerNode]
@@ -347,10 +336,7 @@ class ProjectionInputState:
         self._contracts: ContractSnapshot | None = None
         self._task_refresh_pending = False
         self._enclosures: list[EnclosureNode] = []
-        self._providers: list[ProviderNode] = []
         self._drift_snapshots: list[DriftSnapshotNode] = []
-        self._setup_summaries: list[SetupSummaryNode] = []
-        self._setup_progress: list[SetupProgressNode] = []
         self._tool_reports: list[ToolReportNode] = []
         self._task_sources: list[TaskDocumentSource] = []
         self._closeout_queues: list[CloseoutQueueNode] = []
@@ -361,7 +347,6 @@ class ProjectionInputState:
         self._route_coverage: list[RouteCoverageNode] = []
         self._ledgers: list[LedgerNode] = []
         self._surfaces_at: datetime | None = None
-        self._provider_groups: set[str] = set()
         self._engine_groups: set[str] = set()
         self._ages_at: datetime | None = None
         self._host_activity_reader = HostActivityInput(
@@ -437,15 +422,11 @@ class ProjectionInputState:
         if not self._host_activity_started or pass_.refresh.affects(ProjectionDomain.HOST_ACTIVITY):
             self._host_activity = self._host_activity_reader.read(config)
             self._host_activity_started = True
-        provider_groups = admitted_worktree_groups(self._enclosures)
         engine_groups = active_enclosure_worktree_groups(self._enclosures)
-        providers = ActiveGroups(provider_groups, provider_groups != self._provider_groups)
         engines = ActiveGroups(engine_groups, engine_groups != self._engine_groups)
-        self._provider_groups = provider_groups
         self._engine_groups = engine_groups
 
         observations: list[AttentionObservation] = []
-        self._refresh_providers(config, pass_, providers, observations)
         # MIK-R200 rule 9: the five native facts are re-derived from retained inputs and the
         # files their owners publish into -- no host poll, no second timer, no store sweep.
         # L190-R1-F11: the pass names the native domains that actually moved, so the reader
@@ -510,10 +491,7 @@ class ProjectionInputState:
         self._ages_at = now
         return ProjectionInputs(
             enclosures=self._enclosures,
-            providers=self._providers,
             drift_snapshots=self._drift_snapshots,
-            setup_summaries=self._setup_summaries,
-            setup_progress=self._setup_progress,
             route_coverage=routes,
             tool_reports=self._tool_reports,
             ledgers=ledgers,
@@ -676,34 +654,6 @@ class ProjectionInputState:
         retained_sources.update({source.path: source for source in sources})
         self._task_sources = [retained_sources[path] for path in sorted(retained_sources)]
 
-    def _refresh_providers(
-        self,
-        config: McpRuntimeConfig,
-        pass_: RefreshPass,
-        groups: ActiveGroups,
-        observations: list[AttentionObservation],
-    ) -> None:
-        now = pass_.now
-        providers_changed = pass_.refresh.is_heartbeat or pass_.refresh.affects(
-            ProjectionDomain.PROVIDERS
-        )
-        if providers_changed:
-            self._setup_summaries = read_setup_summaries(config.coordination_root, now=now)
-        if not providers_changed and not groups.changed:
-            return
-        providers = AttentionObservation("provider-down", now)
-        setup = AttentionObservation("failed-setup", now)
-        observations.extend((providers, setup))
-        self._providers = read_providers(
-            config, now=now, active_worktree_groups=groups.groups, observation=providers
-        )
-        self._setup_progress = read_setup_progress_nodes(
-            config.coordination_root,
-            now=now,
-            active_worktree_groups=groups.groups,
-            observation=setup,
-        )
-
     def _refresh_engine_facts(
         self,
         config: McpRuntimeConfig,
@@ -821,15 +771,8 @@ class ProjectionInputState:
         elapsed = max(0.0, (now - self._ages_at).total_seconds())
         if elapsed == 0:
             return
-        self._providers = _advance_model_age(self._providers, "snapshotStaleSeconds", elapsed)
         self._drift_snapshots = _advance_model_age(
             self._drift_snapshots, "snapshotStaleSeconds", elapsed
-        )
-        self._setup_summaries = _advance_model_age(
-            self._setup_summaries, "snapshotStaleSeconds", elapsed
-        )
-        self._setup_progress = _advance_model_age(
-            self._setup_progress, "heartbeatAgeSeconds", elapsed
         )
         self._tool_reports = _advance_model_age(self._tool_reports, "ageSeconds", elapsed)
         aged = _advance_model_age(

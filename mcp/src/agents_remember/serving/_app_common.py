@@ -135,7 +135,6 @@ async def stream_events(
 
 @dataclass(frozen=True)
 class _ResolvedLiveInputs:
-    provider_state: bool
     landing_state: bool
     change_watch: bool
 
@@ -145,12 +144,11 @@ class LiveProjectionInputs:
     """Which live world-inputs this app drives; ``None`` means "infer from the replay seam".
 
     One value because it is one question -- is this app attached to a moving world, or replaying a
-    recorded one? Sim replay must disable all three together (the feeder writes only *inside* a
-    tick, so a change-gated loop would never wake), and answering it three times independently is
+    recorded one? Sim replay must disable both together (the feeder writes only *inside* a
+    tick, so a change-gated loop would never wake), and answering it twice independently is
     how a replay app ends up half-live.
     """
 
-    provider_state: bool | None = None
     landing_state: bool | None = None
     change_watch: bool | None = None
 
@@ -159,7 +157,6 @@ class LiveProjectionInputs:
 
         live = replay.before_tick is None
         return _ResolvedLiveInputs(
-            provider_state=live if self.provider_state is None else self.provider_state,
             landing_state=live if self.landing_state is None else self.landing_state,
             change_watch=live if self.change_watch is None else self.change_watch,
         )

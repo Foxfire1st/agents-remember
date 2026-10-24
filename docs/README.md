@@ -13,17 +13,17 @@ memory-repos/ar-agents-remember/onboarding/src/orchestrator/core_editor.py.md
 
 - **Path-addressed memory:** A source file's note lives at a deterministic mirror path, so an agent holding a file can reach the right context without search, ranking, or guesswork.
 - **Git-proven freshness:** File notes, route overviews, and entity catalogs are drift-checked against source commits, route scopes, or deterministic fingerprints before they are trusted.
-- **Search that finds, not decides:** Optional semantic memory and code-graph providers help locate relevant files, callers, dependencies, and concepts, but verified Markdown and source code remain the truth.
+- **Search that finds, not decides:** Semantic memory and code-graph providers were optional accelerators for locating relevant files, callers, dependencies, and concepts; both are retired now, and verified Markdown and source code remain the truth.
 - **Memory that lands with code:** External memory repos use a `memory.md` ledger, isolated dual worktrees, preview/apply closeout, and all-or-nothing integration so code and memory stay synchronized.
 - **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
 - **One-call first run:** Register the MCP server with your harness, then start Bootstrap from your own chat. The server serves the skills as package resources; optional native instruction files carry only the first-action directive.
 
-The setup stores durable memory in a memory repository of its own, under `ar-coordination/memory-repos/ar-<repo>/`. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused. For the full tour, see [Features](docs/features.md).
+The setup stores durable memory in a memory repository of its own, under `ar-coordination/memory-repos/ar-<repo>/`. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused. For the full tour, see [Features](features.md).
 
 ## Start Here
 
 - [Getting Started](getting-started.md) - the setup path: register MCP, restart if needed, call Bootstrap once and continue in its dashboard chat; optional onboarding and knowledge work goes to a user-started Architect.
-- [Features](features.md) - the concentrated product tour: by-path memory, drift, providers, worktrees, harness setup, and operational guardrails.
+- [Features](features.md) - the concentrated product tour: by-path memory, drift, worktrees, harness setup, and operational guardrails.
 - [Concepts](concepts.md) - the memory model and the terms used throughout the project.
 - [Architecture](architecture.md) - how the source checkout, installed runtime, coordination root, and memory roots fit together.
 - [Workflows](workflows.md) - the `l-01-agent-lifecycles` skill (the role router and the orchestrator lifecycle), its build modes, and worktrees.
@@ -49,7 +49,8 @@ The setup stores durable memory in a memory repository of its own, under `ar-coo
 - [Refresh Stale Onboarding](guides/refresh-stale-onboarding.md)
 - [Adopt Existing Memory](guides/adopt-existing-memory.md)
 - [Carry Memory From a Branch](guides/carryover-from-branch.md)
-- [Providers](guides/providers.md)
+- [Providers](guides/providers.md) — the retired semantic and code-graph
+  providers: what an old install leaves behind and how to clean it up.
 
 ## Reference
 

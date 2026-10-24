@@ -59,7 +59,6 @@ export function TaskDocumentPanel({
       {entry.worktrees.map((enclosure) => (
         <WorktreeSpine
           key={enclosure.enclosure}
-          state={state}
           enclosure={enclosure}
           groupName={enclosure.worktreeGroup}
         />

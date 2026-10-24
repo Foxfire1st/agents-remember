@@ -54,7 +54,6 @@ from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.knowledge_reader import register_knowledge_reader_route
 from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projections.landing_state import LandingStateRefresher
-from agents_remember.serving.projections.projection_store import ProviderStateRefresher
 from agents_remember.serving.projector import (
     DEFAULT_PROJECTION_CADENCE,
     LIVE_PROJECTION_CLOCK,
@@ -107,7 +106,6 @@ def _build_serving_runtime(
         cadence=cadence,
         replay=replay,
         refreshers=ProjectionRefreshers(
-            provider=ProviderStateRefresher() if enabled.provider_state else None,
             landing=landing,
             change_watcher=ProjectionInputWatcher(config, ledger=ledger)
             if enabled.change_watch

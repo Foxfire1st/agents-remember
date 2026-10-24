@@ -7,7 +7,6 @@ import type {
   AttentionItem,
   DriftSnapshotNode,
   EnclosureNode,
-  ProviderNode,
   TaskEntry,
 } from '../types/projection';
 import type { DashboardState } from './store';
@@ -28,18 +27,30 @@ let cachedQueueSource: readonly AttentionItem[] | null = null;
 let cachedSuppressedSource: Record<string, true> | null = null;
 let cachedVisibleQueue: readonly AttentionItem[] = EMPTY_QUEUE;
 
+// The two attention kinds the server retired with the search providers: nothing publishes them,
+// so nothing can dismiss them. A payload from a server older than the removal can still carry
+// them, and its provider-down entry would otherwise reach the bell as an alert nobody can act on
+// — the queue is the seam that keeps them off the surface.
+const RETIRED_ATTENTION_KINDS: ReadonlySet<string> = new Set(['provider-down', 'failed-setup']);
+
 export const selectQueue = (state: DashboardState): readonly AttentionItem[] => {
   const queue = state.analytics?.attentionQueue ?? EMPTY_QUEUE;
   const suppressed = state.suppressedAttentionIds;
-  if (Object.keys(suppressed).length === 0) return queue;
+  const suppressedAny = Object.keys(suppressed).length > 0;
+  const retiredAny = queue.some((item) => RETIRED_ATTENTION_KINDS.has(item.kind));
+  if (!suppressedAny && !retiredAny) return queue;
   if (queue === cachedQueueSource && suppressed === cachedSuppressedSource)
     return cachedVisibleQueue;
   cachedQueueSource = queue;
   cachedSuppressedSource = suppressed;
   // Suppression is the view's own record that the human acknowledged an occurrence. Every entry
   // is one acknowledgement per occurrence (MIK-R200 rule 7), so a suppressed id hides its row
-  // whatever the entry's kind: nothing else may keep a read entry on the queue.
-  cachedVisibleQueue = queue.filter((item) => !suppressed[item.id]);
+  // whatever the entry's kind: nothing else may keep a read entry on the queue. A payload from a
+  // server older than the provider retirement can still carry a retired kind; nothing publishes
+  // it, so nothing can dismiss it, and this filter is the seam that keeps it off the surface.
+  cachedVisibleQueue = queue.filter(
+    (item) => !RETIRED_ATTENTION_KINDS.has(item.kind) && !suppressed[item.id],
+  );
   return cachedVisibleQueue;
 };
 
@@ -56,68 +67,6 @@ export function fmtWait(seconds: number | undefined | null): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
   return `${Math.round(seconds / 86400)}d`;
-}
-
-// ── Engine room (note 08: two engines per pod = CGC + GrepAI) ──────────────────
-// State carried by colour + silhouette: nominal (amber) / indexing (cyan fill) / down (red).
-export type EngineState = 'nominal' | 'indexing' | 'down';
-
-const DOWN_STATES = new Set(['stopped', 'failed', 'error', 'down', 'unreachable']);
-const INDEXING_STATES = new Set(['indexing', 'indexing-pending', 'reindexing', 'seeding']);
-
-export function engineState(provider: ProviderNode): EngineState {
-  if (provider.ok === false || DOWN_STATES.has(provider.state)) return 'down';
-  if (INDEXING_STATES.has(provider.indexingState)) return 'indexing';
-  return 'nominal';
-}
-
-// Group providers into stacks: the workspace stack + one per worktree (its isolated CGC+GrepAI),
-// so the engine room shows that each worktree spawns its own engines bound to its repos (note 08's
-// twin-engine pod), not just main's. Code engine (CGC) before memory engine (GrepAI) within a stack.
-export interface EngineStack {
-  key: string;
-  scope: 'workspace' | 'worktree';
-  repoId: string | null;
-  engines: ProviderNode[];
-}
-
-const ROLE_ORDER: Record<string, number> = { code: 0, memory: 1 };
-
-function sortEngines(list: ProviderNode[]): ProviderNode[] {
-  return [...list].sort(
-    (a, b) =>
-      (ROLE_ORDER[a.role ?? ''] ?? 9) - (ROLE_ORDER[b.role ?? ''] ?? 9) || a.id.localeCompare(b.id),
-  );
-}
-
-export function groupEngines(providers: ProviderNode[]): EngineStack[] {
-  const workspace = providers.filter((p) => p.scope !== 'worktree');
-  const byGroup = new Map<string, ProviderNode[]>();
-  for (const provider of providers) {
-    if (provider.scope !== 'worktree') continue;
-    const key = provider.worktreeGroup ?? '(worktree)';
-    const list = byGroup.get(key);
-    if (list) list.push(provider);
-    else byGroup.set(key, [provider]);
-  }
-  const stacks: EngineStack[] = [];
-  if (workspace.length > 0) {
-    stacks.push({
-      key: 'workspace',
-      scope: 'workspace',
-      repoId: null,
-      engines: sortEngines(workspace),
-    });
-  }
-  for (const [key, engines] of [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    stacks.push({
-      key,
-      scope: 'worktree',
-      repoId: engines[0]?.repoId ?? null,
-      engines: sortEngines(engines),
-    });
-  }
-  return stacks;
 }
 
 // ── Memory mirror (the MEM segmented bar, mc2 harvest #2; maps onto drift reporting) ──

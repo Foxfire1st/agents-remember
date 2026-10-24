@@ -18,8 +18,6 @@ watched root                                    readers it feeds
 ``activity_directory(config)``                  native host activity publication
 ``<obs>/workspace``                             attention dismissals
 ``<obs>/drift``                                 read_drift_snapshots
-``<coord>/logs/providers/status``               workspace provider ``current.json``
-``<coord>/logs/providers/setup``                read_setup_summaries
 ``<coord>/temp/worktree-start``                 read_start_progress_entries
 ``<coord>/temp/tool-reports``                   read_tool_reports
 ``<coord>/controlplane/atomic-series-activation``  native pause records (attent. control plane)
@@ -45,12 +43,9 @@ Deliberately NOT watched -- heartbeat-covered blind spots:
   are large, so their freshness bound is TTL + heartbeat;
 * landing state: an in-memory 30s git-derived refresher with no file signal;
 * the entire ``worktrees/`` tree: the checkouts are ~50k dirs (recursive watching would
-  re-create the scan cost this change removes) and each task's ``provider-runtime`` holds
-  live container data (Postgres/grepai) that is unreadable to the daemon user and churns on
-  every container write -- watching it crashed the watcher on permission-denied and would
-  have re-projected on WAL writes. Worktree ``provider-state.json`` / ``setup-progress.json``
-  changes are infrequent and heartbeat-covered; central provider status is watched via
-  ``logs/providers``.
+  re-create the scan cost this change removes), and the worktree state it holds churns on
+  every write that is unreadable to the daemon user -- watching it crashed the watcher on
+  permission-denied and would have re-projected on WAL writes.
 
 Self-trigger safety: the projection's own per-tick outputs (``latest-state.json`` /
 ``latest-metrics.json`` and their ``*.tmp`` siblings) live at the observer root, *outside*
@@ -279,8 +274,6 @@ def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
         coordination_root / "tasks",
         observer / "workspace",
         drift_snapshot_dir(coordination_root),
-        coordination_root / "logs" / "providers" / "status",
-        coordination_root / "logs" / "providers" / "setup",
         coordination_root / "temp" / "worktree-start",
         coordination_root / "temp" / "tool-reports",
         # L190-R1-F10: the native attention stores, on their real paths. The two parents are
@@ -295,12 +288,16 @@ def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
     activity = activity_directory(config)
     if activity is not None:
         candidates.append(activity)
-    # Deliberately NOT under coordination_root/worktrees: those trees carry each task's
-    # live provider-runtime (Postgres data, grepai indexes) which the daemon user cannot
-    # read and which churn on container writes -- watching them recursively both crashed
-    # the watcher (permission-denied on the container data dir) and would have re-projected
-    # on every WAL write. Worktree provider-state.json changes are infrequent and are
-    # heartbeat-covered; central provider status is already watched via logs/providers.
+    # logs/providers/{status,setup} are NOT watched: no surviving projection reader reads
+    # them, and they carry no entry in projection_domains_for_paths, so an event there would
+    # fail open to every domain and rebuild projections from state nothing displays. The
+    # independent provider-safety sampler keeps its own loop and needs no watch root.
+    #
+    # Deliberately NOT under coordination_root/worktrees either: those trees carry each task's
+    # live provider-runtime data (Postgres data, search indexes) which the daemon user cannot
+    # read and which churn on container writes -- watching them recursively both crashed the
+    # watcher (permission-denied on the container data dir) and would have re-projected on every
+    # WAL write.
     return [path for path in candidates if path.exists()]
 
 
@@ -351,14 +348,6 @@ def projection_domains_for_paths(
         (coordination_root / "tasks", ProjectionDomain.TASKS),
         (observer / "workspace", ProjectionDomain.WORKSPACE),
         (drift_snapshot_dir(coordination_root), ProjectionDomain.DRIFT),
-        (
-            coordination_root / "logs" / "providers" / "status",
-            ProjectionDomain.PROVIDERS,
-        ),
-        (
-            coordination_root / "logs" / "providers" / "setup",
-            ProjectionDomain.PROVIDERS,
-        ),
         (
             coordination_root / "temp" / "worktree-start",
             ProjectionDomain.START_PROGRESS,

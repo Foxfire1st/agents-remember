@@ -11,8 +11,6 @@ const STATE_EVENTS = [
   "taskCounts",
   "enclosure",
   "enclosure.removed",
-  "provider",
-  "provider.removed",
   "activeWorktreeGroups",
   "metrics",
   "analytics",

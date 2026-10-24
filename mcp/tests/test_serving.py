@@ -38,7 +38,12 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
-from agents_remember.observer.projection import EnclosureNode, ProviderNode, WorkspaceProjection
+from agents_remember.observer.projection import (
+    Analytics,
+    DriftSnapshotNode,
+    EnclosureNode,
+    WorkspaceProjection,
+)
 from agents_remember.serving import change_watcher as watcher_module
 from agents_remember.serving import delta as delta_module
 from agents_remember.serving import projector as projector_module
@@ -80,26 +85,52 @@ def _config(tmp: Path) -> McpRuntimeConfig:
     )
 
 
-def _provider(ident: str, *, state: str = "running") -> ProviderNode:
-    return ProviderNode(id=ident, state=state)
+def _enclosure(*, cleanup: str = "pending") -> EnclosureNode:
+    return EnclosureNode(
+        enclosure="/contracts/leaf",
+        taskId="master",
+        taskName="master",
+        repoName="repo",
+        lifecycleId="binding",
+        worktreeGroup="/worktrees/leaf",
+        humanReviewStatus="approved",
+        closeoutStatus="not-started",
+        integrationStatus="not-started",
+        cleanup=cleanup,
+        codeWorktreeExists=True,
+    )
 
 
 def _projection(
     *,
-    providers: tuple[ProviderNode, ...] = (),
     enclosures: tuple[EnclosureNode, ...] = (),
     active_worktree_groups: tuple[str, ...] = (),
+    drift_stale_seconds: float | None = None,
 ) -> WorkspaceProjection:
     """A projection of the resolved tree at ``_TS``.
 
     ``WorkspaceProjection`` defaults every field, so the rolled-up ``metrics``/``analytics``
-    cases construct the model directly rather than routing another two knobs through here.
+    cases construct the model directly rather than routing another knob through here.
     """
+    analytics = (
+        Analytics(
+            driftSnapshots=[
+                DriftSnapshotNode(
+                    repository="repo",
+                    branch="main",
+                    actionableCount=0,
+                    snapshotStaleSeconds=drift_stale_seconds,
+                )
+            ]
+        )
+        if drift_stale_seconds is not None
+        else Analytics()
+    )
     return WorkspaceProjection(
         generatedAt=_TS,
-        providers=list(providers),
         enclosures=list(enclosures),
         activeWorktreeGroups=list(active_worktree_groups),
+        analytics=analytics,
     )
 
 
@@ -148,15 +179,12 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(projector._subscribers), 1)
         _, initial = projector.current()
         assert initial is not None
-        projector._publish_projection(
-            initial.model_copy(update={"providers": [_provider("handoff")]})
-        )
+        enclosure = _enclosure()
+        projector._publish_projection(initial.model_copy(update={"enclosures": [enclosure]}))
 
         second = await asyncio.wait_for(gen.__anext__(), timeout=HANG_GUARD_SECONDS)
-        self.assertEqual(second.event, "provider")
-        self.assertEqual(
-            second.data, _provider("handoff").model_dump(by_alias=True, exclude_none=True)
-        )
+        self.assertEqual(second.event, "enclosure")
+        self.assertEqual(second.data, enclosure.model_dump(by_alias=True, exclude_none=True))
         await gen.aclose()
         self.assertEqual(len(projector._subscribers), 0)
 
@@ -213,7 +241,7 @@ class StateEtagTests(unittest.TestCase):
             time.sleep(0.02)
 
     def test_etag_304_cycle_then_new_etag_on_content_change(self) -> None:
-        held = [_projection(providers=(_provider("L1"),))]
+        held = [_projection(enclosures=(_enclosure(),), drift_stale_seconds=1.0)]
         with self._client_with_held_projection(held) as client:
             first = client.get("/api/state")
             self.assertEqual(first.status_code, 200)
@@ -228,7 +256,8 @@ class StateEtagTests(unittest.TestCase):
 
             # Volatile-only movement (ages advance every tick) must NOT mint a new revision.
             held[0] = _projection(
-                providers=(_provider("L1").model_copy(update={"snapshotStaleSeconds": 77.0}),)
+                enclosures=(_enclosure(),),
+                drift_stale_seconds=77.0,
             )
             wait_until(
                 lambda: (
@@ -241,12 +270,14 @@ class StateEtagTests(unittest.TestCase):
             self.assertEqual(still.headers["etag"], etag)
 
             # A real content change mints a new revision: 200 with a fresh ETag + fresh body.
-            held[0] = _projection(providers=(_provider("L1", state="paused"),))
+            held[0] = _projection(
+                enclosures=(_enclosure(cleanup="reopened"),), drift_stale_seconds=77.0
+            )
             changed = self._get_until(client, etag=etag, want_status=200)
             self.assertEqual(changed.status_code, 200)
             self.assertNotEqual(changed.headers["etag"], etag)
             body = changed.json()
-            self.assertEqual(body["providers"][0]["state"], "paused")
+            self.assertEqual(body["enclosures"][0]["cleanup"], "reopened")
 
 
 class BackgroundProjectionTests(unittest.IsolatedAsyncioTestCase):

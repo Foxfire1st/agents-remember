@@ -64,14 +64,15 @@ After the `c-08-ar-coordination-context-resolver` skill resolves the target repo
 Agents Remember `context_packet` MCP tool when that server is configured.
 Provider authority comes from the MCP settings file.
 
-If the MCP settings configure providers, request:
+The call carries no provider selection: the retired search providers are not queried, so
+there is no provider flag to pass and nothing to request on their behalf.
 
 ```text
-context_packet(repo_id="agents-remember", include_providers=true)
+context_packet(repo_id="agents-remember")
 ```
 
-Skip this provider check when no MCP server is configured or the MCP settings
-report no providers.
+Legacy provider keys in the settings are still reported by the product's own provider summary
+and cleanup routes; they change nothing about how this packet is asked for.
 
 Then run `c-05-create-or-update-onboarding-files` for the resolved context before
 reasoning from onboarding or source files.
@@ -91,8 +92,12 @@ runtime settings live under the selected `ar-coordination/` or memory root.
 
 ### Memory Retrieval Strategies
 
-- `Semantics`: Fuzzy search use GrepAI to search over onboardings. Leads to code routes & files using 1-to-1 file mapping backward.
-- `Relationship`: For code-relationship questions use Code Graph Context (cgc).
+- `Semantics` (retired — no semantic-query provider): a fuzzy concept is known, but structure,
+  route, or file location is unknown. Answer it with route-index and onboarding search, then
+  bounded native reads.
+- `Relationship` (retired — no relationship-query provider): an anchor is known, but callers,
+  callees, dependencies, ownership, inheritance, impact paths, or neighboring code are unknown.
+  Answer it with native search from the anchor symbol.
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
   onboarding plus bounded source confirmation.

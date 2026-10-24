@@ -12,15 +12,15 @@ describe('postAttentionDismiss', () => {
     vi.stubGlobal('fetch', fetch);
 
     const status = await postAttentionDismiss({
-      itemId: 'provider-down:cgc',
-      kind: 'provider-down',
+      itemId: 'blocked-start:/worktrees/group',
+      kind: 'blocked-start',
     });
 
     expect(status).toBe('dismissed');
     expect(fetch).toHaveBeenCalledWith('/api/actions/dismiss', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId: 'provider-down:cgc', kind: 'provider-down' }),
+      body: JSON.stringify({ itemId: 'blocked-start:/worktrees/group', kind: 'blocked-start' }),
     });
   });
 
@@ -46,7 +46,7 @@ describe('postAttentionDismiss', () => {
 
   it('maps a non-202 response to error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 500 })));
-    await expect(postAttentionDismiss({ itemId: 'x', kind: 'provider-down' })).resolves.toBe(
+    await expect(postAttentionDismiss({ itemId: 'x', kind: 'blocked-start' })).resolves.toBe(
       'error',
     );
   });

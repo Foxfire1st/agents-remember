@@ -20,7 +20,6 @@ export function resolveViewedLeafKey(entry: TaskEntry | undefined): string | und
 
 export function useDetailPanelState({ selectedId, onOpenLifecycle, onViewTask }: DetailPanelProps) {
   const tasks = useDashboard((state) => state.tasks);
-  const providers = useDashboard((state) => state.providers);
   const activeWorktreeGroups = useDashboard((state) => state.activeWorktreeGroups);
   const [local, setLocal] = useState<{ source: string | null; key: string }>();
   const key = local?.source === selectedId ? local.key : selectedId;
@@ -43,7 +42,6 @@ export function useDetailPanelState({ selectedId, onOpenLifecycle, onViewTask }:
     document: body.document,
     taskDocumentBodyState: body.state,
     jump,
-    providers,
     activeWorktreeGroups,
     parent: entry?.parent ? tasks[entry.parent] : undefined,
   };

@@ -9,10 +9,13 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     ProviderScope,
 )
-from agents_remember.observer.projection import Analytics, SetupProgressNode, WorkspaceProjection
+from agents_remember.observer.projection import (
+    Analytics,
+    DriftSnapshotNode,
+    WorkspaceProjection,
+)
 from agents_remember.observer.worktree_provider_admission import (
     active_enclosure_worktree_groups,
-    admitted_worktree_groups,
 )
 from agents_remember.serving.delta import diff_projection
 from agents_remember.serving.projections.paths import observer_root
@@ -107,23 +110,27 @@ class SnapshotReaderTests(unittest.TestCase):
             with self.subTest(cleanup=cleanup):
                 write_contract(contract.contract_path, replace(contract, cleanup=cleanup))
                 nodes = read_enclosures(config.coordination_root)
-                self.assertEqual(admitted_worktree_groups(nodes), expected)
                 self.assertEqual(active_enclosure_worktree_groups(nodes), expected)
 
-    def test_setup_heartbeat_age_alone_emits_no_analytics_delta(self) -> None:
+    def test_snapshot_age_alone_emits_no_analytics_delta(self) -> None:
         def projection(age: float) -> WorkspaceProjection:
             return WorkspaceProjection(
                 generatedAt=FRESH.isoformat(),
                 analytics=Analytics(
-                    setupProgress=[
-                        SetupProgressNode(group="work", state="running", heartbeatAgeSeconds=age)
+                    driftSnapshots=[
+                        DriftSnapshotNode(
+                            repository="repo",
+                            branch="main",
+                            actionableCount=0,
+                            snapshotStaleSeconds=age,
+                        )
                     ]
                 ),
             )
 
         self.assertEqual(diff_projection(projection(1), projection(12)), [])
         changed = projection(12)
-        changed.analytics.setupProgress[0].state = "failed"
+        changed.analytics.driftSnapshots[0].actionableCount = 2
         self.assertEqual(
             [event.event for event in diff_projection(projection(1), changed)], ["analytics"]
         )

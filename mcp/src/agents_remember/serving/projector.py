@@ -88,7 +88,6 @@ if TYPE_CHECKING:
     from agents_remember.observer.projection import WorkspaceProjection
     from agents_remember.serving.change_watcher import ChangeWatch
     from agents_remember.serving.projections.landing_state import LandingStateRefresh
-    from agents_remember.serving.projections.projection_store import ProviderStateRefresh
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +139,6 @@ class ProjectionRefreshers:
     choice -- "is this projector attached to a moving world?" -- not three independent hooks.
     """
 
-    provider: ProviderStateRefresh | None = None
     landing: LandingStateRefresh | None = None
     change_watcher: ChangeWatch | None = None
     host_activity_reconcile: HostActivityReconcile | None = None
@@ -170,7 +168,6 @@ class Projector:
         self._interval = interval
         self._now: Callable[[], datetime] = replay.now or _utcnow
         self._before_tick = replay.before_tick
-        self._provider_refresher = refreshers.provider
         self._landing_refresher = refreshers.landing
         # Adaptive waking (260712-PTS-L3): with a watcher, the run loop paces via the
         # ChangePacer (change-driven + heartbeat, floored to one tick per ``interval``).
@@ -431,7 +428,6 @@ class Projector:
         self._tick_stable = None
         tick = ProjectionTickState(
             input_state=self._input_state,
-            provider_refresher=self._provider_refresher,
             landing_state=self._landing_refresher,
         )
         with measured(OWNER_PROJECTION, self._ledger):

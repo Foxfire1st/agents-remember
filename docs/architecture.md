@@ -44,7 +44,7 @@ ar-coordination/
 ```
 
 The installer copies package-owned assets from `agents_remember/package_data/runtime/` into this tree. The MCP settings own the coordination root, so normal users configure that path in the MCP settings JSON rather than through source-checkout environment files.
-The installed runtime does not keep a parallel `scripts/` execution route; MCP tools and package-local modules own runtime install, provider lifecycle, worktree, memory, and benchmark operations.
+The installed runtime does not keep a parallel `scripts/` execution route; MCP tools and package-local modules own runtime install, provider-leftover cleanup, worktree, memory, and benchmark operations.
 
 ## Target Code Repository
 
@@ -85,12 +85,12 @@ still carrying the removed repo-local `ar-memory/` root is refused by name with 
 Once memory is resolved, agents reach into memory and code through three substrates, routed by the `c-04-retrieval-strategy-router` skill:
 
 - **By path (Intent)** — a known file's onboarding note, located directly from its path. Always available; needs no provider.
-- **By meaning (Semantics)** — semantic search over the memory, for when the concept is known but the file is not.
-- **By relationship (Relationship)** — a code-relationship graph for callers, callees, and dependencies.
+- **By meaning (Semantics)** — semantic search over the memory, for when the concept is known but the file is not. Its provider is retired; the route has no engine now.
+- **By relationship (Relationship)** — a code-relationship graph for callers, callees, and dependencies. Its provider is retired as well.
 
-The meaning and relationship substrates are served by **opt-in providers** — GrepAI for semantic memory search, CodeGraphContext for the code graph. They run as local Docker services under `ar-coordination/providers/` (shown above) and index code and memory in the background.
+The meaning and relationship substrates were served by two providers — GrepAI for semantic memory search, CodeGraphContext for the code graph. Both are retired (MIK-R112): no product path installs, enables, starts, indexes, or queries them, and the `providers/` tree shown above holds only what an older installation left behind.
 
-These providers are accelerators for *finding* knowledge; they are not the source of truth. Durable memory stays Markdown + Git, drift-checked and approval-gated, regardless of which substrate surfaced it. No product path installs or starts provider processes (MIK-R112): `runtime_install` stops leftover watchers and reports old provider keys once as unused — see the [Providers guide](guides/providers.md) and [MCP tool reference](reference/mcp-tools.md).
+These providers were accelerators for *finding* knowledge; they were never the source of truth. Durable memory stays Markdown + Git, drift-checked and approval-gated, whatever surfaced a candidate. `runtime_install` stops a leftover provider watcher and reports old provider keys once as unused; deleting leftover folders takes the explicit `providers-remove` command — see the [Providers guide](guides/providers.md), now a retirement and old-install cleanup account, and [MCP tool reference](reference/mcp-tools.md).
 
 ## Ownership Boundaries
 
@@ -112,7 +112,7 @@ worktree-backed tasks and the sanctioned branch-direct landing route. Memory com
 outside staging, commits, and transaction admission or recovery. Regenerating the cache does not
 rewrite historical commits; historical attribution rewrites require explicit deployment work.
 
-Provider lifecycle — building images, watchers, and indexing — is owned by the MCP provider tools and `runtime_install`, not by the memory or workflow skills.
+Provider leftovers — a stale watcher, old settings keys, leftover runtime folders — are handled by `runtime_install` and the explicit `providers-remove` command, not by the memory or workflow skills. No provider lifecycle (images, watchers, indexing) belongs to anything now: it is retired.
 
 ## What a Read May Write
 

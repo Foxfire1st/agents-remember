@@ -39,8 +39,8 @@ GitHub Releases (there is no `CHANGELOG.md`); the canonical tag is `mcp-vX.Y.Z`.
 - [ ] Fresh `uvx agents-remember-mcp==<version>` starts and serves the tool list.
 - [ ] `runtime_install(dry_run=true)` previews cleanly; `runtime_install(dry_run=false, install_provider_deps=false)` applies.
 - [ ] `python3 scripts/sync-skills.py --check` confirms root `skills/`, MCP package data, and harness package skill folders are in sync.
-- [ ] Provider-disabled setup works.
-- [ ] Provider-enabled setup reports useful diagnostics when Docker is unavailable (does not hang).
+- [ ] Setup works with no provider configuration at all.
+- [ ] An older settings file carrying retired provider keys loads, reports them once as unused (`unusedProviderKeys`), and leftover provider folders are reported with sizes.
 
 ## Docs
 

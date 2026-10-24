@@ -1,8 +1,8 @@
 """Engine Room process map: one node per worktree contract (slice 5e).
 
-Composed, not read: contract + status guidance join the worktree's provider
-stack and setup-progress boot sequence into the process node vocabulary. Pure
-and deterministic so the served projection and sim replay stay byte-identical.
+Composed, not read: contract + status guidance join the worktree's own lanes
+into the process node vocabulary. Pure and deterministic so the served
+projection and sim replay stay byte-identical.
 """
 
 from __future__ import annotations
@@ -20,20 +20,9 @@ from agents_remember.observer.projection import (
     LandingRefNode,
     ProcessFactState,
     ProcessHealth,
-    ProviderBootNode,
-    ProviderNode,
-    SetupProgressNode,
 )
 
 # --- engine room process map (slice 5e) --------------------------------------
-
-_ENGINE_DOWN: frozenset[str] = frozenset({"stopped", "failed", "error", "down", "unreachable"})
-_ENGINE_INDEXING: frozenset[str] = frozenset(
-    {"indexing", "indexing-pending", "reindexing", "seeding"}
-)
-_SETUP_FAILED: frozenset[str] = frozenset({"failed", "failed-unchecked"})
-_SETUP_DONE: frozenset[str] = frozenset({"ok", "complete", "prepared"})
-_ROLE_ORDER: dict[str, int] = {"code": 0, "memory": 1}
 
 # The ``lifecycle_guidance`` phases -> the process-map phase vocabulary (slice 5e; 05l adds ``abandoned``).
 _GUIDANCE_PHASE: dict[str, str] = {
@@ -64,35 +53,21 @@ def _is_disposed(fact: EngineProcessFacts) -> bool:
 def build_engine_processes(
     facts: list[EngineProcessFacts],
     enclosures: list[EnclosureNode],
-    providers: list[ProviderNode],
-    setup_progress: list[SetupProgressNode],
     start_progress: list[dict[str, Any]] | None = None,
 ) -> list[EngineProcessNode]:
     """The enclosure-centered Engine Room process map (slice 5e), composed -- not read.
 
     One node per worktree contract, joining the recorded contract + status guidance (existence,
-    dirty, base freshness, provider boot) with the worktree's isolated provider stack and its
-    setup-progress boot sequence. ``start_progress`` (§5.4) adds a node for any start blocked
-    *before* its contract was written -- the one start state the contract-keyed surface cannot
-    see. Pure and deterministic (sorted by repo/task/id) so the served projection and sim replay
-    stay byte-identical. The provider/setup join is on the worktree *group basename*:
-    ``EnclosureNode.worktreeGroup`` is a full path, while ``ProviderNode.worktreeGroup`` and
-    ``SetupProgressNode.group`` are the basename -- matching the existing dashboard join.
+    dirty, base freshness) with the worktree's own lanes. ``start_progress`` (§5.4) adds a node
+    for any start blocked *before* its contract was written -- the one start state the
+    contract-keyed surface cannot see. Pure and deterministic (sorted by repo/task/id) so the
+    served projection and sim replay stay byte-identical.
     """
     enclosure_by_id = {enclosure.enclosure: enclosure for enclosure in enclosures}
-    providers_by_group: dict[str, list[ProviderNode]] = {}
-    for provider in providers:
-        if provider.scope == "worktree" and provider.worktreeGroup:
-            providers_by_group.setdefault(provider.worktreeGroup, []).append(provider)
-    for stack in providers_by_group.values():
-        stack.sort(key=lambda provider: (_ROLE_ORDER.get(provider.role or "", 9), provider.id))
-    setup_by_group = {node.group: node for node in setup_progress}
     nodes = [
         _engine_process(
             fact,
             enclosure_by_id.get(str(fact.contract.get("contract_path", ""))),
-            providers_by_group,
-            setup_by_group,
         )
         for fact in facts
         if not _is_disposed(fact)
@@ -114,7 +89,6 @@ _START_PHASE: dict[str, str] = {
     "stale-base-blocked": "preflight",
     "source-lineage-blocked": "preflight",
     "memory-blocked": "memory-compatibility",
-    "provider-blocked": "provider-setup",
     "preflight": "preflight",
     "code-worktree": "code-worktree",
     "contract-written": "contract-written",
@@ -153,14 +127,6 @@ def _start_process_node(entry: dict[str, Any]) -> EngineProcessNode:
             state="complete" if code_exists else "planned",
             label="add code worktree",
         ),
-        EngineProcessEdge(
-            id="cgc-seed",
-            fromNode="code-worktree",
-            toNode="cgc-engine",
-            kind="cgc-seed",
-            state="planned",
-            label="CGC seed",
-        ),
     ]
     if memory_mode == "external":
         edges.append(
@@ -171,16 +137,6 @@ def _start_process_node(entry: dict[str, Any]) -> EngineProcessNode:
                 kind="ledger-map",
                 state="blocked" if blocked_reason else "planned",
                 label="ledger-map + memory worktree",
-            )
-        )
-        edges.append(
-            EngineProcessEdge(
-                id="grepai-clone",
-                fromNode="memory-worktree",
-                toNode="grepai-engine",
-                kind="grepai-clone",
-                state="planned",
-                label="GrepAI clone",
             )
         )
     missing = [f"start gated at {phase} — contract not yet written"]
@@ -205,7 +161,6 @@ def _start_process_node(entry: dict[str, Any]) -> EngineProcessNode:
         closeoutStatus="not-started",
         integrationStatus="not-started",
         cleanup="pending",
-        providers=[],
         edges=edges,
         actions=[],
         nextAction=choices[0] if choices else None,
@@ -218,22 +173,18 @@ def _start_process_node(entry: dict[str, Any]) -> EngineProcessNode:
 def _engine_process(
     fact: EngineProcessFacts,
     enclosure: EnclosureNode | None,
-    providers_by_group: dict[str, list[ProviderNode]],
-    setup_by_group: dict[str, SetupProgressNode],
 ) -> EngineProcessNode:
-    """One worktree contract as a process node: its two lanes, its boot facts, its conduits.
+    """One worktree contract as a process node: its two lanes and its conduits.
 
-    The three derivations that make up the node are each a unit of their own -- the code
-    lane's commit refs, the memory lane's (absent unless the contract runs external memory),
-    and the worktree group's provider-boot facts -- so each is composed by its own helper
-    below and this stays the assembly.
+    The two derivations that make up the node are each a unit of their own -- the code
+    lane's commit refs and the memory lane's (absent unless the contract runs external
+    memory) -- so each is composed by its own helper below and this stays the assembly.
     """
     cp = fact.contract
     status = fact.status or {}
     guidance = fact.guidance
     enclosure_id = str(cp.get("contract_path", ""))
     group_full = str(cp.get("worktree_group", ""))
-    group_key = group_full.rsplit("/", 1)[-1]
     memory_mode = str(cp.get("memory_mode", ""))
     source_lineage = _source_lineage(status.get("source_lineage"))
 
@@ -242,27 +193,14 @@ def _engine_process(
     code = _code_refs(contract=cp, status=status, freshness=freshness)
     memory = _memory_refs(contract=cp, status=status, freshness=freshness, memory_mode=memory_mode)
 
-    setup_node = setup_by_group.get(group_key)
-    setup = _setup_facts(setup_node, status)
-    observed_providers = providers_by_group.get(group_key, [])
-    boot = _provider_boot_nodes(
-        observed_providers,
-        group_key=group_key,
-        memory_mode=memory_mode,
-        setup_state=setup.state,
-    )
-    has_provider_surface = bool(setup_node or observed_providers)
-
-    phase = _process_phase(guidance.get("phase"), setup.state, behind_official=behind_official)
-    health = _process_health(phase, setup.state, setup.failed_phases)
+    phase = _process_phase(guidance.get("phase"), behind_official=behind_official)
+    health = _process_health(phase)
     edges = _process_edges(
         _ProcessLanes(
             memory_mode=memory_mode,
             code_worktree=code.worktree,
             memory_worktree=memory.worktree,
         ),
-        boot,
-        setup,
         behind_official=behind_official,
     )
 
@@ -292,14 +230,6 @@ def _engine_process(
         integrationStrategy=_str_or_none(cp.get("integration_strategy")),
         cleanup=str(cp.get("cleanup", "")),
         carryoverDoneAt=_str_or_none(status.get("carryoverDoneAt")),
-        setupState=setup.state,
-        currentPhase=setup.current_phase,
-        completedPhases=setup.completed_phases,
-        failedPhases=setup.failed_phases,
-        heartbeatAgeSeconds=setup.heartbeat_age_seconds,
-        seedFallback=setup.seed_fallback,
-        retryArgs=setup.retry_args,
-        providers=boot,
         edges=edges,
         landing=[LandingRefNode(**ref) for ref in (status.get("landing") or [])],
         actions=list(enclosure.actions) if enclosure else [],
@@ -309,10 +239,8 @@ def _engine_process(
             has_status=bool(status),
             contract=cp,
             memory_mode=memory_mode,
-            setup_state=setup.state,
-            boot=boot,
         ),
-        sourceFiles=_source_files(cp, memory_mode, group_full, has_setup=has_provider_surface),
+        sourceFiles=_source_files(cp, memory_mode),
     )
 
 
@@ -402,95 +330,6 @@ def _memory_refs(
     )
 
 
-@dataclass(frozen=True)
-class _SetupFacts:
-    """A worktree group's provider-boot facts, as the process node reports them."""
-
-    state: str | None
-    current_phase: str | None
-    heartbeat_age_seconds: float | None
-    failed_phases: list[str]
-    completed_phases: list[str]
-    seed_fallback: bool
-    retry_args: dict[str, Any] | None
-
-
-def _setup_facts(setup_node: SetupProgressNode | None, status: dict[str, Any]) -> _SetupFacts:
-    """Derive the boot facts, preferring the live setup run over the recorded status block.
-
-    A group with a live ``SetupProgressNode`` has the better witness -- only it carries the
-    current phase and the heartbeat age -- so it wins field by field; the status payload's
-    ``providers`` block is the fallback, and remains the only source for the completed
-    phases, the seed fallback and the retry arguments.
-    """
-    provider_status = _as_dict(status.get("providers"))
-    retry = provider_status.get("retryArgs")
-    return _SetupFacts(
-        state=setup_node.state if setup_node else _str_or_none(provider_status.get("state")),
-        current_phase=setup_node.currentPhase if setup_node else None,
-        heartbeat_age_seconds=setup_node.heartbeatAgeSeconds if setup_node else None,
-        failed_phases=(
-            list(setup_node.failedPhases)
-            if setup_node
-            else _str_list(provider_status.get("failedPhases"))
-        ),
-        completed_phases=_str_list(provider_status.get("completedPhases")),
-        seed_fallback=bool(provider_status.get("seedFallback")),
-        retry_args=retry if isinstance(retry, dict) else None,
-    )
-
-
-def _provider_boot_nodes(
-    providers: list[ProviderNode],
-    *,
-    group_key: str,
-    memory_mode: str,
-    setup_state: str | None,
-) -> list[ProviderBootNode]:
-    boot = [
-        ProviderBootNode(
-            id=provider.id,
-            role=provider.role or "code",
-            runtimeState=_engine_runtime_state(provider),
-        )
-        for provider in providers
-    ]
-    if setup_state in {"running", "blocked"} and not boot:
-        return boot
-    observed_roles = {node.role for node in boot}
-    for role in _expected_provider_roles(memory_mode):
-        if role not in observed_roles:
-            boot.append(
-                ProviderBootNode(
-                    id=f"missing-{role}@{group_key}",
-                    role=role,
-                    runtimeState="missing",
-                    factState="missing",
-                )
-            )
-    boot.sort(key=lambda node: (_ROLE_ORDER.get(node.role, 9), node.id))
-    return boot
-
-
-def _expected_provider_roles(memory_mode: str) -> list[str]:
-    roles = ["code"]
-    if memory_mode == "external":
-        roles.append("memory")
-    return roles
-
-
-# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/reducer_impl/_processes.py:478).
-def _engine_runtime_state(provider: ProviderNode) -> str:  # pragma: no cover
-    """Bucket a worktree engine's runtime state (mirrors the dashboard ``engineState``)."""
-    if provider.ok is False or provider.state in _ENGINE_DOWN:
-        return "down"
-    if provider.indexingState in _ENGINE_INDEXING:
-        return "indexing"
-    if provider.state == "configured":
-        return "configured"
-    return "nominal"
-
-
 def _ref_fact_state(has_status: bool, exists: object) -> ProcessFactState:
     """observed = on disk; derived = recorded but absent; missing = unobservable."""
     if not has_status:
@@ -504,25 +343,17 @@ def _ref_fact_state(has_status: bool, exists: object) -> ProcessFactState:
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/reducer_impl/_processes.py:500).
 def _process_phase(  # pragma: no cover
-    guidance_phase: object, setup_state: str | None, *, behind_official: bool
+    guidance_phase: object, *, behind_official: bool
 ) -> str:
     base = _GUIDANCE_PHASE.get(str(guidance_phase or ""), "unknown")
     if base != "worktree-started":
         return base
     if behind_official:
         return "sync-needed"
-    if setup_state in {"running", "stale"} or setup_state in _SETUP_FAILED:
-        return "provider-setup"
     return base
 
 
-def _process_health(phase: str, setup_state: str | None, failed_phases: list[str]) -> ProcessHealth:
-    if failed_phases or setup_state in _SETUP_FAILED:
-        return "failed"
-    if setup_state == "stale":
-        return "stale"
-    if setup_state == "running":
-        return "running"
+def _process_health(phase: str) -> ProcessHealth:
     if phase in {"commit-approval-pending", "integration-blocked", "sync-needed"}:
         return "blocked"
     if phase == "completed":
@@ -542,17 +373,13 @@ class _ProcessLanes:
 
 def _process_edges(
     lanes: _ProcessLanes,
-    boot: list[ProviderBootNode],
-    setup: _SetupFacts,
     *,
     behind_official: bool,
 ) -> list[EngineProcessEdge]:
-    """The core conduits: worktree materialization, provider seed/clone, and a sync feedback edge."""
+    """The core conduits: worktree materialization and a sync feedback edge."""
     memory_mode = lanes.memory_mode
     code_worktree = lanes.code_worktree
     memory_worktree = lanes.memory_worktree
-    setup_state = setup.state
-    failed_phases = setup.failed_phases
     edges = [
         EngineProcessEdge(
             id="code-worktree-add",
@@ -561,19 +388,6 @@ def _process_edges(
             kind="worktree-add",
             state=_materialize_edge_state(code_worktree),
             label="add code worktree",
-        ),
-        EngineProcessEdge(
-            id="cgc-seed",
-            fromNode="code-worktree",
-            toNode="cgc-engine",
-            kind="cgc-seed",
-            state=_seed_edge_state(
-                setup_state,
-                failed_phases,
-                any(node.role == "code" and node.factState != "missing" for node in boot),
-                "codegraphcontext",
-            ),
-            label="CGC seed",
         ),
     ]
     if memory_mode == "external":
@@ -585,21 +399,6 @@ def _process_edges(
                 kind="ledger-map",
                 state=_materialize_edge_state(memory_worktree),
                 label="ledger-map + memory worktree",
-            )
-        )
-        edges.append(
-            EngineProcessEdge(
-                id="grepai-clone",
-                fromNode="memory-worktree",
-                toNode="grepai-engine",
-                kind="grepai-clone",
-                state=_seed_edge_state(
-                    setup_state,
-                    failed_phases,
-                    any(node.role == "memory" and node.factState != "missing" for node in boot),
-                    "grepai",
-                ),
-                label="GrepAI clone",
             )
         )
     if behind_official:
@@ -627,41 +426,12 @@ def _materialize_edge_state(ref: CommitRefNode | None) -> str:  # pragma: no cov
     return "planned"
 
 
-# Setup states that decide a seed edge on their own, whatever the engine reports.
-_DECISIVE_SETUP_EDGE_STATES: dict[str, str] = {
-    "running": "running",
-    "stale": "stale",
-    **dict.fromkeys(_SETUP_FAILED, "failed"),
-}
-
-
-def _seed_edge_state(
-    setup_state: str | None, failed_phases: list[str], has_engine: bool, token: str
-) -> str:
-    """The seed edge's state, strongest evidence first.
-
-    A failed phase naming this seed outranks everything; then the setup run's own state
-    where that is decisive; then the engine's presence, which is what turns a finished or
-    unobserved setup into a complete edge.
-    """
-    if any(token in line for line in failed_phases):
-        return "failed"
-    decisive = _DECISIVE_SETUP_EDGE_STATES.get(setup_state) if setup_state is not None else None
-    if decisive is not None:
-        return decisive
-    if has_engine and (setup_state is None or setup_state in _SETUP_DONE):
-        return "complete"
-    return "skipped" if setup_state == "skipped" else "planned"
-
-
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/reducer_impl/_processes.py:650).
 def _missing_facts(  # pragma: no cover
     *,
     has_status: bool,
     contract: dict[str, Any],
     memory_mode: str,
-    setup_state: str | None,
-    boot: list[ProviderBootNode],
 ) -> list[str]:
     missing: list[str] = []
     if not has_status:
@@ -672,28 +442,18 @@ def _missing_facts(  # pragma: no cover
         missing.append("code base commit not recorded in the contract")
     if memory_mode == "external" and not contract.get("ledger_path"):
         missing.append("memory ledger path not recorded")
-    if setup_state is None and all(node.factState == "missing" for node in boot):
-        missing.append("provider setup not observed for this worktree group")
-    missing_roles = [node.role for node in boot if node.factState == "missing"]
-    if missing_roles:
-        missing.append(
-            "provider runtime not observed for this worktree group: "
-            + ", ".join(sorted(missing_roles, key=lambda role: _ROLE_ORDER.get(role, 9)))
-        )
     return missing
 
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/reducer_impl/_processes.py:678).
 def _source_files(  # pragma: no cover
-    contract: dict[str, Any], memory_mode: str, group_full: str, *, has_setup: bool
+    contract: dict[str, Any], memory_mode: str
 ) -> list[str]:
     sources = [str(contract.get("contract_path", ""))]
     if contract.get("code_worktree"):
         sources.append(str(contract["code_worktree"]))
     if memory_mode == "external" and contract.get("memory_worktree"):
         sources.append(str(contract["memory_worktree"]))
-    if has_setup and group_full:
-        sources.append(f"{group_full}/provider-runtime/setup-progress.json")
     return [path for path in sources if path]
 
 

@@ -1,8 +1,12 @@
 // Engine Room scenario fixtures (slice 5e, 05e §11). Each is a set of server-shaped
-// `EngineProcessNode`s + the workspace (official/main) provider stack. The dev gallery wraps
-// them in a WorkspaceProjection (dev/fixtures.ts), and component tests can import them directly.
-// They cover the boot states (bootstrap, setup running, GrepAI failure, CGC fallback, memory
-// blocked, sync needed, cleanup pending) plus a step-through of one enclosure being assembled.
+// `EngineProcessNode`s. The dev gallery wraps them in a WorkspaceProjection (dev/fixtures.ts),
+// and component tests can import them directly. They cover the enclosure lifecycle (bootstrap,
+// memory verify/block, stale-base preflight/block, sync needed, cleanup pending, integration
+// conflict) plus a step-through of one enclosure being assembled.
+//
+// Provider state left the surface (MIK-R112): no workspace engine stack, no per-enclosure
+// provider boot nodes, and no seed/clone lanes. The scenarios carry only the enclosure-centered
+// process facts the server still composes.
 
 import type {
   CommitRefNode,
@@ -12,29 +16,14 @@ import type {
   LedgerNode,
   LedgerRefNode,
   ProcessFactState,
-  ProviderBootNode,
-  ProviderNode,
 } from "../../types/projection";
 
 export interface EngineRoomScenario {
   name: string;
   processes: EngineProcessNode[];
-  workspace: ProviderNode[];
 }
 
 const SOURCE_BRANCH = "feat/observable-lifecycle-dashboard";
-const wsEngine = (id: string, indexingState = "indexed"): ProviderNode => ({
-  id,
-  state: "ready",
-  ok: true,
-  watcherUp: true,
-  indexingState,
-  snapshotStaleSeconds: 4,
-  scope: "workspace",
-  role: id.includes("memory") || id.includes("grepai") ? "memory" : "code",
-});
-
-const WORKSPACE = [wsEngine("codegraphcontext-code"), wsEngine("grepai-memory")];
 
 // The served memory.md ledger window for the coupler popover (5h). The newest row maps the fixture's
 // current worktree/source commits (08e9221a ⇄ d60a0511), so the popover highlights it. The window fills to
@@ -109,15 +98,6 @@ function ref(over: Partial<CommitRefNode> = {}): CommitRefNode {
   return { factState: "observed", ...over };
 }
 
-function boot(role: "code" | "memory", runtimeState = "nominal"): ProviderBootNode {
-  return {
-    id: role === "code" ? "codegraphcontext-code@grp" : "grepai-memory@grp",
-    role,
-    runtimeState,
-    factState: "observed",
-  };
-}
-
 function landingRef(
   kind: string,
   label: string,
@@ -128,11 +108,11 @@ function landingRef(
   return { kind, label, state, factState, ...(detail ? { detail } : {}) };
 }
 
+// The surviving edge vocabulary the server emits: the two intake lanes, the later sync phase of the code
+// intake, and the integration return lane (authored in these fixtures for the landing arcs).
 interface EdgeStates {
   worktreeAdd?: string;
-  cgc?: string;
   ledger?: string;
-  grepai?: string;
   sync?: string;
   integration?: string;
 }
@@ -151,14 +131,6 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       state: edgeState(states.worktreeAdd, "complete"),
       label: "add code worktree",
     },
-    {
-      id: "cgc-seed",
-      fromNode: "code-worktree",
-      toNode: "cgc-engine",
-      kind: "cgc-seed",
-      state: edgeState(states.cgc, "complete"),
-      label: "CGC seed",
-    },
   ];
   if (external) {
     out.push({
@@ -168,14 +140,6 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       kind: "ledger-map",
       state: edgeState(states.ledger, "complete"),
       label: "ledger-map + memory worktree",
-    });
-    out.push({
-      id: "grepai-clone",
-      fromNode: "memory-worktree",
-      toNode: "grepai-engine",
-      kind: "grepai-clone",
-      state: edgeState(states.grepai, "complete"),
-      label: "GrepAI clone",
     });
   }
   if (states.sync) {
@@ -248,15 +212,6 @@ function engineProcess(
     closeoutStatus: "not-started",
     integrationStatus: "not-started",
     cleanup: "pending",
-    setupState: "ok",
-    completedPhases: [
-      "codegraphcontext-code seed: ok",
-      "grepai-memory clone: ok",
-      "grepai-memory watcher: ok",
-    ],
-    failedPhases: [],
-    seedFallback: false,
-    providers: [boot("code"), boot("memory")],
     edges: edges({}),
     landing: [],
     ledgerRows: LEDGER_ROWS,
@@ -265,7 +220,7 @@ function engineProcess(
     nextAction: "continue_work",
     summary: "Worktree task started; continue the wrapped workflow before closeout.",
     missingFacts: [],
-    sourceFiles: [enclosurePath, `${group}/${over.id}`, `${group}/provider-runtime/setup-progress.json`],
+    sourceFiles: [enclosurePath, `${group}/${over.id}`],
     ...over,
   };
 }
@@ -275,10 +230,10 @@ const bootBase = { id: BOOT_ID, taskName: "device-management", repoName: "agents
 
 const bootStages: EngineRoomScenario[] = [
   {
-    // B0 — main only: the official line + workspace engines exist; the enclosure is not yet
-    // materialised. Worktree refs are `planned` (not on disk), no providers, every edge planned —
-    // so the canvas renders the left world solid and the worktree side at rest (the build-up's
-    // honest start, = podstage B0). No missingFacts: a not-yet-created enclosure is not an alarm.
+    // B0 — main only: the official line exists; the enclosure is not yet materialised. Worktree refs are
+    // `planned` (not on disk) and every edge planned — so the canvas renders the left world solid and the
+    // worktree side at rest (the build-up's honest start, = podstage B0). No missingFacts: a not-yet-created
+    // enclosure is not an alarm.
     name: "engine-boot-0-main-only",
     processes: [
       engineProcess({
@@ -287,10 +242,7 @@ const bootStages: EngineRoomScenario[] = [
         health: "running",
         codeWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
         memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "planned", ledger: "planned", cgc: "planned", grepai: "planned" }),
+        edges: edges({ worktreeAdd: "planned", ledger: "planned" }),
         ledgerRows: [],
         ledgerRowCount: 0,
         summary: "worktree_start invoked — the official line is at rest; the enclosure is not yet materialised.",
@@ -298,7 +250,6 @@ const bootStages: EngineRoomScenario[] = [
         missingFacts: [],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // B1 — the code worktree copies in from the official line (branch-copy); memory still planned.
@@ -309,16 +260,12 @@ const bootStages: EngineRoomScenario[] = [
         phase: "code-worktree",
         health: "running",
         memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "complete", ledger: "planned", cgc: "planned", grepai: "planned" }),
+        edges: edges({ worktreeAdd: "complete", ledger: "planned" }),
         summary: "Code worktree forked from the official line; resolving external memory compatibility.",
         nextAction: "continue_work",
         missingFacts: [],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // B2 — the memory worktree copies in; the contract coupler binds (code === memory).
@@ -328,71 +275,25 @@ const bootStages: EngineRoomScenario[] = [
         ...bootBase,
         phase: "contract-written",
         health: "running",
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "planned", grepai: "planned" }),
+        edges: edges({ worktreeAdd: "complete", ledger: "complete" }),
         summary: "Memory ledger maps the base commit; contract written — the coupler binds.",
         missingFacts: [],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
-    // B3 — provider runtime deploys: the engines materialise dim and the clone conduits begin
-    // (cloned from main, not re-indexed). Engines `configured` (dim outline, drained charge).
-    name: "engine-boot-3-providers-dim",
-    processes: [
-      engineProcess({
-        ...bootBase,
-        phase: "provider-setup",
-        health: "running",
-        setupState: "running",
-        currentPhase: "provider runtime deploy",
-        heartbeatAgeSeconds: 1,
-        completedPhases: [],
-        providers: [boot("code", "configured"), boot("memory", "configured")],
-        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "running", grepai: "running" }),
-        summary: "Provider runtime deploying — the engines materialise dim, cloned from the official line.",
-        missingFacts: [],
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    // B4 — seed / clone: both engines charge (the center-out boot-fill) while the clone conduits run.
-    name: "engine-boot-4-seeding",
-    processes: [
-      engineProcess({
-        ...bootBase,
-        phase: "provider-setup",
-        health: "running",
-        setupState: "running",
-        currentPhase: "codegraphcontext-code seed · grepai-memory clone",
-        heartbeatAgeSeconds: 2,
-        completedPhases: [],
-        providers: [boot("code", "indexing"), boot("memory", "indexing")],
-        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "running", grepai: "running" }),
-        summary: "Provider runtime booting — CGC seeds and GrepAI clones; the engines charge cyan.",
-        missingFacts: [],
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    // B5 — powered: the engines went green and settle nominal; the clone conduits are gone. The
-    // idle constellation (= the default engineProcess: all observed, providers nominal, edges complete).
+    // B5 — powered: the enclosure is fully materialised and settles nominal. The idle constellation
+    // (= the default engineProcess: all observed, both intake lanes complete).
     name: "engine-boot-5-nominal",
     processes: [engineProcess({ ...bootBase })],
-    workspace: WORKSPACE,
   },
   {
     // T18 (X2/X3) — ABANDON: the live boot-demo enclosure DISSOLVES with no landing. Same boot-demo identity
     // as engine-boot-5-nominal (the X0 idle frame), so the scenario player animates the dissolve as a PROP
     // DIFF, not a remount. phase "abandoned" drives the Motion `dissolveShell` (fade + grayscale) + the
     // AbandonRecord; inside the canvas `retiring` detaches the worktree nodes, fades every worktree conduit
-    // to 0, powers the engines off, and raises the historical LaneFlag. Providers go [] (engines drain/off),
-    // the worktree refs go `planned` (detaching out). TERMINAL — no recover tail, no landing[].
+    // to 0, and raises the historical LaneFlag. The worktree refs go `planned` (detaching out).
+    // TERMINAL — no recover tail, no landing[].
     name: "engine-boot-abandoned",
     processes: [
       engineProcess({
@@ -406,14 +307,12 @@ const bootStages: EngineRoomScenario[] = [
         codeWorktree: ref({ branch: `ar/${BOOT_ID}`, path: "(detaching)", exists: false, factState: "planned" }),
         memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, path: "(detaching)", exists: false, factState: "planned" }),
         landing: [],
-        providers: [],
         edges: edges({}),
         actions: [],
         nextAction: "",
         summary: "Worktree abandoned without integration — no landing; an abandoned record is kept.",
       }),
     ],
-    workspace: WORKSPACE,
   },
 ];
 
@@ -432,16 +331,12 @@ const memoryBlockStages: EngineRoomScenario[] = [
         phase: "code-worktree",
         health: "running",
         memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "complete", ledger: "running", cgc: "planned", grepai: "planned" }),
+        edges: edges({ worktreeAdd: "complete", ledger: "running" }),
         summary: "Ledger-verify — checking the memory mapping for the selected base commit.",
         nextAction: "continue_work",
         missingFacts: [],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // block — no ledger map for the base commit: the memory lane is GATED (steady red) + GHOSTED while the
@@ -453,10 +348,7 @@ const memoryBlockStages: EngineRoomScenario[] = [
         phase: "worktree-started",
         health: "blocked",
         memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, path: "(not created)", exists: false, factState: "missing" }),
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "complete", ledger: "blocked", cgc: "planned", grepai: "planned" }),
+        edges: edges({ worktreeAdd: "complete", ledger: "blocked" }),
         ledgerRows: [],
         ledgerRowCount: 0,
         summary: "External memory blocked: no ledger mapping for the selected base commit — reconcile to map it.",
@@ -467,7 +359,6 @@ const memoryBlockStages: EngineRoomScenario[] = [
         ],
       }),
     ],
-    workspace: WORKSPACE,
   },
 ];
 
@@ -487,16 +378,12 @@ const staleBaseStages: EngineRoomScenario[] = [
         health: "running",
         codeWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
         memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "running", ledger: "planned", cgc: "planned", grepai: "planned" }),
+        edges: edges({ worktreeAdd: "running", ledger: "planned" }),
         summary: "Preflight — checking the base (local main) is current with upstream.",
         nextAction: "continue_work",
         missingFacts: [],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // block — base behind upstream: a FLEETING enclosure is born blocked (start gated before the contract),
@@ -510,10 +397,7 @@ const staleBaseStages: EngineRoomScenario[] = [
         codeSource: ref({ branch: SOURCE_BRANCH, commit: "08e9221a", path: `/home/dev/Projects/agents-remember`, behindSource: 3 }),
         codeWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
         memoryWorktree: ref({ branch: `ar/${BOOT_ID}`, exists: false, factState: "planned" }),
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "planned", ledger: "planned", cgc: "planned", grepai: "planned" }),
+        edges: edges({ worktreeAdd: "planned", ledger: "planned" }),
         ledgerRows: [],
         ledgerRowCount: 0,
         actions: [
@@ -528,130 +412,14 @@ const staleBaseStages: EngineRoomScenario[] = [
         ],
       }),
     ],
-    workspace: WORKSPACE,
-  },
-];
-
-// --- T7B (05o) provider-plan block arc ----------------------------------------
-// The provider PLAN (pre-contract runtime config) verify → block beats as ONE boot-demo enclosure. Both
-// worktrees materialise first (the recover reuses engine-boot-2..5), so the gate anchors ON the worktree
-// code/engine region (not a source lane) and the engines stay UNLIT. Mirrors podstage T7B P3/P4.
-const providerBlockStages: EngineRoomScenario[] = [
-  {
-    // P3 verify — both worktrees are real (observed); the provider runtime CONFIG is being checked
-    // (setupState 'running', no boot nodes yet) → the cyan scan ring sweeps AT the worktree engine. Engines
-    // not yet present. Contract not yet written (pre-contract). Same boot-demo enclosure as block/recover.
-    name: "engine-boot-provider-verify",
-    processes: [
-      engineProcess({
-        ...bootBase,
-        phase: "contract-written",
-        health: "running",
-        setupState: "running",
-        currentPhase: "provider plan — checking runtime setup config",
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "planned", grepai: "planned" }),
-        summary: "Provider plan — checking the runtime setup config (pre-contract).",
-        nextAction: "continue_work",
-        missingFacts: [],
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    // P4 BLOCK — provider runtime setup config missing: a steady gate drops on the worktree CODE node BEFORE
-    // the contract anchors and the engines NEVER light (providers: [] → unlit). setupState 'blocked' + the
-    // provider-plan missing fact is the T7B signal the renderer keys on (scan-at-engine + provider gate +
-    // engine-dropout halo, NOT the big red fleeting box). Recovery: retry setup / abandon (memory cannot
-    // be disabled for a task, so no disabled-memory choice is offered).
-    name: "engine-boot-provider-blocked",
-    processes: [
-      engineProcess({
-        ...bootBase,
-        phase: "contract-written",
-        health: "blocked",
-        setupState: "blocked",
-        completedPhases: [],
-        providers: [],
-        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "planned", grepai: "planned" }),
-        actions: [
-          { action: "retry setup", enabled: true },
-          { action: "abandon", enabled: true },
-        ],
-        nextAction: "retry_provider_setup",
-        summary: "Provider plan blocked — runtime setup config missing; contract not yet written.",
-        missingFacts: [
-          "start gated at provider plan — contract not yet written",
-          "provider runtime setup config missing",
-        ],
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-];
-
-// --- T9B (05o) seed-fault arc -------------------------------------------------
-// The GrepAI seed FAULT → re-seed beats as ONE boot-demo enclosure (recover reuses the boot frames). The
-// FAULT beat is the red refused grepai-clone flash + the GrepAI engine down-flicker (CGC unaffected); the
-// RETRY beat re-seeds (grepai-clone running again). Mirrors podstage T9B S5/S6.
-const seedFaultStages: EngineRoomScenario[] = [
-  {
-    // S5 — FAULT · GrepAI: the grepai-clone conduit is REFUSED (state failed → red flash), the GrepAI
-    // (memory) engine is `down` (red flicker), CGC (code) stays indexing/charging (UNAFFECTED). Keyed on
-    // boot-demo (continuous identity). A real `failed` health + the retry nextAction raise the breathing
-    // attention + the retry chip.
-    name: "engine-boot-seed-fault",
-    processes: [
-      engineProcess({
-        ...bootBase,
-        phase: "provider-setup",
-        health: "failed",
-        setupState: "failed",
-        currentPhase: "grepai-memory clone",
-        heartbeatAgeSeconds: 2,
-        completedPhases: ["codegraphcontext-code seed: ok"],
-        failedPhases: ["grepai-memory clone: failed (seed refused — stale heartbeat)"],
-        // CGC code engine still charging (indexing/booting), GrepAI memory engine down (fault flicker)
-        providers: [boot("code", "indexing"), boot("memory", "down")],
-        // grepai-clone FAILED → the red refused flash anchors on it; cgc-seed stays running (unaffected)
-        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "running", grepai: "failed" }),
-        retryArgs: { repo_id: "agents-remember", task_name: "device-management", worktree_name: BOOT_ID, retry_provider_setup: true },
-        nextAction: "retry seed",
-        summary: "GrepAI seed failed — stale heartbeat; CGC is independent and healthy. Retry the seed.",
-        missingFacts: [],
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    // S6 — RETRY: re-seed GrepAI; the grepai-clone conduit redraws (running again), the GrepAI engine
-    // returns to indexing (charges cyan), the fault/badge/chip clear. Same enclosure (prop diff).
-    name: "engine-boot-seed-retry",
-    processes: [
-      engineProcess({
-        ...bootBase,
-        phase: "provider-setup",
-        health: "running",
-        setupState: "running",
-        currentPhase: "grepai-memory clone (retry)",
-        heartbeatAgeSeconds: 1,
-        completedPhases: ["codegraphcontext-code seed: ok"],
-        providers: [boot("code", "indexing"), boot("memory", "indexing")],
-        edges: edges({ worktreeAdd: "complete", ledger: "complete", cgc: "running", grepai: "running" }),
-        summary: "Re-seeding GrepAI — the conduit redraws and the engine charges again.",
-        missingFacts: [],
-      }),
-    ],
-    workspace: WORKSPACE,
   },
 ];
 
 // --- T12B (05o) live memory-sync-block arc ------------------------------------
 // A live SYNC block on the MEMORY lane only: the worktree is real and working but origin/mem-main ADVANCED
 // (memorySource.behindSource > 0) while the worktree holds local memory commits — the memory lane gates +
-// ghosts while the CODE lane keeps advancing. Recover is merge-memory (fast-forward); the engines never go
-// down, so the recover is a ref/ff diff (no clone/seed beats). One `live-sync` enclosure throughout.
+// ghosts while the CODE lane keeps advancing. Recover is merge-memory (fast-forward), a ref/ff diff.
+// One `live-sync` enclosure throughout.
 const SYNC_ID = "live-sync";
 const syncBase = { id: SYNC_ID, taskName: "device-management", repoName: "agents-remember" } as const;
 const liveSyncStages: EngineRoomScenario[] = [
@@ -675,7 +443,6 @@ const liveSyncStages: EngineRoomScenario[] = [
         missingFacts: [],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // Y2 — BLOCKED · memory sync: the memory lane (ledger-map) gates STEADY + ghosts while the code lane
@@ -706,15 +473,13 @@ const liveSyncStages: EngineRoomScenario[] = [
         ],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // Y3·Y4 — recover (merge-memory → ff) + running: the memory worktree fast-forwards onto the moved
-    // upstream (behindSource cleared), the gate lifts, the ghost clears, both lanes solid, engines nominal.
-    // This is the default `engineProcess` rest state for the SAME enclosure (a ref/ff diff, no clone beats).
+    // upstream (behindSource cleared), the gate lifts, the ghost clears, both lanes solid.
+    // This is the default `engineProcess` rest state for the SAME enclosure (a ref/ff diff).
     name: "engine-sync-recovered",
     processes: [engineProcess({ ...syncBase, phase: "worktree-started", health: "running" })],
-    workspace: WORKSPACE,
   },
 ];
 
@@ -727,28 +492,9 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         id: "device-mgmt",
         taskName: "device-management",
         repoName: "agents-remember",
-        phase: "provider-setup",
+        phase: "contract-written",
         health: "running",
-        setupState: "running",
-        currentPhase: "grepai-memory clone",
-        heartbeatAgeSeconds: 3,
-        completedPhases: ["codegraphcontext-code seed: ok"],
-        providers: [boot("code"), boot("memory", "indexing")],
-        edges: edges({ cgc: "complete", grepai: "running" }),
-        summary: "Provider setup running — GrepAI cloning.",
-      }),
-      engineProcess({
-        id: "gate-plane",
-        taskName: "gate-control-plane",
-        repoName: "agents-remember",
-        health: "failed",
-        setupState: "failed",
-        failedPhases: ["grepai-memory clone: failed (clone stalled)"],
-        completedPhases: ["codegraphcontext-code seed: ok"],
-        providers: [boot("code"), boot("memory", "down")],
-        edges: edges({ grepai: "failed" }),
-        retryArgs: { repo_id: "agents-remember", task_name: "gate-control-plane", worktree_name: "gate-plane", retry_provider_setup: true },
-        summary: "GrepAI clone failed; retry available.",
+        summary: "Contract written; the enclosure is assembled and the workflow is running.",
       }),
       engineProcess({
         id: "read-packet",
@@ -778,104 +524,10 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         nextAction: "request_integration_decision",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     name: "engine-bootstrap",
     processes: [engineProcess({ id: "browser-dashboard", taskName: "browser-dashboard", repoName: "agents-remember" })],
-    workspace: WORKSPACE,
-  },
-  {
-    name: "engine-setup-running",
-    processes: [
-      engineProcess({
-        id: "device-mgmt",
-        taskName: "device-management",
-        repoName: "agents-remember",
-        phase: "provider-setup",
-        health: "running",
-        setupState: "running",
-        currentPhase: "grepai-memory clone",
-        heartbeatAgeSeconds: 4,
-        completedPhases: ["codegraphcontext-code seed: ok"],
-        providers: [boot("code"), boot("memory", "indexing")],
-        edges: edges({ cgc: "complete", grepai: "running" }),
-        summary: "Provider setup running — current phase grepai-memory clone (heartbeat fresh).",
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    name: "engine-grepai-failed",
-    processes: [
-      engineProcess({
-        id: "device-mgmt",
-        taskName: "device-management",
-        repoName: "agents-remember",
-        phase: "provider-setup",
-        health: "failed",
-        setupState: "failed",
-        failedPhases: ["grepai-memory clone: failed (clone stalled — no progress for 120s)"],
-        completedPhases: ["codegraphcontext-code seed: ok"],
-        providers: [boot("code"), boot("memory", "down")],
-        edges: edges({ grepai: "failed" }),
-        retryArgs: { repo_id: "agents-remember", task_name: "device-management", worktree_name: "device-mgmt", retry_provider_setup: true },
-        summary: "GrepAI clone failed; the code engine is independent and healthy.",
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    // T9C (05o) R4 — the CGC seed is REFUSED (commit mismatch) and CGC reindexes IN PLACE: the cgc-seed
-    // conduit flashes AMBER (a reroute, not a failure) while GrepAI seeds normally. SOFT — health stays
-    // `running` (never blocked/failed), so it raises NO gate/STOP/attention; only the amber flash + the
-    // amber center-out reindex pulse (driven by seedFallback) + the soft indicator. One device-mgmt identity
-    // (same as engine-cgc-fallback) so the reroute → reindex-settled recover is a prop diff, not a remount.
-    name: "engine-cgc-seed-refused",
-    processes: [
-      engineProcess({
-        id: "device-mgmt",
-        taskName: "device-management",
-        repoName: "agents-remember",
-        phase: "provider-setup",
-        health: "running", // SOFT — a reroute, not a failure
-        setupState: "running",
-        currentPhase: "codegraphcontext-code reindex (seed stale — reroute)",
-        heartbeatAgeSeconds: 1,
-        seedFallback: true, // retired render (MIK-R112): no reindex pulse reads this anymore
-        completedPhases: ["grepai-memory clone: ok"],
-        // CGC reindexing (engine `indexing`, amber via reindex prop); GrepAI seeds normally (running clone)
-        providers: [boot("code", "indexing"), boot("memory", "indexing")],
-        // The cgc-seed lane is `stale` — the reducer's own reroute state (_seed_edge_state), which the
-        // renderer derives AMBER polarity from; grepai-clone keeps running normally. Nothing here
-        // carries a polarity field: the fixture states are exactly the ones the server can emit.
-        edges: edges({ cgc: "stale", grepai: "running", worktreeAdd: "complete", ledger: "complete" }),
-        summary: "CGC seed went stale on commit mismatch — rerouting to a full reindex (a fallback, not a failure).",
-        nextAction: "continue_work",
-        missingFacts: [],
-      }),
-    ],
-    workspace: WORKSPACE,
-  },
-  {
-    name: "engine-cgc-fallback",
-    processes: [
-      engineProcess({
-        id: "device-mgmt",
-        taskName: "device-management",
-        repoName: "agents-remember",
-        setupState: "ok",
-        seedFallback: true,
-        completedPhases: [
-          "codegraphcontext-code seed: skipped (commit mismatch — reroute to reindex)",
-          "codegraphcontext-code reindex: ok",
-          "grepai-memory clone: ok",
-        ],
-        edges: edges({ cgc: "complete" }),
-        summary: "CGC seed refused on commit mismatch; rerouted to a full reindex (not a failure).",
-      }),
-    ],
-    workspace: WORKSPACE,
   },
   {
     name: "engine-memory-blocked",
@@ -887,20 +539,15 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         phase: "worktree-started",
         health: "blocked",
         memoryWorktree: ref({ branch: "ar/v12-feature", path: "(not created)", exists: false, factState: "missing" }),
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ ledger: "blocked", cgc: "planned", grepai: "planned" }),
+        edges: edges({ ledger: "blocked" }),
         ledgerRows: [], // no ledger mapping yet — the coupler popover stays empty (no fake rows)
         ledgerRowCount: 0,
         summary: "External memory blocked: no ledger mapping for the selected code base commit.",
         missingFacts: [
           "memory worktree not present on disk",
-          "provider setup not observed for this worktree group",
         ],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     name: "engine-precontract-blocked",
@@ -916,10 +563,7 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         memorySource: ref({ factState: "planned" }),
         memoryWorktree: ref({ exists: false, factState: "missing" }),
         ledgerPath: undefined,
-        setupState: undefined,
-        completedPhases: [],
-        providers: [],
-        edges: edges({ ledger: "blocked", cgc: "planned", grepai: "planned" }),
+        edges: edges({ ledger: "blocked" }),
         ledgerRows: [], // pre-contract: no ledger mapping yet → empty coupler popover
         ledgerRowCount: 0,
         summary: "no exact ledger mapping for selected code base commit",
@@ -931,7 +575,6 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         sourceFiles: ["/home/dev/Projects/ar-coordination/temp/worktree-start/agents-remember/v12-feat.json"],
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     name: "engine-sync-needed",
@@ -949,7 +592,6 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         nextAction: "worktree_sync",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     name: "engine-cleanup-pending",
@@ -966,8 +608,8 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         integrationStrategy: "ff-only",
         cleanup: "pending",
         // D5 de-materialise: the work has LANDED (the strip is done), so the WORKTREE side detaches — its
-        // branches go `planned` (fading out) and the provider runtime powers down (no boot nodes), while
-        // the official line (main) stays solid and the remote dock holds until the row is removed (D6).
+        // branches go `planned` (fading out), while the official line (main) stays solid and the remote dock
+        // holds until the row is removed (D6).
         codeWorktree: ref({ branch: "ar/boot-audio", path: "(detaching)", exists: false, factState: "planned" }),
         memoryWorktree: ref({ branch: "ar/boot-audio", path: "(detaching)", exists: false, factState: "planned" }),
         landing: [
@@ -976,18 +618,16 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
           landingRef("origin-main", "origin/main", "tip", "observed", "0a1b2c3"),
           landingRef("origin-mem-main", "origin/mem-main", "pushed"),
         ],
-        providers: [],
         actions: [{ action: "cleanup", enabled: true }],
-        summary: "Landed; the provider runtime powers down and the worktree detaches (de-materialise).",
+        summary: "Landed; the worktree detaches (de-materialise) back into the official line.",
         nextAction: "retry_cleanup",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
-    // D6 stack removed: the enclosure is gone. The worktree branches + providers are removed (missing),
-    // the landing arc has retired (no remote dock, no feat tier) — only the official line (main) + a dim
-    // historical contract chip remain. `cleanup` is `done`, so the row is retiring out of the stack list.
+    // D6 stack removed: the enclosure is gone. The worktree branches are removed (missing), the landing arc
+    // has retired (no remote dock, no feat tier) — only the official line (main) + a dim historical contract
+    // chip remain. `cleanup` is `done`, so the row is retiring out of the stack list.
     name: "engine-retired",
     processes: [
       engineProcess({
@@ -1006,13 +646,11 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         landing: [],
         ledgerRows: [],
         ledgerRowCount: 0,
-        providers: [],
         actions: [],
         summary: "Retired — worktree removed; only the official line (main) and the historical record remain.",
         nextAction: "",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     name: "engine-integration-conflict",
@@ -1033,7 +671,6 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         summary: "Integration conflict on the source line — resolve manually; nothing landed (all-or-nothing).",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // T14C (05o) C3 — the transient CONFLICT FLASH: the replay HIT a conflict; the integration return-lane(s)
@@ -1059,7 +696,6 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         summary: "Replay refused — conflict on the source line; nothing landed (all-or-nothing).",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     name: "engine-abandoned",
@@ -1073,13 +709,11 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         humanReviewStatus: "n/a",
         closeoutStatus: "not-started",
         cleanup: "done",
-        providers: [],
         actions: [],
         nextAction: "",
         summary: "Worktree abandoned without integration — record kept.",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // 5h T13 — closeout train: the known closeout order plays on closeout-pending (before integration).
@@ -1098,7 +732,6 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         nextAction: "closeout",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // 5h T14 — successful ff-only landing, mid-arc: source pushed, PR open, memory not yet carried.
@@ -1125,7 +758,6 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         nextAction: "request_integration_decision",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // 5h T14b/T16 — replay onto a moved main, PR merged, memory carried over (D4). The enclosure is
@@ -1155,7 +787,6 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         nextAction: "retry_cleanup",
       }),
     ],
-    workspace: WORKSPACE,
   },
   {
     // 5k D3 — code lands: feat pushed → PR merged → origin/main advanced → local main pulls. The CODE has
@@ -1186,12 +817,9 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         nextAction: "request_integration_decision",
       }),
     ],
-    workspace: WORKSPACE,
   },
   ...bootStages,
   ...memoryBlockStages,
   ...staleBaseStages,
-  ...providerBlockStages,
-  ...seedFaultStages,
   ...liveSyncStages,
 ];
