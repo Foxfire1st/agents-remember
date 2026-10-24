@@ -30,6 +30,16 @@ class MasterOrderTask:
     waits_for: tuple[str, ...]
     wave: int
     cycle: bool = False
+    # MIK-R189 rule 2: the leaf's intent-review state (``pending``/``review-first``/``go``), or
+    # ``None`` for an older leaf and for a synthetic ``gone`` entry. The Order section's State
+    # column shows it; ``ready_ids`` leaves such a leaf out. No new ready list is made.
+    intent_review: str | None = None
+
+    @property
+    def intent_review_open(self) -> bool:
+        """Whether this leaf waits for the architect's go before any start."""
+
+        return self.intent_review is not None and self.intent_review != "go"
 
 
 @dataclass(frozen=True)
@@ -131,6 +141,11 @@ def _task_population(
             file=row.file,
             waits_for=tuple(child.waitsFor or ()) if child else (),
             wave=-1,
+            intent_review=(
+                child.intentReview.state
+                if child is not None and child.intentReview is not None
+                else None
+            ),
         )
     for task in tuple(tasks.values()):
         for ref in task.waits_for:
@@ -224,6 +239,7 @@ def derive_master_order(
         for key, task in tasks.items()
         if task.status == "planning"
         and key not in cyclic
+        and not task.intent_review_open
         and all(tasks[ref].status == "Completed" for ref in task.waits_for)
     )
     return MasterOrder(

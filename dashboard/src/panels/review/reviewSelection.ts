@@ -10,8 +10,8 @@ export type ReviewSelection =
   | { kind: 'block'; block: ReviewBlockIdentity }
   | { kind: 'lane'; path?: string };
 
-// L89's Sort menu: the deterministic sorts only. L183 adds the judgment group.
-export type ReviewSort =
+// The Sort menu: the seven deterministic sorts (MIK-R89 v2) plus the judgment categories (MIK-R187).
+export type DeterministicSort =
   | 'priority'
   | 'authored'
   | 'currentness'
@@ -20,7 +20,19 @@ export type ReviewSort =
   | 'without-proof'
   | 'open-weaknesses';
 
-export const REVIEW_SORTS: readonly ReviewSort[] = [
+export type JudgmentSort = `judgment:${string}`;
+
+export type ReviewSort = DeterministicSort | JudgmentSort;
+
+export const isJudgmentSort = (sort: string): sort is JudgmentSort =>
+  sort.startsWith('judgment:') && sort.length > 'judgment:'.length;
+
+export const judgmentCategoryOf = (sort: string): string | null =>
+  isJudgmentSort(sort) ? sort.slice('judgment:'.length) : null;
+
+export const judgmentSortFor = (category: string): JudgmentSort => `judgment:${category}`;
+
+const BASE_REVIEW_SORTS: readonly ReviewSort[] = [
   'priority',
   'authored',
   'currentness',
@@ -30,7 +42,19 @@ export const REVIEW_SORTS: readonly ReviewSort[] = [
   'open-weaknesses',
 ];
 
-export const SORT_LABELS: Record<ReviewSort, string> = {
+export const REVIEW_SORTS: readonly ReviewSort[] = new Proxy(BASE_REVIEW_SORTS, {
+  get(target, prop, receiver) {
+    if (prop === 'includes') {
+      return (searchElement: ReviewSort, fromIndex?: number): boolean => {
+        if (typeof searchElement === 'string' && isJudgmentSort(searchElement)) return true;
+        return Array.prototype.includes.call(target, searchElement, fromIndex);
+      };
+    }
+    return Reflect.get(target, prop, receiver);
+  },
+});
+
+const DETERMINISTIC_SORT_LABELS: Record<DeterministicSort, string> = {
   priority: 'Priority',
   authored: 'Authored',
   currentness: 'Memory currentness',
@@ -39,6 +63,23 @@ export const SORT_LABELS: Record<ReviewSort, string> = {
   'without-proof': 'Invariants without proof first',
   'open-weaknesses': 'Most open weaknesses',
 };
+
+export const SORT_LABELS: Record<ReviewSort, string> = new Proxy(
+  DETERMINISTIC_SORT_LABELS as Record<ReviewSort, string>,
+  {
+    get(target, prop) {
+      if (typeof prop === 'string') {
+        if (prop in target) return target[prop as DeterministicSort];
+        if (isJudgmentSort(prop)) return `✦ ${prop.slice('judgment:'.length)}`;
+      }
+      return Reflect.get(target, prop);
+    },
+  },
+);
+
+export function sortLabel(sort: ReviewSort): string {
+  return SORT_LABELS[sort] ?? String(sort);
+}
 
 // The four sorts fed by the card read's memory values; unavailable together when those are.
 export const MEMORY_SORTS: ReadonlySet<ReviewSort> = new Set<ReviewSort>([

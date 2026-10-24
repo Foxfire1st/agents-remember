@@ -17,6 +17,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
+from agents_remember.kernel.primitives.control_vocabulary import (
+    PROVIDER_LIMIT_REASON,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.observer.provider_limits import (
     ProviderLimits,
@@ -29,7 +32,6 @@ from agents_remember.serving.paseo.provider_limits import provider_limits_path, 
 logger = logging.getLogger(__name__)
 
 # Rule 9's held reason, and the fourth case MIK-R100 rule 4b's three gain.
-PROVIDER_LIMIT_REASON = "provider-limit"
 # Rule 7's one failed-read line per tick names the batch's failures inside this bound.
 _FAILED_READ_LINE_LIMIT = 500
 

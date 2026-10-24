@@ -120,7 +120,7 @@ class _Ticker:
             self.seen,
             self.usage_seen,
             sweep=False,
-            usage_read=record_usage,
+            collaborators=life._DeliveryCollaborators(usage_read=record_usage),
         )
 
 

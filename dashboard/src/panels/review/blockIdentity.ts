@@ -233,3 +233,86 @@ export function inComparison(identity: ReviewBlockIdentity, trees: ComparisonTre
   if (identity.kind === 'hunk') return true;
   return identity.trees.memoryBase === trees.memoryBase && identity.trees.memoryCandidate === trees.memoryCandidate;
 }
+
+function fieldMatches(value: unknown, expected: string): boolean {
+  return typeof value !== 'string' || value === expected;
+}
+
+function treesMatchJson(trees: ComparisonTrees, record: Record<string, unknown>): boolean {
+  const pairs: Array<[unknown, string]> = [
+    [record.codeBase, trees.codeBase],
+    [record.codeCandidate, trees.codeCandidate],
+    [record.memoryBase, trees.memoryBase],
+    [record.memoryCandidate, trees.memoryCandidate],
+  ];
+  return pairs.every(([actual, expected]) => fieldMatches(actual, expected));
+}
+
+function matchesEntryJsonRecord(
+  identity: BlockIdentity,
+  entryIds: readonly string[],
+  record: Record<string, unknown>,
+): boolean {
+  if (typeof record.entry !== 'string' || !entryIds.includes(record.entry)) return false;
+  if (!fieldMatches(record.path, identity.path)) return false;
+  return treesMatchJson(identity.trees, record);
+}
+
+function matchesJsonReference(
+  identity: ReviewBlockIdentity,
+  entryIds: readonly string[],
+  raw: string,
+): boolean {
+  if (!raw.startsWith('{')) return false;
+  const parsed = parseJson(raw);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
+  const record = parsed as Record<string, unknown>;
+  if (identity.kind === 'entry') return matchesEntryJsonRecord(identity, entryIds, record);
+  return typeof record.path === 'string' && record.path === identity.path;
+}
+
+function matchesEncodedBlock(
+  key: string,
+  drawnKeys: readonly string[],
+  reference: string,
+): boolean {
+  if (!reference.startsWith('b:') && !reference.startsWith('h:')) return false;
+  const decoded = parseSelection(reference);
+  if (decoded?.kind !== 'block') return false;
+  const decodedKey = blockKey(decoded.block);
+  return decodedKey === key || drawnKeys.includes(decodedKey);
+}
+
+function matchesPrefixedSubject(
+  identity: ReviewBlockIdentity,
+  entryIds: readonly string[],
+  reference: string,
+): boolean {
+  if (reference.startsWith('card:')) {
+    const entry = reference.slice('card:'.length).split('@')[0]?.split(':')[0] ?? '';
+    return Boolean(entry) && entryIds.includes(entry);
+  }
+  if (reference.startsWith('hunk:') && identity.kind === 'hunk') {
+    const pathPart = reference.slice('hunk:'.length).split('@')[0] ?? '';
+    return pathPart === identity.path;
+  }
+  return false;
+}
+
+/**
+ * Whether a stored grade or claim reference names this block (MIK-R89 v2 rule 13; MIK-R187 rule 3).
+ */
+export function matchesBlockReference(
+  identity: ReviewBlockIdentity,
+  drawnKeys: readonly string[],
+  entryIds: readonly string[],
+  reference: string,
+): boolean {
+  if (!reference) return false;
+  const key = blockKey(identity);
+  if (reference === key || drawnKeys.includes(reference) || entryIds.includes(reference)) return true;
+  if (reference === formatSelection({ kind: 'block', block: identity })) return true;
+  if (matchesEncodedBlock(key, drawnKeys, reference)) return true;
+  if (matchesPrefixedSubject(identity, entryIds, reference)) return true;
+  return matchesJsonReference(identity, entryIds, reference);
+}

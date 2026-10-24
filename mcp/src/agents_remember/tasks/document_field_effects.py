@@ -31,6 +31,8 @@ from .document import (
     DiscardUnstartedProof,
     ExpectedKnowledgeEffect,
     HeaderNote,
+    IntentReview,
+    IntentReviewRevision,
     ReviewApproval,
     ReviewFinding,
     ReviewState,
@@ -170,6 +172,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "lifecycleId": LIFECYCLE,
         "knowledgeMaintenanceScope": LIFECYCLE,
         "expectedKnowledgeEffects": NORMATIVE,
+        "intentReview": NORMATIVE,
         "objective": NORMATIVE,
         "requirements": NORMATIVE,
         "design": NORMATIVE,
@@ -295,6 +298,16 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "subject": NORMATIVE,
         "effect": NORMATIVE,
         "requirementRef": NORMATIVE,
+    },
+    IntentReview: {
+        "state": NORMATIVE,
+        "decisionRef": NORMATIVE,
+        "agreedRevision": NORMATIVE,
+    },
+    IntentReviewRevision: {
+        "revisionId": NORMATIVE,
+        "sha256": NORMATIVE,
+        "packetVersions": NORMATIVE,
     },
     TaskEnclosureRef: {"leafId": LIFECYCLE, "enclosurePath": LIFECYCLE},
     TaskExecutionRegistration: {

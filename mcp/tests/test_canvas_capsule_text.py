@@ -52,7 +52,7 @@ REQUIRED_WORDING = (
     "You are not the Reviewer",
     "Keywords:",
     "You write only in your working folder.",
-    "The side conversation belongs to this attempt",
+    "The side conversation belongs to this environment",
 )
 
 
@@ -227,3 +227,5 @@ def test_the_packaging_declaration_ships_the_installed_copy() -> None:
     assert "canvas/*.md" in patterns
     assert (PACKAGE_ROOT / PACKAGED_PATH).is_file()
     assert (REPOSITORY_ROOT / CANONICAL_PATH).is_file()
+    loaded = load_capability_resource(CAPABILITY)
+    assert "Message file:" in loaded.text and "messageId" in loaded.text

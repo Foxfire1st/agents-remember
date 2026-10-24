@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.agent_binding import read_agent_binding
 from agents_remember.application.direct_execution_grants import refuse_open_direct_sibling
 from agents_remember.kernel.direct_execution_grants import DirectGrantError
 from agents_remember.kernel.primitives.runtime_config import (
@@ -38,6 +39,7 @@ from agents_remember.tasks import (
     write_task_docs,
     write_task_docs_and_remove,
 )
+from agents_remember.tasks.document import IntentReview
 from agents_remember.tasks.leaf_doc import require_task_document_in_place
 from agents_remember.tasks.master_sync import (
     MasterSyncError,
@@ -70,6 +72,7 @@ from .task_doc_content_edits import (
     _apply_set_status,
     _upsert_section,
     _upsert_subtask,
+    enforce_intent_review_candidate,
 )
 from .task_doc_discard import DiscardUnstartedRequest, discard_unstarted_subtask
 from .task_doc_field_homes import enforce_prose_field_homes, enforce_waits_for_write
@@ -475,6 +478,7 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     _enforce_route_review_authority(operation, original, doc)
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
     _enforce_preserves_unresolved_master_rows(operation, original, doc)
+    enforce_intent_review_candidate(operation, original, doc, caller=read_agent_binding())
     _enforce_terminal_status(operation, doc, context.edit)
     require_master_completion(config.coordination_root, target.repo_id, task_root, original, doc)
     _enforce_register_section_shapes(doc)
@@ -595,7 +599,13 @@ def _prepare_task_doc_edit(
     json_path = _existing_json(request.task_root, request.slug)
     original, selected_snapshot = read_task_doc_with_source(json_path)
     if request.operation == "replace":
-        doc = _replace(request.payload_fields, request.contract, request.task_root, json_path)
+        doc = _replace(
+            request.payload_fields,
+            request.contract,
+            request.task_root,
+            json_path,
+            original=original,
+        )
     elif request.operation == "begin_review":
         doc = _begin_task_review_bound(
             original,
@@ -764,11 +774,23 @@ def _create(
     contract: WorktreeContract | None,
     task_root: Path,
 ) -> TaskDocument:
-    doc = _build_doc(fields, contract, task_root)
+    doc = _pending_intent_review(_build_doc(fields, contract, task_root))
     json_path = json_path_for(task_root, doc)
     if json_path.exists():
         raise TaskDocError(f"task document already exists: {json_path}; use an update operation")
     return doc
+
+
+def _pending_intent_review(doc: TaskDocument) -> TaskDocument:
+    """A leaf created after MIK-R189 lands starts ``pending`` (rule 2).
+
+    The architect asks the developer once and records the answer here; until then every start of
+    the new leaf answers ``intent-review-open``. A master carries no intent review at all.
+    """
+
+    if doc.kind != "subTask" or doc.intentReview is not None:
+        return doc
+    return doc.model_copy(update={"intentReview": IntentReview(state="pending")})
 
 
 def _replace(
@@ -776,6 +798,8 @@ def _replace(
     contract: WorktreeContract | None,
     task_root: Path,
     existing_json_path: Path,
+    *,
+    original: TaskDocument | None = None,
 ) -> TaskDocument:
     doc = _build_doc(fields, contract, task_root)
     replacement_json_path = json_path_for(task_root, doc)
@@ -783,6 +807,12 @@ def _replace(
         raise TaskDocError(
             "replace cannot change the task document path; keep the same slug/kind or create a new document"
         )
+    # MIK-R189 rule 8: replace rebuilds the document from the payload alone, so a field the
+    # caller did not re-supply would be silently gone. The intent review is kept instead; a
+    # payload that sets it to null is the one call that would drop it, and the candidate guard
+    # refuses that by name.
+    if original is not None and original.intentReview is not None and "intentReview" not in fields:
+        return doc.model_copy(update={"intentReview": original.intentReview})
     return doc
 
 
@@ -1018,42 +1048,22 @@ def _enforce_terminal_status(
     candidate: TaskDocument,
     edit: TaskDocEdit = NO_EDIT,
 ) -> None:
-    """A Completed document admits no new unresolved work -- except a reasoned removal.
-
-    ``remove_step`` is the deliberate exception (developer ruling). Its motivating case
-    repaired spurious units on an already-``Completed`` leaf document, and a status gate
-    would have forced a full-document ``replace`` that was correctly refused as too
-    destructive. The removal's nonblank reason and its appended decision are the audited
-    substitute for that gate; ``_apply_remove_step`` refuses a blank reason first.
-    """
+    """A Completed document admits no new unresolved work -- except a reasoned removal."""
     if candidate.status != "Completed":
         return
     if operation == "remove_step" and task_doc_steps.step_reason(edit.step) is not None:
         return
-    _raise_for_completion_blockers(candidate)
-
-
-def _raise_for_completion_blockers(doc: TaskDocument) -> None:
-    blockers = completion_blockers(doc)
-    if not blockers:
-        return
-    exact = [blocker.model_dump() for blocker in blockers]
-    raise TaskDocError(f"task completion refused; unresolved work units: {exact!r}")
+    blockers = completion_blockers(candidate)
+    if blockers:
+        exact = [blocker.model_dump() for blocker in blockers]
+        raise TaskDocError(f"task completion refused; unresolved work units: {exact!r}")
 
 
 def _remove_subtask(
     context: _TaskDocSpecialContext,
     subtask: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Remove a terminal row, or audit and discard one canonically proven-unstarted leaf.
-
-    ``remove_subtask`` completes task-doc CRUD: it drops the ``SubTaskRef`` by ``number`` from the
-    master ``subTasks`` index and deletes the referenced leaf document (``<slug>.json`` + ``.md``)
-    -- "remove means remove" -- unless ``subtask.keep_file`` is set, in which case only the index
-    row is removed and the leaf doc is left on disk. ``disposition=discard-unstarted`` is the
-    distinct planning transition: it requires a nonblank reason, forbids ``keep_file``, proves
-    absence of execution authority under the task CAS, and leaves a typed parent audit.
-    """
+    """Remove a terminal row, or audit and discard one canonically proven-unstarted leaf."""
     if not subtask or not subtask.get("number"):
         raise TaskDocError("remove_subtask requires subtask.number")
     disposition = subtask.get("disposition")

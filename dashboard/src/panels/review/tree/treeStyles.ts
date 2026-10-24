@@ -126,7 +126,7 @@ export const branches = css({ paddingBottom: '0.6rem' });
 // One line per row (D48; INV-PKFP2R): a caret, the ellipsized name and one reason.
 export const row = css({
   display: 'grid',
-  gridTemplateColumns: '0.9rem minmax(0, 1fr) auto',
+  gridTemplateColumns: '0.9rem auto minmax(0, 1fr) auto',
   gap: '0.35rem',
   alignItems: 'baseline',
   width: '100%',

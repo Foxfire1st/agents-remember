@@ -36,6 +36,7 @@ import subprocess
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Final
 
@@ -144,9 +145,6 @@ from agents_remember.models.tools.tool_answer import (
     TOOL_ANSWER_LIST_MAX,
     TOOL_ANSWER_STATUS_ENTRY_MAX,
 )
-from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, legacy_format_refusal
-from agents_remember.worktrees.modules.git import worktree_candidate_tree
-from agents_remember.worktrees.worktree_contract import load_contract
 
 from .base import _tool_payload
 
@@ -664,12 +662,14 @@ def _memory_tree_refusal(memory_root: str, operation: str) -> tuple[str, str] | 
         )
     if path.is_dir():
         return (
-            LEGACY_FORMAT_CODE,
-            legacy_format_refusal(path, operation=operation, subject=f"the memory tree {path}"),
+            import_module("agents_remember.worktrees.cutover_lock").LEGACY_FORMAT_CODE,
+            import_module("agents_remember.worktrees.cutover_lock").legacy_format_refusal(
+                path, operation=operation, subject=f"the memory tree {path}"
+            ),
         )
     return (
-        LEGACY_FORMAT_CODE,
-        legacy_format_refusal(
+        import_module("agents_remember.worktrees.cutover_lock").LEGACY_FORMAT_CODE,
+        import_module("agents_remember.worktrees.cutover_lock").legacy_format_refusal(
             path.parent,
             operation=operation,
             subject=f"the file {path}",
@@ -1119,8 +1119,8 @@ def _diff_result(request: DiffToolRequest, coordination_root: str | None = None)
     root = Path(request.memory_root)
     if root.is_file():
         return refused(
-            LEGACY_FORMAT_CODE,
-            legacy_format_refusal(
+            import_module("agents_remember.worktrees.cutover_lock").LEGACY_FORMAT_CODE,
+            import_module("agents_remember.worktrees.cutover_lock").legacy_format_refusal(
                 root.parent,
                 operation="knowledge_diff",
                 subject=f"the file {root}",
@@ -1324,8 +1324,8 @@ def _diff_trees(root: Path, request: DiffToolRequest) -> tuple[str, str] | _Refu
             return _Refusal("selected_input_unavailable", resolved)
         if not resolved.converted:
             return _Refusal(
-                LEGACY_FORMAT_CODE,
-                legacy_format_refusal(
+                import_module("agents_remember.worktrees.cutover_lock").LEGACY_FORMAT_CODE,
+                import_module("agents_remember.worktrees.cutover_lock").legacy_format_refusal(
                     root,
                     operation="knowledge_diff",
                     subject=f"the memory tree {root} at {revision} ({resolved.tree})",
@@ -1391,7 +1391,9 @@ def _working_tree(root: Path) -> _ResolvedTree | str:
 
     try:
         with tempfile.TemporaryDirectory(prefix="ar-knowledge-diff-") as scratch:
-            tree = worktree_candidate_tree(root, Path(scratch) / "index")
+            tree = import_module("agents_remember.worktrees.modules.git").worktree_candidate_tree(
+                root, Path(scratch) / "index"
+            )
         marker = run_git(
             root,
             ["cat-file", "-e", f"{tree}:{LAYOUT_MARKER_PATH}"],
@@ -1566,7 +1568,9 @@ def _validator_inputs(
     )
     if request.contractPath is not None and (memory_root is None or code_root is None):
         try:
-            contract = load_contract(Path(request.contractPath))
+            contract = import_module("agents_remember.worktrees.worktree_contract").load_contract(
+                Path(request.contractPath)
+            )
         except (ValueError, OSError) as error:
             return (
                 "selected_input_unavailable",

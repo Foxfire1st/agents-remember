@@ -11,12 +11,6 @@ from mcp.server.lowlevel.server import request_ctx
 from pydantic import Field, StrictBool, StrictStr
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.mcp.tools.role_agents import (
-    role_message_payload,
-    role_start_payload,
-    role_start_set_payload,
-    user_settings_init_payload,
-)
 from agents_remember.models.role_agents import (
     DEFAULT_WAIT_SECONDS,
     MAX_WAIT_SECONDS,
@@ -27,6 +21,8 @@ from agents_remember.models.role_agents import (
 )
 from agents_remember.models.role_launcher import LauncherRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
+
+from .lazy import tools
 
 _SEAT_OVERRIDE_KEYS = frozenset({"agent", "model", "effort", "featureValues", "feature_values"})
 
@@ -120,7 +116,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
             step_up=step_up,
             caller_harness=caller_harness_name(),
         )
-        return await asyncio.to_thread(role_start_payload, config, call)
+        return await asyncio.to_thread(tools.role_start_payload, config, call)
 
     @server.tool()
     async def role_start_set(
@@ -160,7 +156,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
                 "nextAction": "Fix the seat override named in detail and call again.",
                 "requestId": str(request_id),
             }
-        return await asyncio.to_thread(role_start_set_payload, config, call)
+        return await asyncio.to_thread(tools.role_start_set_payload, config, call)
 
     @server.tool()
     async def user_settings_init(
@@ -172,7 +168,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
     ) -> dict[str, object]:
         """Preview or create role-settings with a harness per named role; model and effort stay unset. Name one harness or a harness per role. Existing choices are read and never overwritten. Call dry_run first. host-authority is refused: host preparation writes paseoRuntime in the active MCP settings file. The answer names state, path and changes. More: docs/reference/mcp-tools.md."""
         return await asyncio.to_thread(
-            user_settings_init_payload,
+            tools.user_settings_init_payload,
             config,
             harness=harness,
             roles=roles,
@@ -209,7 +205,7 @@ def register_role_agent_tools(server: FastMCP, config: McpRuntimeConfig) -> None
             timeout_seconds=timeout_seconds,
             withdraw_held_message_id=withdraw_held_message_id,
         )
-        return await asyncio.to_thread(role_message_payload, config, call)
+        return await asyncio.to_thread(tools.role_message_payload, config, call)
 
 
 __all__ = ["register_role_agent_tools"]

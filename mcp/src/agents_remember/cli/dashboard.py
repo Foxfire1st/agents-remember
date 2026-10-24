@@ -20,11 +20,15 @@ from typing import Any, NamedTuple
 import uvicorn
 
 import agents_remember
+from agents_remember.application.review_planned_comparison import (
+    explainer_application_ports,
+)
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli.dashboard_review_summary import review_intent_summary_port
 from agents_remember.cli.developer_messages import register_developer_chat_routes
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.cli.paseo_bridge import bridge_call
+from agents_remember.cli.paseo_explainer_host import PaseoExplainerHost
 from agents_remember.cli.role_launch_archive import LeafAgentArchive
 from agents_remember.cli.role_launch_routes import register_role_launch_routes
 from agents_remember.controlplane.durable_store import declare_process_role
@@ -234,6 +238,9 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         )
 
     return ServingCollaborators(
+        explainer_host=PaseoExplainerHost(config),
+        explainer_application=explainer_application_ports(),
+        explainer_contract_for=partial(_master_contract, config),
         host_activity_reconcile=lambda runtime: bridge_call(runtime, "host-activity-snapshot", {}),
         usage_read=read_usage_for_agents,
         review_memory_root=partial(_review_memory_root, config),
@@ -246,6 +253,36 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         knowledge_reader=knowledge_reader_port,
         extra_api_routes=api_routes,
     )
+
+
+def _master_contract(config: McpRuntimeConfig, scope: Any) -> Path | None:
+    """The master line's series contract: the tips a `planning` leaf's page is bound to.
+
+    A planned comparison sits at the master line's two tip commits (MIK-R189 rule 4), and the master
+    document names the contract that states those branches (`seriesContractPath`); a master that
+    predates that field answers `<master folder>/series-contract.md` when the file is there. A leaf
+    with no such contract refuses the planned read by name rather than borrowing another line.
+    """
+
+    folder = (
+        config.coordination_root
+        / "tasks"
+        / str(getattr(scope, "repository_id", ""))
+        / str(getattr(scope, "task", ""))
+    )
+    named = folder / "task.json"
+    if named.is_file():
+        try:
+            document = json.loads(named.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            document = {}
+        declared = document.get("seriesContractPath") if isinstance(document, dict) else None
+        if isinstance(declared, str) and declared:
+            candidate = Path(declared)
+            if candidate.is_file():
+                return candidate
+    fallback = folder / "series-contract.md"
+    return fallback if fallback.is_file() else None
 
 
 def _dev_app():

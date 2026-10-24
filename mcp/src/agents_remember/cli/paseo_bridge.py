@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.errors import PaseoRuntimeFailure
+from agents_remember.kernel.primitives.control_vocabulary import (
+    BRIDGE_REFUSED,
+    BRIDGE_TIMEOUT,
+    SEND_OUTCOME_UNKNOWN,
+)
 from agents_remember.kernel.primitives.paseo_authority import authority_settings_path
 from agents_remember.kernel.primitives.paseo_node_paths import product_node
 from agents_remember.kernel.primitives.paseo_runtime_settings import (
@@ -37,6 +42,15 @@ from agents_remember.serving.paseo.paseo_remedy import terminal_provision_remedy
 
 # Every bridge call ends within this limit; a call that does not is stopped and reported as a
 # timeout. An operation that has to wait longer is a sequence of calls.
+__all__ = [
+    "BRIDGE_REFUSED",
+    "BRIDGE_TIMEOUT",
+    "SEND_OUTCOME_UNKNOWN",
+    "PaseoBridgeFailure",
+    "bridge_call",
+    "daemon_configuration",
+]
+
 PASEO_BRIDGE_TIMEOUT_SECONDS = 60
 # The script's own budget, so it can answer with a named timeout before the hard stop.
 _SCRIPT_DEADLINE_MS = 55_000
@@ -51,13 +65,10 @@ _REPORT_NOISE = re.compile(r"\s+at .*|\s*|Node\.js v\S+")
 
 RUNTIME_NOT_CONFIGURED = PaseoRuntimeNotConfigured.code
 DAEMON_UNREACHABLE = "paseo_daemon_unreachable"
-BRIDGE_TIMEOUT = "paseo_bridge_timeout"
 BRIDGE_UNAVAILABLE = "paseo_bridge_unavailable"
 BRIDGE_INVALID_REPLY = "paseo_bridge_invalid_reply"
-BRIDGE_REFUSED = "paseo_call_failed"
 # agent-send: the connection was lost while the message was being sent, so the host may
 # have taken it. What the product does with that is MIK-R171 rule 3.
-SEND_OUTCOME_UNKNOWN = "paseo_send_outcome_unknown"
 
 # agent-create: the agent exists without its first message and its closed session cannot be
 # opened again, so no repeat of the call can deliver the message.

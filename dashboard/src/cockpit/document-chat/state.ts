@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ExplainerColumnTarget } from '../../explainer/ExplainerColumn';
 import type { TaskEntry, TaskDocumentRef } from '../../types/projection';
 import {
   canonicalLauncherRole,
@@ -38,6 +39,12 @@ export interface DocumentChatProps {
    */
   preload?: boolean;
   unbound?: DocumentChatUnbound | null;
+  /**
+   * The review page's column is this leaf's explainer (MIK-R106 v2 rule 1). Present, the column
+   * shows the explainer or its placeholder and reads no document chat; absent, the document's own
+   * chat is shown exactly as before.
+   */
+  explainer?: ExplainerColumnTarget;
 }
 
 const UNBOUND_SELECTION = { role: 'worker' } as const;

@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from agents_remember.application.role_launch_context import ROLE_LEVELS, RoleLaunchContext
+from agents_remember.application.role_launch_context import (
+    RoleLaunchContext,
+)
 from agents_remember.cli.paseo_bridge import daemon_configuration
 from agents_remember.errors import PaseoRuntimeFailure
 from agents_remember.kernel._agentic_settings_core import EXTRA_ARGS_HARNESSES
@@ -15,6 +17,7 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import ROLE_LEVELS
 from agents_remember.serving.paseo.paseo_daemon_config import (
     host_provider_extra_args,
     provider_extra_args,

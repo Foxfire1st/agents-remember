@@ -13,6 +13,16 @@ receives exactly four operations:
 ``request-explanation``
     a question the page would like to put to the trusted conversation control. It records a
     request; it starts no model, and the trusted side decides whether to act on it.
+``offer-selections``
+    the developer's confirmed choices in a page, offered to AR's tray (MIK-R104 rule 2). It fills
+    a pick and sends nothing; nothing leaves the tray until he presses Send there.
+
+The host may open a message of its own to the frame, and the frame receives exactly one:
+
+``stale-parts``
+    which of the page's parts are stale and how many there are (MIK-R104 rule 1). Display only:
+    the marks it draws inside the frame are advisory, and the trusted panel lists the stale parts
+    itself. Reasons are never sent into the frame.
 
 Everything else is refused before anything happens. A message is bound to the host-created session,
 the revision and the comparison it was served with; a request that names another revision, another
@@ -26,19 +36,27 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from agents_remember.canvas.parts import part_id_problem
+
 __all__ = [
     "FRAME_OPS",
+    "HOST_INITIATED_OPS",
     "HOST_OPS",
     "MAX_MESSAGE_BYTES",
     "MAX_QUESTION_LENGTH",
     "MAX_REQUESTS_PER_SESSION",
+    "MAX_SELECTIONS",
+    "MAX_SELECTION_CHOICE",
+    "MAX_SELECTION_QUESTION",
+    "MAX_STALE_PARTS",
     "MAX_STATUS_DETAIL",
     "MESSAGE_SCHEMA",
     "PROTOCOL_VERSION",
@@ -48,15 +66,27 @@ __all__ = [
     "FrameMessage",
     "ProtocolRefusal",
     "RequestLedger",
+    "Selection",
     "parse_frame_message",
+    "parse_host_message",
+    "stale_parts_payload",
 ]
 
 PROTOCOL_VERSION = 1
 MESSAGE_SCHEMA = "ar-canvas-message/v1"
 
 #: What the frame may send, and what the host may answer. Both are closed.
-FRAME_OPS: tuple[str, ...] = ("ready", "status", "open-evidence", "request-explanation")
+FRAME_OPS: tuple[str, ...] = (
+    "ready",
+    "status",
+    "open-evidence",
+    "request-explanation",
+    "offer-selections",
+)
 HOST_OPS: tuple[str, ...] = ("accepted", "refused", "unavailable")
+#: What the host may open by itself. The frame accepts only these, and only from its own parent with
+#: its own session and revision (MIK-R104 rule 1).
+HOST_INITIATED_OPS: tuple[str, ...] = ("stale-parts",)
 
 #: The finite bounds the envelope and the payload obey (rule 6, rule 8).
 MAX_MESSAGE_BYTES = 4096
@@ -67,6 +97,15 @@ MAX_REFERENCE_LENGTH = 512
 MAX_CLAIM_ID_LENGTH = 128
 MAX_RATE = 20
 MAX_BURST = 40
+#: A ``stale-parts`` message lists at most 32 part ids and carries the true count in ``total``
+#: (:data:`agents_remember.canvas.parts.MAX_PART_ID_LENGTH` bounds one id). 32 ids of 64 characters
+#: with quotes and commas are about 2,200 bytes, and the envelope's own fields about 900, so both
+#: stay under :data:`MAX_MESSAGE_BYTES` (MIK-R104 rule 1).
+MAX_STALE_PARTS = 32
+#: An offer carries at most 12 `{question, choice}` rows; each field is plain text (rule 2).
+MAX_SELECTIONS = 12
+MAX_SELECTION_QUESTION = 120
+MAX_SELECTION_CHOICE = 80
 #: How deep a legal envelope may nest. The envelope and every payload field it admits are flat, so a
 #: deeper document is refused before a validator walks it (L104-B07).
 MAX_JSON_DEPTH = 12
@@ -197,11 +236,54 @@ def _request_explanation(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _offer_selections(payload: dict[str, Any]) -> dict[str, Any]:
+    """One page's confirmed choices, verbatim and bounded (MIK-R104 rule 2)."""
+
+    _bounded(payload, allowed={"selections"})
+    rows = payload.get("selections")
+    if not isinstance(rows, list) or not rows:
+        raise ProtocolRefusal(
+            "malformed", "an offer is a non-empty list of {question, choice} rows"
+        )
+    if len(rows) > MAX_SELECTIONS:
+        raise ProtocolRefusal(
+            "oversized", f"an offer carries at most {MAX_SELECTIONS} selection(s)"
+        )
+    result: list[dict[str, str]] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ProtocolRefusal(
+                "malformed", f"selection {index} is a {{question, choice}} object"
+            )
+        unknown = set(row) - {"question", "choice"}
+        if unknown:
+            raise ProtocolRefusal(
+                "malformed",
+                f"selection {index} names unknown field(s): {', '.join(sorted(unknown))}",
+            )
+        result.append(
+            {
+                "question": _text(
+                    row.get("question"),
+                    limit=MAX_SELECTION_QUESTION,
+                    name=f"selection {index}'s question",
+                ),
+                "choice": _text(
+                    row.get("choice"),
+                    limit=MAX_SELECTION_CHOICE,
+                    name=f"selection {index}'s choice",
+                ),
+            }
+        )
+    return {"selections": result}
+
+
 _PAYLOAD_RULES: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "ready": lambda payload: _bounded(payload, allowed=set()),
     "status": _status,
     "open-evidence": _open_evidence,
     "request-explanation": _request_explanation,
+    "offer-selections": _offer_selections,
 }
 
 
@@ -295,6 +377,119 @@ def parse_frame_message(raw: bytes, *, binding: Binding) -> AcceptedMessage:
     )
 
 
+@dataclass(frozen=True)
+class Selection:
+    """One confirmed choice a page offered: a question and the choice the developer made."""
+
+    question: str
+    choice: str
+
+    def as_record(self) -> dict[str, str]:
+        """The plain shape the tray's pick carries, verbatim and never interpreted."""
+
+        return {"question": self.question, "choice": self.choice}
+
+
+def stale_parts_payload(
+    *, known_part_ids: Iterable[str], stale_part_ids: Iterable[str], total: int | None = None
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """The host's ``stale-parts`` payload, with the ids it had to drop.
+
+    The host validates before sending (MIK-R104 rule 1): an id the revision's part map does not hold,
+    or one readiness would not admit, is dropped and counted in the view's own state. The list is at
+    most :data:`MAX_STALE_PARTS` ids, and ``total`` keeps the true count so the page can say "+ n
+    more". A malformed payload is never sent: the ids given here are strings or the call refuses.
+    """
+
+    known = set(known_part_ids)
+    listed: list[str] = []
+    dropped: list[str] = []
+    for part_id in stale_part_ids:
+        if not isinstance(part_id, str) or part_id not in known or part_id_problem(part_id):
+            dropped.append(str(part_id))
+            continue
+        if part_id not in listed:
+            listed.append(part_id)
+    count = len(listed) if total is None else max(int(total), 0)
+    if count < len(listed):
+        raise ProtocolRefusal(
+            "malformed", f"total {count} is fewer than the {len(listed)} stale part(s) listed"
+        )
+    payload = {"parts": listed[:MAX_STALE_PARTS], "total": count}
+    _encoded = json.dumps(payload, separators=(",", ":")).encode()
+    if len(_encoded) > MAX_MESSAGE_BYTES:
+        raise ProtocolRefusal("oversized", f"the stale-parts payload is {len(_encoded)} bytes")
+    return payload, tuple(dropped)
+
+
+def encode_host_message(binding: Binding, operation: str, payload: dict[str, Any]) -> bytes:
+    """One host-initiated message as bytes, within the envelope and the size bound."""
+
+    if operation not in HOST_INITIATED_OPS:
+        raise ProtocolRefusal(
+            "unknown-op", f"{operation!r} is not one of the host-initiated operations"
+        )
+    envelope = {
+        "schema": MESSAGE_SCHEMA,
+        "protocolVersion": PROTOCOL_VERSION,
+        "type": operation,
+        "requestId": f"host-{uuid.uuid4().hex[:16]}",
+        "session": binding.session,
+        "revision": binding.revision,
+        "comparison": binding.comparison,
+        "payload": payload,
+    }
+    raw = json.dumps(envelope, separators=(",", ":")).encode()
+    if len(raw) > MAX_MESSAGE_BYTES:
+        raise ProtocolRefusal(
+            "oversized", f"the message is {len(raw)} bytes, beyond {MAX_MESSAGE_BYTES}"
+        )
+    return raw
+
+
+def parse_host_message(raw: bytes, *, binding: Binding) -> tuple[str, dict[str, Any]]:
+    """Validate one message the host opened, as the frame's own kit must read it.
+
+    Only a host-initiated operation is accepted, and only when it names this frame's session,
+    revision and comparison; the frame's kit makes the same checks and drops anything else
+    (MIK-R104 rule 1). This is the Python side of that rule, so the host can prove what it sent.
+    """
+
+    decoded = _decoded(raw)
+    try:
+        message = FrameMessage.model_validate(decoded)
+    except ValidationError as error:
+        raise ProtocolRefusal(
+            "malformed", f"the envelope is invalid: {error.errors()[0]}"
+        ) from error
+    if message.protocol_version != PROTOCOL_VERSION:
+        raise ProtocolRefusal("wrong-version", f"protocol version {message.protocol_version}")
+    if message.type not in HOST_INITIATED_OPS:
+        raise ProtocolRefusal("unknown-op", f"{message.type!r} is not a host-initiated operation")
+    if (message.session, message.revision, message.comparison) != (
+        binding.session,
+        binding.revision,
+        binding.comparison,
+    ):
+        raise ProtocolRefusal(
+            "foreign-session", "the message is bound to another session, revision or comparison"
+        )
+    payload = _bounded(message.payload, allowed={"parts", "total"})
+    parts = payload.get("parts")
+    total = payload.get("total")
+    if not isinstance(parts, list) or not all(isinstance(item, str) for item in parts):
+        raise ProtocolRefusal("malformed", "parts is a list of part ids")
+    if len(parts) > MAX_STALE_PARTS:
+        raise ProtocolRefusal("oversized", f"a message carries at most {MAX_STALE_PARTS} part ids")
+    if not isinstance(total, int) or isinstance(total, bool) or total < len(parts):
+        raise ProtocolRefusal("malformed", "total is the true count of stale parts")
+    for part_id in parts:
+        problem = part_id_problem(part_id)
+        if problem:
+            raise ProtocolRefusal("malformed", problem)
+    return "stale-parts", {"parts": parts, "total": total}
+
+
 class RequestLedger:
     """The bounded identity memory one session keeps: accepted, refused and rate state.
 
@@ -324,6 +519,8 @@ class RequestLedger:
         self.accepted = 0
         self.refused = 0
         self.last_status: dict[str, Any] | None = None
+        self.last_selections: list[dict[str, str]] | None = None
+        self._last_offer_at: float | None = None
         self.explanation_requests: deque[str] = deque(maxlen=20)
 
     def _refill(self) -> None:
@@ -364,6 +561,15 @@ class RequestLedger:
                 "exhausted",
                 f"this channel took its {self.capacity} admitted request(s); reopen the frame",
             )
+        if message.operation == "offer-selections":
+            now = self._clock()
+            if self._last_offer_at is not None and (now - self._last_offer_at) < 1.0:
+                raise ProtocolRefusal(
+                    "rate-limited",
+                    "at most one offer-selections request per second is admitted on one session",
+                )
+            self._last_offer_at = now
+            self.last_selections = list(message.payload.get("selections") or ())
         if len(self._seen) == self._seen.maxlen and self._seen:
             self._known.discard(self._seen[0])
         self._seen.append(message.request_id)

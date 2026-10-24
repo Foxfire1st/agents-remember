@@ -21,8 +21,6 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from agents_remember.application.role_launch_context import (
-    LEAF_ROLES,
-    TASKLESS_ROLES,
     RoleLaunchContext,
     selection_binding,
 )
@@ -45,7 +43,7 @@ from agents_remember.cli.role_step_up_decisions import record_step_up
 from agents_remember.controlplane.held_store_discovery import EXECUTIONS_DIRECTORY
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.role_identity import canonical_role
+from agents_remember.models.role_identity import LEAF_ROLES, TASKLESS_ROLES, canonical_role
 from agents_remember.models.role_launcher import (
     RoleDispatchRequest,
     RoleResultRequest,

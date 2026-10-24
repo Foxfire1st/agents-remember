@@ -19,6 +19,7 @@ from .curator_coherence import curator_coherence_payload
 from .direct_execution import direct_execution_grant_payload
 from .direct_landing import direct_landing_payload
 from .enclosure_adoption import worktree_enclosure_adopt_payload
+from .explainer_control import ExplainerControlCall, explainer_control_payload
 from .lifecycle_finalize import lifecycle_finalize_task_payload
 from .memory import (
     citation_fix_payload,
@@ -55,12 +56,14 @@ __all__ = [
     "PUBLIC_TOOLS",
     "RESERVED_TOOLS",
     "TRANSPORT",
+    "ExplainerControlCall",
     "citation_fix_payload",
     "closeout_queue_payload",
     "context_packet_payload",
     "curator_coherence_payload",
     "direct_execution_grant_payload",
     "direct_landing_payload",
+    "explainer_control_payload",
     "lifecycle_finalize_task_payload",
     "memory_baseline_adopt_payload",
     "memory_baseline_status_payload",

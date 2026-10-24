@@ -31,16 +31,7 @@ from mcp.server.fastmcp import FastMCP
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
-from ..tools.knowledge import (
-    DiffToolRequest,
-    IntegrityCheckRequest,
-    ReadToolRequest,
-    WriteToolRequest,
-    knowledge_diff_payload,
-    knowledge_integrity_check_payload,
-    knowledge_read_payload,
-    knowledge_write_payload,
-)
+from .lazy import tools
 
 
 def _worktree_relative_locations(config: McpRuntimeConfig, memory_root: str) -> bool:
@@ -123,8 +114,8 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         Docs: docs/reference/mcp-tools.md.
         """
 
-        return knowledge_read_payload(
-            ReadToolRequest(
+        return tools.knowledge_read_payload(
+            tools.ReadToolRequest(
                 memory_root=memoryRoot,
                 view=view,
                 ordering_input=orderingInput,
@@ -174,8 +165,8 @@ def _register_knowledge_write(server: FastMCP, config: McpRuntimeConfig) -> None
         refusal lists every problem, and the whole report is a file the answer names. Longer
         explanation: docs/reference/mcp-tools.md.
         """
-        return knowledge_write_payload(
-            WriteToolRequest(
+        return tools.knowledge_write_payload(
+            tools.WriteToolRequest(
                 contract_path=contractPath,
                 handoff=handoff,
                 handoff_name=handoffName,
@@ -210,8 +201,8 @@ def _register_knowledge_diff(server: FastMCP, config: McpRuntimeConfig) -> None:
         tree, which writes loose, unreferenced objects. Narrow with
         `recordId`/`path`; absent selectors refused, unconverted sides as
         `legacy-format`. Longer explanation: docs/reference/mcp-tools.md."""
-        return knowledge_diff_payload(
-            DiffToolRequest(
+        return tools.knowledge_diff_payload(
+            tools.DiffToolRequest(
                 memory_root=memoryRoot,
                 before=beforeRevision,
                 after=afterRevision,
@@ -244,8 +235,8 @@ def _register_knowledge_integrity_check(server: FastMCP) -> None:
         anchors with; with none, every anchor is checked for path existence. An unconverted tree
         or a database file is refused as `legacy-format`. The tool reads only: it writes no file
         and opens no database."""
-        return knowledge_integrity_check_payload(
-            IntegrityCheckRequest(
+        return tools.knowledge_integrity_check_payload(
+            tools.IntegrityCheckRequest(
                 memoryRoot=memoryRoot,
                 codeRoot=codeRoot,
                 baseCommits=None if baseCommits is None else tuple(baseCommits),

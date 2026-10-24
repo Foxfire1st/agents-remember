@@ -9,16 +9,19 @@ returns the plan as the worktree layer's :class:`CrossingPlanView`. A failing st
 from __future__ import annotations
 
 import tempfile
+from importlib import import_module
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.conversion.crossing_sync import CrossingError, HistoryOwner, cross
 from agents_remember.memory.conversion.inputs import memory_from_git
-from agents_remember.worktrees.services import (
-    CrossingPlanView,
-    CrossingRequest,
-    CrossingStepFailed,
-)
+
+if TYPE_CHECKING:  # annotation-only: the worktree layer loads when a plan is asked for
+    from agents_remember.worktrees.services import (
+        CrossingPlanView,
+        CrossingRequest,
+    )
 
 
 class GitKnowledgeCrossing:
@@ -41,10 +44,14 @@ class GitKnowledgeCrossing:
                     owner=HistoryOwner(kind=request.owner_kind, id=request.owner_id),
                 )
         except CrossingError as error:
-            raise CrossingStepFailed(str(error)) from error
+            raise import_module("agents_remember.worktrees.services").CrossingStepFailed(
+                str(error)
+            ) from error
         except (OSError, ValueError) as error:
-            raise CrossingStepFailed(f"crossing sync step 'convert' failed: {error}") from error
-        return CrossingPlanView(
+            raise import_module("agents_remember.worktrees.services").CrossingStepFailed(
+                f"crossing sync step 'convert' failed: {error}"
+            ) from error
+        return import_module("agents_remember.worktrees.services").CrossingPlanView(
             files=plan.files,
             conflicts=tuple((one.path, one.item, one.reason) for one in plan.conflicts),
             conflict_versions=plan.conflict_versions,

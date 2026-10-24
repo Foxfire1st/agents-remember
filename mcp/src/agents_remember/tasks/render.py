@@ -31,6 +31,7 @@ from .document import (
     CodeExample,
     Decision,
     DiscardedSubTask,
+    IntentReview,
     RouteReviewRecord,
     Section,
     SprintExecutionEndpoint,
@@ -180,8 +181,9 @@ def _master_order_lines(order: MasterOrder) -> list[str]:
         if task.cycle:
             wave = f"{wave} (cycle)"
         name = f"[{task.id} — {task.title}]({task.file})" if task.file else task.id
+        state = f"{task.status} · intent review open" if task.intent_review_open else task.status
         lines.append(
-            f"| {wave} | {_cell(name)} | {task.status} | {_cell(', '.join(task.waits_for))} |"
+            f"| {wave} | {_cell(name)} | {_cell(state)} | {_cell(', '.join(task.waits_for))} |"
         )
     return lines
 
@@ -273,8 +275,7 @@ def _header_lines(
         lines.append(f"**Integration branch:** `{doc.integrationBranch}`")
     if doc.executionNature:
         lines.append(f"**Execution nature:** `{doc.executionNature}`")
-    if doc.knowledgeMaintenanceScope:  # MIK-R08: the worklist classifies every base entry
-        lines.append("**Knowledge maintenance scope:** `true`")
+    lines.extend(_declared_scope_lines(doc))
     if doc.expectedKnowledgeEffects:  # MIK-R11: declared before implementation
         lines.append("**Expected knowledge effects:**")
         lines += [
@@ -287,6 +288,38 @@ def _header_lines(
         f"**{note.label}:** {note.value}" for note in doc.headerNotes
     ]  # extra header lines (R4)
     return lines
+
+
+def _declared_scope_lines(doc: TaskDocument) -> list[str]:
+    """Header lines that exist only when the leaf declared them.
+
+    The maintenance scope (MIK-R08) and the intent review (MIK-R189 rule 8) are one such pair;
+    neither writes a line for a document that does not carry it, so older renders stay identical.
+    """
+
+    lines: list[str] = []
+    if doc.knowledgeMaintenanceScope:  # MIK-R08: the worklist classifies every base entry
+        lines.append("**Knowledge maintenance scope:** `true`")
+    if doc.intentReview is not None:  # MIK-R189 rule 8: the answer asked for before any start
+        lines.append(_intent_review_line(doc.intentReview))
+    return lines
+
+
+def _intent_review_line(review: IntentReview) -> str:
+    """The leaf's one intent-review header line: the state, its decision and the agreed revision."""
+
+    line = f"**Intent review:** {review.state}"
+    if review.decisionRef:
+        line = f"{line} — {review.decisionRef}"
+    revision = review.agreedRevision
+    if revision is not None:
+        packets = (
+            f"; packets {', '.join(revision.packetVersions)}" if revision.packetVersions else ""
+        )
+        line = (
+            f"{line}; agreed revision `{revision.revisionId}` (sha256 `{revision.sha256}`{packets})"
+        )
+    return line
 
 
 def _seat_lines(seats: list[SprintSeat]) -> list[str]:

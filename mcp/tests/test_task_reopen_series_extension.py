@@ -171,6 +171,9 @@ class _World:
                     "repo": self.terminal.repo_name,
                     "createdAt": "2026-07-01T11:00",
                     "master": "task.md",
+                    # MIK-R189 rule 2: a leaf created now waits `pending`; this world starts it
+                    # at once, so it records the architect's go as the product requires.
+                    "intentReview": {"state": "go"},
                     "steps": [{"id": "S1", "title": "the extension work", "status": "pending"}],
                 }
             ),

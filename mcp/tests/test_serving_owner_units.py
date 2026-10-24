@@ -424,6 +424,9 @@ class MaterialOwnerUnitTests(unittest.IsolatedAsyncioTestCase):
                     clock=lambda: datetime(2026, 10, 13, tzinfo=UTC),
                     projector=SimpleNamespace(prime=mock.AsyncMock(), run=parked),
                     review_trees_shutdown=clock.wrap("shutdown", 5, lambda: None),
+                    # The merged runtime carries the explainer's application port (MIK-R186);
+                    # this stand-in runs no explainer, so the lifespan admits no move watcher.
+                    explainer_application=None,
                 ),
             )
             with contextlib.ExitStack() as stack:
@@ -479,6 +482,7 @@ class MaterialOwnerUnitTests(unittest.IsolatedAsyncioTestCase):
                         observer_root=Path(tmp),
                         background_ledger=clock.ledger,
                         clock=lambda: datetime(2026, 10, 13, tzinfo=UTC),
+                        explainer_application=None,
                     ),
                 )
 

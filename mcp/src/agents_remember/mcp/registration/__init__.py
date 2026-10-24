@@ -21,6 +21,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from .capsule_serving import register_capsule_and_skill_tools
 from .closeout import register_closeout_tools
 from .core import register_core_tools
+from .explainer import register_explainer_tools
 from .knowledge import register_knowledge_tools
 from .memory import register_memory_tools
 from .role_agents import register_role_agent_tools
@@ -40,6 +41,7 @@ TOOL_REGISTRARS: tuple[ToolRegistrar, ...] = (
     register_capsule_and_skill_tools,
     register_role_agent_tools,
     register_knowledge_tools,
+    register_explainer_tools,
 )
 
 __all__ = ["TOOL_REGISTRARS", "ToolRegistrar"]

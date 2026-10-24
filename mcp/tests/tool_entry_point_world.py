@@ -633,6 +633,11 @@ class EntryPointWorld:
                     "createdAt": "2026-09-18T12:00:00+02:00",
                     "objective": "Give the sweep a real leaf document to address.",
                     "requirements": ["One enclosure exists."],
+                    # MIK-R189 rule 2: a leaf created now starts with its intent review
+                    # ``pending``, which refuses every start. This world is about the production
+                    # rows it drives, not about the review, so it records the developer's answer
+                    # as the go the start requires.
+                    "intentReview": {"state": "go", "decisionRef": "D369"},
                     "steps": [{"id": "S1", "title": "sweep", "status": "pending"}],
                 },
             },
@@ -718,6 +723,13 @@ class EntryPointWorld:
                     "decision": "entry-point sweep",
                     "rationale": "The sweep exercises one write; reads are files.",
                 },
+            },
+            # The architect's explainer control answers only a hosted architect seat for `claim`;
+            # this server was started by no launch, so the claim refuses before any write.
+            "explainer_control": {
+                "action": "claim",
+                "repo_id": REPO,
+                "task_name": MASTER,
             },
             # This server is unbound: role tools refuse before reading, starting or sending.
             "role_start": {

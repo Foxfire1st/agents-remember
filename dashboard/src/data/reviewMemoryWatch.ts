@@ -5,15 +5,57 @@ import { useDashboard } from './store';
 import { useRevalidateIntentEntry } from './intentEntryRevalidation';
 
 export interface ReviewMemoryScope { repo: string; master: string; leaf: string }
+export interface ReviewExplainerMovedEvent extends ReviewMemoryScope {
+  kind?: 'comparison-moved' | 'master-moved' | 'moved-no-explainer' | 'cleared';
+  from?: number | null;
+  to?: number | null;
+  blocks?: number;
+  blocksChanged?: number;
+  updateOffered?: boolean;
+  commitFrom?: string | null;
+  commitTo?: string | null;
+  text?: string;
+  cleared?: boolean;
+  moved?: null;
+}
 interface Registration { scope: ReviewMemoryScope; changed: () => void; failed: (detail: string) => void }
+type MovedListener = (event: ReviewExplainerMovedEvent) => void;
 const registrations = new Set<Registration>();
 const scopeListeners = new Set<() => void>();
+const movedListeners = new Set<{ scope: ReviewMemoryScope; onMoved: MovedListener }>();
 let revision: string | undefined;
 const key = (scope: ReviewMemoryScope | undefined) => scope && JSON.stringify([scope.repo, scope.master, scope.leaf]);
 export const reviewMemoryScope = (): ReviewMemoryScope | undefined => registrations.values().next().value?.scope;
 export function subscribeReviewMemoryScope(callback: () => void): () => void {
   scopeListeners.add(callback);
   return () => { scopeListeners.delete(callback); };
+}
+export function subscribeReviewExplainerMoved(
+  scope: ReviewMemoryScope,
+  onMoved: MovedListener,
+): () => void {
+  const entry = { scope, onMoved };
+  movedListeners.add(entry);
+  return () => {
+    movedListeners.delete(entry);
+  };
+}
+export function publishReviewExplainerMoved(data: unknown): void {
+  if (typeof data !== 'object' || data === null) return;
+  const payload = data as Partial<ReviewExplainerMovedEvent> & {
+    repository?: string;
+    task?: string;
+    leaf_id?: string;
+  };
+  const repo = payload.repo ?? payload.repository;
+  const master = payload.master ?? payload.task;
+  const leaf = payload.leaf ?? payload.leaf_id;
+  if (typeof repo !== 'string' || typeof master !== 'string' || typeof leaf !== 'string') return;
+  const event: ReviewExplainerMovedEvent = { ...payload, repo, master, leaf };
+  const targetKey = key({ repo, master, leaf });
+  movedListeners.forEach((entry) => {
+    if (key(entry.scope) === targetKey) entry.onMoved(event);
+  });
 }
 function register(registration: Registration): () => void {
   const before = key(reviewMemoryScope());

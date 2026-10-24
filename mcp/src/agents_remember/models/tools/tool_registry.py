@@ -51,6 +51,7 @@ from agents_remember.models.role_agents import (
 from agents_remember.models.runtime import RuntimeInstallResponse
 from agents_remember.models.structural.agent import RetireChildResponse
 from agents_remember.models.task_doc import TaskDocResponse, TaskReopenResponse
+from agents_remember.models.tools.explainer_control import ExplainerControlResponse
 from agents_remember.models.tools.knowledge_responses import (
     KnowledgeDiffResponse,
     KnowledgeIntegrityCheckResponse,
@@ -123,4 +124,5 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "knowledge_diff": KnowledgeDiffResponse,
     "knowledge_integrity_check": KnowledgeIntegrityCheckResponse,
     "knowledge_write": KnowledgeWriteResponse,
+    "explainer_control": ExplainerControlResponse,
 }

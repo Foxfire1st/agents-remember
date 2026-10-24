@@ -76,6 +76,11 @@ _LONGEST_LEADING_ID = 12
 # harness need not pass its environment on, so the definition carries each of them when the
 # launching process has it, and never a value of its own.
 _CARRIED_VARIABLES = (
+    # The browser module the seat's publish step loads the page in. A seat whose server cannot see it
+    # reaches `render` blind: the load refuses, nothing is published, and the page on screen is the
+    # previous generation's. It is carried here for the same reason the cache directories are: the
+    # server must run the host's own tools, not a second installation's.
+    "AR_PLAYWRIGHT",
     "GIT_OPTIONAL_LOCKS",
     "PYTHONPYCACHEPREFIX",
     "TMUX_TMPDIR",

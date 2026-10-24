@@ -917,7 +917,18 @@ class LeafEnclosureSprintBindingTests(unittest.TestCase):
                     config, existing_leaf, parent_task="260713_improved-agentic-system"
                 )
             self.assertEqual(contract_path, existing_path.resolve())
-            self.assertEqual(reused_status, {**status, "enclosurePreparation": "found"})
+            # MIK-R189 rule 8: the go records the agreed revision; at enclosure creation (rule 9)
+            # its reference copy goes into the workspace, and a failed copy is named in the status
+            # rather than refusing the start. This fixture writes no leaf file, so the copy fails.
+            self.assertEqual(
+                {key: value for key, value in reused_status.items() if key != "referenceWarning"},
+                {
+                    **status,
+                    "enclosurePreparation": "found",
+                    "referenceRoot": (group / "reference").resolve().as_posix(),
+                },
+            )
+            self.assertIn(leaf_path.as_posix(), reused_status["referenceWarning"])
             self.assertNotIn("enclosurePreparation", status)
             reuse_start.assert_not_called()
 

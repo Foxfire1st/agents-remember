@@ -2,9 +2,10 @@
 
 One case per round-1 finding, each driving the real store against a real task directory:
 
-1. F01 a revision binds one comparison's full identity, not a tree hash;
+1. F01 a revision binds one comparison's full identity (its owner included), not a tree hash;
 2. F09 the admitted evidence and the regeneration inputs live with the revision;
-3. F10 the lineage and task ceilings count what the store actually holds, drafts included;
+3. F10 the store's one byte ceiling -- the task's total -- counts what the store actually holds,
+   drafts included; the number of revisions and a lineage's size are not ceilings (v2 item 8);
 4. F11 a symlinked frame or leaf is held, never followed out of the task;
 5. F12 a live draft is kept, a finished or abandoned one is reclaimed, and its outcome is durable;
 6. F13 reopening and serving read one verified snapshot and refuse corrupt bytes;
@@ -23,7 +24,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -31,6 +32,7 @@ from pathlib import Path
 import pytest
 from agents_remember.application import review_frame_store as store
 from agents_remember.application.review_evidence_packet import (
+    COMPARISON_OWNER,
     SideState,
     build_evidence_packet,
     comparison_reference,
@@ -51,9 +53,11 @@ from agents_remember.application.review_frame_store import (
     publish_revision,
     reclaim_task_frames,
     regeneration_request,
+    remove_revisions,
     reopen_frame,
     usage,
 )
+from agents_remember.canvas.parts import derive_part_map
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.models.knowledge.review_evidence import (
     ClaimBasis,
@@ -65,6 +69,7 @@ from agents_remember.models.knowledge.review_frame import (
     FrameAuthoring,
     FrameBinding,
     FrameLimits,
+    FramePart,
 )
 from agents_remember.models.knowledge.review_trees import (
     ReviewConvertedBase,
@@ -72,6 +77,7 @@ from agents_remember.models.knowledge.review_trees import (
     ReviewTreeSide,
 )
 from agents_remember_test_support.testing.waits import HANG_GUARD_SECONDS
+from pydantic import ValidationError
 
 AT = "2026-10-18T00:00:00Z"
 LATER = "2026-10-18T06:00:00Z"
@@ -176,6 +182,8 @@ def _publish(  # noqa: PLR0913 - one test publication states its own comparison 
     limits: FrameLimits | None = None,
     ancestry: tuple[int, ...] = (),
     now: str = AT,
+    part_map: tuple[FramePart, ...] = (),
+    binding_source: Callable[[], FrameBinding | None] | None = None,
 ):
     scope = frame_scope(task_root, record.leaf_id, FRAME)
     begin_draft(
@@ -201,6 +209,8 @@ def _publish(  # noqa: PLR0913 - one test publication states its own comparison 
         created_at=now,
         limits=limits or FrameLimits(),
         asset_ancestry=ancestry,
+        part_map=part_map,
+        binding_source=binding_source,
     )
 
 
@@ -212,7 +222,9 @@ def test_f01_a_revision_bound_to_a_foreign_comparison_is_stale(task: Path) -> No
     assert published.published
     scope = frame_scope(task, LEAF, FRAME)
 
-    current = frame_staleness(scope, _record(), comparison_owner=OWNER)
+    # The packet's own owner is part of the identity this revision binds, so the current
+    # expectation has to name that owner (MIK-R103 v2 item 3: the owner is not decoration).
+    current = frame_staleness(scope, _record(), comparison_owner=COMPARISON_OWNER)
     assert current.state == "current"
 
     for moved in (
@@ -224,11 +236,21 @@ def test_f01_a_revision_bound_to_a_foreign_comparison_is_stale(task: Path) -> No
         _record(memory_candidate="8" * 40),
         _record(converted="7" * 40),
     ):
-        judged = frame_staleness(scope, moved, comparison_owner=OWNER)
+        judged = frame_staleness(scope, moved, comparison_owner=COMPARISON_OWNER)
         assert judged.state == "stale", moved
         assert judged.changed
         assert judged.selected is not None and judged.retained is not None
         assert judged.regeneration_offered
+
+    # A different owner alone -- every side, the conversion and the number unchanged -- is
+    # another comparison, and the page that explains the first one is stale for it.
+    foreign_owner = frame_staleness(scope, _record(), comparison_owner=OWNER)
+    assert foreign_owner.state == "stale"
+    assert foreign_owner.changed == ("comparison",)
+    assert foreign_owner.selected is not None
+    assert foreign_owner.selected.comparison_owner == OWNER
+    assert foreign_owner.retained is not None
+    assert foreign_owner.retained.comparison_owner == COMPARISON_OWNER
 
 
 def test_f01_a_binding_keeps_repositories_commits_and_the_conversion(task: Path) -> None:
@@ -288,25 +310,40 @@ def test_f09_the_evidence_survives_the_scratch_and_regeneration_names_it(task: P
 # --- F10: the ceilings count actual store usage -------------------------------------------------
 
 
-def test_f10_a_lineage_ceiling_counts_revisions_drafts_and_metadata(task: Path) -> None:
-    tight = FrameLimits(lineage_bytes=1200, bytes_per_revision=1200, draft_bytes=1200)
-    with pytest.raises(FrameRefused, match="lineage"):
-        _publish(task, _record(), limits=tight)
-    area = frames_area(task, LEAF)
-    assert not (area / FRAME / "revisions").exists() or not any(
-        (area / FRAME / "revisions").iterdir()
-    )
+def test_f10_a_lineage_keeps_more_than_eight_revisions_and_counts_their_bytes(task: Path) -> None:
+    """MIK-R103 v2 item 8: the number of revisions is not a ceiling any more.
 
-    roomy = FrameLimits(lineage_bytes=100_000, bytes_per_revision=100_000)
-    assert _publish(task, _record(), limits=roomy).published
+    Nine publications of one lineage are all kept -- each one reopenable and served from its own
+    bytes -- and the byte accounting still counts every revision, the drafts and the metadata. The
+    removed lineage ceiling is not replaced by a count: nothing is reclaimed at publication.
+    """
+
+    for number in range(1, 10):
+        assert _publish(task, _record(), request=f"req-{number}").published
+    area = frames_area(task, LEAF)
+    scope = frame_scope(task, LEAF, FRAME)
+    assert _revisions(scope) == list(range(1, 10))
+    assert not (scope.frame_dir / "reclaimed.json").exists(), (
+        "publication reclaims nothing silently: a superseded revision is kept and stays reopenable"
+    )
+    for number in (1, 5, 9):
+        assert open_asset(scope, number, "index.html") == ASSETS["index.html"]
+    assert json.loads((scope.frame_dir / "ready.json").read_text())["revision"] == 9
+
     counted = usage(area, now=AT)
-    assert counted["frames"][0]["bytes"] > 0
+    assert counted["frames"][0]["revisions"] == list(range(1, 10))
+    assert counted["frames"][0]["ready_revision"] == 9
     assert counted["frames"][0]["revision_bytes"] > 0
-    assert counted["frames"][0]["metadata_bytes"] >= 0
+    assert counted["frames"][0]["draft_bytes"] > 0
+    assert counted["frames"][0]["metadata_bytes"] > 0
+    assert counted["frames"][0]["bytes"] == sum(
+        counted["frames"][0][field] for field in ("revision_bytes", "draft_bytes", "metadata_bytes")
+    )
+    assert counted["bytes"] == counted["frames"][0]["bytes"]
 
 
 def test_f10_the_task_ceiling_counts_every_lineage_and_a_draft(task: Path) -> None:
-    first = FrameLimits(task_bytes=12_000, lineage_bytes=100_000, draft_bytes=100_000)
+    first = FrameLimits(task_bytes=12_000, draft_bytes=100_000)
     assert _publish(task, _record(), limits=first).published
     other = frame_scope(task, LEAF, "second-frame")
     begin_draft(
@@ -319,8 +356,8 @@ def test_f10_the_task_ceiling_counts_every_lineage_and_a_draft(task: Path) -> No
         limits=first,
         now=AT,
     )
-    tight = FrameLimits(task_bytes=12_000, lineage_bytes=100_000, draft_bytes=100_000)
-    with pytest.raises(FrameRefused, match="task"):
+    tight = FrameLimits(task_bytes=12_000, draft_bytes=100_000)
+    with pytest.raises(FrameRefused, match="task") as refused:
         begin_draft(
             other,
             working_directory=task.parent / "authoring" / task.name / "req-3",
@@ -331,6 +368,9 @@ def test_f10_the_task_ceiling_counts_every_lineage_and_a_draft(task: Path) -> No
             limits=tight,
             now=AT,
         )
+    # The one ceiling left is the task's own byte total, and it is refused by name.
+    assert refused.value.reason == "frame-store-full"
+    assert "revision selector" in refused.value.detail
 
 
 # --- F11: physical confinement ---------------------------------------------------------------
@@ -489,7 +529,7 @@ def test_f14_a_refused_publication_preserves_the_ready_revision(task: Path) -> N
         for path in sorted(scope.frame_dir.rglob("*"))
         if path.is_file() and "drafts" not in path.parts
     }
-    tight = FrameLimits(manifest_bytes=64, lineage_bytes=1_000_000)
+    tight = FrameLimits(manifest_bytes=64)
     begin_draft(
         scope,
         working_directory=task.parent / "authoring" / task.name / "req-2",
@@ -500,7 +540,7 @@ def test_f14_a_refused_publication_preserves_the_ready_revision(task: Path) -> N
         limits=tight,
         now=LATER,
     )
-    with pytest.raises(FrameRefused, match="manifest"):
+    with pytest.raises(FrameRefused, match="manifest") as refused:
         publish_revision(
             scope,
             request_id="req-2",
@@ -510,6 +550,8 @@ def test_f14_a_refused_publication_preserves_the_ready_revision(task: Path) -> N
             created_at=LATER,
             limits=tight,
         )
+    # A manifest refusal is its own reason: only the task total and a moved binding are named.
+    assert refused.value.reason is None
     after = {
         path.relative_to(scope.frame_dir).as_posix(): path.read_bytes()
         for path in sorted(scope.frame_dir.rglob("*"))
@@ -524,20 +566,29 @@ def test_f14_a_refused_publication_preserves_the_ready_revision(task: Path) -> N
 
 
 def test_f15_a_reclaimed_revision_is_named_when_reopened(task: Path) -> None:
-    tight = FrameLimits(revisions_per_lineage=1, lineage_bytes=10_000_000)
-    _publish(task, _record(), request="req-1", limits=tight)
-    _publish(task, _record(), request="req-2", limits=tight, now=LATER)
+    first = _publish(task, _record(), request="req-1")
+    second = _publish(task, _record(), request="req-2", now=LATER)
     scope = frame_scope(task, LEAF, FRAME)
-    assert _revisions(scope) == [2]
-    receipt = json.loads((scope.frame_dir / "reclaimed.json").read_text())
-    assert receipt["state"] == "deleted"
-    assert 1 in receipt["revisions"]
-    assert receipt["reason"]
+    # MIK-R103 v2 item 8: publication supersedes nothing by itself. Both revisions stay, the
+    # publication reports no reclamation, and no receipt is written for a revision that still exists.
+    assert first.published and second.published
+    assert first.reclaimed == () and second.reclaimed == ()
+    assert _revisions(scope) == [1, 2]
+    assert not (scope.frame_dir / "reclaimed.json").exists()
+    assert reopen_frame(scope).revision == 2
 
-    (scope.frame_dir / "ready.json").unlink()
+    # The developer removes both revisions in the Explanation view's selector: the store's own act
+    # leaves the receipt, and a reopen names that reclamation instead of reporting a page that was
+    # never generated.
+    removed = remove_revisions(scope, revisions=(1, 2), now=LATER)
+    assert removed.removed == (1, 2)
+    assert removed.retained == ()
+    assert not (scope.frame_dir / "ready.json").exists()
     opening = reopen_frame(scope)
     assert opening.state == "unavailable"
     assert "reclaimed" in opening.detail
+    assert "revision selector" in opening.detail
+    assert "2" in opening.detail
 
 
 def test_f15_an_archive_records_a_partial_failure_and_keeps_what_it_removed(
@@ -568,26 +619,29 @@ def test_f15_an_archive_records_a_partial_failure_and_keeps_what_it_removed(
 # --- F16: the largest admitted store, restart and counters --------------------------------------
 
 
-def test_f16_the_largest_admitted_store_reopens_after_a_restart(task: Path) -> None:
-    limits = FrameLimits(revisions_per_lineage=2, lineage_bytes=10_000_000)
-    _publish(task, _record(), request="req-1", limits=limits)
-    _publish(task, _record(), request="req-2", limits=limits, now=LATER)
+def test_f16_a_lineage_past_eight_revisions_reopens_after_a_restart(task: Path) -> None:
+    """No revision count is a ceiling: ten revisions of one lineage survive a restart (v2 item 8)."""
+
+    for number in range(1, 11):
+        assert _publish(task, _record(), request=f"req-{number}").published
     scope = frame_scope(task, LEAF, FRAME)
-    assert _revisions(scope) == [1, 2]
+    assert _revisions(scope) == list(range(1, 11))
+    assert not (scope.frame_dir / "reclaimed.json").exists()
     pointer = json.loads((scope.frame_dir / "ready.json").read_text())
-    assert pointer["revision"] == 2
+    assert pointer["revision"] == 10
 
     # A second store instance reads the same bytes; nothing in memory carries the page.
     restarted = frame_scope(task, LEAF, FRAME)
     opening = reopen_frame(restarted)
-    assert opening.state == "ready" and opening.revision == 2
-    assert open_asset(restarted, 2, "index.html").startswith(b"<!doctype html>")
+    assert opening.state == "ready" and opening.revision == 10
+    assert open_asset(restarted, 10, "index.html").startswith(b"<!doctype html>")
+    assert open_asset(restarted, 1, "index.html").startswith(b"<!doctype html>")
 
     counted = usage(scope.area, now=LATER)
     assert counted["bytes"] > 0
-    assert counted["frames"][0]["revisions"] == [1, 2]
-    assert counted["frames"][0]["ready_revision"] == 2
-    assert counted["frames"][0]["drafts"] == ["published", "published"]
+    assert counted["frames"][0]["revisions"] == list(range(1, 11))
+    assert counted["frames"][0]["ready_revision"] == 10
+    assert counted["frames"][0]["drafts"] == ["published"] * 10
 
 
 def test_f16_a_cancelled_attempt_is_a_durable_state_not_an_absence(task: Path) -> None:
@@ -636,8 +690,8 @@ def test_f01_r2_a_published_draft_never_answers_a_foreign_comparison(task: Path)
 
 def test_f10_r2_draft_admission_counts_its_own_metadata(task: Path) -> None:
     scope = frame_scope(task, LEAF, FRAME)
-    tight = FrameLimits(task_bytes=80, lineage_bytes=80, draft_bytes=4096, bytes_per_revision=4096)
-    with pytest.raises(FrameRefused):
+    tight = FrameLimits(task_bytes=80, draft_bytes=4096, bytes_per_revision=4096)
+    with pytest.raises(FrameRefused) as refused:
         begin_draft(
             scope,
             working_directory=task.parent / "authoring" / task.name / "req-1",
@@ -648,6 +702,8 @@ def test_f10_r2_draft_admission_counts_its_own_metadata(task: Path) -> None:
             limits=tight,
             now=AT,
         )
+    # The draft's own record is part of the reservation that meets the task total.
+    assert refused.value.reason == "frame-store-full"
     assert not (scope.frame_dir / "drafts" / "req-1").exists()
 
 
@@ -730,7 +786,9 @@ def test_f13_r2_regeneration_reads_one_snapshot(task: Path) -> None:
     _publish(task, record)
     scope = frame_scope(task, LEAF, FRAME)
     _publish(task, record, request="req-2", now=LATER)
-    request = regeneration_request(scope, record, comparison_owner=OWNER)
+    # Both revisions are retained; the ready one is judged against the packet's own owner.
+    assert _revisions(scope) == [1, 2]
+    request = regeneration_request(scope, record, comparison_owner=COMPARISON_OWNER)
     assert request.state == "refused", "the ready revision already binds the selection"
     assert request.stale_revision == 2
 
@@ -783,13 +841,16 @@ def test_f16_r2_the_largest_store_is_measured_at_its_default_ceiling(
     task: Path, tmp_path: Path
 ) -> None:
     limits = FrameLimits()
-    for number in range(1, limits.revisions_per_lineage + 1):
+    kept = 10  # more than the eight revisions v1 reclaimed at
+    for number in range(1, kept + 1):
         _publish(task, _record(), request=f"req-{number}", limits=limits, now=AT)
     scope = frame_scope(task, LEAF, FRAME)
     counted = usage(scope.area, now=LATER)
     lineage = counted["frames"][0]
-    assert lineage["revisions"] == list(range(1, limits.revisions_per_lineage + 1))
-    assert 0 < lineage["bytes"] <= limits.lineage_bytes
+    assert lineage["revisions"] == list(range(1, kept + 1))
+    assert not (scope.frame_dir / "reclaimed.json").exists()
+    # With no lineage ceiling the largest a lineage may be is the task total itself.
+    assert 0 < lineage["bytes"] <= limits.task_bytes
 
     script = tmp_path / "reopen.py"
     script.write_text(
@@ -808,7 +869,7 @@ def test_f16_r2_the_largest_store_is_measured_at_its_default_ceiling(
         check=True,
     )
     restarted = json.loads(completed.stdout.strip().splitlines()[-1])
-    assert restarted == {"state": "ready", "revision": limits.revisions_per_lineage}
+    assert restarted == {"state": "ready", "revision": kept}
 
 
 def test_f01_r4_each_operand_field_survives_both_binding_constructors(task: Path) -> None:
@@ -826,15 +887,19 @@ def test_f01_r4_each_operand_field_survives_both_binding_constructors(task: Path
                 update={side: getattr(record, side).model_copy(update={field: value})}
             )
             selected = FrameBinding.from_record(
-                moved, comparison_owner=OWNER, comparison_reference=comparison_reference(moved)
+                moved,
+                comparison_owner=COMPARISON_OWNER,
+                comparison_reference=comparison_reference(moved),
             )
             carried = FrameBinding.from_packet(_evidence(moved).comparison)
             assert selected.side_identity() == carried.side_identity()
             assert selected.conversion_identity() == carried.conversion_identity()
-            assert frame_staleness(scope, moved, comparison_owner=OWNER).state == "stale", (
-                side,
-                field,
-            )
+            # The comparison's owner is the packet's own, so the operand field is the only thing
+            # that moved: under v2 a foreign owner alone would already make this stale.
+            assert selected.same_comparison(carried)
+            assert (
+                frame_staleness(scope, moved, comparison_owner=COMPARISON_OWNER).state == "stale"
+            ), (side, field)
 
 
 def test_f10_r4_publication_reserves_every_final_byte(task: Path) -> None:
@@ -842,11 +907,15 @@ def test_f10_r4_publication_reserves_every_final_byte(task: Path) -> None:
     scope = frame_scope(task, LEAF, FRAME)
     actual = usage(scope.area, now=AT)["bytes"]
     shutil.rmtree(scope.frame_dir)
-    assert _publish(task, _record(), limits=FrameLimits(lineage_bytes=actual)).published
+    assert _publish(task, _record(), limits=FrameLimits(task_bytes=actual)).published
     assert usage(scope.area, now=AT)["bytes"] == actual
     shutil.rmtree(scope.frame_dir)
-    with pytest.raises(FrameRefused, match="lineage"):
-        _publish(task, _record(), limits=FrameLimits(lineage_bytes=actual - 1))
+    # One byte over the task total is a publication refused by name: the reservation counts every
+    # final byte, so nothing is written and the removal control is named in the refusal.
+    with pytest.raises(FrameRefused, match="task") as refused:
+        _publish(task, _record(), limits=FrameLimits(task_bytes=actual - 1))
+    assert refused.value.reason == "frame-store-full"
+    assert "revision selector" in refused.value.detail
     assert not (scope.frame_dir / "ready.json").exists()
 
 
@@ -962,94 +1031,68 @@ def test_f15_r4_archive_enumerates_after_publication_exclusion(task: Path, monke
     assert receipt["frames"][0]["ready_revision"] == 2
 
 
-def test_f16_r4_default_byte_maximum_costs_restart_and_reclamation(task: Path, monkeypatch) -> None:  # noqa: PLR0915 - one measured maximum-store lifecycle
-    """Real 64 MiB lineages fill the real 512 MiB task; no sparse files or reported constants."""
+def test_f16_r4_the_task_byte_maximum_costs_restart_and_reclamation(task: Path) -> None:  # noqa: PLR0915 - one measured maximum-store lifecycle
+    """The real task byte total, filled by one lineage's 32 revisions -- real bytes, no sparse files.
+
+    MIK-R103 v2 leaves one ceiling: the task's own byte total. This measures that total instead of
+    the removed 64 MiB lineage -- every revision kept and reopenable past eight, the next byte
+    refused by name, a restart reading the last revision, and the archive reclaiming what it counted.
+    """
+
     limits = FrameLimits()
-    large = {"index.html": b"x" * (limits.bytes_per_revision // 64)}
-    large.update(
-        {f"asset-{index:02}.css": b"x" * (limits.bytes_per_revision // 64) for index in range(63)}
-    )
+    per_file = limits.bytes_per_revision // 64
+    large = {"index.html": b"x" * per_file}
+    large.update({f"asset-{index:02}.css": b"x" * per_file for index in range(63)})
     small = {path: b"x" for path in large}
-    calls = {"writes": 0, "reads": 0, "read_bytes": 0}
-    write, read = store.atomic_write_bytes, store.read_frame_bytes
+    # The largest store one lineage may hold is the whole task total at the per-revision ceiling.
+    count = limits.task_bytes // limits.bytes_per_revision
+    assert count > 8, "the measured store reaches well past the eight revisions v1 reclaimed at"
+    record = _record()
 
-    def measured_write(path, payload):
-        calls["writes"] += 1
-        return write(path, payload)
-
-    def measured_read(path, *args):
-        payload = read(path, *args)
-        calls["reads"] += 1
-        calls["read_bytes"] += len(payload)
-        return payload
-
-    monkeypatch.setattr(store, "atomic_write_bytes", measured_write)
-    monkeypatch.setattr(store, "read_frame_bytes", measured_read)
-
-    def populate(record, last):
-        for number in range(1, limits.revisions_per_lineage + 1):
-            assets = large if number <= 3 else last if number == 8 else small
-            result = _publish(task, record, request=f"max-{number:02}", assets=assets)
-            assert result.published
+    def populate(last: dict[str, bytes]) -> None:
+        for number in range(1, count + 1):
+            published = _publish(
+                task,
+                record,
+                request=f"max-{number:02}",
+                assets=large if number < count else last,
+                limits=limits,
+            )
+            assert published.published
+            assert published.manifest is not None and published.manifest.revision == number
             working = task.parent / "authoring" / task.name / record.leaf_id / f"max-{number:02}"
             shutil.rmtree(working)
 
-    # Calibrate metadata through actual publication. Only the last asset's decimal byte-size fields
-    # (manifest and draft receipt) change width; its SHA-256 stays the same encoded length.
-    populate(_record(), small)
+    # Calibrate metadata through an actual fill. Only the last revision's largest asset changes its
+    # decimal byte-size fields (in its manifest and its published draft), never its digest width.
+    populate(small)
     scope = frame_scope(task, LEAF, FRAME)
     calibrated = usage(scope.area, now=AT)["bytes"]
-    fill = limits.lineage_bytes - calibrated + 1
+    fill = limits.task_bytes - calibrated + 1
     for _ in range(10):
-        adjusted = limits.lineage_bytes - calibrated + 1 - 2 * (len(str(fill)) - 1)
+        adjusted = limits.task_bytes - calibrated + 1 - 2 * (len(str(fill)) - 1)
         if adjusted == fill:
             break
         fill = adjusted
-    last = {**small, "index.html": b"x" * fill}
     shutil.rmtree(scope.frame_dir)
-    samples = []
-    calls.update(writes=0, reads=0, read_bytes=0)
-    for index in range(limits.task_bytes // limits.lineage_bytes):
-        leaf = f"260928-MIK-L{102 + index}"
-        populate(_record(leaf=leaf), last)
-        leaf_scope = frame_scope(task, leaf, FRAME)
-        assert usage(leaf_scope.area, now=AT)["bytes"] == limits.lineage_bytes
-        if index in (0, 7):
-            paths = [path for path in scope.area.parent.rglob("*") if path.is_file()]
-            physical = sum(path.stat().st_size for path in paths)
-            records = sum(
-                path.name in {"manifest.json", "draft.json", "ready.json"} for path in paths
-            )
-            samples.append(
-                {
-                    "lineages": index + 1,
-                    "bytes": physical,
-                    "paths": len(paths),
-                    "records": records,
-                    **calls,
-                }
-            )
-    assert samples[0]["bytes"] == limits.lineage_bytes
-    assert samples[1]["bytes"] == limits.task_bytes
-    assert samples[1]["records"] == 8 * samples[0]["records"]
-    assert samples[1]["writes"] == 8 * samples[0]["writes"]
+    populate({**small, "index.html": b"x" * fill})
 
+    counted = usage(scope.area, now=AT)
+    assert counted["bytes"] == limits.task_bytes
+    physical = sum(path.stat().st_size for path in scope.area.parent.rglob("*") if path.is_file())
+    assert physical == limits.task_bytes, "the total is real bytes on disk, not a reported constant"
+    assert _revisions(scope) == list(range(1, count + 1))
+    assert not (scope.frame_dir / "reclaimed.json").exists(), "no revision was reclaimed silently"
+    opening = reopen_frame(scope)
+    assert opening.state == "ready" and opening.revision == count
+    assert open_asset(scope, count, "index.html").startswith(b"x")
+    assert open_asset(scope, 1, "index.html").startswith(b"x")
+
+    # At the task total the next attempt is refused by name, and the ready revision stays.
     before = (scope.frame_dir / "ready.json").read_bytes()
-    with pytest.raises(FrameRefused, match="lineage"):
+    with pytest.raises(FrameRefused, match="task") as refused:
         begin_draft(
             scope,
-            working_directory=task.parent / "over-lineage",
-            request_id="extra",
-            authoring=_authoring("extra"),
-            focus="one byte",
-            assets={"index.html": b"x"},
-            limits=limits,
-            now=AT,
-        )
-    other = frame_scope(task, LEAF, "extra")
-    with pytest.raises(FrameRefused, match="task"):
-        begin_draft(
-            other,
             working_directory=task.parent / "over-task",
             request_id="extra",
             authoring=_authoring("extra"),
@@ -1058,6 +1101,12 @@ def test_f16_r4_default_byte_maximum_costs_restart_and_reclamation(task: Path, m
             limits=limits,
             now=AT,
         )
+    assert refused.value.reason == "frame-store-full"
+    assert "revision selector" in refused.value.detail
+    assert (scope.frame_dir / "ready.json").read_bytes() == before
+    assert _revisions(scope) == list(range(1, count + 1))
+
+    other = frame_scope(task, LEAF, "extra")
     for assets, reason in (
         ({**small, "extra.css": b"x"}, "file"),
         ({"index.html": b"x" * (limits.bytes_per_revision + 1)}, "draft"),
@@ -1092,7 +1141,7 @@ def test_f16_r4_default_byte_maximum_costs_restart_and_reclamation(task: Path, m
         check=True,
     )
     opened = json.loads(restarted.stdout)
-    assert opened["state"] == "ready" and opened["revision"] == 8
+    assert opened["state"] == "ready" and opened["revision"] == count
     assert opened["source"] == str(Path(store.__file__).parents[1] / "__init__.py")
     preview = reclaim_task_frames(task, dry_run=True, now=LATER)
     assert sum(entry["bytes"] for entry in preview["would_remove"]) == limits.task_bytes
@@ -1102,7 +1151,8 @@ def test_f16_r4_default_byte_maximum_costs_restart_and_reclamation(task: Path, m
     print(
         json.dumps(
             {
-                "default_store_samples": samples,
+                "task_total": limits.task_bytes,
+                "revisions": count,
                 "restart": opened,
                 "reclaimed_bytes": sum(entry["bytes"] for entry in archived["removed"]),
             }
@@ -1165,19 +1215,197 @@ def test_f16_r4_the_default_manifest_ceiling_is_exact(task: Path) -> None:
 
 
 def test_f10_r4_reclamation_metadata_is_in_the_reservation(task: Path) -> None:
-    def populate(limits):
+    def populate(limits: FrameLimits) -> None:
+        scope = frame_scope(task, LEAF, FRAME)
+        begin_draft(
+            scope,
+            working_directory=task.parent / "authoring" / task.name / "expired",
+            request_id="expired",
+            authoring=_authoring("expired"),
+            focus="an attempt that is abandoned",
+            assets=ASSETS,
+            limits=limits,
+            now=AT,
+        )
+        assert cleanup_frames(scope.area, dry_run=False, now=LATER)["removed"]
         for number in range(1, 10):
-            _publish(task, _record(), request=f"req-{number}", limits=limits)
+            _publish(task, _record(), request=f"req-{number}", limits=limits, now=AT)
 
     populate(FrameLimits())
     scope = frame_scope(task, LEAF, FRAME)
     actual = usage(scope.area, now=AT)["bytes"]
-    assert _revisions(scope) == list(range(2, 10))
-    assert (scope.frame_dir / "reclaimed.json").is_file()
+    # Nine revisions are kept: the receipt below records the expired draft, never a publication.
+    assert _revisions(scope) == list(range(1, 10))
+    receipt = json.loads((scope.frame_dir / "reclaimed.json").read_text())
+    assert receipt["drafts"] == ["expired"]
+    assert receipt["revisions"] == []
+    assert usage(scope.area, now=AT)["frames"][0]["metadata_bytes"] > 0
+
     shutil.rmtree(scope.frame_dir)
-    populate(FrameLimits(lineage_bytes=actual))
+    populate(FrameLimits(task_bytes=actual))
     assert usage(scope.area, now=AT)["bytes"] == actual
     shutil.rmtree(scope.frame_dir)
-    with pytest.raises(FrameRefused, match="lineage"):
-        populate(FrameLimits(lineage_bytes=actual - 1))
-    assert reopen_frame(scope).revision == 8
+    with pytest.raises(FrameRefused, match="task") as refused:
+        populate(FrameLimits(task_bytes=actual - 1))
+    assert refused.value.reason == "frame-store-full"
+    # The refused publication left the store as the last admitted one: eight revisions and their
+    # reclamation receipt, with revision 8 still ready.
+    kept = frame_scope(task, LEAF, FRAME)
+    assert _revisions(kept) == list(range(1, 9))
+    assert reopen_frame(kept).revision == 8
+
+
+# --- MIK-R103 v2 / MIK-R104 v3: the owner, the part map and the moved binding -------------------
+
+
+def test_f01_v2_a_publish_refused_by_a_moved_binding_writes_nothing(task: Path) -> None:
+    """A publication the environment no longer serves is refused by name, and publishes nothing."""
+    scope = frame_scope(task, LEAF, FRAME)
+    begin_draft(
+        scope,
+        working_directory=task.parent / "authoring" / task.name / "req-1",
+        request_id="req-1",
+        authoring=_authoring(),
+        focus="the selected comparison",
+        assets=ASSETS,
+        limits=FrameLimits(),
+        now=AT,
+    )
+    # The environment now serves another candidate than the one this draft binds.
+    moved = FrameBinding.from_packet(_evidence(_record(code_candidate="9" * 40)).comparison)
+    with pytest.raises(FrameRefused) as refused:
+        publish_revision(
+            scope,
+            request_id="req-1",
+            entrypoint="index.html",
+            evidence=_evidence(_record()),
+            supplemental=(),
+            created_at=AT,
+            limits=FrameLimits(),
+            binding_source=lambda: moved,
+        )
+    assert refused.value.reason == "binding-moved"
+    assert not (scope.frame_dir / "revisions").exists()
+    assert not (scope.frame_dir / "ready.json").exists()
+    assert reopen_frame(scope).state == "unavailable"
+
+    # The same publication, with a source that still serves the draft's comparison, goes through:
+    # the refusal was the moved binding and not the presence of a source.
+    published = publish_revision(
+        scope,
+        request_id="req-1",
+        entrypoint="index.html",
+        evidence=_evidence(_record()),
+        supplemental=(),
+        created_at=AT,
+        limits=FrameLimits(),
+        binding_source=lambda: FrameBinding.from_packet(_evidence(_record()).comparison),
+    )
+    assert published.published and published.manifest is not None
+    assert published.manifest.revision == 1
+
+
+def test_f09_v2_a_part_map_is_stored_with_the_revision_and_reopens(task: Path) -> None:
+    """The product's part map is durable with its revision, so per-part staleness needs no page."""
+    part_map = (
+        FramePart(part="overview", title="What changed", claims=("c1",)),
+        FramePart(part="bases", title="Where each claim comes from"),
+    )
+    published = _publish(task, _record(), part_map=part_map)
+    assert published.published and published.manifest is not None
+    assert published.manifest.part_map == part_map
+
+    scope = frame_scope(task, LEAF, FRAME)
+    opening = reopen_frame(scope)
+    assert opening.state == "ready" and opening.manifest is not None
+    assert opening.manifest.part_map == part_map
+    stored = json.loads((scope.frame_dir / "revisions" / "1" / "manifest.json").read_text())
+    assert [entry["part"] for entry in stored["part_map"]] == ["overview", "bases"]
+    assert stored["part_map"][0]["claims"] == ["c1"]
+    assert stored["part_map"][1]["claims"] == []
+
+
+def test_f09_v2_a_part_map_naming_an_unknown_claim_is_refused(task: Path) -> None:
+    """The manifest validator holds a part map to the revision's own admitted claim map."""
+    with pytest.raises(ValidationError, match="claim map does not hold"):
+        _publish(
+            task,
+            _record(),
+            part_map=(FramePart(part="overview", title="What changed", claims=("c1", "c9")),),
+        )
+    scope = frame_scope(task, LEAF, FRAME)
+    assert not (scope.frame_dir / "revisions").exists()
+    assert not (scope.frame_dir / "ready.json").exists()
+    assert reopen_frame(scope).state == "unavailable"
+
+
+def test_f09_v2_a_part_map_derived_from_the_admitted_bytes_is_persisted(task: Path) -> None:
+    """E10: the map the product derives from the page's own static marks is what the revision keeps."""
+    assets = dict(ASSETS)
+    assets["index.html"] = (
+        b"<!doctype html><div data-part='overview' data-part-title='What changed'>"
+        b"<span data-evidence-claim='c1'>x</span></div>"
+        b"<div data-part='bases' data-part-title='Where it comes from'></div>"
+    )
+    derived = derive_part_map(assets["index.html"].decode())
+    assert not derived.problems and not derived.implicit
+    part_map = tuple(
+        FramePart(part=entry.part_id, title=entry.title, claims=entry.claims)
+        for entry in derived.parts
+    )
+
+    published = _publish(task, _record(), assets=assets, part_map=part_map)
+    assert published.published and published.manifest is not None
+    assert published.manifest.part_map == part_map
+
+    stored = json.loads(
+        (frame_scope(task, LEAF, FRAME).frame_dir / "revisions" / "1" / "manifest.json").read_text()
+    )
+    assert stored["part_map"] == [
+        {"part": "overview", "title": "What changed", "claims": ["c1"]},
+        {"part": "bases", "title": "Where it comes from", "claims": []},
+    ]
+
+
+def test_f01_v2_a_binding_that_moves_after_the_read_stays_the_old_binding(task: Path) -> None:
+    """E10: the publish re-reads binding.json once under the lock; a later move leaves the old one.
+
+    The environment moves after the publication's read of the binding. The new revision keeps the
+    binding it read -- it is never relabelled current for the comparison the environment serves now.
+    """
+    record = _record()
+    scope = frame_scope(task, LEAF, FRAME)
+    begin_draft(
+        scope,
+        working_directory=task.parent / "authoring" / task.name / "req-1",
+        request_id="req-1",
+        authoring=_authoring(),
+        focus="the selected comparison",
+        assets=ASSETS,
+        limits=FrameLimits(),
+        now=AT,
+    )
+    read_at = record.code_candidate.tree
+    published = publish_revision(
+        scope,
+        request_id="req-1",
+        entrypoint="index.html",
+        evidence=_evidence(record),
+        supplemental=(),
+        created_at=AT,
+        limits=FrameLimits(),
+        # The environment still serves the draft's comparison at the moment of the read.
+        binding_source=lambda: FrameBinding.from_packet(_evidence(record).comparison),
+    )
+    assert published.published and published.manifest is not None
+    retained = published.manifest.binding
+    assert retained.code_candidate_tree == read_at
+
+    # The environment then moves: an Update would now serve another candidate. The retained
+    # revision keeps the binding it read, and is shown as stale -- never current -- for the new one.
+    moved = _record(code_candidate="9" * 40)
+    judged = frame_staleness(scope, moved, comparison_owner=COMPARISON_OWNER)
+    assert judged.state == "stale"
+    assert judged.retained is not None and judged.retained.code_candidate_tree == read_at
+    assert judged.selected is not None and judged.selected.code_candidate_tree == "9" * 40
+    assert published.manifest.binding.code_candidate_tree == read_at

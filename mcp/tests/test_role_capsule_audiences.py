@@ -554,7 +554,12 @@ R125_ADDRESSED_PARAGRAPHS = (
         "architect",
         "When the leaf's packet names an effect on a recorded invariant or family, the Architect "
         "declares it in `expectedKnowledgeEffects` through `task_doc` on `agents-remember-task` "
-        "before implementation. A leaf whose packet names none declares nothing.",
+        "before implementation. A leaf whose packet names none declares nothing. After a new "
+        "leaf's task document exists, before any start, ask the developer once: \"go, or review "
+        'first?" (one-line suggestion optional), disclosing up-front review uses planned '
+        "comparison (no task workspace) and makes the explainer workspace on first Explain; "
+        "record `review-first` or `go` (`agreedRevision`) in `intentReview` via `task_doc` "
+        "(`intent-review-open` until `go`).",
     ),
     (
         "coordination",
@@ -562,7 +567,8 @@ R125_ADDRESSED_PARAGRAPHS = (
         "The Manager receives only what `../roles/manager.md` lists for the Manager. It supplies "
         "the occasion for the sender to retry a pending hand-over, without relaying contents or "
         "asking for developer confirmation of that occasion. Read reports and task records for "
-        "routine state and record which seat holds each next step and since when.",
+        "routine state and record which seat holds each next step and since when. Starts refused "
+        "`intent-review-open` wait for architect's `go`; never retry.",
     ),
     (
         "review",
@@ -614,11 +620,14 @@ R125_ADDRESSED_PARAGRAPHS = (
 # the coordination document stopped naming a nested field three of its readers never have.
 R125_OPERATION_SHA256 = {
     "orientation": "cb21c41525efc28773e5497b396701ef0f9b246833958c3d7b3448c57a5b11f1",
-    "planning": "d6a1c6458d3a67ed54c0bbf0b399066022d8ac094110e5fae4673c5d0bd36f63",
+    # MIK-R189 rule 1 (L183): the architect block gains "go, or review first?" and the manager
+    # block's "intent-review-open waits for go", so the planning seal follows the new text.
+    "planning": "464ef1952bdbb23012cba852cac0812a0563af5b42bb420cdfcbd96e46aad801",
     "review": "c7ddda94f04ea23c555296fbf8108037598098a17d22cad26613be65de64c317",
     # MIK-R196: the coordination text now names leafSeats.roleMessageArguments, so its pinned
-    # digest follows the sentence the wording suite requires.
-    "coordination": "4d0e8fe886c1806091a9355cad05d3d28199bf7b5bd9d1f5d4283c0ee015b2be",
+    # digest follows the sentence the wording suite requires. MIK-R189 rule 1 (L183) adds the
+    # manager block's intent-review sentence, so the seal moved with that text too.
+    "coordination": "21b57a18e50629b3223234df6a0fdb877ae739787d18a773ddc772bd54631785",
     "recovery": "ae7583596bc9f30d49b5d675e48b5076da2aabca5cf3d992ab97ce438e7607b1",
     "implementation": "53561f31eed705d04851973f654d9670b48a061075a132c704f83b2817798ce9",
     # MIK-R196 rule 4: the bootstrap operation's step 8 hands the foundation to the Architect and

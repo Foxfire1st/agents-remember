@@ -15,6 +15,12 @@ MIK-R103's page outlives the process that drew it, so this module owns the acts 
 * **reclamation leaves receipts.** A removed revision or draft writes a :class:`FrameReclamation`
   before its bytes go and again with the outcome, and reopening consults it, so a reclaimed page is
   never reported as one that was never generated (rule 10, failure and recovery).
+* **removal is the developer's** (v2 item 8). :func:`remove_revisions` deletes the retained
+  revisions he chose in the Explanation view's revision selector -- never the pinned agreed
+  revision, never one a retained revision's recorded regeneration lineage names, and never a number
+  that is issued again -- under the one task lock, which it takes with a finite budget so a
+  concurrent publication answers a named refusal instead of a hang. Nothing is removed silently and
+  no superseded revision is reclaimed without that call.
 * **physical confinement.** Every path is resolved against the task's own durable area and every
   intermediate component is checked, so a symlinked frame or leaf directory is held rather than
   followed into another task's bytes (rule 11).
@@ -29,12 +35,14 @@ import hashlib
 import json
 import os
 import shutil
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.review_evidence_adapter import require_intended_packet
 from agents_remember.application.review_evidence_packet import comparison_reference
 from agents_remember.application.review_frame_read import (
     read_frame_bytes,
@@ -42,7 +50,11 @@ from agents_remember.application.review_frame_read import (
 )
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.canonical_json import canonical_json_bytes
-from agents_remember.kernel.file_lock import exclusive_file_lock, lock_path_for
+from agents_remember.kernel.file_lock import (
+    LockAcquisitionTimeout,
+    exclusive_file_lock,
+    lock_path_for,
+)
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
 from agents_remember.models.knowledge.review_evidence import (
     EvidencePacket,
@@ -58,6 +70,7 @@ from agents_remember.models.knowledge.review_frame import (
     FrameLimits,
     FrameManifest,
     FrameOpening,
+    FramePart,
     FramePointer,
     FrameReclamation,
     FrameRegeneration,
@@ -65,12 +78,20 @@ from agents_remember.models.knowledge.review_frame import (
     artifacts_digest,
 )
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
+from agents_remember.tasks.document import (
+    ResolvedAgreedRevision,
+)
+from agents_remember.tasks.document import (
+    resolve_agreed_revision as _canonical_resolve_agreed_revision,
+)
 from agents_remember.tasks.task_paths import slugify
 
 __all__ = [
     "FRAMES_DIRECTORY",
     "RECLAMATION_RECEIPT",
+    "AgreedRevision",
     "FramePublication",
+    "FrameRemoval",
     "FrameScope",
     "begin_draft",
     "cleanup_frames",
@@ -83,7 +104,9 @@ __all__ = [
     "publish_revision",
     "reclaim_task_frames",
     "regeneration_request",
+    "remove_revisions",
     "reopen_frame",
+    "resolve_agreed_revision",
     "revision_manifest",
     "usage",
 ]
@@ -102,6 +125,9 @@ TASK_LOCK_NAME = ".frames.lock"
 RECLAMATION_RECEIPT = "review-frames-reclaimed.json"
 
 _TASK_DOCUMENT_NAMES = frozenset({"task.json", "task.md"})
+# A leaf's task document is a small JSON control file. This read bound keeps a damaged one from
+# being read whole into memory while leaving every real document far below it.
+_TASK_DOCUMENT_READ_BYTES = 8 * 1024 * 1024
 _MEDIA_BY_SUFFIX: dict[str, str] = {
     ".html": "text/html",
     ".htm": "text/html",
@@ -118,7 +144,20 @@ _MEDIA_BY_SUFFIX: dict[str, str] = {
 
 
 class FrameRefused(ValueError):
-    """A frame act refused with the reason a caller can act on."""
+    """A frame act refused with the reason a caller can act on.
+
+    ``reason`` is the value a route or a page shows when the packet names one -- ``frame-store-full``
+    for a revision a task's byte total cannot hold (MIK-R103 v2 item 8), ``binding-moved`` for a
+    publication the environment no longer serves (MIK-R103 v2 item 3), and the removal reasons
+    (``frame-not-found``, ``revision-not-retained``, ``revision-pinned``,
+    ``revision-lineage-needed``, ``revision-removal-busy``) for the developer's removal control
+    (MIK-R106 v2 rule 6).
+    """
+
+    def __init__(self, detail: str, *, reason: str | None = None) -> None:
+        self.reason = reason
+        self.detail = detail
+        super().__init__(detail)
 
 
 @dataclass(frozen=True)
@@ -128,6 +167,22 @@ class FramePublication:
     manifest: FrameManifest | None
     published: bool
     reclaimed: tuple[int, ...]
+    detail: str
+
+
+@dataclass(frozen=True)
+class FrameRemoval:
+    """What one developer removal did: the revisions gone, what remains, and the pin it kept.
+
+    The pin is answered even when nothing was removed, so the selector can label the revision the
+    architect agreed at the go without a second read of the task document.
+    """
+
+    frame_id: str
+    removed: tuple[int, ...]
+    retained: tuple[int, ...]
+    pinned: int | None
+    bytes_freed: int
     detail: str
 
 
@@ -449,7 +504,8 @@ def _check_assets(assets: Mapping[str, bytes], limits: FrameLimits, *, draft: bo
     if total > ceiling:
         raise FrameRefused(
             f"the attempt holds {total} byte(s), beyond the admitted {ceiling} for a "
-            f"{'draft' if draft else 'revision'}"
+            f"{'draft' if draft else 'revision'}",
+            reason="draft-too-large" if draft else "revision-too-large",
         )
     for path in assets:
         if not _contained(path):
@@ -555,10 +611,6 @@ def _check_capacity(  # noqa: PLR0913 - one write's costs and the exact objects 
 ) -> None:
     """Refuse a write that would exceed a lineage or task ceiling, before any mutation (rule 8)."""
 
-    if not scope.frame_dir.is_dir():
-        current = {"drafts": 0, "revisions": 0, "metadata": 0, "total": 0}
-    else:
-        current = _lineage_usage(scope.frame_dir)
     freed = 0
     if replacing_draft:
         draft = _draft_path(scope, replacing_draft)
@@ -569,19 +621,33 @@ def _check_capacity(  # noqa: PLR0913 - one write's costs and the exact objects 
     for number in reclaiming:
         reclaimed = scope.frame_dir / REVISIONS_DIRECTORY / str(number)
         freed += _size(reclaimed) if reclaimed.is_dir() else 0
-    lineage_after = current["total"] - freed + revision_bytes
-    if lineage_after > limits.lineage_bytes:
-        raise FrameRefused(
-            f"this lineage would hold {lineage_after} byte(s) including drafts and metadata, "
-            f"beyond the admitted {limits.lineage_bytes}; nothing was published and no current "
-            "page was evicted"
-        )
     task_after = _area_usage(_task_area(scope)) - freed + revision_bytes
     if task_after > limits.task_bytes:
         raise FrameRefused(
             f"the task's frame store would hold {task_after} byte(s), beyond the admitted "
-            f"{limits.task_bytes}; nothing was published and no current page was evicted"
+            f"{limits.task_bytes}; nothing was published and no current page was evicted. Remove "
+            "an old revision in the Explanation view's revision selector, or ask for the pin to be "
+            "moved; the revision that is pinned is never offered",
+            reason="frame-store-full",
         )
+
+
+def _leaf_document_stem(task_root: Path, leaf_id: str) -> str | None:
+    """The leaf's own task-document stem, when the task folder holds that document.
+
+    A planned binding's intended claim may rest on the leaf's own document, and the claim's receipt is
+    recognised by this stem (MIK-R102 v2 item 1); a folder without the document answers ``None`` and
+    the claim then rests on its other admitted sources or is refused.
+    """
+
+    for path in sorted(Path(task_root).glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("id") == leaf_id:
+            return path.stem
+    return None
 
 
 def publish_revision(  # noqa: PLR0913 - one publication states a draft's own inputs
@@ -594,6 +660,8 @@ def publish_revision(  # noqa: PLR0913 - one publication states a draft's own in
     created_at: str,
     limits: FrameLimits,
     asset_ancestry: tuple[int, ...] = (),
+    part_map: tuple[FramePart, ...] = (),
+    binding_source: Callable[[], FrameBinding | None] | None = None,
 ) -> FramePublication:
     """Admit and record one new ready revision, atomically and idempotently (rules 3, 8, 9, 14)."""
 
@@ -631,6 +699,14 @@ def publish_revision(  # noqa: PLR0913 - one publication states a draft's own in
             "nothing and its outcome stays recorded"
         )
     binding = FrameBinding.from_packet(evidence.comparison)
+    # A planned binding's claims are `intended` or they are refused here, at the seam where the
+    # revision's binding meets its claim map (MIK-R189 rule 6; MIK-R102 v2's separate authorities).
+    require_intended_packet(
+        evidence,
+        comparison_owner=binding.comparison_owner,
+        leaf_id=binding.leaf_id,
+        leaf_document=_leaf_document_stem(scope.task_root, binding.leaf_id),
+    )
     with exclusive_file_lock(_task_lock(scope), "review frame store"):
         return _publish_locked(
             scope,
@@ -642,6 +718,8 @@ def publish_revision(  # noqa: PLR0913 - one publication states a draft's own in
             created_at=created_at,
             limits=limits,
             ancestry=asset_ancestry,
+            part_map=part_map,
+            binding_source=binding_source,
         )
 
 
@@ -656,9 +734,20 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
     created_at: str,
     limits: FrameLimits,
     ancestry: tuple[int, ...],
+    part_map: tuple[FramePart, ...] = (),
+    binding_source: Callable[[], FrameBinding | None] | None = None,
 ) -> FramePublication:
     """The validated publication, executed only after every admission check has passed."""
 
+    if binding_source is not None:
+        served = binding_source()
+        if served is not None and not binding.same_comparison(served):
+            raise FrameRefused(
+                "the environment's binding moved before this publication took the frame store's "
+                f"lock: the draft binds {binding.comparison_reference}, the environment now serves "
+                f"{served.comparison_reference}",
+                reason="binding-moved",
+            )
     current = read_draft(scope, draft.request_id)
     if current is None or current.state not in {"active", "published"}:
         raise FrameRefused("the authoring attempt finished before publication took its lock")
@@ -674,6 +763,13 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
                 f"published revision {existing.revision}; the retry added no revision"
             ),
         )
+    draft_total = sum(asset.byte_size for asset in draft.assets)
+    if draft_total > limits.bytes_per_revision:
+        raise FrameRefused(
+            f"the attempt holds {draft_total} byte(s), beyond the admitted "
+            f"{limits.bytes_per_revision} for a revision",
+            reason="revision-too-large",
+        )
     assets = _draft_assets(scope, draft.request_id)
     _check_assets(assets, limits, draft=False)
     if entrypoint not in assets or _media_type(entrypoint) != "text/html":
@@ -688,6 +784,9 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
             f"the ready pointer already names revision {pointer.revision}; this publisher holds a "
             "stale view and would overwrite a newer ready revision"
         )
+    # A number a developer removed is never issued again: the reclamation receipt keeps every number
+    # this lineage published, so the next publication cannot land on a removed revision's identity.
+    revision = max(revision, _highest_removed(scope.frame_dir) + 1)
     manifest = _manifest(
         scope,
         revision=revision,
@@ -702,6 +801,7 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
         evidence=evidence,
         supplemental=supplemental,
         ancestry=ancestry,
+        part_map=part_map,
     )
     encoded = _canonical(json.loads(manifest.model_dump_json(by_alias=True)))
     if len(encoded) > limits.manifest_bytes:
@@ -709,7 +809,10 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
             f"the manifest is {len(encoded)} byte(s), beyond the admitted {limits.manifest_bytes}; "
             "nothing was published"
         )
-    planned = _superseded_for_space(retained, revision, limits)
+    # Nothing is removed silently: the number of revisions is not a ceiling any more, and a task
+    # that reaches its byte total is refused by name with the removal control offered instead
+    # (MIK-R103 v2 item 8).
+    planned: tuple[int, ...] = ()
     pointer_bytes = len(
         _canonical(
             {
@@ -725,20 +828,6 @@ def _publish_locked(  # noqa: PLR0913 - the admission's own decided inputs
         json.loads(_published_draft(draft, revision, created_at).model_dump_json(by_alias=True))
     )
     reclamation_bytes = 0
-    if planned:
-        record = _reclamation_record(
-            scope,
-            state="deleted",
-            revisions=planned,
-            digests=tuple(
-                previous_manifest.artifact_digest
-                for number in planned
-                if (previous_manifest := revision_manifest(scope.frame_dir, number)) is not None
-            ),
-            reason="superseded at the revision ceiling",
-            now=created_at,
-        )
-        reclamation_bytes = len(_canonical(json.loads(record.model_dump_json(by_alias=True))))
     _check_capacity(
         scope,
         limits,
@@ -816,6 +905,7 @@ def _manifest(  # noqa: PLR0913 - one manifest's own decided fields
     evidence: EvidencePacket,
     supplemental: tuple[SupplementalReceipt, ...],
     ancestry: tuple[int, ...],
+    part_map: tuple[FramePart, ...] = (),
 ) -> FrameManifest:
     return FrameManifest(
         frame_id=scope.frame_id,
@@ -831,6 +921,7 @@ def _manifest(  # noqa: PLR0913 - one manifest's own decided fields
         evidence=evidence,
         supplemental=supplemental,
         asset_ancestry=ancestry,
+        part_map=part_map,
     )
 
 
@@ -841,7 +932,12 @@ def _draft_assets(scope: FrameScope, request_id: str) -> dict[str, bytes]:
     try:
         validate_asset_read_bounds(draft.assets)
     except ValueError as failure:
-        raise FrameRefused(str(failure)) from failure
+        oversized = (
+            sum(asset.byte_size for asset in draft.assets) > FrameLimits().bytes_per_revision
+        )
+        raise FrameRefused(
+            str(failure), reason="revision-too-large" if oversized else None
+        ) from failure
     working = _working_directory(scope, Path(draft.working_directory))
     root = working / ASSETS_DIRECTORY
     _guard_working(working, root)
@@ -1161,10 +1257,16 @@ def _changed_sides(retained: FrameBinding, selected: FrameBinding) -> tuple[str,
     if retained.conversion_identity() != selected.conversion_identity():
         changed.append("converted-base")
     if (
+        retained.comparison_owner,
         retained.task_id,
         retained.leaf_id,
         retained.comparison_number,
-    ) != (selected.task_id, selected.leaf_id, selected.comparison_number):
+    ) != (
+        selected.comparison_owner,
+        selected.task_id,
+        selected.leaf_id,
+        selected.comparison_number,
+    ):
         changed.append("comparison")
     return tuple(changed)
 
@@ -1458,40 +1560,340 @@ def _record_reclamation(scope: FrameScope, **facts: Any) -> None:
     )
 
 
-def _superseded_for_space(
-    retained: list[tuple[int, Path]], revision: int, limits: FrameLimits
-) -> tuple[int, ...]:
-    """The oldest superseded revisions a publication must reclaim to stay within its ceiling.
+# --- the developer's removal of retained revisions -----------------------------------------------
 
-    The revision being published becomes the ready one, so the previously ready revision is
-    superseded too and may be reclaimed after the new pointer is written. Nothing is removed here:
-    the plan is what admission accounts for and what publication executes once its bytes exist.
+
+REMOVAL_REASON = "the developer removed revisions in the Explanation view's revision selector (MIK-R103 v2 item 8)"
+# A removal waits this long for the task lock and then refuses by name. A publication holding the
+# lock must never make the developer's control hang, and nothing is deleted before the lock is held.
+REMOVAL_LOCK_SECONDS = 2.0
+_PINNED_NUMBER_KEYS = ("revision", "revisionId", "revisionNumber")
+
+
+def remove_revisions(
+    scope: FrameScope,
+    *,
+    revisions: tuple[int, ...],
+    now: str | None = None,
+    lock_wait_seconds: float = REMOVAL_LOCK_SECONDS,
+) -> FrameRemoval:
+    """Delete retained revisions one developer chose, under the store's one task lock (rule 10).
+
+    This is the "remove old revisions" control of MIK-R106 v2 rule 6, and the only way a published
+    revision leaves the store: a publication reclaims nothing (v2 item 8). The request is refused by
+    name, before a byte is deleted, when it is empty or malformed, when the frame does not exist,
+    when a named number is not retained, when a named number is the pinned agreed revision, when a
+    retained revision's recorded regeneration lineage needs it, when a retained manifest cannot be
+    read, and when the store's lock is held past ``lock_wait_seconds``. Because every refusal comes
+    before the first deletion, a refused call mutates nothing.
+
+    A removal keeps the lineage readable: every remaining revision's manifest and binding still read,
+    its ``parent_revision`` still names the publication it followed (a removed parent answers as no
+    longer retained, never as an error), and the reclamation receipt names every revision and
+    artifact digest that went, so a reopen explains the loss instead of reporting a page that never
+    existed. A removed number is never issued again. When the ready revision itself is removed the
+    pointer moves to the highest retained revision, or is cleared when nothing remains.
     """
 
-    numbers = [number for number, _directory in retained if number != revision]
-    excess = len(numbers) + 1 - limits.revisions_per_lineage
-    return tuple(numbers[: max(0, excess)])
+    scope.verify()
+    wanted = _wanted_revisions(revisions)
+    moment = now or _now()
+    try:
+        with exclusive_file_lock(
+            _task_lock(scope),
+            "review frame store",
+            deadline=time.monotonic() + lock_wait_seconds,
+        ):
+            return _remove_locked(scope, wanted, moment)
+    except LockAcquisitionTimeout as busy:
+        raise FrameRefused(
+            f"frame {scope.frame_id} is busy: a publication or another removal holds the store's "
+            "lock, so nothing was removed and no revision was partly deleted; retry when it "
+            "finishes",
+            reason="revision-removal-busy",
+        ) from busy
 
 
-def _reclaim_for_space(scope: FrameScope, ready: int | None, limits: FrameLimits) -> None:
-    """Free one superseded revision when the lineage is at its revision ceiling (rules 8, 14)."""
+def _wanted_revisions(revisions: tuple[int, ...]) -> tuple[int, ...]:
+    """The named numbers as one ascending request, refusing an empty, repeated or non-numeric one."""
 
-    for number, _directory in _revisions(scope.frame_dir):
-        if number == ready:
-            continue
-        if _reclaim_revision(scope, number, "superseded at the revision ceiling", _now()):
-            return
-    raise FrameRefused(
-        f"frame {scope.frame_id} is at its admitted {limits.revisions_per_lineage} revision(s) and "
-        "the only reclaimable one is the ready revision; nothing was published and the current "
-        "page is retained"
+    if not revisions:
+        raise FrameRefused(
+            "a removal names at least one retained revision", reason="revision-request-invalid"
+        )
+    if any(
+        isinstance(number, bool) or not isinstance(number, int) or number < 1
+        for number in revisions
+    ):
+        raise FrameRefused(
+            f"a revision number is one positive integer, not {revisions!r}",
+            reason="revision-request-invalid",
+        )
+    wanted = tuple(sorted(revisions))
+    if len(set(wanted)) != len(wanted):
+        raise FrameRefused(
+            f"a removal names each revision once, not {revisions!r}",
+            reason="revision-request-invalid",
+        )
+    return wanted
+
+
+def _remove_locked(scope: FrameScope, wanted: tuple[int, ...], moment: str) -> FrameRemoval:
+    """Validate the whole request, then delete it in one receipted pass; the lock is already held."""
+
+    if not scope.frame_dir.is_dir():
+        raise FrameRefused(
+            f"frame {scope.frame_id} does not exist under this leaf's frame area, so there is "
+            "nothing to remove",
+            reason="frame-not-found",
+        )
+    retained = tuple(number for number, _ in _revisions(scope.frame_dir))
+    unknown = tuple(number for number in wanted if number not in retained)
+    if unknown:
+        held = ", ".join(str(number) for number in retained) or "none"
+        raise FrameRefused(
+            f"revision(s) {', '.join(str(number) for number in unknown)} are not retained in frame "
+            f"{scope.frame_id}, which holds {held}; a number is removed once and never offered again",
+            reason="revision-not-retained",
+        )
+    pinned = _pinned_revision(scope)
+    if pinned is not None and pinned in wanted:
+        raise FrameRefused(
+            f"revision {pinned} is the agreed revision the architect pinned in the leaf's task "
+            "document; it is never offered for removal and it counts toward the task total",
+            reason="revision-pinned",
+        )
+    needed = _lineage_need(scope.frame_dir, retained, frozenset(wanted))
+    if needed is not None:
+        ancestor, holder = needed
+        raise FrameRefused(
+            f"revision {holder}, which stays, records revision {ancestor} in its regeneration "
+            "lineage; a retained revision's lineage names bytes the store still holds, so that "
+            "revision is not removable",
+            reason="revision-lineage-needed",
+        )
+    sizes = {
+        number: _size(scope.frame_dir / REVISIONS_DIRECTORY / str(number)) for number in wanted
+    }
+    digests = _removal_digests(scope.frame_dir, wanted)
+    _record_reclamation(
+        scope,
+        state="intent",
+        revisions=wanted,
+        digests=digests,
+        reason=REMOVAL_REASON,
+        now=moment,
+    )
+    removed, failures = _delete_revisions(scope, wanted)
+    _record_reclamation(
+        scope,
+        state="partial" if failures else "deleted",
+        revisions=removed,
+        digests=digests,
+        reason=REMOVAL_REASON,
+        now=moment,
+        failures=failures,
+    )
+    remaining = tuple(number for number, _ in _revisions(scope.frame_dir))
+    _repoint(scope, wanted, remaining, moment)
+    return FrameRemoval(
+        frame_id=scope.frame_id,
+        removed=removed,
+        retained=remaining,
+        pinned=pinned,
+        bytes_freed=sum(sizes[number] for number in removed),
+        detail=_removal_detail(scope.frame_id, removed, remaining, failures),
     )
 
 
-def cleanup_frames(
-    area: Path, *, dry_run: bool = False, retain_revisions: int = 8, now: str | None = None
-) -> dict[str, Any]:
-    """Bound one area's store under its task lock, holding live drafts and the ready revision."""
+def _removal_detail(
+    frame_id: str,
+    removed: tuple[int, ...],
+    remaining: tuple[int, ...],
+    failures: tuple[str, ...],
+) -> str:
+    """One sentence naming what went, what stays, and anything the store could not delete."""
+
+    detail = (
+        f"removed revision(s) {', '.join(str(number) for number in removed) or 'none'} from frame "
+        f"{frame_id}; {', '.join(str(number) for number in remaining) or 'no revision'} remain"
+    )
+    if failures:
+        detail = f"{detail}; {len(failures)} could not be deleted ({'; '.join(failures)})"
+    return detail
+
+
+#: The one canonical agreement resolver (MIK-R189 rule 8), defined in ``tasks.document`` so every
+#: rank can import it; re-exported here for the store's historical consumers. It resolves the strict
+#: ``intentReview.agreedRevision`` record (revision id, SHA-256, packet versions) to the exact
+#: retained revision, its manifest bytes and digest verdict.
+AgreedRevision = ResolvedAgreedRevision
+
+
+def resolve_agreed_revision(
+    task_root: Path,
+    document: Any = None,
+    *,
+    leaf_id: str | None = None,
+    frame_id: str = "explainer",
+) -> ResolvedAgreedRevision | None:
+    """Resolve ``intentReview.agreedRevision`` to the retained revision, manifest path and digest."""
+
+    return _canonical_resolve_agreed_revision(
+        task_root, document, leaf_id=leaf_id, frame_id=frame_id
+    )
+
+
+def _pinned_revision(scope: FrameScope) -> int | None:
+    """The agreed revision's number from the leaf's task document (MIK-R189 rule 9).
+
+    The architect writes it at the go as ``intentReview.agreedRevision``, and the store reads it
+    there and nowhere else. A document with no intent review, or with no agreed revision, pins
+    nothing -- the same reading every other frame act gives a record it cannot find. A pin the
+    document states but whose number cannot be read refuses the removal instead of guessing: a
+    revision the store cannot identify is one it must not delete.
+    """
+
+    document = _leaf_document(scope)
+    review = document.get("intentReview") if document is not None else None
+    agreement = review.get("agreedRevision") if isinstance(review, dict) else None
+    if not isinstance(agreement, dict):
+        return None
+    resolved = resolve_agreed_revision(scope.task_root, agreement, leaf_id=scope.area.name)
+    if resolved is not None and resolved.digest_verified:
+        return resolved.revision
+    raise FrameRefused(
+        "the leaf's task document pins an agreed revision, but no verified revision can be resolved "
+        f"from {', '.join(sorted(agreement)) or 'its empty record'}; no revision is offered for "
+        "removal while the pin cannot be identified",
+        reason="revision-pin-unreadable",
+    )
+
+
+def _leaf_document(scope: FrameScope) -> dict[str, Any] | None:
+    """The leaf's own task document, matched by the id its frame area is named for.
+
+    The document is the durable record the product writes beside the task, so it is found the way
+    the page's own reader finds it: a JSON document in the task folder whose ``id`` names this leaf.
+    Each path is checked before it is read; a symlinked or unreadable document is skipped rather
+    than followed (rule 11).
+    """
+
+    root = scope.task_root.resolve()
+    for path in sorted(scope.task_root.glob("*.json")):
+        if _escaped(root, path):
+            continue
+        try:
+            document = json.loads(read_frame_bytes(path, _TASK_DOCUMENT_READ_BYTES))
+        except (OSError, ValueError):
+            continue
+        if isinstance(document, dict) and slugify(str(document.get("id") or "")) == scope.area.name:
+            return document
+    return None
+
+
+def _lineage_need(
+    frame_dir: Path, retained: tuple[int, ...], removing: frozenset[int]
+) -> tuple[int, int] | None:
+    """The first removed number a retained revision's regeneration lineage names, and its holder."""
+
+    for number in retained:
+        if number in removing:
+            continue
+        manifest = revision_manifest(frame_dir, number)
+        if manifest is None:
+            raise FrameRefused(
+                f"revision {number} is retained but its manifest cannot be read, so no removal can "
+                "show that the lineage it belongs to stays readable",
+                reason="revision-lineage-unreadable",
+            )
+        for ancestor in manifest.asset_ancestry:
+            if ancestor in removing:
+                return ancestor, number
+    return None
+
+
+def _removal_digests(frame_dir: Path, wanted: tuple[int, ...]) -> tuple[str, ...]:
+    """The artifact digests the receipt records before the bytes they name are deleted."""
+
+    return tuple(
+        manifest.artifact_digest
+        for number in wanted
+        if (manifest := revision_manifest(frame_dir, number)) is not None
+    )
+
+
+def _delete_revisions(
+    scope: FrameScope, wanted: tuple[int, ...]
+) -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """Delete each named revision directory; a link on the way is held, never followed (rule 11)."""
+
+    root = scope.frame_dir / REVISIONS_DIRECTORY
+    scope.guard(root, label="revisions directory")
+    removed: list[int] = []
+    failures: list[str] = []
+    for number in wanted:
+        try:
+            scope.guard(root / str(number), label=f"revision {number}")
+            shutil.rmtree(root / str(number))
+        except (OSError, FrameRefused) as failure:
+            failures.append(f"revision {number}: {failure}")
+            continue
+        removed.append(number)
+    return tuple(removed), tuple(failures)
+
+
+def _repoint(
+    scope: FrameScope, removed: tuple[int, ...], remaining: tuple[int, ...], moment: str
+) -> None:
+    """Move the ready pointer off a removed revision, or clear it when no revision remains.
+
+    Reopening reads the pointer, so a removal that took the ready revision leaves the newest
+    revision the page can still serve in its place. Nothing is invented here: the pointer records
+    the digest of the manifest bytes it will be verified against, as a publication does.
+    """
+
+    pointer = _pointer(scope.frame_dir)
+    if pointer is None or pointer.revision not in removed:
+        return
+    ready = scope.frame_dir / READY_POINTER
+    scope.guard(ready, label="ready pointer")
+    if not remaining:
+        ready.unlink(missing_ok=True)
+        return
+    revision = remaining[-1]
+    try:
+        digest = hashlib.sha256(_manifest_bytes(scope.frame_dir, revision)).hexdigest()
+    except (OSError, FrameRefused):
+        return
+    atomic_write_bytes(
+        ready,
+        _canonical(
+            json.loads(
+                FramePointer(
+                    frame_id=scope.frame_id,
+                    revision=revision,
+                    manifest_digest=digest,
+                    published_at=moment,
+                ).model_dump_json(by_alias=True)
+            )
+        ),
+    )
+
+
+def _highest_removed(frame_dir: Path) -> int:
+    """The highest revision number this lineage's receipt says was removed, or ``0``."""
+
+    record = _reclamation(frame_dir)
+    return max(record.revisions, default=0) if record is not None else 0
+
+
+def cleanup_frames(area: Path, *, dry_run: bool = False, now: str | None = None) -> dict[str, Any]:
+    """Remove one area's expired drafts, holding live ones and every revision.
+
+    The number of revisions is not a ceiling (MIK-R103 v2 item 8): nothing is removed silently, and
+    a revision leaves only when the developer removes it in the Explanation view's selector.
+    """
 
     moment = now or _now()
     report: dict[str, Any] = {
@@ -1537,32 +1939,16 @@ def cleanup_frames(
             except FrameRefused as refusal:
                 report["held"].append({"target": str(frame), "reason": str(refusal)})
                 continue
-            _cleanup_lineage(scope, retain_revisions, moment, report, dry_run)
+            _cleanup_lineage(scope, moment, report, dry_run)
     return report
 
 
 def _cleanup_lineage(
     scope: FrameScope,
-    retain_revisions: int,
     moment: str,
     report: dict[str, Any],
     dry_run: bool,
 ) -> None:
-    revisions = _revisions(scope.frame_dir)
-    pointer = _pointer(scope.frame_dir)
-    keep = {number for number, _ in revisions[-retain_revisions:]} if revisions else set()
-    if pointer is not None:
-        keep.add(pointer.revision)
-    for number, directory in revisions:
-        if number in keep:
-            continue
-        if dry_run:
-            report["would_remove"].append({"target": str(directory), "bytes": _size(directory)})
-            continue
-        if _reclaim_revision(scope, number, "bounded retention", moment):
-            report["removed"].append({"target": str(directory), "bytes": _size(directory)})
-        else:
-            report["failed"].append({"target": str(directory), "reason": "deletion failed"})
     for directory in _draft_directories(scope.frame_dir):
         draft = read_draft_path(directory)
         if draft is not None and draft.state == "active" and moment <= draft.lease_until:

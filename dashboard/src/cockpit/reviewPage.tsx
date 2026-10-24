@@ -65,7 +65,12 @@ export function reviewRailView(fullBleed: boolean, column: ReviewChatColumn) {
     width: column.width,
     onResize: column.onResize,
     handle: { label: 'Resize the chat column', testId: 'review-chat-resize' },
-    chatProps: { taskDocumentRef: column.documentRef, preload: true, unbound: column.unbound },
+    chatProps: {
+      taskDocumentRef: column.documentRef,
+      preload: true,
+      unbound: column.unbound,
+      explainer: column.explainer ?? undefined,
+    },
   };
 }
 

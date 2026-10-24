@@ -14,7 +14,13 @@ from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.task_retirement import MasterRetirementScope, RetirementReadiness
 
 from .task_retirement_records import Observed, proof_path
-from .task_retirement_shared import RESTART_NOTICE, archive_hook, hook_failed, hook_remainder
+from .task_retirement_shared import (
+    RESTART_NOTICE,
+    archive_hook,
+    explainer_line,
+    hook_failed,
+    hook_remainder,
+)
 from .task_sprint_context import SprintLinkageRequest
 
 RetirementState = Literal[
@@ -77,6 +83,9 @@ def preview_answer(
         changes.append(
             f"review artifacts: delete {remainder} (listed under taskArchive.reviewArtifacts)"
         )
+    explainer = explainer_line(report)
+    if explainer is not None:
+        changes.append(explainer)
     if hook_failed(report):
         changes.append(
             "review artifacts: retry what the hook cannot reach (listed under "

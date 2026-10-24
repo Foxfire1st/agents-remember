@@ -12,9 +12,10 @@ resumes.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from importlib import import_module
 from typing import Any
 
-from agents_remember.models.tokens import DEFAULT_TOKEN_COUNTER, count_response_tokens
+from agents_remember.models.token_names import TOKENIZER_NAME
 
 __all__ = [
     "ENVELOPE_RESERVE_TOKENS",
@@ -26,7 +27,7 @@ __all__ = [
 
 # The declared threshold, in tokens of the tokenizer below.
 KNOWLEDGE_PAGE_THRESHOLD_TOKENS = 8000
-KNOWLEDGE_PAGE_TOKENIZER = DEFAULT_TOKEN_COUNTER.name
+KNOWLEDGE_PAGE_TOKENIZER = TOKENIZER_NAME
 
 # What the mounted response choke point adds after a page is cut: ``ok`` and the
 # whole-result envelope (``operation`` and the three token-accounting fields --
@@ -40,7 +41,8 @@ ENVELOPE_RESERVE_TOKENS = 64
 def response_tokens(value: Mapping[str, Any]) -> int:
     """The token count of one response body, in the measurement the threshold is declared in."""
 
-    return count_response_tokens(value)
+    # The counter itself loads on the first page that measures something, not at import.
+    return import_module("agents_remember.models.tokens").count_response_tokens(value)
 
 
 def threshold_block() -> dict[str, Any]:

@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application import worktree_tools
-from agents_remember.application.role_launch_context import LEAF_ROLES, RoleLaunchContext
+from agents_remember.application.role_launch_context import RoleLaunchContext
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocEdit,
     TaskDocTarget,
@@ -45,6 +45,7 @@ from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
 from agents_remember.cli import role_launch_workspace
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
+from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.models.role_launcher import LauncherRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import read_task_doc
@@ -526,6 +527,10 @@ class MasterReopenTests(unittest.TestCase):
                     "createdAt": "2026-07-01T11:00",
                     "master": "task.md",
                     "steps": [{"id": "S1", "title": "the work", "status": "pending"}],
+                    # MIK-R189 rule 2: a leaf created after the rule lands starts `pending`, so
+                    # every start waits for the architect's go. This fixture starts the leaf, so
+                    # it carries the answer the architect would record through task_doc.
+                    "intentReview": {"state": "go"},
                 }
             ),
         )

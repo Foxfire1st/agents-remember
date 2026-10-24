@@ -4,11 +4,11 @@
   "scriptPolicy": "enabled",
   "scriptsEnabled": true,
   "provenScope": "generated scripts in the browser's sandboxed frame",
-  "policyDigest": "07d9fa38c57c814ebdb97c7253a0388b37217d7b98e5b9c6946b5ccbae9b6334",
+  "policyDigest": "76ba93c0b89176e5f1b01a4fffaeaa750e8fffcbaea9f82c44c1fde4da0dba54",
   "originArrangement": "opaque-sandbox-v1",
   "browser": "chromium",
   "browserVersion": "148.0.7778.96",
-  "checkedAt": "2026-10-19T07:37:29.920Z",
+  "checkedAt": "2026-10-24T08:48:32.869Z",
   "sandbox": "allow-scripts",
   "origin": {
     "arrangement": "opaque-sandbox-v1",
@@ -17,9 +17,9 @@
     "landingOrigin": "null"
   },
   "servedPolicy": {
-    "origin": "http://127.0.0.1:37585",
-    "session": "zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8",
-    "csp": "sandbox allow-scripts; default-src 'none'; script-src http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/ 'unsafe-inline'; style-src http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/ 'unsafe-inline'; img-src http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/ data:; font-src http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/ data:; media-src http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/; manifest-src http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
+    "origin": "http://127.0.0.1:39047",
+    "session": "s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c",
+    "csp": "sandbox allow-scripts; default-src 'none'; script-src http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/ 'unsafe-inline'; style-src http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/ 'unsafe-inline'; img-src http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/ data:; font-src http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/ data:; media-src http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/; manifest-src http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
     "permissionsPolicy": "accelerometer=(), autoplay=(), camera=(), clipboard-read=(), clipboard-write=(), cross-origin-isolated=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=(), xr-spatial-tracking=()",
     "openerPolicy": "same-origin",
     "frameCorp": "same-origin",
@@ -41,35 +41,35 @@
     "parserWarnings": 0
   },
   "source": {
-    "policyDigest": "07d9fa38c57c814ebdb97c7253a0388b37217d7b98e5b9c6946b5ccbae9b6334",
+    "policyDigest": "76ba93c0b89176e5f1b01a4fffaeaa750e8fffcbaea9f82c44c1fde4da0dba54",
     "modules": {
       "agents_remember.canvas.policy": "528f2ccfb4a5d18e23a8e8f8e62d7e2590b9b6f38dbd0b2fe3d115db44a75927",
-      "agents_remember.serving.canvas": "3229d0c403b47e99a375d4170bb0c7b3036c71daa5ef5fe413d69c4a2b6d6b7a",
+      "agents_remember.serving.canvas": "4f845942fe758ec0bbccc6ed9cd5289f831892bc799a60e1d899cdd6110b3191",
       "agents_remember.serving.write_guard": "63c66c611bac637a333114ce3c5117e7146f687bb97e0bf8eb1f28374a102eee",
-      "agents_remember.serving.app": "d8c2248a835644469cb45a7d8bda3f33bd1d29e822ef1bee2a0ba4b745c588dc",
+      "agents_remember.serving.app": "25ad981482370f83cb0dbfedb9a319f2fe4bea4a7caa56076670b044d7b58730",
       "agents_remember.canvas.sessions": "ee4fedee836f6548faa3a606ed916b5b255a7e0d1310e045a6cb624323e332cc",
-      "agents_remember.canvas.document": "2c754cd4a4d8df7167ed55b07a4a92a137b3596c3cd8284afcd8e51b51478f26",
-      "agents_remember.canvas.protocol": "51e2d10f7a992a3b28fb422b03ee38af142fd572c849599c2dcc0bcd8123f2c2",
+      "agents_remember.canvas.document": "c7c6c679ff1eb156b90ba17d3e2f31beee9b38e1ecf215dcb34fe10a4dc634f4",
+      "agents_remember.canvas.protocol": "11a1ad2afc084c83d39327fc30e83c4ffbb59f8ef0a4d80495e8b2ebd226d479",
       "agents_remember.canvas.evidence": "7ea5ee866f7ed9f675bb02db3e19001d8c0cb93f6c97bad4edf9207a8872937a",
       "agents_remember.canvas.proof_record": "029bb0ec87ee526310df57425c83320a0999578a2dbca27726064e7e84e654af",
-      "agents_remember.application.review_frame_store": "5cd1de4415c35469f49e57be050dc3d8a7ba1505f4b5c2df25a1573933b85c7d",
+      "agents_remember.application.review_frame_store": "37055b3fc76d584d864ed070707f5e7b6f930b57f7bdf42b9fb39e746c747927",
       "agents_remember.application.review_frame_read": "97402c5ee25fe0f3e080a5921212ae07f81882b8c29e4eaed29b69c7d56b957e",
-      "agents_remember.models.knowledge.review_frame": "b5817cae05f6dd1f5e5121f6fb10e392c9e5d9827659d09d9afd2c201e75b27f"
+      "agents_remember.models.knowledge.review_frame": "0584e5d15cddfac7415057409f0fb277bb4cf86aae8e5ad35c9aca002b9f8efc"
     },
-    "frontend": "ebd8a630ff100307145e3b45eb91f8bc568fb968d33df9d0a7ad1df6911bf185",
+    "frontend": "8efbfc909710cd2be2284875c00f8543abd43b6a81d52646f87bf7af3c1e7f82",
     "proofServer": "19f3f0ab3672a485d5882afbdd9b7ea2769413184405f0c85f64791522d16fc1",
     "harness": "a0cbb6e1504430af745ca46cdf350c2e6c3567a9ea18adb6a108172ea1577ce6",
-    "panelBundle": "7972fb831add6dc54290cc0abc33ef4b98dfddb68859391fdb55ff3b8cdec7ee",
+    "panelBundle": "d2e290d31717ce51d5ef8a345d7fefa9d0daf9521375118be4c64cb8d633b355",
     "harnessFile": "scripts/canvas-isolation-proof.mjs",
     "proofServerFile": "scripts/canvas_proof_app.py"
   },
   "artifacts": {
     "entrypoint": "index.html",
-    "artifactDigest": "b77e3b5dea2e7d91cf41ab06b11f7199e9195eb63e90ffb259fea13e7ff641cb",
+    "artifactDigest": "e61427be99191592fa41accb7b9fe68cc7568e5c20e3ba4b85ac6072d97c698e",
     "assets": [
       {
         "path": "index.html",
-        "digest": "006387f81e942b67576c0118544590c7d343daaac03a4989db07eafa3210ec90",
+        "digest": "e07c2588c8b67f7ded067ea124d4a53c0e4db6ae3bcedff2b9cc889feb7d1f46",
         "bytes": 9855,
         "mediaType": "text/html"
       },
@@ -96,12 +96,12 @@
   "requests": {
     "host": [
       "GET / -> 200",
-      "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/ -> 200",
-      "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/ -> 200",
-      "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/probe.css -> 200",
-      "POST /api/canvas/sessions/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/revoke -> 200",
-      "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/ -> 410",
-      "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/probe.css -> 410"
+      "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/ -> 200",
+      "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/ -> 200",
+      "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/probe.css -> 200",
+      "POST /api/canvas/sessions/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/revoke -> 200",
+      "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/ -> 410",
+      "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/probe.css -> 410"
     ],
     "externalSink": [],
     "hostApiRequests": 0,
@@ -135,41 +135,41 @@
     "taskReport": "task-reports/260928-MIK-L104-worker.md",
     "siblingFrame": "sibling-page",
     "targets": {
-      "script:own": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/probe.js",
-      "style:own": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/probe.css",
-      "image:own": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/probe.svg",
-      "script:revision": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.js",
-      "script:frame": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.js",
-      "script:task": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md",
-      "script:session": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.js",
-      "style:revision": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.css",
-      "style:frame": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.css",
-      "style:task": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md",
-      "style:session": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.css",
-      "image:revision": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.svg",
-      "image:frame": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.svg",
-      "image:task": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md",
-      "image:session": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.svg",
-      "font:revision": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.woff2",
-      "font:frame": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.woff2",
-      "font:task": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md",
-      "font:session": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.woff2",
-      "media:revision": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.js",
-      "media:frame": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.js",
-      "media:task": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md",
-      "media:session": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.js",
-      "iframe:revision": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.html",
-      "iframe:frame": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.html",
-      "iframe:task": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md",
-      "iframe:session": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.html",
-      "worker:revision": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.js",
-      "worker:frame": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.js",
-      "worker:task": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md",
-      "worker:session": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.js",
-      "fetch:revision": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.js",
-      "fetch:frame": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.js",
-      "fetch:task": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md",
-      "fetch:session": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.js"
+      "script:own": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/probe.js",
+      "style:own": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/probe.css",
+      "image:own": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/probe.svg",
+      "script:revision": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.js",
+      "script:frame": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.js",
+      "script:task": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md",
+      "script:session": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.js",
+      "style:revision": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.css",
+      "style:frame": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.css",
+      "style:task": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md",
+      "style:session": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.css",
+      "image:revision": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.svg",
+      "image:frame": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.svg",
+      "image:task": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md",
+      "image:session": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.svg",
+      "font:revision": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.woff2",
+      "font:frame": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.woff2",
+      "font:task": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md",
+      "font:session": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.woff2",
+      "media:revision": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.js",
+      "media:frame": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.js",
+      "media:task": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md",
+      "media:session": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.js",
+      "iframe:revision": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.html",
+      "iframe:frame": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.html",
+      "iframe:task": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md",
+      "iframe:session": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.html",
+      "worker:revision": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.js",
+      "worker:frame": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.js",
+      "worker:task": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md",
+      "worker:session": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.js",
+      "fetch:revision": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.js",
+      "fetch:frame": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.js",
+      "fetch:task": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md",
+      "fetch:session": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.js"
     },
     "matrix": {
       "worker:revision": "blocked:SecurityError",
@@ -193,104 +193,105 @@
       "image:own": "loaded",
       "media:session": "blocked:SecurityPolicyViolation",
       "script:revision": "blocked:error",
-      "script:task": "blocked:error",
-      "script:frame": "blocked:error",
       "style:revision": "blocked:error",
-      "font:revision": "blocked:font-error",
-      "style:frame": "blocked:error",
-      "font:frame": "blocked:font-error",
       "image:frame": "blocked:error",
+      "style:frame": "blocked:error",
+      "script:frame": "blocked:error",
+      "script:task": "blocked:error",
+      "font:revision": "blocked:font-error",
+      "font:frame": "blocked:font-error",
       "image:revision": "blocked:error",
-      "style:task": "blocked:error",
-      "media:frame": "blocked:error",
       "media:revision": "blocked:error",
       "image:task": "blocked:error",
+      "media:frame": "blocked:error",
+      "font:task": "blocked:font-error",
       "media:task": "blocked:error",
-      "font:task": "blocked:font-error"
+      "style:task": "blocked:error"
     },
     "matrixComplete": true,
     "requests": {
       "host": [
         "GET / -> 200",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/ -> 200",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.js -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.js -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.css -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.woff2 -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.css -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.woff2 -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.svg -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.svg -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.js -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.js -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md -> 404",
-        "GET /canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md -> 404"
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/ -> 200",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.js -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.css -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.svg -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.css -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.js -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.woff2 -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.woff2 -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.svg -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.js -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.js -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md -> 404",
+        "GET /canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md -> 404"
       ],
       "external": []
     },
     "violations": [
       {
         "directive": "script-src",
-        "blocked": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/eval"
+        "blocked": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/eval"
       },
       {
         "directive": "script-src-elem",
-        "blocked": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.js"
+        "blocked": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.js"
       },
       {
         "directive": "style-src-elem",
-        "blocked": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.css"
+        "blocked": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.css"
       },
       {
         "directive": "font-src",
-        "blocked": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.woff2"
+        "blocked": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.woff2"
       },
       {
         "directive": "connect-src",
-        "blocked": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/foreign.js"
+        "blocked": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/foreign.js"
       },
       {
         "directive": "connect-src",
-        "blocked": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/sibling.js"
+        "blocked": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/sibling.js"
       },
       {
         "directive": "connect-src",
-        "blocked": "http://127.0.0.1:37585/canvas/page/zTf-4vQ3LgWYsq2wrPGhNOlqOVvomt0PD2m9pCjJWo8/task-reports/260928-MIK-L104-worker.md"
+        "blocked": "http://127.0.0.1:39047/canvas/page/s8Gp1aHjGyGaDXQF4l9xCPs3ezVK6pyxgoVjYnnrp4c/task-reports/260928-MIK-L104-worker.md"
       },
       {
         "directive": "connect-src",
-        "blocked": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.js"
+        "blocked": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.js"
       },
       {
         "directive": "img-src",
-        "blocked": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.svg"
+        "blocked": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.svg"
       },
       {
         "directive": "media-src",
-        "blocked": "http://127.0.0.1:37585/canvas/page/z78SItIvQXmUYKjIstkNBZNl7mUeXBhR_coQOHaFMSM/sibling.js"
+        "blocked": "http://127.0.0.1:39047/canvas/page/5XBHX4A817doFO4wnRzEmM97S-xx0fGmBYLvPjAvbZI/sibling.js"
       },
       {
         "directive": "frame-src",
-        "blocked": "http://127.0.0.1:37585/"
+        "blocked": "http://127.0.0.1:39047/"
       },
       {
         "directive": "frame-src",
-        "blocked": "http://127.0.0.1:37585/"
+        "blocked": "http://127.0.0.1:39047/"
       },
       {
         "directive": "frame-src",
-        "blocked": "http://127.0.0.1:37585/"
+        "blocked": "http://127.0.0.1:39047/"
       },
       {
         "directive": "frame-src",
-        "blocked": "http://127.0.0.1:37585/"
+        "blocked": "http://127.0.0.1:39047/"
       },
       {
         "directive": "frame-src",
-        "blocked": "http://127.0.0.1:46591/"
+        "blocked": "http://127.0.0.1:36809/"
       }
     ],
     "crossSession": {

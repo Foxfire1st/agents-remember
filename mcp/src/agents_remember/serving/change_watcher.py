@@ -83,12 +83,21 @@ import asyncio
 import contextlib
 import logging
 import os
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import time as _wall_now
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
+from agents_remember.canvas.explainer_paths import (
+    GENERATION_SUFFIX,
+    leaf_workspace,
+)
+from agents_remember.canvas.explainer_state import (
+    generation,
+    read_binding,
+)
 from agents_remember.kernel.file_lock import lock_path_for
 from agents_remember.kernel.own_writes import OWN_WRITES
 from agents_remember.observer.store import WORKSPACE_CURSOR_FILE, WORKSPACE_LOCK_FILE
@@ -98,7 +107,21 @@ from agents_remember.serving.background_accounting import (
     measured,
     offload,
 )
-from agents_remember.serving.projections.host_activity import activity_directory
+from agents_remember.serving.explainer_watcher import (
+    CapturedComparison,
+    ComparisonMeasurement,
+    GitComparisonOwner,
+    LeafSelection,
+    MovedNotice,
+    MoveNoticeChannel,
+    WatcherApplicationPorts,
+    is_planned,
+    leaf_seats,
+    measure_notice,
+    notices,
+    unexplained_turn_notice,
+)
+from agents_remember.serving.projections.host_activity import activity_directory, turn_ended_agents
 from agents_remember.serving.projections.paths import drift_snapshot_dir, observer_logs_root
 from agents_remember.serving.projections.projection_inputs import (
     ALL_PROJECTION_DOMAINS,
@@ -108,7 +131,7 @@ from agents_remember.serving.projections.projection_inputs import (
 from agents_remember.serving.projections.projection_store import LATEST_METRICS, LATEST_STATE
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from watchfiles import Change
 
@@ -1060,3 +1083,208 @@ class ProjectionInputWatcher:
             if fresh != current:
                 stop.set()
                 return
+
+
+# --- the moved watcher (MIK-R186 rule 7) -----------------------------------------------------------
+
+#: How often the turn-end reader looks when its loop runs; the host writes one publication.
+MOVE_NOTICE_TICK_SECONDS = 3.0
+#: One review page opens (or reconnects) more than once; one capture serves that short window.
+PAGE_OPEN_COOLDOWN_SECONDS = 5.0
+
+#: The one watch per coordination root: the route compares and publishes, the turn-end loop reads.
+_WATCHES: dict[tuple[str, int], MoveNoticeWatch] = {}
+
+
+def move_notice_watch(config: McpRuntimeConfig, ports: WatcherApplicationPorts) -> MoveNoticeWatch:
+    """The process's watch for this coordination root and composition, made once to be shared."""
+
+    key = (str(config.coordination_root), id(ports))
+    watch = _WATCHES.get(key)
+    if watch is None:
+        watch = MoveNoticeWatch(config, ports)
+        _WATCHES[key] = watch
+    return watch
+
+
+@dataclass(frozen=True)
+class WatchOptions:
+    """What a watch may replace: its capture owner and counter, its channel, its cooldown."""
+
+    measurement: ComparisonMeasurement = field(default_factory=ComparisonMeasurement)
+    channel: MoveNoticeChannel | None = None
+    cooldown: float = PAGE_OPEN_COOLDOWN_SECONDS
+
+
+class MoveNoticeWatch:
+    """Show that a leaf moved past its explainer's binding, and wake nothing (MIK-R186 rule 7).
+
+    Two triggers, one comparison. A review page opening or refreshing calls :meth:`page_opened`;
+    :meth:`run` reads the host's turn ends with :func:`turn_ended_agents` and calls
+    :meth:`after_turn_ends`. A ``planning`` leaf is checked only when the page opens: its planned
+    binding is compared with the master line's two tips, and nothing is captured.
+
+    The watch sends no message, writes no held store and makes no host call. Its only effects are
+    the comparison owner's capture (Git objects, no pin and no record) and one notice on the
+    in-process channel.
+    """
+
+    def __init__(
+        self,
+        config: McpRuntimeConfig,
+        ports: WatcherApplicationPorts,
+        *,
+        options: WatchOptions | None = None,
+    ) -> None:
+        options = options or WatchOptions()
+        self._config = config
+        self._ports = ports
+        self._owner = options.measurement.owner
+        self._counter = options.measurement.counter
+        self._channel = options.channel or notices
+        self._cooldown = max(options.cooldown, 0.0)
+        self._seen: dict[str, str] = {}
+        self._checked: dict[tuple[str, str, str], float] = {}
+        self._unexplained_baselines: dict[tuple[str, str, str], Any] = {}
+        self._guard = threading.Lock()
+
+    @property
+    def channel(self) -> MoveNoticeChannel:
+        """The one channel this watch publishes to; the stream route reads the same one."""
+
+        return self._channel
+
+    def clear(self, selection: LeafSelection | None = None) -> None:
+        """Forget cached notice state and broadcast a cleared notice to open streams."""
+
+        with self._guard:
+            if selection is None:
+                self._checked.clear()
+            else:
+                self._checked.pop(selection.as_key(), None)
+        self._channel.clear(selection)
+
+    def page_opened(self, selection: LeafSelection) -> MovedNotice | None:
+        """The page's own read: compare now, and let the stream carry the notice."""
+
+        key = selection.as_key()
+        now = time.monotonic()
+        current_key = self._current_binding_key(selection)
+        if current_key is None:
+            with self._guard:
+                self._checked.pop(key, None)
+            self._channel.clear(selection, broadcast=False)
+            if self._channel.has_subscribers(selection):
+                captured = (self._owner or GitComparisonOwner(self._config, self._ports)).capture(
+                    selection
+                )
+                if isinstance(captured, CapturedComparison):
+                    with self._guard:
+                        self._unexplained_baselines[key] = captured.record
+            return None
+        with self._guard:
+            last = self._checked.get(key)
+            if last is not None and self._cooldown and now - last < self._cooldown:
+                cached = self._channel.latest(selection, binding_key=current_key)
+                if cached is not None:
+                    return cached
+            self._checked[key] = now
+        return self.check(selection)
+
+    def check(self, selection: LeafSelection) -> MovedNotice | None:
+        """Compare one environment with its leaf's state and publish a notice when it moved."""
+
+        try:
+            with self._guard:
+                outcome, notice, bkey = measure_notice(
+                    self._config,
+                    selection,
+                    self._ports,
+                    measurement=ComparisonMeasurement(owner=self._owner, counter=self._counter),
+                )
+        except Exception:  # a page or a turn end is never broken by the watcher's own read
+            logger.exception("the moved watcher failed to compare %s", selection.leaf_id)
+            return None
+        if outcome == "moved" and notice is not None:
+            self._channel.publish(selection, notice, binding_key=bkey)
+            return notice
+        if outcome == "clean":
+            with self._guard:
+                self._checked.pop(selection.as_key(), None)
+            self._channel.clear(selection)
+        return None
+
+    def after_turn_ends(self, ended: Iterable[str]) -> list[MovedNotice]:
+        """The turn-end trigger: each ended seat of a leaf, never a planning one."""
+
+        published: list[MovedNotice] = []
+        seats = self.seats()
+        for agent in ended:
+            selection = seats.get(agent)
+            if selection is None or self._planning(selection):
+                continue
+            if self._current_binding_key(selection) is not None:
+                notice = self.check(selection)
+            else:
+                notice = unexplained_turn_notice(
+                    self._config,
+                    selection,
+                    self._unexplained_baselines,
+                    self._ports,
+                    measurement=ComparisonMeasurement(owner=self._owner, counter=self._counter),
+                )
+                if notice is not None:
+                    self._channel.publish(selection, notice)
+            if notice is not None:
+                published.append(notice)
+        return published
+
+    def seats(self) -> dict[str, LeafSelection]:
+        """Every leaf with an environment or open stream, by its explainer and leaf-role seat ids."""
+
+        return leaf_seats(
+            self._config,
+            self._ports,
+            active_streams=lambda sel: (
+                self._channel.has_subscribers(sel) or sel.as_key() in self._unexplained_baselines
+            ),
+        )
+
+    async def run(self, *, tick: float = MOVE_NOTICE_TICK_SECONDS) -> None:
+        """Read the host's turn ends forever; one failed tick never ends the watch."""
+
+        while True:
+            try:
+                ended = await asyncio.to_thread(turn_ended_agents, self._config, self._seen)
+                if ended:
+                    await asyncio.to_thread(self.after_turn_ends, ended)
+            except Exception:  # a watcher must never take the dashboard down with it
+                logger.exception("the moved watcher's turn-end read failed; retrying next tick")
+            await asyncio.sleep(tick)
+
+    def _current_binding_key(self, selection: LeafSelection) -> str | None:
+        try:
+            workspace = leaf_workspace(
+                self._config, selection.repository_id, selection.master, selection.leaf_id
+            )
+            binding = read_binding(workspace)
+            number = generation(workspace.parent / (selection.leaf_id + GENERATION_SUFFIX))
+        except Exception:
+            return None
+        if binding is None:
+            return None
+        held = binding.binding
+        return (
+            f"{number}:{held.comparison_owner}:{held.comparison_reference}:"
+            f"{held.four_tree_digest}:{binding.snapshot}"
+        )
+
+    def _planning(self, selection: LeafSelection) -> bool:
+        try:
+            workspace = leaf_workspace(
+                self._config, selection.repository_id, selection.master, selection.leaf_id
+            )
+            binding = read_binding(workspace)
+        except Exception:  # an unreadable environment is not a planning one to skip
+            return False
+        return binding is not None and is_planned(binding)

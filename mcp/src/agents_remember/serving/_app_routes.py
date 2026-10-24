@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import FastAPI, Header, HTTPException, Query, Response
@@ -27,20 +29,31 @@ from agents_remember.serving.actions import (
     DismissalIntent,
     evaluate_action,
 )
+from agents_remember.serving.change_watcher import MoveNoticeWatch, move_notice_watch
 from agents_remember.serving.conditional_read import if_none_match_matches
 from agents_remember.serving.direct_execution_grants import (
     DeveloperGrantRequest,
     developer_grant_tool,
 )
 from agents_remember.serving.events import stream_raw_events
+from agents_remember.serving.explainer_watcher import (
+    NOTICE_EVENT,
+    LeafSelection,
+    notice_event,
+)
 from agents_remember.serving.response_contract import (
     ACTION_RESPONSES,
     ActionAccepted,
     HttpDetailRefusal,
     StreamReadyMarker,
 )
-from agents_remember.serving.review_memory_watch import multiplex_review_memory
+from agents_remember.serving.review_memory_watch import (
+    ReviewMemoryRootPort,
+    multiplex_review_memory,
+)
 from agents_remember.serving.served_state import ServedWorkspaceProjection, served_state_tail
+
+logger = logging.getLogger(__name__)
 
 
 def _checkout_binding(runtime: _ServingRuntime) -> dict[str, object] | None:
@@ -105,8 +118,95 @@ def _task_document_response(
     return Response(content=doc.body, media_type="application/json", headers=headers)
 
 
+async def _moved_events(
+    identity: tuple[str, str, str], watch: MoveNoticeWatch
+) -> AsyncGenerator[ServerSentEvent]:
+    """The review page's moved notice: one comparison when it opens, then every publish.
+
+    The comparison runs off the event loop (it captures Git trees), and a failure is logged rather
+    than sent: the page keeps its stream and shows no notice it cannot stand behind (rule 7).
+    """
+
+    selection = LeafSelection(*identity)
+    check = asyncio.create_task(asyncio.to_thread(watch.page_opened, selection))
+    check.add_done_callback(_note_check_failure)
+    try:
+        async with contextlib.aclosing(watch.channel.listen(selection)) as stream:
+            async for notice in stream:
+                yield ServerSentEvent(event=NOTICE_EVENT, data=notice_event(selection, notice))
+    finally:
+        check.cancel()
+
+
+async def _review_stream(
+    ordinary: AsyncGenerator[ServerSentEvent],
+    identity: tuple[str, str, str] | None,
+    root: ReviewMemoryRootPort | None,
+    watch: MoveNoticeWatch | None,
+) -> AsyncGenerator[ServerSentEvent]:
+    """One review page's stream: the projection, the memory invalidations, and the moved notice."""
+
+    async with contextlib.aclosing(multiplex_review_memory(ordinary, identity, root)) as events:
+        if identity is None or watch is None:
+            async for event in events:
+                yield event
+            return
+        async with (
+            contextlib.aclosing(_moved_events(identity, watch)) as moved,
+            contextlib.aclosing(_merged_stream(events, moved)) as streamed,
+        ):
+            async for event in streamed:
+                yield event
+
+
+def _note_check_failure(task: asyncio.Task[object]) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning("the moved watcher could not compare this review page: %s", error)
+
+
+async def _next_event(source: AsyncGenerator[ServerSentEvent]) -> ServerSentEvent:
+    return await anext(source)
+
+
+async def _merged_stream(
+    source: AsyncGenerator[ServerSentEvent], extra: AsyncGenerator[ServerSentEvent]
+) -> AsyncGenerator[ServerSentEvent]:
+    """Two event sources as one; the page's own stream ends the connection, notices never do."""
+
+    streams = {asyncio.create_task(_next_event(one)): one for one in (source, extra)}
+    try:
+        while streams:
+            done, _ = await asyncio.wait(streams, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                origin = streams.pop(task)
+                try:
+                    event = task.result()
+                except StopAsyncIteration:
+                    if origin is extra:
+                        continue
+                    return
+                yield event
+                streams[asyncio.create_task(_next_event(origin))] = origin
+    finally:
+        for task in streams:
+            task.cancel()
+        await asyncio.gather(*streams, return_exceptions=True)
+
+
 def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     """The read side of the cockpit: the projection once, tailed, and the raw event river."""
+
+    # One watcher per coordination root: it remembers which pages it compared just now, and
+    # publishes to the process's one notice channel that review-scoped streams read (rule 7). The
+    # turn-end loop reads this same instance (``move_notice_watch(config).run()``).
+    move_watch = (
+        None
+        if runtime.explainer_application is None
+        else move_notice_watch(runtime.config, runtime.explainer_application.watcher)
+    )
 
     # The 304 branch is why this cannot become a model-returning handler: it answers with an
     # ETag and NO body at all, which no ``response_model`` can express. The declaration names
@@ -173,14 +273,12 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
             watcher_health=runtime.projector.watcher_health(),
             checkout_binding=_checkout_binding(runtime),
         )
+        # ``aclose`` the inner stream explicitly: ``async for`` does not close its iterator, and
+        # a disconnected page must release the projector's subscription at once (MIK-R81).
         async with contextlib.aclosing(
-            multiplex_review_memory(
-                ordinary,
-                identity,
-                runtime.review_memory_root,
-            )
-        ) as events:
-            async for event in events:
+            _review_stream(ordinary, identity, runtime.review_memory_root, move_watch)
+        ) as streamed:
+            async for event in streamed:
                 yield event
 
     # The raw river: every ``event`` frame is a verbatim observer JSONL record replayed from

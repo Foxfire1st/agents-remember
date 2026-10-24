@@ -25,6 +25,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from agents_remember.canvas.explainer_archive import seat_ids as explainer_seat_ids
 from agents_remember.cli.paseo_bridge import (
     PaseoBridgeFailure,
     bridge_call,
@@ -194,7 +195,11 @@ def tree_agent_ids(
             if agent_id is not None and agent_id not in agent_ids and agent_id in live.agent_ids:
                 agent_ids.append(agent_id)
                 receipts[agent_id] = record
-    return agent_ids
+    # An explainer seat is never resumed by the warmup: it loads when its chat is shown or written
+    # to, never after a host restart (MIK-R186 rule 5). Its id is derived from its environment's
+    # workspace and generation, so the exclusion needs no launch record.
+    explainers = explainer_seat_ids(config.coordination_root)
+    return [agent_id for agent_id in agent_ids if agent_id not in explainers]
 
 
 def _read_live_or_note_away(tracker: WarmupTracker, config: McpRuntimeConfig) -> LiveAgents | None:

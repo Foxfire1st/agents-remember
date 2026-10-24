@@ -219,6 +219,14 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
             "text": "refusal census",
             "agent_id": "00000000-0000-4000-8000-000000000002",
         },
+        # The architect's explainer control answers only a hosted architect seat for `claim`; this
+        # census server was started by no launch, so the claim refuses in the envelope before any
+        # write (MIK-R189 rule 7).
+        "explainer_control": {
+            "action": "claim",
+            "repo_id": REPO,
+            "task_name": MASTER,
+        },
         # -- knowledge ----------------------------------------------------------------
         # The three `knowledge_*` operations over a memory tree (MIK-R26 rule 5). Each entry
         # drives the production call with an input that cannot succeed:

@@ -228,6 +228,10 @@ class ProductionOwnerClockTests(unittest.IsolatedAsyncioTestCase):
                 # Without it the held sweep's call raised AttributeError, was swallowed
                 # by the loop's except, and never accounted a unit (MIK-R206 items 2-4).
                 usage_read=None,
+                # The explainer's application ports are the second optional port the held
+                # loop reads (``_app_common.py``: ``explainer_application: ... = None``);
+                # leaving it off the fake raised AttributeError before the sweep ran.
+                explainer_application=None,
             )
             for case in _cases(cast(_ServingRuntime, fields), config):
                 modes = [("success", None)]

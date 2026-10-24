@@ -450,6 +450,9 @@ class WorkflowWorld:
                         "createdAt": "2026-09-18T12:00:00+02:00",
                         "objective": "Give the workflow walk a real enclosure to address.",
                         "requirements": ["One enclosure exists."],
+                        # MIK-R189 rule 2: the walk starts these leaves, so each records the
+                        # architect's go before its start is admitted.
+                        "intentReview": {"state": "go"},
                         "steps": [{"id": "S1", "title": "walk", "status": "done"}],
                     },
                 },
@@ -524,6 +527,8 @@ class WorkflowWorld:
                     "createdAt": "2026-09-18T12:00:00+02:00",
                     "objective": "One enclosure exists.",
                     "requirements": ["One enclosure exists."],
+                    # MIK-R189 rule 2: this sibling's start is one of the walk's hops.
+                    "intentReview": {"state": "go"},
                     "steps": [{"id": "S1", "title": "walk", "status": "done"}],
                 },
             },

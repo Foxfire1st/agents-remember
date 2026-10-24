@@ -12,6 +12,7 @@ import {
   ROLE_LABEL,
   type FamilyHeading,
   type FoldedGroup,
+  type LocationJudgment,
   type LocationNode,
   type SubjectNode,
 } from '../changeSetOrder';
@@ -160,6 +161,64 @@ export function SubjectRow({
   );
 }
 
+const judgmentChip = css({
+  fontFamily: 'mono',
+  fontSize: '0.66rem',
+  paddingInline: '0.32rem',
+  borderWidth: '1px',
+  borderStyle: 'solid',
+  borderColor: 'purple',
+  borderRadius: '2px',
+  color: 'purple',
+  whiteSpace: 'nowrap',
+  '&[data-stale="true"]': {
+    borderStyle: 'dashed',
+    borderColor: 'amber',
+    color: 'amber',
+  },
+});
+
+export function JudgmentChip({ judgment }: { judgment?: LocationJudgment }) {
+  if (!judgment) return null;
+  return (
+    <span
+      className={judgmentChip}
+      data-testid="review-judgment-chip"
+      data-stale={judgment.stale ? 'true' : undefined}
+      data-category={judgment.activeCategory ?? undefined}
+      data-grade={judgment.activeGrade ?? undefined}
+      title={judgment.hoverText}
+    >
+      {judgment.chipLabel}
+    </span>
+  );
+}
+
+function UngradedHeading({ count, nested }: { count?: number; nested: boolean }) {
+  if (!count || count <= 0) return null;
+  return (
+    <div
+      className={cx(styles.row, styles.groupRow, nested ? styles.grandchild : styles.child)}
+      data-testid="review-tree-ungraded-group"
+      data-count={count}
+    >
+      <span className={styles.caret} aria-hidden="true">▸</span>
+      <span className={styles.name}>{`Ungraded (${count})`}</span>
+      <span className={styles.reason} />
+    </div>
+  );
+}
+
+function locationTooltip(node: LocationNode): string {
+  const base = `${node.path} ${node.range}${node.symbol ? ` · ${node.symbol}` : ''}`;
+  return node.judgment ? `${base}\n${node.judgment.hoverText}` : base;
+}
+
+function locationAriaLabel(node: LocationNode, label: string): string {
+  const roleWord = node.role === 'unclassified' ? 'unclassified' : node.role;
+  return `${label} ${node.path} ${node.range} ${roleWord} ${node.reason}`;
+}
+
 export function LocationRow({
   node,
   nested,
@@ -173,30 +232,37 @@ export function LocationRow({
 }) {
   const label = node.symbol ?? fileName(node.path);
   const detail = node.symbol ? fileName(node.path) : node.range;
+  const rowSpace = nested ? styles.grandchild : styles.child;
   return (
-    <button
-      type="button"
-      className={cx(styles.row, nested ? styles.grandchild : styles.child)}
-      data-testid="review-tree-location"
-      data-tree-node="location"
-      data-row-key={`b:${node.key}`}
-      data-entry={node.entry.id}
-      data-entries={node.card.entries.map((entry) => entry.id).join(',')}
-      data-change={node.change}
-      aria-current={current || undefined}
-      aria-label={`${label} ${node.path} ${node.range} ${node.role === 'unclassified' ? 'unclassified' : node.role} ${node.reason}`}
-      title={`${node.path} ${node.range}${node.symbol ? ` · ${node.symbol}` : ''}`}
-      onClick={onSelect}
-      onKeyDown={treeArrow}
-    >
-      <span className={styles.caret} aria-hidden="true" />
-      <span className={styles.name}>
-        {node.role === 'proof' ? <span className={styles.proof} aria-hidden="true">✓</span> : null}
-        {label}
-        <span className={styles.dim}>{detail}</span>
-      </span>
-      <CountsReason text={node.reason || ROLE_LABEL[node.role]} />
-    </button>
+    <>
+      <UngradedHeading count={node.ungradedGroupCount} nested={nested} />
+      <button
+        type="button"
+        className={cx(styles.row, rowSpace)}
+        data-testid="review-tree-location"
+        data-tree-node="location"
+        data-row-key={`b:${node.key}`}
+        data-entry={node.entry.id}
+        data-entries={node.card.entries.map((entry) => entry.id).join(',')}
+        data-change={node.change}
+        data-graded={node.judgment ? 'true' : undefined}
+        data-stale-grade={node.judgment?.stale ? 'true' : undefined}
+        aria-current={current || undefined}
+        aria-label={locationAriaLabel(node, label)}
+        title={locationTooltip(node)}
+        onClick={onSelect}
+        onKeyDown={treeArrow}
+      >
+        <span className={styles.caret} aria-hidden="true" />
+        <JudgmentChip judgment={node.judgment} />
+        <span className={styles.name}>
+          {node.role === 'proof' ? <span className={styles.proof} aria-hidden="true">✓</span> : null}
+          {label}
+          <span className={styles.dim}>{detail}</span>
+        </span>
+        <CountsReason text={node.reason || ROLE_LABEL[node.role]} />
+      </button>
+    </>
   );
 }
 

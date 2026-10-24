@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from agents_remember.application.user_settings_init import SettingsInitRefused
@@ -28,6 +28,7 @@ from agents_remember.kernel._agentic_settings_core import (
     NON_PERMISSION_FEATURES,
     native_service_tier,
 )
+from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_launcher import RoleAgentOverride
 
@@ -736,3 +737,34 @@ def _unreadable_catalog() -> PaseoBridgeFailure:
     return PaseoBridgeFailure(
         BRIDGE_INVALID_REPLY, "The Paseo bridge returned an unreadable catalog."
     )
+
+
+def settings_role_launch(
+    config: McpRuntimeConfig, repository_id: str, role: str = "review-presenter"
+) -> tuple[str, dict[str, Any]]:
+    """One settings role's harness and launch options, resolved as the normal seat path resolves them.
+
+    MIK-R105 @ v4: the explainer's harness, model and effort are the settings role's, and its launch is
+    the normal one. This lives beside the host-role and selection readers it uses, so no capability keeps
+    a launch resolution of its own.
+    """
+
+    repository = config.repositories[repository_id]
+    settings = load_agentic_settings(config.coordination_root, repo_root=repository.path)
+    knobs = settings.resolved_role_knobs(role)
+    defaults = {
+        "agent": knobs.harness or settings.spawn_harness,
+        "model": knobs.model,
+        "effort": knobs.effort,
+        "serviceTier": knobs.service_tier,
+        "mode": knobs.mode,
+        "featureValues": dict(knobs.feature_values),
+        "notes": knobs.notes,
+        "role": role,
+        "notesKey": f"orchestration.roles.{role}.notes",
+        "hostRole": read_host_role(config, role),
+        "settingsSources": [str(path) for path in settings.sources],
+        "fieldOrigins": {key: asdict(value) for key, value in knobs.origins.items()},
+        "useHostDefaultMode": True,
+    }
+    return resolve_agent_selection(config, defaults, settings.harness_ids, None)

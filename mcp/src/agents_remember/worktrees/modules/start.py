@@ -17,6 +17,9 @@ from agents_remember.kernel.memory_mode import (
     is_removed_memory_mode,
     memory_mode_refusal_fields,
 )
+from agents_remember.tasks import TaskDocument
+from agents_remember.tasks.document import INTENT_REVIEW_REFUSAL, intent_review_refusal
+from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.activation.atomic_series_activation import (
@@ -216,6 +219,15 @@ def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
 def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
+    refusal = _contract_intent_review_block(contract, planning_only=True)
+    if refusal is not None:
+        return refusal
+    return _attach_admitted(contract, args)
+
+
+def _attach_admitted(contract: WorktreeContract, args: WorktreeArgs) -> WorktreeCommandResult:
+    """Attach the contract once the leaf's intent review admits it (MIK-R189 rule 2)."""
+
     try:
         require_matching_lifecycle_operation_location(contract)
     except LifecycleOperationLocationError as error:
@@ -523,6 +535,15 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if refused is not None:
         return refused
     context = resolve_context(args)
+    refused = _open_intent_review_start_result(context, args)
+    if refused is not None:
+        return refused
+    return _admitted_start_result(context, args)
+
+
+def _admitted_start_result(context, args: WorktreeArgs) -> WorktreeCommandResult:
+    """Build and create the enclosure once the leaf's intent review admits the start."""
+
     attached = _live_disabled_leaf_attach_result(context, args)
     if attached is not None:
         return attached
@@ -539,6 +560,73 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if isinstance(preflighted, WorktreeCommandResult):
         return preflighted
     return _create_start_enclosure(context, preflighted, args, preview_parent=built.preview_parent)
+
+
+def _open_intent_review_start_result(context, args: WorktreeArgs) -> WorktreeCommandResult | None:
+    """MIK-R189 rule 2: refuse a leaf start whose intent review is still open.
+
+    Answered before the contract is built, so the refusal creates nothing at all: no worktree,
+    no branch, no contract and no task-document change. An unresolvable leaf is left to
+    ``build_start_contract``, whose own refusal also comes before anything is created.
+    """
+
+    if not args.task_name:
+        return None
+    try:
+        leaf_id = resolve_start_leaf_doc_id(context, args)
+        task_root = resolve_active_task_root(
+            context.coordination_root,
+            context.code_repository_name,
+            args.task_name,
+            parent_task=args.parent_task,
+        )
+        found = resolve_terminal_leaf_doc(task_root, leaf_id)
+    except (AssertionError, LeafRefResolutionError, TaskResolutionError, OSError, ValueError):
+        return None
+    if found is None:
+        return None
+    return _intent_review_block(found[0], found[1])
+
+
+def _contract_intent_review_block(
+    contract: WorktreeContract, *, planning_only: bool
+) -> WorktreeCommandResult | None:
+    """MIK-R189 rule 2: the open review of the leaf this contract belongs to, or ``None``.
+
+    ``planning_only`` is the attach reading: a leaf that already reads ``inProgress`` or later is
+    re-entering its existing enclosure, not starting work. A start reads every stage.
+    """
+
+    if contract.kind != "leaf" or not contract.leaf_id:
+        return None
+    try:
+        found = resolve_terminal_leaf_doc(contract.task_root, contract.leaf_id)
+    except (OSError, ValueError):
+        return None
+    if found is None or (planning_only and found[1].status != "planning"):
+        return None
+    return _intent_review_block(found[0], found[1])
+
+
+def _intent_review_block(
+    document_path: Path, document: TaskDocument
+) -> WorktreeCommandResult | None:
+    """The named refusal of one leaf whose intent review is open, or ``None`` when admitted."""
+    refusal = intent_review_refusal(document)
+    if refusal is None:
+        return None
+    return WorktreeCommandResult(
+        2,
+        {
+            "state": INTENT_REVIEW_REFUSAL,
+            "status": INTENT_REVIEW_REFUSAL,
+            "summary": refusal,
+            "detail": refusal,
+            "taskDocument": document_path.as_posix(),
+            # The wait is the architect's record, not something this caller retries.
+            "nextAction": "ask-architect",
+        },
+    )
 
 
 def _removed_vocabulary_result(args: WorktreeArgs) -> WorktreeCommandResult | None:
@@ -710,6 +798,9 @@ def _create_start_enclosure(
     preview_parent: WorktreeContract | None = None,
 ) -> WorktreeCommandResult:
     """Create the code worktree, prepare memory, write the contract, and set the providers up."""
+    intent_block = _contract_intent_review_block(contract, planning_only=False)
+    if intent_block is not None:
+        return intent_block
     _record_start_progress(context, contract, args, StartBeat(phase="preflight"))
     prepared = _prepare_start_enclosure(context, contract, args, preview_parent=preview_parent)
     if isinstance(prepared, WorktreeCommandResult):

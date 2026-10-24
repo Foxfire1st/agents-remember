@@ -8,7 +8,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.structural.agent import RetireChildRequest, StructuralRole
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
-from ..tools.role_agents import retire_child_payload
+from .lazy import tools
 
 
 def register_seat_retirement_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -23,7 +23,7 @@ def register_seat_retirement_tools(server: FastMCP, config: McpRuntimeConfig) ->
         interrupt_turn: bool = False,
     ) -> dict[str, Any]:
         """Retire one authorized direct child seat using task_document_ref, role and reason. Only its starter may retire it; interrupt_turn is required for a running turn. Repeats are inert. More: docs/tool-details.md."""
-        return retire_child_payload(
+        return tools.retire_child_payload(
             config,
             RetireChildRequest(
                 task_document_ref=task_document_ref,

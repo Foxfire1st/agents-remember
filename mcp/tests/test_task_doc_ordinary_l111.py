@@ -176,6 +176,14 @@ class TaskDocLiveOrdinaryTests(unittest.TestCase):
     def test_set_status_meets_location_separated_target_counts_distinct_locations_and_holds_whole_result(
         self,
     ) -> None:
+        # A leaf created now starts with an open intent review (MIK-R189 rule 2): the go is
+        # recorded first, and the same status write is then admitted.
+        task_doc_tool(
+            self.cfg,
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
+            operation="set_field",
+            edit=TaskDocEdit(fields={"intentReview": {"state": "go"}}),
+        )
         answer, expected = self._delivered(
             "set_status", edit=TaskDocEdit(fields={"status": "inProgress"})
         )
@@ -225,6 +233,9 @@ class TaskDocPhraseTests(unittest.TestCase):
         self.assertIn("done", whole["updated"])
 
     def test_set_status_names_value(self) -> None:
+        # A leaf created now starts with an open intent review (MIK-R189 rule 2): the go is
+        # recorded first, and the same status write is then admitted.
+        self._whole("set_field", edit=TaskDocEdit(fields={"intentReview": {"state": "go"}}))
         whole = self._whole("set_status", edit=TaskDocEdit(fields={"status": "inProgress"}))
         self.assertIn("inProgress", whole["updated"])
 

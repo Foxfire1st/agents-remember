@@ -93,6 +93,9 @@ AUTHORED_INTERIM_OWNERS: dict[str, str] = {
     "task_reopen": "L111",
     "role_start": "L111",
     "role_message": "L111",
+    # L183: the review page's explainer control tool (mcp/tools/explainer_control.py),
+    # which the candidate registers on the ordinary server and the roster had no row for.
+    "explainer_control": "L183",
 }
 
 

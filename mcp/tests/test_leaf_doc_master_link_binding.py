@@ -108,6 +108,9 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
             "repo": "repo-a",
             "createdAt": "2026-06-24T02:01",
             "master": "task.md",
+            # MIK-R189 rule 2: a leaf created now waits `pending`; this world starts it, so it
+            # records the architect's go as the product requires.
+            "intentReview": {"state": "go"},
             "steps": [{"id": "S1", "title": "do the thing", "status": "pending"}],
         }
         fields.update(over)
@@ -140,6 +143,8 @@ class LeafDocMasterLinkBindingTests(unittest.TestCase):
             "repo": "repo-a",
             "createdAt": "2026-06-24T02:01",
             "master": "task.md",
+            # MIK-R189 rule 2: the start this document is authored for records the go first.
+            "intentReview": {"state": "go"},
             "steps": [{"id": "S1", "title": "do the thing", "status": "pending"}],
         }
         payload.update(over)

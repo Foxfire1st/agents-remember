@@ -24,8 +24,9 @@ to know *why* a page did not open, did not publish or was refused.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections import OrderedDict
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
@@ -66,7 +67,12 @@ from agents_remember.canvas.presenter import (
     PresenterRunner,
     presenter_launch,
 )
-from agents_remember.canvas.protocol import Binding, ProtocolRefusal, parse_frame_message
+from agents_remember.canvas.protocol import (
+    AcceptedMessage,
+    Binding,
+    ProtocolRefusal,
+    parse_frame_message,
+)
 from agents_remember.canvas.sessions import CanvasSession, SessionBinding, SessionRegistry
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -110,6 +116,11 @@ class CanvasHosts:
     runner: PresenterRunner | None = None
     proof: IsolationProof | None = None
     limits: FrameLimits | None = None
+    pinned_sessions: set[str] = field(default_factory=set)
+    session_slots: dict[str, str] = field(default_factory=dict)
+    selection_picks: OrderedDict[tuple[str, str, str, str, int], dict[str, Any]] = field(
+        default_factory=OrderedDict
+    )
 
 
 def _now() -> str:
@@ -129,7 +140,14 @@ def _frame_scope(
 
     require_repo(hosts.config, repository_id)
     guard_frame_id(frame_id)
-    return frame_scope(task_root(hosts.config, repository_id, master), leaf_id, frame_id)
+    root = task_root(hosts.config, repository_id, master)
+    scope = frame_scope(root, leaf_id, frame_id)
+    if not scope.frame_dir.is_dir():
+        raise FrameRefused(
+            f"frame {frame_id!r} has no folder at {scope.frame_dir}; a missing frame is refused "
+            "by name and is never swapped for another frame's bytes"
+        )
+    return scope
 
 
 def _presenter(hosts: CanvasHosts, scope: FrameScope, leaf_id: str) -> Presenter:
@@ -503,13 +521,65 @@ def _replace_presenter(presenter: Presenter, attempt_id: str, body: dict[str, An
     ).model_dump()
 
 
-def open_session(hosts: CanvasHosts, body: dict[str, Any]) -> JSONResponse:
+def _resolve_open_revision(
+    scope: FrameScope, requested: object
+) -> tuple[Any, int, bool] | JSONResponse:
+    if requested is not None:
+        if isinstance(requested, bool) or not isinstance(requested, int) or requested < 1:
+            return _refusal("frame-unavailable", "revision is a positive integer", status=400)
+        manifest = revision_manifest(scope.frame_dir, requested)
+        if manifest is None:
+            return _refusal(
+                "no-ready-revision",
+                f"revision {requested} is not retained in frame {scope.frame_id}",
+                status=404,
+            )
+        return manifest, manifest.revision, True
+    opening = reopen_frame(scope)
+    if opening.state != "ready" or opening.manifest is None or opening.revision is None:
+        return _refusal("no-ready-revision", opening.detail, status=404)
+    return opening.manifest, opening.revision, False
+
+
+def _revoke_matching_sessions(
+    hosts: CanvasHosts,
+    target: tuple[str, str, str],
+    *,
+    revision: int,
+    slot: str,
+    pinned: bool,
+) -> None:
+    repository_id, leaf_id, frame_id = target
+    if not pinned:
+        hosts.sessions.revoke_frame(
+            repository_id=repository_id, leaf_id=leaf_id, frame_id=frame_id, reason="replaced"
+        )
+        return
+    doomed = [
+        item.session
+        for item in hosts.sessions.sessions()
+        if (item.repository_id, item.leaf_id, item.frame_id, item.revision)
+        == (repository_id, leaf_id, frame_id, revision)
+        and hosts.session_slots.get(item.session, "") == slot
+    ]
+    for token in doomed:
+        hosts.sessions.revoke(token, "replaced")
+        hosts.pinned_sessions.discard(token)
+        hosts.session_slots.pop(token, None)
+
+
+def open_session(
+    hosts: CanvasHosts,
+    body: dict[str, Any],
+    path_params: Mapping[str, Any] | None = None,
+) -> JSONResponse:
     """Open one frame for viewing: the saved-first open, with a fresh bound session."""
 
-    repository_id = body.get("repository")
-    master = body.get("master")
-    leaf_id = body.get("leaf")
-    frame_id = body.get("frame")
+    params = path_params or {}
+    repository_id = body.get("repository") or params.get("repository_id")
+    master = body.get("master") or params.get("master")
+    leaf_id = body.get("leaf") or params.get("leaf_id")
+    frame_id = body.get("frame") or params.get("frame_id")
     if not (
         isinstance(repository_id, str)
         and isinstance(master, str)
@@ -523,30 +593,36 @@ def open_session(hosts: CanvasHosts, body: dict[str, Any]) -> JSONResponse:
         return _refusal("frame-unavailable", "a session names its exact review target", status=400)
     try:
         scope = _frame_scope(hosts, repository_id, master, leaf_id, frame_id)
-        opening = reopen_frame(scope)
+        resolved = _resolve_open_revision(scope, body.get("revision"))
     except (PathRefused, FrameRefused, ValueError) as error:
         return _refusal("frame-unavailable", str(error), status=404)
-    if opening.state != "ready" or opening.manifest is None or opening.revision is None:
-        return _refusal("no-ready-revision", opening.detail, status=404)
-    manifest = opening.manifest
-    # Replacement revokes the old channel before the new one exists: a request on the superseded
-    # document changes nothing even if its window is still alive (L104-B02).
-    hosts.sessions.revoke_frame(
-        repository_id=repository_id, leaf_id=leaf_id, frame_id=frame_id, reason="replaced"
+    if isinstance(resolved, JSONResponse):
+        return resolved
+    manifest, revision_num, pinned = resolved
+    slot = str(body.get("slot") or "")
+    _revoke_matching_sessions(
+        hosts,
+        (repository_id, leaf_id, scope.frame_id),
+        revision=revision_num,
+        slot=slot,
+        pinned=pinned,
     )
     session, displaced = hosts.sessions.open(
         SessionBinding(
             repository_id=repository_id,
             master=master,
             leaf_id=leaf_id,
-            frame_id=frame_id,
-            revision=opening.revision,
+            frame_id=scope.frame_id,
+            revision=revision_num,
             comparison=manifest.binding.comparison_reference,
             evidence_digest=manifest.evidence_digest(),
             entrypoint=manifest.entrypoint.path,
             scripts=_scripts(hosts),
         )
     )
+    if pinned:
+        hosts.pinned_sessions.add(session.session)
+        hosts.session_slots[session.session] = slot
     return JSONResponse(
         {
             "state": "ok",
@@ -655,6 +731,12 @@ def _superseded(hosts: CanvasHosts, session: CanvasSession) -> str | None:
         scope = _frame_scope(
             hosts, session.repository_id, session.master, session.leaf_id, session.frame_id
         )
+        if session.session in hosts.pinned_sessions:
+            if revision_manifest(scope.frame_dir, session.revision) is None:
+                return (
+                    f"this channel serves revision {session.revision}, which is no longer retained"
+                )
+            return None
         opening = reopen_frame(scope)
     except (PathRefused, FrameRefused, ValueError):
         return None
@@ -695,13 +777,71 @@ def session_message(hosts: CanvasHosts, request: Request, raw: bytes) -> JSONRes
         if stale is not None:
             session.budget.note_refusal("stale-revision", stale)
             return JSONResponse({"state": "refused", "reason": "stale-revision", "detail": stale})
+    return _dispatch_session_message(hosts, session, message)
+
+
+def _dispatch_session_message(
+    hosts: CanvasHosts, session: CanvasSession, message: AcceptedMessage
+) -> JSONResponse:
     if message.operation in {"status", "ready"}:
         if message.operation == "status":
             session.budget.last_status = message.payload
         return JSONResponse({"state": "accepted", "operation": message.operation})
+    if message.operation == "offer-selections":
+        return _selections_offered(hosts, session, message.payload)
     if message.operation == "request-explanation":
         return _explanation_requested(hosts, session, message.payload)
     return _evidence_requested(hosts, session, message.payload)
+
+
+def _selections_offered(
+    hosts: CanvasHosts, session: CanvasSession, payload: dict[str, Any]
+) -> JSONResponse:
+    """Record confirmed choices for the trusted tray, replacing any prior offer of this revision."""
+
+    selections = [
+        {"question": str(row["question"]), "choice": str(row["choice"])}
+        for row in payload.get("selections") or ()
+        if isinstance(row, dict)
+    ]
+    verbatim = "\n".join(f"{row['question']}: {row['choice']}" for row in selections)
+    pick = {
+        "id": f"selection:{session.leaf_id}:{session.frame_id}:{session.revision}",
+        "kind": "selection",
+        "title": f"Selections · revision {session.revision}",
+        "revision": session.revision,
+        "frame": session.frame_id,
+        "comparison": session.comparison,
+        "target": "explainer",
+        "removable": True,
+        "selections": selections,
+        "text": verbatim,
+    }
+    key = (
+        session.repository_id,
+        session.master,
+        session.leaf_id,
+        session.frame_id,
+        session.revision,
+    )
+    hosts.selection_picks[key] = pick
+    hosts.selection_picks.move_to_end(key)
+    while len(hosts.selection_picks) > 64:
+        hosts.selection_picks.popitem(last=False)
+    return JSONResponse(
+        {
+            "state": "accepted",
+            "operation": "offer-selections",
+            "revision": session.revision,
+            "comparison": session.comparison,
+            "selections": selections,
+            "pick": pick,
+            "startsModel": False,
+            "detail": (
+                "the selections are offered to the tray verbatim; nothing was sent or started"
+            ),
+        }
+    )
 
 
 def _explanation_requested(
@@ -721,12 +861,30 @@ def _explanation_requested(
             recorded = True
     except (PresenterRefused, PathRefused, FrameRefused, ValueError):
         recorded = False
-    session.budget.explanation_requests.append(payload["question"][:200])
+    question = str(payload["question"])
+    session.budget.explanation_requests.append(question[:200])
+    pick = {
+        "id": (
+            f"explanation-request:{session.leaf_id}:{session.frame_id}:{session.revision}:"
+            f"{len(session.budget.explanation_requests)}"
+        ),
+        "kind": "text",
+        "title": f"Question · revision {session.revision}",
+        "revision": session.revision,
+        "frame": session.frame_id,
+        "comparison": session.comparison,
+        "target": "explainer",
+        "removable": True,
+        "question": question,
+        "text": question,
+    }
     return JSONResponse(
         {
             "state": "recorded",
             "operation": "request-explanation",
             "recorded": recorded,
+            "question": question,
+            "pick": pick,
             "startsModel": False,
             "detail": "the request is recorded for the trusted conversation; nothing was started",
         }
@@ -742,28 +900,40 @@ def _evidence_requested(
         scope = _frame_scope(
             hosts, session.repository_id, session.master, session.leaf_id, session.frame_id
         )
-        opening = reopen_frame(scope)
+        if session.session in hosts.pinned_sessions:
+            manifest = revision_manifest(scope.frame_dir, session.revision)
+            if manifest is None:
+                return JSONResponse(
+                    {
+                        "state": "unavailable",
+                        "operation": "open-evidence",
+                        "detail": f"revision {session.revision} is no longer retained",
+                    }
+                )
+        else:
+            opening = reopen_frame(scope)
+            if opening.state != "ready" or opening.manifest is None:
+                return JSONResponse(
+                    {"state": "unavailable", "operation": "open-evidence", "detail": opening.detail}
+                )
+            if opening.revision != session.revision:
+                return JSONResponse(
+                    {
+                        "state": "unavailable",
+                        "operation": "open-evidence",
+                        "detail": (
+                            f"this channel serves revision {session.revision}; the retained ready "
+                            f"revision is {opening.revision}"
+                        ),
+                    }
+                )
+            manifest = opening.manifest
     except (PathRefused, FrameRefused, ValueError) as error:
         return JSONResponse(
             {"state": "unavailable", "operation": "open-evidence", "detail": str(error)}
         )
-    if opening.state != "ready" or opening.manifest is None:
-        return JSONResponse(
-            {"state": "unavailable", "operation": "open-evidence", "detail": opening.detail}
-        )
-    if opening.revision != session.revision:
-        return JSONResponse(
-            {
-                "state": "unavailable",
-                "operation": "open-evidence",
-                "detail": (
-                    f"this channel serves revision {session.revision}; the retained ready revision "
-                    f"is {opening.revision}"
-                ),
-            }
-        )
     destination = resolve_evidence_reference(
-        opening.manifest, payload["reference"], claim_id=payload.get("claimId")
+        manifest, payload["reference"], claim_id=payload.get("claimId")
     )
     return JSONResponse(
         {
@@ -783,7 +953,10 @@ def revoke_session(hosts: CanvasHosts, request: Request, body: dict[str, Any]) -
     """Dispose one channel: navigation, replacement or a scope change each revoke the old one."""
 
     reason = str(body.get("reason") or "navigated")
-    revoked = hosts.sessions.revoke(request.path_params["session"], reason)
+    token = request.path_params["session"]
+    revoked = hosts.sessions.revoke(token, reason)
+    hosts.pinned_sessions.discard(token)
+    hosts.session_slots.pop(token, None)
     return JSONResponse(
         {
             "state": "ok",
@@ -839,14 +1012,25 @@ def register_canvas_routes(app: FastAPI, hosts: CanvasHosts) -> None:
         return attempt_operation(hosts, request, await _body(request))
 
     @app.post(f"{CANVAS_API_PREFIX}/sessions")
+    @app.post(
+        f"{CANVAS_API_PREFIX}/frames/{{repository_id}}/{{master}}/{{leaf_id}}/{{frame_id}}/sessions"
+    )
     async def _open(request: Request) -> JSONResponse:
-        return open_session(hosts, await _body(request))
+        return open_session(hosts, await _body(request), request.path_params)
 
     @app.post(f"{CANVAS_API_PREFIX}/sessions/{{session}}/messages")
+    @app.post(
+        f"{CANVAS_API_PREFIX}/frames/{{repository_id}}/{{master}}/{{leaf_id}}/{{frame_id}}"
+        "/sessions/{session}/messages"
+    )
     async def _message(request: Request) -> JSONResponse:
         return session_message(hosts, request, await _bounded_raw(request))
 
     @app.post(f"{CANVAS_API_PREFIX}/sessions/{{session}}/revoke")
+    @app.post(
+        f"{CANVAS_API_PREFIX}/frames/{{repository_id}}/{{master}}/{{leaf_id}}/{{frame_id}}"
+        "/sessions/{session}/revoke"
+    )
     async def _revoke(request: Request) -> JSONResponse:
         return revoke_session(hosts, request, await _body(request))
 

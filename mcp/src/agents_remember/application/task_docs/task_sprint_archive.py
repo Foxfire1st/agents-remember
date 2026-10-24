@@ -77,6 +77,7 @@ from ..review_artifact_receipts import DELETION_KEYS
 from .task_retirement_shared import (
     archive_hook,
     digest,
+    explainer_line,
     hook_failed,
     hook_remainder,
     optional_digest,
@@ -1085,6 +1086,9 @@ def _preview_cleanup_changes(
             f"review artifacts of {live.name}: delete {item['remainder']} (listed "
             "under taskArchive.cleanups)"
         )
+    explainer = explainer_line(item["report"])
+    if explainer is not None:
+        changes.append(f"{live.name}: {explainer}")
     if item["failed"]:
         changes.append(
             "review artifacts: retry what the hook cannot reach (listed under "

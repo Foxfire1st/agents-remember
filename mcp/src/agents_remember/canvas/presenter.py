@@ -14,11 +14,13 @@ Four separations are structural here, not advisory:
 * **publication is not a finished turn.** :meth:`Presenter.publish` hands bytes to the frame store
   and reports the store's result; the attempt's ``publication`` and the store's ready pointer are
   read separately, so a cancelled turn never claims to have published.
-* **the harness must be confined.** The authoring execution is behind :class:`PresenterRunner`; the
-  shipped default is :class:`~agents_remember.canvas.presenter_native.NativePresenterHarness`, whose
-  native tools admit only the prepared inputs and the attempt's own presentation assets. A
-  runner that cannot confine its writes must refuse, and :class:`UnconfiguredPresenterRunner` is
-  that refusal. An instruction that says "do not write outside the folder" is not confinement.
+* **the harness must be confined.** The authoring execution is behind :class:`PresenterRunner`; a
+  caller that wires none gets :class:`UnconfiguredPresenterRunner`, which refuses by name. The
+  native launch this capability shipped -- a dedicated presenter tool server, whose standalone
+  entry is gone -- was retired with the explainer's move to the normal task server, so a bare
+  presenter starts nothing rather than a seat with no tools (MIK-R186 @ v2 Scope). A runner that
+  cannot confine its writes must refuse. An instruction that says "do not write outside the
+  folder" is not confinement.
 * **the design text steers the look only.** The selected text travels with the assignment verbatim,
   beside its source and sha256, behind a non-authority fence. A repository text that asks to change
   permissions, evidence, the claim set, the isolation or where the page may load from is delivered
@@ -65,10 +67,7 @@ from agents_remember.canvas.paths import (
 )
 from agents_remember.canvas.presenter_assets import collect_assets
 from agents_remember.canvas.presenter_files import remove_directory, write_file
-from agents_remember.canvas.presenter_host import (
-    HostIdentity,
-    HostReceipt,
-)
+from agents_remember.canvas.presenter_host import HostReceipt
 from agents_remember.canvas.presenter_inputs import (
     DESIGN_NON_AUTHORITY_FENCE,
     INSTRUCTIONS_FILE,
@@ -84,7 +83,6 @@ from agents_remember.canvas.presenter_inputs import (
     presenter_launch,
     seed_from_revision,
 )
-from agents_remember.canvas.presenter_native import NativePresenterHarness
 from agents_remember.canvas.presenter_store import (
     ATTEMPT_SCHEMA,
     CAPABILITY,
@@ -118,6 +116,7 @@ from agents_remember.models.knowledge.review_frame import (
     FrameAuthoring,
     FrameBinding,
     FrameLimits,
+    FramePart,
 )
 
 __all__ = [
@@ -213,11 +212,14 @@ def _host_port(runner: object) -> PresenterHost | None:
 
 
 class UnconfiguredPresenterRunner:
-    """A runner that refuses: kept for a caller with no confined harness to wire."""
+    """A runner that refuses: kept for a caller with no confined harness to wire.
 
-    def start(
-        self, _attempt: PresenterAttempt, _instructions: str, _working: Path
-    ) -> RunnerReceipt:
+    It keeps :class:`PresenterRunner`'s exact parameter names so it is the port's own refusal, not
+    a lookalike a type checker would reject; the three values are what the refusal declines.
+    """
+
+    def start(self, attempt: PresenterAttempt, instructions: str, working: Path) -> RunnerReceipt:
+        del attempt, instructions, working
         raise RunnerRefused(
             "no-confined-harness",
             "this build wires no confined authoring harness for review-presenter; the page was "
@@ -290,13 +292,7 @@ class Presenter:
         # cannot run one passes a port that says ``unavailable`` rather than a port that says
         # ``loaded``.
         self._prospective: ProspectiveLoad = prospective or BrowserProspectiveLoad()
-        self._runner: PresenterRunner = runner or NativePresenterHarness(
-            config,
-            identity=HostIdentity(
-                repository_id=repository_id, task=task, leaf_id=leaf_id, frame_id=frame_id
-            ),
-            clock=self._clock,
-        )
+        self._runner: PresenterRunner = runner or UnconfiguredPresenterRunner()
         self._attempts: AttemptStore | None = None
 
     def _host(self) -> PresenterHost | None:
@@ -1003,6 +999,14 @@ class Presenter:
                 limits=self._limits,
                 now=self._clock(),
             )
+            part_map = (
+                ()
+                if readiness.part_map is None or readiness.part_map.implicit
+                else tuple(
+                    FramePart(part=entry.part_id, title=entry.title, claims=entry.claims)
+                    for entry in readiness.part_map.parts
+                )
+            )
             publication = publish_revision(
                 scope,
                 request_id=attempt.request_id,
@@ -1014,10 +1018,13 @@ class Presenter:
                 asset_ancestry=()
                 if attempt.parent_revision is None
                 else (attempt.parent_revision,),
+                part_map=part_map,
             )
         except FrameRefused as refusal:
             self._store.record_publication_refusal(attempt.attempt_id, refusal)
-            raise PresenterRefused("publication-refused", str(refusal)) from refusal
+            raise PresenterRefused(
+                refusal.reason or "publication-refused", str(refusal)
+            ) from refusal
         if publication.manifest is not None and publication.published:
             self._store.record_publication(attempt, publication)
             self._retain_transcript(self._store.require(attempt.attempt_id))

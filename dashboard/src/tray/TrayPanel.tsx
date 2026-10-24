@@ -6,7 +6,12 @@
 // nothing in it calls `removeAllRanges()`. While it is open, Ctrl+V of an image anywhere in the
 // dashboard becomes an image pick (rule 6), minimised or expanded: one `paste` handler on
 // `clipboardData.files`, no permission, no screen capture.
-import { useEffect, useState } from 'react';
+import {
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 
 import { pickUnavailableText, usePickNotice } from '../cockpit/frameTrayChannel';
 import { TrayChip } from './TrayChip';
@@ -107,16 +112,53 @@ function CloseButton() {
   );
 }
 
-// The minimised tray (rule 5, 15f92a8f): one line, "⊕ Attached · n", that a click expands. It holds
-// no picks, target, message, Send, preference or log; the last Send's answer stands beside it, and
-// each refusal of that Send under it, by name.
+// The minimised tray (MIK-R188 rule 5, MIK-R197): one line, "⊕ Attached · n", that a click anywhere
+// on the bar expands. It holds no picks, target, message, Send, preference or log; the last Send's
+// answer stands beside it, and each refusal of that Send under it, by name. The line's own controls
+// keep their actions: a click or key that starts in a button, link or field is left alone, and the
+// ⊕ button keeps its label and its keyboard route (D491).
+function controlWithin(event: {
+  target: EventTarget | null;
+  currentTarget: EventTarget | null;
+}): boolean {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  const control = target.closest(
+    'button, a, input, textarea, select, [role="button"], [role="link"], [role="menuitem"]',
+  );
+  return control !== null && control !== event.currentTarget;
+}
+
+function expandUnlessControl(event: ReactMouseEvent<HTMLDivElement>) {
+  if (controlWithin(event)) return;
+  trayStore.getState().setMinimised(false);
+}
+
+function expandOnKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  if (controlWithin(event)) return;
+  event.preventDefault();
+  trayStore.getState().setMinimised(false);
+}
+
 export function TrayLine() {
   const count = useTray((state) => state.picks.length);
   const outcome = useTray((state) => state.outcome);
   useTrayPaste(true);
   return (
     <section className={look.line} data-tray-root aria-label="AR tray" data-testid="tray-line">
-      <div className={look.head}>
+      {/* The bar is one button for the mouse and for Enter/Space; the ⊕ button inside keeps its
+          label and its own keyboard route, and a click or key that starts in a control is left to
+          that control (MIK-R197, D491). */}
+      <div
+        className={look.head}
+        role="button"
+        tabIndex={0}
+        aria-label="Expand the AR tray"
+        onClick={expandUnlessControl}
+        onKeyDown={expandOnKey}
+        data-testid="tray-line-head"
+      >
         <button
           type="button"
           className={look.lineOpen}

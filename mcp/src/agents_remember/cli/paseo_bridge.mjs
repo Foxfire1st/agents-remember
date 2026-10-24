@@ -121,6 +121,11 @@
 //            -> {serverId, agent}
 //            Cancels only the named presenter session; it never changes an AR role.
 //
+//   agent-cancel  {agentId: string, requestId?: string}
+//            -> {serverId, agent: AGENT | null, cancelled: boolean, requestId}
+//            Cancels the exact agent named, never an archive or a replacement; `requestId` is
+//            echoed so the caller can name what it cancelled.
+//
 //   agent-state  {agentId: string}
 //            -> {serverId, agent: STATE | null}
 //            What the runtime reports about the agent with exactly that id, archived or not; null
@@ -273,6 +278,7 @@ const COMMANDS = {
   'agent-state': readAgentState,
   'presenter-transcript': presenterTranscript,
   'presenter-cancel': presenterCancel,
+  'agent-cancel': cancelSeat,
   'agents-live': listLiveAgents,
   'agent-resume': resumeAgent,
   'agent-send': sendToAgent,
@@ -862,17 +868,11 @@ function agentCreation(input, agentId) {
       }
     }
   }
-  if (input.labels['ar.capability'] === 'review-presenter') {
-    if (provider !== 'claude' || !isRecord(appliedServers) ||
-        Object.keys(appliedServers).length !== 1 || !appliedServers['review-presenter']) {
-      throw failure('presenter_confinement_unavailable',
-        'The qualified presenter boundary requires Claude with only its review-presenter tool server.')
-    }
-    // Native Claude CLI enforcement: no built-in filesystem/shell/delegation tools and no
-    // inherited user/project MCP servers. This capability's exact read/write tools are its
-    // entire tool authority, on every resume. It is never an instruction-text fence.
-    providerOptions = { ...providerOptions, extraArgs: { tools: '', 'strict-mcp-config': null } }
-  }
+  // MIK-R105 @ v4 / MIK-R186 @ v2 rule 3: there is no presenter-only launch check and no
+  // Claude-only tool fence: the provider test the base made for `claude` and the extraArgs it set
+  // are gone. A seat is launched as the settings role names it, on any harness, and what a harness
+  // brings itself is documented under D154 rather than excluded here. The boundary the product enforces
+  // is the bound server's tool surface, which the server itself applies at registration and dispatch.
   // What the runtime keeps with the agent and applies again on every resume of its session.
   const kept = {
     ...(modeId ? { modeId } : {}),
@@ -1000,6 +1000,24 @@ async function presenterCancel({ api, daemon }, input) {
   return { serverId: serverIdOf(daemon), agent: await agentState(api, after ?? agent) }
 }
 
+async function cancelSeat({ api, daemon }, input) {
+  // The explainer seat's cancel (MIK-R105 v1 rule 9): the exact agent the caller names, never a
+  // presenter lookup and never an archive or a replacement. The request identity rides along and
+  // is echoed, so the Python host can name what it cancelled.
+  const agentId = requiredText(input, 'agentId')
+  const requestId = optionalText(input, 'requestId') ?? null
+  const agent = await findAgent(api, daemon, agentId)
+  if (!agent) return { serverId: serverIdOf(daemon), agent: null, cancelled: false, requestId }
+  await daemon.cancelAgent(agent.id)
+  const after = await findAgent(api, daemon, agent.id)
+  return {
+    serverId: serverIdOf(daemon),
+    agent: after ? await agentState(api, after) : null,
+    cancelled: Boolean(after),
+    requestId
+  }
+}
+
 async function resumeAgent({ api, daemon }, input) {
   const agentId = requiredText(input, 'agentId')
   const serverId = serverIdOf(daemon)
@@ -1036,15 +1054,26 @@ async function agentState(api, agent) {
   const readable = agent.status === 'idle' && !nonEmpty(agent.archivedAt)
   return {
     id: agent.id,
+    // MIK-R105 v2 rule 9: the seat's provider is part of what a resume must be able to check.
+    provider: nonEmpty(agent.provider),
     status: agent.status ?? null,
     archivedAt: agent.archivedAt ?? null,
-    turnActive: Boolean(agent.activeTurn),
+    turnActive:
+      Object.hasOwn(agent, 'activeTurn') && agent.activeTurn !== undefined
+        ? Boolean(agent.activeTurn)
+        : null,
     pendingPermissions: permissions.map((request) => ({
       name: nonEmpty(request?.name) ?? nonEmpty(request?.title) ?? 'a tool',
       kind: request?.kind ?? null
     })),
     lastError: nonEmpty(agent.lastError) ? text(agent.lastError) : null,
     attentionReason: nonEmpty(agent.attentionReason),
+    // MIK-R105 v2 rule 9 tests "a closed seat that never ran a turn" by `lastUserMessageAt`. It is a
+    // field of the record, so it costs no timeline read and can be published for a closed or archived
+    // agent too -- unlike `lastTurn`, which is read only for an idle one because reading the timeline
+    // of a closed agent would load it.
+    lastUserMessageAt: nonEmpty(agent.lastUserMessageAt),
+    lastStatus: nonEmpty(agent.lastStatus),
     lastTurn: readable ? await lastTurn(api, agent) : null
   }
 }
@@ -1586,4 +1615,4 @@ function text(value) {
   return String(value ?? '').slice(0, MESSAGE_LIMIT)
 }
 
-export { agentCreation };
+export { agentCreation, agentState };

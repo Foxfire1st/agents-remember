@@ -53,14 +53,24 @@ import type {
   ReviewTreeEntrySide,
   ReviewTreesResult,
 } from '../../data/reviewTrees';
-import { blockIdentityOf, blockKey, type BlockIdentity } from './blockIdentity';
+import {
+  blockIdentityOf,
+  blockKey,
+  matchesBlockReference,
+  type BlockIdentity,
+} from './blockIdentity';
 import { outlineCounts, outlineGroups, realChange, type OutlineBadge, type OutlineRow } from './changeTriage';
+import type { ExplainerCategory, ExplainerGrade } from './explainer/explainerApi';
 import type { CardChange, ExpressionCard } from './focusedCards';
 import { meaningBadgeText } from './MeaningEffects';
 import {
+  isJudgmentSort,
+  judgmentCategoryOf,
+  judgmentSortFor,
   MEMORY_SORTS,
   REVIEW_SORTS,
   SORT_LABELS,
+  type DeterministicSort,
   type ReviewSelection,
   type ReviewSort,
 } from './reviewSelection';
@@ -90,6 +100,27 @@ export interface ChangeSetInputs {
   // Read 4's leaf-wide currentness of the comparison shown.
   currentness?: ReviewTreesResult['currentness'];
   cards: ChangeSetCards;
+  // The explainer's judgment categories and block grades (MIK-R187 rules 2–6).
+  categories?: readonly ExplainerCategory[];
+  grades?: readonly ExplainerGrade[];
+}
+
+export interface LocationGradeEntry {
+  category: string;
+  grade: string;
+  reason: string;
+  stale: boolean;
+  staleReason?: string | null;
+}
+
+export interface LocationJudgment {
+  chipLabel: string;
+  activeCategory: string | null;
+  activeGrade: string | null;
+  scaleRank: number | null;
+  stale: boolean;
+  grades: LocationGradeEntry[];
+  hoverText: string;
 }
 
 // What keeps a row shown in Changed beside its real change (MIK-R86 v1 rule 5).
@@ -142,6 +173,10 @@ export interface LocationNode {
   memory?: ReviewEntryMemory;
   // The tree row's one reason (MIK-R86 v2 rule 3).
   reason: string;
+  // The explainer's judgment on this block, when graded (MIK-R187 rules 5 and 6).
+  judgment?: LocationJudgment;
+  // Present on the first ungraded changed location of a subject under a judgment sort (MIK-R187 rule 6).
+  ungradedGroupCount?: number;
 }
 
 export interface SubjectNode {
@@ -161,6 +196,9 @@ export interface SubjectNode {
   notComparable: LocationNode[];
   currentness: SubjectCurrentness;
   reason: string;
+  // Under a judgment sort, the ungraded changed locations and their heading label `Ungraded (n)`.
+  ungradedChanged?: LocationNode[];
+  ungradedLabel?: string;
 }
 
 export interface FamilyHeading {
@@ -297,7 +335,7 @@ const CURRENTNESS_RANK: Readonly<Record<SubjectCurrentness, number>> = {
 
 // The Sort popup's short reasons (mockup app.js:243-246). Each of the first three ends its one-line row
 // in the popup's 350 px (d9a1ec8f item 4); Memory currentness's order is `CURRENTNESS_RANK`.
-export const SORT_HINTS: Readonly<Record<ReviewSort, string>> = {
+const DETERMINISTIC_SORT_HINTS: Readonly<Record<DeterministicSort, string>> = {
   priority: 'retire/weaken first, then size',
   authored: 'order the curator wrote',
   currentness: 'least current first',
@@ -306,6 +344,19 @@ export const SORT_HINTS: Readonly<Record<ReviewSort, string>> = {
   'without-proof': 'invariants the index lists without proof',
   'open-weaknesses': 'open weaknesses recorded at the location’s path',
 };
+
+export const SORT_HINTS: Readonly<Record<ReviewSort, string>> = new Proxy(
+  DETERMINISTIC_SORT_HINTS as Record<ReviewSort, string>,
+  {
+    get(target, prop) {
+      if (typeof prop === 'string') {
+        if (prop in target) return target[prop as DeterministicSort];
+        if (isJudgmentSort(prop)) return 'highest grade first, then Priority';
+      }
+      return Reflect.get(target, prop);
+    },
+  },
+);
 
 export function effectRank(meaning: ReviewOutlineMeaning | undefined): number {
   if (meaning?.state !== 'steps') return NO_EFFECT;
@@ -556,7 +607,7 @@ function leastCurrent(facts: SubjectFacts): number {
 function sortKey(sort: ReviewSort, facts: SubjectFacts): number[] {
   if (sort === 'authored') return [facts.authored];
   const priority = priorityKey(facts);
-  if (sort === 'priority') return priority;
+  if (sort === 'priority' || isJudgmentSort(sort)) return priority;
   // The state the subject's row shows, then Priority (MIK-R89 v2 rule 3, e9b9d515).
   if (sort === 'currentness') return [CURRENTNESS_RANK[subjectCurrentness(facts)], ...priority];
   return [-Math.max(-1, ...facts.entries.map((node) => memoryValue(sort, node))), ...priority];
@@ -648,14 +699,17 @@ function readSort(requested: ReviewSort, sorts: readonly SortOption[]): ReviewSo
   return sorts.find((option) => option.sort === requested)?.available ? requested : 'priority';
 }
 
-export function sortOptions(cards: ChangeSetCards): SortOption[] {
+export function sortOptions(
+  cards: ChangeSetCards,
+  categories: readonly ExplainerCategory[] = [],
+): SortOption[] {
   const memoryReason =
     cards.state === 'unavailable'
       ? cards.reason
       : cards.state === 'ready' && cards.memory?.state !== 'available'
         ? (cards.memory?.reason ?? 'the card read gave no memory values')
         : undefined;
-  return REVIEW_SORTS.map((sort) => {
+  const deterministic: SortOption[] = REVIEW_SORTS.map((sort) => {
     const unavailable = MEMORY_SORTS.has(sort) ? memoryReason : undefined;
     return {
       sort,
@@ -665,6 +719,17 @@ export function sortOptions(cards: ChangeSetCards): SortOption[] {
       ...(unavailable === undefined ? {} : { reason: unavailable }),
     };
   });
+  const judgment: SortOption[] = categories.map((category) => {
+    const sort = judgmentSortFor(category.name);
+    const scaleHint = category.scale.map((point) => point.grade).join(' › ');
+    return {
+      sort,
+      label: `✦ ${category.name}`,
+      hint: category.meaning ? `${category.meaning} (${scaleHint})` : scaleHint || SORT_HINTS[sort],
+      available: true,
+    };
+  });
+  return [...deterministic, ...judgment];
 }
 
 function changedEffects(outline: ReviewOutline | undefined): string[] {
@@ -750,15 +815,181 @@ function groupTie(draft: GroupDraft, members: SubjectFacts[]): string {
   return members[0]?.row.id ?? draft.family?.row.id ?? '';
 }
 
+function scaleIndexOf(
+  categories: ReadonlyMap<string, ExplainerCategory>,
+  categoryName: string,
+  gradeName: string,
+): number {
+  const category = categories.get(categoryName);
+  if (!category) return Number.MAX_SAFE_INTEGER;
+  const idx = category.scale.findIndex((point) => point.grade === gradeName);
+  return idx >= 0 ? idx : Number.MAX_SAFE_INTEGER;
+}
+
+function expandMatchedGrades(matched: readonly ExplainerGrade[]): LocationGradeEntry[] {
+  return matched.flatMap((grade) => {
+    if (grade.carried && grade.carried.length > 0) {
+      return grade.carried.map((item) => ({
+        category: item.category || grade.category,
+        grade: item.grade,
+        reason: item.reason,
+        stale: item.stale !== false,
+        staleReason: item.staleReason ?? null,
+      }));
+    }
+    return [
+      {
+        category: grade.category,
+        grade: grade.grade,
+        reason: grade.reason,
+        stale: grade.stale,
+        staleReason: grade.staleReason ?? null,
+      },
+    ];
+  });
+}
+
+function orderGradeEntries(
+  expanded: readonly LocationGradeEntry[],
+  categories: ReadonlyMap<string, ExplainerCategory>,
+  activeCategory: string | null,
+): LocationGradeEntry[] {
+  return expanded
+    .map((entry, index) => ({ entry, index }))
+    .sort((left, right) => {
+      const leftActive = left.entry.category === activeCategory ? 0 : 1;
+      const rightActive = right.entry.category === activeCategory ? 0 : 1;
+      if (leftActive !== rightActive) return leftActive - rightActive;
+      if (left.entry.category === right.entry.category) {
+        const leftScale = scaleIndexOf(categories, left.entry.category, left.entry.grade);
+        const rightScale = scaleIndexOf(categories, right.entry.category, right.entry.grade);
+        if (leftScale !== rightScale) return leftScale - rightScale;
+      }
+      return left.index - right.index;
+    })
+    .map((item) => item.entry);
+}
+
+function formatJudgmentHover(ordered: readonly LocationGradeEntry[]): string {
+  return [
+    "Explainer's judgment (presenter inference):",
+    ...ordered.map(
+      (item) =>
+        `${item.category}: ${item.grade}${item.stale ? ' (stale)' : ''}${item.reason ? ` — ${item.reason}` : ''}`,
+    ),
+  ].join('\n');
+}
+
+function computeLocationJudgment(
+  node: LocationNode,
+  categories: ReadonlyMap<string, ExplainerCategory>,
+  grades: readonly ExplainerGrade[],
+  sort: ReviewSort,
+): LocationJudgment | undefined {
+  if (!grades.length) return undefined;
+  const entryIds = node.card.entries.map((entry) => entry.id);
+  const drawnKeys = node.draws.length ? node.draws : [node.key];
+  const matched = grades.filter((grade) =>
+    matchesBlockReference(node.identity, drawnKeys, entryIds, grade.reference),
+  );
+  if (!matched.length) return undefined;
+  const activeCategory = judgmentCategoryOf(sort);
+  const ordered = orderGradeEntries(expandMatchedGrades(matched), categories, activeCategory);
+  const hoverText = formatJudgmentHover(ordered);
+  const activeEntries =
+    activeCategory !== null ? ordered.filter((item) => item.category === activeCategory) : [];
+
+  if (activeCategory !== null && activeEntries.length > 0) {
+    const best = activeEntries[0];
+    const rank = scaleIndexOf(categories, activeCategory, best.grade);
+    const stale = activeEntries.some((item) => item.stale);
+    return {
+      chipLabel: `✦ ${activeCategory}: ${best.grade}${stale ? ' · stale' : ''}`,
+      activeCategory,
+      activeGrade: best.grade,
+      scaleRank: rank === Number.MAX_SAFE_INTEGER ? 0 : rank,
+      stale,
+      grades: ordered,
+      hoverText,
+    };
+  }
+
+  const stale = ordered.some((item) => item.stale);
+  return {
+    chipLabel: `✦ graded${stale ? ' · stale' : ''}`,
+    activeCategory,
+    activeGrade: null,
+    scaleRank: null,
+    stale,
+    grades: ordered,
+    hoverText,
+  };
+}
+
+function attachJudgmentsAndOrder(
+  nodes: readonly LocationNode[],
+  categories: ReadonlyMap<string, ExplainerCategory>,
+  grades: readonly ExplainerGrade[],
+  sort: ReviewSort,
+): { changed: LocationNode[]; ungraded: LocationNode[] } {
+  const withJudgments = nodes.map((node) => {
+    if (!drawsItself(node)) return node;
+    const judgment = computeLocationJudgment(node, categories, grades, sort);
+    return judgment ? { ...node, judgment } : node;
+  });
+  if (!isJudgmentSort(sort)) {
+    return { changed: withJudgments, ungraded: [] };
+  }
+  const drawing = withJudgments.filter(drawsItself);
+  const followers = withJudgments.filter((node) => !drawsItself(node));
+  const graded = drawing
+    .map((node, index) => ({ node, index }))
+    .filter((item) => item.node.judgment?.scaleRank !== null && item.node.judgment?.scaleRank !== undefined)
+    .sort(
+      (left, right) =>
+        left.node.judgment!.scaleRank! - right.node.judgment!.scaleRank! ||
+        left.index - right.index,
+    )
+    .map((item) => item.node);
+  const ungradedRaw = drawing.filter(
+    (node) => node.judgment?.scaleRank === null || node.judgment?.scaleRank === undefined,
+  );
+  const ungraded = ungradedRaw.map((node, index) =>
+    index === 0 ? { ...node, ungradedGroupCount: ungradedRaw.length } : node,
+  );
+  return { changed: [...graded, ...ungraded, ...followers], ungraded };
+}
+
 function subjectNode(
   facts: SubjectFacts,
   family: string | undefined,
   first: boolean,
   sort: ReviewSort,
   cards: ChangeSetCards['state'],
+  categories: ReadonlyMap<string, ExplainerCategory>,
+  grades: readonly ExplainerGrade[],
 ): SubjectNode {
   const ordered = [...facts.entries].sort(compareLocations);
-  const changed = drawnRegions(ordered.filter((node) => node.change === 'changed'));
+  const rawChanged = drawnRegions(ordered.filter((node) => node.change === 'changed'));
+  const { changed, ungraded } = first
+    ? attachJudgmentsAndOrder(rawChanged, categories, grades, sort)
+    : { changed: [], ungraded: [] };
+  const unchanged = first
+    ? ordered
+        .filter((node) => node.change === 'unchanged')
+        .map((node) => {
+          const judgment = computeLocationJudgment(node, categories, grades, sort);
+          return judgment ? { ...node, judgment } : node;
+        })
+    : [];
+  const notComparable = first
+    ? ordered
+        .filter((node) => node.change === 'undetermined')
+        .map((node) => {
+          const judgment = computeLocationJudgment(node, categories, grades, sort);
+          return judgment ? { ...node, judgment } : node;
+        })
+    : [];
   const currentness = subjectCurrentness(facts);
   return {
     key: `${family ?? '-'}/${facts.row.selectorId}`,
@@ -766,11 +997,17 @@ function subjectNode(
     first,
     effects: effectsOf(facts.row),
     cards,
-    changed: first ? changed : [],
-    unchanged: first ? ordered.filter((node) => node.change === 'unchanged') : [],
-    notComparable: first ? ordered.filter((node) => node.change === 'undetermined') : [],
+    changed,
+    unchanged,
+    notComparable,
     currentness,
-    reason: subjectReason(facts.row, sort, cards, changed.length, currentness),
+    reason: subjectReason(facts.row, sort, cards, rawChanged.length, currentness),
+    ...(isJudgmentSort(sort)
+      ? {
+          ungradedChanged: ungraded,
+          ...(ungraded.length > 0 ? { ungradedLabel: `Ungraded (${ungraded.length})` } : {}),
+        }
+      : {}),
   };
 }
 
@@ -825,6 +1062,8 @@ function subjectGroups(
   keep: ChangeSetKeep,
   sort: ReviewSort,
   cards: ChangeSetCards['state'],
+  categories: ReadonlyMap<string, ExplainerCategory>,
+  grades: readonly ExplainerGrade[],
 ): SubjectGroup[] {
   const placed = new Set<string>();
   return shown.map(({ draft, members }) => ({
@@ -839,7 +1078,7 @@ function subjectGroups(
     subjects: members.map((facts) => {
       const first = !placed.has(facts.row.selectorId);
       placed.add(facts.row.selectorId);
-      return subjectNode(facts, draft.family?.row.selectorId, first, sort, cards);
+      return subjectNode(facts, draft.family?.row.selectorId, first, sort, cards, categories, grades);
     }),
   }));
 }
@@ -872,11 +1111,21 @@ export function changeSetModel(
 ): ChangeSetModel {
   const outlined = inputs.outline?.state === 'outlined';
   const appliedView: TreeView = outlined ? view : 'all';
-  const sorts = sortOptions(inputs.cards);
+  const categoriesList = inputs.categories ?? [];
+  const gradesList = inputs.grades ?? [];
+  const categoriesMap = new Map(categoriesList.map((cat) => [cat.name, cat]));
+  const sorts = sortOptions(inputs.cards, categoriesList);
   const sort = readSort(requested, sorts);
   const drafts = draftGroups(inputs, keep, locationsBySubject(inputs.cards, sort));
   const shown = orderedDrafts(drafts, sort, shownRules(appliedView, keep, inputs.cards));
-  const groups = subjectGroups(shown, keep, sort, inputs.cards.state);
+  const groups = subjectGroups(
+    shown,
+    keep,
+    sort,
+    inputs.cards.state,
+    categoriesMap,
+    gradesList,
+  );
   const subjects = groups.flatMap((group) => group.subjects.filter((node) => node.first));
   return {
     sort,

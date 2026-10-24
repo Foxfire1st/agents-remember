@@ -87,6 +87,9 @@ LaneMembershipState = Literal[
 # The gate's own file-level linkage of a non-text change (a ``file``-locator entry covers it), or
 # ``unknown`` when a knowledge side could not be read.
 LaneGateLinkage = Literal["linked", "unexplained", "unknown"]
+# A hunk subject is ``hunk:<path>@<base>..<candidate>``: two side identities of 71 characters each
+# (``sha256:`` and 64 hex, or ``absent``), so the bound is the path's plus both sides' and the glue.
+_HUNK_SUBJECT_MAX_LENGTH = PATH_MAX_LENGTH + 2 * 71 + len("hunk:@..")
 
 
 class ReviewLaneSpan(KnowledgeModel):
@@ -172,11 +175,18 @@ class ReviewLaneUnknown(KnowledgeModel):
 
 
 class ReviewLaneHunk(KnowledgeModel):
-    """One zero-context hunk of the path, keyed by its side line numbers, and its classification."""
+    """One zero-context hunk of the path, keyed by its side line numbers, and its classification.
+
+    ``subject`` is the hunk's own identity from MIK-R10 -- ``hunk:<path>@<base lines>..<candidate
+    lines>``, each side ``sha256:`` over the changed lines or ``absent`` -- so a grade keyed by this
+    block (MIK-R187 rule 3) can be marked stale without re-reading the diff. It is ``None`` when the
+    lane could not hash the changed lines, and such a hunk is ungradeable rather than guessed.
+    """
 
     before: ReviewLaneSpan
     after: ReviewLaneSpan
     classification: LaneHunkClass
+    subject: str | None = Field(default=None, max_length=_HUNK_SUBJECT_MAX_LENGTH)
     links: tuple[ReviewLaneLink, ...] = ()
     unknown: tuple[ReviewLaneUnknown, ...] = ()
 

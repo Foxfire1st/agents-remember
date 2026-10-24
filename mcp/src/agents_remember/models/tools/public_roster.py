@@ -68,4 +68,6 @@ PUBLIC_TOOLS = (
     "knowledge_integrity_check",
     # MIK-R73 rule 1: the writer's mounted route, beside the reader.
     "knowledge_write",
+    # MIK-R186 rule 6 and MIK-R189 rule 7: the architect's Update, Retire and claim.
+    "explainer_control",
 )

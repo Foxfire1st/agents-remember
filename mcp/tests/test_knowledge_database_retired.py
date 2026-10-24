@@ -149,6 +149,10 @@ COMPUTED_IMPORTS_ALLOWED = {
     "memory_quality/style/citations/grammars.py": (
         "loads the tree-sitter grammar package its own GRAMMAR_PACKAGES table names"
     ),
+    "mcp/registration/lazy.py": (
+        "a lazy view over the payload-builder package: the name comes from the attribute a "
+        "registration module asks for, never from an author or a request"
+    ),
     "providers/lifecycle/__init__.py": "a lazy facade over its own _EXPORT_MODULES list",
     "providers/cgc/lifecycle/__init__.py": "a lazy facade over its own _EXPORT_MODULES list",
     "providers/grepai/lifecycle/__init__.py": "a lazy facade over its own _EXPORT_MODULES list",

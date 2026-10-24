@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 
+from agents_remember.canvas.kit import kit_protocol_helper_js
 from agents_remember.canvas.sessions import CanvasSession
 
 _DOCTYPE = re.compile(rb"\A(?:\xef\xbb\xbf)?(?:\s|<!--.*?-->)*<!doctype\s[^>]*>", re.I | re.S)
@@ -37,7 +38,8 @@ def bound_document(payload: bytes, session: CanvasSession) -> bytes:
         "'*',[channel.port2]);"
         "addEventListener('pagehide',()=>notify({schema:'ar-canvas-document/v1',"
         "session:binding.session,phase:'departed'},'*'),{once:true});"
-        "addEventListener('DOMContentLoaded',()=>dispatchEvent(new MessageEvent('message',"
+        + kit_protocol_helper_js()
+        + "addEventListener('DOMContentLoaded',()=>dispatchEvent(new MessageEvent('message',"
         "{data:binding,source:host})),{once:true});"
         "})();</script>"
     ).encode("ascii")

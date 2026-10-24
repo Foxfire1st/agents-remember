@@ -47,10 +47,12 @@ from agents_remember.models.knowledge.review_evidence import (
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
 __all__ = [
+    "COMPARISON_OWNER",
     "FRAME_DRAFT_SCHEMA",
     "FRAME_MANIFEST_SCHEMA",
     "FRAME_POINTER_SCHEMA",
     "FRAME_RECLAMATION_SCHEMA",
+    "PLANNED_OWNER",
     "FrameAsset",
     "FrameAuthoring",
     "FrameBinding",
@@ -59,13 +61,33 @@ __all__ = [
     "FrameLimits",
     "FrameManifest",
     "FrameOpening",
+    "FramePart",
     "FramePointer",
     "FrameReclamation",
     "FrameRegeneration",
+    "FrameStalePart",
     "FrameStaleness",
     "artifacts_digest",
+    "comparison_reference",
     "four_tree_digest",
+    "planned_reference",
 ]
+
+COMPARISON_OWNER = "agents_remember.application.review_tree_comparison"
+PLANNED_OWNER = "planned"
+
+
+def comparison_reference(record: ReviewTreeComparisonRecord) -> str:
+    """The stable reference of one existing comparison: task, leaf and its own number."""
+
+    return f"review-comparison:{record.task_id}/{record.leaf_id}/{record.number}"
+
+
+def planned_reference(task_id: str, leaf_id: str) -> str:
+    """The planned comparison's own reference; it never reads as a closed leaf's number 0."""
+
+    return f"review-comparison:{task_id}/{leaf_id}/planned"
+
 
 FRAME_MANIFEST_SCHEMA: Literal["ar-review-frame-manifest/v2"] = "ar-review-frame-manifest/v2"
 FRAME_POINTER_SCHEMA: Literal["ar-review-frame-pointer/v1"] = "ar-review-frame-pointer/v1"
@@ -79,8 +101,6 @@ FRAME_RECLAMATION_SCHEMA: Literal["ar-review-frame-reclamation/v1"] = (
 MAX_FILES = 64
 MAX_REVISION_BYTES = 16 * 1024 * 1024
 MAX_MANIFEST_BYTES = 1024 * 1024
-MAX_REVISIONS = 8
-MAX_LINEAGE_BYTES = 64 * 1024 * 1024
 MAX_TASK_BYTES = 512 * 1024 * 1024
 MAX_DRAFT_BYTES = 16 * 1024 * 1024
 
@@ -105,8 +125,6 @@ class FrameLimits(KnowledgeModel):
     files_per_revision: int = Field(default=MAX_FILES, gt=0)
     bytes_per_revision: int = Field(default=MAX_REVISION_BYTES, gt=0)
     manifest_bytes: int = Field(default=MAX_MANIFEST_BYTES, gt=0)
-    revisions_per_lineage: int = Field(default=MAX_REVISIONS, gt=0)
-    lineage_bytes: int = Field(default=MAX_LINEAGE_BYTES, gt=0)
     task_bytes: int = Field(default=MAX_TASK_BYTES, gt=0)
     draft_bytes: int = Field(default=MAX_DRAFT_BYTES, gt=0)
     draft_lease_seconds: int = Field(default=900, gt=0)
@@ -366,10 +384,16 @@ class FrameBinding(KnowledgeModel):
         )
 
     def same_comparison(self, other: FrameBinding) -> bool:
-        """Whether two bindings name the same comparison's full identity (rules 1, 5)."""
+        """Whether two bindings name the same comparison's full identity (rules 1, 5).
+
+        The owner is part of it: number 0 already marks a closed leaf's committed range, so a
+        planned binding is never taken as current against a landed leaf's number-0 comparison
+        (MIK-R103 v2 item 3).
+        """
 
         return (
-            (self.task_id, self.leaf_id, self.comparison_number)
+            self.comparison_owner == other.comparison_owner
+            and (self.task_id, self.leaf_id, self.comparison_number)
             == (other.task_id, other.leaf_id, other.comparison_number)
             and self.side_identity() == other.side_identity()
             and self.conversion_identity() == other.conversion_identity()
@@ -417,6 +441,69 @@ def artifacts_digest(assets: tuple[FrameAsset, ...]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+class FramePart(KnowledgeModel):
+    """One part of a published page, and the claims nested in it (MIK-R103 v2 rule 2).
+
+    The product writes this map; the explainer never does. Its ids are the ones readiness admitted,
+    and every claim id in it resolves in the revision's own claim map, so per-part staleness can name
+    a part without reading the page again.
+    """
+
+    part: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=120)
+    claims: tuple[str, ...] = ()
+
+
+def _parts_are_true(part_map: tuple[FramePart, ...], evidence: EvidencePacket) -> None:
+    """The part map names each part once and carries each revision claim at most once."""
+
+    part_ids = [part.part for part in part_map]
+    if len(part_ids) != len(set(part_ids)):
+        raise ValueError("a part id appears once in one revision's part map")
+    claims = {claim.claim_id for claim in evidence.claims.claims}
+    seen_claims: dict[str, str] = {}
+    for part in part_map:
+        unknown = [claim for claim in part.claims if claim not in claims]
+        if unknown:
+            raise ValueError(
+                f"part {part.part!r} carries claim(s) the revision's claim map does not hold: "
+                + ", ".join(sorted(unknown)[:5])
+            )
+        if len(part.claims) != len(set(part.claims)):
+            raise ValueError(f"part {part.part!r} lists a claim id more than once")
+        for claim_id in part.claims:
+            owner = seen_claims.get(claim_id)
+            if owner is not None:
+                raise ValueError(
+                    f"claim {claim_id!r} is claimed by both part {owner!r} and part {part.part!r}; "
+                    "every claim belongs to at most one part"
+                )
+            seen_claims[claim_id] = part.part
+    if any(part.claims for part in part_map) and set(seen_claims) != claims:
+        missing = sorted(claims - set(seen_claims))[:5]
+        raise ValueError(
+            "every claim of the revision belongs to one part in the part map; unmapped: "
+            + ", ".join(missing)
+        )
+
+
+def _supplemental_is_true(
+    supplemental: tuple[SupplementalReceipt, ...],
+    held: tuple[SupplementalReceipt, ...],
+) -> None:
+    if len({r.receipt_id for r in supplemental}) != len(supplemental) or len(
+        {r.canonical_source for r in supplemental}
+    ) != len(supplemental):
+        raise ValueError("each supplemental receipt id and canonical source appears once")
+    receipts = {(r.receipt_id, r.canonical_source, r.digest, r.read_state) for r in supplemental}
+    expected = {(r.receipt_id, r.canonical_source, r.digest, r.read_state) for r in held}
+    if receipts != expected or len(supplemental) != len(held):
+        raise ValueError(
+            "the revision's supplemental receipts are the evidence packet's own receipts; a "
+            "second copy would be a second identity for the same bytes"
+        )
+
+
 class FrameManifest(KnowledgeModel):
     """One immutable ready revision: its binding, its evidence, its assets and its authoring."""
 
@@ -437,6 +524,9 @@ class FrameManifest(KnowledgeModel):
     evidence: EvidencePacket
     supplemental: tuple[SupplementalReceipt, ...] = ()
     asset_ancestry: tuple[int, ...] = ()
+    # The page's parts and their claims, derived from the page's own document at publication. An
+    # empty map is a page without parts: it is one part, and its staleness is whole-page.
+    part_map: tuple[FramePart, ...] = ()
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
@@ -460,13 +550,8 @@ class FrameManifest(KnowledgeModel):
             raise ValueError("the evidence packet and the binding describe different tasks")
         if self.evidence.comparison.comparison_number != self.binding.comparison_number:
             raise ValueError("the evidence packet describes another comparison than the binding")
-        receipts = {receipt.receipt_id for receipt in self.supplemental}
-        held = {receipt.receipt_id for receipt in self.evidence.supplemental}
-        if receipts != held:
-            raise ValueError(
-                "the revision's supplemental receipts are the evidence packet's own receipts; a "
-                "second copy would be a second identity for the same bytes"
-            )
+        _parts_are_true(self.part_map, self.evidence)
+        _supplemental_is_true(self.supplemental, self.evidence.supplemental)
         return self
 
     def evidence_digest(self) -> str:
@@ -575,6 +660,19 @@ class FrameOpening(KnowledgeModel):
         return self
 
 
+class FrameStalePart(KnowledgeModel):
+    """One stale part of a retained page, with the title a reader sees and why it is stale.
+
+    MIK-R187 rule 8 makes staleness per part; this is the shape the answer carries so the trusted
+    Explanation view can list a part without reading the page again. The reasons name the basis that
+    changed and how, so a reader can check the claim rather than take the word "stale".
+    """
+
+    part: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=120)
+    reasons: tuple[str, ...] = ()
+
+
 class FrameStaleness(KnowledgeModel):
     """Whether a retained revision still describes the selected comparison (rule 5)."""
 
@@ -586,6 +684,9 @@ class FrameStaleness(KnowledgeModel):
     changed: tuple[str, ...] = ()
     supplemental_state: Literal["current", "changed", "unread"] = "unread"
     regeneration_offered: bool = False
+    # The per-part answer (MIK-R187 rule 8). Empty means no part is stale, or that this answer is
+    # the whole-page one an older revision or an older caller gives: `changed` names the sides then.
+    stale_parts: tuple[FrameStalePart, ...] = ()
     detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
@@ -596,6 +697,14 @@ class FrameStaleness(KnowledgeModel):
             raise ValueError(
                 "a stale revision shows the identity it retains and the identity now selected, "
                 "and which sides moved"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _only_a_stale_revision_names_stale_parts(self) -> FrameStaleness:
+        if self.stale_parts and self.state != "stale":
+            raise ValueError(
+                "a revision names stale parts only when it is stale; a current one has none"
             )
         return self
 

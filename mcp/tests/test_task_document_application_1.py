@@ -73,7 +73,9 @@ class ApplicationTests1(ApplicationTests):
 
     def test_leaf_updates_preserve_manual_master_scope(self) -> None:
         self._create_parent_master()
-        self._create(master="task.md")
+        # MIK-R189 rule 2: a leaf created now waits `pending`; this case moves it to inProgress,
+        # so its intent review records the architect's go first.
+        self._create(master="task.md", intentReview={"state": "go"})
         task_doc_tool(
             self.cfg,
             TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
@@ -258,7 +260,9 @@ class ApplicationTests1(ApplicationTests):
         self.assertEqual(master.subTasks[0].status, "inProgress")
 
     def test_set_status_and_set_field(self) -> None:
-        self._create()
+        # MIK-R189 rule 2: the leaf starts `pending`; this case moves it to inProgress, so its
+        # intent review records the architect's go first.
+        self._create(intentReview={"state": "go"})
         status_result = self._call("set_status", fields={"status": "inProgress"})
         self.assertEqual(status_result["status"], "inProgress")
         updated = self._call("set_field", fields={"objective": "new", "bogus": "x"})
@@ -815,8 +819,11 @@ class ApplicationWriteAnswers(ApplicationTests):
         return count_response_tokens(fixed)
 
     def test_ordinary_writes_answer_within_100_tokens(self) -> None:
+        # MIK-R189 rule 2: the last write moves the leaf to inProgress, so its intent review
+        # records the architect's go first.
         self._create(
             steps=[{"id": "S1", "title": "One", "status": "pending"}],
+            intentReview={"state": "go"},
         )
         calls: list[tuple[str, dict[str, Any], str]] = [
             ("set_step", {"step": {"id": "S1", "status": "done"}}, "operation"),

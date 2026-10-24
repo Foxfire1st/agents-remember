@@ -26,7 +26,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from importlib import import_module
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agents_remember.application.role_capsules import (
     CapsuleAdmissionRequest,
@@ -73,12 +75,6 @@ from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_ro
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.store import capture_task_doc_source
-from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-from agents_remember.worktrees.worktree_contract import (
-    ContractError,
-    WorktreeContract,
-    load_contract,
-)
 
 from .provider import SHIPPED_SKILL_ORIGIN, shipped_composition_corpus
 
@@ -87,6 +83,10 @@ from .provider import SHIPPED_SKILL_ORIGIN, shipped_composition_corpus
 #: declared-path rules are written against those relative paths. The manifest is
 #: therefore admitted as ``composition-manifest.json`` beside them.
 COMPOSITION_MANIFEST = "composition-manifest.json"
+
+
+if TYPE_CHECKING:  # annotations are strings; the contract itself loads at its call sites
+    from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,7 +397,9 @@ def _enclosure(config: McpRuntimeConfig, request: CapsuleCompileRequest) -> Admi
                     topology="external", coordination_root=config.coordination_root
                 ),
                 selector=request.enclosure,
-                contract_reader=WorktreeContractReader(),
+                contract_reader=import_module(
+                    "agents_remember.worktrees.modules.contract_reader"
+                ).WorktreeContractReader(),
             ),
         )
     except (ValueError, OSError) as error:
@@ -420,8 +422,13 @@ def _enclosure(config: McpRuntimeConfig, request: CapsuleCompileRequest) -> Admi
             ),
         )
     try:
-        contract = load_contract(contract_path)
-    except (ContractError, OSError) as error:
+        contract = import_module("agents_remember.worktrees.worktree_contract").load_contract(
+            contract_path
+        )
+    except (
+        import_module("agents_remember.worktrees.worktree_contract").ContractError,
+        OSError,
+    ) as error:
         raise TaskProjectionSourceError(
             "contract-unavailable",
             f"worktree contract {contract_path.as_posix()} is unreadable: {error}",
@@ -452,8 +459,15 @@ def _declared_repository_root(request: CapsuleCompileRequest) -> Path | None:
     if contract_path is None:
         return None
     try:
-        return load_contract(contract_path).code_repo_path
-    except (ContractError, OSError) as error:
+        return (
+            import_module("agents_remember.worktrees.worktree_contract")
+            .load_contract(contract_path)
+            .code_repo_path
+        )
+    except (
+        import_module("agents_remember.worktrees.worktree_contract").ContractError,
+        OSError,
+    ) as error:
         raise TaskProjectionSourceError(
             "contract-unavailable",
             f"worktree contract {contract_path.as_posix()} is unreadable: {error}",

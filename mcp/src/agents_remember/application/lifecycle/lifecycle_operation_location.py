@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -13,16 +14,11 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationKind,
     LifecycleOperationProjection,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache import (
-    resolve_lifecycle_operation_location,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
-    LifecycleOperationLocation,
-    LifecycleOperationLocationError,
-)
-from agents_remember.worktrees.integration.lifecycle.observation.projection import (
-    unreadable_contract_operation_projections,
-)
+
+if TYPE_CHECKING:  # annotation-only: the lifecycle layer loads when a location is resolved
+    from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+        LifecycleOperationLocation,
+    )
 
 
 @dataclass(frozen=True)
@@ -64,13 +60,16 @@ def configured_lifecycle_operation_location(
     """Bind a confined contract path to exactly one configured repository task root."""
 
     confined = require_within_coordination(config, str(contract_path), "contract_path")
+    resolve_lifecycle_operation_location = import_module(
+        "agents_remember.worktrees.integration.lifecycle.lifecycle_location_cache"
+    ).resolve_lifecycle_operation_location
     return confined, resolve_lifecycle_operation_location(
         config.coordination_root,
         confined,
     )
 
 
-def location_decision_payload(error: LifecycleOperationLocationError) -> LocationDecisionPayload:
+def location_decision_payload(error: Any) -> LocationDecisionPayload:
     return {
         "ok": False,
         "state": error.status,
@@ -95,7 +94,9 @@ def unreadable_status_operations(
 
     try:
         _, location = configured_lifecycle_operation_location(config, contract_path)
-    except LifecycleOperationLocationError as error:
+    except import_module(
+        "agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location"
+    ).LifecycleOperationLocationError as error:
         status_result.update(location_decision_payload(error))
         return []
     observation = observe_contract_read_failure(
@@ -116,7 +117,9 @@ def observe_contract_read_failure(
     error_type = read_failure.get("errorType")
     name = read_failure.get("name")
     operations = tuple(
-        unreadable_contract_operation_projections(
+        import_module(
+            "agents_remember.worktrees.integration.lifecycle.observation.projection"
+        ).unreadable_contract_operation_projections(
             location,
             error_type=error_type if isinstance(error_type, str) else "ContractError",
             name=name if isinstance(name, str) else location.contract_path.name,
@@ -213,3 +216,18 @@ def operation_address_projections(
             or item.generation == address.generation
         )
     ]
+
+
+def __getattr__(name: str) -> object:
+    """The two names other modules import from here are re-exported on first use, not at import.
+
+    `application/worktree_status.py` takes `LifecycleOperationLocation` from this module; keeping that
+    import working while the worktree layer stays unloaded is what a module-level resolver is for.
+    """
+
+    if name in {"LifecycleOperationLocation", "LifecycleOperationLocationError"}:
+        module = import_module(
+            "agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location"
+        )
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

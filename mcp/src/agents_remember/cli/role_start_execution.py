@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agents_remember.application.role_launch_context import TASKLESS_ROLES, selection_binding
+from agents_remember.application.role_launch_context import (
+    selection_binding,
+)
 from agents_remember.cli import role_launch_routes as route
 from agents_remember.cli.role_launch_liveness import _Replacement
 from agents_remember.cli.role_step_up_runtime import step_up_request
+from agents_remember.models.role_identity import TASKLESS_ROLES
 from agents_remember.tasks.launch_review_read import tolerate_unreadable_review
 
 if TYPE_CHECKING:
