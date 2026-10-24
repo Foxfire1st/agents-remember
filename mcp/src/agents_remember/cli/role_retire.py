@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.agent_binding import AgentBinding, read_agent_binding
-from agents_remember.application.role_launch_context import LEAF_ROLES
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.models.structural.agent import RetireChildRequest
 from agents_remember.serving.projections.host_activity import running_subagents
 

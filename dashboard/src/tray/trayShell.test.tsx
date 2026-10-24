@@ -159,7 +159,7 @@ describe('the tray on the review page with its column closed', () => {
     fireEvent.click(view.getByRole('button', { name: 'Expand the AR tray, 1 pick' }));
     expect(chatColumn(view).style.display).toBe('flex');
     expect(view.getByTestId('review-chat-toggle').getAttribute('aria-expanded')).toBe('true');
-    await waitFor(() => expect(trayStore.getState().targets).toEqual(['a-wrk']));
+    await waitFor(() => expect(trayStore.getState().targets).toEqual(['explainer:repo/master/LEAF']));
     expect(trayStore.getState().pendingDefault).toBe(false);
     expect(chatColumn(view).querySelector('[data-testid="tray-column-dock"]')).not.toBeNull();
 
@@ -186,7 +186,7 @@ describe('the tray on the review page with its column closed', () => {
       trayStore.getState().setTargets(['a-arch']);
     });
     fireEvent.click(view.getByTestId('tray-button'));
-    await waitFor(() => expect(shownStore.getState().chat?.agentId).toBe('a-wrk'));
+    await waitFor(() => expect(shownStore.getState().chat?.agentId).toBe('explainer:repo/master/LEAF'));
     expect(trayStore.getState().targets).toEqual(['a-arch']);
 
     // A new tray on the review page whose wait is ended by leaving it.

@@ -25,7 +25,9 @@ nearest match and no silent widening of scope.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
+from typing import TYPE_CHECKING  # the annotations below are strings; nothing loads at runtime
 
 from agents_remember.errors import TaskProjectionSourceError
 from agents_remember.kernel.coordination_context.models import (
@@ -45,12 +47,9 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentTopology,
 )
 from agents_remember.tasks.store import TaskDocSourceSnapshot, capture_task_doc_source
-from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-from agents_remember.worktrees.worktree_contract import (
-    ContractError,
-    WorktreeContract,
-    load_contract,
-)
+
+if TYPE_CHECKING:
+    from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 from .statuses import (
     STATUS_BINDING_UNRESOLVED,
@@ -145,8 +144,13 @@ def _contract_of(contract_path: Path | None) -> WorktreeContract:
             ),
         )
     try:
-        return load_contract(contract_path)
-    except (ContractError, OSError) as error:
+        # MIK-R204 @ v1 rule 1: the contract reader is work for a projection, not for a server start.
+        worktree_contract = import_module("agents_remember.worktrees.worktree_contract")
+        return worktree_contract.load_contract(contract_path)
+    except (
+        import_module("agents_remember.worktrees.worktree_contract").ContractError,
+        OSError,
+    ) as error:
         raise TaskProjectionSourceError(
             STATUS_CONTRACT_UNAVAILABLE,
             f"worktree contract {contract_path.as_posix()} could not be read: {error}",
@@ -344,7 +348,12 @@ def resolve_task_projection_scope(
     task state, memory content or Git ref is written by this call.
     """
 
-    reader = scope_request.contract_reader or WorktreeContractReader()
+    reader = (
+        scope_request.contract_reader
+        or import_module(
+            "agents_remember.worktrees.modules.contract_reader"
+        ).WorktreeContractReader()
+    )
     admitted = binding.admitted
     try:
         context = resolve_coordination_context(

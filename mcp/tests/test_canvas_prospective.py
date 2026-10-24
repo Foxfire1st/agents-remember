@@ -373,3 +373,31 @@ def test_rendered_reference_inventory_is_checked_against_the_actual_packet(tmp_p
     result = _load_with(tmp_path, f"import json\nprint(json.dumps({answer!r}))\n")
     assert result.state == "failed"
     assert result.unresolved_references == ("not-in-packet",)
+
+    # Real claim IDs in claimIds pass when they belong to the packet and their bases resolve,
+    # while keeping data-evidence reference validation separate.
+    good_claims = {
+        **CLEAN,
+        "evidenceReferences": ["code-candidate:src/app.py"],
+        "claimIds": ["c-present", "c-gone"],
+    }
+    loaded = _load_with(tmp_path, f"import json\nprint(json.dumps({good_claims!r}))\n")
+    assert loaded.state == "loaded"
+    assert loaded.claim_ids == ("c-present", "c-gone")
+
+    # A claim ID placed in evidenceReferences (data-evidence) fails reference resolution.
+    claim_as_ref = {**CLEAN, "evidenceReferences": ["c-present"]}
+    failed_ref = _load_with(tmp_path, f"import json\nprint(json.dumps({claim_as_ref!r}))\n")
+    assert failed_ref.state == "failed"
+    assert failed_ref.unresolved_references == ("c-present",)
+
+    # A basis reference placed in claimIds (data-evidence-claim) fails claim resolution.
+    ref_as_claim = {**CLEAN, "claimIds": ["code-candidate:src/app.py"]}
+    failed_claim = _load_with(tmp_path, f"import json\nprint(json.dumps({ref_as_claim!r}))\n")
+    assert failed_claim.state == "failed"
+    assert failed_claim.unresolved_references == ("code-candidate:src/app.py",)
+
+    script_text = default_load_script().read_text(encoding="utf-8")
+    assert "claimIds" in script_text
+    assert 'querySelectorAll("[data-evidence]")' in script_text
+    assert 'querySelectorAll("[data-evidence-claim]")' in script_text

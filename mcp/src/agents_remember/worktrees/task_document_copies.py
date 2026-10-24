@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,10 +15,12 @@ from typing import Any
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks.document import resolve_agreed_revision
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.task_paths import (
     is_foreign_enclosure_contract,
     iter_leaf_enclosure_contracts,
+    slugify,
 )
 from agents_remember.worktrees.task_leaf_binding import (
     TaskLeafBindingError,
@@ -30,6 +33,11 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 TASK_DOCUMENTS_DIRECTORY = "task-documents"
+REFERENCE_DIRECTORY = "reference"
+REFERENCE_CUSTODY_NAME = "reference-custody.json"
+REFERENCE_EXCLUDED_NAMES = frozenset(
+    {"binding.json", "manifest.sha256", "reclaimed.json", "ready.json", "draft.json"}
+)
 
 logger = logging.getLogger(__name__)
 
@@ -877,3 +885,252 @@ def _require_real_destination(path: Path, root: Path) -> None:
         if current == root:
             break
         current = current.parent
+
+
+@dataclass
+class _ReferenceCopyStage:
+    task_root: Path
+    reference_root: Path
+    leaf_id: str
+    leaf_slug: str
+    writes: dict[Path, bytes] = field(default_factory=dict)
+    total_bytes: int = 0
+
+    def stage_file(self, source_file: Path, dest_file: Path, *, code: str) -> None:
+        _require_real_destination(dest_file, self.reference_root)
+        size = source_file.stat().st_size
+        if size > COPY_FILE_MAX_BYTES:
+            raise ValueError(
+                f"{code}: {source_file} holds {size} bytes, over the {COPY_FILE_MAX_BYTES} byte budget"
+            )
+        raw = source_file.read_bytes()
+        if self.total_bytes + len(raw) > COPY_TOTAL_MAX_BYTES:
+            raise ValueError(
+                f"{code}: {source_file} exceeds the {COPY_TOTAL_MAX_BYTES} byte total budget"
+            )
+        self.total_bytes += len(raw)
+        self.writes[dest_file] = raw
+
+
+def prepare_leaf_workspace_reference(
+    coordination_root: Path, group: Path, leaf_json_path: Path
+) -> dict[str, Any]:
+    """Copy ``notes/reference/<leaf>/`` and the agreed revision into ``<group>/reference/`` (MIK-R189 rule 9).
+
+    Excludes ``binding.json``. A copy failure is returned as a named warning and never refuses
+    the leaf start; once custody is sealed, retries preserve the copied yardstick.
+    """
+
+    reference_root = group / REFERENCE_DIRECTORY
+    try:
+        return _prepare_leaf_workspace_reference(coordination_root, group, leaf_json_path)
+    except (OSError, ValueError, RuntimeError) as error:
+        if not reference_root.is_symlink():
+            with suppress(OSError):
+                reference_root.mkdir(parents=True, exist_ok=True)
+        return {
+            "referenceRoot": reference_root.as_posix(),
+            "copied": [],
+            "warning": str(error),
+        }
+
+
+def _prepare_leaf_workspace_reference(
+    _coordination_root: Path, group: Path, leaf_json_path: Path
+) -> dict[str, Any]:
+    reference_root = group / REFERENCE_DIRECTORY
+    _require_real_destination(reference_root, group)
+    custody_path = group / ".ar-product" / REFERENCE_CUSTODY_NAME
+    reused = _reused_reference_custody(reference_root, custody_path)
+    if reused is not None:
+        return reused
+    raw_doc = json.loads(leaf_json_path.read_bytes())
+    if not isinstance(raw_doc, dict):
+        raise ValueError(f"reference-leaf-unreadable: {leaf_json_path} is not a JSON object")
+    stage = _ReferenceCopyStage(
+        task_root=leaf_json_path.parent,
+        reference_root=reference_root,
+        leaf_id=str(raw_doc.get("id") or ""),
+        leaf_slug=str(raw_doc.get("slug") or ""),
+    )
+    has_ref_source = _collect_task_reference_writes(stage)
+    intent_review = raw_doc.get("intentReview")
+    agreed = intent_review.get("agreedRevision") if isinstance(intent_review, dict) else None
+    if isinstance(agreed, dict):
+        _collect_agreed_revision_writes(stage, agreed)
+    reference_root.mkdir(parents=True, exist_ok=True)
+    if stage.writes:
+        _publish_copy_writes(stage.writes)
+    copied = sorted(path.relative_to(reference_root).as_posix() for path in stage.writes)
+    if stage.writes or has_ref_source or isinstance(agreed, dict):
+        _write_reference_custody(custody_path, group, copied)
+    return {
+        "referenceRoot": reference_root.as_posix(),
+        "copied": copied,
+    }
+
+
+def _reused_reference_custody(reference_root: Path, custody_path: Path) -> dict[str, Any] | None:
+    if not custody_path.is_file() or custody_path.is_symlink():
+        return None
+    try:
+        custody = json.loads(custody_path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(custody, dict) or custody.get("complete") is not True:
+        return None
+    files = custody.get("files")
+    if not isinstance(files, list) or not all(isinstance(item, str) for item in files):
+        return None
+    if any(
+        not (reference_root / rel).is_file() or (reference_root / rel).is_symlink() for rel in files
+    ):
+        return None
+    return {
+        "referenceRoot": reference_root.as_posix(),
+        "copied": list(files),
+        "reusedCustody": True,
+    }
+
+
+def _write_reference_custody(custody_path: Path, group: Path, copied: list[str]) -> None:
+    _require_real_destination(custody_path, group)
+    payload = {"schema": "ar-reference-custody/v1", "complete": True, "files": copied}
+    atomic_write_bytes(
+        custody_path, (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    )
+
+
+def _require_confined_source(root: Path, candidate: Path, *, code: str) -> None:
+    resolved_root = root.resolve(strict=False)
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as error:
+        raise ValueError(f"{code}: {candidate} escapes {root}") from error
+    probe = root
+    for step in (
+        probe,
+        *(probe.joinpath(*relative.parts[: idx + 1]) for idx in range(len(relative.parts))),
+    ):
+        if step.is_symlink():
+            raise ValueError(f"{code}: {step} is a symlink")
+    if not candidate.resolve(strict=False).is_relative_to(resolved_root):
+        raise ValueError(f"{code}: {candidate} resolves outside {root}")
+
+
+def _collect_task_reference_writes(stage: _ReferenceCopyStage) -> bool:
+    notes_dir = stage.task_root / "notes"
+    ref_base = notes_dir / "reference"
+    for prefix in (notes_dir, ref_base):
+        if prefix.is_symlink():
+            raise ValueError(f"reference-symlink-refused: {prefix} is a symlink")
+    names = list(
+        dict.fromkeys(n for n in (stage.leaf_id, slugify(stage.leaf_id), stage.leaf_slug) if n)
+    )
+    found_dir = False
+    for name in names:
+        leaf_ref = ref_base / name
+        if leaf_ref.is_symlink():
+            raise ValueError(f"reference-symlink-refused: {leaf_ref} is a symlink")
+        if not leaf_ref.exists():
+            continue
+        if not leaf_ref.is_dir():
+            raise ValueError(f"reference-not-a-directory: {leaf_ref} is not a directory")
+        found_dir = True
+        for visits, entry in enumerate(sorted(leaf_ref.rglob("*")), start=1):
+            if visits > COPY_SCAN_MAX_ENTRIES:
+                raise ValueError(
+                    f"reference-scan-limit: {leaf_ref} exceeds {COPY_SCAN_MAX_ENTRIES} entries"
+                )
+            _require_confined_source(leaf_ref, entry, code="reference-symlink-refused")
+            if entry.is_file() and entry.name not in REFERENCE_EXCLUDED_NAMES:
+                stage.stage_file(
+                    entry,
+                    stage.reference_root / entry.relative_to(leaf_ref),
+                    code="reference-copy-too-large",
+                )
+    return found_dir
+
+
+def _packet_versions(raw: object) -> tuple[str, ...]:
+    """The agreed revision's packet versions, in declared order; a bare string is one version."""
+
+    if isinstance(raw, str) and raw.strip():
+        return (raw.strip(),)
+    if isinstance(raw, (list, tuple)):
+        return tuple(str(one).strip() for one in raw if str(one).strip())
+    return ()
+
+
+def _resolve_agreed_revision_dir(stage: _ReferenceCopyStage, agreed: Mapping[str, Any]) -> Path:
+    revision_id = str(agreed.get("revisionId") or "").strip()
+    expected_sha = str(agreed.get("sha256") or "").strip()
+    expected_packets = _packet_versions(agreed.get("packetVersions"))
+    if not revision_id or not expected_sha or not expected_packets:
+        raise ValueError(
+            "agreed-revision-missing: the agreed revision must name revisionId, sha256 and "
+            "packetVersions; a numeric directory is not the triple"
+        )
+    frames_base = stage.task_root / "notes" / "reports" / "review-frames"
+    for parent in (stage.task_root / "notes", stage.task_root / "notes" / "reports", frames_base):
+        if parent.is_symlink():
+            raise ValueError(f"agreed-revision-symlink-refused: {parent} is a symlink")
+    if not frames_base.is_dir():
+        raise ValueError(
+            f"agreed-revision-missing: frame store {frames_base} does not exist for {revision_id!r}"
+        )
+    # The one canonical agreement resolver (MIK-R189 rule 8): the strict record names the exact
+    # retained revision, and only its digest-verified manifest is copied as the agreed static
+    # assets. A record the resolver cannot identify, or a tampered manifest, copies nothing.
+    resolved = resolve_agreed_revision(stage.task_root, agreed, leaf_id=stage.leaf_id)
+    if resolved is None or not resolved.digest_verified:
+        raise ValueError(
+            f"agreed-revision-missing: agreed revision {revision_id!r} was not found in {frames_base}"
+        )
+    rev_dir = resolved.manifest_path.parent
+    _require_confined_source(frames_base, rev_dir, code="agreed-revision-symlink-refused")
+    return rev_dir
+
+
+def _collect_agreed_revision_writes(stage: _ReferenceCopyStage, agreed: Mapping[str, Any]) -> None:
+    rev_dir = _resolve_agreed_revision_dir(stage, agreed)
+    manifest_path = rev_dir / "manifest.json"
+    _require_confined_source(rev_dir, manifest_path, code="agreed-revision-symlink-refused")
+    if not manifest_path.is_file():
+        raise ValueError(f"agreed-revision-manifest-missing: {manifest_path} does not exist")
+    try:
+        manifest_obj = json.loads(manifest_path.read_bytes())
+    except (OSError, ValueError) as error:
+        raise ValueError(f"agreed-revision-manifest-invalid: {manifest_path}: {error}") from error
+    if not isinstance(manifest_obj, dict):
+        raise ValueError(f"agreed-revision-manifest-invalid: {manifest_path} is not a JSON object")
+    for visits, entry in enumerate(sorted(rev_dir.rglob("*")), start=1):
+        if visits > COPY_SCAN_MAX_ENTRIES:
+            raise ValueError(
+                f"agreed-revision-scan-limit: {rev_dir} exceeds {COPY_SCAN_MAX_ENTRIES} entries"
+            )
+        _require_confined_source(rev_dir, entry, code="agreed-revision-symlink-refused")
+        if (
+            entry.is_file()
+            and entry.name not in REFERENCE_EXCLUDED_NAMES
+            and not entry.name.startswith(".")
+        ):
+            stage.stage_file(
+                entry,
+                stage.reference_root / entry.relative_to(rev_dir),
+                code="agreed-revision-copy-too-large",
+            )
+    entrypoint_cfg = manifest_obj.get("entrypoint")
+    entrypoint_rel = (
+        str(entrypoint_cfg.get("path") or "index.html")
+        if isinstance(entrypoint_cfg, dict)
+        else "index.html"
+    )
+    asset_entrypoint = rev_dir / "assets" / entrypoint_rel
+    top_entrypoint = stage.reference_root / entrypoint_rel
+    if (
+        asset_entrypoint.is_file()
+        and not asset_entrypoint.is_symlink()
+        and top_entrypoint not in stage.writes
+    ):
+        stage.stage_file(asset_entrypoint, top_entrypoint, code="agreed-revision-copy-too-large")

@@ -10,12 +10,13 @@
 //   6. the lane, `/api/review/trees?comparison=<n>&lane=files`, eager.
 // The shown subjects of read 5 are the opening's: a selection reads no cards of its own (W4), so the
 // set is computed without the selection.
-import { useMemo } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import type { ReviewPayload } from '../../../data/review';
 import { useIntentReviewSummary, type IntentSummaryRead } from '../../../data/reviewIntentSummary';
 import { useReviewLane, type LaneRead, type ReviewUnexplainedLane } from '../../../data/reviewLane';
 import {
+  reviewTrees,
   treeComparisonNumber,
   useChangeSetCards,
   useReviewTrees,
@@ -33,9 +34,77 @@ import {
   type ChangeSetModel,
 } from '../changeSetOrder';
 import { codeFacts, matchingTreeRead } from '../codeFacts';
+import type { ExplainerCategory, ExplainerGrade } from '../explainer/explainerApi';
 import type { ReviewSelection } from '../reviewSelection';
 import { useTreeOrder } from '../triageOrderPreference';
 import { useTreeView } from '../triageViewPreference';
+
+interface LeafJudgmentData {
+  categories: readonly ExplainerCategory[];
+  grades: readonly ExplainerGrade[];
+}
+
+const EMPTY_JUDGMENTS: LeafJudgmentData = { categories: [], grades: [] };
+const leafJudgments = new Map<string, LeafJudgmentData>();
+const leafMoveGenerations = new Map<string, number>();
+const judgmentListeners = new Set<() => void>();
+
+const judgmentKey = (repo: string, master: string, leaf: string) => `${repo}/${master}/${leaf}`;
+
+export function bumpLeafMoveGeneration(repo: string, master: string, leaf: string): void {
+  const key = judgmentKey(repo, master, leaf);
+  leafMoveGenerations.set(key, (leafMoveGenerations.get(key) ?? 0) + 1);
+  judgmentListeners.forEach((fn) => fn());
+}
+
+export function publishLeafJudgments(
+  repo: string,
+  master: string,
+  leaf: string,
+  categories?: readonly ExplainerCategory[],
+  grades?: readonly ExplainerGrade[],
+): void {
+  const key = judgmentKey(repo, master, leaf);
+  const nextCats = categories ?? [];
+  const nextGrades = grades ?? [];
+  const prev = leafJudgments.get(key);
+  if (
+    prev &&
+    JSON.stringify(prev.categories) === JSON.stringify(nextCats) &&
+    JSON.stringify(prev.grades) === JSON.stringify(nextGrades)
+  ) {
+    return;
+  }
+  if (nextCats.length === 0 && nextGrades.length === 0) {
+    leafJudgments.delete(key);
+  } else {
+    leafJudgments.set(key, { categories: nextCats, grades: nextGrades });
+  }
+  judgmentListeners.forEach((fn) => fn());
+}
+
+export function usePublishLeafJudgments(
+  repo: string,
+  master: string,
+  leaf: string,
+  categories?: readonly ExplainerCategory[],
+  grades?: readonly ExplainerGrade[],
+): void {
+  useEffect(() => {
+    publishLeafJudgments(repo, master, leaf, categories, grades);
+  }, [repo, master, leaf, categories, grades]);
+}
+
+function useLeafJudgments(repo: string, master: string, leaf: string): LeafJudgmentData {
+  const key = judgmentKey(repo, master, leaf);
+  return useSyncExternalStore(
+    (listener) => {
+      judgmentListeners.add(listener);
+      return () => judgmentListeners.delete(listener);
+    },
+    () => leafJudgments.get(key) ?? EMPTY_JUDGMENTS,
+  );
+}
 
 // The summary read's facts key: the review page's own, apart from the task entry's projection facts.
 const REVIEW_SUMMARY_FACTS = 'review-page';
@@ -68,6 +137,8 @@ export interface ChangeSetInput {
   catalogue: ReviewCatalogueRead;
   selection: ReviewSelection | null;
   walked: ChangeSetKeep['walked'];
+  categories?: readonly ExplainerCategory[];
+  grades?: readonly ExplainerGrade[];
 }
 
 const settledCatalogue = (catalogue: ReviewCatalogueRead) =>
@@ -131,6 +202,9 @@ export function useChangeSet(input: ChangeSetInput): ChangeSetReads {
   const lane = useReviewLane(repo, master, leaf, number);
   const sort = useTreeOrder();
   const view = useTreeView();
+  const storedJudgments = useLeafJudgments(repo, master, leaf);
+  const categories = input.categories ?? storedJudgments.categories;
+  const grades = input.grades ?? storedJudgments.grades;
   const trees = matchingTreeRead(leafTrees, number);
   const comparison = trees?.comparison ?? null;
   // The menu lists every number the leaf recorded; the trees answer names the highest of them.
@@ -143,13 +217,31 @@ export function useChangeSet(input: ChangeSetInput): ChangeSetReads {
       catalogue: catalogue.entries ?? [],
       code: read4Settled ? codeFacts(leafTrees, number) : undefined,
       currentness: trees?.currentness,
+      categories,
+      grades,
     }),
-    [catalogue.outline, catalogue.entries, read4Settled, leafTrees, number, trees],
+    [catalogue.outline, catalogue.entries, read4Settled, leafTrees, number, trees, categories, grades],
   );
   const asked = useMemo(
     () => changeSetModel({ ...base, cards: { state: 'reading' } }, 'priority', view, { selection: null, walked }).shownInvariantIds,
     [base, view, walked],
   );
+  const moveGen = useSyncExternalStore(
+    (listener) => {
+      judgmentListeners.add(listener);
+      return () => judgmentListeners.delete(listener);
+    },
+    () => leafMoveGenerations.get(judgmentKey(repo, master, leaf)) ?? 0,
+  );
+  useEffect(() => {
+    if (moveGen === 0 || number === undefined) return;
+    void reviewTrees(repo, master, leaf, { comparison: number }).catch(() => undefined);
+    if (asked.length > 0) {
+      void reviewTrees(repo, master, leaf, { comparison: number, invariants: asked }).catch(
+        () => undefined,
+      );
+    }
+  }, [moveGen, repo, master, leaf, number, asked]);
   const cardRead = useChangeSetCards(repo, master, leaf, number, asked, read4Settled && settledCatalogue(catalogue));
   const cards = useMemo(
     () => modelCards(cardRead, comparison, input.frame !== null, number),

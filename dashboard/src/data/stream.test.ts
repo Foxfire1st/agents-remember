@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { subscribeReviewExplainerMoved } from "./reviewMemoryWatch";
+import type { ReviewExplainerMovedEvent } from "./reviewMemoryWatch";
 import { dashboardStore } from "./store";
 import { STATE_STREAM_OPEN_DEADLINE_MS, connectEvents, connectState } from "./stream";
 
@@ -115,6 +117,90 @@ describe("connectState liveness (260723 sleep/wake)", () => {
     // The re-attempt can still recover honestly: a fresh instance that opens restores "live".
     ControlledSource.instances[2].fire("open");
     expect(dashboardStore.getState().conn).toBe("live");
+    dispose();
+  });
+});
+
+describe("connectState moved notice (review.explainer.moved)", () => {
+  const scope = { repo: "agents-remember", master: "m183", leaf: "l183" };
+  const movedPayload = {
+    ...scope,
+    kind: "comparison-moved",
+    from: 7,
+    to: 8,
+    blocksChanged: 3,
+    updateOffered: true,
+    text: "task moved: #7 -> #8, 3 blocks changed",
+  };
+
+  it("delivers the named SSE event to a mounted subscriber without a page reopen", () => {
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const received: ReviewExplainerMovedEvent[] = [];
+    const unsubscribe = subscribeReviewExplainerMoved(scope, (event) => {
+      received.push(event);
+    });
+    const dispose = connectState();
+
+    ControlledSource.instances[0].fire("review.explainer.moved", {
+      data: JSON.stringify(movedPayload),
+    });
+    expect(received).toEqual([movedPayload]);
+
+    // A sibling leaf's notice never reaches this subscriber.
+    ControlledSource.instances[0].fire("review.explainer.moved", {
+      data: JSON.stringify({ ...movedPayload, leaf: "l999" }),
+    });
+    expect(received).toHaveLength(1);
+
+    unsubscribe();
+    dispose();
+  });
+
+  it("carries the no-work move and the cleared notice to the same subscriber", () => {
+    vi.stubGlobal("EventSource", ControlledSource);
+    ControlledSource.instances = [];
+    const received: ReviewExplainerMovedEvent[] = [];
+    const unsubscribe = subscribeReviewExplainerMoved(scope, (event) => {
+      received.push(event);
+    });
+    const dispose = connectState();
+
+    // A code-only move on a leaf with no explainer work: the page renews its live
+    // deterministic view from this event, and nothing wakes an agent.
+    const noWork = {
+      ...scope,
+      kind: "comparison-moved",
+      from: 7,
+      to: 8,
+      blocksChanged: 2,
+      updateOffered: false,
+      hasExplainer: false,
+      text: "task moved: #7 -> #8, 2 blocks changed",
+    };
+    ControlledSource.instances[0].fire("review.explainer.moved", {
+      data: JSON.stringify(noWork),
+    });
+    expect(received).toEqual([noWork]);
+
+    // After Update/Retire the channel publishes the cleared notice; the page drops the mark.
+    const cleared = {
+      ...scope,
+      kind: "current",
+      from: null,
+      to: null,
+      blocksChanged: 0,
+      updateOffered: false,
+      cleared: true,
+      moved: null,
+      text: "current",
+    };
+    ControlledSource.instances[0].fire("review.explainer.moved", {
+      data: JSON.stringify(cleared),
+    });
+    expect(received[1]).toEqual(cleared);
+
+    unsubscribe();
     dispose();
   });
 });

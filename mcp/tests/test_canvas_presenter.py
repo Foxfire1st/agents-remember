@@ -50,6 +50,7 @@ from agents_remember.canvas.presenter import (
     PresenterRefused,
     RunnerReceipt,
     RunnerRefused,
+    UnconfiguredPresenterRunner,
     capability_instructions,
     design_text,
     presenter_launch,
@@ -221,6 +222,35 @@ def test_a_start_requires_explicit_activation_and_this_pages_comparison(tmp_path
     with pytest.raises(PresenterRefused) as other_leaf:
         _start(presenter, foreign, request="req-2")
     assert other_leaf.value.reason == "foreign-comparison"
+
+
+def test_a_presenter_without_a_runner_refuses_the_retired_native_seat(tmp_path: Path) -> None:
+    """MIK-R186 @ v2 Scope: the native default is gone; a page with no wired runner refuses.
+
+    The shipped default used to be the native presenter harness, whose start told the host to run
+    ``python -m agents_remember.canvas.presenter_tools``. That module's standalone server entry was
+    removed with the move to the normal AR task server, so the default could only start a seat with
+    no tools. A presenter built with no runner now answers ``no-confined-harness`` and prepares no
+    launch.
+    """
+
+    settings = config(tmp_path)
+    task(settings)
+    write_settings(settings, LAUNCH)
+    presenter = Presenter(
+        settings,
+        repository_id=REPO,
+        task=TASK,
+        leaf_id=LEAF,
+        frame_id=FRAME,
+        prospective=LoadedProspective(),
+        clock=lambda: AT,
+    )
+    assert isinstance(presenter._runner, UnconfiguredPresenterRunner)
+    attempt = _start(presenter, request="req-retired-native")
+    assert attempt.state == "failed"
+    assert (attempt.detail or "").startswith("no-confined-harness:")
+    assert not (Path(attempt.working_directory) / "host" / "prepared-start.json").exists()
 
 
 def test_a_start_records_identity_activity_and_conversation(tmp_path: Path) -> None:

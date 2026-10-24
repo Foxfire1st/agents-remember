@@ -16,10 +16,13 @@ the observer never projects them as a lifecycle node.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Self
 
 from pydantic import (
@@ -75,6 +78,7 @@ from .route_review import (  # noqa: F401  # preserve existing task-document mod
     RouteReviewUnit,
     RouteReviewVerdict,
 )
+from .task_paths import slugify
 
 TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 
@@ -652,6 +656,355 @@ class ExpectedKnowledgeEffect(_Doc):
     requirementRef: str = Field(min_length=1, max_length=256, pattern=REQUIREMENT_REF_PATTERN)
 
 
+IntentReviewState = Literal["pending", "review-first", "go"]
+
+# The named refusal every start of a leaf answers while its intent review is open
+# (MIK-R189 rule 2). The gate, the stage move and the role launch all answer with it.
+INTENT_REVIEW_REFUSAL = "intent-review-open"
+INTENT_REVIEW_ERASURE_REFUSAL = "intent-review-erasure-refused"
+
+
+class IntentReviewRevision(_Doc):
+    """The revision the developer agreed to at the go (MIK-R189 rule 8).
+
+    ``revisionId`` names the revision he said yes to, ``sha256`` is the digest of its bytes and
+    ``packetVersions`` lists the packet identities (``<stable ID>@v<n>``) it illustrated. The
+    revision is pinned here and copied into the leaf's reference folder; it never overrides the
+    packets.
+    """
+
+    revisionId: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    packetVersions: list[str] = Field(default_factory=list)
+
+    @field_validator("revisionId")
+    @classmethod
+    def _trim_revision_id(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("an agreed revision id must not be blank")
+        return trimmed
+
+    @field_validator("packetVersions")
+    @classmethod
+    def _check_packet_versions(cls, value: list[str]) -> list[str]:
+        trimmed = [version.strip() for version in value]
+        if any(not version for version in trimmed):
+            raise ValueError("an agreed revision's packet versions must not be blank")
+        if len(set(trimmed)) != len(trimmed):
+            raise ValueError("an agreed revision's packet versions must be unique")
+        return trimmed
+
+
+class IntentReview(_Doc):
+    """The architect's record of the developer's answer before a leaf starts (MIK-R189 rule 8).
+
+    ``pending`` (a leaf created after the rule landed) and ``review-first`` both refuse every
+    start of the leaf with :data:`INTENT_REVIEW_REFUSAL`; ``go`` admits it. ``agreed`` is not a
+    state: the agreed revision is the field ``agreedRevision``, written together with ``go``.
+    The record holds no agent id -- the decision stays the architect's document, not a session's.
+    """
+
+    state: IntentReviewState
+    decisionRef: str | None = None
+    agreedRevision: IntentReviewRevision | None = None
+
+    @field_validator("decisionRef")
+    @classmethod
+    def _trim_decision_ref(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("an intent-review decision reference must not be blank")
+        return trimmed
+
+    @model_validator(mode="after")
+    def _agreed_revision_rides_the_go(self) -> Self:
+        if self.agreedRevision is not None and self.state != "go":
+            raise ValueError(
+                "agreedRevision is written with the go; an intent review that is "
+                f"{self.state!r} carries no agreed revision"
+            )
+        return self
+
+
+def intent_review_open(document: TaskDocument) -> IntentReview | None:
+    """The open intent review that refuses this leaf's start, or ``None``.
+
+    A leaf without the field is every leaf from before the rule: it was never asked, so it is
+    admitted (MIK-R189 rule 2, "old leaves").
+    """
+
+    review = document.intentReview
+    if review is None or review.state == "go":
+        return None
+    return review
+
+
+def intent_review_refusal(document: TaskDocument) -> str | None:
+    """The refusal text naming ``intent-review-open`` for this leaf, or ``None`` when admitted."""
+
+    review = intent_review_open(document)
+    if review is None:
+        return None
+    return (
+        f"{INTENT_REVIEW_REFUSAL}: leaf {document.id!r} waits for the architect's go; its intent "
+        f"review is {review.state!r}, so no start of it is admitted. The architect records the "
+        "developer's answer as `go` in `intentReview` through task_doc, then the same start is "
+        "admitted. Do not retry this start."
+    )
+
+
+def intent_review_stage_refusal(
+    original: TaskDocument | None, candidate: TaskDocument
+) -> str | None:
+    """Refuse moving a leaf to ``inProgress`` while its intent review is open (MIK-R189 rule 2)."""
+
+    if candidate.kind != "subTask" or candidate.status != "inProgress":
+        return None
+    if original is not None and original.status not in {"planning", "abandoned"}:
+        return None
+    return intent_review_refusal(candidate)
+
+
+def intent_review_erasure_refusal(
+    operation: str, original: TaskDocument | None, candidate: TaskDocument
+) -> str | None:
+    """Refuse dropping an existing leaf ``intentReview`` across any write route (MIK-R189 rule 8)."""
+
+    if original is None or original.intentReview is None or candidate.intentReview is not None:
+        return None
+    return (
+        f"{INTENT_REVIEW_ERASURE_REFUSAL}: {operation} cannot drop intentReview; it records "
+        "the developer's answer before any start. Re-supply the same value, or change it "
+        "with task_doc set_field fields.intentReview."
+    )
+
+
+#: The frame id whose retained revisions hold the agreed page (MIK-R189 rule 9).
+AGREED_FRAME_ID = "explainer"
+#: A symlink on the way to the retained revision is refused, never followed (rule 9).
+AGREED_REVISION_SYMLINK_REFUSAL = "agreed-revision-symlink-refused"
+
+
+@dataclass(frozen=True)
+class ResolvedAgreedRevision:
+    """The agreed revision, resolved from its strict fields to its exact retained bytes.
+
+    ``revision`` is the retained revision number the strict ``revisionId`` names, ``manifest_path``
+    the revision's manifest and ``manifest_bytes`` its exact bytes. ``sha256`` is the digest the
+    architect recorded at the go, and ``digest_verified`` whether the retained manifest still
+    carries it: the same validated agreement identifies, seals and supplies the actual agreed page
+    to display, removal, receipts and the enclosure copy (MIK-R189 rule 9).
+    """
+
+    revision: int
+    revision_id: str
+    sha256: str
+    packet_versions: tuple[str, ...]
+    manifest_path: Path
+    manifest_bytes: bytes
+    digest_verified: bool
+
+
+def resolve_agreed_revision(
+    task_root: Path,
+    document: TaskDocument | IntentReview | IntentReviewRevision | Mapping[str, Any] | None = None,
+    *,
+    leaf_id: str | None = None,
+    frame_id: str = AGREED_FRAME_ID,
+) -> ResolvedAgreedRevision | None:
+    """Resolve ``intentReview.agreedRevision`` through its strict fields to the exact retained revision.
+
+    Only the strict native record counts (MIK-R189 rule 8): ``revisionId`` names the retained
+    revision, ``sha256`` is the digest of its manifest bytes and ``packetVersions`` cites the
+    packets the agreed page illustrated. The resolver accepts a task document, its
+    ``intentReview``, the ``agreedRevision`` record itself, or a JSON mapping carrying one of
+    those -- never loose packet keys. The retained revisions live under
+    ``<task_root>/notes/reports/review-frames/<leaf>/``. An agreement whose record fails the strict
+    schema, or whose revision is not retained there, resolves to ``None``; a retained manifest
+    whose bytes no longer match the recorded digest resolves with ``digest_verified`` false, so
+    consumers refuse instead of guessing. A symlink on the way is refused, never followed.
+    """
+
+    agreement = _strict_agreement(document)
+    if agreement is None:
+        return None
+    resolved_leaf = _agreement_leaf(document, leaf_id)
+    if resolved_leaf is None:
+        return None
+    frames_base = _refuse_symlink_parents(task_root)
+    revision = agreement.revisionId.strip()
+    number_candidates = _revision_number_candidates(revision)
+    for area_name in _area_candidates(resolved_leaf, document):
+        area = frames_base / area_name
+        if area.is_symlink():
+            raise ValueError(f"{AGREED_REVISION_SYMLINK_REFUSAL}: {area} is a symlink")
+        if not area.is_dir():
+            continue
+        for revisions_dir in _revision_roots(area, frame_id):
+            found = _match_revision_dir(revisions_dir, number_candidates)
+            if found is None:
+                continue
+            manifest_path = found / "manifest.json"
+            if manifest_path.is_symlink() or not manifest_path.is_file():
+                return ResolvedAgreedRevision(
+                    revision=int(found.name),
+                    revision_id=revision,
+                    sha256=agreement.sha256,
+                    packet_versions=tuple(agreement.packetVersions),
+                    manifest_path=manifest_path,
+                    manifest_bytes=b"",
+                    digest_verified=False,
+                )
+            manifest_bytes = manifest_path.read_bytes()
+            verified = _manifest_carries_digest(manifest_bytes, agreement.sha256)
+            return ResolvedAgreedRevision(
+                revision=int(found.name),
+                revision_id=revision,
+                sha256=agreement.sha256,
+                packet_versions=tuple(agreement.packetVersions),
+                manifest_path=manifest_path,
+                manifest_bytes=manifest_bytes,
+                digest_verified=verified,
+            )
+    return None
+
+
+def _strict_agreement(
+    document: TaskDocument | IntentReview | IntentReviewRevision | Mapping[str, Any] | None,
+) -> IntentReviewRevision | None:
+    """The one strict agreement record, or ``None`` when the input does not carry a valid one."""
+
+    raw = _raw_agreement(document)
+    if raw is None:
+        return None
+    if isinstance(raw, IntentReviewRevision):
+        return raw
+    try:
+        return IntentReviewRevision.model_validate(raw)
+    except ValidationError:
+        return None
+
+
+def _raw_agreement(
+    document: TaskDocument | IntentReview | IntentReviewRevision | Mapping[str, Any] | None,
+) -> Mapping[str, Any] | IntentReviewRevision | None:
+    """The agreement record the source carries, extracted before its strict validation."""
+
+    if isinstance(document, IntentReviewRevision):
+        return document
+    if isinstance(document, IntentReview):
+        return document.agreedRevision
+    if isinstance(document, TaskDocument):
+        return None if document.intentReview is None else document.intentReview.agreedRevision
+    if not isinstance(document, Mapping):
+        return None
+    raw: object | None = None
+    if "intentReview" in document:
+        review = document.get("intentReview")
+        if isinstance(review, Mapping):
+            raw = review.get("agreedRevision")
+    elif any(key in document for key in ("revisionId", "sha256", "packetVersions")):
+        raw = document
+    return raw if isinstance(raw, Mapping) else None
+
+
+def _agreement_leaf(
+    document: TaskDocument | IntentReview | IntentReviewRevision | Mapping[str, Any] | None,
+    leaf_id: str | None,
+) -> str | None:
+    if leaf_id:
+        return leaf_id
+    if isinstance(document, TaskDocument):
+        return document.id
+    if isinstance(document, Mapping) and isinstance(document.get("id"), str):
+        return str(document["id"])
+    return None
+
+
+def _area_candidates(leaf_id: str, document: object) -> list[str]:
+    slug = ""
+    if isinstance(document, TaskDocument):
+        slug = document.slug
+    elif isinstance(document, Mapping) and isinstance(document.get("slug"), str):
+        slug = str(document["slug"])
+    return list(dict.fromkeys(name for name in (slugify(leaf_id), leaf_id, slug) if name))
+
+
+def _refuse_symlink_parents(task_root: Path) -> Path:
+    """The task-owned frame store root, after refusing a symlink on the way to it."""
+
+    frames_base = task_root / "notes" / "reports" / "review-frames"
+    for parent in (task_root / "notes", task_root / "notes" / "reports", frames_base):
+        if parent.is_symlink():
+            raise ValueError(f"{AGREED_REVISION_SYMLINK_REFUSAL}: {parent} is a symlink")
+    return frames_base
+
+
+def _revision_roots(area: Path, frame_id: str) -> list[Path]:
+    """The retained-revision directories of one frame area: its own and every child frame's."""
+
+    if not area.is_dir():
+        return []
+    roots: list[Path] = []
+    for candidate in [area / frame_id, *sorted(area.iterdir())]:
+        if candidate.is_symlink():
+            raise ValueError(f"{AGREED_REVISION_SYMLINK_REFUSAL}: {candidate} is a symlink")
+        if candidate.is_dir() and (candidate / "revisions").is_dir():
+            roots.append(candidate / "revisions")
+    return roots
+
+
+def _revision_number_candidates(revision_id: str) -> list[str]:
+    """The directory names one ``revisionId`` can name: itself, and its number's spellings."""
+
+    cleaned = revision_id.strip()
+    candidates = [cleaned]
+    digits = re.sub(r"^[^0-9]+", "", cleaned)
+    if digits and digits.isdecimal():
+        for variant in (str(int(digits)), f"rev-{int(digits)}"):
+            if variant not in candidates:
+                candidates.append(variant)
+    return candidates
+
+
+def _match_revision_dir(revisions_dir: Path, candidates: list[str]) -> Path | None:
+    """The exact retained revision directory the strict id names, refusing symlinks on the way.
+
+    A retained revision's directory name is a decimal number; a candidate name that is not one
+    cannot be the exact retained revision the strict record identifies.
+    """
+
+    if revisions_dir.is_symlink() or not revisions_dir.is_dir():
+        return None
+    for name in candidates:
+        if not name.isdecimal():
+            continue
+        candidate = revisions_dir / name
+        if candidate.is_symlink():
+            raise ValueError(f"{AGREED_REVISION_SYMLINK_REFUSAL}: {candidate} is a symlink")
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _manifest_carries_digest(manifest_bytes: bytes, sha256: str) -> bool:
+    """Whether the manifest's own bytes, or its declared artifact digest, carry the strict digest."""
+
+    if hashlib.sha256(manifest_bytes).hexdigest() == sha256:
+        return True
+    try:
+        parsed = json.loads(manifest_bytes)
+    except (OSError, ValueError):
+        return False
+    return isinstance(parsed, dict) and sha256 in {
+        str(parsed.get("artifactDigest") or ""),
+        str(parsed.get("artifact_digest") or ""),
+    }
+
+
 def _check_expected_knowledge_effects(
     kind: DocKind,
     effects: list[ExpectedKnowledgeEffect] | None,
@@ -724,6 +1077,10 @@ class TaskDocument(_Doc):
     # MIK-R11: the invariant and family effects the leaf expects, declared before implementation.
     # Absent means no declaration: every worklist item is ``unplanned``.
     expectedKnowledgeEffects: list[ExpectedKnowledgeEffect] | None = None
+    # MIK-R189 rule 8: the architect's record of the developer's answer before a start. Absent is
+    # an older leaf, which is admitted; ``pending`` and ``review-first`` refuse every start of the
+    # leaf with ``intent-review-open``. ``go``, with the agreed revision, admits it.
+    intentReview: IntentReview | None = None
     objective: str = ""
     requirements: list[str | ApprovedRequirementPacketRef] = Field(default_factory=list)
     design: str | None = None
@@ -809,10 +1166,11 @@ class TaskDocument(_Doc):
             or self.codeExamplesNote is not None
             or self.lifecycleId is not None
             or self.executionRegistrations
+            or self.intentReview is not None
         ):
             raise ValueError(
                 "a master document has no steps, codeExamples, codeExamplesNote, lifecycleId, "
-                "or executionRegistrations"
+                "executionRegistrations, or intentReview"
             )
 
     def _check_nonmaster_fields(self) -> None:

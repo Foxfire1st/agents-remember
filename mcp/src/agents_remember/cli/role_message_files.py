@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.primitives.control_vocabulary import EXECUTIONS_DIRECTORY
+
 # The link a leaf workspace carries to its leaf message folder.
 MESSAGES_LINK = "messages"
 MESSAGES_DIRECTORY = "messages"
@@ -210,7 +212,7 @@ def narrowed_scope(
         task_dir = Path(task_dir_of(sprint))
         folder = task_dir / "notes" / MESSAGES_DIRECTORY
         return MessageScope(folder=folder, record_root=task_dir, level="sprint")
-    base = coordination_root / "notes" / "reports" / "paseo-native-executions" / _safe(sender_role)
+    base = coordination_root / "notes" / "reports" / EXECUTIONS_DIRECTORY / _safe(sender_role)
     return MessageScope(folder=base / MESSAGES_DIRECTORY, record_root=base, level="taskless")
 
 

@@ -187,7 +187,7 @@ CAPABILITY_RESOURCES: dict[str, CapabilityResource] = {
             "You are not the Reviewer",
             "Keywords:",
             "You write only in your working folder.",
-            "The side conversation belongs to this attempt",
+            "The side conversation belongs to this environment",
         ),
     ),
 }

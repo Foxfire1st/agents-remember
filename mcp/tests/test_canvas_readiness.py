@@ -9,7 +9,8 @@ policy (rule 8), not by a page defect.
 from __future__ import annotations
 
 from agents_remember.canvas.readiness import check_page
-from canvas_host_test_support import packet, record
+from agents_remember.models.knowledge.review_evidence import ClaimBasis, EvidenceClaim
+from canvas_host_test_support import default_claims, packet, record
 
 PAGE = b"""<!doctype html><html><head>
 <link rel="stylesheet" href="app.css">
@@ -35,8 +36,13 @@ def test_an_admitted_self_contained_page_is_ready() -> None:
         "entrypoint",
         "admitted-assets",
         "evidence-references",
+        "part-map",
         "reduced-motion",
     }
+    # A page without parts is one part holding every claim; its staleness is whole-page.
+    assert report.part_map is not None
+    assert report.part_map.implicit
+    assert [entry.part_id for entry in report.part_map.parts] == ["page"]
 
 
 def test_a_page_that_requests_the_network_is_not_ready() -> None:
@@ -161,3 +167,101 @@ def test_a_quoted_reference_outside_the_packet_is_refused_too() -> None:
     assets["index.html"] = b'<!doctype html><p data-evidence="not-admitted">x</p>'
     report = check_page(assets, entrypoint="index.html", packet=packet(record()))
     assert not report.ready
+
+
+def test_readiness_requires_resolving_claim_bases_and_unique_part_ownership() -> None:
+    baseless = EvidenceClaim(
+        claim_id="c-baseless",
+        authoring_revision="rev-1",
+        classification="unresolved-question",
+        subject="open question",
+        applicability="this comparison",
+        statement="what happens?",
+        bases=(),
+        limit="not yet established",
+    )
+    assets = _assets(
+        **{
+            "index.html": (
+                b"<!doctype html><div data-part='p1'>"
+                b"<span data-evidence-claim='c-baseless'>x</span></div>"
+            )
+        }
+    )
+    no_basis_report = check_page(
+        assets, entrypoint="index.html", packet=packet(record(), claims=(baseless,))
+    )
+    assert not no_basis_report.ready
+    assert "no basis" in {c.name: c.detail for c in no_basis_report.failures}["part-map"]
+
+    wrong_tree = EvidenceClaim(
+        claim_id="c-wrong-tree",
+        authoring_revision="rev-1",
+        classification="recorded-fact",
+        subject="wrong tree",
+        applicability="this comparison",
+        statement="cites foreign tree",
+        bases=(
+            ClaimBasis(
+                kind="tree-blob",
+                reference="code-candidate:src/app.py",
+                state="present",
+                side="code-candidate",
+                tree="f" * 40,
+                path="src/app.py",
+            ),
+        ),
+    )
+    assets["index.html"] = (
+        b"<!doctype html><div data-part='p1'>"
+        b"<span data-evidence-claim='c-wrong-tree'>x</span></div>"
+    )
+    bad_tree_report = check_page(
+        assets, entrypoint="index.html", packet=packet(record(), claims=(wrong_tree,))
+    )
+    assert not bad_tree_report.ready
+    assert "does not resolve" in {c.name: c.detail for c in bad_tree_report.failures}["part-map"]
+
+
+def test_claim_ids_and_the_legacy_reference_check_stay_separate() -> None:
+    """E11: ``data-evidence-claim`` holds claim ids; ``data-evidence`` keeps its own resolution."""
+    admitted = _assets()
+    admitted["index.html"] = (
+        b"<!doctype html><div data-part='p1'>"
+        b"<span data-evidence-claim='c-present' data-evidence='code-candidate:src/app.py'>x</span>"
+        b"<span data-evidence-claim='c-gone'>y</span>"
+        b"</div>"
+    )
+    report = check_page(admitted, entrypoint="index.html", packet=packet(record()))
+    assert report.ready, report.diagnostics()
+    assert report.part_map is not None and report.part_map.part_of("c-present") == "p1"
+    names = {check.name: check.state for check in report.checks}
+    assert names["part-map"] == "passed"
+    assert names["evidence-references"] == "passed"
+
+    # The same marks with an invented claim id fail only the part-map check: the legacy
+    # reference resolution is its own check and stays resolved.
+    invented = _assets()
+    invented["index.html"] = (
+        b"<!doctype html><div data-part='p1'>"
+        b"<span data-evidence-claim='c-invented' data-evidence='code-candidate:src/app.py'>x</span>"
+        b"</div>"
+    )
+    refused = check_page(invented, entrypoint="index.html", packet=packet(record()))
+    assert not refused.ready
+    failed = {check.name: check.detail for check in refused.failures}
+    assert "claim id" in failed["part-map"]
+    assert "evidence-references" not in failed
+
+
+def test_a_page_without_parts_is_ready_as_one_implicit_part_with_real_claim_ids() -> None:
+    """E11: an implicit page is one part holding every real claim id, and nothing invented."""
+    implicit = _assets()
+    implicit["index.html"] = (
+        b"<!doctype html><span data-evidence-claim='c-present'>x</span>"
+        b"<span data-evidence-claim='c-gone'>y</span>"
+    )
+    report = check_page(implicit, entrypoint="index.html", packet=packet(record()))
+    assert report.ready, report.diagnostics()
+    assert report.part_map is not None and report.part_map.implicit
+    assert set(report.part_map.claims()) == {claim.claim_id for claim in default_claims(record())}

@@ -18,6 +18,8 @@ No database copy is part of either shape: each knowledge side is the derived ind
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
@@ -52,9 +54,11 @@ __all__ = [
     "ReviewTreeComparisonRecord",
     "ReviewTreeSide",
     "ReviewTreeSideState",
+    "ReviewTrees",
     "ReviewTreesResult",
     "ReviewTreesState",
     "ReviewWorklistView",
+    "TreeKnowledge",
 ]
 
 REVIEW_TREE_COMPARISON_SCHEMA: Literal["ar-review-tree-comparison/v1"] = (
@@ -321,3 +325,35 @@ class ReviewTreesResult(KnowledgeModel):
     lane: ReviewUnexplainedLane | None = None
     file_classification: ReviewFileClassification | None = None
     refusal: ReviewRefusal | None = None
+
+
+@dataclass(frozen=True)
+class TreeKnowledge:
+    """One memory side as the reviewer reads it: its wire state, and its index file when readable."""
+
+    wire: ReviewKnowledgeSide
+    database: Path | None
+
+
+@dataclass(frozen=True)
+class ReviewTrees:
+    """One comparison of four Git trees, and each memory side's index.
+
+    ``record_path`` is where the record lives (``None`` for a comparison between recorded
+    committed endpoints that nothing had to record). ``live`` is set for a comparison captured from
+    a live enclosure: the memory candidate is then rechecked before the payload is published.
+    """
+
+    record: ReviewTreeComparisonRecord
+    record_path: Path | None
+    memory_repository: Path
+    before: TreeKnowledge
+    after: TreeKnowledge
+    live: bool = False
+    memory_worktree: Path | None = field(default=None)
+    code_sides: tuple[ReviewCodeSide, ...] = ()
+
+    def sides(self) -> tuple[ReviewKnowledgeSide, ...]:
+        """Both memory sides in before/after order."""
+
+        return (self.before.wire, self.after.wire)

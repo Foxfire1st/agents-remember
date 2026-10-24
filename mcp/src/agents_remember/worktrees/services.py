@@ -17,6 +17,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from agents_remember.certification.models import RailDefinition
+from agents_remember.kernel.worktree_service_binding import (  # MIK-R204 @ v1 rule 3: one definition, re-exported
+    WorktreeServicesUnboundError,
+    bind_worktree_services,
+    reset_worktree_services,
+    worktree_services,
+)
 from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -344,6 +350,10 @@ class ReviewArtifactCleanupRequest:
     code_repository: Path | None
     memory_repository: Path | None
     dry_run: bool
+    #: The task's explainer folder (MIK-R186 rule 2), when the caller's task owns environments.
+    #: ``None`` -- a leaf finalize, or a caller that was not told -- touches no explainer file:
+    #: leaf finalize, abandon and cleanup never retire (rule 8).
+    explainer_root: Path | None = None
 
 
 class ReviewArtifactCleanupPort(Protocol):
@@ -394,33 +404,6 @@ class ProviderSetupRequestSpec:
     cgc_isolated: Any
     grepai_seed: Any
     grepai_isolated: Any
-
-
-_current: WorktreeServices | None = None
-
-
-class WorktreeServicesUnboundError(RuntimeError):
-    """Raised when a worktree operation needs services that were never bound."""
-
-
-def bind_worktree_services(services: WorktreeServices) -> None:
-    """Bind the composition-provided services for this process."""
-    global _current  # noqa: PLW0603  # module-level composition binding
-    _current = services
-
-
-def reset_worktree_services() -> None:
-    """Clear the bound services (tests and process teardown)."""
-    global _current  # noqa: PLW0603  # module-level composition binding
-    _current = None
-
-
-def worktree_services() -> WorktreeServices:
-    if _current is None:
-        raise WorktreeServicesUnboundError(
-            "worktree services are not bound; the MCP/CLI composition must bind them"
-        )
-    return _current
 
 
 __all__ = [

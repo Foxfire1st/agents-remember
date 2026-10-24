@@ -1,5 +1,11 @@
 import { dashboardStore } from "./store";
-import { reviewMemoryScope, subscribeReviewMemoryScope, publishReviewMemory, publishReviewMemoryError } from './reviewMemoryWatch';
+import {
+  reviewMemoryScope,
+  subscribeReviewMemoryScope,
+  publishReviewMemory,
+  publishReviewMemoryError,
+  publishReviewExplainerMoved,
+} from './reviewMemoryWatch';
 import { startStreamLivenessWatchdog } from "./streamLiveness";
 
 // The state channel's named SSE events (serving/app.py + serving/delta.py). Each is merged
@@ -25,7 +31,28 @@ const STATE_EVENTS = [
 // lit with nothing connected.
 export const STATE_STREAM_OPEN_DEADLINE_MS = 20_000;
 
-/** Subscribe to `GET /api/stream` (the folded-projection channel). Returns a disposer. */
+function attachReviewListeners(
+  next: EventSource,
+  isCurrent: () => boolean,
+  markAlive: () => void,
+  resetInitialMemory: { current: boolean },
+): void {
+  next.addEventListener('review.memory', (event) => {
+    if (!isCurrent()) return;
+    markAlive();
+    publishReviewMemory(JSON.parse((event as MessageEvent).data), resetInitialMemory.current);
+    resetInitialMemory.current = false;
+  });
+  next.addEventListener('review.memory.error', (event) => {
+    if (!isCurrent()) return;
+    publishReviewMemoryError(JSON.parse((event as MessageEvent).data));
+  });
+  next.addEventListener('review.explainer.moved', (event) => {
+    if (!isCurrent()) return;
+    markAlive();
+    publishReviewExplainerMoved(JSON.parse((event as MessageEvent).data));
+  });
+}
 export function connectState(base = ""): () => void {
   const store = dashboardStore.getState(); // actions are stable references
   let source: EventSource | null = null;
@@ -50,32 +77,24 @@ export function connectState(base = ""): () => void {
     const next = new EventSource(`${base}/api/stream${query}`);
     source = next;
     openNow = false;
-    let initialMemory = true;
-    next.addEventListener('review.memory', (event) => {
-      if (stopped || source !== next) return;
-      watchdog.markAlive();
-      publishReviewMemory(JSON.parse((event as MessageEvent).data), initialMemory);
-      initialMemory = false;
-    });
-    next.addEventListener('review.memory.error', (event) => {
-      if (stopped || source !== next) return;
-      publishReviewMemoryError(JSON.parse((event as MessageEvent).data));
-    });
+    const initialMemory = { current: true };
+    const isCurrent = () => !stopped && source === next;
+    attachReviewListeners(next, isCurrent, () => watchdog.markAlive(), initialMemory);
     next.addEventListener("snapshot", (event) => {
-      if (stopped || source !== next) return;
+      if (!isCurrent()) return;
       watchdog.markAlive();
       store.applySnapshot(JSON.parse((event as MessageEvent).data));
     });
     for (const name of STATE_EVENTS) {
       next.addEventListener(name, (event) => {
-        if (stopped || source !== next) return;
+        if (!isCurrent()) return;
         watchdog.markAlive();
         store.applyDelta(name, JSON.parse((event as MessageEvent).data));
       });
     }
     next.addEventListener("open", () => {
-      if (stopped || source !== next) return;
-      initialMemory = true;
+      if (!isCurrent()) return;
+      initialMemory.current = true;
       openNow = true;
       clearOpenDeadline(); // it opened in time — the M4 deadline no longer applies
       watchdog.markAlive();

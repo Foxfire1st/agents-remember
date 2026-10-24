@@ -18,7 +18,7 @@
  *     only while the channel that received them is still the channel on screen.
  */
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 import {
   CanvasRefusal,
@@ -331,33 +331,65 @@ export interface FrameForwardTally {
  * nor arbitrarily many properties can make the trusted page walk or serialize unbounded data.
  * Structured-clone work inside the browser precedes delivery and is outside this adapter's bound.
  */
+const MAX_FORWARD_ARRAY_ITEMS = 32;
+const MAX_FORWARD_FIELDS = 64;
+
 function dataProperty(value: object, key: string): unknown {
   const property = Object.getOwnPropertyDescriptor(value, key);
   if (!property || !('value' in property)) throw new Error('malformed');
   return property.value;
 }
 
-function container(value: unknown, depth: number): asserts value is object {
-  if (typeof value !== 'object' || Array.isArray(value) || depth > 1) throw new Error('malformed');
+function container(value: unknown, depth: number, inArray: boolean): asserts value is object {
+  const maxDepth = inArray ? 3 : 1;
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || depth > maxDepth) {
+    throw new Error('malformed');
+  }
+}
+
+function isScalar(value: unknown): value is null | number | boolean {
+  return value === null || typeof value === 'number' || typeof value === 'boolean';
+}
+
+function copyArray(
+  value: unknown[],
+  depth: number,
+  inArray: boolean,
+  copyItem: (child: unknown, nextDepth: number, nextInArray: boolean) => unknown,
+): unknown[] {
+  if (depth < 1 || depth > 2 || inArray) throw new Error('malformed');
+  if (value.length > MAX_FORWARD_ARRAY_ITEMS) throw new Error('oversized');
+  return value.map((item) => copyItem(item, depth + 1, true));
 }
 
 export function forwardedBody(message: unknown): string | null {
   let fields = 0;
   let characters = 0;
-  function copy(value: unknown, depth: number): unknown {
+  let sawArray = false;
+  function copyObject(value: object, depth: number, inArray: boolean): Record<string, unknown> {
+    const bounded: Record<string, unknown> = Object.create(null);
+    const fieldLimit = sawArray ? MAX_FORWARD_FIELDS : 16;
+    for (const key in value) {
+      if (++fields > fieldLimit || key.length > 64) throw new Error('oversized');
+      const child = dataProperty(value, key);
+      if (inArray && typeof child === 'object' && child !== null) throw new Error('malformed');
+      bounded[key] = copy(child, depth + 1, inArray);
+    }
+    return bounded;
+  }
+  function copy(value: unknown, depth: number, inArray = false): unknown {
     if (typeof value === 'string') {
       characters += value.length;
       if (characters > MAX_FORWARDED_MESSAGE_BYTES) throw new Error('oversized');
       return value;
     }
-    if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
-    container(value, depth);
-    const bounded: Record<string, unknown> = Object.create(null);
-    for (const key in value) {
-      if (++fields > 16 || key.length > 64) throw new Error('oversized');
-      bounded[key] = copy(dataProperty(value, key), depth + 1);
+    if (isScalar(value)) return value;
+    if (Array.isArray(value)) {
+      sawArray = true;
+      return copyArray(value, depth, inArray, copy);
     }
-    return bounded;
+    container(value, depth, inArray);
+    return copyObject(value, depth, inArray);
   }
   try {
     const body = JSON.stringify(copy(message, 0));
@@ -389,7 +421,7 @@ export function useCanvasMessages(
   onOpen: (destination: EvidenceDestination) => void,
 ): RefObject<FrameForwardTally> {
   const tally = useRef<FrameForwardTally>({ oversized: 0, busy: 0 });
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!session) return undefined;
     let live = true;
     let inFlight = 0;

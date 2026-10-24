@@ -49,11 +49,6 @@ def _clear_cache(module: ModuleType, attribute: str) -> None:
     getattr(module, attribute).cache_clear()
 
 
-def _clear_binding(module: ModuleType, attribute: str) -> None:
-    del attribute
-    module.reset_worktree_services()
-
-
 def _stop_spawned(module: ModuleType, attribute: str) -> None:
     processes = getattr(module, attribute)
     for process in tuple(processes):
@@ -146,6 +141,11 @@ PROCESS_MUTABLE_STATES = (
         treatment="restored",
     ),
     _row(
+        "application.master_architect_record",
+        "_HOST_PORTS",
+        "Forget host adapters bound by a preceding module's explainer-control test.",
+    ),
+    _row(
         "application.memory_quality.runs",
         "_registry",
         "Complete the module's owned workers before forgetting retained quality runs.",
@@ -162,6 +162,16 @@ PROCESS_MUTABLE_STATES = (
         "application.tool_answer_log",
         "_FOLDER_BUDGETS",
         "Forget per-folder measured answer budgets between test modules.",
+    ),
+    _row(
+        "canvas.explainer_service",
+        "_IN_FLIGHT_SENDS",
+        "Forget a preceding module's in-flight send ledgers between test modules.",
+    ),
+    _row(
+        "canvas.explainer_service",
+        "_BUILD_STATES",
+        "Forget a preceding module's in-flight build ledgers between test modules.",
     ),
     _row(
         "cli.paseo_catalog",
@@ -281,6 +291,11 @@ PROCESS_MUTABLE_STATES = (
         _clear_cache,
     ),
     _row(
+        "serving.change_watcher",
+        "_WATCHES",
+        "Forget per-root move watches between test modules.",
+    ),
+    _row(
         "serving.daemon",
         "_spawned",
         "Terminate and reap only children tracked as spawned by this process.",
@@ -335,12 +350,6 @@ PROCESS_MUTABLE_STATES = (
         "worktrees.integration.atomic_series_terminal",
         "_THREAD_ACTIVE",
         "Forget terminal permits after the module's publications have completed.",
-    ),
-    _row(
-        "worktrees.services",
-        "_current",
-        "Clear the module's application composition binding.",
-        _clear_binding,
     ),
 )
 

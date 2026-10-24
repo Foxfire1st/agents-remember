@@ -21,7 +21,6 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from agents_remember.application.role_launch_context import (
-    TASKLESS_ROLES,
     selection_binding,
 )
 from agents_remember.cli.investigator_receipts import (
@@ -52,7 +51,7 @@ from agents_remember.cli.role_message_files import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import RoleMessageCall
-from agents_remember.models.role_identity import canonical_role
+from agents_remember.models.role_identity import TASKLESS_ROLES, canonical_role
 from agents_remember.models.role_launcher import RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology

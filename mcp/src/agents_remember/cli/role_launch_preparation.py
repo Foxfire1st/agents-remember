@@ -23,7 +23,6 @@ from agents_remember.application.context_packet import (
 )
 from agents_remember.application.role_capsules.launch import compile_launch_capsule
 from agents_remember.application.role_launch_context import (
-    LEAF_ROLES,
     RoleLaunchContext,
     resolve_role_launch_context,
     selection_binding,
@@ -66,7 +65,7 @@ from agents_remember.cli.role_report_preparation import role_report_path as _rol
 from agents_remember.cli.role_step_up_runtime import selected_defaults
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
-from agents_remember.models.role_identity import canonical_role
+from agents_remember.models.role_identity import LEAF_ROLES, canonical_role
 from agents_remember.models.role_launcher import (
     LauncherRole,
     RoleAgentOverride,

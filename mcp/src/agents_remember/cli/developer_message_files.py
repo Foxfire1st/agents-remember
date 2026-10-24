@@ -38,11 +38,11 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import HTTPException
 
-from agents_remember.cli.role_launch_receipts import _read_receipt
+from agents_remember.cli.role_launch_receipts import _read_receipt as read_receipt
 from agents_remember.cli.role_message_files import (
     UNDELIVERED_SUFFIX,
     MessageContent,
@@ -74,12 +74,19 @@ def _safe(value: str) -> str:
     return _SAFE.sub("_", value).strip("._") or "unnamed"
 
 
-def messages_root(config: McpRuntimeConfig) -> Path:
+class _CoordinationRooted(Protocol):
+    """Everything these paths need of the runtime config: the coordination root."""
+
+    @property
+    def coordination_root(self) -> Path: ...
+
+
+def messages_root(config: _CoordinationRooted) -> Path:
     return config.coordination_root / "notes" / "reports" / DEVELOPER_MESSAGES_DIRECTORY
 
 
 def target_folder(
-    config: McpRuntimeConfig, repository: str, task_id: str | None, agent_id: str
+    config: _CoordinationRooted, repository: str, task_id: str | None, agent_id: str
 ) -> Path:
     """The folder of one target's developer messages (rule 9, decisions 7 and 57)."""
 
@@ -363,8 +370,9 @@ def _held_ends(receipt: str, request_id: object) -> dict[str, str]:
     path = Path(receipt)
     if not path.is_file() and isinstance(request_id, str) and request_id:
         path = path.parent / "history" / f"{_safe(request_id)}.json"
+
     try:
-        record = _read_receipt(path)
+        record = read_receipt(path)
     except HTTPException:
         return {}
     lines = record.get("heldMessageLines") if record else None

@@ -6,30 +6,27 @@ from dataclasses import dataclass
 from typing import Any
 
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import LEAF_ROLES, ROLE_LEVELS, TASKLESS_ROLES
 from agents_remember.models.role_launcher import LauncherRole, RoleSelection
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentTopology,
 )
 
-ROLE_LEVELS = {
-    "architect": "portfolio",
-    "investigator": "portfolio",
-    "orchestrator": "portfolio",
-    "manager": "master",
-    "worker": "leaf",
-    "reviewer": "leaf",
-    "curator": "leaf",
-    # The free agent a new user reaches through the one start call (MIK-R196): it holds no
-    # task altitude, so no per-level override applies to it and its role row is the whole
-    # of its launch choices.
-    "bootstrap": "free-agent",
-}
-# The roles whose execution is keyed by its request id rather than by a document: a
-# selection with no document at all. ``bootstrap`` joins them as the identity-free first
-# seat (MIK-R196 rule 1), not as a second identity of any other role.
-TASKLESS_ROLES = frozenset({"architect", "investigator", "bootstrap"})
-LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+# This module's launch surface keeps the three names the base moved here; the values have one
+# owner, models.role_identity, where this task's move put them (MIK-R196's ``bootstrap`` role is
+# that owner's value too). Re-exporting them here keeps every base importer working without a
+# second definition.
+__all__ = [
+    "LEAF_ROLES",
+    "PARENTLESS_START_SELECTIONS",
+    "ROLE_LEVELS",
+    "TASKLESS_ROLES",
+    "RoleLaunchContext",
+    "parentless_selection_violation",
+    "resolve_role_launch_context",
+    "selection_binding",
+]
 
 # What may be started without a parent (MIK-R113 rule 6): the selections the
 # dashboard's start accepts, per role as (sprint, master, task) with True =

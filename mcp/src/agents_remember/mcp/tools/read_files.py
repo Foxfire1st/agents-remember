@@ -13,11 +13,12 @@ from agents_remember.application.task_scoped_mcp import (
     task_scoped_mcp_config_for_reader,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.mcp.vocabulary import REMOVED_ARGUMENT as _REMOVED_ARGUMENT
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
 
 from .base import _tool_payload
 
-_REMOVED_ARGUMENT: Any = "removed"
+# The sentinel lives in the light vocabulary owner (MIK-R204 rule 1); this module keeps the name it used.
 """Sentinel for the removed ``refresh`` argument: only an omitted argument
 carries it, so any supplied value -- true, false or an explicit null --
 is distinguishable and refused (MIK-R109 rule 1)."""

@@ -1,0 +1,4193 @@
+{
+ "tools": [
+  {
+   "annotations": {
+    "readOnlyHint": true
+   },
+   "description": "Report the resolved configuration: build, roots, allowed repos, provider keys left\nunused, and, on a role-launched server, the tool server name and agent binding.\nRead-only; reflects the settings and runtime loaded at startup. Longer explanation:\ndocs/tool-details.md.",
+   "inputSchema": {
+    "properties": {},
+    "title": "server_infoArguments",
+    "type": "object"
+   },
+   "name": "server_info",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "server_infoDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Orient a repository or leaf; leaf calls pass task_context. include_drift measures the reference anchors of onboarding cards and validity of the tree; omit it and nothing is measured. Staleness never blocks by itself. Currentness: knowledge_read and knowledge_integrity_check. MIK-R30: update the card or record why not; citation_fix repairs moved anchors, a curator re-authors stale ones. Nothing is repaired here. include_freshness fetches remotes and writes FETCH_HEAD. More: docs/tool-details.md.",
+   "inputSchema": {
+    "$defs": {
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     },
+     "TaskScopedReaderContext": {
+      "additionalProperties": false,
+      "description": "The exact task and canonical enclosure asserted by one reader call.",
+      "properties": {
+       "contract_path": {
+        "title": "Contract Path",
+        "type": "string"
+       },
+       "task_document_ref": {
+        "$ref": "#/$defs/TaskDocumentRef"
+       }
+      },
+      "required": [
+       "task_document_ref",
+       "contract_path"
+      ],
+      "title": "TaskScopedReaderContext",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "include_drift": {
+      "default": false,
+      "title": "Include Drift",
+      "type": "boolean"
+     },
+     "include_freshness": {
+      "default": false,
+      "title": "Include Freshness",
+      "type": "boolean"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "task_context": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskScopedReaderContext"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "required": [
+     "repo_id"
+    ],
+    "title": "context_packetArguments",
+    "type": "object"
+   },
+   "name": "context_packet",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "context_packetDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": true
+   },
+   "description": "\nName which knowledge governs up to 20 paths (MIK-R109).\n\nPer path: existence, its governing card with `cardStatus`, record counts, and the\naction-asking records by ID, kind, state and heading. `openWeaknesses` and\n`dependentDocuments` are one count each, absent at zero. No text is returned: open the\nfiles yourself. `refresh` is removed. Leaf calls pass `task_context`; `worktreeScope`,\n`sourceRoot` and `memoryRoot` name both. Longer explanation: docs/reference/mcp-tools.md.\n",
+   "inputSchema": {
+    "$defs": {
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     },
+     "TaskScopedReaderContext": {
+      "additionalProperties": false,
+      "description": "The exact task and canonical enclosure asserted by one reader call.",
+      "properties": {
+       "contract_path": {
+        "title": "Contract Path",
+        "type": "string"
+       },
+       "task_document_ref": {
+        "$ref": "#/$defs/TaskDocumentRef"
+       }
+      },
+      "required": [
+       "task_document_ref",
+       "contract_path"
+      ],
+      "title": "TaskScopedReaderContext",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "files": {
+      "items": {},
+      "title": "Files",
+      "type": "array"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "task_context": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskScopedReaderContext"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "required": [
+     "repo_id",
+     "files"
+    ],
+    "title": "read_ar_filesArguments",
+    "type": "object"
+   },
+   "name": "read_ar_files",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "read_ar_filesDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Install or refresh the packaged coordinator runtime into the coordination root, safe\nto re-run. Preserves user data (memory-repos/, providers/data/); replaces the scaffold\n(skills/, docs/) and prunes legacy binaries. No provider install/start/watch\npath remains: the install stops leftover watchers and reports enabled provider keys\nonce as unused. The final host part provisions the build-pinned host/plugin from the\nshared paseoRuntime block; it never writes shared settings and defers needed restarts.\nPreview first with dry_run=true: it changes nothing. Longer explanation:\ndocs/tool-details.md.",
+   "inputSchema": {
+    "properties": {
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "experiment": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Experiment"
+     },
+     "include_benchmarks": {
+      "default": false,
+      "title": "Include Benchmarks",
+      "type": "boolean"
+     },
+     "install_provider_deps": {
+      "default": true,
+      "title": "Install Provider Deps",
+      "type": "boolean"
+     },
+     "no_cache": {
+      "default": false,
+      "title": "No Cache",
+      "type": "boolean"
+     }
+    },
+    "title": "runtime_installArguments",
+    "type": "object"
+   },
+   "name": "runtime_install",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "runtime_installDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Retire one authorized direct child seat using task_document_ref, role and reason. Only its starter may retire it; interrupt_turn is required for a running turn. Repeats are inert. More: docs/tool-details.md.",
+   "inputSchema": {
+    "$defs": {
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "agent_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Agent Id"
+     },
+     "interrupt_turn": {
+      "default": false,
+      "title": "Interrupt Turn",
+      "type": "boolean"
+     },
+     "reason": {
+      "default": "delegated seat retired",
+      "title": "Reason",
+      "type": "string"
+     },
+     "role": {
+      "enum": [
+       "architect",
+       "orchestrator",
+       "strategist",
+       "designer",
+       "investigator",
+       "system-specialist",
+       "manager",
+       "worker",
+       "reviewer",
+       "curator"
+      ],
+      "title": "Role",
+      "type": "string"
+     },
+     "task_document_ref": {
+      "$ref": "#/$defs/TaskDocumentRef"
+     }
+    },
+    "required": [
+     "task_document_ref",
+     "role"
+    ],
+    "title": "retire_childArguments",
+    "type": "object"
+   },
+   "name": "retire_child",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "retire_childDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "\nCheck memory before closeout: findings, counts and the checklist location, not semantic\ncertification. Pass a sync, start or poll request; candidate runs use the leaf contract.\nReady memory also requires validated curator_coherence. Four operations have no tool, by\ndesign: the conversion (it runs inside the crossing sync, or once per repository), the\nindex build (every read builds it on demand), the formatter (the writer renders canonical\nfiles), and the worklist (this tool computes it and `knowledge_integrity_check` returns\nit). Longer explanation: docs/tool-details.md.\n",
+   "inputSchema": {
+    "$defs": {
+     "MemoryQualityCheckRequest": {
+      "discriminator": {
+       "mapping": {
+        "poll": "#/$defs/MemoryQualityPollRequest",
+        "start": "#/$defs/MemoryQualityStartRequest",
+        "sync": "#/$defs/MemoryQualitySyncRequest"
+       },
+       "propertyName": "mode"
+      },
+      "oneOf": [
+       {
+        "$ref": "#/$defs/MemoryQualitySyncRequest"
+       },
+       {
+        "$ref": "#/$defs/MemoryQualityStartRequest"
+       },
+       {
+        "$ref": "#/$defs/MemoryQualityPollRequest"
+       }
+      ]
+     },
+     "MemoryQualityPollRequest": {
+      "additionalProperties": false,
+      "description": "Poll one repository-owned run through the same admitted scope.",
+      "properties": {
+       "contract_path": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Contract Path"
+       },
+       "mode": {
+        "const": "poll",
+        "title": "Mode",
+        "type": "string"
+       },
+       "repo_id": {
+        "title": "Repo Id",
+        "type": "string"
+       },
+       "run_id": {
+        "title": "Run Id",
+        "type": "string"
+       }
+      },
+      "required": [
+       "mode",
+       "repo_id",
+       "run_id"
+      ],
+      "title": "MemoryQualityPollRequest",
+      "type": "object"
+     },
+     "MemoryQualityStartRequest": {
+      "additionalProperties": false,
+      "description": "Start one bounded asynchronous memory-quality request.",
+      "properties": {
+       "checks": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Checks"
+       },
+       "contract_path": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Contract Path"
+       },
+       "detail_limit": {
+        "default": 50,
+        "title": "Detail Limit",
+        "type": "integer"
+       },
+       "mode": {
+        "const": "start",
+        "title": "Mode",
+        "type": "string"
+       },
+       "repo_id": {
+        "title": "Repo Id",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repo_id",
+       "mode"
+      ],
+      "title": "MemoryQualityStartRequest",
+      "type": "object"
+     },
+     "MemoryQualitySyncRequest": {
+      "additionalProperties": false,
+      "description": "Run one memory-quality request synchronously.",
+      "properties": {
+       "checks": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Checks"
+       },
+       "contract_path": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Contract Path"
+       },
+       "detail_limit": {
+        "default": 50,
+        "title": "Detail Limit",
+        "type": "integer"
+       },
+       "mode": {
+        "const": "sync",
+        "title": "Mode",
+        "type": "string"
+       },
+       "repo_id": {
+        "title": "Repo Id",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repo_id",
+       "mode"
+      ],
+      "title": "MemoryQualitySyncRequest",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "request": {
+      "$ref": "#/$defs/MemoryQualityCheckRequest"
+     }
+    },
+    "required": [
+     "request"
+    ],
+    "title": "memory_quality_checkArguments",
+    "type": "object"
+   },
+   "name": "memory_quality_check",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "memory_quality_checkDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Repair moved citation anchors in a leaf memory worktree. Pass repo_id and contract_path, with documents for a batch or document for one card; preview with dry_run. Renames, deletions and ambiguous anchors remain curator work. Old-format memory is refused: convert before repair. Converted repairs author sidecar references; full lists are in logged detail. Longer explanation: docs/tool-details.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Contract Path"
+     },
+     "document": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Document"
+     },
+     "documents": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Documents"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "repo_id"
+    ],
+    "title": "citation_fixArguments",
+    "type": "object"
+   },
+   "name": "citation_fix",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "citation_fixDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Refresh route indexes for a leaf memory worktree using repo_id and contract_path. Preview with dry_run; unscoped writes require pre-baseline admission. More: docs/tool-details.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Contract Path"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "repo_id"
+    ],
+    "title": "route_index_refreshArguments",
+    "type": "object"
+   },
+   "name": "route_index_refresh",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "route_index_refreshDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Initialize or repair a repository's memory root (scaffold `system/` files, the\n`onboarding/` and `docs/` layout, optionally `git init`). `initial_branch` names the code\nbranch the memory is the foundation of: it becomes the memory repository's initial branch\nand the recorded `agents-remember.defaultBranch` that baseline adoption and every worktree\nentry point check against. Omitted, it defaults to the configured code repository's\ncurrently checked-out branch, and the call refuses rather than inventing a name when\nneither is available. Creates missing paths only and never overwrites existing onboarding\ncontent. Preview with dry_run=true. Usually driven by the c-00-initialize-memory-repo\nskill.",
+   "inputSchema": {
+    "properties": {
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "initial_branch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Initial Branch"
+     },
+     "initialize_git": {
+      "default": true,
+      "title": "Initialize Git",
+      "type": "boolean"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "repo_id"
+    ],
+    "title": "memory_initArguments",
+    "type": "object"
+   },
+   "name": "memory_init",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "memory_initDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Report drift and Git attribution state to decide whether an external-memory baseline can be\nadopted. Read-only.",
+   "inputSchema": {
+    "properties": {
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "repo_id"
+    ],
+    "title": "memory_baseline_statusArguments",
+    "type": "object"
+   },
+   "name": "memory_baseline_status",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "memory_baseline_statusDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Adopt the first attributed external-memory baseline and commit memory. Pass repo_id; preview with dry_run. accept_drift permits stale anchors, never validator violations. More: docs/tool-details.md.",
+   "inputSchema": {
+    "properties": {
+     "accept_drift": {
+      "default": false,
+      "title": "Accept Drift",
+      "type": "boolean"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "source_branch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Source Branch"
+     },
+     "work_branch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Work Branch"
+     }
+    },
+    "required": [
+     "repo_id"
+    ],
+    "title": "memory_baseline_adoptArguments",
+    "type": "object"
+   },
+   "name": "memory_baseline_adopt",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "memory_baseline_adoptDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Plan converted pairs/records at equal versions; observe official-code anchors, review conflicts. Curator authors history; no commit/report. More: docs/tool-details.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "official_code_ref": {
+      "title": "Official Code Ref",
+      "type": "string"
+     },
+     "old_base": {
+      "title": "Old Base",
+      "type": "string"
+     },
+     "replace_existing": {
+      "default": false,
+      "title": "Replace Existing",
+      "type": "boolean"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "source_code_ref": {
+      "title": "Source Code Ref",
+      "type": "string"
+     },
+     "source_memory": {
+      "title": "Source Memory",
+      "type": "string"
+     }
+    },
+    "required": [
+     "repo_id",
+     "contract_path",
+     "source_memory",
+     "official_code_ref",
+     "source_code_ref",
+     "old_base"
+    ],
+    "title": "memory_carryover_planArguments",
+    "type": "object"
+   },
+   "name": "memory_carryover_plan",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "memory_carryover_planDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Apply converted pairs/records; reanchor, index, validate. Refusal restores bytes; skip edited targets, retry safely. No commit/history carry; curator authors rows before closeout. Requires intent_note. More: docs/tool-details.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "include_review_required": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Include Review Required"
+     },
+     "intent_note": {
+      "title": "Intent Note",
+      "type": "string"
+     },
+     "official_code_ref": {
+      "title": "Official Code Ref",
+      "type": "string"
+     },
+     "old_base": {
+      "title": "Old Base",
+      "type": "string"
+     },
+     "replace_existing": {
+      "default": false,
+      "title": "Replace Existing",
+      "type": "boolean"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "source_code_ref": {
+      "title": "Source Code Ref",
+      "type": "string"
+     },
+     "source_memory": {
+      "title": "Source Memory",
+      "type": "string"
+     }
+    },
+    "required": [
+     "repo_id",
+     "contract_path",
+     "source_memory",
+     "official_code_ref",
+     "source_code_ref",
+     "old_base",
+     "intent_note"
+    ],
+    "title": "memory_carryover_applyArguments",
+    "type": "object"
+   },
+   "name": "memory_carryover_apply",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "memory_carryover_applyDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "\nCreate or load a task contract with its code and memory worktrees.\n\nAnswers the state reached (started, would-start, blocked) and the next call with its\narguments; the whole result is in the log file. Poll worktree_status for progress. A\ndry run changes no task document, no contract, no Git ref and no worktree, and the\ncall is recorded in the observer log like every tool call. It does not read the\ndependencies a packet names: leaves start in parallel and are synchronised later, so\nthe order of landing is the manager's decision. Reference:\ndocs/reference/mcp-tools.md.\n",
+   "inputSchema": {
+    "properties": {
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "leaf_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Leaf Id"
+     },
+     "memory_choice": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Memory Choice"
+     },
+     "memory_mode": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Memory Mode"
+     },
+     "parent_task": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Parent Task"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "retry_provider_setup": {
+      "default": false,
+      "title": "Retry Provider Setup",
+      "type": "boolean"
+     },
+     "skip_provider_setup": {
+      "default": false,
+      "title": "Skip Provider Setup",
+      "type": "boolean"
+     },
+     "source_branch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Source Branch"
+     },
+     "stale_base_choice": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Stale Base Choice"
+     },
+     "task_name": {
+      "title": "Task Name",
+      "type": "string"
+     },
+     "work_branch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Work Branch"
+     },
+     "workflow_kind": {
+      "default": "light-task",
+      "title": "Workflow Kind",
+      "type": "string"
+     },
+     "worktree_name": {
+      "title": "Worktree Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "repo_id",
+     "task_name",
+     "worktree_name"
+    ],
+    "title": "worktree_startArguments",
+    "type": "object"
+   },
+   "name": "worktree_start",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_startDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Explicitly adopt one readable pre-locator enclosure. Dry-run by default. This is the\nonly old-layout address migration. It validates one exact contract/root, preserves\nsource digests and an audit receipt, and never runs from normal status, control,\ncontract writes, or schema-1 repair. Answers the state reached. Reference:\ndocs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "approved": {
+      "default": false,
+      "title": "Approved",
+      "type": "boolean"
+     },
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": true,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "expected_publication_request_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Expected Publication Request Id"
+     },
+     "expected_worktree_group": {
+      "title": "Expected Worktree Group",
+      "type": "string"
+     },
+     "rationale": {
+      "title": "Rationale",
+      "type": "string"
+     }
+    },
+    "required": [
+     "contract_path",
+     "expected_worktree_group",
+     "rationale"
+    ],
+    "title": "worktree_enclosure_adoptArguments",
+    "type": "object"
+   },
+   "name": "worktree_enclosure_adopt",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_enclosure_adoptDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Re-attach to an existing task contract without mutating Git. Answers the state reached\n(attached, attached-existing-contract, blocked) and the next call; the whole result is\nin the log file. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Contract Path"
+     },
+     "leaf_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Leaf Id"
+     },
+     "parent_task": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Parent Task"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "task_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Task Name"
+     }
+    },
+    "required": [
+     "repo_id"
+    ],
+    "title": "worktree_attachArguments",
+    "type": "object"
+   },
+   "name": "worktree_attach",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_attachDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": true
+   },
+   "description": "Report a task worktree's lifecycle status: the phase reached (worktree-started,\nintegration-pending, closeout-pending, integration-blocked, carryover-pending,\ncleanup-pending, cleanup-completed, abandoned), what blocks, the one\nfollowing call, and whether task-document copies differ from their sources. Lineage and\nrefresh detail stays in the log file. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "$defs": {
+     "DeclaredCaller": {
+      "additionalProperties": false,
+      "description": "Declared identity of an ambient caller: a short role label plus the canonical task document it acts on.",
+      "properties": {
+       "role": {
+        "maxLength": 64,
+        "title": "Role",
+        "type": "string"
+       },
+       "task_document_ref": {
+        "$ref": "#/$defs/TaskDocumentRef"
+       }
+      },
+      "required": [
+       "role",
+       "task_document_ref"
+      ],
+      "title": "DeclaredCaller",
+      "type": "object"
+     },
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "caller": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/DeclaredCaller"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "contract_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Contract Path"
+     },
+     "leaf_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Leaf Id"
+     },
+     "parent_task": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Parent Task"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "task_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Task Name"
+     }
+    },
+    "required": [
+     "repo_id"
+    ],
+    "title": "worktree_statusArguments",
+    "type": "object"
+   },
+   "name": "worktree_status",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_statusDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Pull the official line into a live worktree. Returns synced,\nalready-current, would-sync, sync-active, sync-resolution-required,\nmemory-sync-choice-required or blocked, with next-call arguments and a log path.\nTree changes mark the prior review pre-sync and offer a new review; sync movement\nnever blocks. The product merges memory lines only here; raw git merge is a hand edit\nit cannot prevent. Every memory landing judges its tree; a fast-forward judges what\nit adopts before moving any ref.\n\nReference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "memory_sync_choice": {
+      "anyOf": [
+       {
+        "enum": [
+         "merge-memory",
+         "skip-memory"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Memory Sync Choice"
+     },
+     "resolution_action": {
+      "anyOf": [
+       {
+        "enum": [
+         "continue",
+         "cancel"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Resolution Action"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "worktree_syncArguments",
+    "type": "object"
+   },
+   "name": "worktree_sync",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_syncDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "PAUSE an atomic master: it stops, hands control back, and releases the master's atomic-series activation selection. Publishes NOTHING: publication is a separate, explicitly requested PUBLICATION through worktree_checkpoint_landing. States: paused, blocked. Answers the state reached and the next call. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "worktree_pauseArguments",
+    "type": "object"
+   },
+   "name": "worktree_pause",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_pauseDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Land one verified series code commit with its memory content through a durable direct-\nlanding generation, recovering through worktree_operation_control. States: landed,\nwould-land, refused. Answers the state, what blocks and the next call; the whole result\nis in the log file. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "$defs": {
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "candidate_tree": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Candidate Tree"
+     },
+     "code_commit": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Code Commit"
+     },
+     "code_commit_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Code Commit Message"
+     },
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "intent_note": {
+      "default": "",
+      "title": "Intent Note",
+      "type": "string"
+     },
+     "leaf_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Leaf Id"
+     },
+     "leaf_task_document_ref": {
+      "$ref": "#/$defs/TaskDocumentRef"
+     },
+     "memory_commit_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Memory Commit Message"
+     }
+    },
+    "required": [
+     "contract_path",
+     "leaf_task_document_ref"
+    ],
+    "title": "direct_landingArguments",
+    "type": "object"
+   },
+   "name": "direct_landing",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "direct_landingDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Give, take back, or reclaim direct-execution grants, as an architect.\n\nA leaf runs directly on its master's branch only while a grant for\nit exists, and only a caller bound to the architect role may call\nthis. ``action`` is ``give``, ``revoke`` or ``reclaim``; giving a\ngrant that exists, or taking back one that does not, changes nothing\nand says so. Reclaim takes back one task's grants that no leaf still\nrequires. The grant is read at the moment of every call.\nMUTATING (grant record only).\nReference: docs/reference/mcp-tools.md.\n",
+   "inputSchema": {
+    "$defs": {
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "action": {
+      "title": "Action",
+      "type": "string"
+     },
+     "task_document_ref": {
+      "$ref": "#/$defs/TaskDocumentRef"
+     }
+    },
+    "required": [
+     "task_document_ref",
+     "action"
+    ],
+    "title": "direct_execution_grantArguments",
+    "type": "object"
+   },
+   "name": "direct_execution_grant",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "direct_execution_grantDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": true
+   },
+   "description": "Preview a worktree closeout without mutating: the count of changed code paths and\nproposed commits with subjects up to the list bound, and what blocks (states:\nwould-closeout, blocked, closeout-gate-blocked). A preview is a read; the whole result\nis in the log file.\nReference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "code_commit_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Code Commit Message"
+     },
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "memory_commit_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Memory Commit Message"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "worktree_closeout_previewArguments",
+    "type": "object"
+   },
+   "name": "worktree_closeout_preview",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_closeout_previewDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Apply an approved worktree closeout and return promptly. States: closed, blocked,\ncloseout-gate-blocked. Answers the state reached and the next call; the whole result\nis in the log file. Delivered-against-reviewed names\nsame, different, or no review recorded. Poll worktree_status for progress.\nReference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "$defs": {
+     "CorrectiveInputChange": {
+      "additionalProperties": false,
+      "description": "One exact semantic input changed by a corrective repair.",
+      "properties": {
+       "afterDigest": {
+        "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+        "title": "Afterdigest",
+        "type": "string"
+       },
+       "beforeDigest": {
+        "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+        "title": "Beforedigest",
+        "type": "string"
+       },
+       "inputId": {
+        "maxLength": 1024,
+        "title": "Inputid",
+        "type": "string"
+       },
+       "inputKind": {
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+        "title": "Inputkind",
+        "type": "string"
+       }
+      },
+      "required": [
+       "inputKind",
+       "inputId",
+       "beforeDigest",
+       "afterDigest"
+      ],
+      "title": "CorrectiveInputChange",
+      "type": "object"
+     },
+     "RailIdentity": {
+      "additionalProperties": false,
+      "properties": {
+       "railId": {
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+        "title": "Railid",
+        "type": "string"
+       },
+       "version": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+        "title": "Version",
+        "type": "string"
+       }
+      },
+      "required": [
+       "railId",
+       "version"
+      ],
+      "title": "RailIdentity",
+      "type": "object"
+     },
+     "RedCatalogDisposition": {
+      "additionalProperties": false,
+      "description": "Corrective authority for one enforcing failed or blocked rail.",
+      "properties": {
+       "changedInputs": {
+        "items": {
+         "$ref": "#/$defs/CorrectiveInputChange"
+        },
+        "maxItems": 4096,
+        "title": "Changedinputs",
+        "type": "array"
+       },
+       "correctiveOwner": {
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+        "title": "Correctiveowner",
+        "type": "string"
+       },
+       "disposition": {
+        "enum": [
+         "direct-repair",
+         "repaired-root"
+        ],
+        "title": "Disposition",
+        "type": "string"
+       },
+       "priorResultDigest": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Priorresultdigest",
+        "type": "string"
+       },
+       "priorStatus": {
+        "enum": [
+         "fail",
+         "blocked"
+        ],
+        "title": "Priorstatus",
+        "type": "string"
+       },
+       "rail": {
+        "$ref": "#/$defs/RailIdentity"
+       },
+       "rationale": {
+        "maxLength": 4096,
+        "title": "Rationale",
+        "type": "string"
+       },
+       "repairedRoot": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/RailIdentity"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       }
+      },
+      "required": [
+       "rail",
+       "priorStatus",
+       "priorResultDigest",
+       "correctiveOwner",
+       "disposition",
+       "rationale"
+      ],
+      "title": "RedCatalogDisposition",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "code_commit_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Code Commit Message"
+     },
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "corrective_dispositions": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/$defs/RedCatalogDisposition"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Corrective Dispositions"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "intent_note": {
+      "title": "Intent Note",
+      "type": "string"
+     },
+     "memory_commit_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Memory Commit Message"
+     }
+    },
+    "required": [
+     "contract_path",
+     "intent_note"
+    ],
+    "title": "worktree_closeout_applyArguments",
+    "type": "object"
+   },
+   "name": "worktree_closeout_apply",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_closeout_applyDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Land a task onto its target branch, ff-only or replay. Answers the state (integrated,\nwould-integrate, blocked, handover-gate-blocked), the commit, and cleanup with its\narguments as the next call.\nA refusal names the unfinished step and the call that finishes it. Delivered-against-\nreviewed names same, different, or no review recorded. Reference:\ndocs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "strategy": {
+      "default": "ff-only",
+      "enum": [
+       "ff-only",
+       "replay"
+      ],
+      "title": "Strategy",
+      "type": "string"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "worktree_integrateArguments",
+    "type": "object"
+   },
+   "name": "worktree_integrate",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_integrateDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "PUBLISH the finished leaves of an unfinished series master; this call is not a pause. Pausing is a separate matter and is NOT this call: use worktree_pause to stop a master. States: checkpointed, would-checkpoint, blocked, handover-gate-blocked. Answers the state reached and the next call. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "strategy": {
+      "default": "ff-only",
+      "enum": [
+       "ff-only",
+       "replay"
+      ],
+      "title": "Strategy",
+      "type": "string"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "worktree_checkpoint_landingArguments",
+    "type": "object"
+   },
+   "name": "worktree_checkpoint_landing",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_checkpoint_landingDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Record a commit the landing target already holds. States: recorded, already-recorded, would-record, blocked. Answers the state reached; a refusal\nnames the commit that is missing or elsewhere and what to do. Reference:\ndocs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "landed_code_commit": {
+      "title": "Landed Code Commit",
+      "type": "string"
+     },
+     "landed_memory_content_commit": {
+      "default": "",
+      "title": "Landed Memory Content Commit",
+      "type": "string"
+     }
+    },
+    "required": [
+     "contract_path",
+     "landed_code_commit"
+    ],
+    "title": "worktree_record_landingArguments",
+    "type": "object"
+   },
+   "name": "worktree_record_landing",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_record_landingDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Retry, recover, resume, cancel, retire or supersede one closeout, integrate or direct-\ndirect-landing generation. States: refused, or the controlled generation's status. Answers the state reached and the next call;\nthe log file. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "$defs": {
+     "CandidateAdmissionFacts": {
+      "additionalProperties": false,
+      "properties": {
+       "admissionReady": {
+        "default": true,
+        "title": "Admissionready",
+        "type": "boolean"
+       },
+       "admissionReason": {
+        "default": "",
+        "maxLength": 8192,
+        "title": "Admissionreason",
+        "type": "string"
+       },
+       "resourceReady": {
+        "default": true,
+        "title": "Resourceready",
+        "type": "boolean"
+       },
+       "resourceReason": {
+        "default": "",
+        "maxLength": 8192,
+        "title": "Resourcereason",
+        "type": "string"
+       }
+      },
+      "title": "CandidateAdmissionFacts",
+      "type": "object"
+     },
+     "CorrectiveInputChange": {
+      "additionalProperties": false,
+      "description": "One exact semantic input changed by a corrective repair.",
+      "properties": {
+       "afterDigest": {
+        "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+        "title": "Afterdigest",
+        "type": "string"
+       },
+       "beforeDigest": {
+        "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+        "title": "Beforedigest",
+        "type": "string"
+       },
+       "inputId": {
+        "maxLength": 1024,
+        "title": "Inputid",
+        "type": "string"
+       },
+       "inputKind": {
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+        "title": "Inputkind",
+        "type": "string"
+       }
+      },
+      "required": [
+       "inputKind",
+       "inputId",
+       "beforeDigest",
+       "afterDigest"
+      ],
+      "title": "CorrectiveInputChange",
+      "type": "object"
+     },
+     "DeclaredCaller": {
+      "additionalProperties": false,
+      "description": "Declared identity of an ambient caller: a short role label plus the canonical task document it acts on.",
+      "properties": {
+       "role": {
+        "maxLength": 64,
+        "title": "Role",
+        "type": "string"
+       },
+       "task_document_ref": {
+        "$ref": "#/$defs/TaskDocumentRef"
+       }
+      },
+      "required": [
+       "role",
+       "task_document_ref"
+      ],
+      "title": "DeclaredCaller",
+      "type": "object"
+     },
+     "RailIdentity": {
+      "additionalProperties": false,
+      "properties": {
+       "railId": {
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+        "title": "Railid",
+        "type": "string"
+       },
+       "version": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$",
+        "title": "Version",
+        "type": "string"
+       }
+      },
+      "required": [
+       "railId",
+       "version"
+      ],
+      "title": "RailIdentity",
+      "type": "object"
+     },
+     "RedCatalogDisposition": {
+      "additionalProperties": false,
+      "description": "Corrective authority for one enforcing failed or blocked rail.",
+      "properties": {
+       "changedInputs": {
+        "items": {
+         "$ref": "#/$defs/CorrectiveInputChange"
+        },
+        "maxItems": 4096,
+        "title": "Changedinputs",
+        "type": "array"
+       },
+       "correctiveOwner": {
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+        "title": "Correctiveowner",
+        "type": "string"
+       },
+       "disposition": {
+        "enum": [
+         "direct-repair",
+         "repaired-root"
+        ],
+        "title": "Disposition",
+        "type": "string"
+       },
+       "priorResultDigest": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Priorresultdigest",
+        "type": "string"
+       },
+       "priorStatus": {
+        "enum": [
+         "fail",
+         "blocked"
+        ],
+        "title": "Priorstatus",
+        "type": "string"
+       },
+       "rail": {
+        "$ref": "#/$defs/RailIdentity"
+       },
+       "rationale": {
+        "maxLength": 4096,
+        "title": "Rationale",
+        "type": "string"
+       },
+       "repairedRoot": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/RailIdentity"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       }
+      },
+      "required": [
+       "rail",
+       "priorStatus",
+       "priorResultDigest",
+       "correctiveOwner",
+       "disposition",
+       "rationale"
+      ],
+      "title": "RedCatalogDisposition",
+      "type": "object"
+     },
+     "SchedulingGradeInput": {
+      "additionalProperties": false,
+      "properties": {
+       "judgmentId": {
+        "maxLength": 256,
+        "minLength": 1,
+        "title": "Judgmentid",
+        "type": "string"
+       },
+       "priority": {
+        "enum": [
+         "critical",
+         "high",
+         "normal",
+         "low"
+        ],
+        "title": "Priority",
+        "type": "string"
+       },
+       "risk": {
+        "anyOf": [
+         {
+          "maxLength": 8192,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Risk"
+       },
+       "urgency": {
+        "anyOf": [
+         {
+          "maxLength": 8192,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Urgency"
+       }
+      },
+      "required": [
+       "priority",
+       "judgmentId"
+      ],
+      "title": "SchedulingGradeInput",
+      "type": "object"
+     },
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "action": {
+      "enum": [
+       "retry",
+       "recover",
+       "resume",
+       "cancel",
+       "retire",
+       "supersede"
+      ],
+      "title": "Action",
+      "type": "string"
+     },
+     "admission": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/CandidateAdmissionFacts"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "caller": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/DeclaredCaller"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "code_commit_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Code Commit Message"
+     },
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "corrective_dispositions": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/$defs/RedCatalogDisposition"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Corrective Dispositions"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "expected_generation": {
+      "title": "Expected Generation",
+      "type": "integer"
+     },
+     "grade": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/SchedulingGradeInput"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "intent_note": {
+      "title": "Intent Note",
+      "type": "string"
+     },
+     "memory_commit_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Memory Commit Message"
+     },
+     "operation_kind": {
+      "enum": [
+       "closeout",
+       "integrate",
+       "direct-landing"
+      ],
+      "title": "Operation Kind",
+      "type": "string"
+     }
+    },
+    "required": [
+     "contract_path",
+     "operation_kind",
+     "action",
+     "expected_generation",
+     "intent_note"
+    ],
+    "title": "worktree_operation_controlArguments",
+    "type": "object"
+   },
+   "name": "worktree_operation_control",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_operation_controlDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Archive lifecycle evidence, then remove worktrees, merged branches, reports, logs and\nthe enclosure root once integrated. States: cleanup-completed, already-clean, would-cleanup,\nblocked, provider-setup-running. Answers the state reached; a dry run with\nblockers answers a blocked state. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "teardown_providers": {
+      "default": true,
+      "title": "Teardown Providers",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "worktree_cleanupArguments",
+    "type": "object"
+   },
+   "name": "worktree_cleanup",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_cleanupDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Abandon a worktree task without integrating, preserving terminal archive proof. States: abandoned, would-abandon, abandon-blocked, blocked. Answers the state reached\nand the next call. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "force": {
+      "default": false,
+      "title": "Force",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "worktree_abandonArguments",
+    "type": "object"
+   },
+   "name": "worktree_abandon",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "worktree_abandonDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Reopen a COMPLETED leaf under its exact same leaf id: review, closeout and integration\nstate returns to virgin and the leaf document goes back to planning. A cleaned-up leaf\nbehind its master's tip restarts from that tip when its recorded landing is an ancestor\nof it; a landing not on the line refuses. Afterwards edit\nsteps via task_doc, then run a normal worktree_start. States: reopened, blocked;\npreview with dry_run. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "task_reopenArguments",
+    "type": "object"
+   },
+   "name": "task_reopen",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "task_reopenDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Prove the landed edge and complete one parent-child task lifecycle edge: refuses before\ncleanup unless every declared step is done, then reconciles the exact parent row.\nLeaves require a master; ancestors are not completed. States: finalized,\nwould-finalize, blocked. Answers the state, what blocks\nand the next call; preview with dry_run. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "contract_path": {
+      "title": "Contract Path",
+      "type": "string"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "master_doc_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Master Doc Path"
+     },
+     "subtask_number": {
+      "default": "",
+      "title": "Subtask Number",
+      "type": "string"
+     },
+     "task_doc_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Task Doc Path"
+     },
+     "teardown_providers": {
+      "default": true,
+      "title": "Teardown Providers",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "contract_path"
+    ],
+    "title": "lifecycle_finalize_taskArguments",
+    "type": "object"
+   },
+   "name": "lifecycle_finalize_task",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "lifecycle_finalize_taskDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Write task documents: ar-task-document/v1 JSON and generated markdown. Read the .md as a file. A write names its kind ['subTask'|'master']. Operations: create, replace, set_status, set_step, add_step, remove_step, skip_step, set_subtask, remove_subtask, set_section, append_decision, put_open_question, begin_review, record_review, record_route_review, author_execution_graph, attach_master, detach_master, retire_master, archive_sprint, linkage_report, set_field. Writes answer ok; dry runs answer wouldLose and the diff. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "branch_addressed": {
+      "default": false,
+      "title": "Branch Addressed",
+      "type": "boolean"
+     },
+     "contract_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Contract Path"
+     },
+     "decision": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Decision"
+     },
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "fields": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Fields"
+     },
+     "fields_file": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Fields File"
+     },
+     "operation": {
+      "title": "Operation",
+      "type": "string"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "review": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Review"
+     },
+     "section": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Section"
+     },
+     "section_body_file": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Section Body File"
+     },
+     "slug": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Slug"
+     },
+     "step": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Step"
+     },
+     "subtask": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Subtask"
+     },
+     "task_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Task Name"
+     }
+    },
+    "required": [
+     "repo_id",
+     "operation"
+    ],
+    "title": "task_docArguments",
+    "type": "object"
+   },
+   "name": "task_doc",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "task_docDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Prepare, publish, inspect or validate one leaf's curator-coherence authority. Publish requires semantic_requirement_revision, delivery_attempt, expected_predecessor_digest, expected_code_candidate_tree, expected_memory_candidate_tree, expected_task_topology_fingerprint, expected_task_intent, expected_attestation_sha256 and caller; supply judgments or judgments_file. The stable manifest is authoritative, never Markdown. Longer explanation: docs/tool-details.md.",
+   "inputSchema": {
+    "$defs": {
+     "AssessmentEvidenceReference": {
+      "additionalProperties": false,
+      "description": "One citation, under the namespace the shipped resolver already confines.",
+      "properties": {
+       "namespace": {
+        "enum": [
+         "code",
+         "memory",
+         "task"
+        ],
+        "title": "Namespace",
+        "type": "string"
+       },
+       "ref": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "title": "Ref",
+        "type": "string"
+       }
+      },
+      "required": [
+       "namespace",
+       "ref"
+      ],
+      "title": "AssessmentEvidenceReference",
+      "type": "object"
+     },
+     "AssessmentSubject": {
+      "additionalProperties": false,
+      "description": "What one assessment judges: an identity, a revision pair, or an explicit comparison.",
+      "properties": {
+       "afterRevisionIds": {
+        "default": [],
+        "items": {
+         "type": "string"
+        },
+        "title": "Afterrevisionids",
+        "type": "array"
+       },
+       "beforeRevisionIds": {
+        "default": [],
+        "items": {
+         "type": "string"
+        },
+        "title": "Beforerevisionids",
+        "type": "array"
+       },
+       "comparisonRef": {
+        "anyOf": [
+         {
+          "maxLength": 1024,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Comparisonref"
+       },
+       "kind": {
+        "enum": [
+         "knowledge-record",
+         "family",
+         "invariant-revision",
+         "comparison"
+        ],
+        "title": "Kind",
+        "type": "string"
+       },
+       "recordId": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "title": "Recordid",
+        "type": "string"
+       }
+      },
+      "required": [
+       "kind",
+       "recordId"
+      ],
+      "title": "AssessmentSubject",
+      "type": "object"
+     },
+     "CuratorCoherenceJudgment": {
+      "additionalProperties": false,
+      "description": "One agent-owned semantic judgment; the lifecycle never invents these fields.",
+      "properties": {
+       "classification": {
+        "maxLength": 256,
+        "minLength": 1,
+        "title": "Classification",
+        "type": "string"
+       },
+       "disposition": {
+        "enum": [
+         "reconciled",
+         "preserved",
+         "extended",
+         "superseded",
+         "contradicted",
+         "no-content-impact",
+         "no-route-impact",
+         "capture-candidate"
+        ],
+        "title": "Disposition",
+        "type": "string"
+       },
+       "evidenceRef": {
+        "maxLength": 8192,
+        "minLength": 1,
+        "title": "Evidenceref",
+        "type": "string"
+       },
+       "onboardingFile": {
+        "maxLength": 8192,
+        "minLength": 1,
+        "title": "Onboardingfile",
+        "type": "string"
+       },
+       "rationale": {
+        "maxLength": 8192,
+        "minLength": 1,
+        "title": "Rationale",
+        "type": "string"
+       },
+       "sourceFile": {
+        "maxLength": 8192,
+        "minLength": 1,
+        "title": "Sourcefile",
+        "type": "string"
+       }
+      },
+      "required": [
+       "sourceFile",
+       "onboardingFile",
+       "classification",
+       "disposition",
+       "rationale",
+       "evidenceRef"
+      ],
+      "title": "CuratorCoherenceJudgment",
+      "type": "object"
+     },
+     "CuratorCoherenceRequest": {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "status",
+         "prepare",
+         "publish",
+         "validate"
+        ],
+        "title": "Action",
+        "type": "string"
+       },
+       "caller": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/DeclaredCaller"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "contract_path": {
+        "maxLength": 8192,
+        "minLength": 1,
+        "title": "Contract Path",
+        "type": "string"
+       },
+       "delivery_attempt": {
+        "anyOf": [
+         {
+          "maxLength": 256,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Delivery Attempt"
+       },
+       "expected_attestation_sha256": {
+        "anyOf": [
+         {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Expected Attestation Sha256"
+       },
+       "expected_code_candidate_tree": {
+        "anyOf": [
+         {
+          "pattern": "^[0-9a-f]{40,64}$",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Expected Code Candidate Tree"
+       },
+       "expected_memory_candidate_tree": {
+        "anyOf": [
+         {
+          "pattern": "^[0-9a-f]{40,64}$",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Expected Memory Candidate Tree"
+       },
+       "expected_predecessor_digest": {
+        "anyOf": [
+         {
+          "pattern": "^$|^[0-9a-f]{64}$",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Expected Predecessor Digest"
+       },
+       "expected_task_intent": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/TaskIntentIdentity"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "expected_task_topology_fingerprint": {
+        "anyOf": [
+         {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Expected Task Topology Fingerprint"
+       },
+       "freeze_snapshot": {
+        "default": false,
+        "title": "Freeze Snapshot",
+        "type": "boolean"
+       },
+       "judgments": {
+        "items": {
+         "$ref": "#/$defs/CuratorCoherenceJudgment"
+        },
+        "maxItems": 2048,
+        "title": "Judgments",
+        "type": "array"
+       },
+       "judgments_file": {
+        "anyOf": [
+         {
+          "maxLength": 8192,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Judgments File"
+       },
+       "review_assessments": {
+        "items": {
+         "$ref": "#/$defs/ReviewAssessmentRevision"
+        },
+        "maxItems": 256,
+        "title": "Review Assessments",
+        "type": "array"
+       },
+       "semantic_requirement_revision": {
+        "anyOf": [
+         {
+          "maxLength": 1024,
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Semantic Requirement Revision"
+       }
+      },
+      "required": [
+       "action",
+       "contract_path"
+      ],
+      "title": "CuratorCoherenceRequest",
+      "type": "object"
+     },
+     "DeclaredCaller": {
+      "additionalProperties": false,
+      "description": "Declared identity of an ambient caller: a short role label plus the canonical task document it acts on.",
+      "properties": {
+       "role": {
+        "maxLength": 64,
+        "title": "Role",
+        "type": "string"
+       },
+       "task_document_ref": {
+        "$ref": "#/$defs/TaskDocumentRef"
+       }
+      },
+      "required": [
+       "role",
+       "task_document_ref"
+      ],
+      "title": "DeclaredCaller",
+      "type": "object"
+     },
+     "ReviewAssessmentRevision": {
+      "additionalProperties": false,
+      "description": "What a caller may author: the finding, its rationale, and its citations.",
+      "properties": {
+       "assessmentId": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "title": "Assessmentid",
+        "type": "string"
+       },
+       "assumptions": {
+        "default": [],
+        "items": {
+         "type": "string"
+        },
+        "title": "Assumptions",
+        "type": "array"
+       },
+       "comparisonRef": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "title": "Comparisonref",
+        "type": "string"
+       },
+       "disposition": {
+        "enum": [
+         "concern_found",
+         "no_concern_found",
+         "unresolved"
+        ],
+        "title": "Disposition",
+        "type": "string"
+       },
+       "evidenceRefs": {
+        "default": [],
+        "items": {
+         "$ref": "#/$defs/AssessmentEvidenceReference"
+        },
+        "title": "Evidencerefs",
+        "type": "array"
+       },
+       "finding": {
+        "maxLength": 20000,
+        "title": "Finding",
+        "type": "string"
+       },
+       "rationale": {
+        "maxLength": 20000,
+        "minLength": 1,
+        "title": "Rationale",
+        "type": "string"
+       },
+       "scopeManifestRef": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "title": "Scopemanifestref",
+        "type": "string"
+       },
+       "subject": {
+        "$ref": "#/$defs/AssessmentSubject"
+       }
+      },
+      "required": [
+       "assessmentId",
+       "subject",
+       "disposition",
+       "finding",
+       "rationale",
+       "comparisonRef",
+       "scopeManifestRef"
+      ],
+      "title": "ReviewAssessmentRevision",
+      "type": "object"
+     },
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     },
+     "TaskIntentIdentity": {
+      "additionalProperties": false,
+      "description": "Canonical task-intent schema plus its exact projection digest.",
+      "properties": {
+       "digest": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Digest",
+        "type": "string"
+       },
+       "schema": {
+        "const": "task-intent/v1",
+        "default": "task-intent/v1",
+        "title": "Schema",
+        "type": "string"
+       }
+      },
+      "required": [
+       "digest"
+      ],
+      "title": "TaskIntentIdentity",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "request": {
+      "$ref": "#/$defs/CuratorCoherenceRequest"
+     }
+    },
+    "required": [
+     "request"
+    ],
+    "title": "curator_coherenceArguments",
+    "type": "object"
+   },
+   "name": "curator_coherence",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "curator_coherenceDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Inspect or rebuild one sprint's disposable waiting-only closeout projection: exact-\ncurrent valid-built or non-admitting invalid-empty, derived from the current task plus\nwaiting-door facts. States: valid-built, invalid-empty, blocked. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "$defs": {
+     "CloseoutQueueRequest": {
+      "additionalProperties": false,
+      "properties": {
+       "action": {
+        "enum": [
+         "status",
+         "rebuild"
+        ],
+        "title": "Action",
+        "type": "string"
+       },
+       "caller": {
+        "anyOf": [
+         {
+          "$ref": "#/$defs/DeclaredCaller"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null
+       },
+       "sprint_task_document_ref": {
+        "$ref": "#/$defs/TaskDocumentRef"
+       }
+      },
+      "required": [
+       "action",
+       "sprint_task_document_ref"
+      ],
+      "title": "CloseoutQueueRequest",
+      "type": "object"
+     },
+     "DeclaredCaller": {
+      "additionalProperties": false,
+      "description": "Declared identity of an ambient caller: a short role label plus the canonical task document it acts on.",
+      "properties": {
+       "role": {
+        "maxLength": 64,
+        "title": "Role",
+        "type": "string"
+       },
+       "task_document_ref": {
+        "$ref": "#/$defs/TaskDocumentRef"
+       }
+      },
+      "required": [
+       "role",
+       "task_document_ref"
+      ],
+      "title": "DeclaredCaller",
+      "type": "object"
+     },
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "request": {
+      "$ref": "#/$defs/CloseoutQueueRequest"
+     }
+    },
+    "required": [
+     "request"
+    ],
+    "title": "closeout_queueArguments",
+    "type": "object"
+   },
+   "name": "closeout_queue",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "closeout_queueDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Start one role agent for one canonical selection with the caller as parent, starting in Paseo. Only a role agent that AR launched can call this. A request id reconciles the same agent, never a second. Only the agent that started an execution repeats its request_id. Answers ok, the agent id and the handover location; rejected (the launch is closed; no usable agent exists). Starts run one at a time. A call waits up to 60 seconds for another start to end, then is refused; nextAction says to call again with the same arguments. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "$defs": {
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "agent": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Agent"
+     },
+     "effort": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Effort"
+     },
+     "feature_values": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "anyOf": [
+          {
+           "type": "boolean"
+          },
+          {
+           "type": "string"
+          }
+         ]
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Feature Values"
+     },
+     "master_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "model": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Model"
+     },
+     "replaces_agent_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Replaces Agent Id"
+     },
+     "replaces_interrupt_turn": {
+      "default": false,
+      "title": "Replaces Interrupt Turn",
+      "type": "boolean"
+     },
+     "request_id": {
+      "format": "uuid",
+      "title": "Request Id",
+      "type": "string"
+     },
+     "role": {
+      "enum": [
+       "architect",
+       "investigator",
+       "system-specialist",
+       "orchestrator",
+       "manager",
+       "worker",
+       "reviewer",
+       "curator"
+      ],
+      "title": "Role",
+      "type": "string"
+     },
+     "sprint_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "step_up": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Step Up"
+     },
+     "task_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "required": [
+     "role",
+     "request_id"
+    ],
+    "title": "role_startArguments",
+    "type": "object"
+   },
+   "name": "role_start",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "role_startDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Start a leaf's Worker, Reviewer and Curator in one call (MIK-R100 rule 1). Only a role agent that AR launched can call this. Only the leaf's owning Manager may call it. Pass selection, request_id and per-seat launch choices. Worker opens; Reviewer and Curator are held unless reviewer_message opens the Reviewer. A repeat with the same request id reconciles the same three agents: it creates no fourth and opens no held seat. More: docs/tool-details.md.",
+   "inputSchema": {
+    "$defs": {
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "curator": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Curator"
+     },
+     "master_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "replaces": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Replaces"
+     },
+     "replaces_interrupt_turn": {
+      "default": false,
+      "title": "Replaces Interrupt Turn",
+      "type": "boolean"
+     },
+     "request_id": {
+      "format": "uuid",
+      "title": "Request Id",
+      "type": "string"
+     },
+     "reviewer": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Reviewer"
+     },
+     "reviewer_message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Reviewer Message"
+     },
+     "sprint_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "task_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "worker": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Worker"
+     }
+    },
+    "required": [
+     "request_id"
+    ],
+    "title": "role_start_setArguments",
+    "type": "object"
+   },
+   "name": "role_start_set",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "role_start_setDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Send one text message to one role agent. Name the recipient by agent_id or by role plus task references. Only the host request is promised: without wait the call answers once the host accepted the message; with wait it answers when the consuming turn ends (finished, failed, cancelled, permission, timeout). A mid-turn recipient gets the message in its turn, which the host may cancel; a waiting, unstarted or unwritable recipient is answered `held` with reason, permission, counts and id. Only a full hold store (twenty) is refused as `recipient-busy`. Reference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "$defs": {
+     "TaskDocumentRef": {
+      "additionalProperties": false,
+      "description": "Address of one task document: the ``repository`` id plus the document ``path`` inside that repository's task root.",
+      "properties": {
+       "path": {
+        "title": "Path",
+        "type": "string"
+       },
+       "repository": {
+        "title": "Repository",
+        "type": "string"
+       }
+      },
+      "required": [
+       "repository",
+       "path"
+      ],
+      "title": "TaskDocumentRef",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "agent_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Agent Id"
+     },
+     "attach": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Attach"
+     },
+     "body": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Body"
+     },
+     "master_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "role": {
+      "anyOf": [
+       {
+        "enum": [
+         "architect",
+         "investigator",
+         "system-specialist",
+         "orchestrator",
+         "manager",
+         "worker",
+         "reviewer",
+         "curator"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Role"
+     },
+     "sprint_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "task_document_ref": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/TaskDocumentRef"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "text": {
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+     },
+     "timeout_seconds": {
+      "default": 300,
+      "maximum": 1800,
+      "minimum": 1,
+      "title": "Timeout Seconds",
+      "type": "integer"
+     },
+     "wait": {
+      "default": false,
+      "title": "Wait",
+      "type": "boolean"
+     },
+     "withdraw_held_message_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Withdraw Held Message Id"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "title": "role_messageArguments",
+    "type": "object"
+   },
+   "name": "role_message",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "role_messageDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": true
+   },
+   "description": "\nName records of one memory-tree view.\n\nViews: source_context, invariant, family, record, weakness (open by file, kind or sentence),\ndependent (documents and their links). `recordId` takes a text ID (`INV-\u2026`, `WKN-\u2026`, `DPD-\u2026`).\nRows name ID, kind, state and location, never text. Filters: `sourcePath`, `weaknessKind`,\n`includeClosed`, `staleOnly`, `standsOn`. `repositoryRoot` and `codeTreeId` select the measured\ncode tree. Writes: `agents-remember knowledge-ingest` or `agents-remember knowledge-bootstrap`.\nDocs: docs/reference/mcp-tools.md.\n",
+   "inputSchema": {
+    "properties": {
+     "codeTreeId": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Codetreeid"
+     },
+     "continuation": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Continuation"
+     },
+     "familyRevisionId": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Familyrevisionid"
+     },
+     "includeClosed": {
+      "default": false,
+      "title": "Includeclosed",
+      "type": "boolean"
+     },
+     "invariantRevisionId": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Invariantrevisionid"
+     },
+     "limit": {
+      "default": 32,
+      "title": "Limit",
+      "type": "integer"
+     },
+     "memoryRoot": {
+      "title": "Memoryroot",
+      "type": "string"
+     },
+     "orderingInput": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Orderinginput"
+     },
+     "recordId": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Recordid"
+     },
+     "repositoryRoot": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Repositoryroot"
+     },
+     "sourcePath": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Sourcepath"
+     },
+     "staleOnly": {
+      "default": false,
+      "title": "Staleonly",
+      "type": "boolean"
+     },
+     "standsOn": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Standson"
+     },
+     "view": {
+      "title": "View",
+      "type": "string"
+     },
+     "weaknessKind": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Weaknesskind"
+     }
+    },
+    "required": [
+     "memoryRoot",
+     "view"
+    ],
+    "title": "knowledge_readArguments",
+    "type": "object"
+   },
+   "name": "knowledge_read",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "knowledge_readDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Name the changed records of two memory trees beside a report (MIK-R109).\n\nThe whole comparison is a caller-readable report: every changed file\nwith its patch, grouped by record and source path. The answer holds\nthe two trees, the counts by kind, the changed records, and the\nreport's location. With no `afterRevision`, HEAD meets the working\ntree, which writes loose, unreferenced objects. Narrow with\n`recordId`/`path`; absent selectors refused, unconverted sides as\n`legacy-format`. Longer explanation: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "afterRevision": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Afterrevision"
+     },
+     "beforeRevision": {
+      "default": "HEAD",
+      "title": "Beforerevision",
+      "type": "string"
+     },
+     "memoryRoot": {
+      "title": "Memoryroot",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Path"
+     },
+     "recordId": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Recordid"
+     }
+    },
+    "required": [
+     "memoryRoot"
+    ],
+    "title": "knowledge_diffArguments",
+    "type": "object"
+   },
+   "name": "knowledge_diff",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "knowledge_diffDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": true
+   },
+   "description": "Run the knowledge validator (MIK-R22) over one converted memory tree and return its\nreport: `validation.ok`, the refusal and report-only counts, the counts by rule, and the\nfirst violations (refusing ones first; `violationsTruncated` says when more exist). Name a\nleaf by `contractPath`: the validator reads the leaf's memory worktree against its\nrecorded memory base and its code worktree, and the response adds the leaf's latest\nchange-to-knowledge worklist (MIK-R08): its state, digest, item counts and items, with the\npersisted file's path for every item's facts. Or name a tree directly with `memoryRoot`\nand its paired code checkout `codeRoot`. `baseCommits` are memory commits to compare\nanchors with; with none, every anchor is checked for path existence. An unconverted tree\nor a database file is refused as `legacy-format`. The tool reads only: it writes no file\nand opens no database.",
+   "inputSchema": {
+    "properties": {
+     "baseCommits": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Basecommits"
+     },
+     "codeRoot": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Coderoot"
+     },
+     "contractPath": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Contractpath"
+     },
+     "memoryRoot": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Memoryroot"
+     }
+    },
+    "title": "knowledge_integrity_checkArguments",
+    "type": "object"
+   },
+   "name": "knowledge_integrity_check",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "knowledge_integrity_checkDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "\nPlan or commit one knowledge write (MIK-R73 rule 1).\n\n`contractPath` names a leaf, or with `crossing` a master's open crossing sync; the\ncontract guards the write and names the only memory worktree it may write. `repoId`\nwith `wave` writes a taskless wave. Give the hand-off as `handoff` with\n`handoffName`, or as `handoffPath`. Without `commit` (the default) it plans,\nvalidates and writes nothing; with it, it writes files and commits nothing to Git. A\nrefusal lists every problem, and the whole report is a file the answer names. Longer\nexplanation: docs/reference/mcp-tools.md.\n",
+   "inputSchema": {
+    "properties": {
+     "authorizationRef": {
+      "default": "",
+      "title": "Authorizationref",
+      "type": "string"
+     },
+     "commit": {
+      "default": false,
+      "title": "Commit",
+      "type": "boolean"
+     },
+     "contractPath": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Contractpath"
+     },
+     "crossing": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Crossing"
+     },
+     "handoff": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Handoff"
+     },
+     "handoffName": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Handoffname"
+     },
+     "handoffPath": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Handoffpath"
+     },
+     "repoId": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Repoid"
+     },
+     "wave": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Wave"
+     }
+    },
+    "title": "knowledge_writeArguments",
+    "type": "object"
+   },
+   "name": "knowledge_write",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "knowledge_writeDictOutput",
+    "type": "object"
+   }
+  },
+  {
+   "annotations": {
+    "readOnlyHint": false
+   },
+   "description": "Update or retire one leaf's explainer, or claim a master as its architect. `action` is\n`update`, `retire` or `claim`; `leaf_id` names the leaf for the two leaf actions, and a\n`retire` carries its `receipt_id`. `claim` is open to any hosted architect seat, writes the\nmaster-to-architect record and moves that master's held reports to the claiming seat.\n`update` and `retire` are accepted only from the seat that record names; any other caller\nis refused `not-this-masters-architect` and claims first.\nReference: docs/reference/mcp-tools.md.",
+   "inputSchema": {
+    "properties": {
+     "action": {
+      "title": "Action",
+      "type": "string"
+     },
+     "leaf_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Leaf Id"
+     },
+     "receipt_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Receipt Id"
+     },
+     "repo_id": {
+      "title": "Repo Id",
+      "type": "string"
+     },
+     "task_name": {
+      "title": "Task Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "action",
+     "repo_id",
+     "task_name"
+    ],
+    "title": "explainer_controlArguments",
+    "type": "object"
+   },
+   "name": "explainer_control",
+   "outputSchema": {
+    "additionalProperties": true,
+    "title": "explainer_controlDictOutput",
+    "type": "object"
+   }
+  }
+ ]
+}

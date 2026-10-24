@@ -14,7 +14,6 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from agents_remember.application.role_launch_context import LEAF_ROLES
 from agents_remember.cli.paseo_launch import PASEO_AGENT_KIND
 from agents_remember.cli.paseo_status import AgentReading, read_agent, status_row
 from agents_remember.cli.role_activity import resume_role_agent
@@ -34,6 +33,7 @@ from agents_remember.cli.role_launch_receipts import (
 )
 from agents_remember.cli.role_step_up_decisions import record_step_up
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.models.role_launcher import RoleDispatchRequest
 from agents_remember.serving.projections.host_activity import running_subagents
 

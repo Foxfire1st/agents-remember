@@ -15,6 +15,11 @@ And, anywhere under the task folder, every ``ar-cache-*`` directory (MIK-R82 rul
 cache trees a process rooted inside the task. Each is listed with its size and deleted with the
 whole directory tree; a symlink is never followed or deleted.
 
+And, beyond the task folder, every explainer environment of its leaves (MIK-R186 rule 9): each is
+retired first -- a dry run lists them and retires nothing -- and then its workspace, generation
+counter, grades file and retire receipts are removed in the explainer's own confinement, while a
+pending retire keeps its folder, counter and receipt. The leaf lock files are kept.
+
 A generation's pin and snapshots are released through their own deletion owners
 (:mod:`agents_remember.application.review_comparison_reclamation`), which remove the
 verified bytes and then write the unavailable-history record, so a later reopen of the
@@ -55,6 +60,7 @@ import os
 import re
 import shutil
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -81,6 +87,14 @@ from agents_remember.application.review_comparison_reclamation import (
     release_comparison_code_object,
 )
 from agents_remember.application.review_frame_store import reclaim_task_frames
+from agents_remember.canvas.explainer_archive import (
+    ArchiveRun,
+    environments,
+    guard_problem,
+    host_seat_archive,
+    remove_environment,
+    retire_environments,
+)
 from agents_remember.errors import CodeObjectRetentionError, ComparisonReclamationError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.durable_evidence import durable_reports_root
@@ -111,6 +125,8 @@ class _Report:
     dataset_copies: list[dict[str, Any]] = field(default_factory=list)
     ar_caches: list[dict[str, Any]] = field(default_factory=list)
     frame_revisions: list[dict[str, Any]] = field(default_factory=list)
+    environments: list[dict[str, Any]] = field(default_factory=list)
+    explainer_artifacts: list[dict[str, Any]] = field(default_factory=list)
     failures: list[dict[str, str]] = field(default_factory=list)
     held_refs: set[str] = field(default_factory=set)
     confinement: _Confinement | None = None
@@ -143,6 +159,8 @@ class _Report:
             "datasetCopies": self.dataset_copies,
             "arCaches": self.ar_caches,
             "frameRevisions": self.frame_revisions,
+            "environments": self.environments,
+            "explainerArtifacts": self.explainer_artifacts,
             "failures": self.failures,
             "alreadyAbsent": [],
         }
@@ -156,15 +174,22 @@ class ReviewArtifactCleanup:
         return cleanup_review_artifacts(request)
 
 
-def cleanup_review_artifacts(request: ReviewArtifactCleanupRequest) -> dict[str, Any]:
+def cleanup_review_artifacts(
+    request: ReviewArtifactCleanupRequest, *, explainer_config: Any | None = None
+) -> dict[str, Any]:
     """Delete (or, on a dry run, list) every review artifact of one archived task, and record it.
 
     It never raises for an artifact or a repository it cannot reach: that is a ``failures`` entry,
     because the task has already been archived when this runs. A real run first lists what it is
     about to delete and writes that into this attempt's receipt; it deletes nothing when that
     receipt cannot be written.
+
+    The explainer comes first: every environment of the task is retired (rule 9) before anything is
+    deleted, so a receipt this hook cannot write still leaves no live seat behind the archive. A
+    dry run retires nothing and lists the environments it would retire.
     """
 
+    explainer = _explainer_retired(request, explainer_config)
     confined = _Confinement(request.task_root)
     ledger = ReceiptLedger.open(
         durable_reports_root(confined.task_root),
@@ -172,28 +197,66 @@ def cleanup_review_artifacts(request: ReviewArtifactCleanupRequest) -> dict[str,
         lambda name: _still_there(request, confined, name),
     )
     if request.dry_run:
-        document = _sweep(request, confined).document()
+        document = _sweep(request, confined, explainer).document()
         document["alreadyAbsent"] = ledger.already_absent(document)
         ledger.preview(document)
         return document
-    planned = _sweep(replace(request, dry_run=True), confined).document()
+    planned = _sweep(replace(request, dry_run=True), confined, explainer).document()
     if any(planned[key] for key in DELETION_KEYS):
         refused = ledger.begin(planned)
         if refused is not None:
             return _nothing_deleted(planned, ledger, refused)
-    document = _sweep(request, confined).document()
+    document = _sweep(request, confined, explainer).document()
     document["alreadyAbsent"] = ledger.already_absent(document)
     ledger.finish(document)
     return document
 
 
-def _sweep(request: ReviewArtifactCleanupRequest, confined: _Confinement) -> _Report:
+def _explainer_retired(request: ReviewArtifactCleanupRequest, config: Any | None) -> dict[str, Any]:
+    """Retire every explainer environment of the task, or list them on a dry run.
+
+    A task the hook was not told about (a leaf finalize, a caller with no explainer folder) has no
+    environments to retire: Retire alone never removes a grade or a receipt (rule 8).
+    """
+
+    root = request.explainer_root
+    if root is None:
+        return {"environments": [], "failures": []}
+    try:
+        return retire_environments(
+            root,
+            ArchiveRun(
+                task_root=request.task_root,
+                now=_now(),
+                dry_run=request.dry_run,
+                archive_session=host_seat_archive(config),
+            ),
+        )
+    except Exception as exc:  # the retirement is committed: a failed retire is reported, not raised
+        return {
+            "environments": [],
+            "failures": [
+                {"target": root.as_posix(), "detail": f"explainer: {type(exc).__name__}: {exc}"}
+            ],
+        }
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _sweep(
+    request: ReviewArtifactCleanupRequest,
+    confined: _Confinement,
+    explainer: dict[str, Any] | None = None,
+) -> _Report:
     """One pass over the task's review artifacts: list them on a dry run, delete them otherwise."""
 
     # The legacy identity (retained-code pins, manifest own-leaf check) follows the trust line; the
     # review-ref namespace is the directory name, whatever any file says.
     task_id, identity_problem = _confirmed_task_id(request, confined)
     report = _Report(dry_run=request.dry_run, task_id=task_id)
+    report = _with_explainer(report, explainer or {})
     if identity_problem is not None and _pins_under_unconfirmed_id(request, confined):
         report.failures.append({"target": "task.json", "detail": identity_problem})
     _release_generations(request, report, confined)
@@ -215,7 +278,54 @@ def _sweep(request: ReviewArtifactCleanupRequest, confined: _Confinement) -> _Re
     _delete_dataset_copies(confined, report)
     _delete_ar_caches(confined, report)
     _delete_frames(confined, report)
+    _delete_explainer_artifacts(request, confined, report)
     return report
+
+
+def _with_explainer(report: _Report, explainer: dict[str, Any]) -> _Report:
+    """Carry the environments the hook retired (or would retire) into the report."""
+
+    report.environments = list(explainer.get("environments", []))
+    report.failures.extend(explainer.get("failures", []))
+    return report
+
+
+def _delete_explainer_artifacts(
+    request: ReviewArtifactCleanupRequest, confined: _Confinement, report: _Report
+) -> None:
+    """Remove each leaf's workspace, marker, counter, grades and retire receipts (rule 9).
+
+    A leaf whose retire receipt is still pending keeps its folder, its counter and its receipt, so a
+    repeat of the retirement can finish it. The leaf's lock file is kept, because a lock is never
+    removed. A symlink anywhere below the explainer's task folder holds that path and everything
+    behind it.
+    """
+
+    root = request.explainer_root
+    if root is None:
+        return
+    found, held = environments(root, confined.task_root)
+    report.failures.extend(held)
+    admit = _explainer_admit(root, confined)
+    for environment in found:
+        entries, failures = remove_environment(
+            environment, task_root=confined.task_root, admit=admit, dry_run=report.dry_run
+        )
+        report.explainer_artifacts.extend(entries)
+        report.failures.extend(failures)
+
+
+def _explainer_admit(root: Path, confined: _Confinement) -> Any:
+    """Admit one path: below the explainer's task folder, or below the task for its own records."""
+
+    def admit(path: Path) -> str | None:
+        if path.is_relative_to(root):
+            if root.is_symlink():
+                return f"{root} is a symlink; it is held, not followed"
+            return guard_problem(root, path)
+        return confined.problem(path)
+
+    return admit
 
 
 def _delete_frames(confined: _Confinement, report: _Report) -> None:
@@ -243,6 +353,10 @@ def _nothing_deleted(
     document = _Report(dry_run=False, task_id=planned["taskId"]).document()
     document["state"] = "partial"
     document["reportPath"] = None
+    # The environments were retired before this receipt was attempted; what is listed below is what
+    # the deletion would have removed.
+    document["environments"] = planned["environments"]
+    document["explainerArtifacts"] = planned["explainerArtifacts"]
     document["failures"] = [
         *planned["failures"],
         {
@@ -264,7 +378,14 @@ def _still_there(request: ReviewArtifactCleanupRequest, confined: _Confinement, 
             for repository in (request.code_repository, request.memory_repository)
         )
     path = Path(name)
-    if not path.is_absolute() or confined.problem(path) is not None:
+    if not path.is_absolute():
+        return True
+    admit = (
+        _explainer_admit(request.explainer_root, confined)
+        if request.explainer_root is not None
+        else confined.problem
+    )
+    if admit(path) is not None:
         return True
     return path.exists() or path.is_symlink()
 

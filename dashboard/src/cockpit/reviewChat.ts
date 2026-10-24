@@ -21,6 +21,9 @@ import type { ChangeSetTarget } from '../panels/changeset/ChangeSetViewer';
 import { isExpanded, trayStore } from '../tray/trayStore';
 import type { TaskDocumentRef, TaskEntry } from '../types/projection';
 import type { DocumentChatUnbound } from './document-chat/state';
+import type { ExplainerColumnTarget } from '../explainer/ExplainerColumn';
+import { onFirstRequest } from '../explainer/request';
+import { sameExplainerAddress, type ExplainerAddress } from '../explainer/client';
 import { useMediaQuery, useNarrowCockpit } from './layout';
 
 export const REVIEW_CHAT_WIDTH_KEYS = {
@@ -74,6 +77,15 @@ export interface ReviewChatControl {
   toggle: () => void;
 }
 
+export interface ReviewExplainerTarget extends ExplainerColumnTarget {
+  repository: string;
+  master: string;
+  leaf: string;
+  planned: boolean;
+  comparisonNumber: number | null;
+  history: 'live' | 'recorded';
+}
+
 export interface ReviewChatColumn extends ReviewChatControl {
   width: number;
   onResize: (width: number) => void;
@@ -82,11 +94,28 @@ export interface ReviewChatColumn extends ReviewChatControl {
   placement: ReviewChatPlacement;
   documentRef: TaskDocumentRef | undefined;
   unbound: DocumentChatUnbound | null;
+  /**
+   * The leaf this column's explainer belongs to (MIK-R106 v2 rule 1). Null for a review that names
+   * no leaf: only a leaf has an explainer, and there the document's own chat stands.
+   */
+  explainer: ReviewExplainerTarget | null;
 }
 
 function useReviewChatTask(review: ChangeSetTarget | null) {
   const tasks = useDashboard((state) => state.tasks);
   const hydrated = useDashboard((state) => state.generatedAt !== null);
+  const entry = useMemo(
+    () =>
+      review
+        ? Object.values(tasks).find(
+            (task) =>
+              task.id === review.leaf &&
+              task.reference?.repository === review.repo &&
+              dirName(task.reference.path) === review.master,
+          )
+        : undefined,
+    [review, tasks],
+  );
   const task = useMemo(
     () => (review ? reviewChatTask(review, tasks, hydrated) : null),
     [review, tasks, hydrated],
@@ -98,7 +127,8 @@ function useReviewChatTask(review: ChangeSetTarget | null) {
     if (state === 'unknown') return { line: unknownLine, pending: false };
     return null;
   }, [state, unknownLine]);
-  return { documentRef: task?.state === 'resolved' ? task.ref : undefined, unbound };
+  const planned = Boolean(entry?.stage === 'planned');
+  return { documentRef: task?.state === 'resolved' ? task.ref : undefined, unbound, planned };
 }
 
 function useReviewChatWidth() {
@@ -161,11 +191,83 @@ export function useReviewChat(review: ChangeSetTarget | null): ReviewChatColumn 
   const width = useReviewChatWidth();
   const placement = useReviewChatPlacement();
   const task = useReviewChatTask(review);
+  const explainer = useExplainerTargetOf(review, task.planned);
+  useFirstRequestOpens(review, openColumn);
   return {
     open,
     toggle,
     ...width,
     placement,
-    ...task,
+    documentRef: task.documentRef,
+    unbound: task.unbound,
+    explainer,
   };
+}
+
+/**
+ * A review that names a leaf has an explainer (MIK-R106 v2 rule 1). The column selects it, or its
+ * placeholder, and never the task's Worker. A review without a leaf keeps the document's chat.
+ */
+export function explainerAddress(
+  review: Pick<ChangeSetTarget, 'repo' | 'master' | 'leaf'> | null,
+): ExplainerAddress | null {
+  return addressOfLeaf(review?.repo ?? null, review?.master ?? null, review?.leaf ?? null);
+}
+
+/** The address three facts make; all three, or no explainer at all. */
+function addressOfLeaf(
+  repository: string | null,
+  master: string | null,
+  leaf: string | null,
+): ExplainerAddress | null {
+  if (!repository || !master || !leaf) return null;
+  return { repository, master, leaf };
+}
+
+/**
+ * The address, kept by the three facts it is: the column and the ask compare it across renders, so
+ * a fresh object per render must not read as a change.
+ */
+function useExplainerAddressOf(review: ChangeSetTarget | null): ExplainerAddress | null {
+  const repository = review?.repo ?? null;
+  const master = review?.master ?? null;
+  const leaf = review?.leaf ?? null;
+  return useMemo(() => addressOfLeaf(repository, master, leaf), [repository, master, leaf]);
+}
+
+function useExplainerTargetOf(
+  review: ChangeSetTarget | null,
+  planned: boolean,
+): ReviewExplainerTarget | null {
+  const address = useExplainerAddressOf(review);
+  const comparisonNumber = typeof review?.comparison === 'number' ? review.comparison : null;
+  const history: 'live' | 'recorded' = review?.review?.historical ? 'recorded' : 'live';
+  return useMemo(() => {
+    if (!address) return null;
+    return {
+      address,
+      task: address.leaf,
+      preload: true,
+      repository: address.repository,
+      master: address.master,
+      leaf: address.leaf,
+      planned,
+      comparisonNumber,
+      history,
+    };
+  }, [address, planned, comparisonNumber, history]);
+}
+
+/**
+ * ✦ Explain and a ⊕ with no seat ask for the first-request form (MIK-R106 v2 rule 3). The ask
+ * opens the column, which then shows the form; it starts nothing (rule 10).
+ */
+function useFirstRequestOpens(review: ChangeSetTarget | null, openColumn: () => void): void {
+  const address = useExplainerAddressOf(review);
+  useEffect(() => {
+    if (!address) return;
+    return onFirstRequest((body) => {
+      if (sameExplainerAddress(body.address, address)) openColumn();
+    });
+  }, [address, openColumn]);
 }

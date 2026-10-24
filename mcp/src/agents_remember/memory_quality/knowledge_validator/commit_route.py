@@ -13,6 +13,7 @@ import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agents_remember.memory_quality.knowledge_validator.report import KnowledgeValidationError
 from agents_remember.memory_quality.knowledge_validator.trees import (
@@ -26,7 +27,9 @@ from agents_remember.memory_quality.knowledge_validator.validator import (
     require_valid_commit,
     validation_applies,
 )
-from agents_remember.worktrees.services import LeafPublication
+
+if TYPE_CHECKING:  # annotation-only: the worktree services load where a commit is actually routed
+    from agents_remember.worktrees.services import LeafPublication
 
 BaseConverter = Callable[..., KnowledgeTree]
 """``(memory_repository, base, *, after, code_repository, code_commit) -> KnowledgeTree``."""

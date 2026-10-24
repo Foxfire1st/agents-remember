@@ -232,6 +232,17 @@ recovery, replan, drain, or stale-row transition. Claim transfers the current ge
 door into the enclosure-root operation journal. Queue invalidation or absence cannot destroy or
 strand accepted operation evidence.
 
+## The review page's explainer
+
+| Tool | Purpose | Key args |
+| --- | --- | --- |
+| `explainer_control` | Update or retire one leaf's explainer, or claim a master as its architect. `claim` is open to any hosted architect seat, writes the master-to-architect record and moves that master's held reports to the claiming seat. `update` and `retire` are accepted only from the seat that record names; any other caller is refused `not-this-masters-architect` and claims first. A refused action is a typed answer, never a server error. | `action` (`update`, `retire`, `claim`), `repo_id`, `task_name`, `leaf_id` for the two leaf actions, `receipt_id` for a `retire` |
+
+The developer's own presses do not pass through this tool: the page's Update and Retire call the
+dashboard's routes, and master retirement and sprint archive retire every environment through their
+hook. A leaf's environment is built at the developer's first request, never by opening the page, and
+none of these calls starts a model turn.
+
 ## Task documents
 
 | Tool | Purpose | Key args |

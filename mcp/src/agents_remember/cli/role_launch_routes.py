@@ -11,16 +11,19 @@ import json
 import threading
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from agents_remember.application.master_architect_record import (
+    MANAGER_START,
+    master_architect_path,
+    write_record,
+)
 from agents_remember.application.role_launch_context import (
-    LEAF_ROLES,
-    TASKLESS_ROLES,
     RoleLaunchContext,
     resolve_role_launch_context,
 )
@@ -73,6 +76,7 @@ from agents_remember.cli.role_launch_preparation import (
     prepare_role_handover,
 )
 from agents_remember.cli.role_launch_receipts import (
+    EXECUTIONS_DIRECTORY,
     RECEIPT_SCHEMA,
     _archived_receipt_for_selection,
     _create_receipt,
@@ -107,11 +111,13 @@ from agents_remember.cli.role_step_up_runtime import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_agents import RoleStartSetCall
+from agents_remember.models.role_identity import LEAF_ROLES, TASKLESS_ROLES, canonical_role
 from agents_remember.models.role_launcher import (
     RoleAgentOverride,
     RoleDispatchRequest,
     RoleLauncherOptionsRequest,
     RoleResultRequest,
+    RoleSelection,
 )
 from agents_remember.serving.paseo.paseo_daemon_config import provider_denied_tools
 from agents_remember.tasks.document_refs import TaskDocumentRefError
@@ -121,6 +127,10 @@ __all__ = ["_refuse_reused_request_id", "_request_digest", "prepare_role_handove
 
 
 # How a failed bridge call answers a launcher route; every other bridge failure is a bad gateway.
+#: The role a Manager's start records as its master's architect (MIK-R189 rule 7 step 3).
+ARCHITECT_ROLE = "architect"
+
+
 @dataclass(frozen=True, slots=True)
 class _PreparedRoleStart:
     config: McpRuntimeConfig
@@ -469,6 +479,113 @@ def _refuse_another_starter(
     )
 
 
+def remember_master_architect(
+    config: McpRuntimeConfig,
+    request: RoleSelection,
+    started_by: StartingAgent | None,
+) -> dict[str, str] | None:
+    """Write the master-to-architect record a Manager start makes (MIK-R189 rule 7 step 3).
+
+    The master comes from the Manager's own reference. The record names the starter when the
+    starter is a hosted architect; when it is an Orchestrator, it names that Orchestrator's
+    parent, which the Orchestrator's launch recorded as ``parentAgentId`` and which this writer
+    checks is an architect before recording it. Any other starter writes nothing -- an
+    Orchestrator's own id is never recorded -- and neither does a start with no starter at all
+    (the launcher's).
+
+    The record has a second writer, ``explainer_control`` action ``claim``, and the last write
+    wins; an architect a Manager's start did not record takes the master over with it.
+    """
+
+    if request.role != "manager" or started_by is None:
+        return None
+    master_ref = request.master_document_ref
+    if master_ref is None:
+        return None
+    architect = _architect_behind(config, started_by)
+    if architect is None:
+        return None
+    master = PurePosixPath(master_ref.path).parts[0]
+    return write_record(
+        master_architect_path(config.coordination_root, master_ref.repository, master),
+        architect_agent_id=architect,
+        act=MANAGER_START,
+    )
+
+
+def _record_manager_start(start: _PreparedRoleStart) -> None:
+    """Record the architect behind one Manager start; a failed write never fails the seat.
+
+    The record is an address the explainer reads and the architect claims; a start that could not
+    write it leaves the master unclaimed, which ``claim`` answers, while a start failed over it
+    would cost the developer the seat itself.
+    """
+
+    try:
+        remember_master_architect(start.config, start.request, start.started_by)
+    except (OSError, ValueError):
+        return
+
+
+def _architect_behind(config: McpRuntimeConfig, started_by: StartingAgent) -> str | None:
+    """The architect one starter stands for, or ``None`` for a starter that stands for none."""
+
+    role = canonical_role(started_by.role)
+    if role == ARCHITECT_ROLE:
+        return started_by.agent_id
+    if role != "orchestrator":
+        return None
+    parent = _orchestrator_parent(config, started_by)
+    if parent is None:
+        return None
+    receipt = _architect_receipt(config, parent)
+    if receipt is None or canonical_role(str(receipt.get("role") or "")) != ARCHITECT_ROLE:
+        return None
+    return parent
+
+
+def _orchestrator_parent(config: McpRuntimeConfig, started_by: StartingAgent) -> str | None:
+    """The agent that started one Orchestrator, read from the Orchestrator's own launch record."""
+
+    try:
+        path = _receipt_path(
+            config,
+            RoleSelection(role="orchestrator", sprintDocumentRef=started_by.sprint_ref),
+        )
+    except (ValueError, TaskDocumentRefError):
+        return None
+    receipt = _readable_receipt(path)
+    parent = None if receipt is None else receipt.get("parentAgentId")
+    return parent if isinstance(parent, str) and parent else None
+
+
+def _architect_receipt(config: McpRuntimeConfig, agent_id: str) -> dict[str, Any] | None:
+    """The architect's own launch record, read to prove the parent a starter names is one."""
+
+    folder = (
+        config.coordination_root
+        / "notes"
+        / "reports"
+        / EXECUTIONS_DIRECTORY
+        / "architect"
+        / "sessions"
+    )
+    if not folder.is_dir():
+        return None
+    for path in sorted(folder.glob("*.json")):
+        receipt = _readable_receipt(path)
+        if receipt is not None and receipt.get("agentId") == agent_id:
+            return receipt
+    return None
+
+
+def _readable_receipt(path: Path) -> dict[str, Any] | None:
+    try:
+        return _read_receipt(path)
+    except (HTTPException, OSError, ValueError):
+        return None
+
+
 def _start_execution(
     config: McpRuntimeConfig,
     request: RoleDispatchRequest,
@@ -631,6 +748,8 @@ def _launch_prepared_role_session(start: _PreparedRoleStart, *, prompt: str) -> 
             status_code=409,
             detail="Another launch of this AR role selection started at the same moment; refresh and start again.",
         )
+    # The seat's receipt is this start's now; a Manager's start also names its master's architect.
+    _record_manager_start(start)
     return _execute_prepared_launch(start.config, start.receipt_path, receipt)
 
 

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
         McpRuntimeConfig,
     )
+    from agents_remember.serving.explainer import ExplainerApplicationPorts
 
 
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_app_common.py:50).
@@ -226,11 +227,37 @@ class ServingCollaborators:
     review_memory_root: ReviewMemoryRootPort | None = None
     """Cheap canonical leaf memory-root admission, used only by an open review stream."""
 
+    explainer_application: ExplainerApplicationPorts | None = None
+    """The application-tier ports the explainer routes and the moved watcher call.
+
+    ``serving`` ranks below ``application``, so it cannot import the frame, evidence, comparison
+    and lane adapters it needs; the composition root builds this one value and hands it here.
+    Omitting it leaves the explainer routes and the moved watcher unwired, and each refuses by
+    name rather than serving a half-composed page.
+    """
+
     knowledge_reader: KnowledgeReaderPort | None = None
     """The path-based knowledge reader (MIK-R29): read-only views of any converted memory tree.
 
     It needs no task, so it is its own port rather than a mode of the review adapter. Omitting it
     refuses the reader route by name.
+    """
+
+    explainer_host: Any = None
+    """The explainer's seat on the host (MIK-R186 rule 5): made without a turn, messaged, archived.
+
+    A port because making a seat is the bridge's business and ``serving`` may not import ``cli``.
+    Omitting it refuses the explainer's routes as ``explainer-unavailable`` rather than claiming a
+    seat that cannot exist.
+    """
+
+    #: This leaf's own enclosure contract, for a `planning` leaf's planned comparison
+    #: (MIK-R189 rule 4): the dashboard resolves it per leaf from the coordination root.
+    explainer_contract_for: Callable[[Any], Path | None] | None = None
+    """The master's series contract, read for the line a planning leaf's planned comparison binds.
+
+    Only a leaf that has no work yet needs it (MIK-R189 rule 4): its two tip commits come from the
+    contract's branches. Omitting it refuses a planned build by name.
     """
 
     extra_api_routes: Callable[[Any], None] | None = None
@@ -276,6 +303,8 @@ class _ServingRuntime:
     # MIK-R190 rule 7: the one usage read a tick with a new stamped end makes, as the
     # composition root bound it (``None`` when this process was given no such port).
     usage_read: UsageReadPort | None = None
+    #: The application-tier explainer ports: the routes and the moved watcher read them from here.
+    explainer_application: ExplainerApplicationPorts | None = None
     task_bodies: TaskDocumentBodyCache = field(default_factory=TaskDocumentBodyCache)
 
     @property

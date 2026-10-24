@@ -33,6 +33,7 @@ from agents_remember.cli import (
     role_launch_routes,
 )
 from agents_remember.cli.paseo_launch import (
+    _CARRIED_VARIABLES,
     RECOVERY_NOTE_LIMIT,
     recovery_note,
     tool_server_definition,
@@ -1294,3 +1295,17 @@ class HandoverArtifactOnTheRouteTests(PaseoLaunchTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_the_tool_server_carries_the_browser_module_the_host_has(tmp_path, monkeypatch):
+    """The seat's publish step loads the page in the host's browser, so the server must carry it.
+
+    ``_CARRIED_VARIABLES`` is the only door the host's environment comes through. Without
+    ``AR_PLAYWRIGHT`` the seat's server cannot name the module, ``render`` refuses for want of a
+    browser nobody withheld, and no page is published while the previous one stays on screen.
+    """
+
+    assert "AR_PLAYWRIGHT" in _CARRIED_VARIABLES
+    monkeypatch.setenv("AR_PLAYWRIGHT", "/opt/mod/playwright/index.js")
+    definition = tool_server_definition(tmp_path / "settings.json", binding("worker", SPRINT))
+    assert definition["env"]["AR_PLAYWRIGHT"] == "/opt/mod/playwright/index.js"

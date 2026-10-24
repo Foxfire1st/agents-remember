@@ -608,6 +608,11 @@ class EntryPointWorld:
                     "createdAt": "2026-09-18T12:00:00+02:00",
                     "objective": "Give the sweep a real leaf document to address.",
                     "requirements": ["One enclosure exists."],
+                    # MIK-R189 rule 2: a leaf created now starts with its intent review
+                    # ``pending``, which refuses every start. The sweep is about the start and
+                    # its enclosure, not about the review, so its world records the developer's
+                    # answer as the go the start requires.
+                    "intentReview": {"state": "go", "decisionRef": "D369"},
                     "steps": [{"id": "S1", "title": "sweep", "status": "pending"}],
                 },
             },
@@ -680,6 +685,14 @@ class EntryPointWorld:
                 "operation": "read_steps",
                 "task_name": MASTER,
                 "slug": "1_leaf",
+            },
+            # The architect's explainer tool answers only a hosted architect seat for `claim`,
+            # and only the seat the master's record names for `update` and `retire`. This server
+            # was not started by a launch, so the claim refuses before anything is written.
+            "explainer_control": {
+                "action": "claim",
+                "repo_id": REPO,
+                "task_name": MASTER,
             },
             # Role start and role messaging serve only a role agent AR launched. This server was
             # not started by a launch, so both refuse in the envelope before anything is read,

@@ -44,8 +44,6 @@ from agents_remember.application.agent_binding import (
     read_agent_binding,
 )
 from agents_remember.application.role_launch_context import (
-    LEAF_ROLES,
-    TASKLESS_ROLES,
     resolve_role_launch_context,
     selection_binding,
 )
@@ -137,7 +135,12 @@ from agents_remember.models.role_agents import (
     RoleStartCall,
     RoleStartSetCall,
 )
-from agents_remember.models.role_identity import ROLE_ALIAS_NOTICE, canonical_role
+from agents_remember.models.role_identity import (
+    LEAF_ROLES,
+    ROLE_ALIAS_NOTICE,
+    TASKLESS_ROLES,
+    canonical_role,
+)
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.tool_events import call_target_role

@@ -23,7 +23,7 @@ import {
 } from 'react-aria-components';
 
 import type { SortOption } from '../changeSetOrder';
-import { MEMORY_SORTS, SORT_LABELS, type ReviewSort } from '../reviewSelection';
+import { isJudgmentSort, MEMORY_SORTS, SORT_LABELS, type ReviewSort } from '../reviewSelection';
 import { treeOrderStore } from '../triageOrderPreference';
 import * as styles from './treeStyles';
 
@@ -92,7 +92,7 @@ export function SortMenu({
           <MenuSection>
             <Header className={styles.menuGroup}>Always available</Header>
             {sorts
-              .filter((option) => !MEMORY_SORTS.has(option.sort))
+              .filter((option) => !MEMORY_SORTS.has(option.sort) && !isJudgmentSort(option.sort))
               .map((option) => (
                 <SortItem key={option.sort} option={option} chosen={option.sort === requested} />
               ))}
@@ -106,6 +106,19 @@ export function SortMenu({
                 <SortItem key={option.sort} option={option} chosen={option.sort === requested} />
               ))}
           </MenuSection>
+          {sorts.some((option) => isJudgmentSort(option.sort)) ? (
+            <>
+              <Separator className={styles.menuRule} />
+              <MenuSection data-testid="review-tree-sort-judgment-section">
+                <Header className={styles.menuGroup}>Explainer’s judgment</Header>
+                {sorts
+                  .filter((option) => isJudgmentSort(option.sort))
+                  .map((option) => (
+                    <SortItem key={option.sort} option={option} chosen={option.sort === requested} />
+                  ))}
+              </MenuSection>
+            </>
+          ) : null}
         </Menu>
         <p id={hint} className={styles.menuHint} data-testid="review-tree-sort-hint">
           {memoryHint(sorts)}

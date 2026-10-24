@@ -192,6 +192,9 @@ class _ServingFixture:
                 review_trees_shutdown=self.review_trees_shutdown,
                 clock=self.clock.now,
                 background_ledger=None,
+                # The merged runtime carries the explainer's application port (MIK-R186); this
+                # stand-in runs no explainer, so the lifespan admits no move watcher.
+                explainer_application=None,
             ),
         )
 

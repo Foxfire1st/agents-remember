@@ -1,24 +1,25 @@
 """Server identity, orientation reads, and runtime installation tools."""
 
+from importlib import import_module
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from agents_remember.application.context_packet import ContextPacketRequest
-from agents_remember.application.runtime.install import RuntimeInstallRequest
 from agents_remember.application.runtime.startup import mcp_serving_build_payload
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.mcp.vocabulary import _REMOVED_ARGUMENT
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.task_document_ref import TaskScopedReaderContext
 
-from ..tools import (
-    context_packet_payload,
-    read_ar_files_payload,
-    runtime_install_payload,
-    server_info_payload,
-)
-from ..tools.read_files import _REMOVED_ARGUMENT
+from .lazy import tools
+
+
+def server_info_payload(
+    config: McpRuntimeConfig, serving_build: ServingBuildPayload
+) -> dict[str, Any]:
+    """Forward to the lazily loaded tool builder so discovery stays import-free (MIK-R204)."""
+    return tools.server_info_payload(config, serving_build)
 
 
 def _scrub_removed_argument(server: FastMCP, tool_name: str, argument: str) -> None:
@@ -81,9 +82,9 @@ def _register_orientation_tools(
         task_context: TaskScopedReaderContext | None = None,
     ) -> dict[str, Any]:
         """Orient a repository or leaf; leaf calls pass task_context. include_drift measures the reference anchors of onboarding cards and validity of the tree; omit it and nothing is measured. Staleness never blocks by itself. Currentness: knowledge_read and knowledge_integrity_check. MIK-R30: update the card or record why not; citation_fix repairs moved anchors, a curator re-authors stale ones. Nothing is repaired here. include_freshness fetches remotes and writes FETCH_HEAD. More: docs/tool-details.md."""
-        return context_packet_payload(
+        return tools.context_packet_payload(
             config,
-            ContextPacketRequest(
+            import_module("agents_remember.application.context_packet").ContextPacketRequest(
                 repo_id=repo_id,
                 include_drift=include_drift,
                 include_freshness=include_freshness,
@@ -108,7 +109,7 @@ def _register_orientation_tools(
         files yourself. `refresh` is removed. Leaf calls pass `task_context`; `worktreeScope`,
         `sourceRoot` and `memoryRoot` name both. Longer explanation: docs/reference/mcp-tools.md.
         """
-        return read_ar_files_payload(
+        return tools.read_ar_files_payload(
             config,
             repo_id,
             files,
@@ -137,9 +138,9 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         pinned host/plugin from active MCP authority's paseoRuntime; it writes no settings
         and defers needed restarts. dry_run=true previews without changes. Longer explanation:
         docs/tool-details.md."""
-        return runtime_install_payload(
+        return tools.runtime_install_payload(
             config,
-            RuntimeInstallRequest(
+            import_module("agents_remember.application.runtime.install").RuntimeInstallRequest(
                 dry_run=dry_run,
                 include_benchmarks=include_benchmarks,
                 install_provider_deps=install_provider_deps,

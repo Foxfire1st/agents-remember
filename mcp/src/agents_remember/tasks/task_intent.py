@@ -26,7 +26,15 @@ from agents_remember.models.task_intent import (
     require_task_intent_identity,
 )
 
-from .document import CodeExample, ExpectedKnowledgeEffect, Step, SubStep, TaskDocument
+from .document import (
+    CodeExample,
+    ExpectedKnowledgeEffect,
+    IntentReview,
+    IntentReviewRevision,
+    Step,
+    SubStep,
+    TaskDocument,
+)
 from .document_field_effects import (
     TaskDocumentFieldEffect,
     TaskDocumentFieldEffectProjector,
@@ -143,6 +151,7 @@ _ROOT_FIELDS = frozenset(
         "codeExamplesNote",
         "openQuestions",
         "expectedKnowledgeEffects",
+        "intentReview",
     }
 )
 _NESTED_FIELDS: dict[type[BaseModel], frozenset[str]] = {
@@ -153,6 +162,8 @@ _NESTED_FIELDS: dict[type[BaseModel], frozenset[str]] = {
     AcceptanceObligationQuestion: frozenset({"kind", "id", "question"}),
     TaskDocumentRef: frozenset({"repository", "path"}),
     ExpectedKnowledgeEffect: frozenset({"subject", "effect", "requirementRef"}),
+    IntentReview: frozenset({"state", "decisionRef", "agreedRevision"}),
+    IntentReviewRevision: frozenset({"revisionId", "sha256", "packetVersions"}),
 }
 
 

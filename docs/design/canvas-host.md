@@ -8,7 +8,7 @@ conversation) as built. This contributor reference states the supported contract
 | Surface | Path | Who may call it | What it does |
 | --- | --- | --- | --- |
 | frame | `/canvas/page/{session}/` (document) and `/canvas/page/{session}/{asset}` | the framed document, after one bound session exists | serves the session's exact admitted revision with the policy headers; reads and sets no cookie |
-| trusted API | `/api/canvas/...` | the dashboard (same origin) | opens sessions, carries frame messages, reads the saved-first state, starts one explicit authoring attempt |
+| trusted API | `/api/canvas/...` | the dashboard (same origin) | opens sessions, carries frame messages, reads the saved-first state; the old authoring POSTs are retired and refuse by name |
 
 The store (`application/review_frame_store.py`, MIK-R103) owns revision identity, containment,
 digests, drafts, publication and reclamation. The host consumes it and never re-implements it. The
@@ -138,13 +138,16 @@ A capability, not a fourth seat. One durable attempt record per explicit activat
   receipt cannot revive a cancelled attempt and publication races keep their real outcome. `resume`
   refuses without a recorded session, `cancel` keeps the last ready revision, `replace` validates
   its successor first, records its predecessor and starts from that revision's assets.
-- **authoring execution** uses `NativePresenterHarness` on the configured Paseo host. The qualified
-  Claude boundary removes built-in tools and inherited MCP servers, admitting only the dedicated
-  presenter tools. They read immutable packet/assignment bytes, R102 source windows at the packet's
-  four trees, and this attempt's own assets; writes are descriptor anchored in its assets folder.
-  Documentation is separately bounded and labeled; it is never review evidence. Render returns
-  Chromium diagnostics and a picture at 1280×720. An installed build needs an explicitly configured
-  browser runner/dependencies; missing browser capability refuses publication.
+- **authoring execution** is the presenter's own port. A caller that wires a confined runner gets one
+  attempt's prepared folder; a caller that wires none gets `UnconfiguredPresenterRunner`, which
+  refuses by name. The native launch that attached the dedicated presenter tools was retired with
+  `canvas/presenter_tools.py`'s standalone entry (MIK-R186 @ v2 Scope); the explainer's seat on the
+  normal task server is the authoring path (MIK-R105 @ v4). The kept tools read immutable
+  packet/assignment bytes, R102 source windows at the packet's four trees, and this attempt's own
+  assets; writes are descriptor anchored in its assets folder. Documentation is separately bounded
+  and labeled; it is never review evidence. Render returns Chromium diagnostics and a picture at
+  1280×720. An installed build needs an explicitly configured browser runner/dependencies; missing
+  browser capability refuses publication.
 
 ## The panel
 

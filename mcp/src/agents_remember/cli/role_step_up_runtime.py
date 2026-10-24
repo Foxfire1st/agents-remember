@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from agents_remember.cli.role_launch_routes import _PreparedRoleStart
 
 from agents_remember.application.role_launch_context import (
-    TASKLESS_ROLES,
     RoleLaunchContext,
     selection_binding,
 )
@@ -28,6 +27,7 @@ from agents_remember.cli.role_launch_receipts import _read_receipt, _receipt_pat
 from agents_remember.cli.role_step_up import LAUNCH_FIELDS, select_step_up
 from agents_remember.cli.role_step_up_decisions import recorded_step_up
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import TASKLESS_ROLES
 from agents_remember.models.role_launcher import RoleDispatchRequest, RoleSelection
 from agents_remember.worktrees.review_history import review_count_unavailable, role_review_state
 

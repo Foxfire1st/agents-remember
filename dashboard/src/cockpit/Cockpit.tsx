@@ -37,13 +37,14 @@ import type { ViewedTaskContext } from '../panels/detail-panel/state';
 import { EngineRoom } from '../panels/EngineRoom';
 import { useShouldAnimate } from '../panels/engine-room/useShouldAnimate';
 import { EventRiver } from '../panels/EventRiver';
+import { ViewedLeafExplainerControl } from '../explainer/ExplainerTaskDocument';
 import { FileViewer } from '../panels/file-viewer/FileViewer';
 import { Hangar } from '../panels/Hangar';
 import { KnowledgeReader } from '../panels/knowledge-reader/KnowledgeReader';
 import { LifecycleList } from '../panels/lifecycle-list/LifecycleList';
 import type { AttentionAgentTarget } from '../panels/AttentionQueue';
 import { MemoryMirror } from '../panels/MemoryMirror';
-import { DocumentChat } from './document-chat/DocumentChat';
+import { DocumentChat, type ExplainerColumnTarget } from './document-chat/DocumentChat';
 import { TrayBarSlot, trayBarRow } from '../tray/TrayButton';
 import { TrayLayer } from '../tray/TrayLayer';
 import { usePublishShownPage } from '../tray/shownChat';
@@ -507,9 +508,17 @@ function rightRailView({ fullBleed, hidden, railView, rightRailWidth, onResize, 
   };
 }
 
+function resolveRailExplainer(
+  column: ReviewChatColumn | null,
+  chatProps: { explainer?: ExplainerColumnTarget | null },
+): ExplainerColumnTarget | undefined {
+  return column?.explainer ?? chatProps.explainer ?? undefined;
+}
+
 export function RightRail(props: RightRailProps) {
   const { railEnter, railView, setRailView, tasks, column = null } = props;
   const view = column ? reviewRailView(props.fullBleed, column) : rightRailView(props);
+  const explainer = resolveRailExplainer(column, view.chatProps as { explainer?: ExplainerColumnTarget | null });
   return (
     <motion.aside
       key="rail-right"
@@ -539,7 +548,12 @@ export function RightRail(props: RightRailProps) {
         aria-hidden={!view.chat}
         data-testid="rail-chat-keepalive"
       >
-        <DocumentChat active={view.shown && view.chat} tasks={tasks} {...view.chatProps} />
+        <DocumentChat
+          active={view.shown && view.chat}
+          tasks={tasks}
+          {...view.chatProps}
+          explainer={explainer}
+        />
       </div>
     </motion.aside>
   );
@@ -597,6 +611,7 @@ function MainLayers({
   hidden,
   sidebars,
   selectedId,
+  viewedTask,
   tasks,
   agentChat,
   onOpen,
@@ -610,6 +625,7 @@ function MainLayers({
   hidden: boolean;
   sidebars: { left: SidebarState; right: SidebarState };
   selectedId: string | null;
+  viewedTask: ViewedTaskContext | undefined;
   tasks: TaskEntry[];
   /** The chat the shell was asked for by its exact agent (the attention bell, L190-R1-F09). */
   agentChat: AgentChatTarget | null;
@@ -618,6 +634,7 @@ function MainLayers({
   onOpenNotes: (target: NotesReaderTarget) => void;
   onViewTask: (context: ViewedTaskContext | undefined) => void;
 }) {
+  const operationsActive = view === 'operations' && !takeover && !hidden;
   return (
     <main
       className={cx(viewport, 'viewport')}
@@ -636,8 +653,14 @@ function MainLayers({
           survives a view switch instead of resetting to the master overview (see `operationsLayer`). */}
       <ViewLayer visible={view === 'operations'} className={operationsLayer}>
         <OperationsSidebarStrip left={sidebars.left} right={sidebars.right} />
+        <ViewedLeafExplainerControl
+          active={operationsActive}
+          selectedId={selectedId}
+          viewedTaskRef={viewedTask?.taskDocumentRef}
+          tasks={tasks}
+        />
         <DetailPanel
-          active={view === 'operations' && !takeover && !hidden}
+          active={operationsActive}
           selectedId={selectedId}
           onOpenLifecycle={onOpen}
           onOpenChangeSet={onOpenChangeSet}
@@ -702,6 +725,7 @@ function RailedBody({
         hidden={state.reviewShown}
         sidebars={{ left: state.opsLeft, right: state.opsRight }}
         selectedId={state.selectedId}
+        viewedTask={state.viewedTask}
         tasks={state.tasks}
         agentChat={state.agentChat}
         onOpen={actions.open}

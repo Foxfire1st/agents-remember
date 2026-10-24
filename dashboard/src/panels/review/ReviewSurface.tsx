@@ -4,14 +4,19 @@
 // page opens with nothing selected and makes exactly the six opening reads (reading/useChangeSet.ts);
 // a selection reads its subject only. Every page-level block stays mounted while reads are pending, and
 // the selected subject's slot alone changes with its read (rule 9).
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChangeSetViewer } from '../changeset/ChangeSetViewer';
-import { ReviewHeader } from './ReviewHeader';
+import { ReviewHeader, shortLeafId } from './ReviewHeader';
 import { recordLabelOf } from './ReviewScopeHeader';
 import { matchingTreeRead } from './codeFacts';
-import { useReviewTrees } from '../../data/reviewTrees';
+import { resetCardCachesForTests, useReviewTrees } from '../../data/reviewTrees';
+import { useRevalidateIntentEntry } from '../../data/intentEntryRevalidation';
 import { useReviewHistory } from './useReviewHistory';
-import { useReviewMemoryWatch } from '../../data/reviewMemoryWatch';
+import {
+  subscribeReviewExplainerMoved,
+  useReviewMemoryWatch,
+} from '../../data/reviewMemoryWatch';
+import { askFirstRequest } from '../../explainer/request';
 import type { ReviewChangeContext } from '../changeset/reviewChangeSet';
 import { ReviewChangeSetNavigation, type OpenReviewChanges } from './changeSetNavigation';
 import { RIGHT_RAIL_ID } from '../../cockpit/layout';
@@ -42,7 +47,6 @@ import {
 } from '../../data/review';
 import type { ReviewRefusal } from '../../data/review';
 import type { useReviewLane } from '../../data/reviewLane';
-import { treeComparisonNumber } from '../../data/reviewTrees';
 import { type ReviewPageRequest, targetKeyOf, useReviewReadCycle } from './ReviewReadCycle';
 import {
   comparisonGenerationOf,
@@ -50,9 +54,25 @@ import {
   type ComparisonGeneration,
   ReviewReadCache,
 } from './ReviewReadCache';
-import { CanvasPanel, type CanvasEvidenceNavigation } from './canvas/CanvasPanel';
-import type { CanvasComparison } from './canvas/canvasApi';
-import { useRetainedComparison } from './canvas/canvasHooks';
+import type { EvidenceDestination } from './canvas/canvasApi';
+import { ExplanationSwitch, type ExplanationViewTab } from './explainer/ExplanationSwitch';
+import {
+  ExplanationView,
+  ReadingJudgmentMounts,
+  ReviewMovedBanner,
+} from './explainer/ExplanationView';
+import type { ClaimLink } from './explainer/explainerApi';
+import { hasWork, staleParts } from './explainer/explainerModel';
+import {
+  resolveClaimSelection,
+  resolveEvidenceSelection,
+  useExplainer,
+  usePlannedReview,
+  type ClaimResolutionContext,
+  type ExplainerRead,
+} from './explainer/explainerRead';
+import { PlannedReview } from './explainer/planned/PlannedReview';
+import type { PlannedPage } from './explainer/planned/plannedPage';
 import { ReviewRefresh, generationOf } from './ReviewRefresh';
 import {
   type ReviewRead,
@@ -75,6 +95,7 @@ import { ReadingColumn } from './reading/ReadingColumn';
 import { ReviewGrid, reviewBody, reviewRoot, useBracketKeys } from './reading/ReviewLayout';
 import { SummaryLine } from './reading/SummaryLine';
 import { TechnicalDetails } from './reading/TechnicalDetails';
+import { bumpLeafMoveGeneration, usePublishLeafJudgments } from './reading/useChangeSet';
 import { useReadingLayout } from './reading/useReadingLayout';
 import { useReviewPage, type PageReads } from './reading/useReviewPage';
 
@@ -500,44 +521,6 @@ function readingStatusOf(
   };
 }
 
-/** The comparison on screen, with the lineage number and the history the reviewer is reading. */
-function pageComparison(
-  shown: Pick<ReviewPayload, 'comparison' | 'limitations'> | null | undefined,
-  history: ReviewHistory | undefined,
-): CanvasComparison | undefined {
-  if (!shown?.comparison) return undefined;
-  return {
-    reference: shown.comparison.reference,
-    number: treeComparisonNumber(shown.limitations),
-    history: history ?? 'live',
-  };
-}
-
-/**
- * An evidence navigation the saved page asked for, bound to the comparison on screen (L104-B11).
- *
- * The panel has already refused a destination that belongs to another comparison or another review
- * target, and this surface checks the same two facts against the payload it is showing before it
- * selects anything: a destination that moved under the panel is not opened, and no substitute record
- * is selected in its place. `keepTree` keeps the tree the reader walked, so returning to the page
- * finds the review where it was.
- */
-function evidenceSelection(
-  destination: CanvasEvidenceNavigation,
-  shown: ReviewPayload | null,
-  selectSubject: (subject: { kind: 'invariant' | 'family'; id: string }) => void,
-): void {
-  if (!shown?.comparison) return;
-  if (shown.comparison.reference !== destination.comparison.reference) return;
-  if (
-    destination.comparison.number !== undefined &&
-    treeComparisonNumber(shown.limitations) !== destination.comparison.number
-  ) {
-    return;
-  }
-  selectSubject({ kind: destination.selector.kind, id: destination.selector.id });
-}
-
 // A refresh shows the comparison as it reads now, not the tree walked before it (MIK-R39), and asks
 // for the selected row to be brought into view once its answer is shown. A refresh whose read fails
 // or is refused has no such answer: its request is dropped, so that a later answer for the subject
@@ -582,33 +565,6 @@ function useRefreshReview(
     else refresh();
   };
   return { refreshReview, retryReview };
-}
-
-/**
- * The page above the deterministic detail (MIK-R105 rules 2, 13), with its evidence navigation.
- *
- * The comparison is held by the surface across a selection that is still reading: the page belongs to
- * the comparison, not to the selection, so a reading turn neither unmounts it nor drops its channel
- * (L104-B11).
- */
-function CanvasRegion(props: {
-  repo: string;
-  master: string;
-  leaf: string;
-  history: ReviewHistory | undefined;
-  shown: ReviewPayload | null;
-  onSelect: (subject: { kind: 'invariant' | 'family'; id: string }) => void;
-}) {
-  const comparison = useRetainedComparison(pageComparison(props.shown, props.history));
-  return (
-    <CanvasPanel
-      repository={props.repo}
-      master={props.master}
-      leaf={props.leaf}
-      comparison={comparison}
-      onOpenEvidence={(destination) => evidenceSelection(destination, props.shown, props.onSelect)}
-    />
-  );
 }
 
 // The comparison chosen in the selector, null for the latest (MIK-R89 v2 rule 10), and the
@@ -674,7 +630,18 @@ function useSurface({
   return {
     ...{ repo, master, leaf, history, leaveHistory, navigation: bound, instead, setInstead, page, setPage, workspace },
     ...{ chosen, setChosen },
-    ...{ frame, coherent, shown, read, carried: cycle.carried, refreshReview, retryReview, problem, reading },
+    ...{
+      frame,
+      coherent,
+      shown,
+      read,
+      carried: cycle.carried,
+      refreshReview,
+      retryReview,
+      memoryChanged: cycle.memoryChanged,
+      problem,
+      reading,
+    },
     openTaskContext,
   };
 }
@@ -756,27 +723,67 @@ function WorklistView({ props, open }: { props: PageProps; open: OpenReviewChang
   );
 }
 
-function PageReading({ props, tree, chat, open }: { props: PageProps & { reads: Surface }; tree: ReturnType<typeof useSidebar>; chat?: ReviewChatControl; open: OpenReviewChanges }) {
+interface PageReadingProps {
+  props: PageProps & { reads: Surface };
+  tree: ReturnType<typeof useSidebar>;
+  chat?: ReviewChatControl;
+  open: OpenReviewChanges;
+  viewTab: ExplanationViewTab;
+  explainer: ExplainerRead;
+  plannedPage: PlannedPage | null;
+  comparisonInfo: { reference: string; number?: number; owner?: 'planned' | 'recorded' } | undefined;
+  onExplain: () => void;
+  onOpenBlock: (claim: ClaimLink) => void;
+  onEvidence: (destination: EvidenceDestination) => void;
+}
+
+function readingReplacementOf({
+  props,
+  open,
+  viewTab,
+  explainer,
+  plannedPage,
+  comparisonInfo,
+  onExplain,
+  onOpenBlock,
+  onEvidence,
+}: PageReadingProps): React.ReactNode | undefined {
+  const { reads } = props;
+  if (viewTab === 'explanation') {
+    return (
+      <ExplanationView
+        target={{ repository: reads.repo, master: reads.master, leaf: reads.leaf }}
+        comparison={comparisonInfo}
+        read={explainer}
+        taskLabel={shortLeafId(reads.leaf)}
+        onExplain={onExplain}
+        onOpenBlock={onOpenBlock}
+        onEvidence={onEvidence}
+      />
+    );
+  }
+  if (plannedPage) return <PlannedReview payload={plannedPage} />;
+  if (reads.workspace.worklist) return <WorklistView props={props} open={open} />;
+  return undefined;
+}
+
+function ReadingNotes({
+  props,
+  viewTab,
+  explainer,
+  plannedPage,
+}: {
+  props: PageProps & { reads: Surface };
+  viewTab: ExplanationViewTab;
+  explainer: ExplainerRead;
+  plannedPage: PlannedPage | null;
+}) {
   const { reads, page } = props;
-  const { changeSet } = page;
-  const layout = useReadingLayout(page.scroller);
-  const context = useReadingValue(props, layout);
   const read = reads.read;
   return (
-    <ReadingColumn
-      scroller={page.scroller}
-      context={context}
-      model={changeSet.model}
-      treeToggle={<SidebarToggle side="left" open={tree.open} onToggle={tree.toggle} name="Tree sidebar" controls="review-tree" keyHint="[" testId="review-tree-toggle" />}
-      chatToggle={
-        chat ? (
-          <SidebarToggle side="right" open={chat.open} onToggle={chat.toggle} name="Chat sidebar" controls={RIGHT_RAIL_ID} keyHint="]" testId="review-chat-toggle" />
-        ) : null
-      }
-      crumbText={crumbOf(page, reads.navigation.catalogue.entries)}
-      orphan={<OrphanSlot props={props} layout={layout} />}
-      markerReturn={<MarkerReturn />}
-      notes={
+    <>
+      {viewTab === 'review' ? <ReviewMovedBanner read={explainer} /> : null}
+      {plannedPage && viewTab === 'review' ? null : (
         <PageNotes
           page={page}
           frame={reads.frame}
@@ -787,36 +794,94 @@ function PageReading({ props, tree, chat, open }: { props: PageProps & { reads: 
               shown={reads.shown}
               lastCoherent={read.phase === 'failed' ? reads.coherent : null}
               onRetry={retryFor(read, reads.retryReview)}
-              onOpenTaskContext={insteadFor(read, reads.problem, reads.instead, (failure) => reads.openTaskContext.current(failure))}
+              onOpenTaskContext={insteadFor(read, reads.problem, reads.instead, (failure) =>
+                reads.openTaskContext.current(failure),
+              )}
               readingInWorkspace={reads.reading !== null}
             />
           }
         />
-      }
-      summary={<SummaryLine model={changeSet.model} catalogue={reads.navigation.catalogue} summary={changeSet.summary} lane={changeSet.lane} />}
-      replacement={reads.workspace.worklist ? <WorklistView props={props} open={open} /> : undefined}
-      lane={
-        <LaneSection
-          read={changeSet.lane}
-          place={context.place}
-          comparison={changeSet.comparison}
-          layout={layout}
-          collapse={context.collapse}
-          select={{ selection: page.selection, onSelect: context.select, onFile: page.lanes.onFile }}
-        />
-      }
-      canvas={
-        <CanvasRegion
-          repo={reads.repo}
-          master={reads.master}
-          leaf={reads.leaf}
-          history={reads.history}
-          shown={reads.shown ?? reads.frame}
-          onSelect={(subject) => page.select({ kind: 'subject', subject }, { keepTree: true })}
-        />
-      }
-      details={<PageDetails props={props} />}
-    />
+      )}
+    </>
+  );
+}
+
+function PageReading(readingProps: PageReadingProps) {
+  const { props, tree, chat, viewTab, explainer, plannedPage } = readingProps;
+  const { reads, page } = props;
+  const { changeSet } = page;
+  const layout = useReadingLayout(page.scroller);
+  const context = useReadingValue(props, layout);
+  const replacement = readingReplacementOf(readingProps);
+  const showJudgments = viewTab === 'review' && !plannedPage && !reads.workspace.worklist;
+
+  return (
+    <>
+      <ReadingColumn
+        scroller={page.scroller}
+        context={context}
+        model={changeSet.model}
+        treeToggle={
+          <SidebarToggle
+            side="left"
+            open={tree.open}
+            onToggle={tree.toggle}
+            name="Tree sidebar"
+            controls="review-tree"
+            keyHint="["
+            testId="review-tree-toggle"
+          />
+        }
+        chatToggle={
+          chat ? (
+            <SidebarToggle
+              side="right"
+              open={chat.open}
+              onToggle={chat.toggle}
+              name="Chat sidebar"
+              controls={RIGHT_RAIL_ID}
+              keyHint="]"
+              testId="review-chat-toggle"
+            />
+          ) : null
+        }
+        crumbText={crumbOf(page, reads.navigation.catalogue.entries)}
+        orphan={<OrphanSlot props={props} layout={layout} />}
+        markerReturn={<MarkerReturn />}
+        notes={
+          <ReadingNotes
+            props={props}
+            viewTab={viewTab}
+            explainer={explainer}
+            plannedPage={plannedPage}
+          />
+        }
+        summary={
+          <SummaryLine
+            model={changeSet.model}
+            catalogue={reads.navigation.catalogue}
+            summary={changeSet.summary}
+            lane={changeSet.lane}
+          />
+        }
+        replacement={replacement}
+        lane={
+          <LaneSection
+            read={changeSet.lane}
+            place={context.place}
+            comparison={changeSet.comparison}
+            layout={layout}
+            collapse={context.collapse}
+            select={{ selection: page.selection, onSelect: context.select, onFile: page.lanes.onFile }}
+          />
+        }
+        canvas={null}
+        details={<PageDetails props={props} />}
+      />
+      {showJudgments ? (
+        <ReadingJudgmentMounts model={changeSet.model} scroller={page.scroller} />
+      ) : null}
+    </>
   );
 }
 
@@ -832,18 +897,211 @@ function surfaceAttributes(surface: Surface, layout: { markers: boolean }) {
   };
 }
 
+function resolveComparisonInfo(
+  plannedPage: PlannedPage | null,
+  payloadRef: string | undefined,
+  number: number | undefined,
+  master: string,
+  leaf: string,
+): { reference: string; number?: number; owner?: 'planned' | 'recorded' } | undefined {
+  if (plannedPage) {
+    return {
+      reference: plannedPage.binding.reference,
+      number: plannedPage.binding.number,
+      owner: 'planned',
+    };
+  }
+  const ref =
+    payloadRef ?? (number !== undefined ? `review-comparison:${master}/${leaf}/${number}` : undefined);
+  if (!ref && number === undefined) return undefined;
+  return { reference: ref ?? '', number, owner: 'recorded' };
+}
+
+function useExplainerMovedRefresh(surface: Surface, explainer: ExplainerRead) {
+  const { repo, master, leaf, history } = surface;
+  const revalidate = useRevalidateIntentEntry();
+  const explainerStateRef = useRef(explainer.state);
+  explainerStateRef.current = explainer.state;
+  const surfaceMemoryChangedRef = useRef(surface.memoryChanged);
+  surfaceMemoryChangedRef.current = surface.memoryChanged;
+  const revalidateRef = useRef(revalidate);
+  revalidateRef.current = revalidate;
+
+  useEffect(() => {
+    if (history === 'recorded') return undefined;
+    return subscribeReviewExplainerMoved({ repo, master, leaf }, (event) => {
+      if (event.cleared || event.kind === 'cleared') return;
+      const workExists = hasWork(explainerStateRef.current) || event.kind === 'master-moved';
+      if (!workExists || event.updateOffered === false) {
+        resetCardCachesForTests();
+        bumpLeafMoveGeneration(repo, master, leaf);
+        surfaceMemoryChangedRef.current();
+        revalidateRef.current();
+      }
+    });
+  }, [repo, master, leaf, history]);
+}
+
+function useResolutionContext(
+  surface: Surface,
+  page: ReturnType<typeof useReviewPage>,
+  payload: ReviewPayload | null,
+  comparisonInfo: { reference: string; number?: number; owner?: 'planned' | 'recorded' } | undefined,
+): ClaimResolutionContext {
+  return useMemo<ClaimResolutionContext>(() => {
+    const laneHunks = [...page.lanes.files.values()].flatMap((f) => f.hunks);
+    return {
+      model: page.changeSet.model,
+      cards: page.changeSet.cards,
+      comparison: page.changeSet.comparison,
+      comparisonNumber: page.changeSet.number,
+      comparisonReference: payload?.comparison?.reference ?? comparisonInfo?.reference ?? null,
+      laneHunks,
+      catalogue: surface.navigation.catalogue.entries,
+    };
+  }, [
+    page.changeSet.model,
+    page.changeSet.cards,
+    page.changeSet.comparison,
+    page.changeSet.number,
+    page.lanes.files,
+    payload?.comparison?.reference,
+    comparisonInfo?.reference,
+    surface.navigation.catalogue.entries,
+  ]);
+}
+
+function isPlannedReadEnabled(surface: Surface, hasInitialSubject: boolean): boolean {
+  return (
+    surface.history !== 'recorded' &&
+    !hasInitialSubject &&
+    surface.read.phase === 'reviewed'
+  );
+}
+
+function isExplainerReadEnabled(
+  viewTab: ExplanationViewTab,
+  comparisonInfo: { reference: string; number?: number; owner?: 'planned' | 'recorded' } | undefined,
+  surface: Surface,
+  hasInitialSubject: boolean,
+): boolean {
+  if (viewTab === 'explanation' || comparisonInfo !== undefined) return true;
+  return !hasInitialSubject && surface.read.phase === 'reviewed';
+}
+
+function useSurfaceExplainer(
+  surface: Surface,
+  page: ReturnType<typeof useReviewPage>,
+  chat: ReviewChatControl | undefined,
+  viewTab: ExplanationViewTab,
+  setViewTab: (tab: ExplanationViewTab) => void,
+  hasInitialSubject: boolean,
+) {
+  const { repo, master, leaf } = surface;
+  const payload = surface.shown ?? surface.frame;
+  const plannedPage = usePlannedReview(
+    { repository: repo, master, leaf },
+    isPlannedReadEnabled(surface, hasInitialSubject),
+  );
+  const comparisonInfo = useMemo(
+    () =>
+      resolveComparisonInfo(
+        plannedPage,
+        payload?.comparison?.reference,
+        page.changeSet.number,
+        master,
+        leaf,
+      ),
+    [plannedPage, payload?.comparison?.reference, page.changeSet.number, master, leaf],
+  );
+  const explainer = useExplainer(
+    { repository: repo, master, leaf },
+    comparisonInfo,
+    isExplainerReadEnabled(viewTab, comparisonInfo, surface, hasInitialSubject),
+  );
+  usePublishLeafJudgments(repo, master, leaf, explainer.state?.categories, explainer.state?.grades);
+  useExplainerMovedRefresh(surface, explainer);
+  const resolutionContext = useResolutionContext(surface, page, payload, comparisonInfo);
+
+  const select = page.select;
+  const onExplain = useCallback(() => {
+    askFirstRequest({ repository: repo, master, leaf });
+    if (chat && !chat.open) chat.toggle();
+  }, [repo, master, leaf, chat]);
+
+  const onOpenBlock = useCallback(
+    (claim: ClaimLink) => {
+      const resolved = resolveClaimSelection(claim, resolutionContext);
+      if (!resolved) return;
+      setViewTab('review');
+      select(resolved, { keepTree: true });
+    },
+    [resolutionContext, select, setViewTab],
+  );
+
+  const onEvidence = useCallback(
+    (destination: EvidenceDestination) => {
+      const resolved = resolveEvidenceSelection(
+        destination,
+        { repository: repo, master, leaf },
+        resolutionContext,
+      );
+      if (!resolved) return;
+      setViewTab('review');
+      select(resolved, { keepTree: true });
+    },
+    [repo, master, leaf, resolutionContext, select, setViewTab],
+  );
+
+  return { plannedPage, comparisonInfo, explainer, onExplain, onOpenBlock, onEvidence };
+}
+
+function HeaderExplanationSwitch({
+  viewTab,
+  setViewTab,
+  explainer,
+}: {
+  viewTab: ExplanationViewTab;
+  setViewTab: (tab: ExplanationViewTab) => void;
+  explainer: ExplainerRead;
+}) {
+  const staleInfo = staleParts(explainer.state);
+  const isBuilding = Boolean(
+    explainer.state?.building && explainer.state.building.state !== 'idle',
+  );
+  return (
+    <ExplanationSwitch
+      view={viewTab}
+      stale={staleInfo.total}
+      building={isBuilding}
+      retired={explainer.state?.retired ?? false}
+      onSwitch={setViewTab}
+    />
+  );
+}
+
 export function ReviewSurface(props: ReviewTarget & { onBack: () => void; chat?: ReviewChatControl }) {
   const surface = useSurface(props);
   const reads: PageReads = { ...surface, initial: initialSelection(props) };
   const page = useReviewPage(reads);
   const root = useRef<HTMLDivElement>(null);
   const { repo, master, leaf, read, workspace } = surface;
+  const [viewTab, setViewTab] = useState<ExplanationViewTab>('review');
+  const payload = surface.shown ?? surface.frame;
+  const explainerCtrl = useSurfaceExplainer(
+    surface,
+    page,
+    props.chat,
+    viewTab,
+    setViewTab,
+    Boolean(props.selectorKind && props.selectorId),
+  );
   const change = useReviewChangePage({
     repo,
     master,
     leaf,
     comparison: page.changeSet.number,
-    payload: surface.shown ?? surface.frame,
+    payload,
     laneRead: page.changeSet.lane,
     leafTrees: page.changeSet.leafTrees,
   });
@@ -859,11 +1117,10 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void; chat?:
   const tree = useSidebar('review', 'left');
   useBracketKeys(tree.toggle, props.chat?.toggle, change.changePage === null);
   const markers = usePageMarkers(surface, page);
-  useSelectionFocus(surface.shown ?? surface.frame, workspace, surface.reading, root);
+  useSelectionFocus(payload, workspace, surface.reading, root);
   const title = useTaskTitle(repo, master, leaf);
   const parts = { reads: { ...surface, initial: reads.initial }, page };
   return (
-    // The keymap owner's reviewer zone: its j/k block traversal fires only inside it (MIK-R33).
     <div ref={root} className={reviewRoot} data-testid="review-surface" data-kbzone="review" {...surfaceAttributes(surface, { markers: markers?.origin != null })}>
       <IntentMarkerScope.Provider value={markers}>
         <ReviewChangeSetNavigation.Provider value={change.openChanges}>
@@ -874,12 +1131,22 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void; chat?:
               record={recordLabelOf(surface.frame, surface.history)}
               onBack={props.onBack}
               chip={<TopLineControls props={parts} />}
+              comparison={<HeaderExplanationSwitch viewTab={viewTab} setViewTab={setViewTab} explainer={explainerCtrl.explainer} />}
               refresh={<ReviewRefresh onRefresh={surface.refreshReview} busy={read.phase === 'loading'} generation={generationOf(read, surface.carried, surface.shown)} />}
             />
             <ReviewGrid
               treeOpen={tree.open}
               tree={<PageTree props={parts} traversal={traversal.status} />}
-              reading={<PageReading props={parts} tree={tree} chat={props.chat} open={change.openChanges} />}
+              reading={
+                <PageReading
+                  props={parts}
+                  tree={tree}
+                  chat={props.chat}
+                  open={change.openChanges}
+                  viewTab={viewTab}
+                  {...explainerCtrl}
+                />
+              }
             />
           </div>
           <ReviewChangeOverlay state={change.changePage} onBack={change.closeChanges} />

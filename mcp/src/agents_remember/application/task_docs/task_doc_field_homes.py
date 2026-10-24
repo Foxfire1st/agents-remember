@@ -59,6 +59,8 @@ RESERVED_HEADER_LABELS: dict[str, str] = {
     "executionnature": "executionNature",
     "integration branch": "integrationBranch",
     "integrationbranch": "integrationBranch",
+    "intent review": "intentReview",
+    "intentreview": "intentReview",
 }
 
 

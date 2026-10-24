@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.tasks import TaskDocument, read_task_doc
+from agents_remember.tasks.document import intent_review_refusal
 from agents_remember.tasks.leaf_doc import (
     require_task_document_in_place,
     resolve_terminal_leaf_doc,
@@ -72,6 +73,12 @@ def plan_task_stage(
         return TaskStageChange()
     path, document = source
     require_task_document_in_place(path, document, ValueError)
+    if status == "inProgress" and document.status in {"planning", "abandoned"}:
+        # MIK-R189 rule 2, the last of its four places: while the intent review is open no move
+        # to ``inProgress`` is written, the abandoned -> inProgress successor included.
+        refusal = intent_review_refusal(document)
+        if refusal is not None:
+            raise ValueError(refusal)
     original = capture_task_doc_source(path)
     updated = document
     if status == "abandoned" or (

@@ -5,6 +5,7 @@ import contextlib
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -48,6 +49,7 @@ from agents_remember.serving.background_accounting import (
     measured,
     offload,
 )
+from agents_remember.serving.change_watcher import move_notice_watch
 from agents_remember.serving.heap_diag import (
     heap_diag_loop,
     malloc_trim_enabled,
@@ -61,6 +63,7 @@ if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
         McpRuntimeConfig,
     )
+    from agents_remember.serving.explainer import ExplainerApplicationPorts
 
 
 async def _to_thread_owned[**Args, Result](
@@ -139,6 +142,14 @@ async def _metrics_loop(
         await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
 
 
+@dataclass(frozen=True)
+class _DeliveryCollaborators:
+    """The two optional ports one held-delivery tick may call."""
+
+    usage_read: UsageReadPort | None = None
+    explainer: ExplainerApplicationPorts | None = None
+
+
 async def _held_delivery_loop(runtime: _ServingRuntime) -> None:
     """Deliver durably held role messages on the dashboard's own tick (MIK-R100 rule 4a).
 
@@ -178,7 +189,10 @@ async def _held_delivery_loop(runtime: _ServingRuntime) -> None:
                 seen,
                 usage_seen,
                 sweep=sweep,
-                usage_read=runtime.usage_read,
+                collaborators=_DeliveryCollaborators(
+                    usage_read=runtime.usage_read,
+                    explainer=runtime.explainer_application,
+                ),
             )
         except Exception:
             logger.exception("held-message delivery sweep failed; retrying next interval")
@@ -191,7 +205,7 @@ def _held_delivery_tick(
     usage_seen: dict[str, str] | None = None,
     *,
     sweep: bool,
-    usage_read: UsageReadPort | None = None,
+    collaborators: _DeliveryCollaborators | None = None,
 ) -> None:
     """One tick of the held-message delivery: the turn ends, and the sweep as fallback.
 
@@ -216,14 +230,17 @@ def _held_delivery_tick(
         turn_ended_agents,
     )
 
+    collaborators = collaborators or _DeliveryCollaborators()
     ended = turn_ended_agents(config, seen)
     if usage_seen is not None:
         fresh = new_stamped_ends(config, usage_seen)
-        if fresh and usage_read is not None:
+        if fresh and collaborators.usage_read is not None:
             # The read comes before this tick's delivery to the same agents.
-            usage_read(config, fresh)
+            collaborators.usage_read(config, fresh)
     if ended:
         deliver_ended_turns(config, ended)
+        if collaborators.explainer is not None:
+            move_notice_watch(config, collaborators.explainer.watcher).after_turn_ends(ended)
     if sweep:
         sweep_held_messages(config)
 
@@ -383,6 +400,13 @@ def _serving_lifespan(
         held_delivery_task = asyncio.create_task(_held_delivery_loop(runtime))
         river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
         warmup_watch_task = asyncio.create_task(_warmup_watch_loop(runtime))
+        move_watch_task = (
+            None
+            if runtime.explainer_application is None
+            else asyncio.create_task(
+                move_notice_watch(runtime.config, runtime.explainer_application.watcher).run()
+            )
+        )
         optional: list[asyncio.Task[None]] = []
         # The heap-growth diagnostic only exists when AR_HEAP_DIAG is set (tracemalloc started here
         # so the very first snapshot has a full trace history); otherwise there is no extra task at all.
@@ -398,6 +422,7 @@ def _serving_lifespan(
             river_compaction_task,
             held_delivery_task,
             warmup_watch_task,
+            *([] if move_watch_task is None else [move_watch_task]),
             metrics_task,
             projection_task,
             *optional,

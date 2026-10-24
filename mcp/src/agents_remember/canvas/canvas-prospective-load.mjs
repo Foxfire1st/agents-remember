@@ -150,15 +150,13 @@ function answer(request, response) {
 
 async function observe(page) {
   return page.evaluate(() => {
-    const cited = [
-      ...document.querySelectorAll("[data-evidence], [data-evidence-claim]"),
-    ];
-    const references = cited.flatMap((element) =>
-      ["data-evidence", "data-evidence-claim"]
-        .filter((name) => element.hasAttribute(name))
-        .map((name) => element.getAttribute(name).trim()),
+    const references = [...document.querySelectorAll("[data-evidence]")].map(
+      (element) => element.getAttribute("data-evidence").trim(),
     );
-    const unresolved = references
+    const claimIds = [...document.querySelectorAll("[data-evidence-claim]")].map(
+      (element) => element.getAttribute("data-evidence-claim").trim(),
+    );
+    const unresolved = [...references, ...claimIds]
       .filter((reference) => !reference)
       .map(() => "(empty)");
     const playing = [...document.querySelectorAll("audio, video")].filter(
@@ -167,9 +165,10 @@ async function observe(page) {
     const body = document.body;
     return {
       unresolved,
-      // Read the rendered DOM, including references created by scripts and legal unquoted HTML.
-      // The trusted Python caller resolves these against its own immutable packet.
-      references: references.slice(0, 401),
+      // Read the rendered DOM, keeping data-evidence basis references and data-evidence-claim
+      // claim IDs in separate inventories for the Python caller to resolve against its packet.
+      references: references.filter(Boolean).slice(0, 401),
+      claimIds: claimIds.filter(Boolean).slice(0, 401),
       playing,
       reduce: matchMedia("(prefers-reduced-motion: reduce)").matches,
       animations: document.getAnimations ? document.getAnimations().length : 0,
@@ -207,18 +206,22 @@ async function visibleContent(page) {
   }
 }
 
-/** Keep both reference attributes, including references introduced during the load window. */
+/** Keep both reference attributes in separate inventories through the load window. */
 async function watchReferences(page) {
   return page.evaluateHandle(() => {
     const references = new Set();
+    const claimIds = new Set();
     const collect = () => {
-      for (const element of document.querySelectorAll(
-        "[data-evidence],[data-evidence-claim]",
-      )) {
-        for (const name of ["data-evidence", "data-evidence-claim"]) {
-          if (element.hasAttribute(name) && references.size < 401) {
-            references.add(element.getAttribute(name).trim());
-          }
+      for (const element of document.querySelectorAll("[data-evidence]")) {
+        const value = element.getAttribute("data-evidence").trim();
+        if (value && references.size < 401) {
+          references.add(value);
+        }
+      }
+      for (const element of document.querySelectorAll("[data-evidence-claim]")) {
+        const value = element.getAttribute("data-evidence-claim").trim();
+        if (value && claimIds.size < 401) {
+          claimIds.add(value);
         }
       }
     };
@@ -234,7 +237,10 @@ async function watchReferences(page) {
       finish() {
         collect();
         observer.disconnect();
-        return [...references];
+        return {
+          references: [...references],
+          claimIds: [...claimIds],
+        };
       },
     };
   });
@@ -290,7 +296,9 @@ async function observeInBrowser(origin) {
     // One bounded load observation, including delayed DOM work; no claim about arbitrary future JS.
     await page.waitForTimeout(2000);
     const seen = await observe(page);
-    seen.references = await references.evaluate((watch) => watch.finish());
+    const watched = await references.evaluate((watch) => watch.finish());
+    seen.references = watched.references;
+    seen.claimIds = watched.claimIds;
     await references.dispose();
     seen.visible = await visibleContent(page);
     const screenshotIndex = process.argv.indexOf("--screenshot");
@@ -323,6 +331,7 @@ async function observeInBrowser(origin) {
       reducedMotionOk,
       unresolvedReferences: seen.unresolved,
       evidenceReferences: seen.references,
+      claimIds: seen.claimIds,
       detail: `${faults.length ? `faults: ${faults.join(", ")}` : "no fault observed"}; page title ${JSON.stringify(
         seen.title,
       )}, ${seen.animations} running animation(s) under reduce`,

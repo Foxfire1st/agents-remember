@@ -40,6 +40,7 @@ _ARTIFACT_KEYS: Final = (
     "datasetCopies",
     "arCaches",
     "frameRevisions",
+    "explainerArtifacts",
 )
 DELETION_KEYS: Final = (*_ARTIFACT_KEYS, "releasedGenerations")
 _NUMBERED: Final = re.compile(r"\.attempt-(\d+)$")

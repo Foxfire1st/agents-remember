@@ -3,8 +3,9 @@
 The sealed acceptance asks for an actual default run and an actual repository-design run of one
 comparison that keep the same claims and coverage, reject a hide-limit/network/privilege design
 with a conversation disclosure, and leave saved revisions unchanged. These cases explicitly inject LocalPresenterHarness, a deterministic fixture; no native host or
-model runs. They assert on its local bytes only. The separate sandbox qualification supplies
-actual NativePresenterHarness authoring evidence.
+model runs. They assert on its local bytes only. The native presenter launch was retired with the
+explainer's move to the normal task server (MIK-R186 @ v2 Scope), so no native-authoring evidence is
+claimed here.
 
 The repository's memory layer here is a pytest ``tmp_path`` folder standing in for the configured
 one; nothing under this workspace's memory roots is read or written. Publication runs the product's

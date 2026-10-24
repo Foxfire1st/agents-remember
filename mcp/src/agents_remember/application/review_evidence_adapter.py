@@ -14,6 +14,11 @@ with its measured side/index states, reads the landed schemas at that exact tree
 Reading is the bounded read of :mod:`review_evidence_read`, so the adapter inherits its exact-tree
 operand, its byte and page bounds and its distinct absent/binary/unavailable states. It starts no
 role, launches no page and writes nothing: it prepares evidence for a consumer that already exists.
+
+One refusal belongs to the *binding* rather than to the claim model: on a planned comparison, a
+claim resting only on receipts of the leaf's packets, task document or reference files wears the
+``intended`` authority, and :func:`require_intended_authority` refuses ``recorded-fact`` or
+``mechanical-signal`` for it (MIK-R102 v2 item 1; MIK-R189 rule 6). Another binding is untouched.
 """
 
 from __future__ import annotations
@@ -23,9 +28,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.application.review_evidence_packet import (
+    COMPARISON_OWNER,
+    PLANNED_OWNER,
     SideState,
     build_evidence_packet,
     comparison_reference,
+    intended_receipt_ids,
     same_comparison,
 )
 from agents_remember.application.review_evidence_read import (
@@ -42,6 +50,7 @@ from agents_remember.models.knowledge.review_evidence import (
     EvidenceLimits,
     EvidenceMap,
     EvidencePacket,
+    SupplementalReceipt,
 )
 from agents_remember.models.knowledge.review_trees import (
     ReviewKnowledgeSide,
@@ -53,10 +62,13 @@ __all__ = [
     "NAME_JUDGMENTS",
     "NAME_PROOFS",
     "NAME_SOURCES",
+    "IntendedAuthorityRefusal",
     "PreparedAddress",
     "PreparedEvidence",
     "consume_address",
     "prepare_evidence",
+    "require_intended_authority",
+    "require_intended_packet",
 ]
 
 NAME_SOURCES = "source-inventory-and-linked-locations"
@@ -110,6 +122,92 @@ class AddressRead:
     detail: str = ""
 
 
+class EvidencePrecondition(ValueError):
+    """A preparation that cannot be made from what the comparison owner measured.
+
+    It carries the reason a build or an Update shows -- ``evidence-source-unavailable`` -- so an
+    absent input is a named refusal at the step that needed it, never a server error (MIK-R185 v2
+    rule 3).
+    """
+
+    reason = "evidence-source-unavailable"
+
+
+class IntendedAuthorityRefusal(EvidencePrecondition):
+    """A planned binding's claim was dressed in an authority its bases cannot earn (rule 7).
+
+    On a page bound to the planned comparison, a claim resting *only* on receipts of the leaf's own
+    packets, task document or reference files says what the task is meant to produce. That is the
+    ``intended`` authority; ``recorded-fact`` and ``mechanical-signal`` would read as facts about
+    code that does not exist yet (MIK-R102 v2 item 1; MIK-R189 rule 6). The refusal is named, so a
+    caller answers with it rather than with a server error.
+    """
+
+    reason = "intended-claim-required"
+
+
+def require_intended_authority(
+    claims: tuple[EvidenceClaim, ...],
+    *,
+    supplemental: tuple[SupplementalReceipt, ...],
+    comparison_owner: str,
+    leaf_id: str,
+    leaf_document: str | None = None,
+) -> None:
+    """Refuse a planned binding's claim that rests only on the task's own receipts (rule 7).
+
+    The rule is about the *binding*, so it runs here, where a revision's binding and its claim map
+    meet: the claim model cannot see the owner, and another binding's page must keep the kinds it
+    has always had. A claim whose present bases are all ``supplemental-receipt`` bases of an
+    admitted intended root must be classified ``intended``; a claim that also cites a tree blob or a
+    knowledge record at the master tip keeps today's kinds, because that citation is a fact about
+    code or memory that exists. An unread basis establishes nothing and is not a citation, so it is
+    not counted here either.
+    """
+
+    if comparison_owner != PLANNED_OWNER:
+        return
+    admitted = intended_receipt_ids(supplemental, leaf_id=leaf_id, leaf_document=leaf_document)
+    if not admitted:
+        return
+    for claim in claims:
+        if claim.classification not in {"recorded-fact", "mechanical-signal"}:
+            continue
+        present = [basis for basis in claim.bases if basis.state == "present"]
+        if not present:
+            continue
+        if all(
+            basis.kind == "supplemental-receipt" and basis.reference in admitted
+            for basis in present
+        ):
+            raise IntendedAuthorityRefusal(
+                f"on the planned comparison a claim resting only on packet, task-document or "
+                f"reference receipts is intended, not {claim.classification}: claim "
+                f"{claim.claim_id!r} cites "
+                f"{', '.join(sorted({str(basis.reference) for basis in present}))} and nothing at "
+                "the master tip, so it states behaviour the task is meant to produce rather than a "
+                "fact about the code"
+            )
+
+
+def require_intended_packet(
+    packet: EvidencePacket,
+    *,
+    comparison_owner: str,
+    leaf_id: str,
+    leaf_document: str | None = None,
+) -> None:
+    """The same refusal for an already-built packet, at the publication seam (rule 7)."""
+
+    require_intended_authority(
+        packet.claims.claims,
+        supplemental=packet.supplemental,
+        comparison_owner=comparison_owner,
+        leaf_id=leaf_id,
+        leaf_document=leaf_document,
+    )
+
+
 def prepare_evidence(  # noqa: PLR0913 - one preparation states its own scope and payload
     trees: ReviewTrees,
     *,
@@ -120,21 +218,40 @@ def prepare_evidence(  # noqa: PLR0913 - one preparation states its own scope an
     paths: tuple[str, ...] = (),
     family_path: str | None = None,
     limits: EvidenceLimits = DEFAULT_READ_LIMITS,
+    supplemental: tuple[SupplementalReceipt, ...] = (),
+    comparison_owner: str = COMPARISON_OWNER,
+    comparison_reference: str | None = None,
+    leaf_document: str | None = None,
 ) -> PreparedEvidence:
-    """Prepare from the comparison owner's opened sides, preserving its measured index state."""
+    """Prepare from the comparison owner's opened sides, preserving its measured index state.
+
+    ``leaf_document`` is the leaf's own task-document stem, when the caller knows it: a planned
+    binding's intended claims may rest on that document's own bytes, and this is how their receipt
+    is recognised (MIK-R102 v2 item 1).
+    """
 
     record = trees.record
     before = _memory_state(trees.before.wire)
     after = _memory_state(trees.after.wire)
     states = {side.side: SideState(side.state, side.detail) for side in trees.code_sides}
+    require_intended_authority(
+        claims,
+        supplemental=supplemental,
+        comparison_owner=comparison_owner,
+        leaf_id=record.leaf_id,
+        leaf_document=leaf_document,
+    )
     if set(states) != {"base", "candidate"}:
-        raise ValueError("preparation requires the comparison owner's measured code sides")
+        raise EvidencePrecondition(
+            "preparation requires the comparison owner's measured code sides; a comparison with "
+            "no measured side cannot be explained, and nothing is substituted for it"
+        )
     if claims:
         cited = {
             basis.path for claim in claims for basis in claim.bases if isinstance(basis.path, str)
         }
         if len(cited | set(paths)) > limits.paths_per_packet:
-            raise ValueError(
+            raise EvidencePrecondition(
                 f"the prepared scope names more than {limits.paths_per_packet} path(s); select a "
                 "narrower scope or page the evidence"
             )
@@ -159,6 +276,9 @@ def prepare_evidence(  # noqa: PLR0913 - one preparation states its own scope an
         limitations=_limitations(record, collections)
         + tuple(side.detail for side in (before, after) if side.detail),
         recorded_at=record.recorded_at,
+        supplemental=supplemental,
+        comparison_owner=comparison_owner,
+        comparison_reference_value=comparison_reference,
     )
     prepared = tuple(
         PreparedAddress(

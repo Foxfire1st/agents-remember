@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 from agents_remember.models.knowledge.review_evidence import (
     EVIDENCE_COLLECTIONS,
+    INTENDED_CLASSIFICATION,
     ClaimMap,
     EvidenceClaim,
     EvidenceCodeSide,
@@ -37,21 +38,51 @@ from agents_remember.models.knowledge.review_evidence import (
     EvidencePacket,
     SupplementalReceipt,
 )
+from agents_remember.models.knowledge.review_frame import (
+    COMPARISON_OWNER,
+    PLANNED_OWNER,
+    comparison_reference,
+    planned_reference,
+)
 from agents_remember.models.knowledge.review_trees import ReviewTreeComparisonRecord
 
 __all__ = [
     "COMPARISON_OWNER",
+    "INTENDED_AUTHORITY",
+    "INTENDED_REFERENCE_DIRECTORY",
+    "INTENDED_SOURCE_ROOTS",
+    "INTENDED_TASK_DOCUMENT",
+    "PLANNED_OWNER",
     "PacketBindingMismatch",
     "build_evidence_packet",
     "comparison_binding",
     "comparison_reference",
+    "intended_receipt_ids",
+    "intended_source_root",
+    "planned_reference",
     "retained_supplemental",
     "same_comparison",
     "unselected_collection",
 ]
 
-# Rule 1: the packet references the existing owner. The owner is named, not reimplemented.
-COMPARISON_OWNER = "agents_remember.application.review_tree_comparison"
+#: The claim authority for behaviour the task is meant to produce (MIK-R102 v2 item 1; MIK-R189
+#: rule 6). A planned page's claim that rests only on the task's own documents wears this one; the
+#: model's spelling is the only spelling, so the packet and the claim cannot drift apart.
+INTENDED_AUTHORITY: str = INTENDED_CLASSIFICATION
+#: The reference folder a planned leaf writes before it starts, under the admitted ``notes/`` root:
+#: ``notes/reference/<leaf>/`` (MIK-R189 rule 9).
+INTENDED_REFERENCE_DIRECTORY = "notes/reference"
+#: The leaf's own task document, admitted by its exact two names at the task root and never by the
+#: root itself (MIK-R102 v2 item 2).
+INTENDED_TASK_DOCUMENT = "task-document"
+INTENDED_TASK_DOCUMENT_IDS: frozenset[str] = frozenset(
+    {"task-document", "task-document-json", "task-document-md"}
+)
+#: The supplemental roots an intended claim's bases may be receipts of: a packet under
+#: ``requirements/``, the leaf's task document, and a file under ``notes/reference/<leaf>/``.
+#: ``DEVELOPER-DIRECTION.md`` is deliberately outside them: a decision reaches a page through the
+#: packet that quotes it, never as a receipt of its own (MIK-R102 v2 item 2).
+INTENDED_SOURCE_ROOTS: tuple[str, ...] = ("requirements", INTENDED_REFERENCE_DIRECTORY)
 
 
 class PacketBindingMismatch(ValueError):
@@ -67,12 +98,6 @@ class SideState:
     index_state: str | None = None
 
 
-def comparison_reference(record: ReviewTreeComparisonRecord) -> str:
-    """The stable reference of one existing comparison: task, leaf and its own number."""
-
-    return f"review-comparison:{record.task_id}/{record.leaf_id}/{record.number}"
-
-
 def comparison_binding(  # noqa: PLR0913 -- one record's four sides, each with its own state
     record: ReviewTreeComparisonRecord,
     *,
@@ -82,6 +107,8 @@ def comparison_binding(  # noqa: PLR0913 -- one record's four sides, each with i
     memory_before: SideState,
     memory_after: SideState,
     recorded_at: str,
+    owner: str = COMPARISON_OWNER,
+    reference: str | None = None,
 ) -> EvidenceComparisonBinding:
     """Copy one record's four sides and conversion inputs into a packet binding (rule 1).
 
@@ -100,12 +127,12 @@ def comparison_binding(  # noqa: PLR0913 -- one record's four sides, each with i
         )
     )
     return EvidenceComparisonBinding(
-        comparison_owner=COMPARISON_OWNER,
+        comparison_owner=owner,
         repository_id=repository_id,
         task_id=record.task_id,
         leaf_id=record.leaf_id,
         comparison_number=record.number,
-        comparison_reference=comparison_reference(record),
+        comparison_reference=reference or comparison_reference(record),
         code_base=EvidenceCodeSide(
             side="base",
             repository=record.code_base.repository,
@@ -241,10 +268,13 @@ def _admit_populations(
         )
 
 
-def _omissions_for(collections: Sequence[EvidenceCollection]) -> tuple[EvidenceOmission, ...]:
-    """The evidence map's own entry for every collection preparation did not build."""
+def _omissions_for(
+    collections: Sequence[EvidenceCollection],
+    supplemental: Sequence[SupplementalReceipt] = (),
+) -> tuple[EvidenceOmission, ...]:
+    """The evidence map's own entry for every skipped collection or truncated receipt read."""
 
-    return tuple(
+    collection_omissions = tuple(
         EvidenceOmission(
             item=collection.name,
             kind="not-selected-collection",
@@ -254,6 +284,17 @@ def _omissions_for(collections: Sequence[EvidenceCollection]) -> tuple[EvidenceO
         for collection in collections
         if collection.state in {"not-selected", "not-read"}
     )
+    receipt_omissions = tuple(
+        EvidenceOmission(
+            item=receipt.canonical_source,
+            kind="truncated-read",
+            detail=receipt.limitation or "supplemental source omitted at read bound",
+            witness=receipt.receipt_id,
+        )
+        for receipt in supplemental
+        if receipt.read_state == "unavailable" and "truncated-read" in (receipt.limitation or "")
+    )
+    return collection_omissions + receipt_omissions
 
 
 def build_evidence_packet(  # noqa: PLR0913 -- one call states one packet's own inputs
@@ -274,6 +315,8 @@ def build_evidence_packet(  # noqa: PLR0913 -- one call states one packet's own 
     limitations: Sequence[str] = (),
     recorded_at: str,
     skipped_reason: str = "preparation selected no producer for this collection",
+    comparison_owner: str = COMPARISON_OWNER,
+    comparison_reference_value: str | None = None,
 ) -> EvidencePacket:
     """One comparison's packet, with every collection and claim accounted for.
 
@@ -285,7 +328,7 @@ def build_evidence_packet(  # noqa: PLR0913 -- one call states one packet's own 
 
     built = _default_collections(collections or {}, skipped_reason)
     _admit_populations(built, claims, limits)
-    named = evidence_map.omissions + _omissions_for(built)
+    named = evidence_map.omissions + _omissions_for(built, supplemental)
     return EvidencePacket(
         comparison=comparison_binding(
             record,
@@ -295,6 +338,8 @@ def build_evidence_packet(  # noqa: PLR0913 -- one call states one packet's own 
             memory_before=memory_before,
             memory_after=memory_after,
             recorded_at=recorded_at,
+            owner=comparison_owner,
+            reference=comparison_reference_value,
         ),
         scope=scope,
         question=question,
@@ -391,3 +436,75 @@ def retained_supplemental(packet: EvidencePacket) -> tuple[SupplementalReceipt, 
     """The receipts a packet keeps, exactly as captured: never refreshed in place (rule 6)."""
 
     return packet.supplemental
+
+
+def intended_source_root(
+    canonical_source: str, *, leaf_id: str, leaf_document: str | None = None
+) -> str | None:
+    """Which admitted root an intended claim's receipt may come from, or ``None`` (item 1).
+
+    Exactly three kinds of source establish an intention (MIK-R189 rule 6):
+
+    * a packet file under ``requirements/``;
+    * the leaf's own task document -- ``<leaf_document>.json`` and ``.md`` at the task root, or the
+      names built from ``leaf_id`` when the caller does not name the document's stem;
+    * a file under ``notes/reference/<leaf_id>/``.
+
+    Everything else answers ``None``, and ``DEVELOPER-DIRECTION.md`` answers ``None`` explicitly: it
+    sits at the task root beside the document and is not admitted, because a decision reaches a page
+    through the packet that quotes it (MIK-R102 v2 item 2). A path that is absolute, carries a
+    ``..`` or ``.`` segment, or a backslash is refused here too, so the predicate and the receipt
+    admission agree about what a task-relative path is.
+    """
+
+    source = canonical_source.strip()
+    if not source or source.startswith("/") or "\\" in source:
+        return None
+    segments = source.split("/")
+    if any(segment in {"", ".", ".."} for segment in segments):
+        return None
+    if segments[0] == "requirements" and len(segments) > 1:
+        return "requirements"
+    if (
+        len(segments) > 2
+        and segments[0] == "notes"
+        and segments[1] == "reference"
+        and segments[2] == leaf_id
+    ):
+        return f"{INTENDED_REFERENCE_DIRECTORY}/{leaf_id}"
+    if len(segments) == 1 and source.endswith((".json", ".md")):
+        stem = source.rsplit(".", 1)[0]
+        if stem == leaf_id or (leaf_document is not None and stem == leaf_document):
+            return INTENDED_TASK_DOCUMENT
+    return None
+
+
+def intended_receipt_ids(
+    receipts: Sequence[SupplementalReceipt],
+    *,
+    leaf_id: str,
+    leaf_document: str | None = None,
+) -> frozenset[str]:
+    """The receipts whose source is one of the three intended roots, by receipt id (item 1).
+
+    Only a ``present`` receipt names bytes that were examined, so only it can establish anything.
+    The leaf's own document receipt is also recognised by its id, ``task-document``: the receipt
+    composer names the leaf's own document exactly that, and admission has already refused another
+    leaf's document under the leaf's own name.
+    """
+
+    admitted: set[str] = set()
+    for receipt in receipts:
+        if receipt.read_state != "present":
+            continue
+        root = intended_source_root(
+            receipt.canonical_source, leaf_id=leaf_id, leaf_document=leaf_document
+        )
+        named_document = (
+            receipt.receipt_id in INTENDED_TASK_DOCUMENT_IDS
+            and "/" not in receipt.canonical_source
+            and receipt.canonical_source.endswith((".json", ".md"))
+        )
+        if root is not None or named_document:
+            admitted.add(receipt.receipt_id)
+    return frozenset(admitted)

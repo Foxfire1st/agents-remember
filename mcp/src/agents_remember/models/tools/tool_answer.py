@@ -216,8 +216,11 @@ INTERIM_TOOL_LEAF: dict[str, str] = {
     "task_reopen": "L111",
     "role_start": "L111",
     "role_message": "L111",
+    # L183: the review page's explainer control (explainer_control.py) answers with the
+    # environment's state and the next step, and stands interim until its leaf lands.
+    "explainer_control": "L183",
 }
-INTERIM_LEAVES = ("L100", "L110", "L111", "L112")
+INTERIM_LEAVES = ("L100", "L110", "L111", "L112", "L183")
 
 
 # Rule 9 (L112): the landed leaf's final rows carry their own bounds. The

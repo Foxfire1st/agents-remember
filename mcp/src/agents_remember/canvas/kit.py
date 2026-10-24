@@ -23,9 +23,11 @@ __all__ = [
     "KitEntry",
     "KitFile",
     "KitRefused",
+    "encode_kit_offer",
     "kit_assets",
     "kit_files",
     "kit_manifest",
+    "kit_protocol_helper_js",
 ]
 
 #: Where a revision carries kit files, and how a page names one (the manifest's own contract).
@@ -185,3 +187,77 @@ def kit_assets(paths: list[str] | tuple[str, ...], root: Path | None = None) -> 
         except OSError as error:
             raise KitRefused("kit-file-absent", f"{path}: {error}") from error
     return carried
+
+
+def kit_protocol_helper_js() -> str:
+    """The kit's in-frame protocol helper for ``stale-parts`` and ``offer-selections`` (MIK-R104)."""
+
+    return (
+        "const markStale=(parts,total)=>{"
+        "for(const el of document.querySelectorAll('[data-ar-stale-part]')){"
+        "el.removeAttribute('data-ar-stale-part');el.removeAttribute('data-ar-stale-more');}"
+        "if(!Array.isArray(parts))return;"
+        "const list=parts.slice(0,32);"
+        "for(const id of list){"
+        "if(typeof id!=='string'||!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id))continue;"
+        'for(const el of document.querySelectorAll(`[data-part="${id}"]`)){'
+        "el.setAttribute('data-ar-stale-part','true');}}"
+        "const extra=(typeof total==='number'?total:list.length)-list.length;"
+        "if(extra>0&&document.documentElement){"
+        "document.documentElement.setAttribute('data-ar-stale-more',`+${extra} more`);}"
+        "else if(document.documentElement){"
+        "document.documentElement.removeAttribute('data-ar-stale-more');}};"
+        "addEventListener('message',event=>{"
+        "if(event.source!==host)return;"
+        "const d=event.data;"
+        "if(!d||typeof d!=='object'||d.schema!=='ar-canvas-message/v1'||d.protocolVersion!==1)return;"
+        "if(d.type!=='stale-parts'||d.session!==binding.session||d.revision!==binding.revision)return;"
+        "if(d.comparison&&d.comparison!==binding.comparison)return;"
+        "const p=d.payload;"
+        "if(!p||typeof p!=='object'||!Array.isArray(p.parts))return;"
+        "markStale(p.parts,p.total);});"
+        "window.arCanvasKit={"
+        "offerSelections:(selections,requestId)=>{"
+        "const env={schema:'ar-canvas-message/v1',protocolVersion:1,type:'offer-selections',"
+        "requestId:String(requestId||'offer-0001'),session:binding.session,"
+        "revision:binding.revision,comparison:binding.comparison,payload:{selections}};"
+        "const bytes=new TextEncoder().encode(JSON.stringify(env)).length;"
+        "if(bytes>4096)return{state:'refused',reason:'oversized',bytes};"
+        "notify(env,'*');return{state:'sent',bytes};},"
+        "requestExplanation:(question,requestId)=>{"
+        "const env={schema:'ar-canvas-message/v1',protocolVersion:1,type:'request-explanation',"
+        "requestId:String(requestId||'explain-0001'),session:binding.session,"
+        "revision:binding.revision,comparison:binding.comparison,payload:{question}};"
+        "const bytes=new TextEncoder().encode(JSON.stringify(env)).length;"
+        "if(bytes>4096)return{state:'refused',reason:'oversized',bytes};"
+        "notify(env,'*');return{state:'sent',bytes};}};"
+    )
+
+
+def encode_kit_offer(
+    *,
+    session: str,
+    revision: int,
+    comparison: str,
+    request_id: str,
+    selections: list[dict[str, str]],
+) -> bytes:
+    """Encode a frame's ``offer-selections`` message, refusing over the 4,096-byte UTF-8 cap."""
+
+    envelope = {
+        "schema": "ar-canvas-message/v1",
+        "protocolVersion": 1,
+        "type": "offer-selections",
+        "requestId": request_id,
+        "session": session,
+        "revision": revision,
+        "comparison": comparison,
+        "payload": {"selections": selections},
+    }
+    encoded = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > 4096:
+        raise KitRefused(
+            "oversized",
+            f"the selection offer is {len(encoded)} UTF-8 bytes, beyond the 4096-byte cap",
+        )
+    return encoded

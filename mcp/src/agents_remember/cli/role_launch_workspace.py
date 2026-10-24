@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.direct_execution_grants import refuse_open_direct_sibling
-from agents_remember.application.role_launch_context import LEAF_ROLES, RoleLaunchContext
+from agents_remember.application.role_launch_context import (
+    RoleLaunchContext,
+)
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tool_requests import TaskIdentity
 from agents_remember.application.worktree_tools import worktree_status_tool
@@ -21,9 +23,15 @@ from agents_remember.cli.role_message_files import (
 from agents_remember.errors import MemoryModeUnsupportedError, RolePreparationError
 from agents_remember.kernel.direct_execution_grants import DirectGrantError, read_grant
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import LEAF_ROLES
+from agents_remember.tasks.document import INTENT_REVIEW_REFUSAL, intent_review_refusal
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.tasks.store import read_task_doc
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 from agents_remember.worktrees import outside_scratch
+from agents_remember.worktrees.start_task_publication import publish_start_task_facts
+from agents_remember.worktrees.task_document_copies import prepare_leaf_workspace_reference
+from agents_remember.worktrees.task_leaf_binding import TaskLeafBindingError
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -217,6 +225,66 @@ def _resolve_direct_workspace(
     return workspace
 
 
+def _refuse_open_intent_review(leaf: ResolvedTaskDocument) -> None:
+    """MIK-R189 rule 2: a leaf whose intent review is open refuses every leaf role's start.
+
+    Answered before the enclosure is ensured, so a refused start creates nothing: no enclosure,
+    no contract, no seat.
+    """
+
+    refusal = intent_review_refusal(leaf.document)
+    if refusal is None:
+        return
+    raise RolePreparationError(
+        INTENT_REVIEW_REFUSAL,
+        refusal,
+        "The architect records the developer's answer as `go` in `intentReview` through "
+        "task_doc, then this same role start is admitted. A start refused this way is never "
+        "retried on its own.",
+    )
+
+
+def _move_found_enclosure_to_in_progress(
+    context: RoleLaunchContext,
+    contract_path: Path,
+    status: dict[str, Any],
+) -> None:
+    """MIK-R189 v2: a found live enclosure makes the leaf's stage move here.
+
+    It is the last act of the resolution -- after the intent-review gate and the folder checks --
+    so a refused start moves nothing and the first seat's copies already read ``inProgress``. A
+    created enclosure moved in ``worktree_start``; a terminal or reopened contract and a leaf
+    that is not ``planning`` are untouched, and a retry writes nothing once the facts agree.
+    """
+
+    if str(status.get("enclosurePreparation")) != "found":
+        return
+    try:
+        contract = load_contract(contract_path)
+    except (ContractError, MemoryModeUnsupportedError, OSError, UnicodeError, ValueError):
+        return
+    if contract.cleanup in ("abandoned", "reopened", "completed"):
+        return
+    if context.task is None:
+        return
+    try:
+        document = read_task_doc(context.task.path)
+    except (OSError, UnicodeError, ValueError):
+        return
+    if document.status != "planning":
+        return
+    try:
+        publish_start_task_facts(contract, started=True)
+    except TaskLeafBindingError as error:
+        raise RolePreparationError(
+            error.status,
+            error.detail,
+            "The leaf's enclosure was found, but its start facts could not be written. Inspect "
+            "worktree_status and repair the leaf/enclosure binding, then repeat this same role "
+            "start. No seat was made.",
+        ) from error
+
+
 def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> dict[str, str]:
     """The folder the role class is entitled to: Projects, or the leaf's enclosure group folder.
 
@@ -227,6 +295,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
     if context.role not in LEAF_ROLES:
         return workspace_folder(config.workspace_root)
     assert context.task is not None and context.sprint is not None
+    _refuse_open_intent_review(context.task)
     direct = _direct_leaf_grant(config, context.task)
     if direct:
         return _resolve_direct_workspace(config, context)
@@ -252,6 +321,15 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
     workspace["messagesLink"] = (group / MESSAGES_LINK).as_posix()
     if messages_warning is not None:
         workspace["messagesLinkWarning"] = messages_warning
+    reference_result = prepare_leaf_workspace_reference(
+        config.coordination_root, group, context.task.path
+    )
+    workspace["referenceRoot"] = str(
+        status.get("referenceRoot") or reference_result["referenceRoot"]
+    )
+    reference_warning = status.get("referenceWarning") or reference_result.get("warning")
+    if isinstance(reference_warning, str) and reference_warning:
+        workspace["referenceWarning"] = reference_warning
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
     report_access = group / "role-reports"
@@ -269,6 +347,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
         taskReportAccessRoot=report_access.as_posix(),
         outsideScratchRoot=_ensure_leaf_root(contract_path, group),
     )
+    _move_found_enclosure_to_in_progress(context, contract_path, status)
     return workspace
 
 
@@ -363,6 +442,14 @@ def _ensure_leaf_enclosure(
     if status.get("ok") is not True:
         raise _preparation_refusal(status, contract_path, leaf.ref.repository)
     status = {**status, "enclosurePreparation": preparation}
+    raw_group = status.get("worktree_group")
+    if isinstance(raw_group, str) and raw_group and Path(raw_group).is_dir():
+        ref_copy = prepare_leaf_workspace_reference(
+            config.coordination_root, Path(raw_group).resolve(), leaf.path
+        )
+        status["referenceRoot"] = ref_copy["referenceRoot"]
+        if isinstance(ref_copy.get("warning"), str) and ref_copy["warning"]:
+            status["referenceWarning"] = ref_copy["warning"]
     return contract_path, status
 
 

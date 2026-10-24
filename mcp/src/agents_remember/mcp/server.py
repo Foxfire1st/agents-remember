@@ -1,10 +1,14 @@
 """Stdio MCP server wiring for Agents Remember."""
 
+from __future__ import annotations
+
 import argparse
+import asyncio
 import json
 import time
 from contextlib import suppress
 from datetime import UTC, datetime
+from importlib import import_module
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -23,14 +27,12 @@ from agents_remember.application.tool_answer_log import (
     resolve_log_roots,
     tool_call_context,
 )
+from agents_remember.canvas.explainer_answers import refusal
+from agents_remember.canvas.explainer_binding import LaunchedSeat, require_launched_seat
+from agents_remember.canvas.explainer_state import ExplainerRefused
 
 # Application owns process trust and startup composition; transport only invokes it.
 # Server factories stay state-free for in-process tests.
-from agents_remember.application.worktree_services import (
-    bind_worktree_services,
-    build_default_worktree_services,
-)
-from agents_remember.cli.role_launch_archive import LeafAgentArchive
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
     McpRuntimeConfig,
@@ -40,6 +42,12 @@ from agents_remember.kernel.primitives.runtime_config import (
 from .compact_content import install_compact_content
 from .read_only import apply_read_only_marks
 from .registration import TOOL_REGISTRARS
+from .registration.explainer_surface import (
+    EXPLAINER_SURFACE,
+    read_explainer_binding,
+    refuse_unexposed,
+    register_explainer_surface,
+)
 
 
 class AgentsRememberMCP(FastMCP):
@@ -56,10 +64,42 @@ class AgentsRememberMCP(FastMCP):
     # instance (a test), where the log resolves without it.
     _agents_remember_config: Any | None = None
 
+    # MIK-R186 @ v2 rule 3: when this process was launched as an explainer seat, the only tools it
+    # advertises *and* dispatches are the explainer's. None on an ordinary server.
+    _bound_surface: tuple[str, ...] | None = None
+
+    # MIK-R186 @ v2 rule 3: the seat this process was launched for. Set with `_bound_surface`; every
+    # dispatched call is checked against it, so a forged or replaced seat answers by name.
+    _explainer_binding: Any | None = None
+
     async def list_tools(self) -> list[Any]:
-        return await super().list_tools()
+        answer = await super().list_tools()
+        # MIK-R204 @ v1 rule 3 as amended (80f71dff): the one post-discovery start -- the
+        # outside-scratch sweep always and dashboard supervision when autoStart is true -- is
+        # scheduled from the event loop right after this first discovery answer has been produced,
+        # so neither initialize nor the answer waits for it. The first tool call below is the
+        # fallback for a client that never lists; one latch covers both, so it happens once.
+        loop = asyncio.get_running_loop()
+        loop.call_soon(
+            server_startup.start_after_discovery,
+            getattr(self, "_agents_remember_config", None),
+        )
+        return answer
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        # MIK-R204 @ v1 rule 3 as amended: this is the fallback start, for a client that never
+        # lists tools. The same once-only latch runs the outside-scratch sweep and, when autoStart
+        # is set, dashboard supervision; a second call is a no-op. Both launches are daemon threads
+        # and the attempt is total, so this neither delays nor changes the answer below. The
+        # tool-event writer stays at startup because it is the boot-time caller identity of rule 4.
+        config = getattr(self, "_agents_remember_config", None)
+        server_startup.start_after_discovery(config)
+        # MIK-R186 @ v2 rule 3: a bound explainer server answers its own surface and nothing else. The
+        # list is enforced here as well as at registration, so naming a tool directly is refused by name
+        # rather than merely absent from discovery.
+        bound = getattr(self, "_bound_surface", None)
+        if bound is not None and name not in bound:
+            raise refuse_unexposed(name)
         # MIK-R108 rule 3: every call is written to the daily log with its
         # arguments, outcome, duration and answer size. The context carries
         # the exact MCP arguments, the call start, and this server's config
@@ -67,8 +107,15 @@ class AgentsRememberMCP(FastMCP):
         # the completed call; a call that raises is logged here and re-raised.
         # Dispatch input refusals happen inside the context so they are
         # logged like any other raised call.
-        config = getattr(self, "_agents_remember_config", None)
         with tool_call_context(name, arguments, config=config):
+            launched = getattr(self, "_explainer_binding", None)
+            if launched is not None:
+                # MIK-R186 @ v2 rule 3 sentences 3-4: every tool of this server checks that the caller
+                # is the seat the server was launched for, and answers a forged or replaced seat as
+                # data. One check covers all 22 tools because it sits ahead of every one of them.
+                not_this_seat = _launched_seat_refusal(launched)
+                if not_this_seat is not None:
+                    return not_this_seat
             try:
                 return await super().call_tool(name, arguments)
             except Exception as error:
@@ -123,6 +170,21 @@ def _log_raised_tool_call(
         )
 
 
+def _launched_seat_refusal(binding: LaunchedSeat) -> dict[str, Any] | None:
+    """MIK-R186 @ v2 rule 3: the caller must be the seat this bound server was launched for.
+
+    The comparison is `canvas.explainer_binding.require_launched_seat`, one owner for both halves of
+    the launch identity; a refusal is answered as the same data shape every explainer tool answers,
+    never as a transport error.
+    """
+
+    try:
+        require_launched_seat(binding)
+    except ExplainerRefused as refused:
+        return refusal(refused.reason, refused.detail)
+    return None
+
+
 def _complete_fastmcp_settings() -> None:
     """Resolve FastMCP's generic forward reference for strict warning policies."""
     FastMCPSettings.model_rebuild(_types_namespace={"FastMCP": FastMCP})
@@ -151,11 +213,23 @@ def launched_server_instructions() -> str | None:
     return LAUNCHED_SERVER_INSTRUCTIONS if bound else None
 
 
+def _worktree_services(config: McpRuntimeConfig) -> Any:
+    """Build this process's worktree services, on the first operation that asks for them."""
+
+    from agents_remember.cli.role_launch_archive import LeafAgentArchive  # noqa: PLC0415
+
+    composed = import_module("agents_remember.application.worktree_services")
+    return composed.build_default_worktree_services(leaf_agent_archive=LeafAgentArchive(config))
+
+
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
-    bind_worktree_services(
-        build_default_worktree_services(leaf_agent_archive=LeafAgentArchive(config))
-    )
+    # MIK-R204 @ v1 rule 3: the worktree services are an operation collaborator, not discovery work. The
+    # composition names how to build them; the first worktree operation that needs them builds them once.
+    # The services package is a worktree collaborator, not a startup dependency: naming the supplier is the
+    # only thing this process needs from it, and it is resolved here rather than imported at module level.
+    binding = import_module("agents_remember.kernel.worktree_service_binding")
+    binding.set_worktree_services_supplier(lambda: _worktree_services(config))
     # Initialize the process's application services before registering tools.
     server_startup.initialize_mcp_application(config)
     _complete_fastmcp_settings()
@@ -163,10 +237,20 @@ def create_server(config: McpRuntimeConfig) -> Any:
     # MIK-R108 rule 3: the dispatch carries this server's config (coordination
     # and transcript roots, toolLog keeping) to the answer boundary per call.
     server._agents_remember_config = config
-    # The tool surface itself lives in `.registration`, one module per family; this loop is
-    # the only place that decides which families a server advertises.
-    for register_tools in TOOL_REGISTRARS:
-        register_tools(server, config)
+    # The tool surface itself lives in `.registration`, one module per family; this is the only place
+    # that decides which families a server advertises. MIK-R186 @ v2 rule 3: a launch that bound this
+    # process as an explainer seat gets one surface -- the explainer's -- and an invalid binding refuses
+    # service instead of falling through to the ordinary roster.
+    binding = read_explainer_binding(config)
+    if binding is None:
+        for register_tools in TOOL_REGISTRARS:
+            register_tools(server, config)
+    else:
+        server._bound_surface = EXPLAINER_SURFACE
+        # MIK-R186 @ v2 rule 3: the binding names the seat this process serves, and the dispatch checks
+        # every call against it.
+        server._explainer_binding = binding
+        register_explainer_surface(server, config, binding)
     # MIK-R109 rule 7: the one list of read-only marks rides on the advertised
     # annotations, applied here so every family is covered and an unlisted
     # tool breaks creation instead of shipping unmarked.
@@ -196,8 +280,9 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as error:
         parser.error(str(error))
 
-    # Preparation idempotently retains the process declaration, then owns boot-time dashboard
-    # supervision.  It remains total/threaded so it cannot delay or break the stdio handshake.
-    server_startup.prepare_mcp_process(config)
+    # Preparation retains only the process declaration. Dashboard supervision starts right after
+    # the first tool-list answer (or on the first tool call as a fallback), so initialize never
+    # starts a dashboard thread (MIK-R204 @ v1 rule 3 as amended).
+    server_startup.prepare_mcp_process()
     run_server(config)
     return 0

@@ -42,6 +42,9 @@ _MUTABLE_FIELDS = frozenset(
         "executionGraph",
         "knowledgeMaintenanceScope",
         "expectedKnowledgeEffects",
+        # MIK-R189 rule 8: the architect records the developer's answer here. Absent from this set
+        # the applier would silently ignore it while the phrase claimed the write.
+        "intentReview",
     }
 )
 

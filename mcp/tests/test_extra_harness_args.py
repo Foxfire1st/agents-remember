@@ -2,7 +2,9 @@
 
 The cases cover the settings family's three places and their layering, the shape and the refusals
 that keep the user's file honest, the resolution of one start's arguments and their record, the
-hand-over through the host's provider options, and the confined presenter's refusal.
+hand-over through the host's provider options, and the record a start keeps when the host's map
+cannot be read. The confined-seat refusal those arguments earn is the explainer host's
+(:mod:`test_explainer_host`); the old presenter's copy went with its retired launch.
 """
 
 from __future__ import annotations
@@ -13,16 +15,13 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from _user_settings_guard import user_settings_path_for_write
 from agents_remember.application.role_launch_context import RoleLaunchContext
-from agents_remember.canvas import presenter_native
-from agents_remember.canvas.presenter_host import HostIdentity
-from agents_remember.canvas.presenter_native import NativePresenterHarness
-from agents_remember.canvas.presenter_store import PresenterAttempt, PresenterRefused
 from agents_remember.cli import paseo_bridge
+from agents_remember.cli import paseo_catalog as presenter_catalog
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure
 from agents_remember.cli.paseo_launch import (
     RoleLaunch,
@@ -586,97 +585,6 @@ def host_config(root: Path, providers: dict[str, Any]) -> McpRuntimeConfig:
     )
 
 
-def presenter(config: McpRuntimeConfig) -> NativePresenterHarness:
-    return NativePresenterHarness(config, identity=HostIdentity(REPO, "task", "leaf", "frame"))
-
-
-@pytest.mark.parametrize("block", ["options", "params"])
-def test_each_confined_step_refuses_a_host_map_that_gives_claude_arguments(
-    root: Path, monkeypatch: pytest.MonkeyPatch, block: str
-) -> None:
-    monkeypatch.setattr(
-        "agents_remember.serving.paseo.paseo_daemon_config.daemon_provider_extra_args",
-        lambda config, provider, read_config=None: (),
-    )
-    config = host_config(root, {"claude": {block: {"extraArgs": {"chrome": None}}}})
-    runtime = config.paseo_runtime
-    assert runtime is not None
-    harness = presenter(config)
-
-    for step in (
-        lambda: harness.message("agent-1", role="developer", text="hello"),
-        lambda: harness.start(cast(PresenterAttempt, object()), "instructions", root / "working"),
-        lambda: harness.reconcile(cast(PresenterAttempt, object()), root / "working"),
-        lambda: harness.resume("agent-1"),
-    ):
-        with pytest.raises(PresenterRefused) as refused:
-            step()
-        assert refused.value.reason == "presenter-host-extra-arguments"
-        assert str(runtime.home / "config.json") in refused.value.detail
-        assert "chrome" in refused.value.detail
-        assert "runtime_install" in refused.value.detail
-        assert "paseo provision" in refused.value.detail
-
-
-def test_a_host_map_without_claude_arguments_lets_a_confined_step_run(
-    root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "agents_remember.serving.paseo.paseo_daemon_config.daemon_provider_extra_args",
-        lambda config, provider, read_config=None: (),
-    )
-    config = host_config(root, {"claude": {"options": {"disallowedTools": ["mcp__x"]}}})
-    harness = presenter(config)
-
-    assert harness._require_confined_host() is None
-
-
-def test_a_clean_file_and_a_dirty_running_map_refuse_a_confined_step(
-    root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """MIK-R192 rule 8: the running daemon's map is read at the envelope the daemon reports.
-
-    The file holds no extra arguments and the daemon reports ``chrome`` at ``config.providers``,
-    where Paseo's client puts it. An adapter that looked under the file's ``agents.providers``
-    found nothing and let the step run with the host's argument (L184-R1-F21).
-    """
-
-    config = host_config(root, {"claude": {"options": {"disallowedTools": ["mcp__x"]}}})
-    monkeypatch.setattr(
-        paseo_bridge,
-        "bridge_call",
-        lambda config, command, payload: {
-            "config": {"providers": {"claude": {"options": {"extraArgs": {"chrome": None}}}}},
-            "readAt": "2026-10-21T09:00:00.000Z",
-        },
-    )
-
-    with pytest.raises(PresenterRefused) as refused:
-        presenter(config)._require_confined_host()
-
-    assert refused.value.reason == "presenter-host-extra-arguments"
-    assert "chrome" in refused.value.detail
-
-
-def test_a_live_map_that_cannot_be_read_refuses_a_confined_step(
-    root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A map that was not read is not a clean one: the confined step refuses before the host."""
-
-    config = host_config(root, {"claude": {"options": {"disallowedTools": ["mcp__x"]}}})
-
-    def unread(config: Any, command: str, payload: dict[str, Any]) -> dict[str, Any]:
-        raise PaseoBridgeFailure("paseo_daemon_unreachable", "the daemon did not answer")
-
-    monkeypatch.setattr(paseo_bridge, "bridge_call", unread)
-
-    with pytest.raises(PresenterRefused) as refused:
-        presenter(config)._require_confined_host()
-
-    assert refused.value.reason == "presenter-host-map-unread"
-    assert "paseo_daemon_unreachable" in refused.value.detail
-
-
 def test_an_ordinary_start_records_a_live_map_it_could_not_read(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -756,85 +664,6 @@ def test_a_start_whose_map_was_read_and_clean_records_no_plan(root: Path) -> Non
     assert extra_args_plan(statement, "claude") is None
 
 
-def test_a_presenter_resume_refuses_the_host_map_before_any_host_call(
-    root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """MIK-R192 rule 8: the public resume route checks the map before the host is asked.
-
-    The set, the daemon's file stands under a clean map, is dirty, so the host must not be called
-    at all: a resume that reached it would run the seat with the configured arguments.
-    """
-    monkeypatch.setattr(
-        "agents_remember.serving.paseo.paseo_daemon_config.daemon_provider_extra_args",
-        lambda config, provider, read_config=None: (),
-    )
-    config = host_config(root, {"claude": {"options": {"extraArgs": {"chrome": None}}}})
-    calls: list[str] = []
-
-    def bridge(config: Any, command: str, payload: dict[str, Any]) -> dict[str, Any]:
-        calls.append(command)
-        raise AssertionError("the host must not be asked while the map gives Claude arguments")
-
-    monkeypatch.setattr(presenter_native, "bridge_call", bridge)
-    harness = presenter(config)
-
-    with pytest.raises(PresenterRefused) as refused:
-        harness.resume("agent-1")
-
-    assert refused.value.reason == "presenter-host-extra-arguments"
-    assert "chrome" in refused.value.detail
-    assert calls == []
-
-
-def test_a_presenter_resume_refuses_a_running_daemon_map_the_file_does_not_show(
-    root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The host's running map alone is enough: a clean file does not let the resume through."""
-    monkeypatch.setattr(
-        "agents_remember.serving.paseo.paseo_daemon_config.daemon_provider_extra_args",
-        lambda config, provider, read_config=None: ("chrome",),
-    )
-    config = host_config(root, {"claude": {"options": {"disallowedTools": ["mcp__x"]}}})
-    calls: list[str] = []
-    monkeypatch.setattr(
-        presenter_native,
-        "bridge_call",
-        lambda config, command, payload: calls.append(command) or {},
-    )
-    harness = presenter(config)
-
-    with pytest.raises(PresenterRefused) as refused:
-        harness.resume("agent-1")
-
-    assert refused.value.reason == "presenter-host-extra-arguments"
-    assert calls == []
-
-
-def test_a_presenter_resume_under_a_clean_map_reaches_the_same_session(
-    root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The positive control: the same session, one host call, nothing refused."""
-    monkeypatch.setattr(
-        "agents_remember.serving.paseo.paseo_daemon_config.daemon_provider_extra_args",
-        lambda config, provider, read_config=None: (),
-    )
-    config = host_config(root, {"claude": {"options": {"disallowedTools": ["mcp__x"]}}})
-    calls: list[tuple[str, dict[str, Any]]] = []
-
-    def bridge(config: Any, command: str, payload: dict[str, Any]) -> dict[str, Any]:
-        calls.append((command, payload))
-        return {"agent": {"status": "running", "archivedAt": None}, "resume": {"resumed": True}}
-
-    monkeypatch.setattr(presenter_native, "bridge_call", bridge)
-    harness = presenter(config)
-
-    receipt = harness.resume("agent-1")
-
-    assert calls == [("agent-resume", {"agentId": "agent-1"})]
-    assert receipt.session_id == "agent-1"
-    assert receipt.execution_id == "agent-1"
-
-
 def test_the_presenter_launch_states_no_extra_arguments(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -852,9 +681,11 @@ def test_the_presenter_launch_states_no_extra_arguments(
         captured.update(defaults)
         return "claude", {"model": "the-model", "choices": {}}
 
-    monkeypatch.setattr(presenter_native, "resolve_agent_selection", resolve)
+    # MIK-R186 @ v2 rule 3: the settings-role launch resolution lives with the catalog now, and the
+    # presenter module keeps none of its own.
+    monkeypatch.setattr(presenter_catalog, "resolve_agent_selection", resolve)
 
-    presenter_native.qualified_launch(config, REPO)
+    presenter_catalog.settings_role_launch(config, REPO)
 
     assert "extraArgs" not in captured
 

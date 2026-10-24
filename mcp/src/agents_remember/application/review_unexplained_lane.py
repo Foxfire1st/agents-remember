@@ -28,11 +28,13 @@ of the side was read.
 
 from __future__ import annotations
 
+import subprocess
 from collections import Counter
 from collections.abc import Mapping, Sequence
 
 import apsw
 
+from agents_remember.application.knowledge_worklist.code import Hunk
 from agents_remember.application.review_lane_classification import (
     FileResult,
     HunkResult,
@@ -46,6 +48,7 @@ from agents_remember.application.review_lane_classification import (
 )
 from agents_remember.application.review_source_inventory import byte_form
 from agents_remember.application.review_tree_comparison import ReviewTrees
+from agents_remember.memory.conversion.code_objects import CodeObjectError
 from agents_remember.memory.knowledge.tree_observation import TreeChange, TreePaths
 from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, REFERENCE_MAX_LENGTH
@@ -69,6 +72,12 @@ from agents_remember.models.knowledge.review_lane import (
     ReviewLaneSummary,
     ReviewUnexplainedLane,
 )
+from agents_remember.models.knowledge_files.anchor_content import (
+    RangeOutsideBlobError,
+    content_identity,
+    range_bytes,
+)
+from agents_remember.models.knowledge_files.unexplained import ABSENT, hunk_subject
 
 __all__ = ["classify_changed_path", "lane_summary", "unexplained_lane"]
 
@@ -266,7 +275,7 @@ def _classification(lane: TreeLane, result: FileResult) -> ReviewFileClassificat
         bucket=result.bucket,
         reason=result.reason,
         sides=(_side(result.before, change), _side(result.after, change)),
-        hunks=tuple(_hunk(lane, one) for one in result.hunks),
+        hunks=tuple(_hunk(lane, change.path, one) for one in result.hunks),
         non_text=result.non_text,
         counts=result.counts(),
     )
@@ -303,15 +312,48 @@ def _entry_range(placed: Placed) -> ReviewLaneEntryRange:
     )
 
 
-def _hunk(lane: TreeLane, result: HunkResult) -> ReviewLaneHunk:
+def _hunk(lane: TreeLane, path: str, result: HunkResult) -> ReviewLaneHunk:
     hunk = result.hunk
     return ReviewLaneHunk(
         before=ReviewLaneSpan(start=hunk.old_start, count=hunk.old_count),
         after=ReviewLaneSpan(start=hunk.new_start, count=hunk.new_count),
         classification=result.classification,
+        subject=_hunk_subject(lane, path, hunk),
         links=tuple(_link(lane, side, placed) for side, placed in result.links),
         unknown=result.unknown,
     )
+
+
+def _hunk_subject(lane: TreeLane, path: str, hunk: Hunk) -> str | None:
+    """The hunk's own subject ``hunk:<path>@<base>..<candidate>``, or ``None`` when unhashable.
+
+    The subject is the gate's own identity for the same hunk (MIK-R10): ``sha256:`` over the
+    changed lines of each side's blob, ``absent`` for a side that changes no line. A grade keyed by
+    it goes stale exactly when an edit changes those lines. An unhashable hunk is named by no
+    subject rather than by a made-up one, so a grade over it reads as stale, never as current.
+    """
+
+    sides = (
+        _changed_identity(lane, lane.code.base().get(path), hunk.old_start, hunk.old_count),
+        _changed_identity(lane, lane.code.candidate().get(path), hunk.new_start, hunk.new_count),
+    )
+    if any(side is None for side in sides):
+        return None
+    return hunk_subject(path, sides[0] or ABSENT, sides[1] or ABSENT)
+
+
+def _changed_identity(lane: TreeLane, blob: str | None, start: int, count: int) -> str | None:
+    """``sha256:`` over one side's changed lines, ``absent`` when it changes none, else ``None``."""
+
+    if count == 0:
+        return ABSENT
+    if blob is None:
+        return None
+    try:
+        data = lane.code.objects.blob(blob)
+        return content_identity(range_bytes(data, start, start + count - 1))
+    except (CodeObjectError, RangeOutsideBlobError, subprocess.SubprocessError, OSError):
+        return None
 
 
 def _link(lane: TreeLane, side: LaneSideName, placed: Placed) -> ReviewLaneLink:

@@ -1,8 +1,9 @@
 """MIK-R105 L104-B15/B16: the confined harness and the identity-bound host operations.
 
-These cases explicitly inject the deterministic LocalPresenterHarness fixture. Production selects
-NativePresenterHarness and is qualified separately on the real sandbox Paseo host. These cases hold
-the facade and fixture contracts; they are not model authoring or native-host evidence:
+These cases explicitly inject the deterministic LocalPresenterHarness fixture. Production wires no
+presenter harness: its native launch was retired with the dedicated tool server (MIK-R186 @ v2
+Scope), so a presenter built without a runner refuses. These cases hold the facade and fixture
+contracts; they are not model authoring or native-host evidence:
 
 * a start prepares the attempt's folder, writes presentation output there only, reads exactly the
   three admitted inputs by digest, and records a host session whose receipt the attempt keeps;

@@ -171,6 +171,34 @@ describe('the tray dock', () => {
     expect(screen.getByTestId('tray-pill').textContent).toBe('⊕ 3 in the AR tray · open');
   });
 
+  // MIK-R197: clicking the minimised line itself, above the chat box, expands the tray; the line's
+  // own controls keep their actions.
+  it('expands when the docked line itself is clicked, away from its button', () => {
+    act(() => trayStore.setState({ ...EMPTY_TRAY, open: false }));
+    frameTrayStore.setState({ composer: { document: MEASURED } });
+    render(<Column />);
+    act(() => void trayStore.getState().take(pick('INV-1')));
+    const dock = screen.getByTestId('tray-column-dock');
+    expect(dock.getAttribute('data-dock')).toBe('above-composer');
+    expect(screen.queryByTestId('tray-panel')).toBeNull();
+    // A real click on the bar lands on the line's head or on its empty spacer, never on the section
+    // itself; jsdom has no hit testing, so the test dispatches where the pointer lands.
+    const head = screen.getByTestId('tray-line-head');
+    expect(head.contains(screen.getByRole('button', { name: 'Expand the AR tray, 1 pick' }))).toBe(true);
+    fireEvent.click(head);
+    expect(screen.getByTestId('tray-panel')).toBeTruthy();
+  });
+
+  it('keeps the close control on the docked line closing the tray, and does not expand on it', () => {
+    act(() => trayStore.setState({ ...EMPTY_TRAY, open: false }));
+    frameTrayStore.setState({ composer: { document: MEASURED } });
+    render(<Column />);
+    act(() => void trayStore.getState().take(pick('INV-1')));
+    fireEvent.click(screen.getByRole('button', { name: 'Close the AR tray; its picks stay' }));
+    expect(screen.queryByTestId('tray-panel')).toBeNull();
+    expect(screen.getByTestId('tray-pill').textContent).toBe('⊕ 1 in the AR tray · open');
+  });
+
   it('keeps a refusal by name on the line, and the answer of a Send it returns to', () => {
     act(() => trayStore.setState({ ...EMPTY_TRAY, open: false }));
     render(<Column visible={false} />);

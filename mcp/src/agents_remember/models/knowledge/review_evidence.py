@@ -14,8 +14,10 @@ one place it can be read and refused:
   different statements that a bare empty list would blur into one.
 * **every claim has a basis and a classification** (:class:`EvidenceClaim`): a recorded fact, a
   mechanical signal and an authored judgment each need an inspectable basis that was actually read;
-  a presenter inference needs its author and its supporting inputs; an unresolved question keeps its
-  limit instead of borrowing an authority it has not earned.
+  a presenter inference needs its author and its supporting inputs; an ``intended`` claim -- the
+  behaviour a task is *meant* to produce, before any of it exists -- rests on a receipt of the
+  task's own packet, task document or reference file (MIK-R102 v2 item 1; MIK-R189 rule 6); an
+  unresolved question keeps its limit instead of borrowing an authority it has not earned.
 * **scope, omissions and counted populations travel with the claims** (:class:`EvidenceMap`): a
   count states its denominator, filters and limits, and unassessed items are never counted as passed.
 
@@ -43,6 +45,7 @@ __all__ = [
     "CLAIM_CLASSIFICATIONS",
     "EVIDENCE_COLLECTIONS",
     "EVIDENCE_PACKET_SCHEMA",
+    "INTENDED_CLASSIFICATION",
     "ClaimBasis",
     "ClaimMap",
     "CoverageCount",
@@ -114,7 +117,12 @@ ClaimClassification = Literal[
     "presenter-inference",
     "unresolved-question",
     "unavailable-evidence",
+    "intended",
 ]
+#: The authority that names behaviour a task is *meant* to produce (MIK-R102 v2 item 1). A page
+#: bound to a planned comparison cannot dress a packet's intention in a recorded fact's authority,
+#: so the class has its own spelling here and one place that refuses the substitution.
+INTENDED_CLASSIFICATION: str = "intended"
 CLAIM_CLASSIFICATIONS: tuple[str, ...] = (
     "recorded-fact",
     "mechanical-signal",
@@ -122,12 +130,18 @@ CLAIM_CLASSIFICATIONS: tuple[str, ...] = (
     "presenter-inference",
     "unresolved-question",
     "unavailable-evidence",
+    INTENDED_CLASSIFICATION,
 )
 
 # The classifications that assert something was established by an owner's record or measurement.
 # Without a basis that was actually read they would be an interpretation wearing an authority.
 _BASIS_REQUIRED: frozenset[str] = frozenset(
-    {"recorded-fact", "mechanical-signal", "authored-judgment"}
+    {
+        "recorded-fact",
+        "mechanical-signal",
+        "authored-judgment",
+        INTENDED_CLASSIFICATION,
+    }
 )
 
 OmissionKind = Literal[
@@ -185,6 +199,10 @@ _BASIS_KINDS: dict[str, frozenset[str]] = {
     "presenter-inference": frozenset(_ALL_BASIS_KINDS),
     "unresolved-question": frozenset(_ALL_BASIS_KINDS),
     "unavailable-evidence": frozenset(_ALL_BASIS_KINDS),
+    # An intention is established by the bytes of the task's own documents, never by a tree blob
+    # alone: nothing about behaviour that does not exist yet can be read out of the code
+    # (MIK-R102 v2 item 1). The receipt is a *necessary* basis; the claim may cite others beside it.
+    INTENDED_CLASSIFICATION: frozenset({"supplemental-receipt"}),
 }
 
 BasisKind = Literal[
@@ -455,6 +473,10 @@ class ClaimBasis(KnowledgeModel):
                 f"a {self.kind} basis names {', '.join(missing)}; a reference without a typed "
                 "identity cannot be resolved against the comparison"
             )
+        if self.kind == "supplemental-receipt" and self.reference != self.receipt_id:
+            raise ValueError(
+                "a supplemental-receipt basis names the same receipt in reference and receipt_id"
+            )
         return self
 
 
@@ -531,6 +553,16 @@ class EvidenceClaim(KnowledgeModel):
             raise ValueError(
                 f"an authored-judgment claim {self.claim_id!r} names the judgment row it rests on; "
                 "another kind of basis does not carry an author's judgment"
+            )
+        if self.classification == INTENDED_CLASSIFICATION and not any(
+            basis.kind == "supplemental-receipt" for basis in present
+        ):
+            raise ValueError(
+                f"an intended claim {self.claim_id!r} rests on at least one present "
+                "supplemental receipt -- of a packet under requirements/, the leaf's task document "
+                "or a file in its reference folder; a tree blob alone establishes nothing about "
+                "behaviour the task is meant to produce, and another kind of basis may support the "
+                "claim beside that receipt but never replace it"
             )
         if self.classification in _BASIS_REQUIRED and not present:
             raise ValueError(
@@ -663,19 +695,49 @@ class EvidencePacket(KnowledgeModel):
                 f"the packet names {len(paths)} distinct path(s), beyond the admitted "
                 f"{self.limits.paths_per_packet} per packet"
             )
-        receipts = {receipt.receipt_id for receipt in self.supplemental}
-        for claim in self.claims.claims:
-            for basis in claim.bases:
-                if basis.kind == "supplemental-receipt" and basis.reference not in receipts:
-                    raise ValueError(
-                        f"claim {claim.claim_id!r} cites the unknown receipt {basis.reference!r}"
-                    )
+        _validate_supplemental_and_claims(self.supplemental, self.claims.claims)
         return self
 
     def collection(self, name: str) -> EvidenceCollection | None:
         """One named collection, or ``None`` when the packet does not carry it."""
 
         return next((entry for entry in self.collections if entry.name == name), None)
+
+
+def _validate_supplemental_and_claims(
+    supplemental: tuple[SupplementalReceipt, ...],
+    claims: tuple[EvidenceClaim, ...],
+) -> None:
+    receipt_by_id: dict[str, SupplementalReceipt] = {}
+    seen_sources: set[str] = set()
+    for receipt in supplemental:
+        if receipt.receipt_id in receipt_by_id:
+            raise ValueError(f"the supplemental receipt id {receipt.receipt_id!r} is used twice")
+        if receipt.canonical_source in seen_sources:
+            raise ValueError(
+                f"the supplemental source {receipt.canonical_source!r} is receipted twice"
+            )
+        receipt_by_id[receipt.receipt_id] = receipt
+        seen_sources.add(receipt.canonical_source)
+    for claim in claims:
+        for basis in claim.bases:
+            if basis.kind != "supplemental-receipt":
+                continue
+            held = receipt_by_id.get(basis.receipt_id or basis.reference)
+            if held is None or basis.reference not in {held.receipt_id, held.canonical_source}:
+                raise ValueError(
+                    f"claim {claim.claim_id!r} cites the unknown receipt {basis.reference!r}"
+                )
+            if basis.state == "present" and (held.read_state != "present" or held.digest is None):
+                raise ValueError(
+                    f"claim {claim.claim_id!r} labels basis {basis.reference!r} present, but "
+                    f"receipt {held.receipt_id!r} is {held.read_state} with no present examined bytes"
+                )
+            if basis.state != "present" and held.read_state == "present":
+                raise ValueError(
+                    f"claim {claim.claim_id!r} labels basis {basis.reference!r} {basis.state!r}, "
+                    f"but receipt {held.receipt_id!r} is present"
+                )
 
 
 def packet_errors(packet: EvidencePacket) -> tuple[str, ...]:

@@ -136,12 +136,18 @@ def state(status: str, **fields: Any) -> dict[str, Any]:
 
     return {
         "id": AGENT_ID,
+        # MIK-R105 v3: the view publishes the provider so a resume can refuse one that cannot be confined.
+        "provider": None,
         "status": status,
         "archivedAt": None,
         "turnActive": False,
         "pendingPermissions": [],
         "lastError": None,
         "attentionReason": None,
+        # MIK-R105 v2 rule 9's witness, published for every state so a closed seat can be told from
+        # one that never ran a turn.
+        "lastUserMessageAt": None,
+        "lastStatus": None,
         "lastTurn": None,
         **fields,
     }
@@ -238,7 +244,10 @@ class AgentStateScriptTests(unittest.TestCase):
     def test_agent_state_reports_an_agent_without_reading_its_timeline(self) -> None:
         pending = {"id": "perm-1", "provider": "claude", "name": "Bash", "kind": "tool"}
         snapshots: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
-            "a closed session": (agent("closed", lastUserMessageAt="t"), state("closed")),
+            "a closed session": (
+                agent("closed", lastUserMessageAt="t"),
+                state("closed", lastUserMessageAt="t"),
+            ),
             "an archived agent": (
                 agent("closed", archivedAt=ARCHIVED_AT),
                 state("closed", archivedAt=ARCHIVED_AT),
@@ -284,7 +293,8 @@ class AgentStateScriptTests(unittest.TestCase):
         self.assertEqual(bad.exception.code, "invalid_bridge_payload")
 
     def test_agent_state_reads_how_the_last_turn_of_an_idle_agent_ended(self) -> None:
-        ran = agent("idle", lastUserMessageAt="2026-10-02T01:22:05.725Z")
+        stamp = "2026-10-02T01:22:05.725Z"
+        ran = agent("idle", lastUserMessageAt=stamp)
         tool_call = {"type": "tool_call", "name": "shell", "status": "running"}
         long_reply = "Ergebnis 役割 🙂 " * 400
         endings: dict[str, tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]] = {
@@ -325,7 +335,13 @@ class AgentStateScriptTests(unittest.TestCase):
                 answer = self.call("agent-state", holds=held, timeline=timeline)
                 mark = held.get("attentionReason")
                 self.assertEqual(
-                    answer["agent"], state("idle", lastTurn=expected, attentionReason=mark)
+                    answer["agent"],
+                    state(
+                        "idle",
+                        lastUserMessageAt=held.get("lastUserMessageAt"),
+                        lastTurn=expected,
+                        attentionReason=mark,
+                    ),
                 )
                 self.assertEqual(
                     self.recorded(),
@@ -463,7 +479,12 @@ class AgentStateScriptTests(unittest.TestCase):
             )
             self.assertEqual(answer["resume"], {"attempted": True, "resumed": True})
             self.assertEqual(
-                answer["agent"], state("idle", lastTurn={"state": "replied", "text": "READY"})
+                answer["agent"],
+                state(
+                    "idle",
+                    lastUserMessageAt="t",
+                    lastTurn={"state": "replied", "text": "READY"},
+                ),
             )
             self.assertEqual(self.recorded(), [READ, resume_read, READ, last_turn_read])
         left_alone: dict[str, tuple[dict[str, Any] | None, list[dict[str, Any]]]] = {

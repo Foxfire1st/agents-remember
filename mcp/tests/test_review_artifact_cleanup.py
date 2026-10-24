@@ -684,6 +684,7 @@ def test_an_interrupted_cache_deletion_replays_as_attributed_already_absent(
         "datasetCopies",
         "arCaches",
         "frameRevisions",
+        "explainerArtifacts",
         "releasedGenerations",
     }
     assert interrupted["planned"]["arCaches"] == [{"path": late.as_posix(), "bytes": 4}]
@@ -783,3 +784,31 @@ def test_nothing_is_deleted_when_the_cache_receipt_cannot_be_written(task: Task)
     assert refused["failures"][-1]["target"] == str(reports / CLEANUP_REPORT_NAME)
     done = task.archive()
     assert done["attempt"] == 1 and done["state"] == "deleted" and not cache.exists()
+
+
+def test_interrupted_external_explainer_deletion_replays_as_already_absent(
+    task: Task,
+) -> None:
+    """MIK-R186 rule 9: interrupted deletion of external explainer workspace/counter attributes alreadyAbsent."""
+
+    explainer_root = task.root / "coordination" / "explainer" / REPO / MASTER
+    workspace = explainer_root / LEAF
+    workspace.mkdir(parents=True)
+    (workspace / "retired.json").write_text('{"receipt": "r1"}\n', encoding="utf-8")
+    counter = explainer_root / f"{LEAF}.generation"
+    counter.write_text("1\n", encoding="utf-8")
+    with (
+        mock.patch.object(
+            review_artifact_receipts.ReceiptLedger, "finish", side_effect=KeyboardInterrupt
+        ),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        task.archive(explainer_root=explainer_root)
+    assert not workspace.exists() and not counter.exists()
+    retry = task.archive(explainer_root=explainer_root)
+    absent = {
+        (entry["artifact"], entry["kind"], entry.get("interrupted", False))
+        for entry in retry["alreadyAbsent"]
+    }
+    assert (workspace.as_posix(), "explainerArtifacts", True) in absent
+    assert (counter.as_posix(), "explainerArtifacts", True) in absent

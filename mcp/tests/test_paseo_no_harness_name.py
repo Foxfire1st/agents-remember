@@ -55,14 +55,14 @@ RULE21_ADMITTED_NAMES = {
 }
 
 
-# MIK-R104/105: the qualified presenter is a confined capability, not a generic role
-# launch. These two owners name the only provider whose native tool boundary was
-# qualified (D341); another provider name must fail until separately qualified.
+# MIK-R104/105: the qualified presenter's host-side surface is a confined capability, not a
+# generic role launch. The one owner left names the provider whose native tool boundary was
+# qualified (D341) and records the provider-only fence this task removed (MIK-R186 @ v2 rule 3);
+# another provider name must fail until separately qualified. The presenter's Python launch was
+# removed with that fence, so no other file carries the admission.
 PRESENTER_MODULES = {
-    "canvas/presenter_native.py": "the qualified presenter start refuses providers "
-    "without the measured native tool boundary; it is not a generic launch default",
-    "cli/paseo_bridge.mjs": "the host-side presenter create applies the qualified "
-    "provider's native empty built-in tools and strict MCP config on every resume",
+    "cli/paseo_bridge.mjs": "the host-side presenter session surface records the qualified "
+    "provider's removed tool fence; it is not a generic launch default",
 }
 PRESENTER_ADMITTED_NAMES = {name: {"Claude", "claude"} for name in PRESENTER_MODULES}
 ADMITTED_NAMES = RULE21_ADMITTED_NAMES | PRESENTER_ADMITTED_NAMES
@@ -192,9 +192,7 @@ class NoHarnessNameTests(unittest.TestCase):
         self.assertEqual(sorted(RULE21_MODULES), ["cli/paseo_catalog.py", "cli/paseo_launch.py"])
         for _name, reason in RULE21_MODULES.items():
             self.assertGreater(len(reason), 40)
-        self.assertEqual(
-            sorted(PRESENTER_MODULES), ["canvas/presenter_native.py", "cli/paseo_bridge.mjs"]
-        )
+        self.assertEqual(sorted(PRESENTER_MODULES), ["cli/paseo_bridge.mjs"])
         for reason in PRESENTER_MODULES.values():
             self.assertGreater(len(reason), 40)
         for path, name in zip(scanned, names, strict=True):

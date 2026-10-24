@@ -41,7 +41,6 @@ const ORIGIN = 'https://host.example';
 const FRAME = { available: true, frameBaseUrl: ORIGIN, serverId: 's', projectsWorkspaceId: 'wks_projects' };
 // The leaf's review address as its task document's entry writes it: the master by its folder.
 const REVIEW = '#review?repo=repo&master=master&leaf=LEAF';
-const LEAF_REF = { repository: 'repo', path: 'master/leaf.json' };
 
 const agent = (agentId: string, workspaceId: string, labels: Record<string, string>): DocumentAgent => ({
   agentId,
@@ -67,7 +66,19 @@ interface Call {
   body: Record<string, unknown> | null;
 }
 
-function backend({ frame = FRAME as unknown, worker = WORKER } = {}) {
+const EXPLAINER = {
+  state: 'ok',
+  seat: 'live',
+  agentId: 'a-exp',
+  workspaceId: 'wks_leaf',
+  generation: 1,
+};
+
+function backend({
+  frame = FRAME as unknown,
+  worker = WORKER,
+  explainer = EXPLAINER as unknown,
+} = {}) {
   const calls: Call[] = [];
   vi.stubGlobal(
     'fetch',
@@ -80,6 +91,7 @@ function backend({ frame = FRAME as unknown, worker = WORKER } = {}) {
       else if (url.pathname === '/api/role-launch/options') value = OPTIONS;
       else if (url.pathname === '/api/role-launch/document-chats')
         value = { agents: body?.role === 'worker' ? worker : body?.role === 'architect' ? ARCHITECT : [] };
+      else if (url.pathname === '/api/explainer/repo/master/LEAF/state') value = explainer;
       else if (url.pathname === '/api/task-document')
         value = dashboardStore.getState().tasks[url.searchParams.get('path') ?? '']?.summary ?? {};
       return new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
@@ -209,10 +221,10 @@ describe('the review page keeps the one chat frame (rule 12, evidence 14)', () =
     expect(chatColumn(view).style.display).toBe('flex');
     expect(body.style.gridTemplateColumns).toBe('minmax(0, 1fr) 500px');
     expect(view.getByTestId('rail-chat-keepalive').getAttribute('aria-hidden')).toBe('false');
-    await act(async () => {});
+    await waitFor(() => expect(opens(plugin.posts)).toContain('a-exp'));
     await plugin.answer();
-    // The same task's chat: nothing to switch, and nothing loads.
-    expect(opens(plugin.posts)).toHaveLength(before);
+    // The review column selects the leaf's explainer in the same frame, without reloading it.
+    expect(opens(plugin.posts)).toHaveLength(before + 1);
     expect(railFrame(view)).toBe(frame);
     expect(railGeneration(view)).toBe(loaded);
 
@@ -293,9 +305,9 @@ describe('the review page keeps the one chat frame (rule 12, evidence 14)', () =
     expect(opens(posts)).toEqual([]);
 
     fireEvent.click(view.getByTestId('review-chat-toggle'));
-    await waitFor(() => expect(opens(posts)).toEqual(['a-wrk']));
-    const asked = routes.calls.find((call) => call.path === '/api/role-launch/document-chats')!;
-    expect(asked.body).toMatchObject({ role: 'worker', taskDocumentRef: LEAF_REF });
+    await waitFor(() => expect(opens(posts)).toEqual(['a-exp']));
+    expect(routes.count('/api/explainer/repo/master/LEAF/state')).toBe(1);
+    expect(routes.count('/api/role-launch/document-chats')).toBe(0);
     expect(routes.roles()).not.toContain('architect');
     expect(frameOf(view)).toBe(frame);
     expect(generation(view)).toBe('1');
@@ -312,10 +324,11 @@ describe('the review page keeps the one chat frame (rule 12, evidence 14)', () =
     expect(await view.findByText("Waiting for the task list to name this review's task…")).toBeTruthy();
     await act(async () => {});
     expect(routes.count('/api/role-launch/document-chats')).toBe(0);
+    expect(routes.count('/api/explainer/repo/master/LEAF/state')).toBe(0);
     expect(opens(posts)).toEqual([]);
 
     act(() => hydrate());
-    await waitFor(() => expect(opens(posts)).toEqual(['a-wrk']));
+    await waitFor(() => expect(opens(posts)).toEqual(['a-exp']));
     expect(routes.roles()).not.toContain('architect');
   });
 
@@ -330,13 +343,14 @@ describe('the review page keeps the one chat frame (rule 12, evidence 14)', () =
     expect(await view.findByText(/The task list holds no task LEAF in repo\/260928-MIK/)).toBeTruthy();
     await act(async () => {});
     expect(routes.count('/api/role-launch/document-chats')).toBe(0);
+    expect(routes.count('/api/explainer/repo/260928-MIK/LEAF/state')).toBe(0);
     expect(opens(posts)).toEqual([]);
   });
 
   it('shows the bound launcher for a task without a chat and starts nothing', async () => {
     window.history.replaceState(null, '', '/' + REVIEW);
     hydrate();
-    const routes = backend({ worker: [] });
+    const routes = backend({ worker: [], explainer: { state: 'ok', seat: null } });
     const view = render(<CockpitShell />);
     await view.findByTestId('review-surface');
     await readyFrame(view);
@@ -344,7 +358,7 @@ describe('the review page keeps the one chat frame (rule 12, evidence 14)', () =
     await waitFor(() =>
       expect(frameOf(view)!.closest("div[aria-hidden='true']")).not.toBeNull(),
     );
-    expect(chatColumn(view).querySelector('[data-testid="role-chats-pane"]')).not.toBeNull();
+    expect(chatColumn(view).querySelector('[data-testid="explainer-placeholder"]')).not.toBeNull();
     expect(routes.count('/api/role-launch/dispatch')).toBe(0);
   });
 

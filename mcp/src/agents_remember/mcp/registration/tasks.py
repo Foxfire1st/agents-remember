@@ -1,26 +1,18 @@
 """Task-document tools plus the two task-state transitions: finalize and reopen."""
 
+from importlib import import_module
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.application.closeout_queue import CloseoutQueueRequest
-from agents_remember.application.task_docs.task_doc_tools import (
-    TaskDocCall,
-    TaskDocEdit,
-    TaskDocTarget,
+from agents_remember.application.worktree_tool_requests import (
+    FinalizeTaskDocs,
 )
-from agents_remember.application.worktree_tools import FinalizeTaskDocs
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
+from agents_remember.models.queue.closeout_queue import CloseoutQueueRequest
 
-from ..tools import (
-    closeout_queue_payload,
-    curator_coherence_payload,
-    lifecycle_finalize_task_payload,
-    task_doc_payload,
-    task_reopen_payload,
-)
+from .lazy import tools
 
 
 def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -29,14 +21,14 @@ def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) ->
         """Inspect or rebuild one sprint's disposable waiting-only closeout projection: exact-
         current valid-built or non-admitting invalid-empty, derived from the current task plus
         waiting-door facts. States: valid-built, invalid-empty, blocked. Reference: docs/reference/mcp-tools.md."""
-        return closeout_queue_payload(config, request)
+        return tools.closeout_queue_payload(config, request)
 
 
 def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def curator_coherence(request: CuratorCoherenceRequest) -> dict[str, Any]:
         """Prepare, publish, inspect or validate one leaf's curator-coherence authority. Publish requires semantic_requirement_revision, delivery_attempt, expected_predecessor_digest, expected_code_candidate_tree, expected_memory_candidate_tree, expected_task_topology_fingerprint, expected_task_intent, expected_attestation_sha256 and caller; supply judgments or judgments_file. The stable manifest is authoritative, never Markdown. Longer explanation: docs/tool-details.md."""
-        return curator_coherence_payload(config, request)
+        return tools.curator_coherence_payload(config, request)
 
 
 def _register_task_reopen_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -48,7 +40,7 @@ def _register_task_reopen_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         of it; a landing not on the line refuses. Afterwards edit
         steps via task_doc, then run a normal worktree_start. States: reopened, blocked;
         preview with dry_run. Reference: docs/reference/mcp-tools.md."""
-        return task_reopen_payload(config, contract_path, dry_run=dry_run)
+        return tools.task_reopen_payload(config, contract_path, dry_run=dry_run)
 
 
 def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -67,7 +59,7 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         Leaves require a master; ancestors are not completed. States: finalized,
         would-finalize, blocked. Answers the state, what blocks
         and the next call; preview with dry_run. Reference: docs/reference/mcp-tools.md."""
-        return lifecycle_finalize_task_payload(
+        return tools.lifecycle_finalize_task_payload(
             config,
             contract_path,
             docs=FinalizeTaskDocs(
@@ -103,16 +95,16 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         fields_file: str | None = None,
         section_body_file: str | None = None,
     ) -> dict[str, Any]:
-        return task_doc_payload(
+        return tools.task_doc_payload(
             config,
-            TaskDocTarget(
+            import_module("agents_remember.application.task_docs.task_doc_tools").TaskDocTarget(
                 repo_id=repo_id,
                 task_name=task_name,
                 contract_path=contract_path,
                 slug=slug,
             ),
             operation=operation,
-            edit=TaskDocEdit(
+            edit=import_module("agents_remember.application.task_docs.task_doc_tools").TaskDocEdit(
                 fields=fields,
                 step=step,
                 decision=decision,
@@ -122,7 +114,9 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
                 fields_file=fields_file,
                 section_body_file=section_body_file,
             ),
-            call=TaskDocCall(dry_run=dry_run, branch_addressed=branch_addressed),
+            call=import_module("agents_remember.application.task_docs.task_doc_tools").TaskDocCall(
+                dry_run=dry_run, branch_addressed=branch_addressed
+            ),
         )
 
 

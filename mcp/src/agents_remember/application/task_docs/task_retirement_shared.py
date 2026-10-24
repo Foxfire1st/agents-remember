@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import Field, field_validator
 
+from agents_remember.canvas.explainer_paths import explainer_task_folder
 from agents_remember.models.task_retirement import RetirementEdgeSelection
 from agents_remember.worktrees.services import ReviewArtifactCleanupRequest
 
@@ -34,6 +35,11 @@ def archive_hook(request: SprintLinkageRequest, task_root: Path) -> dict[str, An
 
     The retirement is already committed when this runs, so no exception may leave the operation's
     state unclear. This is as broad as finalization's own handling of the same hook.
+
+    The task's explainer environments are retired by this same close (MIK-R186 rule 9): the folder
+    is derived from the coordination root and the task's own name, so it is found whether the task
+    folder has already moved to its archive location or not. A dry run retires nothing and lists
+    the environments it would retire.
     """
 
     try:
@@ -44,10 +50,28 @@ def archive_hook(request: SprintLinkageRequest, task_root: Path) -> dict[str, An
                 code_repository=request.code_repository,
                 memory_repository=request.memory_repository,
                 dry_run=request.dry_run,
-            )
+                explainer_root=explainer_task_folder(
+                    request.coordination_root, request.repo_id, task_root.name
+                ),
+            ),
+            explainer_config=request.config,
         )
     except Exception as exc:  # the retirement is committed: a failed hook is reported, not raised
         return {"state": "failed", "detail": f"{type(exc).__name__}: {exc}"}
+
+
+def explainer_line(report: dict[str, Any]) -> str | None:
+    """One line naming what a preview would do to the task's explainer environments (rule 9)."""
+
+    environments = report.get("environments", [])
+    retiring = [entry for entry in environments if entry.get("state") == "would-retire"]
+    if not retiring:
+        return None
+    leaves = ", ".join(
+        f"{entry['leaf']} (agent {entry['agentId']}, generation {entry['generation']})"
+        for entry in retiring
+    )
+    return f"explainer environments: retire {len(retiring)} -- {leaves}"
 
 
 RESTART_NOTICE = (
@@ -60,7 +84,16 @@ RESTART_NOTICE = (
 def hook_failed(report: dict[str, Any]) -> bool:
     """Whether the hook's report names a failure: one it lists, or the hook itself failing."""
 
-    return bool(report.get("failures")) or report.get("state") == "failed"
+    environment_failed = any(
+        isinstance(entry, dict)
+        and entry.get("state") not in {"retired", "already-retired", "would-retire", "finished"}
+        for entry in report.get("environments", [])
+    )
+    return (
+        bool(report.get("failures"))
+        or report.get("state") in {"failed", "partial"}
+        or environment_failed
+    )
 
 
 def hook_remainder(report: dict[str, Any]) -> int:

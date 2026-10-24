@@ -5,7 +5,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.application.task_docs.task_ref import TaskRef
-from agents_remember.application.worktree_tools import (
+from agents_remember.application.worktree_tool_requests import (
     StartExecution,
     TaskBases,
     TaskIdentity,
@@ -18,15 +18,7 @@ from agents_remember.models.worktree import (
     SyncResolutionInput,
 )
 
-from ..tools import (
-    worktree_attach_payload,
-    worktree_enclosure_adopt_payload,
-    worktree_pause_payload,
-    worktree_start_payload,
-    worktree_status_payload,
-    worktree_sync_payload,
-)
-from ..tools.enclosure_adoption import EnclosureAdoptionRequest
+from .lazy import tools
 
 
 def register_worktree_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -69,7 +61,7 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         the order of landing is the manager's decision. Reference:
         docs/reference/mcp-tools.md.
         """
-        return worktree_start_payload(
+        return tools.worktree_start_payload(
             config,
             TaskIdentity(
                 repo_id=repo_id,
@@ -112,9 +104,9 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         source digests and an audit receipt, and never runs from normal status, control,
         contract writes, or schema-1 repair. Answers the state reached. Reference:
         docs/reference/mcp-tools.md."""
-        return worktree_enclosure_adopt_payload(
+        return tools.worktree_enclosure_adopt_payload(
             config,
-            EnclosureAdoptionRequest(
+            tools.EnclosureAdoptionRequest(
                 contract_path=contract_path,
                 expected_worktree_group=expected_worktree_group,
                 rationale=rationale,
@@ -135,7 +127,7 @@ def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) 
         """Re-attach to an existing task contract without mutating Git. Answers the state reached
         (attached, attached-existing-contract, blocked) and the next call; the whole result is
         in the log file. Reference: docs/reference/mcp-tools.md."""
-        return worktree_attach_payload(
+        return tools.worktree_attach_payload(
             config,
             TaskRef(
                 repo_id=repo_id,
@@ -165,7 +157,7 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         cleanup-pending, cleanup-completed, abandoned), what blocks, the one
         following call, and whether task-document copies differ from their sources. Lineage and
         refresh detail stays in the log file. Reference: docs/reference/mcp-tools.md."""
-        return worktree_status_payload(
+        return tools.worktree_status_payload(
             config,
             TaskRef(
                 repo_id=repo_id,
@@ -193,7 +185,7 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         it adopts before moving any ref.
 
         Reference: docs/reference/mcp-tools.md."""
-        return worktree_sync_payload(
+        return tools.worktree_sync_payload(
             config,
             contract_path,
             memory_sync_choice=memory_sync_choice,
@@ -210,7 +202,7 @@ def _register_worktree_stop_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         contract_path: str,
     ) -> dict[str, Any]:
         """PAUSE an atomic master: it stops, hands control back, and releases the master's atomic-series activation selection. Publishes NOTHING: publication is a separate, explicitly requested PUBLICATION through worktree_checkpoint_landing. States: paused, blocked. Answers the state reached and the next call. Reference: docs/reference/mcp-tools.md."""
-        return worktree_pause_payload(
+        return tools.worktree_pause_payload(
             config,
             contract_path,
         )

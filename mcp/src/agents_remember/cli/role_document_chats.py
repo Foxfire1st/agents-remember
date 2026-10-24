@@ -7,6 +7,8 @@ that cannot be read at all: it is never answered as a document without a chat.
 
 from __future__ import annotations
 
+import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -19,6 +21,14 @@ from agents_remember.application.role_launch_context import (
     TASKLESS_ROLES,
     resolve_role_launch_context,
 )
+from agents_remember.canvas.explainer_archive import LeafEnvironment, environments
+from agents_remember.canvas.explainer_paths import explainer_roots, explainer_task_folder
+from agents_remember.canvas.explainer_state import (
+    ExplainerBinding,
+    ExplainerStateError,
+    read_binding,
+)
+from agents_remember.canvas.paths import PathRefused
 from agents_remember.cli.paseo_status import read_agent
 from agents_remember.cli.role_agent_override import FREE_AGENT_ROLE
 from agents_remember.cli.role_answers import alias_response
@@ -31,6 +41,8 @@ from agents_remember.cli.role_launch_receipts import (
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_identity import canonical_role
 from agents_remember.models.role_launcher import RoleResultRequest, RoleSelection
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks.document_refs import TaskDocumentTopology
 
 # How many launch records one read visits: the host is asked once per record it is shown.
 _PAGE_SIZE = 3
@@ -290,6 +302,10 @@ def document_chats(
         # The rest of this role's block is older records of the seat just answered: the next page
         # starts after them, so a continuation never re-lists a seat this one already answered.
         index = _block_end(records, index)
+    # The leaf's explainer is not a role seat and has no launch record: its chat is read from its
+    # environment's binding, and it is listed even when a live seat stopped the scan above
+    # (MIK-R106 rule 1).
+    agents.extend(_explainer_agents(config, selection))
     if asked:
         # A clicked agent goes first in a warmup pass that is still running
         # (MIK-R145 rule 4): the click names the agent before its own chat is
@@ -303,3 +319,138 @@ def document_chats(
     # answered a page of architect records as the whole listing, and the bootstrap seat behind
     # them was never reached.
     return {"agents": agents, "nextOffset": index if index < len(records) else None}
+
+
+def _explainer_agents(config: McpRuntimeConfig, selection: RoleSelection) -> list[dict[str, Any]]:
+    """The explainer chat of the selected leaf, when its environment holds a live seat."""
+
+    ref = selection.task_document_ref
+    if ref is None:
+        return []
+    master_folder, leaf_id = _resolve_explainer_leaf(config, selection)
+    found = _explainer_environment(config, ref.repository, leaf_id, master=master_folder)
+    if found is None:
+        return []
+    environment, binding = found
+    reading = read_agent(config, environment.agent)
+    if not reading.reachable or not reading.found or reading.archived:
+        return []
+    return [_explainer_agent(ref, environment, binding)]
+
+
+def _master_folder_of(path: Path) -> str | None:
+    if path.stem == "task" and path.parent != Path("."):
+        return path.parent.name
+    if path.parent != Path("."):
+        return path.parts[0]
+    return path.stem or None
+
+
+def _topology_leaf(
+    config: McpRuntimeConfig, ref: TaskDocumentRef, master_folder: str | None
+) -> tuple[str | None, str | None] | None:
+    topology = TaskDocumentTopology(config.coordination_root)
+    with suppress(Exception):
+        resolved = topology.resolve(ref)
+        if master_folder is None:
+            parent_ref = topology.parent(resolved.ref)
+            if parent_ref is not None:
+                parent_doc = topology.resolve(parent_ref)
+                master_folder = _master_folder_of(parent_doc.path)
+        return master_folder, resolved.document.id
+    return None
+
+
+def _resolve_explainer_leaf(
+    config: McpRuntimeConfig, selection: RoleSelection
+) -> tuple[str | None, str | None]:
+    """Resolve the canonical ``(master_folder, leaf_id)`` from the selected task document."""
+
+    ref = selection.task_document_ref
+    if ref is None:
+        return None, None
+    master_folder = (
+        _master_folder_of(Path(selection.master_document_ref.path))
+        if selection.master_document_ref is not None
+        else None
+    )
+    doc_rel = Path(ref.path)
+    if master_folder is None and doc_rel.parent != Path("."):
+        master_folder = doc_rel.parts[0]
+    from_topology = _topology_leaf(config, ref, master_folder)
+    if from_topology is not None:
+        return from_topology
+    tasks_dir = config.coordination_root / "tasks" / ref.repository
+    candidates = [tasks_dir / doc_rel]
+    if doc_rel.suffix != ".json":
+        candidates.append((tasks_dir / doc_rel).with_suffix(".json"))
+    for candidate in candidates:
+        if not candidate.is_file() or candidate.is_symlink():
+            continue
+        with suppress(OSError, ValueError):
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and isinstance(payload.get("id"), str) and payload["id"]:
+                return master_folder, str(payload["id"])
+    if any(candidate.exists() for candidate in candidates):
+        return master_folder, None
+    return master_folder, _leaf_of(ref.path)
+
+
+def _leaf_of(path: str) -> str | None:
+    """The leaf id a task document's path names: its stem, or its folder for ``task.json``."""
+
+    document = Path(path)
+    name = document.parent.name if document.stem == "task" else document.stem
+    return name or None
+
+
+def _explainer_environment(
+    config: McpRuntimeConfig,
+    repository: str,
+    leaf: str | None,
+    *,
+    master: str | None = None,
+) -> tuple[LeafEnvironment, ExplainerBinding | None] | None:
+    """The one environment of that leaf under its master, with the binding that names it."""
+
+    if leaf is None:
+        return None
+    if master is not None:
+        with suppress(PathRefused):
+            target_root = explainer_task_folder(config.coordination_root, repository, master)
+            for environment in environments(target_root)[0]:
+                if environment.leaf == leaf and environment.workspace.is_dir():
+                    return environment, _explainer_binding(environment.workspace)
+        return None
+    for root in explainer_roots(config.coordination_root):
+        if root.parent.name != repository:
+            continue
+        for environment in environments(root)[0]:
+            if environment.leaf == leaf and environment.workspace.is_dir():
+                return environment, _explainer_binding(environment.workspace)
+    return None
+
+
+def _explainer_binding(workspace: Path) -> ExplainerBinding | None:
+    """The environment's binding, or ``None`` when it has none or cannot be read."""
+
+    try:
+        return read_binding(workspace)
+    except ExplainerStateError:
+        return None
+
+
+def _explainer_agent(
+    ref: Any, environment: LeafEnvironment, binding: ExplainerBinding | None
+) -> dict[str, Any]:
+    """One explainer chat row: its seat, its own role label and the task it explains."""
+
+    return {
+        "agentId": environment.agent,
+        "archivedAt": None,
+        "createdAt": None if binding is None else binding.prepared_at,
+        "labels": {
+            "ar.role": "Explainer",
+            "ar.task-ref": f"{ref.repository}/{ref.path}",
+        },
+    }

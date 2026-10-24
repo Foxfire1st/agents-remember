@@ -9,6 +9,7 @@
 //   repository, or refuses it by name (`unknown-repository`).
 import type { StoreApi } from 'zustand/vanilla';
 
+import { archivedExplainerForTarget, askFirstRequest } from '../explainer/request';
 import { seatOf } from './traySeats';
 import { shownStore } from './shownChat';
 import { refuseOnSend } from './trayModel';
@@ -148,7 +149,9 @@ async function sendOne(state: TrayState, picks: TrayWirePick[], agentId: string,
 }
 
 // Sends the tray to every target. Answers false when nothing was sent (no target, a refusal by
-// name, or a Send already running).
+// name, or a Send already running). A Send aimed at an archived or placeholder explainer opens the
+// leaf's first-request form with the tray's picks and text intact instead of posting to /api/role-chats
+// (MIK-R106 v2 rule 3).
 export async function sendTray(store: StoreApi<TrayState>, deps: SendDeps): Promise<boolean> {
   const state = store.getState();
   if (state.sending || state.targets.length === 0) return false;
@@ -158,13 +161,23 @@ export async function sendTray(store: StoreApi<TrayState>, deps: SendDeps): Prom
     store.setState({ refusal });
     return false;
   }
+  const archived = state.targets.find((agentId) => archivedExplainerForTarget(agentId) !== null);
+  const liveTargets = state.targets.filter((agentId) => archivedExplainerForTarget(agentId) === null);
+  if (archived) {
+    const address = archivedExplainerForTarget(archived)!;
+    askFirstRequest(address, [], { message: state.text });
+    if (liveTargets.length === 0) {
+      store.setState({ sending: false, refusal: null });
+      return true;
+    }
+  }
   store.setState({ sending: true, refusal: null });
   const picks = await wirePicks(state.picks, deps.images);
   if (typeof picks === 'string') {
     store.setState({ sending: false, refusal: picks });
     return false;
   }
-  const results = await Promise.all(state.targets.map((agentId) => sendOne(state, picks, agentId, deps)));
+  const results = await Promise.all(liveTargets.map((agentId) => sendOne(state, picks, agentId, deps)));
   store.getState().settle({
     at: deps.now().toISOString(),
     results,

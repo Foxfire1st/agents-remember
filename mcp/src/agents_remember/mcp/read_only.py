@@ -32,6 +32,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 __all__ = [
+    "EXPLAINER_MUTATING_TOOLS",
+    "EXPLAINER_READ_ONLY_TOOLS",
     "MUTATING_TOOLS",
     "READ_ONLY_TOOLS",
     "UnknownReadOnlyMark",
@@ -56,6 +58,30 @@ READ_ONLY_TOOLS: frozenset[str] = frozenset(
         "worktree_closeout_preview",
         # Liveness and identity.
         "server_info",
+    }
+)
+
+# MIK-R186 @ v2 rule 3: the explainer's reads, served on this same server when a launch binds it
+# as an explainer seat. Every one of them only reads the environment, the retained pages, the
+# reference folder, the six Git subcommands or the bound knowledge tree.
+EXPLAINER_READ_ONLY_TOOLS: frozenset[str] = frozenset(
+    {
+        "assets",
+        "carry_kit",
+        "documentation",
+        "git_cat_file",
+        "git_diff",
+        "git_log",
+        "git_ls_tree",
+        "git_rev_parse",
+        "git_show",
+        "inputs",
+        "list",
+        "read",
+        "read_input",
+        "render",
+        "search",
+        "source",
     }
 )
 
@@ -102,6 +128,9 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
         # Roles and seats.
         "role_start",
         "role_message",
+        # MIK-R186: the architect's Update, Retire and claim write the seat, the
+        # environment and the master-to-architect record.
+        "explainer_control",
         # L100: starting and retiring agents changes seats.
         "role_start_set",
         "retire_child",
@@ -115,6 +144,18 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
     }
 )
 
+# The explainer's writers (MIK-R186 @ v2 rule 3): a category, a grade, a removed category, an
+# asset into drafts/, a rendered file and the architect's report all write.
+EXPLAINER_MUTATING_TOOLS: frozenset[str] = frozenset(
+    {
+        "define_category",
+        "grade",
+        "remove_category",
+        "report_to_architect",
+        "write_asset",
+    }
+)
+
 
 class UnknownReadOnlyMark(Exception):
     """One advertised tool stands in neither part of the read-only list."""
@@ -123,9 +164,9 @@ class UnknownReadOnlyMark(Exception):
 def read_only_hint(tool_name: str) -> bool:
     """Whether the named tool is marked as a read; raises when unlisted."""
 
-    if tool_name in READ_ONLY_TOOLS:
+    if tool_name in READ_ONLY_TOOLS or tool_name in EXPLAINER_READ_ONLY_TOOLS:
         return True
-    if tool_name in MUTATING_TOOLS:
+    if tool_name in MUTATING_TOOLS or tool_name in EXPLAINER_MUTATING_TOOLS:
         return False
     raise UnknownReadOnlyMark(
         f"tool {tool_name!r} stands in neither part of the read-only list; "

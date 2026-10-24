@@ -199,22 +199,22 @@ def advertised_tool_names() -> set[str]:
 # 40 advertised tools, and the registry holds the same 40 names: every registered response
 # model belongs to an advertised tool, so no payload builder sits below the public surface.
 # (MIK-R109 rule 5 removed `resolve_context`; `context_packet` is the orientation read.)
-# MIK-R196 rule 11 adds user_settings_init to the advertised roster.
-ROSTER_SIZE = 42
+# MIK-R196 rule 11 adds user_settings_init to the advertised roster; L183 adds
+# explainer_control, the review page's architect tool.
+ROSTER_SIZE = 43
 
 # The tool-adapter module population and the handler population, same rule: the numbers are
 # asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
 # call-site total equals the handler total) so the rule cannot be satisfied by measuring
 # nothing, and the derivation below is what makes a silent change fail.
 #
-# 13 adapter modules hold 42 handlers: `closeout_queue`, `core`, `curator_coherence`,
-# `direct_execution`, `direct_landing`, `enclosure_adoption`, `knowledge`,
+# 14 adapter modules hold 45 handlers: `closeout_queue`, `core`, `curator_coherence`,
+# `direct_execution`, `direct_landing`, `enclosure_adoption`, `explainer_control`, `knowledge`,
 # `lifecycle_finalize`, `memory`, `read_files`, `role_agents`, `task_doc` and `worktree`.
 # (A `*_payload`-suffixed helper that only shapes a dict, such as the install compactor,
 # is not a handler: it never reaches the choke point.)
-TOOL_MODULE_COUNT = 13
-# ...and its handler to the population one tool adds.
-TOOL_HANDLER_COUNT = 44
+TOOL_MODULE_COUNT = 14
+TOOL_HANDLER_COUNT = 45
 
 
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
@@ -435,7 +435,7 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         handlers at all, and the call-site equality is load-bearing rather than decorative: a
         ``_tool_payload`` call whose result is discarded while a raw dict is returned is
         exactly the bypass shape, and it makes the module's call sites outnumber its
-        handlers. 13 modules hold 43 handlers and 43 call sites -- the same
+        handlers. 14 modules hold 45 handlers and 45 call sites -- the same
         count the registration census reports, so the two readings cannot drift apart -- and the
         handler/call-site totals are also asserted equal to the id-literal total read by
         :func:`adapter_tool_ids`, which is the derivation that cannot be satisfied by measuring

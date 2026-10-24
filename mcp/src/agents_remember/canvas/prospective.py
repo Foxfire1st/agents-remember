@@ -44,9 +44,13 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TypeGuard
 
-from agents_remember.canvas.readiness import check_page, evidence_reference_state
+from agents_remember.canvas.readiness import (
+    check_page,
+    claim_basis_problem,
+    evidence_reference_state,
+)
 from agents_remember.models.knowledge.review_evidence import EvidencePacket
 
 __all__ = [
@@ -95,6 +99,7 @@ class ProspectiveResult:
     reduced_motion_ok: bool = True
     unresolved_references: tuple[str, ...] = ()
     evidence_references: tuple[str, ...] = ()
+    claim_ids: tuple[str, ...] = ()
     detail: str = ""
 
     @property
@@ -241,19 +246,9 @@ class BrowserProspectiveLoad:
                 detail="the load did not run, so nothing about the page was observed",
             )
         result = _read_result(invocation)
-        unknown = tuple(
-            reference
-            for reference in result.evidence_references
-            if evidence_reference_state(packet, reference) is None
+        return _validate_rendered_citations(
+            result, assets=assets, entrypoint=entrypoint, packet=packet
         )
-        if unknown:
-            result = replace(
-                result,
-                state="failed",
-                unresolved_references=(*result.unresolved_references, *unknown),
-                detail="the rendered DOM cites references absent from the bound evidence packet",
-            )
-        return result
 
     def _invoke(self, directory: Path, entrypoint: str) -> _Invocation:
         """Run the child once, answering ``ran=False`` with a named reason when it did not."""
@@ -353,11 +348,8 @@ def _read_result(invocation: _Invocation) -> ProspectiveResult:
             detail=str(payload.get("detail", "no browser observed the page")),
         )
     references = payload.get("evidenceReferences")
-    if (
-        not isinstance(references, list)
-        or len(references) > 400
-        or any(not isinstance(reference, str) or len(reference) > 512 for reference in references)
-    ):
+    claim_ids = payload.get("claimIds", [])
+    if not (_valid_inventory(references) and _valid_inventory(claim_ids)):
         return _unreadable(invocation, extra="no bounded rendered evidence-reference inventory")
     detail = payload.get("detail")
     result = ProspectiveResult(
@@ -368,9 +360,53 @@ def _read_result(invocation: _Invocation) -> ProspectiveResult:
         reduced_motion_ok=_flag(payload.get("reducedMotionOk"), default=declared != "loaded"),
         unresolved_references=_strings(payload.get("unresolvedReferences")),
         evidence_references=tuple(references),
+        claim_ids=tuple(claim_ids),
         detail=detail if isinstance(detail, str) else "",
     )
     return _consistent(result)
+
+
+def _valid_inventory(items: object) -> TypeGuard[list[str]]:
+    return (
+        isinstance(items, list)
+        and len(items) <= 400
+        and all(isinstance(item, str) and len(item) <= 512 for item in items)
+    )
+
+
+def _validate_rendered_citations(
+    result: ProspectiveResult,
+    *,
+    assets: dict[str, bytes],
+    entrypoint: str,
+    packet: EvidencePacket,
+) -> ProspectiveResult:
+    unknown_refs = [
+        reference
+        for reference in result.evidence_references
+        if evidence_reference_state(packet, reference) is None
+    ]
+    claims_by_id = {claim.claim_id: claim for claim in packet.claims.claims}
+    bad_claims: list[str] = []
+    for claim_id in result.claim_ids:
+        claim = claims_by_id.get(claim_id)
+        if claim is None or claim_basis_problem(packet, claim) is not None:
+            bad_claims.append(claim_id)
+    report = check_page(assets, entrypoint=entrypoint, packet=packet)
+    part_failures = [
+        f"{item.name}: {item.detail}" for item in report.failures if item.name == "part-map"
+    ]
+    unresolved = tuple(dict.fromkeys((*result.unresolved_references, *unknown_refs, *bad_claims)))
+    errors = tuple(dict.fromkeys((*result.errors, *part_failures)))
+    if unknown_refs or bad_claims or part_failures:
+        return replace(
+            result,
+            state="failed",
+            errors=errors,
+            unresolved_references=unresolved,
+            detail="the rendered DOM cites references or claims that do not resolve in the bound packet",
+        )
+    return result
 
 
 def _observed_faults(result: ProspectiveResult) -> tuple[str, ...]:

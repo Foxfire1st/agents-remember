@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
+
+from agents_remember.models.role_identity import canonical_role
+from agents_remember.models.role_launcher import LauncherRole
+from agents_remember.tasks.document import (
+    INTENT_REVIEW_ERASURE_REFUSAL,
+    INTENT_REVIEW_REFUSAL,
+    TaskDocument,
+    intent_review_erasure_refusal,
+    intent_review_stage_refusal,
+)
 
 from .task_doc_phrases import _MUTABLE_FIELDS
 from .task_doc_route_review import TaskDocError
@@ -10,11 +20,65 @@ from .task_doc_route_review import TaskDocError
 if TYPE_CHECKING:
     from .task_doc_tools import _Edit
 
+#: The one canonical role that records the developer's intent-review answer (MIK-R189 rule 8).
+ARCHITECT_ROLE: Final[LauncherRole] = "architect"
+
+
+def enforce_intent_review_candidate(
+    operation: str,
+    original: TaskDocument | None,
+    candidate: TaskDocument,
+    *,
+    caller: object | None = None,
+) -> None:
+    """MIK-R189 rules 2 & 8: refuse intent-review erasure, unauthorized writes, or open stage moves."""
+
+    erasure = intent_review_erasure_refusal(operation, original, candidate)
+    if erasure is not None:
+        raise TaskDocError(erasure)
+    before = original.intentReview if original is not None else None
+    if candidate.intentReview != before and caller is not None:
+        role = canonical_role(getattr(caller, "role", "") or "")
+        if role != ARCHITECT_ROLE:
+            raise TaskDocError(
+                f"task_doc {operation} by a hosted {role!r} seat cannot write intentReview: the "
+                "architect records the developer's answer once the task document exists, and a "
+                "developer writing without a seat binding is admitted."
+            )
+    stage_refusal = intent_review_stage_refusal(original, candidate)
+    if stage_refusal is not None:
+        raise TaskDocError(stage_refusal)
+
+
+def _refuse_raw_intent_review_stage_move(
+    data: dict[str, Any], next_status: str | None, *, before_status: str | None = None
+) -> None:
+    """MIK-R189 rule 2: refuse moving a leaf to ``inProgress`` while its intent review is open."""
+
+    prior = data.get("status") if before_status is None else before_status
+    if (
+        data.get("kind") != "subTask"
+        or next_status != "inProgress"
+        or prior not in {"planning", "abandoned", None}
+    ):
+        return
+    review = data.get("intentReview")
+    state = review.get("state") if isinstance(review, dict) else getattr(review, "state", None)
+    if state in {"pending", "review-first"}:
+        leaf_id = str(data.get("id") or "")
+        raise TaskDocError(
+            f"{INTENT_REVIEW_REFUSAL}: leaf {leaf_id!r} waits for the architect's go; its intent "
+            f"review is {state!r}, so no start of it is admitted. The architect records the "
+            "developer's answer as `go` in `intentReview` through task_doc, then the same start is "
+            "admitted. Do not retry this start."
+        )
+
 
 def _apply_set_status(data: dict[str, Any], edit: _Edit) -> None:
     status = edit.fields.get("status")
     if status is None:
         raise TaskDocError("set_status requires fields.status")
+    _refuse_raw_intent_review_stage_move(data, status)
     data["status"] = status
 
 
@@ -23,6 +87,20 @@ def _apply_set_field(data: dict[str, Any], edit: _Edit) -> None:
     if not updates:
         raise TaskDocError(
             f"set_field requires at least one of: {', '.join(sorted(_MUTABLE_FIELDS))}"
+        )
+    if (
+        "intentReview" in updates
+        and updates["intentReview"] is None
+        and data.get("intentReview") is not None
+    ):
+        raise TaskDocError(
+            f"{INTENT_REVIEW_ERASURE_REFUSAL}: set_field cannot drop intentReview; it records "
+            "the developer's answer before any start. Re-supply the same value, or change it "
+            "with task_doc set_field fields.intentReview."
+        )
+    if "status" in updates:
+        _refuse_raw_intent_review_stage_move(
+            {**data, **updates}, updates["status"], before_status=data.get("status")
         )
     data.update(updates)
 

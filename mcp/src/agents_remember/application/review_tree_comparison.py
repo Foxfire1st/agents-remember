@@ -1,37 +1,16 @@
 """A review comparison as four Git trees, pinned by Git refs and reopened from its tree ids (MIK-R25).
 
-Knowledge is text in Git (D18), so every committed state of both repositories is already a Git
-tree. A review comparison is therefore four trees -- code base B, code candidate C, memory base K_B
-and memory candidate K_C -- and nothing is copied:
+Knowledge is text in Git (D18), so a review comparison is four trees -- code base B, code candidate C,
+memory base K_B and memory candidate K_C -- and nothing is copied:
 
-* **Sides.** B is the contract's code base commit. C is the leaf's code worktree captured as a tree
-  (the shipped private-index capture every review binds its candidate with). K_B is the memory
-  commit the worklist pairs with B (:func:`paired_memory_commit`, MIK-R08), so the reviewer and the
-  worklist compare the same sides. K_C is the leaf's memory worktree captured the same way.
-* **Pinning (rule 1).** An uncommitted candidate is pinned by ``refs/ar/review/<task-id>/<leaf-id>/<n>``
-  in its own repository, pointing at the tree itself, before the comparison is published; a side
-  that the durable source line already holds is committed and needs no ref. If a pin cannot be
-  written the comparison is refused, naming the repository and the ref (Failure and Recovery).
-  A comparison whose four trees equal the leaf's latest recorded one reuses that record, so reading
-  the reviewer again does not add refs.
-* **The converted base (rule 4).** When K_B is unconverted and K_C is converted, K_B is compared as
-  its conversion (MIK-R24 rule 7, at the converted-base cache the worklist fills). The converted
-  files are written as a Git tree into the memory repository's object store, so both memory sides
-  are Git trees and their diff is a Git diff. The record names the conversion's inputs; a reopen
-  re-derives it and checks the tree id instead of pinning it. A live read does not write the tree
-  again while Git holds it (MIK-R40 rule 3): the conversion is a pure function of its three
-  inputs, so when the leaf's latest record names the same inputs, its tree id is this
-  conversion's, and it is used once Git confirms it still holds that tree. Otherwise -- no
-  record, other inputs, or a tree Git no longer has -- the tree is written exactly as before.
-* **Knowledge sides (rule 2).** Each memory side is read through the derived index of its tree
-  (MIK-R23), which is itself a dataset of the store's schema, so the landed review composition runs
-  over it unchanged (rule 6). No database copy is created, retained or read.
-* **Reopen (rule 4).** A comparison reopens from its record's tree ids. A tree Git can no longer
-  produce is ``unavailable-history`` and is named; today's tree is never substituted.
-
-The record is ``ar-review-tree-comparison/v1`` under the task's durable reports
-(``notes/reports/review-comparisons/<leaf>/<n>.json``). The task's archive hook
-(:mod:`agents_remember.application.review_artifact_cleanup`) deletes the refs (rule 5).
+* **Sides & Pinning (rule 1).** B is the contract's code base commit; C and K_C are captured from the
+  leaf worktrees; K_B is the paired memory commit (:func:`paired_memory_commit`, MIK-R08). Uncommitted
+  candidates are pinned by ``refs/ar/review/<task-id>/<leaf-id>/<n>`` before publication.
+* **Converted base (rule 4).** When K_B is unconverted and K_C is converted, K_B is compared as its
+  conversion (MIK-R24 rule 7, MIK-R40 rule 3) written as a Git tree.
+* **Knowledge sides & Reopen (rules 2, 4).** Each memory side is read through the derived index of its
+  tree (MIK-R23). A comparison reopens from its record's tree ids; missing trees are reported as
+  ``unavailable-history`` and never substituted.
 """
 
 from __future__ import annotations
@@ -40,7 +19,8 @@ import threading
 import time
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass, field, replace
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -78,8 +58,10 @@ from agents_remember.models.knowledge.review_trees import (
     ReviewConvertedBase,
     ReviewKnowledgeSide,
     ReviewTreeComparisonRecord,
+    ReviewTrees,
     ReviewTreeSide,
     ReviewTreeSideState,
+    TreeKnowledge,
 )
 from agents_remember.models.knowledge_files.canonical import parse_json
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
@@ -107,6 +89,7 @@ __all__ = [
     "ReviewTrees",
     "TreeKnowledge",
     "TreeSideUnreadable",
+    "_code_sides",
     "comparison_directory",
     "comparison_records",
     "converted_base_side",
@@ -130,40 +113,13 @@ _RECORDING: Final = threading.Lock()
 _PIN_ATTEMPTS: Final = 5
 _PIN_RETRY_SECONDS: Final = 0.02
 _SIDES: Final = ("before", "after")
+_VERIFIED_CODE_TREES: ContextVar[frozenset[tuple[str, str]]] = ContextVar(
+    "_VERIFIED_CODE_TREES", default=frozenset()
+)
 _PIN_ACTION: Final = (
     "make the named repository writable (or remove the conflicting ref if it is stale), then "
     "reopen the review; a comparison is never published with an unpinned uncommitted candidate"
 )
-
-
-@dataclass(frozen=True)
-class TreeKnowledge:
-    """One memory side as the reviewer reads it: its wire state, and its index file when readable."""
-
-    wire: ReviewKnowledgeSide
-    database: Path | None
-
-
-@dataclass(frozen=True)
-class ReviewTrees:
-    """One comparison of four Git trees, and each memory side's index.
-
-    ``record_path`` is where the record lives (``None`` for a comparison between recorded
-    committed endpoints that nothing had to record). ``live`` is set for a comparison captured from
-    a live enclosure: the memory candidate is then rechecked before the payload is published.
-    """
-
-    record: ReviewTreeComparisonRecord
-    record_path: Path | None
-    memory_repository: Path
-    before: TreeKnowledge
-    after: TreeKnowledge
-    live: bool = False
-    memory_worktree: Path | None = field(default=None)
-    code_sides: tuple[ReviewCodeSide, ...] = ()
-
-    def sides(self) -> tuple[ReviewKnowledgeSide, ...]:
-        return (self.before.wire, self.after.wire)
 
 
 # -- applicability -------------------------------------------------------------------------------
@@ -273,14 +229,29 @@ def live_review_trees(
     if worktree is None or memory_repository is None or not converted:
         return None
     try:
-        drafted = _live_draft(coordination_root, contract, memory_repository, code_candidate_tree)
+        drafted = _live_draft(
+            coordination_root,
+            contract,
+            memory_repository,
+            code_candidate_tree,
+            resolve_candidates=False,
+        )
     except TreeSideUnreadable as error:
         return _unresolved(error.side, error.detail)
     recorded = _record(contract, drafted)
     if isinstance(recorded, ReviewRefusal):
         return recorded
     record, path = recorded
-    trees = _open_sides(coordination_root, record, memory_repository, path)
+    verified = [(Path(record.code_base.repository).as_posix(), record.code_base.tree)]
+    if record.code_candidate.commit is not None or record.code_candidate.ref is not None:
+        verified.append(
+            (Path(record.code_candidate.repository).as_posix(), record.code_candidate.tree)
+        )
+    token = _VERIFIED_CODE_TREES.set(frozenset(verified))
+    try:
+        trees = _open_sides(coordination_root, record, memory_repository, path)
+    finally:
+        _VERIFIED_CODE_TREES.reset(token)
     return replace(trees, live=True, memory_worktree=worktree)
 
 
@@ -296,6 +267,8 @@ def _live_draft(
     contract: WorktreeContract,
     memory_repository: Path,
     code_candidate_tree: str,
+    *,
+    resolve_candidates: bool = True,
 ) -> ReviewTreeComparisonRecord:
     code_repository = contract.code_repo_path
     # Enclosure contracts record the base as a full commit SHA, so the tree peel
@@ -334,6 +307,16 @@ def _live_draft(
             held=_latest_converted_base(contract.task_root, leaf_id),
         )
     )
+    code_candidate = (
+        _candidate_side(code_repository, contract.code_source_branch, code_candidate_tree)
+        if resolve_candidates
+        else ReviewTreeSide(repository=str(code_repository), tree=code_candidate_tree)
+    )
+    memory_candidate = (
+        _candidate_side(memory_repository, contract.memory_source_branch, candidate_tree)
+        if resolve_candidates
+        else ReviewTreeSide(repository=str(memory_repository), tree=candidate_tree)
+    )
     return ReviewTreeComparisonRecord(
         task_id=review_task_id(contract.task_root),
         leaf_id=leaf_id,
@@ -341,15 +324,11 @@ def _live_draft(
         code_base=ReviewTreeSide(
             repository=str(code_repository), tree=base_tree, commit=base_commit
         ),
-        code_candidate=_candidate_side(
-            code_repository, contract.code_source_branch, code_candidate_tree
-        ),
+        code_candidate=code_candidate,
         memory_base=ReviewTreeSide(
             repository=str(memory_repository), tree=memory_base_tree, commit=memory_base
         ),
-        memory_candidate=_candidate_side(
-            memory_repository, contract.memory_source_branch, candidate_tree
-        ),
+        memory_candidate=memory_candidate,
         converted_base=converted,
         recorded_at=_now(),
     )
@@ -412,13 +391,25 @@ def recheck_memory_candidate(trees: ReviewTrees) -> ReviewRefusal | None:
     )
 
 
-def _candidate_side(repository: Path, durable_line: str, tree: str) -> ReviewTreeSide:
+def _candidate_side(
+    repository: Path,
+    durable_line: str,
+    tree: str,
+    *,
+    listed_tips: Mapping[tuple[str, str], str] | None = None,
+) -> ReviewTreeSide:
     """A candidate is committed when the durable line's tip holds exactly this tree."""
 
-    try:
-        tip: str | None = branch_commit(repository, durable_line)
-    except (OSError, RuntimeError):
-        tip = None
+    ref_name = durable_line if durable_line.startswith("refs/") else f"refs/heads/{durable_line}"
+    tip = None if listed_tips is None else listed_tips.get((str(repository), ref_name))
+    # The listing is a hint, not a lock (MIK-R81 F17): a ref it did not name -- a detached HEAD,
+    # an abbreviated branch, a ref the listing's patterns missed -- is resolved directly, exactly
+    # as the uncached read does, so a committed candidate never records ``commit=None``.
+    if tip is None:
+        try:
+            tip = branch_commit(repository, durable_line)
+        except (OSError, RuntimeError):
+            tip = None
     if (
         tip is not None
         and _git(
@@ -655,7 +646,37 @@ def _recorded(
         if repinned is not None:
             return repinned
         return latest, directory / f"{latest.number}.json"
-    listed = _listed_pin_shas(draft)
+    listed = _listed_pin_shas(
+        draft,
+        branches={
+            draft.code_candidate.repository: contract.code_source_branch,
+            draft.memory_candidate.repository: contract.memory_source_branch,
+        },
+    )
+    # A side the draft already names by commit is authoritative: a landed leaf's delivered pair
+    # resolved its endpoints from the enclosure, and they need no branch-tip lookup (which would
+    # answer another commit, or none, once the line has moved). A live capture's side has no
+    # commit, so the durable line's tip is resolved for it, cached from this listing.
+    code_candidate = (
+        draft.code_candidate
+        if draft.code_candidate.commit is not None
+        else _candidate_side(
+            Path(draft.code_candidate.repository),
+            contract.code_source_branch,
+            draft.code_candidate.tree,
+            listed_tips=listed,
+        )
+    )
+    memory_candidate = (
+        draft.memory_candidate
+        if draft.memory_candidate.commit is not None
+        else _candidate_side(
+            Path(draft.memory_candidate.repository),
+            contract.memory_source_branch,
+            draft.memory_candidate.tree,
+            listed_tips=listed,
+        )
+    )
     number = 1 + max(
         [
             *(record.number for record in existing),
@@ -670,8 +691,8 @@ def _recorded(
     record = draft.model_copy(
         update={
             "number": number,
-            "code_candidate": _with_ref(draft.code_candidate, ref),
-            "memory_candidate": _with_ref(draft.memory_candidate, ref),
+            "code_candidate": _with_ref(code_candidate, ref),
+            "memory_candidate": _with_ref(memory_candidate, ref),
         }
     )
     pinned = _pin(record, hints=listed)
@@ -715,7 +736,11 @@ def _ref_numbers(
     )
 
 
-def _listed_pin_shas(draft: ReviewTreeComparisonRecord) -> dict[tuple[str, str], str]:
+def _listed_pin_shas(
+    draft: ReviewTreeComparisonRecord,
+    *,
+    branches: Mapping[str, str] | None = None,
+) -> dict[tuple[str, str], str]:
     """Every pin ref under this leaf's namespace, with the tree it names now.
 
     One ``for-each-ref`` per repository lists names and trees together, so the later
@@ -727,10 +752,16 @@ def _listed_pin_shas(draft: ReviewTreeComparisonRecord) -> dict[tuple[str, str],
     prefix = f"{REVIEW_REF_NAMESPACE}/{draft.task_id}/{draft.leaf_id}/"
     shas: dict[tuple[str, str], str] = {}
     for repository in {draft.code_candidate.repository, draft.memory_candidate.repository}:
-        listed = _git(Path(repository), "for-each-ref", "--format=%(refname) %(objectname)", prefix)
+        patterns = [prefix]
+        branch = None if branches is None else branches.get(repository)
+        if branch and branch != "HEAD":
+            patterns.append(branch if branch.startswith("refs/") else f"refs/heads/{branch}")
+        listed = _git(
+            Path(repository), "for-each-ref", "--format=%(refname) %(objectname)", *patterns
+        )
         for line in (listed or "").splitlines():
             name, _, sha = line.partition(" ")
-            if name.startswith(prefix) and sha.strip():
+            if name and sha.strip():
                 shas[(repository, name)] = sha.strip()
     return shas
 
@@ -744,17 +775,7 @@ def _pin(
     *,
     hints: dict[tuple[str, str], str] | None = None,
 ) -> ReviewRefusal | None:
-    """Pin each uncommitted candidate (create-only), or refuse naming the repository and the ref.
-
-    A pin already naming its tree is kept. A ref naming anything else is never moved: the
-    comparison is refused. On any failure the pins this call created are removed again.
-
-    ``hints`` carries the pin listing the number computation already took: a side whose ref the
-    listing saw naming its tree is kept, and a side the listing saw missing tries its create
-    first, without re-verifying either. A hint is never a decision — a create that finds the ref
-    changed re-verifies fresh, and a listed tree that is not this tree still verifies fresh
-    before it refuses — so contention answers exactly as without the listing.
-    """
+    """Pin each uncommitted candidate (create-only), or refuse naming the repository and the ref."""
 
     made: list[tuple[Path, str]] = []
     for side in (record.code_candidate, record.memory_candidate):
@@ -777,17 +798,7 @@ def _pin(
 def _create_pin(
     repository: Path, ref: str, tree: str, hint: str | object | None = None
 ) -> tuple[bool | None, str | None, str]:
-    """Create one pin if it is absent: ``(True, …)`` made, ``(False, …)`` already named ``tree``.
-
-    Pinning is idempotent (MIK-R42): readers opening the same new comparison at once all try to
-    create the same pin, and a ref that already names this very tree is the answer they wanted,
-    whoever made it. A brief lock held by another of them is retried. ``None`` is a refusal: the
-    ref names something else, or Git failed for another reason (``current`` and the reason say).
-
-    ``hint`` is what the pin listing saw for this ref: ``_PIN_ABSENT`` tries the create first,
-    the listed tree itself is kept without re-verifying, and anything else verifies fresh —
-    the listing only ever saves a child, never decides a refusal or a keep.
-    """
+    """Create one pin if it is absent: ``(True, …)`` made, ``(False, …)`` already named ``tree``."""
 
     reason = "update-ref failed"
     for attempt in range(_PIN_ATTEMPTS):
@@ -859,12 +870,19 @@ def _open_sides(
         )
         for side in _SIDES
     }
+    code_sides = (
+        _code_sides(record)
+        if getattr(record, "code_base", None) is not None
+        and getattr(record, "code_candidate", None) is not None
+        else ()
+    )
     return ReviewTrees(
         record=record,
         record_path=record_path,
         memory_repository=memory_repository,
         before=opened["before"],
         after=opened["after"],
+        code_sides=code_sides,
     )
 
 
@@ -974,8 +992,7 @@ def reopened_trees(
     if after is not None:
         states["after"] = ("unavailable-history", after)
     path = None if directory is None else directory / f"{record.number}.json"
-    opened = _open_sides(coordination_root, record, memory_repository, path, states=states)
-    return replace(opened, code_sides=_code_sides(record))
+    return _open_sides(coordination_root, record, memory_repository, path, states=states)
 
 
 def _code_sides(record: ReviewTreeComparisonRecord) -> tuple[ReviewCodeSide, ...]:
@@ -1025,6 +1042,8 @@ def _before_state(
 
 
 def _missing_tree(repository: Path, tree: str) -> str | None:
+    if (repository.as_posix(), tree) in _VERIFIED_CODE_TREES.get():
+        return None
     if _git(repository, "cat-file", "-t", tree) == "tree":
         return None
     return f"Git can no longer produce the tree {tree} in {repository}"

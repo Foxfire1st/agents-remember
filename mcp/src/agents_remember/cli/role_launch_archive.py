@@ -17,7 +17,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from agents_remember.application.role_launch_context import LEAF_ROLES
 from agents_remember.cli.paseo_bridge import PaseoBridgeFailure, bridge_call
 from agents_remember.cli.role_launch_receipts import (
     EXECUTIONS_DIRECTORY,
@@ -31,6 +30,7 @@ from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.file_lock import exclusive_file_lock
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.role_identity import LEAF_ROLES
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 

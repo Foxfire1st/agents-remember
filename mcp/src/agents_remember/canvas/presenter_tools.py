@@ -6,22 +6,18 @@ documentation is a separate read-only surface, and draft render runs a model-fre
 
 from __future__ import annotations
 
-import argparse
 import base64
 import json
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 from urllib.parse import urlsplit
 from urllib.request import urlopen
 
-from mcp.server.fastmcp import FastMCP, Image
-from pydantic import Field
-
 from agents_remember.canvas.kit import kit_assets
 from agents_remember.canvas.presenter_assets import collect_assets
-from agents_remember.canvas.presenter_evidence import source as read_source
 from agents_remember.canvas.presenter_files import (
     directory_fd,
     ensure_child,
@@ -46,17 +42,39 @@ DOCUMENTATION_HOSTS = frozenset(
 
 
 class AuthoringTools:
-    def __init__(self, working: Path):
+    """The kept authoring tools, aimed at one working folder and one input folder.
+
+    The presenter's attempt passes only its working folder: the grants lie in ``host/`` beneath
+    it. The explainer's environment keeps its grants and packet in ``instructions/`` and its
+    drafts in ``drafts/`` (MIK-R186 rule 2), so it hands both folders and the grants it read
+    itself -- the same behaviour, one layout apart.
+    """
+
+    def __init__(
+        self,
+        working: Path,
+        *,
+        host: Path | None = None,
+        grants: Mapping[str, Any] | None = None,
+    ):
         self.working = working
-        self.host = working / "host"
-        self.grants = json.loads(
-            read_bounded(
-                self.host / "grants.json",
-                MAX_RECORD_BYTES,
-                reason="grants-too-large",
-                detail="input grant manifest",
+        self.host = working / "host" if host is None else host
+        manifest: Mapping[str, Any]
+        if grants is None:
+            loaded = json.loads(
+                read_bounded(
+                    self.host / "grants.json",
+                    MAX_RECORD_BYTES,
+                    reason="grants-too-large",
+                    detail="input grant manifest",
+                )
             )
-        )
+            if not isinstance(loaded, Mapping):
+                raise ValueError("the grant manifest is not an object of admitted input names")
+            manifest = loaded
+        else:
+            manifest = grants
+        self.grants: dict[str, Any] = dict(manifest)
         if self.grants["working"] != str(working):
             raise ValueError("the grant does not name this prepared folder")
         ensure_child(working, "assets")
@@ -174,69 +192,6 @@ class AuthoringTools:
         }
 
 
-def create_server(working: Path) -> FastMCP:
-    tools = AuthoringTools(working)
-    server = FastMCP("review-presenter")
-
-    @server.tool()
-    def inputs() -> dict:
-        """List exact admitted input names and digests. There is no arbitrary filesystem reader."""
-        return tools.grants["inputs"]
-
-    @server.tool()
-    def read_input(name: str) -> str:
-        """Read evidence.json or assignment.txt, with its admitted digest checked."""
-        return tools.read(name)
-
-    @server.tool()
-    def source(side: str, path: str, start: int = 1, end: int = 100) -> dict:
-        """Read a relative path at one of the packet's four exact trees, through bounded R102 IO.
-
-        No repository, HEAD or revision argument exists. Refusals and unavailable history are
-        receipts, not permission to read today's checkout. Never writes or executes compared code.
-        """
-        packet = EvidencePacket.model_validate_json(tools.read("evidence.json"))
-        return read_source(packet, side, path, start=start, end=end)
-
-    @server.tool()
-    def assets(relative: str | None = None, offset: int = 0) -> dict:
-        """List/read this attempt's own assets; exact read chunks are bounded to 12000 characters."""
-        return tools.assets(relative, offset)
-
-    @server.tool()
-    def write_asset(relative: str, text: Annotated[str, Field(max_length=1048576)]) -> dict:
-        """Write UTF-8 presentation output relative to assets/, never an absolute/protected path."""
-        body = text.encode()
-        tools.write(relative, body)
-        return {"path": relative, "sha256": digest_bytes(body), "bytes": len(body)}
-
-    @server.tool()
-    def carry_kit(paths: list[str]) -> dict:
-        """Carry kit-relative files (e.g. shiki/4.5.0/shiki-kit.js) and their required notices."""
-        return tools.carry(paths)
-
-    @server.tool()
-    def documentation(url: str, offset: int = 0) -> dict:
-        """Fetch bounded read-only authoring documentation. This surface is NEVER review evidence."""
-        return tools.documentation(url, offset)
-
-    @server.tool()
-    def render() -> list:
-        """Load the exact draft in Chromium with reduced motion; return diagnostics and its picture."""
-        report, picture = tools.render()
-        result: list[Any] = [json.dumps(report)]
-        if picture is not None:
-            result.append(Image(data=picture, format="png"))
-        return result
-
-    return server
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--working", type=Path, required=True)
-    create_server(parser.parse_args().working).run()
-
-
-if __name__ == "__main__":
-    main()
+# The standalone `review-presenter` server that used to be built here is gone (MIK-R186 @ v2 rule 3):
+# the normal AR task server serves an explainer seat, and `AuthoringTools` above is the implementation
+# it registers under `_register_authoring`. Nothing else remains to launch.

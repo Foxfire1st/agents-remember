@@ -14,8 +14,11 @@ things at once:
   presenter records. Session state lives in the attempt's folder, so a restarted product reconciles
   the same session instead of inventing a second one. Nothing is implicit.
 
-Production uses NativePresenterHarness. This local harness is only selected explicitly by callers
-such as deterministic tests and supplies no native-host or model-authoring qualification.
+Production wires no presenter harness: the capability's native launch was retired with its
+dedicated tool server (MIK-R186 @ v2 Scope), so a presenter constructed with no runner refuses as
+:class:`~agents_remember.canvas.presenter.UnconfiguredPresenterRunner`. This local harness is only
+selected explicitly by callers such as deterministic tests and supplies no native-host or
+model-authoring qualification.
 
 The draft is named for what it is: ``static-html-readiness`` over the authored bytes at a stated
 viewport, with the check's own errors; no browser is launched and no result claims one observed it.

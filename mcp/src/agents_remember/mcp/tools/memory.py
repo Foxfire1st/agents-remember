@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from importlib import import_module
 from typing import Any
 
 from agents_remember.application.memory_quality.answer import (
@@ -42,7 +43,6 @@ from agents_remember.models.tools.tool_answer import (
     TOOL_ANSWER_LIST_MAX,
     TOOL_ANSWER_STATUS_ENTRY_MAX,
 )
-from agents_remember.worktrees.cutover_lock import LEGACY_FORMAT_CODE, is_legacy_format_refusal
 
 from .base import _tool_payload
 
@@ -187,7 +187,10 @@ def _carry_legacy_refusal(full: Mapping[str, Any], answer: dict[str, Any]) -> No
     converts from the log.
     """
 
-    if full.get("code") == LEGACY_FORMAT_CODE:
+    if (
+        full.get("code")
+        == import_module("agents_remember.worktrees.cutover_lock").LEGACY_FORMAT_CODE
+    ):
         answer["code"] = full["code"]
         if full.get("detail") is not None:
             answer["detail"] = full["detail"]
@@ -409,16 +412,23 @@ def memory_baseline_adopt_payload(
     branches: MemoryBranches = DEFAULT_MEMORY_BRANCHES,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    return _tool_payload(
-        "memory_baseline_adopt",
-        memory_baseline_adopt_tool(
-            config,
-            repo_id=repo_id,
-            accept_drift=accept_drift,
-            branches=branches,
-            dry_run=dry_run,
-        ),
+    whole = memory_baseline_adopt_tool(
+        config,
+        repo_id=repo_id,
+        accept_drift=accept_drift,
+        branches=branches,
+        dry_run=dry_run,
     )
+    answer = (
+        {
+            key: value
+            for key, value in whole.items()
+            if key not in {"onboarding_root", "ledger_path", "drift", "ledger"}
+        }
+        if whole.get("state") == "legacy-format"
+        else None
+    )
+    return _tool_payload("memory_baseline_adopt", whole, answer=answer)
 
 
 def compact_carryover_payload(full: dict[str, Any], report_path: str | None) -> dict[str, Any]:
@@ -464,7 +474,9 @@ def memory_carryover_plan_payload(
     try:
         full = memory_carryover_plan_tool(config, selection)
     except RuntimeError as error:
-        if not is_legacy_format_refusal(str(error)):
+        if not import_module("agents_remember.worktrees.cutover_lock").is_legacy_format_refusal(
+            str(error)
+        ):
             raise
         full = _carryover_legacy_refusal(str(error), operation="memory_carryover_plan")
     # Derived decision facts belong to the validated/logged whole as well as its answer.

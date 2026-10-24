@@ -6,11 +6,13 @@ reclaimed. Every record is one JSON file under the page's presenter directory, s
 read, and every transition is a locked read-modify-write of a fresh record, so a delayed host
 receipt cannot revive a cancelled attempt.
 
-The capability name, the record schema identity, the attempt models and the refusal type live here
-because the store refuses before any orchestration exists: an unknown attempt identity and a record
-path that escapes the task are named here, and every record is sized before its bytes are read.
-``presenter`` and ``presenter_inputs`` import them from here, so one class is raised and one name is
-written.
+The capability name, the record schema identity and the attempt models live here because the store
+refuses before any orchestration exists: an unknown attempt identity and a record path that escapes
+the task are named here, and every record is sized before its bytes are read. The refusal type itself
+lives in the light owner :mod:`agents_remember.canvas.presenter_refusals` and is imported back here, so
+``presenter_store.PresenterRefused`` is that same class: the store raises it, ``presenter`` and
+``presenter_inputs`` raise it, and a declaration module that only catches it loads none of this module's
+frame, evidence and comparison imports (MIK-R204 @ v1 rule 1).
 
 Listing is chronological and bounded (the caller shows 20 of the 32 retained); request and session
 lookups read every retained record, not only a displayed window. A request identity outlives the
@@ -52,6 +54,7 @@ from agents_remember.canvas.presenter_files import (
     unlink_file,
     write_file,
 )
+from agents_remember.canvas.presenter_refusals import PresenterRefused
 from agents_remember.kernel.canonical_json import canonical_json_bytes
 from agents_remember.kernel.file_lock import exclusive_file_lock, lock_path_for
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -100,15 +103,6 @@ MAX_MESSAGE_CHARS = 8192
 
 _STATES = ("started", "running", "published", "failed", "cancelled")
 LIVE_STATES = frozenset({"started", "running"})
-
-
-class PresenterRefused(ValueError):
-    """A presenter act refused with one nameable reason and an actionable detail."""
-
-    def __init__(self, reason: str, detail: str) -> None:
-        self.reason = reason
-        self.detail = detail
-        super().__init__(f"{reason}: {detail}")
 
 
 class StartOutcomeUnknown(PresenterRefused):
