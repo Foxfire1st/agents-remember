@@ -18,6 +18,7 @@ from agents_remember.kernel.memory_mode import (
     memory_mode_refusal_fields,
 )
 from agents_remember.tasks.task_paths import leaf_enclosure_path
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.activation.atomic_series_activation import (
     atomic_series_status_projection,
 )
@@ -747,12 +748,37 @@ def _prepare_start_enclosure(
     *,
     preview_parent: WorktreeContract | None = None,
 ) -> _PreparedStartEnclosure | WorktreeCommandResult:
+    contract = _start_contract_with_outside_scratch(contract, dry_run=args.dry_run)
     planned = _plan_start_enclosure(context, contract, args, preview_parent=preview_parent)
     if isinstance(planned, WorktreeCommandResult):
         return planned
     if args.dry_run:
         return _preview_start_enclosure(planned)
     return _materialize_start_enclosure(context, contract, args, planned)
+
+
+def _start_contract_with_outside_scratch(
+    contract: WorktreeContract, *, dry_run: bool
+) -> WorktreeContract:
+    """The contract carrying this generation's outside scratch root (MIK-R207 rule 1).
+
+    The record has to exist before the exact contract text is written, because the text is
+    what the manifest and the locator pin. A preview allocates nothing and records nothing, so
+    a dry run never names a root it did not create.
+    """
+
+    if dry_run:
+        return contract
+    predecessor = _restartable_start_predecessor(contract)
+    return outside_scratch.with_root_record(
+        contract,
+        predecessor_generation=(
+            outside_scratch.recorded_generation(predecessor.contract_path)
+            if predecessor is not None
+            else ""
+        ),
+        new_generation=predecessor is not None,
+    )
 
 
 def _plan_start_enclosure(

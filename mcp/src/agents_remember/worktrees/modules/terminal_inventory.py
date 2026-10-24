@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     inspect_lifecycle_operation_locator,
 )
@@ -66,6 +67,17 @@ def _memory_work_branch_absent(contract: WorktreeContract) -> bool:
     )
 
 
+def _outside_scratch_absent(contract: WorktreeContract) -> bool:
+    """No registered outside scratch root of this enclosure is still on disk (MIK-R207).
+
+    A remains-free enclosure is only remains-free when the root it records is gone too; the
+    no-remains answer otherwise promises a deletion that never happened.
+    """
+
+    record = outside_scratch.recorded_root(contract)
+    return record is None or not record.root.exists()
+
+
 def terminal_without_remains_reason(contract: WorktreeContract, *, operation: str) -> str | None:
     """MIK-R82 rule 5: why this enclosure may finish with nothing to archive.
 
@@ -93,6 +105,7 @@ def terminal_without_remains_reason(contract: WorktreeContract, *, operation: st
         and local_branch_presence(contract.code_repo_path, contract.code_work_branch).state
         == "absent"
         and _memory_work_branch_absent(contract)
+        and _outside_scratch_absent(contract)
     ):
         return (
             "MIK-R82 rule 5: no locator is published for this enclosure and its "

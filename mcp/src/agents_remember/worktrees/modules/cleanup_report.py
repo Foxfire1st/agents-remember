@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 ALREADY_CLEAN = "already-clean"
@@ -30,9 +31,24 @@ def cleanup_report(contract: WorktreeContract, payload: dict[str, object]) -> di
 
     state = str(payload.get("state"))
     if state == ALREADY_CLEAN:
-        # The terminal archive already proves this enclosure was reclaimed: nothing remained
-        # to remove, and reporting the contract's targets as "still in place" would state the
-        # opposite of what the terminal proof says.
+        # The terminal archive already proves this enclosure was reclaimed, so the contract's
+        # targets are not reported as "still in place": that would state the opposite of what
+        # the terminal proof says. What this retry *did* remove is still reported, because a
+        # completed retry that found the outside scratch root and removed it (MIK-R207) removed
+        # something real, and an empty inventory would discard the only record of it.
+        removed, _ = _inventory(contract, payload)
+        if any(removed.values()):
+            not_removed = _empty_inventory()
+            outside = _outside_scratch(contract, payload)
+            if outside is not None:
+                not_removed["outsideScratch"] = _absent(outside)
+            return {
+                "automatic": True,
+                "state": state,
+                "summary": _summary(removed, not_removed),
+                "removed": removed,
+                "notRemoved": not_removed,
+            }
         return {
             "automatic": True,
             "state": state,
@@ -63,18 +79,23 @@ def _inventory(
 ) -> tuple[RemovalInventory, RemovalInventory]:
     reports = _directory(contract.worktree_group / "reports", payload, "reports")
     root = _directory(contract.worktree_group, payload, "worktree_group")
+    outside = _outside_scratch(contract, payload)
     removed: RemovalInventory = {
         "worktrees": _removed_worktrees(payload),
         "localBranches": _removed_branches(payload),
         "reports": _presented(reports),
         "enclosureRoot": _presented(root),
     }
+    if outside is not None:
+        removed["outsideScratch"] = _presented(outside)
     not_removed: RemovalInventory = {
         "worktrees": _kept_worktrees(contract, payload),
         "localBranches": _kept_branches(contract, payload),
         "reports": _absent(reports),
         "enclosureRoot": _absent(root),
     }
+    if outside is not None:
+        not_removed["outsideScratch"] = _absent(outside)
     return removed, not_removed
 
 
@@ -124,6 +145,32 @@ def _directory(path: Path, payload: dict[str, object], name: str) -> dict[str, o
     item = _entries(payload.get("directories")).get(name)
     return {
         "path": path.as_posix(),
+        "removed": bool(item and item.get("removed")),
+        "reason": _reason(item),
+    }
+
+
+def _outside_scratch(
+    contract: WorktreeContract, payload: dict[str, object]
+) -> dict[str, object] | None:
+    """The outside scratch root this cleanup lists, or ``None`` for a pre-MIK-R207 enclosure.
+
+    An enclosure that records no root reports no such row: the inventory names what the
+    enclosure owns, and it owns nothing outside itself.
+    """
+
+    record = outside_scratch.recorded_root(contract)
+    if record is None:
+        return None
+    item = _entries(payload.get("directories")).get("outside_scratch")
+    if not isinstance(item, dict):
+        # The already-clean path removes the root and publishes that removal at the top level
+        # (`directories: {}` beside `outsideScratch`). Reading only the nested shape dropped a
+        # removal the operation really performed, so both shapes are read here.
+        carried = payload.get("outsideScratch")
+        item = carried if isinstance(carried, dict) else None
+    return {
+        "path": record.root.as_posix(),
         "removed": bool(item and item.get("removed")),
         "reason": _reason(item),
     }
@@ -181,6 +228,11 @@ def _inventory_phrase(inventory: RemovalInventory) -> str:
         _counted(inventory["localBranches"], "local branch", "local branches"),
         _counted(inventory["reports"], "reports directory", "reports directories"),
         _counted(inventory["enclosureRoot"], "enclosure root", "enclosure roots"),
+        *(
+            [_counted(inventory["outsideScratch"], "outside scratch root", "outside scratch roots")]
+            if "outsideScratch" in inventory
+            else []
+        ),
     ]
     return ", ".join(part for part in parts if part)
 

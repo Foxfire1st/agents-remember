@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import threading
 from typing import TYPE_CHECKING
 
 from agents_remember.application.agent_binding import read_agent_binding
@@ -12,11 +15,16 @@ from agents_remember.observer import EventStore, observer_root
 from agents_remember.observer.tool_events import ToolEventWriter, install_tool_writer
 from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.daemon import maybe_autostart_dashboard
+from agents_remember.worktrees.integration.lifecycle.outside_scratch_reconcile import (
+    reconcile_outside_scratch_roots,
+)
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
         McpRuntimeConfig,
     )
+
+logger = logging.getLogger(__name__)
 
 
 def initialize_mcp_application(config: McpRuntimeConfig) -> None:
@@ -77,4 +85,33 @@ def declare_mcp_process() -> None:
 def prepare_mcp_process(config: McpRuntimeConfig) -> None:
     """Declare MCP store ownership, then start optional dashboard supervision."""
     declare_mcp_process()
+    start_outside_scratch_reconcile()
     maybe_autostart_dashboard(config)
+
+
+def start_outside_scratch_reconcile() -> None:
+    """Reconcile the product's outside scratch roots at every tool-server start (MIK-R207).
+
+    A root whose generation is proven ended is deleted; every other root is reported. The scan
+    runs in its own daemon thread so it cannot delay or break the stdio handshake, and a
+    failure is logged: a scratch sweep is never a reason for a server not to start.
+    """
+
+    threading.Thread(
+        target=_reconcile_outside_scratch_roots,
+        name="outside-scratch-reconcile",
+        daemon=True,
+    ).start()
+
+
+def _reconcile_outside_scratch_roots() -> None:
+    try:
+        report = reconcile_outside_scratch_roots()
+    except Exception:
+        logger.exception("outside scratch reconcile failed at tool-server start")
+        return
+    if report["removed"] or report["reported"]:
+        logger.info(
+            "outside scratch reconcile at tool-server start: %s",
+            json.dumps(report, sort_keys=True, default=str),
+        )

@@ -12,6 +12,7 @@ from agents_remember.memory_quality.style.citations.source_index_cache import (
     TERMINAL_CLEANUP_STATES,
 )
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
@@ -25,6 +26,12 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     memory_repository_default_branch,
     repository_default_branch,
     require_terminal_worktree,
+)
+from agents_remember.worktrees.integration.lifecycle.outside_scratch_reconcile import (
+    with_outside_scratch_reconcile,
+)
+from agents_remember.worktrees.integration.terminal_cleanup_completion import (
+    write_completion_record,
 )
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     TerminalCleanupContractAuthority,
@@ -368,7 +375,11 @@ def _removed_directories(
         dry_run=dry_run,
     )
     if contract.kind == "series":
-        return {"reports": reports, "lifecycle": lifecycle}
+        return {
+            "reports": reports,
+            "lifecycle": lifecycle,
+            **outside_scratch.removal_entry_for(contract, dry_run=dry_run),
+        }
     role_folders = remove_group_role_folders(contract, dry_run=dry_run)
     planned = set(planned_removed or ())
     planned.update(
@@ -388,6 +399,7 @@ def _removed_directories(
         "lifecycle": lifecycle,
         "logs": logs,
         "worktree_group": remove_empty_dir(contract.worktree_group, dry_run, planned),
+        **outside_scratch.removal_entry_for(contract, dry_run=dry_run),
     }
     if contract.worktree_group.parent.exists():
         directories["repo_worktree_group"] = remove_empty_dir(
@@ -697,6 +709,7 @@ def _cleanup_terminal_branch(
             _already_completed_cleanup(
                 contract,
                 teardown_providers=args.teardown_providers,
+                dry_run=args.dry_run,
             ),
             dry_run=args.dry_run,
         )
@@ -806,7 +819,7 @@ def _series_terminal_release_refusal(
     return None
 
 
-def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:  # noqa: PLR0911
+def _cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:  # noqa: PLR0911
     if not args.approved and not args.dry_run:
         raise RuntimeError("cleanup requires --approved after successful integration")
     assert args.contract_path is not None
@@ -836,6 +849,12 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:  # noqa: PLR091
         if isinstance(kept_line, WorktreeCommandResult):
             return kept_line
     return _cleanup_settled(args, contract, kept_line)
+
+
+def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
+    """Cleanup terminal reclamation, with the automatic outside-scratch reconcile (MIK-R207)."""
+
+    return with_outside_scratch_reconcile(_cleanup_result(args), dry_run=args.dry_run)
 
 
 def _cleanup_settled(
@@ -950,6 +969,7 @@ def _already_completed_cleanup(
     contract: WorktreeContract,
     *,
     teardown_providers: bool,
+    dry_run: bool,
 ) -> WorktreeCommandResult:
     terminal_archive = _terminal_archive_observation(
         contract,
@@ -957,6 +977,23 @@ def _already_completed_cleanup(
     )
     if terminal_archive.returncode != 0:
         return terminal_archive
+    # MIK-R207 rule 4: a completed retry removes a registered root that is still there, and
+    # never answers a success while it remains.
+    outside, blockers = outside_scratch.terminal_blocker(contract, dry_run=dry_run)
+    if blockers:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "blocked",
+                **status_payload(contract),
+                "summary": (
+                    "Cleanup is already recorded as completed but its outside scratch root "
+                    "could not be removed."
+                ),
+                "blockers": blockers,
+                **({"outsideScratch": outside} if outside is not None else {}),
+            },
+        )
     return _with_terminal_archive(
         WorktreeCommandResult(
             0,
@@ -972,6 +1009,7 @@ def _already_completed_cleanup(
                 "blockers": [],
                 "kept_branches": {},
                 "alreadyTerminal": True,
+                **({"outsideScratch": outside} if outside is not None else {}),
             },
         ),
         terminal_archive,
@@ -1093,6 +1131,10 @@ def _publish_cleanup(
                     "blockers": [{"publication": "contract/cache", "reason": readback_error}],
                 },
             )
+    # MIK-R207: a generation a successor replaces cannot be asked for its own completion later --
+    # its contract dies with the group -- so the completed operation records completion beside its
+    # terminal archive while it still can.
+    write_completion_record(contract, updated, operation="worktree_cleanup")
     state = _cleanup_state(False, True, removed_worktrees, branches)
     return WorktreeCommandResult(
         0,

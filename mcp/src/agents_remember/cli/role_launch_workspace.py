@@ -23,8 +23,13 @@ from agents_remember.kernel.direct_execution_grants import DirectGrantError, rea
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.task_resolver import series_contract_path
-from agents_remember.worktrees.worktree_contract import ContractError, load_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    load_contract,
+)
 
 
 def _recorded_parent(context: RoleLaunchContext) -> str:
@@ -203,6 +208,7 @@ def _resolve_direct_workspace(
         codeRoot=code.as_posix(),
         taskReportRoot=task_reports.resolve().as_posix(),
         taskReportAccessRoot=report_access.as_posix(),
+        **_outside_scratch_field(series),
     )
     if series.memory_worktree is not None:
         workspace["memoryRoot"] = _require_directory_of(
@@ -261,8 +267,41 @@ def _resolve_workspace(config: McpRuntimeConfig, context: RoleLaunchContext) -> 
         memoryRoot=memory.as_posix(),
         taskReportRoot=task_reports.resolve().as_posix(),
         taskReportAccessRoot=report_access.as_posix(),
+        outsideScratchRoot=_ensure_leaf_root(contract_path, group),
     )
     return workspace
+
+
+def _outside_scratch_field(contract: WorktreeContract) -> dict[str, str]:
+    """``workspace.outsideScratchRoot``, beside ``workspace.scratchRoot`` (MIK-R207 rule 3).
+
+    A direct leaf shares the root of the series enclosure it works under; a leaf's own
+    enclosure records its own. The field is always present so that the role and operation
+    texts may name it unconditionally; an enclosure from before this change records no root and
+    the field is empty, which no text reads as a place to write.
+    """
+
+    record = outside_scratch.recorded_root(contract)
+    if record is None:
+        return {"outsideScratchRoot": ""}
+    outside_scratch.ensure_recorded_root(contract)
+    return {"outsideScratchRoot": record.root.as_posix()}
+
+
+def _ensure_leaf_root(contract_path: Path, group: Path) -> str:
+    """The leaf enclosure's root, recreated under its recorded identity when it aged away.
+
+    The manifest is read first and the contract only when it records a root, so an enclosure
+    from before this change is answered without a second read of it. A recorded root that no
+    longer exists is recreated here: the next use is what keeps the place a task writes in.
+    """
+
+    if not outside_scratch.recorded_root_in_group(group):
+        return ""
+    contract = load_contract(contract_path)
+    outside_scratch.ensure_recorded_root(contract)
+    record = outside_scratch.recorded_root(contract)
+    return "" if record is None else record.root.as_posix()
 
 
 def _ensure_leaf_enclosure(

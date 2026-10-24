@@ -21,6 +21,7 @@ from pathlib import Path
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeAbandonArguments
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.abandon_task_publication import publish_abandoned_task
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
@@ -31,6 +32,12 @@ from agents_remember.worktrees.integration.atomic_series_terminal import (
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_terminal_worktree,
+)
+from agents_remember.worktrees.integration.lifecycle.outside_scratch_reconcile import (
+    with_outside_scratch_reconcile,
+)
+from agents_remember.worktrees.integration.terminal_cleanup_completion import (
+    write_completion_record,
 )
 from agents_remember.worktrees.integration.terminal_enclosure_archive import (
     TerminalCleanupContractAuthority,
@@ -121,7 +128,7 @@ def _abandon_terminal_branch(
     if terminal.state == "cleanup-completed":
         result = with_terminal_atomic_series_release(
             contract,
-            _already_abandoned(contract, force=args.force),
+            _already_abandoned(contract, force=args.force, dry_run=args.dry_run),
             dry_run=args.dry_run,
         )
         agents = archive_terminal_agents(contract, dry_run=args.dry_run)
@@ -153,6 +160,12 @@ def _abandon_series_release_refusal(
 
 
 def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
+    """Abandon the worktree, with the automatic outside-scratch reconcile (MIK-R207)."""
+
+    return with_outside_scratch_reconcile(_abandon_result(args), dry_run=args.dry_run)
+
+
+def _abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if not args.approved and not args.dry_run:
         raise RuntimeError("abandon requires --approved (use dry_run to preview)")
     assert args.contract_path is not None
@@ -348,6 +361,7 @@ def _already_abandoned(
     contract: WorktreeContract,
     *,
     force: bool,
+    dry_run: bool,
 ) -> WorktreeCommandResult:
     terminal_archive = _terminal_archive_observation(
         contract,
@@ -355,6 +369,23 @@ def _already_abandoned(
     )
     if terminal_archive.returncode != 0:
         return terminal_archive
+    # MIK-R207 rule 4: a completed retry removes a registered root that is still there, and
+    # never answers a success while it remains.
+    outside, blockers = outside_scratch.terminal_blocker(contract, dry_run=dry_run)
+    if blockers:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "abandon-blocked",
+                **status_payload(contract),
+                "summary": (
+                    "The worktree is already recorded as abandoned but its outside scratch root "
+                    "could not be removed."
+                ),
+                "blockers": blockers,
+                **({"outsideScratch": outside} if outside is not None else {}),
+            },
+        )
     return _with_terminal_archive(
         WorktreeCommandResult(
             0,
@@ -368,6 +399,7 @@ def _already_abandoned(
                 "directories": {},
                 "blockers": [],
                 "alreadyTerminal": True,
+                **({"outsideScratch": outside} if outside is not None else {}),
             },
         ),
         terminal_archive,
@@ -470,6 +502,9 @@ def _publish_abandon(
                     "blockers": [{"publication": "contract/cache", "reason": readback_error}],
                 },
             )
+    # MIK-R207: the completed abandon records its own completion beside the terminal archive, so a
+    # successor's sweep can prove this generation ended without the contract the group took away.
+    write_completion_record(contract, updated, operation="worktree_abandon")
     return WorktreeCommandResult(
         0,
         {
@@ -777,6 +812,7 @@ def _abandon_directories(
 ) -> dict[str, dict[str, object]]:
     group = contract.worktree_group
     lifecycle = group / ".lifecycle"
+    outside = outside_scratch.removal_entry_for(contract, dry_run=dry_run)
     if contract.kind == "series":
         reports = group / ENCLOSURE_REPORTS_DIRECTORY
         # Parity with cleanup and the leaf path (MIK-R108 rule 3): the series
@@ -804,13 +840,15 @@ def _abandon_directories(
                 lifecycle,
                 dry_run=dry_run,
             ),
+            **outside,
         }
     role_folders = remove_group_role_folders(contract, dry_run=dry_run)
     if force:
         directories = {
             "worktree_group": worktree_services().provider_lifecycle.remove_tree(
                 group, dry_run=dry_run
-            )
+            ),
+            **outside,
         }
     else:
         reports_path = group / ENCLOSURE_REPORTS_DIRECTORY
@@ -843,6 +881,7 @@ def _abandon_directories(
             "lifecycle": lifecycle_result,
             "logs": logs,
             "worktree_group": remove_empty_dir(group, dry_run, planned),
+            **outside,
         }
     if group.parent.exists():
         directories["repo_worktree_group"] = remove_empty_dir(group.parent, dry_run)

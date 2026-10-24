@@ -19,6 +19,7 @@ from agents_remember.tasks.leaf_doc import (
     LeafLifecycleRestampPlan,
     plan_leaf_doc_lifecycle_restamp,
 )
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.disabled_memory import opt_out_result_fields, subject_for_contract
 from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
@@ -399,7 +400,11 @@ def _recover_master_series_bootstrap(
     contract = _contract_from_bootstrap_record(spec, record)
     if contract.contract_path.is_file():
         existing = load_contract(contract.contract_path)
-        if existing != contract:
+        # The journal is still here, so the retirement was interrupted after the publication
+        # landed. That publication pinned this generation's outside scratch record (MIK-R207
+        # rule 1), so the published bytes are this same contract *with* the record it wrote --
+        # accepting only the bare rebuild would refuse the retry's own work and lose the root.
+        if existing not in (contract, outside_scratch.with_root_record(contract)):
             raise RuntimeError(
                 "series bootstrap contract was published with different task or repository facts"
             )
@@ -497,6 +502,13 @@ def _finish_master_series_bootstrap(
             ),
             authority=_BOOTSTRAP_REF_AUTHORITY,
         )
+    # MIK-R207 rule 1: the generation records and allocates its outside scratch root as part
+    # of the exact text this publication pins. The record is applied before the retry comparison,
+    # because a retry finds the contract this same publication already wrote: comparing the
+    # un-augmented contract against the published one would refuse its own work after an
+    # interruption between the publication and the journal's retirement, and the record it
+    # carries is the one this retry must reuse rather than compute again.
+    contract = outside_scratch.with_root_record(contract)
     if contract.contract_path.is_file():
         existing = load_contract(contract.contract_path)
         if existing != contract:

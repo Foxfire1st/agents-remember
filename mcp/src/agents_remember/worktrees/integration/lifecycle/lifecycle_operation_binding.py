@@ -133,9 +133,15 @@ def sha256_payload(payload: Mapping[str, object]) -> str:
 
 
 def model_text(model: BaseModel) -> str:
-    exclude = (
-        {"predecessorTerminal"} if getattr(model, "predecessorTerminal", None) is None else None
+    # A field that is null is left out of the exact bytes, exactly as it was before it
+    # existed: an enclosure manifest published before the field is re-serialized to the same
+    # text, so its terminal archive still proves itself after the field is added.
+    absent = tuple(
+        name
+        for name in ("predecessorTerminal", "outsideScratch")
+        if getattr(model, name, None) is None
     )
+    exclude = set(absent) if absent else None
     return model.model_dump_json(indent=2, exclude=exclude) + "\n"
 
 

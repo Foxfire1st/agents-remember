@@ -63,6 +63,23 @@ class TerminalEnclosureReceipt(StrictResponseModel):
     terminalReceiptPath: str = Field(min_length=1, max_length=4096)
 
 
+class OutsideScratchRootRecord(StrictResponseModel):
+    """The scratch root one enclosure generation owns outside ``~/projects`` (MIK-R207).
+
+    The path alone is not ownership: ``generation`` names the publication the root was
+    allocated for, and ``markerSha256`` is the digest of the marker file inside the root. A
+    reconcile deletes a root only when both the manifest record and the marker agree, so a
+    folder whose name merely looks like one of ours is reported, never removed.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schemaVersion: Literal["1.0"] = "1.0"
+    path: str = Field(min_length=1, max_length=4096)
+    generation: str = Field(pattern=r"^[0-9a-f]{64}$")
+    markerSha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class LifecycleEnclosureManifest(StrictResponseModel):
     """Immutable identity and provenance stored beside canonical live journals."""
 
@@ -84,6 +101,9 @@ class LifecycleEnclosureManifest(StrictResponseModel):
     lifecycleId: str = Field(default="", max_length=512)
     bindingFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     predecessorTerminal: TerminalEnclosurePredecessor | None = None
+    # Absent on a generation published before MIK-R207 and on a legacy enclosure that records
+    # no root; the reconcile reads the contract's own record for those, as it always did.
+    outsideScratch: OutsideScratchRootRecord | None = None
 
     @model_validator(mode="after")
     def _successor_generation_has_predecessor(self) -> LifecycleEnclosureManifest:
@@ -354,8 +374,12 @@ def _required_manifest_entry(
 
 
 def _expected_manifest_text(manifest: LifecycleEnclosureManifest) -> str:
-    exclude = {"predecessorTerminal"} if manifest.predecessorTerminal is None else None
-    return manifest.model_dump_json(indent=2, exclude=exclude) + "\n"
+    exclude = {
+        name
+        for name in ("predecessorTerminal", "outsideScratch")
+        if getattr(manifest, name, None) is None
+    }
+    return manifest.model_dump_json(indent=2, exclude=exclude or None) + "\n"
 
 
 def _require_manifest_proof(locator: LifecycleEnclosureLocator, manifest_text: str) -> None:

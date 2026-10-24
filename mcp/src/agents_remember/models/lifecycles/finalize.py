@@ -30,6 +30,11 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     targetBranch: str | None = None
     blockers: list[str | CompletionBlocker] = Field(default_factory=list)
     cleanup: dict[str, Any] = Field(default_factory=dict)
+    # MIK-R207: the outside scratch root a completed-cleanup retry removed, or the one that
+    # still remains and blocks the answer. Absent for an enclosure published before it.
+    outsideScratch: dict[str, Any] = Field(default_factory=dict)
+    # MIK-R207 rule 5: what the terminal sweep removed, and the roots it left with their reason.
+    outsideScratchReconcile: dict[str, Any] = Field(default_factory=dict)
     taskUpdates: dict[str, Any] = Field(default_factory=dict)
     projectionEffects: list[TaskDocProjectionEffect] = Field(default_factory=list, max_length=8)
     taskArchive: dict[str, Any] = Field(default_factory=dict)

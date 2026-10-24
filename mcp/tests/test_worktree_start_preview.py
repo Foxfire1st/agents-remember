@@ -872,3 +872,44 @@ def test_observer_event_mode_change_is_rejected(tmp_path: Path) -> None:
             attach_record(world, world.snapshot()).snapshot["paths"],
             event_path,
         )
+
+
+def test_a_series_bootstrap_retry_accepts_the_contract_it_already_published(
+    tmp_path: Path,
+) -> None:
+    """F04: publication then interrupted journal retirement must not refuse its own contract.
+
+    The retirement is what is interrupted: the publication lands, the bootstrap journal stays, and
+    the retry meets a contract that already carries this generation's outside scratch record. The
+    retry must accept those exact bytes and reuse the recorded root, not refuse them as different
+    task facts and not allocate a second root.
+    """
+
+    world = PreviewFixture(tmp_path, commanded=True)
+    journal = world.coord / "logs" / "worktree-series-bootstrap" / REPO / f"{MASTER}.json"
+    unlink = Path.unlink
+
+    def keep_the_journal(self: Path, missing_ok: bool = False) -> None:
+        if self == journal:
+            return
+        unlink(self, missing_ok=missing_ok)
+
+    with patch.object(Path, "unlink", keep_the_journal):
+        first = world.start(dry_run=False)
+
+    assert not first.isError, first
+    assert journal.is_file(), "the retirement was interrupted, so the journal is still there"
+    contract_path = world.task_root / "series-contract.md"
+    published = load_contract(contract_path)
+    root = Path(published.outside_scratch_root)
+    assert root.is_dir() and published.outside_scratch_generation
+
+    retried = world.start(dry_run=False)
+
+    assert not retried.isError, retried
+    assert retried.structuredContent is not None and retried.structuredContent["ok"]
+    accepted = load_contract(contract_path)
+    assert accepted.outside_scratch_generation == published.outside_scratch_generation
+    assert accepted.outside_scratch_root == published.outside_scratch_root
+    assert root.is_dir(), "the retry reuses the recorded root instead of allocating another"
+    assert not journal.exists(), "the retry retires the journal it recovered"

@@ -86,7 +86,7 @@ Discoveries—incidents, opportunities, alternative frames or forward-learning h
 
 ## Direct handovers within the leaf
 
-Reconcile the Worker's hand-off list and the Reviewer's passed freeze against the same freeze.
+Reconcile the Worker's hand-off list and the Reviewer's passed freeze against that freeze.
 
 Send code questions and evidenced concerns under `../operations/curation.md` §Failure handling, including after code PASS.
 
@@ -94,9 +94,9 @@ Contact the Manager only as `../operations/curation.md` §Handoff / exit states.
 come directly to you; transaction steps and landing authority remain the Manager's. Messages to another leaf
 require a dependency named by a requirement or the Manager; otherwise go through the Manager.
 
-A Curator starts no role: whoever starts an agent briefs it and becomes its parent, so no seat
+A Curator starts no role: whoever starts an agent becomes its parent, so no seat
 starts the one that checks it. Send developer questions to your parent; without a parent, ask in your own chat. A Curator started from the dashboard has no parent and needs none.
-Repository-foundation and other admissions retain their brief's transport without a fallback between transports.
+Repository-foundation and other admissions retain their brief's transport without fallback between transports.
 
 ## What you may do
 
@@ -154,4 +154,4 @@ Messages wake; files carry. Messages state requests or handovers and name files;
 
 Developer questions and relayed answers follow `operations/orientation.md`.
 
-Agent-authored temporary files, experiments and working copies belong only in the handover's real `workspace.scratchRoot`, outside code/memory/task folders. Product/tooling temporaries, test-runner temporaries and explicitly admitted repository sandboxes follow their owners. Write reports/evidence in the handover's local report folder; the product copies them to canonical notes before removal.
+Agent-authored temporaries, experiments and working copies belong only in the real `workspace.scratchRoot`, outside code/memory/task folders. Use `workspace.outsideScratchRoot` for the sandbox root and one short `TMPDIR`; keep `XDG_CONFIG_HOME` inside `workspace.scratchRoot`; never remove that root. Product, test-runner and sandbox temporaries follow their owners. Write reports/evidence in the handover's report folder; the product copies them to canonical notes before removal.

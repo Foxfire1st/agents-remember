@@ -5,10 +5,14 @@ from typing import Any
 
 from agents_remember.tasks import CompletionBlocker, completion_blockers
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
 from agents_remember.worktrees.disabled_memory import is_disabled_contract, opt_out_refusal_result
+from agents_remember.worktrees.integration.lifecycle.outside_scratch_reconcile import (
+    with_outside_scratch_reconcile,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.cleanup_report import cleanup_report
@@ -61,6 +65,12 @@ def _resolve_finalize_targets(
 
 
 def finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
+    """Finalize the task, with the automatic outside-scratch reconcile (MIK-R207)."""
+
+    return with_outside_scratch_reconcile(_finalize_result(args), dry_run=args.dry_run)
+
+
+def _finalize_result(args: FinalizeArgs) -> WorktreeCommandResult:
     contract = load_contract(args.contract_path)
     if is_disabled_contract(contract):
         # A contract that carries the removed mode is never finalized (MIK-R50 R4a).
@@ -301,12 +311,28 @@ def _landed_commit(contract: WorktreeContract) -> str:
 
 def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> WorktreeCommandResult:
     if contract.cleanup == "completed":
+        # MIK-R207 rule 4: a completed retry removes a registered outside scratch root that is
+        # still there, and reports one it could not remove instead of answering cleaned.
+        outside, blockers = outside_scratch.terminal_blocker(contract, dry_run=args.dry_run)
+        if blockers:
+            return WorktreeCommandResult(
+                2,
+                {
+                    "state": "blocked",
+                    "summary": (
+                        "Cleanup is recorded as completed but the enclosure's outside scratch "
+                        "root could not be removed."
+                    ),
+                    "blockers": blockers,
+                },
+            )
         agents = archive_terminal_agents(contract, dry_run=args.dry_run)
         return WorktreeCommandResult(
             0,
             {
                 "state": "already-completed",
                 "summary": "Cleanup already completed.",
+                **({"outsideScratch": outside} if outside is not None else {}),
                 **({"agentArchive": agents} if agents else {}),
             },
         )

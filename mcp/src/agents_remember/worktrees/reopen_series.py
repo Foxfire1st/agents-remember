@@ -22,6 +22,7 @@ from agents_remember.tasks.store import (
     write_task_docs,
 )
 
+from . import outside_scratch
 from .disabled_memory import opt_out_result_fields, subject_for_contract
 from .integration.lifecycle.lifecycle_enclosure_terminal import (
     restartable_predecessor_contract,
@@ -721,25 +722,39 @@ class _SeriesReopenPublication:
                 atomic_write_bytes(path, payload)
 
 
+def _predecessor_generation(tombstone: WorktreeContract) -> str:
+    """The outside scratch generation the terminal predecessor recorded, or ``""``."""
+
+    record = outside_scratch.recorded_root(tombstone)
+    return record.generation if record is not None else ""
+
+
 def _publish_series_successor(plan: _SeriesReopenPlan) -> WorktreeCommandResult | None:
     """Re-publish the enclosure generation the archived one authorizes, or report the failure."""
 
     live = plan.live
-    text = contract_publication_text(live.contract_path, live)
+    # MIK-R207 rule 1: a successor generation carries its own outside scratch root, folded
+    # from the terminal predecessor's generation, and records it in the text being pinned.
+    published = outside_scratch.with_root_record(
+        live,
+        predecessor_generation=_predecessor_generation(plan.tombstone),
+        new_generation=True,
+    )
+    text = contract_publication_text(published.contract_path, published)
     try:
         observed = inspect_lifecycle_operation_locator(
-            live.coordination_root,
-            live.contract_path,
+            published.coordination_root,
+            published.contract_path,
         )
         if observed.state == "terminal-archived":
             reserve_new_lifecycle_operation_location(
-                live,
+                published,
                 contract_text=text,
                 predecessor_contract=plan.tombstone,
                 audit_intent=SERIES_REOPEN_AUDIT_INTENT,
             )
         resume_new_lifecycle_operation_location(
-            live,
+            published,
             contract_text=text,
             audit_intent=SERIES_REOPEN_AUDIT_INTENT,
         )

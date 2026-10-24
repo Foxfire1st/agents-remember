@@ -39,28 +39,28 @@
   },
   "capsules": {
     "architect/orientation": {
-      "size_words": 2994,
-      "budget_words": 3294
+      "size_words": 3003,
+      "budget_words": 3304
     },
     "architect/planning": {
-      "size_words": 2345,
-      "budget_words": 2580
+      "size_words": 2354,
+      "budget_words": 2590
     },
     "architect/review": {
-      "size_words": 2604,
-      "budget_words": 2865
+      "size_words": 2613,
+      "budget_words": 2875
     },
     "architect/coordination": {
-      "size_words": 3604,
+      "size_words": 3607,
       "budget_words": 3700
     },
     "architect/authorized-closeout": {
-      "size_words": 2217,
-      "budget_words": 2439
+      "size_words": 2232,
+      "budget_words": 2456
     },
     "architect/recovery": {
-      "size_words": 2310,
-      "budget_words": 2541
+      "size_words": 2319,
+      "budget_words": 2551
     },
     "orchestrator/orientation": {
       "size_words": 2224,
@@ -75,12 +75,12 @@
       "budget_words": 2018
     },
     "orchestrator/coordination": {
-      "size_words": 2834,
-      "budget_words": 3118
+      "size_words": 2828,
+      "budget_words": 3111
     },
     "orchestrator/authorized-closeout": {
-      "size_words": 1447,
-      "budget_words": 1592
+      "size_words": 1453,
+      "budget_words": 1599
     },
     "orchestrator/recovery": {
       "size_words": 1540,
@@ -111,56 +111,56 @@
       "budget_words": 2896
     },
     "manager/curation": {
-      "size_words": 2962,
-      "budget_words": 3259
+      "size_words": 2978,
+      "budget_words": 3276
     },
     "manager/coordination": {
-      "size_words": 3684,
+      "size_words": 3678,
       "budget_words": 3700
     },
     "manager/authorized-closeout": {
-      "size_words": 2245,
-      "budget_words": 2470
+      "size_words": 2251,
+      "budget_words": 2477
     },
     "manager/recovery": {
       "size_words": 2338,
       "budget_words": 2572
     },
     "worker/orientation": {
-      "size_words": 2581,
-      "budget_words": 2840
+      "size_words": 2643,
+      "budget_words": 2908
     },
     "worker/implementation": {
-      "size_words": 2316,
-      "budget_words": 2548
+      "size_words": 2378,
+      "budget_words": 2616
     },
     "worker/recovery": {
-      "size_words": 1897,
-      "budget_words": 2087
+      "size_words": 1959,
+      "budget_words": 2155
     },
     "curator/orientation": {
-      "size_words": 3142,
-      "budget_words": 3457
+      "size_words": 3121,
+      "budget_words": 3434
     },
     "curator/curation": {
-      "size_words": 3698,
+      "size_words": 3700,
       "budget_words": 3700
     },
     "curator/recovery": {
-      "size_words": 2458,
-      "budget_words": 2704
+      "size_words": 2437,
+      "budget_words": 2681
     },
     "reviewer/orientation": {
-      "size_words": 3696,
+      "size_words": 3698,
       "budget_words": 3700
     },
     "reviewer/review": {
-      "size_words": 3650,
+      "size_words": 3652,
       "budget_words": 3700
     },
     "reviewer/recovery": {
-      "size_words": 3012,
-      "budget_words": 3314
+      "size_words": 3014,
+      "budget_words": 3316
     },
     "investigator/orientation": {
       "size_words": 1794,
@@ -187,8 +187,8 @@
       "budget_words": 1685
     },
     "launcher/coordination": {
-      "size_words": 2141,
-      "budget_words": 2356
+      "size_words": 2135,
+      "budget_words": 2349
     }
   },
   "step_details": {
@@ -3066,5 +3066,375 @@
         "budget_words": 2572
       }
     }
+  },
+  "decision_L198_sync": {
+    "authority": "MIK-R125 capped eleven-tenths rule; L198 sync brief (manager message 20261024T063630Z)",
+    "capsule_ceiling": 3700,
+    "step_detail_ceiling": 2500,
+    "measurement": "sizes re-measured on the merged tree with the shipped compiler (compiled_size and detail_sizes in test_role_capsule_budgets.py); task data and seals excluded; all fifteen step details re-measured and unchanged",
+    "reason": "The L188 landing changed shared capsule sources, so fourteen capsules measured a different size than the registry recorded. The curator role text on top carries this leaf's outside-scratch sentence and the re-fit that keeps curator/curation at the 3700-word ceiling with no headroom; no ceiling moved.",
+    "changes": {
+      "architect/orientation": {
+        "before": {
+          "size_words": 2972,
+          "budget_words": 3270
+        },
+        "after": {
+          "size_words": 2981,
+          "budget_words": 3280
+        }
+      },
+      "architect/planning": {
+        "before": {
+          "size_words": 2323,
+          "budget_words": 2556
+        },
+        "after": {
+          "size_words": 2332,
+          "budget_words": 2566
+        }
+      },
+      "architect/review": {
+        "before": {
+          "size_words": 2582,
+          "budget_words": 2841
+        },
+        "after": {
+          "size_words": 2591,
+          "budget_words": 2851
+        }
+      },
+      "architect/coordination": {
+        "before": {
+          "size_words": 3582,
+          "budget_words": 3700
+        },
+        "after": {
+          "size_words": 3585,
+          "budget_words": 3700
+        }
+      },
+      "architect/authorized-closeout": {
+        "before": {
+          "size_words": 2195,
+          "budget_words": 2415
+        },
+        "after": {
+          "size_words": 2210,
+          "budget_words": 2431
+        }
+      },
+      "architect/recovery": {
+        "before": {
+          "size_words": 2288,
+          "budget_words": 2517
+        },
+        "after": {
+          "size_words": 2297,
+          "budget_words": 2527
+        }
+      },
+      "orchestrator/coordination": {
+        "before": {
+          "size_words": 2834,
+          "budget_words": 3118
+        },
+        "after": {
+          "size_words": 2828,
+          "budget_words": 3111
+        }
+      },
+      "orchestrator/authorized-closeout": {
+        "before": {
+          "size_words": 1447,
+          "budget_words": 1592
+        },
+        "after": {
+          "size_words": 1453,
+          "budget_words": 1599
+        }
+      },
+      "manager/curation": {
+        "before": {
+          "size_words": 2926,
+          "budget_words": 3219
+        },
+        "after": {
+          "size_words": 2942,
+          "budget_words": 3237
+        }
+      },
+      "manager/coordination": {
+        "before": {
+          "size_words": 3648,
+          "budget_words": 3700
+        },
+        "after": {
+          "size_words": 3642,
+          "budget_words": 3700
+        }
+      },
+      "manager/authorized-closeout": {
+        "before": {
+          "size_words": 2209,
+          "budget_words": 2430
+        },
+        "after": {
+          "size_words": 2215,
+          "budget_words": 2437
+        }
+      },
+      "curator/orientation": {
+        "before": {
+          "size_words": 3144,
+          "budget_words": 3459
+        },
+        "after": {
+          "size_words": 3121,
+          "budget_words": 3434
+        }
+      },
+      "curator/recovery": {
+        "before": {
+          "size_words": 2460,
+          "budget_words": 2706
+        },
+        "after": {
+          "size_words": 2437,
+          "budget_words": 2681
+        }
+      },
+      "launcher/coordination": {
+        "before": {
+          "size_words": 2141,
+          "budget_words": 2356
+        },
+        "after": {
+          "size_words": 2135,
+          "budget_words": 2349
+        }
+      }
+    },
+    "step_detail_changes": {}
+  },
+  "decision_L198_post_L194_sync": {
+    "authority": "MIK-R125 capped eleven-tenths rule; manager sync brief 20261024T121226Z",
+    "capsule_ceiling": 3700,
+    "step_detail_ceiling": 2500,
+    "measurement": "sizes measured on the merged tree after the L194 sync with the shipped guard (compiled_size and detail_sizes in test_role_capsule_budgets.py), the landed decisions_L194 table as the recorded baseline; task data and seals excluded; all fifteen step details measured and unchanged",
+    "reason": "The L194 sync parked this leaf's WIP over the published L194 capsule registry. Resolving only the two registry paths: L194's numbers stay the baseline, the merged tree's real sizes replace them where they moved, this leaf's own pre-L194 record is carried unchanged beside it, and no ceiling moved.",
+    "changes": {
+      "architect/orientation": {
+        "before": {
+          "size_words": 2994,
+          "budget_words": 3294
+        },
+        "after": {
+          "size_words": 3003,
+          "budget_words": 3304
+        }
+      },
+      "architect/planning": {
+        "before": {
+          "size_words": 2345,
+          "budget_words": 2580
+        },
+        "after": {
+          "size_words": 2354,
+          "budget_words": 2590
+        }
+      },
+      "architect/review": {
+        "before": {
+          "size_words": 2604,
+          "budget_words": 2865
+        },
+        "after": {
+          "size_words": 2613,
+          "budget_words": 2875
+        }
+      },
+      "architect/coordination": {
+        "before": {
+          "size_words": 3604,
+          "budget_words": 3700
+        },
+        "after": {
+          "size_words": 3607,
+          "budget_words": 3700
+        }
+      },
+      "architect/authorized-closeout": {
+        "before": {
+          "size_words": 2217,
+          "budget_words": 2439
+        },
+        "after": {
+          "size_words": 2232,
+          "budget_words": 2456
+        }
+      },
+      "architect/recovery": {
+        "before": {
+          "size_words": 2310,
+          "budget_words": 2541
+        },
+        "after": {
+          "size_words": 2319,
+          "budget_words": 2551
+        }
+      },
+      "orchestrator/coordination": {
+        "before": {
+          "size_words": 2834,
+          "budget_words": 3118
+        },
+        "after": {
+          "size_words": 2828,
+          "budget_words": 3111
+        }
+      },
+      "orchestrator/authorized-closeout": {
+        "before": {
+          "size_words": 1447,
+          "budget_words": 1592
+        },
+        "after": {
+          "size_words": 1453,
+          "budget_words": 1599
+        }
+      },
+      "manager/curation": {
+        "before": {
+          "size_words": 2962,
+          "budget_words": 3259
+        },
+        "after": {
+          "size_words": 2978,
+          "budget_words": 3276
+        }
+      },
+      "manager/coordination": {
+        "before": {
+          "size_words": 3684,
+          "budget_words": 3700
+        },
+        "after": {
+          "size_words": 3678,
+          "budget_words": 3700
+        }
+      },
+      "manager/authorized-closeout": {
+        "before": {
+          "size_words": 2245,
+          "budget_words": 2470
+        },
+        "after": {
+          "size_words": 2251,
+          "budget_words": 2477
+        }
+      },
+      "worker/orientation": {
+        "before": {
+          "size_words": 2581,
+          "budget_words": 2840
+        },
+        "after": {
+          "size_words": 2643,
+          "budget_words": 2908
+        }
+      },
+      "worker/implementation": {
+        "before": {
+          "size_words": 2316,
+          "budget_words": 2548
+        },
+        "after": {
+          "size_words": 2378,
+          "budget_words": 2616
+        }
+      },
+      "worker/recovery": {
+        "before": {
+          "size_words": 1897,
+          "budget_words": 2087
+        },
+        "after": {
+          "size_words": 1959,
+          "budget_words": 2155
+        }
+      },
+      "curator/orientation": {
+        "before": {
+          "size_words": 3142,
+          "budget_words": 3457
+        },
+        "after": {
+          "size_words": 3121,
+          "budget_words": 3434
+        }
+      },
+      "curator/curation": {
+        "before": {
+          "size_words": 3698,
+          "budget_words": 3700
+        },
+        "after": {
+          "size_words": 3700,
+          "budget_words": 3700
+        }
+      },
+      "curator/recovery": {
+        "before": {
+          "size_words": 2458,
+          "budget_words": 2704
+        },
+        "after": {
+          "size_words": 2437,
+          "budget_words": 2681
+        }
+      },
+      "reviewer/orientation": {
+        "before": {
+          "size_words": 3696,
+          "budget_words": 3700
+        },
+        "after": {
+          "size_words": 3698,
+          "budget_words": 3700
+        }
+      },
+      "reviewer/review": {
+        "before": {
+          "size_words": 3650,
+          "budget_words": 3700
+        },
+        "after": {
+          "size_words": 3652,
+          "budget_words": 3700
+        }
+      },
+      "reviewer/recovery": {
+        "before": {
+          "size_words": 3012,
+          "budget_words": 3314
+        },
+        "after": {
+          "size_words": 3014,
+          "budget_words": 3316
+        }
+      },
+      "launcher/coordination": {
+        "before": {
+          "size_words": 2141,
+          "budget_words": 2356
+        },
+        "after": {
+          "size_words": 2135,
+          "budget_words": 2349
+        }
+      }
+    },
+    "step_detail_changes": {}
   }
 }

@@ -16,10 +16,12 @@ from agents_remember.models.lifecycles.enclosure import (
     EnclosurePublicationState,
     LifecycleEnclosureLocator,
     LifecycleEnclosureManifest,
+    OutsideScratchRootRecord,
     TerminalCleanupOperation,
     TerminalEnclosurePredecessor,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
+from agents_remember.worktrees import outside_scratch
 from agents_remember.worktrees.integration.lifecycle import (
     lifecycle_location_cache as location_cache,
 )
@@ -135,6 +137,7 @@ class EnclosurePublicationArtifacts:
     manifest_text: str
     contract_text: str
     reserved_locator: LifecycleEnclosureLocator
+    outside_scratch: outside_scratch.OutsideScratchRoot | None = None
 
     @property
     def manifest(self) -> LifecycleEnclosureManifest:
@@ -202,6 +205,7 @@ def prepare_enclosure_publication(
     if not intent:
         raise ValueError("enclosure publication requires a nonblank audit intent")
     contract = _contract_bound_to_publication_text(contract, contract_text)
+    outside_scratch_record = _outside_scratch_record(contract)
     root = contract.coordination_root.resolve(strict=False)
     contract_path = _confined_contract_path(root, contract.contract_path)
     worktree_group = contract.worktree_group.resolve(strict=False)
@@ -250,6 +254,11 @@ def prepare_enclosure_publication(
         lifecycleId=contract.lifecycle_id,
         bindingFingerprint=binding_fingerprint,
         predecessorTerminal=predecessor_terminal,
+        outsideScratch=(
+            None
+            if outside_scratch_record is None
+            else OutsideScratchRootRecord.model_validate(outside_scratch_record.manifest_payload())
+        ),
     )
     manifest_text = model_text(manifest)
     locator = LifecycleEnclosureLocator(
@@ -274,7 +283,40 @@ def prepare_enclosure_publication(
         manifest_text=manifest_text,
         contract_text=contract_text,
         reserved_locator=locator,
+        outside_scratch=outside_scratch_record,
     )
+
+
+def _outside_scratch_record(
+    contract: WorktreeContract,
+) -> outside_scratch.OutsideScratchRoot | None:
+    """The root this generation records, computed without touching the disk.
+
+    The record is durable authority, so it is decided here and written into the manifest before
+    the first byte of the enclosure exists; the directory itself is created only after the
+    publication is durable (``_materialise_outside_scratch``). A crash in between leaves a
+    recorded generation with no directory, which the next use recreates, instead of a directory
+    nobody recorded.
+    """
+
+    return outside_scratch.recorded_root(contract)
+
+
+def _materialise_outside_scratch(artifacts: EnclosurePublicationArtifacts) -> None:
+    """Create the recorded root, now that its record is published and cannot be lost."""
+
+    record = artifacts.outside_scratch
+    if record is None:
+        return
+    try:
+        outside_scratch.ensure_root(record)
+    except outside_scratch.OutsideScratchError as error:
+        raise _location_error(
+            "operation-location-outside-scratch-unavailable",
+            f"the enclosure's outside scratch root cannot be allocated: {error}",
+            contract_path=artifacts.contract_path,
+            observed={"root": record.root.as_posix(), "reason": str(error)},
+        ) from error
 
 
 def _contract_bound_to_publication_text(
@@ -450,6 +492,7 @@ def reserve_new_lifecycle_operation_location(
                 locator,
             )
         _publish_successor_contract(artifacts, predecessor_contract)
+        _materialise_outside_scratch(artifacts)
         return locator
 
 
@@ -519,6 +562,7 @@ def publish_enclosure_location(
             before_contract_proof()
         _publish_or_prove_contract(artifacts, mode=contract_mode)
         locator = _prove_contract(artifacts, locator)
+        _materialise_outside_scratch(artifacts)
         manifest, _, manifest_raw = _read_manifest(artifacts.manifest_path, artifacts.contract_path)
         _validate_manifest(
             artifacts.coordination_root,

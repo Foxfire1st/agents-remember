@@ -19,6 +19,7 @@ sys.path[:0] = [
     str(REPOSITORY_ROOT / "mcp" / "test_support"),
 ]
 
+from agents_remember.worktrees import outside_scratch
 from agents_remember_test_support.testing.catalog_canonical import lane_files, read_catalog
 from agents_remember_test_support.testing.hermetic_bootstrap import (
     activate_current_pytest_environment,
@@ -47,6 +48,11 @@ _ISOLATED_ENVIRONMENT = mock.patch.dict(
     },
 )
 _ISOLATED_ENVIRONMENT.start()
+# Every outside scratch root a test allocates lives under this process's own isolated root, so a
+# worker never shares the product parent with a sibling and never has to sweep a shared one
+# (MIK-R207): the parent is per process, and the process removes exactly its own at the end.
+_OUTSIDE_SCRATCH_PARENT = _ISOLATED_ROOT / "outside-scratch"
+_OUTSIDE_SCRATCH_PARENT.mkdir(mode=0o700)
 for directory in ("home", "config", "data", "cache", "codex", "tmux"):
     (_ISOLATED_ROOT / directory).mkdir()
 # Inherited live opt-ins and credentials must never make an ordinary run contact a service.
@@ -94,6 +100,64 @@ pytest_plugins = (
     "agents_remember_test_support.testing.database_retirement_guard",
 )
 _INTEGRATION_FILES = pytest.StashKey[frozenset[Path]]()
+
+
+def _discard_owned(base: Path, parent: Path) -> None:
+    """Remove only the roots whose marker names a coordination root under this run's own base.
+
+    Ownership is the coordination root the marker carries, resolved under this invocation's
+    temporary base -- never a name shape, a shared parent, or a root being merely absent, because
+    a parallel worker shares the parent and its roots must survive this worker's teardown.
+    """
+
+    owned = Path(base).resolve()
+    for item in outside_scratch.list_roots(parent):
+        marker = item.get("marker")
+        if not isinstance(marker, dict):
+            continue
+        coordination = str(marker.get("coordinationRoot") or "")
+        if not coordination:
+            continue
+        try:
+            named = Path(coordination).resolve()
+        except OSError:  # pragma: no cover - an unresolvable path is not proof of ownership
+            continue
+        if named != owned and owned not in named.parents:
+            continue
+        record = outside_scratch.record_from_marker(marker)
+        if record is not None:
+            outside_scratch.remove_root(record, parent=parent)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_outside_scratch_parent(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Point the product's outside-scratch parent at this process's isolated root.
+
+    The product parent is a short shared path under `/var/tmp`; a test tree under it would be
+    shared with every other worker, and any teardown that swept it could delete a root a sibling
+    was still using. The parent is therefore per process, exactly as the environment above is,
+    and the socket budget is raised because an isolated root is deeper than the real parent --
+    the rule itself is measured in `test_outside_scratch_root.py` against the real limit.
+    """
+
+    parent = outside_scratch.OUTSIDE_SCRATCH_PARENT
+    limit = outside_scratch.SOCKET_PATH_LIMIT
+    outside_scratch.OUTSIDE_SCRATCH_PARENT = _OUTSIDE_SCRATCH_PARENT
+    outside_scratch.SOCKET_PATH_LIMIT = 4096
+    try:
+        yield
+    finally:
+        base = tmp_path_factory.getbasetemp()
+        # A test that serves the product from a separate process allocates in the product parent,
+        # because that process never loads this fixture. Its marker still names a coordination
+        # root under this worker's own base, so the same ownership proof reaches it -- and only it.
+        _discard_owned(base, outside_scratch.OUTSIDE_SCRATCH_PARENT)
+        _discard_owned(base, parent)
+        outside_scratch.OUTSIDE_SCRATCH_PARENT = parent
+        outside_scratch.SOCKET_PATH_LIMIT = limit
+        shutil.rmtree(_OUTSIDE_SCRATCH_PARENT, ignore_errors=True)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

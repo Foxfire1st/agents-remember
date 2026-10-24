@@ -291,6 +291,13 @@ class WorktreeContract:
     # promotion, read by worktree_attach to resume. Additive on schema v1 -- old
     # contracts parse to "" (the v2 schema flip is the deliberate 3.0 cutover).
     lifecycle_id: str = ""
+    # The generation's scratch root outside ``~/projects`` (MIK-R207): where it is, which
+    # generation it was allocated for, and the digest of the marker inside it that proves who
+    # owns it. Additive on schema v1 in the same way: a contract written before this change
+    # parses to "", and an enclosure without a recorded root is handled exactly as before.
+    outside_scratch_root: str = ""
+    outside_scratch_generation: str = ""
+    outside_scratch_marker_sha256: str = ""
     # Mid-task base syncs (issue #54): one entry per worktree_sync that advanced
     # the recorded base pair. A real dataclass field because the closeout/contract
     # rewrite regenerates the document from this model — freeform contract prose
@@ -678,6 +685,23 @@ def normalize_contract_leaf_id(
     return replace(contract, leaf_id=resolved.doc_id)
 
 
+def _outside_scratch_lines(contract: WorktreeContract) -> list[str]:
+    """The recorded outside scratch root, or nothing at all for an older enclosure.
+
+    An empty section is never written: a contract that records no root is a pre-MIK-R207
+    enclosure, and it keeps the exact text it had.
+    """
+
+    if not contract.outside_scratch_root:
+        return []
+    return [
+        "outside_scratch:",
+        f"  root: {contract.outside_scratch_root}",
+        f"  generation: {contract.outside_scratch_generation}",
+        f"  marker_sha256: {contract.outside_scratch_marker_sha256}",
+    ]
+
+
 def _memory_lines(contract: WorktreeContract) -> list[str]:
     lines = [
         "memory:",
@@ -833,6 +857,7 @@ def contract_to_text(contract: WorktreeContract) -> str:
             "lifecycle:",
             f"  id: {contract.lifecycle_id}",
             "",
+            *_outside_scratch_lines(contract),
             *_memory_lines(contract),
             "",
             *_sync_lines(contract),
@@ -1127,6 +1152,7 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
     closeout = _section(data, "closeout")
     integration = _section(data, "integration")
     lifecycle = _section(data, "lifecycle")
+    outside_scratch = _section(data, "outside_scratch")
     # Every cell this parse could not read, collected as it goes and carried on the result.
     quarantined: list[str] = []
     vocabulary = _parsed_vocabulary(data, quarantined, contract_path)
@@ -1181,6 +1207,9 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         parent_task_name=coordination.get("parent_task_name", ""),
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),
         lifecycle_id=lifecycle.get("id", ""),
+        outside_scratch_root=outside_scratch.get("root", ""),
+        outside_scratch_generation=outside_scratch.get("generation", ""),
+        outside_scratch_marker_sha256=outside_scratch.get("marker_sha256", ""),
         sync_log=_parse_sync_log(sync.get("log", "")),
     )
     return replace(contract, unknown_cells=tuple(quarantined)) if quarantined else contract

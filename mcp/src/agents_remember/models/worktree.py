@@ -355,6 +355,9 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # progress as running / stale (dead heartbeat) / ok /
     # ready-with-failed-phases / failed, with currentPhase and seedFallback.
     providers: dict[str, Any] | None = None
+    # MIK-R207: the outside scratch root this ending removed, or left with its reason.
+    outsideScratch: dict[str, Any] | None = None
+    outsideScratchReconcile: dict[str, Any] | None = None
     source_lineage: SourceLineageProjection | None = None
     status: str | None = None
     detail: str | None = Field(default=None, max_length=8192)

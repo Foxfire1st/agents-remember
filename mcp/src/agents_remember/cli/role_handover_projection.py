@@ -51,6 +51,7 @@ WORKSPACE_FIELDS: tuple[str, ...] = (
     "codeRoot",
     "memoryRoot",
     "scratchRoot",
+    "outsideScratchRoot",
     "taskReportRoot",
     "taskReportAccessRoot",
     "contractPath",
