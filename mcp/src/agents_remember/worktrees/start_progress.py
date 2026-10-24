@@ -22,6 +22,18 @@ from typing import Any
 
 START_PROGRESS_SCHEMA = "ar-worktree-start-progress/v1"
 
+#: Pre-contract phases a pre-retirement build wrote for a search-provider gate. No surviving
+#: producer writes them any more (the provider start path is gone), so a persisted file carrying
+#: one is an obsolete record: it must never come back as a current blocked start, an attention
+#: item or a process node. Real blocks -- stale base, source lineage, memory compatibility,
+#: admission and locking -- are untouched.
+RETIRED_START_PHASES: frozenset[str] = frozenset({"provider-blocked"})
+
+
+def is_retired_start_progress(payload: dict[str, Any]) -> bool:
+    """True when a parsed beat is a retired provider gate rather than a current block."""
+    return str(payload.get("phase", "")) in RETIRED_START_PHASES
+
 
 @dataclass(frozen=True)
 class StartingEnclosure:

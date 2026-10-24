@@ -52,7 +52,6 @@ class ProjectionReaderRetryTests(unittest.TestCase):
         for count in (1, 9):
             for method in (
                 "_reproject_task_documents",
-                "_refresh_providers",
                 "_refresh_engine_facts",
                 "_refresh_drift",
                 "_refresh_workspace",

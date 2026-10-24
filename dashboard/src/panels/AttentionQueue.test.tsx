@@ -10,17 +10,10 @@ import { AttentionQueue } from './AttentionQueue';
 
 vi.mock('../data/actions', () => ({ postAttentionDismiss: vi.fn() }));
 
+// The two kinds the server still publishes. The provider pair that used to sit beside them
+// (`provider-down`, `failed-setup`) went with the search providers: nothing publishes them, so
+// there is nothing here to render, rank or dismiss.
 const items: AttentionItem[] = [
-  attentionItem({
-    id: 'provider-down:cgc',
-    kind: 'provider-down',
-    severity: 'alarm',
-    lane: 'repo',
-    title: 'Provider cgc down',
-    detail: 'stopped',
-    itemClass: 'operational',
-    dismissible: true,
-  }),
   attentionItem({
     id: 'actionable-drift:repo:main',
     kind: 'actionable-drift',
@@ -28,15 +21,6 @@ const items: AttentionItem[] = [
     lane: 'repo',
     title: '1 actionable drift in repo',
     repoId: 'repo',
-    itemClass: 'operational',
-    dismissible: true,
-  }),
-  attentionItem({
-    id: 'failed-setup:group',
-    kind: 'failed-setup',
-    severity: 'alarm',
-    lane: 'worktree',
-    title: 'Provider setup needs attention',
     itemClass: 'operational',
     dismissible: true,
   }),
@@ -110,9 +94,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('the four remaining attention kinds', () => {
+describe('the attention kinds the server still publishes', () => {
   it('keeps the blocked-start cause and severity visible without a session or task join', () => {
-    seed([items[3]]);
+    seed([items[1]]);
     const view = renderOpen();
     expect(view.getByTestId('attn-item').textContent).toContain(
       'Worktree start blocked · no exact ledger mapping for selected code base commit',
@@ -141,39 +125,80 @@ describe('the four remaining attention kinds', () => {
     );
   });
 
-  it('Clear all sends every listed item, including provider, setup and start failures', async () => {
+  it('never shows or dismisses an entry whose kind the server retired', () => {
+    // A payload from a server older than the removal can still carry these. Nothing can act on
+    // them any more — there is no provider to retry and no setup run to acknowledge — so the
+    // queue drops them rather than showing an alarm with a × that dismisses nothing.
+    const retired = [
+      attentionItem({
+        id: 'provider-down:codegraphcontext-code',
+        kind: 'provider-down',
+        severity: 'alarm',
+        lane: 'repo',
+        title: 'Provider codegraphcontext-code down',
+        detail: 'stopped',
+      }),
+      attentionItem({
+        id: 'failed-setup:group',
+        kind: 'failed-setup',
+        severity: 'alarm',
+        lane: 'worktree',
+        title: 'Provider setup needs attention',
+        detail: 'cgc index',
+      }),
+    ];
+    seed([...retired, items[0]]);
+    const view = render(<AttentionQueue />);
+    const bell = view.getByTestId('attention-bell');
+    expect(bell.getAttribute('aria-label')).toBe('Attention: 1 waiting');
+    expect(bell.textContent).toBe('1');
+    fireEvent.click(bell);
+    expect(view.getAllByTestId('attn-item')).toHaveLength(1);
+    expect(view.getByTestId('attention-queue').textContent).toContain(items[0].title);
+    for (const item of retired) expect(view.queryByText(item.title)).toBeNull();
+    fireEvent.click(view.getByTestId('attn-dismiss'));
+    expect(postAttentionDismiss).toHaveBeenCalledExactlyOnceWith({
+      itemId: items[0].id,
+      kind: items[0].kind,
+    });
+    for (const item of retired) {
+      expect(postAttentionDismiss).not.toHaveBeenCalledWith({ itemId: item.id, kind: item.kind });
+    }
+  });
+
+  it('Clear all sends every listed item', async () => {
     vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
     seed(items);
     const view = renderOpen();
     fireEvent.click(view.getByTestId('attn-clear'));
     expect(view.queryAllByTestId('attn-item')).toHaveLength(0);
-    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(postAttentionDismiss).toHaveBeenCalledTimes(2));
     for (const item of items)
       expect(postAttentionDismiss).toHaveBeenCalledWith({ itemId: item.id, kind: item.kind });
   });
 
   it('restores an item and reports that its click did not hold when the write fails', async () => {
     vi.mocked(postAttentionDismiss).mockResolvedValue('error');
-    seed([items[1]]);
+    seed([items[0]]);
     const view = renderOpen();
     fireEvent.click(view.getByTestId('attn-dismiss'));
-    await waitFor(() => expect(view.getByText(items[1].title)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(items[0].title)).toBeTruthy());
     expect(view.getByRole('alert').textContent).toContain('Dismissal did not hold');
     vi.mocked(postAttentionDismiss).mockResolvedValue('dismissed');
     fireEvent.click(view.getByTestId('attn-dismiss'));
     await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
-    expect(view.queryByText(items[1].title)).toBeNull();
+    expect(view.queryByText(items[0].title)).toBeNull();
   });
 
   it('Clear all restores only failed writes and reports the failure', async () => {
     vi.mocked(postAttentionDismiss).mockImplementation(async (item) =>
-      item.kind === 'provider-down' ? 'error' : 'dismissed',
+      item.kind === 'blocked-start' ? 'error' : 'dismissed',
     );
     seed(items);
     const view = renderOpen();
     fireEvent.click(view.getByTestId('attn-clear'));
     await waitFor(() => expect(view.getAllByTestId('attn-item')).toHaveLength(1));
-    expect(view.getByText(items[0].title + ' · stopped')).toBeTruthy();
+    expect(view.getByText(`${items[1].title} · ${items[1].detail}`)).toBeTruthy();
     expect(view.getByRole('alert').textContent).toContain('Dismissal did not hold');
   });
 });
@@ -192,21 +217,24 @@ describe('AttentionQueue bell (MIK-R144 rule 3a)', () => {
   });
 
   it('carries the number and severity, opens the layer and keeps server order', () => {
-    const queue = [items[1], items[0], items[3], items[2]];
+    // MIK-R199 retired the two alarm-severity kinds, so no current payload carries one. The
+    // bell's alarm tone still has to hold for a payload an older server sent, so this case
+    // supplies the severity rather than pretending a surviving kind publishes it.
+    const queue = [items[1], { ...items[0], severity: 'alarm' as const }];
     seed(queue);
     const view = render(<AttentionQueue />);
     const bell = view.getByTestId('attention-bell');
-    expect(bell.getAttribute('aria-label')).toBe('Attention: 4 waiting');
-    expect(bell.textContent).toBe('4');
+    expect(bell.getAttribute('aria-label')).toBe('Attention: 2 waiting');
+    expect(bell.textContent).toBe('2');
     expect(bell.querySelector('[title]')?.getAttribute('title')).toBe(
-      'Attention: 4 waiting (2 alarm, 2 warning)',
+      'Attention: 2 waiting (1 alarm, 1 warning)',
     );
     expect(bell.getAttribute('data-tone')).toBe('alarm');
     expect(bell.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(bell);
     expect(bell.getAttribute('aria-expanded')).toBe('true');
     expect(view.getByRole('dialog', { name: 'Attention' }).textContent).toContain(
-      'Attention · 4 waiting',
+      'Attention · 2 waiting',
     );
     expect(
       view.getAllByTestId('attn-severity').map((mark) => mark.getAttribute('aria-label')),

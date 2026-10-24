@@ -68,19 +68,18 @@ describe("EnclosureCanvas — GSAP gate (05f §8.4 — no ticker under effects=o
     document.documentElement.removeAttribute("data-effects");
     const { getByTestId } = render(
       <EnclosureProcessMap
-        node={nodeFrom("engine-cgc-fallback")}
-
+        node={nodeFrom("engine-bootstrap")}
       />,
     );
     const structural = getByTestId("enclosure-canvas");
     const effects = getByTestId("engine-fx-overlay");
 
     expect(structural.querySelector("[data-fx='surge']")).toBeNull();
-    expect(structural.querySelector("[data-fx='reindex']")).toBeNull();
     expect(structural.querySelector("[data-fx='breath']")).toBeNull();
     expect(effects.querySelectorAll("[data-fx='surge']").length).toBeGreaterThanOrEqual(2);
-    // The engine-anchored reindex pulse retired with the provider engines (MIK-R112):
-    // it was positioned/sized by ENGINE.cgc geometry, so no reindex marker remains anywhere.
+    // No reindex pulse remains anywhere: the engine-anchored reroute retired with the provider
+    // engines, so neither SVG carries the marker.
+    expect(structural.querySelector("[data-fx='reindex']")).toBeNull();
     expect(effects.querySelector("[data-fx='reindex']")).toBeNull();
   });
 });
@@ -187,21 +186,21 @@ describe("EnclosureCanvas — static bird's-eye (5g G1)", () => {
     expect(container.querySelectorAll('[data-testid="conduit"]').length).toBe(expected);
   });
 
-  it("renders no provider engine gauges — only the warp coupler, bound iff external memory", () => {
+  it("renders no engine gauges — the warp coupler is the only stage gauge, bound iff external memory", () => {
     const node = nodeFrom("engine-bootstrap");
     const external = hasExternalMemory(node);
     const { container } = render(<EnclosureProcessMap node={node} />);
-    // Provider engines left the surface (MIK-R112): no gauges anywhere on the stage.
+    // No engine gauges anywhere on the stage.
     expect(container.querySelectorAll('[data-testid="engine-gauge"]').length).toBe(0);
     expect(container.querySelector('[data-testid="warp-coupler"]')?.getAttribute("data-bound")).toBe(String(external));
   });
 
-  it("renders no official-line (workspace) engines or wiring — the official line keeps only its coupler", () => {
+  it("renders no official-line engines or wiring — the official line keeps only its coupler", () => {
     const node = nodeFrom("engine-bootstrap");
     const external = hasExternalMemory(node);
     const { container } = render(<EnclosureProcessMap node={node} />);
-    // No left-world provider engines, no provider wires. The official (ledger) coupler
-    // is retained task state and renders exactly as before retirement (iff external memory).
+    // No left-world engines, no engine wires. The official (ledger) coupler is retained
+    // task state and renders iff external memory.
     expect(container.querySelectorAll('[data-testid="engine-gauge"]').length).toBe(0);
     expect(container.querySelectorAll('[data-testid="official-wire"]').length).toBe(0);
     expect(container.querySelector('[data-testid="warp-coupler-official"]') !== null).toBe(external);
@@ -219,7 +218,7 @@ describe("EnclosureCanvas — static bird's-eye (5g G1)", () => {
     expect(container.querySelector('[data-testid="lane-ledger"]') !== null).toBe(hasExternalMemory(node));
   });
 
-  it("renders the worktree branch nodes (code & memory when external), never provider gauges", () => {
+  it("renders the worktree branch nodes (code & memory when external), never engine gauges", () => {
     const node = nodeFrom("engine-bootstrap");
     const external = hasExternalMemory(node);
     const { container } = render(<EnclosureProcessMap node={node} />);
@@ -250,11 +249,15 @@ describe("EnclosureCanvas — conduit wiring polish (5h cleanup)", () => {
     expect(container.querySelector("marker#er-chev")?.getAttribute("refX")).toBe("9.6");
   });
 
-  it("renders no provider clone arrows — seed/clone lanes left the surface (MIK-R112)", () => {
+  it("renders no seed/clone conduits — the stage carries only the enclosure lanes", () => {
     const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
-    // The seed/clone edge kinds carry no stage geometry, so no conduit renders for them.
+    // The seed/clone edge kinds are gone from the projection AND carry no stage geometry, so no
+    // conduit renders for them.
     expect(container.querySelector('[data-kind="cgc-seed"]')).toBeNull();
     expect(container.querySelector('[data-kind="grepai-clone"]')).toBeNull();
+    for (const edge of nodeFrom("engine-bootstrap").edges) {
+      expect(["worktree-add", "ledger-map", "sync", "integration", "integration-mem"]).toContain(edge.kind);
+    }
   });
 
   it("keeps the sync lane on the worktree-add centreline (one centred line, not an offset double)", () => {
@@ -471,92 +474,49 @@ describe("EnclosureCanvas — ledger popover columns (5h Tier 2)", () => {
   });
 });
 
-describe("EnclosureCanvas — T9B/T9C refused-conduit flash (shared red/amber primitive)", () => {
-  it("renders no seed-lane flash and no engine fault flicker on a failed provider seed lane", () => {
-    document.documentElement.removeAttribute("data-effects"); // effects ON — a flash would render
-    const { getByTestId, queryByTestId } = render(
-      <EnclosureProcessMap node={nodeFrom("engine-boot-seed-fault")} />,
-    );
-    // Provider seed lanes left the surface (MIK-R112): the failed grepai-clone lane
-    // carries no geometry, so neither the conduit nor the refused flash renders for it.
-    expect(queryByTestId("refused-conduit")).toBeNull();
-    const faulting = getByTestId("enclosure-canvas").querySelectorAll("[data-fx='fault']");
-    expect(faulting.length).toBe(0);
+describe("EnclosureCanvas — provider traces are gone (MIK-R112 rule 2)", () => {
+  const PROVIDER_TEXT = /cgc|grepai|codegraphcontext|provider/i;
+  const REMOVED_NODE_FIELDS = [
+    "providers",
+    "setupState",
+    "currentPhase",
+    "completedPhases",
+    "failedPhases",
+    "heartbeatAgeSeconds",
+    "seedFallback",
+    "retryArgs",
+  ];
+
+  it("carries no provider state on any fixture node", () => {
+    for (const scenario of ENGINE_ROOM_SCENARIOS) {
+      for (const node of scenario.processes) {
+        for (const field of REMOVED_NODE_FIELDS) {
+          expect(node, `${scenario.name} still carries ${field}`).not.toHaveProperty(field);
+        }
+        for (const edge of node.edges) {
+          expect(
+            ["worktree-add", "ledger-map", "sync", "integration", "integration-mem"],
+            `${scenario.name} carries the retired ${edge.kind} lane`,
+          ).toContain(edge.kind);
+        }
+      }
+    }
   });
 
-  it("renders NO refused-conduit flash on a clean seeding frame (the flash is fault/reroute-only)", () => {
-    document.documentElement.removeAttribute("data-effects");
-    const { queryByTestId } = render(
-      <EnclosureProcessMap node={nodeFrom("engine-boot-4-seeding")} />,
-    );
-    expect(queryByTestId("refused-conduit")).toBeNull();
-  });
-
-  it("renders no stale-seed flash and no reindex pulse on a refused seed lane — failed seed lanes are inert", () => {
-    document.documentElement.removeAttribute("data-effects"); // effects ON so a transient flash would render
-    const { container, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-cgc-seed-refused")} />);
-    const seed = container.querySelector('[data-testid="conduit"][data-kind="cgc-seed"]');
-    // the stale seed lane carries no geometry: no conduit, no flash, no reindex pulse.
-    expect(seed).toBeNull();
-    expect(queryByTestId("refused-conduit")).toBeNull();
-    expect(container.querySelector('[data-fx="reindex"]')).toBeNull();
-    // still a SOFT reroute — no steady gate, no terminal STOP, no attention
-    expect(queryByTestId("gate")).toBeNull();
-    expect(queryByTestId("terminal-stop")).toBeNull();
-    expect(queryByTestId("attention")).toBeNull();
-  });
-});
-
-describe("EnclosureCanvas — retired T7B provider-plan block (provider engines left the surface, MIK-R112)", () => {
-  it("renders no provider gauges for missing provider slots", () => {
-    const node = {
-      ...nodeFrom("engine-bootstrap"),
-      providers: [
-        {
-          id: "missing-code@grp",
-          role: "code",
-          runtimeState: "missing",
-          factState: "missing",
-        },
-        {
-          id: "missing-memory@grp",
-          role: "memory",
-          runtimeState: "missing",
-          factState: "missing",
-        },
-      ],
-    } satisfies EngineProcessNode;
-    const { container } = render(<EnclosureProcessMap node={node} />);
-    expect(container.querySelectorAll('[data-testid="engine-gauge"]').length).toBe(0);
-  });
-
-  it("reads a provider-plan block as the pre-contract fleeting state — missing setup config renders the fleeting box, no separate provider block", () => {
-    const { container, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-boot-provider-blocked")} />);
-    // scene.ts resolveBlocks — "contract not yet written" in missingFacts derives fleeting; with no
-    // provider engines there is no separate engine-anchored block, so the missing setup config reads
-    // as the same pre-contract state (L50 T7B policy + L112 retirement; L50's old body asserted the
-    // retired provider-block/dropout/gate render and its title predates the rewrite).
-    expect(queryByTestId("fleeting-enclosure")).not.toBeNull();
-    expect(queryByTestId("provider-block")).toBeNull();
-    expect(queryByTestId("engine-dropout")).toBeNull();
-    expect(container.querySelectorAll('[data-testid="engine-gauge"]').length).toBe(0);
-    // the recovery choices (retry setup / abandon — memory cannot be disabled for a task, so no
-    // disabled-memory choice is offered) render inside the fleeting box, not as separate chips.
-    const fleetingText = queryByTestId("fleeting-enclosure")?.textContent ?? "";
-    expect(fleetingText).toMatch(/retry/i);
-    expect(fleetingText).toMatch(/abandon/i);
-    expect(fleetingText).not.toMatch(/disabled-memory/i);
-    expect(queryByTestId("recovery-chips")).toBeNull();
-  });
-
-  it("sweeps no scan ring at a retired engine centre during the provider-plan verify", () => {
-    const off = render(<EnclosureProcessMap node={nodeFrom("engine-boot-provider-verify")} />);
-    expect(off.queryByTestId("scan-ring")).toBeNull();
-    cleanup();
-    document.documentElement.removeAttribute("data-effects");
-    const on = render(<EnclosureProcessMap node={nodeFrom("engine-boot-provider-verify")} />);
-    // No engine-anchored verify sweep remains: no scan ring at the retired CGC centre.
-    expect(on.queryByTestId("scan-ring")).toBeNull();
+  it("renders no gauge, provider block, dropout halo, fault/reindex marker, seed/clone lane or provider text", () => {
+    document.documentElement.removeAttribute("data-effects"); // effects ON — a transient marker would render
+    for (const scenario of ENGINE_ROOM_SCENARIOS) {
+      const { container, unmount } = render(<EnclosureProcessMap node={scenario.processes[0]} />);
+      expect(container.querySelector('[data-testid="engine-gauge"]'), scenario.name).toBeNull();
+      expect(container.querySelector('[data-testid="provider-block"]'), scenario.name).toBeNull();
+      expect(container.querySelector('[data-testid="engine-dropout"]'), scenario.name).toBeNull();
+      expect(container.querySelector("[data-fx='fault']"), scenario.name).toBeNull();
+      expect(container.querySelector("[data-fx='reindex']"), scenario.name).toBeNull();
+      expect(container.querySelector('[data-kind="cgc-seed"]'), scenario.name).toBeNull();
+      expect(container.querySelector('[data-kind="grepai-clone"]'), scenario.name).toBeNull();
+      expect(container.textContent ?? "", scenario.name).not.toMatch(PROVIDER_TEXT);
+      unmount();
+    }
   });
 });
 

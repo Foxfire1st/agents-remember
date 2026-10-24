@@ -46,7 +46,7 @@
     },
     "Analytics": {
       "additionalProperties": false,
-      "description": "The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.\n\nKept apart from the structural task/enclosure/provider tree so the\nclient-agnostic core stays small. Converted drift counts, provider setup/progress,\nroute coverage, tool reports and memory-ledger currency describe the retained analytics.\n\n``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*\nsurfaces here: the reducer composes them from the structural tree + these signals (not\nfrom an input file), so a structural-only caller can still see them populated.",
+      "description": "The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.\n\nKept apart from the structural task/enclosure tree so the\nclient-agnostic core stays small. Converted drift counts,\nroute coverage, tool reports and memory-ledger currency describe the retained analytics.\n\n``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*\nsurfaces here: the reducer composes them from the structural tree + these signals (not\nfrom an input file), so a structural-only caller can still see them populated.",
       "properties": {
         "attentionQueue": {
           "items": {
@@ -81,20 +81,6 @@
             "$ref": "#/$defs/RouteCoverageNode"
           },
           "title": "Routecoverage",
-          "type": "array"
-        },
-        "setupProgress": {
-          "items": {
-            "$ref": "#/$defs/SetupProgressNode"
-          },
-          "title": "Setupprogress",
-          "type": "array"
-        },
-        "setupSummaries": {
-          "items": {
-            "$ref": "#/$defs/SetupSummaryNode"
-          },
-          "title": "Setupsummaries",
           "type": "array"
         },
         "toolReports": {
@@ -227,18 +213,6 @@
           ],
           "default": null,
           "title": "Promptid"
-        },
-        "providerId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Providerid"
         },
         "repoId": {
           "anyOf": [
@@ -705,7 +679,7 @@
     },
     "DriftSnapshotNode": {
       "additionalProperties": false,
-      "description": "A repo's onboarding-drift result, read from a persisted JSON snapshot (3b, b1).\n\nThe reducer never classifies drift (that is git-per-sidecar -- far too costly for\na poll-cadence write); it reads the snapshot the memory_quality drift run\npersisted and surfaces ``snapshotStaleSeconds`` (age of ``checkedAt``), exactly\nlike a provider tile. The full per-sidecar rows stay in the snapshot file; the\nprojection carries only the classification counts a gauge needs.",
+      "description": "A repo's onboarding-drift result, read from a persisted JSON snapshot (3b, b1).\n\nThe reducer never classifies drift (that is git-per-sidecar -- far too costly for\na poll-cadence write); it reads the snapshot the memory_quality drift run\npersisted and surfaces ``snapshotStaleSeconds`` (age of ``checkedAt``), the same\nage honesty every snapshot-backed surface carries. The full per-sidecar rows stay in the snapshot file; the\nprojection carries only the classification counts a gauge needs.",
       "properties": {
         "actionableCount": {
           "default": 0,
@@ -912,7 +886,7 @@
     },
     "EngineProcessEdge": {
       "additionalProperties": false,
-      "description": "One conduit in the process map, with a state-backed visual treatment (slice 5e).\n\nEdges are derived from facts, never decoration: a ``cgc-seed`` edge reads ``running``\nonly while the seed phase is live, ``failed`` on a failed phase, ``planned`` before it\nstarts -- so an animated conduit always means an observed transition.",
+      "description": "One conduit in the process map, with a state-backed visual treatment (slice 5e).\n\nEdges are derived from facts, never decoration: a worktree-add edge reads ``complete``\nonly where the checkout was observed, ``planned`` before it starts -- so an animated\nconduit always means an observed transition.",
       "properties": {
         "detail": {
           "anyOf": [
@@ -964,7 +938,7 @@
     },
     "EngineProcessNode": {
       "additionalProperties": false,
-      "description": "One worktree enclosure as a state-backed process -- the Engine Room's unit (slice 5e).\n\nComposed (like ``attentionQueue``) from the contract + status guidance + provider boot +\nlifecycle, **not** read from a new file. The center of the Engine Room is this enclosure,\nnot a provider card: the official source line, the code/memory worktrees, the contract\ncoupling them, and the two isolated engines bound to that worktree group. ``health`` and\nthe per-side ``factState``s carry the observed/derived/planned/missing honesty 5e demands.",
+      "description": "One worktree enclosure as a state-backed process -- the Engine Room's unit (slice 5e).\n\nComposed (like ``attentionQueue``) from the contract + status guidance +\nlifecycle, **not** read from a new file. The center of the Engine Room is this enclosure:\nthe official source line, the code/memory worktrees and the contract coupling them.\n``health`` and the per-side ``factState``s carry the observed/derived/planned/missing\nhonesty 5e demands.",
       "properties": {
         "actions": {
           "items": {
@@ -999,25 +973,6 @@
         "codeWorktree": {
           "$ref": "#/$defs/CommitRefNode"
         },
-        "completedPhases": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Completedphases",
-          "type": "array"
-        },
-        "currentPhase": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Currentphase"
-        },
         "edges": {
           "items": {
             "$ref": "#/$defs/EngineProcessEdge"
@@ -1029,27 +984,8 @@
           "title": "Enclosure",
           "type": "string"
         },
-        "failedPhases": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Failedphases",
-          "type": "array"
-        },
         "health": {
           "$ref": "#/$defs/ProcessHealth"
-        },
-        "heartbeatAgeSeconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Heartbeatageseconds"
         },
         "humanReviewStatus": {
           "title": "Humanreviewstatus",
@@ -1172,46 +1108,9 @@
           "title": "Phase",
           "type": "string"
         },
-        "providers": {
-          "items": {
-            "$ref": "#/$defs/ProviderBootNode"
-          },
-          "title": "Providers",
-          "type": "array"
-        },
         "repoName": {
           "title": "Reponame",
           "type": "string"
-        },
-        "retryArgs": {
-          "anyOf": [
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Retryargs"
-        },
-        "seedFallback": {
-          "default": false,
-          "title": "Seedfallback",
-          "type": "boolean"
-        },
-        "setupState": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Setupstate"
         },
         "sourceFiles": {
           "items": {
@@ -2259,35 +2158,6 @@
       "title": "ProjectionSourceProblem",
       "type": "object"
     },
-    "ProviderBootNode": {
-      "additionalProperties": false,
-      "description": "One isolated engine in a worktree's provider runtime: CGC (code) or GrepAI (memory).\n\nThe boot *sequence* (seed/clone/watcher phases) lives on the owning\n:class:`EngineProcessNode` because provider setup is one progress file per worktree\ngroup; this node is the engine's identity + its current runtime health.",
-      "properties": {
-        "factState": {
-          "$ref": "#/$defs/ProcessFactState",
-          "default": "observed"
-        },
-        "id": {
-          "title": "Id",
-          "type": "string"
-        },
-        "role": {
-          "title": "Role",
-          "type": "string"
-        },
-        "runtimeState": {
-          "title": "Runtimestate",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "role",
-        "runtimeState"
-      ],
-      "title": "ProviderBootNode",
-      "type": "object"
-    },
     "ProviderLimit": {
       "additionalProperties": false,
       "description": "What a task shows in place of ``paused``: the earliest `until`, and its seats.",
@@ -2310,101 +2180,6 @@
         "until"
       ],
       "title": "ProviderLimit",
-      "type": "object"
-    },
-    "ProviderNode": {
-      "additionalProperties": false,
-      "description": "One provider's current-state snapshot (data surfaces 1 and 4).\n\n``snapshotStaleSeconds`` is the age of the ``current.json`` file: provider\nstate is call-triggered and stale between calls, so the reducer surfaces how\nold the snapshot is rather than pretending it is live. Workspace providers\ncan be aggregate nodes or repo-covered nodes when the provider snapshot\ncarries per-repo evidence. Worktree providers carry ``worktreeGroup`` and\nbind to their isolated enclosure.",
-      "properties": {
-        "id": {
-          "title": "Id",
-          "type": "string"
-        },
-        "indexingState": {
-          "default": "unknown",
-          "title": "Indexingstate",
-          "type": "string"
-        },
-        "ok": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ok"
-        },
-        "repoId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Repoid"
-        },
-        "role": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Role"
-        },
-        "scope": {
-          "default": "workspace",
-          "title": "Scope",
-          "type": "string"
-        },
-        "snapshotStaleSeconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Snapshotstaleseconds"
-        },
-        "state": {
-          "title": "State",
-          "type": "string"
-        },
-        "watcherUp": {
-          "default": false,
-          "title": "Watcherup",
-          "type": "boolean"
-        },
-        "worktreeGroup": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Worktreegroup"
-        }
-      },
-      "required": [
-        "id",
-        "state"
-      ],
-      "title": "ProviderNode",
       "type": "object"
     },
     "RouteCoverageNode": {
@@ -2447,144 +2222,6 @@
         "route"
       ],
       "title": "RouteCoverageNode",
-      "type": "object"
-    },
-    "SetupProgressNode": {
-      "additionalProperties": false,
-      "description": "A worktree group's live provider-setup progress (slice 3b, surface 3).\n\nProjected through ``setup_progress.progress_status``, so a ``running`` group\nwhose heartbeat went stale reads ``stale`` -- the boot-sequence widget data.",
-      "properties": {
-        "completedCount": {
-          "default": 0,
-          "title": "Completedcount",
-          "type": "integer"
-        },
-        "currentPhase": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Currentphase"
-        },
-        "failedPhases": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Failedphases",
-          "type": "array"
-        },
-        "group": {
-          "title": "Group",
-          "type": "string"
-        },
-        "heartbeatAgeSeconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Heartbeatageseconds"
-        },
-        "state": {
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "group",
-        "state"
-      ],
-      "title": "SetupProgressNode",
-      "type": "object"
-    },
-    "SetupSummaryNode": {
-      "additionalProperties": false,
-      "description": "The latest provider-setup outcome for one action (slice 3b, surface 2).",
-      "properties": {
-        "action": {
-          "title": "Action",
-          "type": "string"
-        },
-        "generatedAt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Generatedat"
-        },
-        "ok": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ok"
-        },
-        "ready": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ready"
-        },
-        "resultCounts": {
-          "additionalProperties": {
-            "type": "integer"
-          },
-          "title": "Resultcounts",
-          "type": "object"
-        },
-        "snapshotStaleSeconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Snapshotstaleseconds"
-        },
-        "state": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "State"
-        }
-      },
-      "required": [
-        "action"
-      ],
-      "title": "SetupSummaryNode",
       "type": "object"
     },
     "SourceLineageEdge": {
@@ -4253,7 +3890,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The resolved tasks, unbound worktrees, providers, counts and analytics.",
+  "description": "The resolved tasks, unbound worktrees, counts and analytics.",
   "properties": {
     "activeWorktreeGroups": {
       "items": {
@@ -4293,13 +3930,6 @@
     },
     "metrics": {
       "$ref": "#/$defs/Metrics"
-    },
-    "providers": {
-      "items": {
-        "$ref": "#/$defs/ProviderNode"
-      },
-      "title": "Providers",
-      "type": "array"
     },
     "taskCounts": {
       "$ref": "#/$defs/TaskCounts"

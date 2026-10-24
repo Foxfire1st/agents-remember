@@ -7,14 +7,16 @@ description: "Choose retrieval strategies across memory substrates: semantics fo
 
 Use this skill when repository work needs context before source decisions. The
 job is to choose the retrieval contract first, then the cheapest substrate that
-can satisfy it. Providers are fast discovery accelerators.
+can satisfy it. Registered tools accelerate discovery; they never replace the
+read.
 
 ## Retrieval Substrates
 
 Choose the next substrate by the missing context bundle:
 
-- `Semantics`: a fuzzy concept or request is known, but structure, route, 
-  or file location is unknown. Prefer GrepAI over the memory repos when available.
+- `Semantics` (retired — no semantic-query tool): a fuzzy concept or request is
+  known, but structure, route, or file location is unknown. Answer it with the
+  route index and onboarding search, then bounded native reads.
 - `Relationship` (retired — no relationship-query tool): an anchor is known, but callers, callees, dependencies,
   ownership, inheritance, impact paths, or neighboring code are unknown. Use native search over the configured code repo.
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
@@ -23,95 +25,31 @@ Choose the next substrate by the missing context bundle:
   which cards govern the paths, then read the named files with your own tools.
 
 A triage prompt starts with Intent: the route index plus `read_ar_files`
-naming prove the contract and fix direction from source. Relationship and
-Semantics are retired (no tools); their method catalogs beside this skill
-remain syntax references for native search, not callable substrates.
+naming prove the contract and fix direction from source. Neither Semantics nor
+Relationship is callable, and no catalog here stands in for one.
 
-## Semantics: GrepAI (retired)
+## Retired Substrates: The Questions They Still Ask
 
-GrepAI is not in the registered roster: there is no semantic-query tool to
-call. For vague or fuzzy requests use Intent below (route index plus
-`read_ar_files` naming, then native reads).
+The questions those two substrates existed for are still real, and native
+search plus Intent answer them.
 
-First request an MCP `context_packet(repo_id="<repoId>")`
-when the MCP server is configured.
+**Semantics questions** — *which route, sidecar, or source area covers this
+concept?* Start from `context_packet(repo_id="<repoId>")` when the MCP server is
+configured, then read the route index (`overview.index.json` routing terms,
+`hotPath`, `childRoutes`) and run one capped native search over the memory
+repository's `onboarding/` and `knowledge/` text. The 1-to-1 sidecar mapping
+gives the source path back from a memory file.
 
-Synthetic answer shape:
+**Relationship questions** — *who calls this, what does it depend on, what does
+touching it reach?* Search the anchor symbol natively in the code repo, read the
+hit sites, and follow one call or import level at a time. For the reverse
+direction start from the callee's name; to decide whether one symbol can reach
+another, walk the named call sites and stop at the first proof.
 
-```text
-results[3]{project,path,lines,score}:
-  1 | <memoryProject> | onboarding/src/jobs/retry-policy.ts.md | 18-34 | 0.84
-  2 | <memoryProject> | onboarding/src/http/client.ts.md | 41-59 | 0.78
-  3 | <memoryProject> | onboarding/overview.md | 72-81 | 0.73
-```
-
-Use this when the route is unknown and the next step is choosing which
-overview, sidecar, or source area to confirm.
-
-Synthetic answer shape:
-
-```json
-{
-  "query": "validation rules for imported records",
-  "results": [
-    {
-      "project": "<memoryProject>",
-      "path": "onboarding/src/import/record-validator.ts.md",
-      "startLine": 22,
-      "endLine": 46,
-      "score": 0.86
-    }
-  ]
-}
-```
-
-Use `--project` after the relevant memory root is known. Use `--path` after
-route discovery narrows the search further. For the full GrepAI usage catalog
-with synthetic example outputs, read
-[grepai-high-leverage-usage.md](./grepai-high-leverage-usage.md) beside this skill.
-
-## Relationship: CodeGraphContext (retired)
-
-CodeGraphContext is not in the registered roster: there is no relationship-query
-tool to call. For anchor/symbol structure questions use Intent (route index plus
-native reads) instead.
-
-First request an MCP `context_packet(repo_id="<repoId>")`
-when the MCP server is configured.
-
-The two highest-value CGC patterns are impact tracing and complexity triage.
-Examples here are synthetic response shapes only; do not copy private
-repository names, symbols, or paths into reusable skill examples.
-
-Synthetic answer shape:
-
-```text
-Function 'handleRequest' calls:
-validateRequest      <repo>/src/http/validation.ts:42
-loadSession          <repo>/src/auth/session.ts:18
-dispatchCommand      <repo>/src/app/command-router.ts:77
-
-Total: 3 function(s)
-```
-
-Use `analyze callers` for the reverse direction and `analyze chain` when two
-symbols are known and the missing question is whether one can reach the other.
-
-Synthetic answer shape:
-
-```text
-Most Complex Functions (threshold: 10):
-Function             Complexity  Location
-renderDashboard              42  <repo>/src/ui/dashboard.tsx:88
-buildReport                  37  <repo>/src/reports/report-builder.ts:114
-syncExternalState            31  <repo>/src/sync/state-sync.ts:57
-```
-
-Use `analyze complexity` as an early risk map before touching large or tangled
-functions. Use `deps` with the module import string recorded in code, not
-necessarily the source file path. For the full CGC method catalog with
-synthetic example outputs, read
-[codegraphcontext-high-level-methods.md](./codegraphcontext-high-level-methods.md) beside this skill.
+**Risk triage** — *where is the tangle?* Size a large or many-caller function
+before editing it: native search by symbol name plus the route index is enough
+to bound it. Treat the result as an early risk map, never as a completeness
+claim.
 
 ### Rules:
 Use native search (`rg`) first for structure and relationships.
@@ -133,9 +71,9 @@ source text, card text or overview text is returned: open the named files
 with your own tools. A call that passes the removed `refresh` parameter, or
 a file as an object, is refused with `argument-removed`.
 
-Use Intent when the route, file, or anchor is known and their relationships (CGC) are
-understood. The missing context is the code's contract, invariant, behavioral 
-expectation, branch-valid truth, or fix direction.
+Use Intent when the route, file, or anchor is known and its callers and
+dependencies are understood. The missing context is the code's contract,
+invariant, behavioral expectation, branch-valid truth, or fix direction.
 
 Read only what is needed to prove the packet:
 
@@ -167,7 +105,7 @@ names an unresolved source question.
   tools whenever a claim is about file content, before and after the build decision — it is never
   reserved as a mere edit precondition.
 - Keep a running count of your `read_ar_files` calls and list them as research evidence,
-  alongside Semantics (GrepAI) and Relationship (CGC) queries.
+  alongside your native searches and the files you read.
 
 ## Recorded Intent Before Planning
 

@@ -152,7 +152,7 @@ def _case_test_permission_prompts_arrive_from_the_publication_and_survive_an_unr
     facts = _read(state, config).native_attention
     assert facts.permissions_complete
     assert [wait.prompt_id for wait in facts.permissions] == ["prompt-a", "prompt-b"]
-    queue = build_attention_queue([], AnalyticalInputs(native_attention=facts), [_entry()], NOW)
+    queue = build_attention_queue(AnalyticalInputs(native_attention=facts), [_entry()], NOW)
     assert [item.id for item in queue] == [
         "permission-wait:11111111-1111-4111-8111-111111111111:prompt-a",
         "permission-wait:11111111-1111-4111-8111-111111111111:prompt-b",
@@ -264,7 +264,7 @@ def _case_test_held_messages_come_from_the_store_row_and_clear_only_on_delivery(
     assert [(row.message_id, row.reason) for row in facts.held] == [
         ("message-1", "recipient at a permission prompt")
     ]
-    queue = build_attention_queue([], AnalyticalInputs(native_attention=facts), [_entry()], NOW)
+    queue = build_attention_queue(AnalyticalInputs(native_attention=facts), [_entry()], NOW)
     assert [item.kind for item in queue] == ["held-message"]
     assert "secret body" not in json.dumps([item.model_dump() for item in queue])
 
@@ -594,7 +594,6 @@ def _case_test_a_notice_acknowledgement_keeps_its_occurrence_once_and_not_the_ne
     queue = [
         item
         for item in build_attention_queue(
-            [],
             AnalyticalInputs(
                 native_attention=facts,
                 attention_dismissals={

@@ -20,8 +20,8 @@ things only:
 ## bug
 
 Lead with a reproduction and a proven root cause before proposing a fix — an unproven fix is a guess.
-Lean on Relationship (callers/callees/impact via cgc) to bound the change, and Intent to confirm the
-invariant the bug violates. Defaults to a build; the fix lands through `decide -> build -> close`.
+Lean on native search from the anchor symbol (callers, callees, impact) to bound the change, and
+Intent to confirm the invariant the bug violates. Defaults to a build; the fix lands through `decide -> build -> close`.
 
 ## feature
 

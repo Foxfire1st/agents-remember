@@ -158,9 +158,7 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         with TestClient(
             create_app(
                 config,
-                live_inputs=LiveProjectionInputs(
-                    provider_state=False, landing_state=False, change_watch=False
-                ),
+                live_inputs=LiveProjectionInputs(landing_state=False, change_watch=False),
             )
         ) as client:
             response = client.get("/api/state")

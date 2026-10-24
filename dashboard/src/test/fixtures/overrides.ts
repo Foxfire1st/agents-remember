@@ -4,7 +4,7 @@
 // of a `Partial<T>` also accepts an EXPLICIT `undefined` — and the builders' trailing `...over`
 // writes it. `taskEntry({ stage: undefined })` therefore compiles, and answers a task entry
 // whose REQUIRED `stage` is `undefined`: a fixture stating that a required field is absent, with
-// no cast at all. `provider({ state: undefined })`, `taskSummary({ steps: undefined })` and
+// no cast at all. `enclosure({ repoName: undefined })`, `taskSummary({ steps: undefined })` and
 // `projection({ enclosures: undefined })` are the same move. Nothing in `wireFixtureGuard.ts` sees
 // any of them: there is no assertion for rule 1, no suppression for rule 5, and rule 4 measures
 // property NAMES, which are all present and correct.

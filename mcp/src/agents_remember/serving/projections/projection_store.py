@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.observer.projection import (
@@ -32,7 +32,6 @@ from agents_remember.observer.reducer import (
     WorkspaceStructure,
     project_workspace,
 )
-from agents_remember.providers.status import refresh_current_provider_state
 from agents_remember.serving.delta import StableProjectionState, stable_projection_state
 from agents_remember.serving.projections.contract_snapshot import ContractSnapshotCache
 from agents_remember.serving.projections.paths import observer_root
@@ -55,7 +54,6 @@ if TYPE_CHECKING:
 
 LATEST_STATE = "latest-state.json"
 LATEST_METRICS = "latest-metrics.json"
-PROVIDER_REFRESH_TTL_SECONDS = 10.0
 # Repo-surface TTL: this walk opens+parses every onboarding document across EVERY managed
 # repo (8 memory repos, thousands of markdown files) — py-spy measured it as the dominant slice
 # of the projection tick at the old 15 s TTL. Coverage/ledger panels tolerate minutes
@@ -105,47 +103,12 @@ def write_projection(root: Path, projection: WorkspaceProjection) -> None:
     )
 
 
-class ProviderStateRefresher:
-    """Refresh provider current-state snapshots before the observer reads them."""
-
-    def __init__(
-        self,
-        *,
-        ttl_seconds: float = PROVIDER_REFRESH_TTL_SECONDS,
-        refresh: Any = refresh_current_provider_state,
-    ) -> None:
-        self._ttl_seconds = ttl_seconds
-        self._refresh = refresh
-        self._last_refresh: datetime | None = None
-
-    def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None:
-        if not config.providers:
-            return
-        if self._last_refresh is not None:
-            age = (now - self._last_refresh).total_seconds()
-            if age < self._ttl_seconds:
-                return
-        self._last_refresh = now
-        try:
-            self._refresh(config, checked_at=now)
-        except Exception:
-            logger.warning(
-                "provider current-state refresh failed; using last snapshot", exc_info=True
-            )
-
-
-class ProviderStateRefresh(Protocol):
-    """Structural contract for projection pre-read provider refreshers."""
-
-    def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None: ...
-
-
 @dataclass
 class ProjectionTickState:
     """What a projector carries between ticks: the retained input snapshot it re-reads
-    incrementally, and the two pre-read refreshers (provider current state, landing state) it
-    drives before reading. All three are the projector's own long-lived collaborators; a tick
-    given some of them and not others silently reverts to a cold read.
+    incrementally, and the pre-read landing-state refresher it drives before reading. Both are
+    the projector's own long-lived collaborators; a tick given some of them and not others
+    silently reverts to a cold read.
 
     ``stable`` is filled in by the tick itself: it is the stable form the tick computed for its
     own write decision, published afterwards instead of being computed a second time. The value
@@ -153,7 +116,6 @@ class ProjectionTickState:
     """
 
     input_state: ProjectionInputState | None = None
-    provider_refresher: ProviderStateRefresh | None = None
     landing_state: LandingStateReader | None = None
     # The stable form this tick computed for its own write decision, so publication compares the
     # same dump instead of computing a second one (MIK-R179 rule 2: no repeated work with no new
@@ -179,8 +141,6 @@ def project_and_write(
     tick = tick or ProjectionTickState()
     moment = now or datetime.now(UTC)
     root = observer_root(config)
-    if tick.provider_refresher is not None:
-        tick.provider_refresher.maybe_refresh(config, now=moment)
     state = tick.input_state or ProjectionInputState(contract_cache=_contract_snapshot_cache)
     inputs = state.read(
         config,
@@ -194,7 +154,6 @@ def project_and_write(
     projection = project_workspace(
         structure=WorkspaceStructure(
             enclosures=inputs.enclosures,
-            providers=inputs.providers,
             # The Topology constellation filters its tree on this active set — the same
             # active-enclosure admission the Engine Room's engine_process_facts use, so both
             # views share one definition of "active" rather than diverging.
@@ -203,8 +162,6 @@ def project_and_write(
         now=moment,
         given=AnalyticalInputs(
             drift_snapshots=inputs.drift_snapshots,
-            setup_summaries=inputs.setup_summaries,
-            setup_progress=inputs.setup_progress,
             route_coverage=inputs.route_coverage,
             tool_reports=inputs.tool_reports,
             ledgers=inputs.ledgers,

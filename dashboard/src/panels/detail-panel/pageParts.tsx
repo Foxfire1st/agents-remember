@@ -209,7 +209,7 @@ export function StatusWord({
   );
 }
 
-// Undefined means no provider; null means a hidden surface whose words must stay stopped.
+// Undefined means no ancestor clock; null means a hidden surface whose words must stay stopped.
 const StatusClock = createContext<number | null | undefined>(undefined);
 
 /** Visible task surfaces share one coarse display clock; nested readers reuse context. */

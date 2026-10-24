@@ -58,7 +58,7 @@ Until the build decision, route managed-repo source reads through the `read_ar_f
 rather than going straight to the native read tool — it names where each file is and keeps
 the read trail observable, but it carries no file text: read the named files with the native
 read tool. Native read is the edit precondition once building begins.
-Count your `read_ar_files` calls as retrieval evidence alongside CGC and GrepAI.
+Count your `read_ar_files` calls as retrieval evidence alongside your native searches and the files you read.
 
 ### Developer Clarifications
 
@@ -134,8 +134,12 @@ report no providers.
 
 ### Memory Retrieval Strategies
 
-- `Semantics`: Fuzzy search use GrepAI to search over onboardings. Leads to code routes & files using 1-to-1 file mapping backward.
-- `Relationship`: For code-relationsship questions use Code Graph Context (cgc).
+- `Semantics` (retired — no semantic-query provider): a fuzzy concept is known, but structure,
+  route, or file location is unknown. Answer it with route-index and onboarding search, then
+  bounded native reads.
+- `Relationship` (retired — no relationship-query provider): an anchor is known, but callers,
+  callees, dependencies, ownership, inheritance, impact paths, or neighboring code are unknown.
+  Answer it with native search from the anchor symbol.
 - `Intent`: an anchor/location + relationships are known, but hidden contracts, invariants,
   branch-valid truths, behavioral expectations, or code intent are unknown. Use the
   `read_ar_files` MCP tool to name the onboarding for bounded source confirmation: one call

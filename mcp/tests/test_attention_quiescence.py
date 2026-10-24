@@ -39,7 +39,7 @@ def _task() -> TaskEntry:
 
 def _queue_at(now: datetime, start: datetime):
     facts = NativeAttentionFacts(stall_clocks={LEAF_KEY: start.isoformat()})
-    return build_attention_queue([], _inputs(facts), [_task()], now)
+    return build_attention_queue(_inputs(facts), [_task()], now)
 
 
 def _inputs(facts: NativeAttentionFacts) -> AnalyticalInputs:

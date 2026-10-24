@@ -33,7 +33,6 @@ function materialized(exists: boolean | undefined): StepState {
 function bootSteps(node: EngineProcessNode): Step[] {
   // Contract anchor LEADS the boot sequence (dev directive): the task contract is the precondition the
   // worktree is created from, so it heads the list — before the code / memory worktrees materialise.
-  // Provider seed/clone/watcher steps left the surface (MIK-R112).
   const steps: Step[] = [
     { label: "Contract anchor", state: "complete" },
     { label: "Code worktree", state: materialized(node.codeWorktree.exists) },

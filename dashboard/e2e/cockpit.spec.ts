@@ -14,7 +14,13 @@ test("attention queue ranks alarms first", async ({ page }) => {
   await page.getByTestId("attention-bell").click();
   const queue = page.getByTestId("attention-queue");
   await expect(queue).toContainText("waiting");
-  await expect(page.getByTestId("attn-item").first()).toContainText("down"); // alarm sorts first
+  // The alarm entry sorts first. The gallery's alarm is its actionable-drift item: the
+  // provider-down item that used to hold this slot went with the search providers (MIK-R199).
+  await expect(page.getByTestId("attn-item").first()).toContainText("3 actionable drift");
+  await expect(page.getByTestId("attn-severity").first()).toHaveAttribute(
+    "aria-label",
+    "Severity: alarm",
+  );
 });
 
 test("task rail pivots between repository and phase grouping", async ({

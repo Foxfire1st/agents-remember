@@ -1,41 +1,43 @@
-import type { EnclosureNode, ProviderNode } from '../../types/projection';
-import type { useDetailPanelState } from './state';
-import { lanes, spine, spineHead } from './styles';
-import { lane, laneTitle, laneRepo, laneMeta } from './styles';
+import type { EnclosureNode } from '../../types/projection';
+import { lane, laneMeta, laneRepo, laneTitle, lanes, spine, spineHead } from './styles';
 
-type DetailState = ReturnType<typeof useDetailPanelState>;
-
+// The Tasks view's worktree spine: the two checkouts an enclosure binds — the code worktree and
+// its memory twin — with the facts the server observes about each (whether the path exists, and
+// the cleanup state that decides whether it still will).
+//
+// The isolated search engines that used to sit on these lanes (CGC over the code checkout,
+// GrepAI over the memory one) are gone from the served projection, so nothing here reads engine
+// or provider state. That is why an enclosure recorded before their removal and one recorded
+// after it render identically: the lanes carry only what the enclosure itself says.
+//
+// `codeWorktreeExists` / `memoryWorktreeExists` are observations of the path *now*, not a
+// creation history: a checkout that existed and was cleaned up answers false exactly like one
+// that was never created. `EnclosureNode` carries no field that separates the two, so an absent
+// lane may only be reported as absent — never as "not created".
 export function WorktreeSpine({
-  state,
   enclosure,
   groupName,
 }: {
-  state: DetailState;
-  enclosure: EnclosureNode | undefined;
+  enclosure: EnclosureNode;
   groupName: string;
 }) {
-  const { providers } = state;
-  const engines = groupName
-    ? Object.values(providers).filter(
-        (p) => p.scope === 'worktree' && p.worktreeGroup === groupName,
-      )
-    : [];
-  if (!enclosure) return null;
   return (
-    <div className={spine}>
+    <div className={spine} data-testid="worktree-spine">
       <div className={spineHead}>worktree · {groupName || enclosure.repoName}</div>
       <div className={lanes}>
         <SpineLane
           kind="code"
-          title="code → CGC"
+          title="code checkout"
           repo={enclosure.repoName}
-          engines={engines.filter((engine) => engine.role === 'code')}
+          exists={enclosure.codeWorktreeExists}
+          cleanup={enclosure.cleanup}
         />
         <SpineLane
           kind="memory"
-          title="memory → GrepAI"
+          title="memory checkout"
           repo={`ar-${enclosure.repoName}`}
-          engines={engines.filter((engine) => engine.role === 'memory')}
+          exists={enclosure.memoryWorktreeExists}
+          cleanup={enclosure.cleanup}
         />
       </div>
     </div>
@@ -46,26 +48,22 @@ export function SpineLane({
   kind,
   title,
   repo,
-  engines,
+  exists,
+  cleanup,
 }: {
   kind: 'code' | 'memory';
   title: string;
   repo: string;
-  engines: ProviderNode[];
+  exists: boolean;
+  cleanup: string;
 }) {
   return (
-    <div className={lane({ kind })}>
+    <div className={lane({ kind })} data-testid={`spine-lane-${kind}`}>
       <div className={laneTitle}>{title}</div>
       <div className={laneRepo}>{repo}</div>
-      {engines.length > 0 ? (
-        <div className={laneMeta}>
-          {engines.map((engine) => (
-            <span key={engine.id}>{engine.state}</span>
-          ))}
-        </div>
-      ) : (
-        <span className="muted">no isolated engine recorded</span>
-      )}
+      <div className={laneMeta}>
+        {exists ? 'worktree present' : 'worktree absent'} · {cleanup} cleanup
+      </div>
     </div>
   );
 }

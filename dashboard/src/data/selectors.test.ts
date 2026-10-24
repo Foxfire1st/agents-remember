@@ -63,6 +63,52 @@ describe('selectQueue', () => {
       } as DashboardState),
     ).toEqual([]);
   });
+
+  it('drops the provider kinds the server retired, even when a stale payload carries them', () => {
+    // Nothing publishes `provider-down` or `failed-setup` any more, so nothing can dismiss them
+    // either. A tab handed an older payload would otherwise raise an alarm with no way to clear it.
+    const retired: AttentionItem[] = [
+      {
+        id: 'provider-down:codegraphcontext-code',
+        kind: 'provider-down',
+        severity: 'alarm',
+        lane: 'repo',
+        title: 'Code index is down',
+        itemClass: 'operational',
+        dismissible: true,
+      },
+      {
+        id: 'failed-setup:legacy-ar',
+        kind: 'failed-setup',
+        severity: 'alarm',
+        lane: 'worktree',
+        title: 'Provider setup needs attention',
+        itemClass: 'operational',
+        dismissible: true,
+      },
+    ];
+    const live: AttentionItem = {
+      id: 'blocked-start:legacy-ar',
+      kind: 'blocked-start',
+      severity: 'warn',
+      lane: 'worktree',
+      title: 'Worktree start blocked',
+      itemClass: 'operational',
+      dismissible: true,
+    };
+    expect(
+      selectQueue({
+        analytics: { attentionQueue: [...retired, live] },
+        suppressedAttentionIds: {},
+      } as DashboardState),
+    ).toEqual([live]);
+    expect(
+      selectQueue({
+        analytics: { attentionQueue: retired },
+        suppressedAttentionIds: {},
+      } as DashboardState),
+    ).toEqual([]);
+  });
 });
 
 function driftSnapshot(counts: Record<string, number>): DriftSnapshotNode {

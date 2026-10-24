@@ -22,10 +22,8 @@ from agents_remember.controlplane.attention_dismissals import (
 )
 from agents_remember.kernel import atomic_write, own_writes
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.providers.current_state import current_state_path, write_current_provider_state
 from agents_remember.serving import change_watcher
 from agents_remember.serving.change_watcher import ProjectionInputWatcher
-from agents_remember.serving.projections.projection_store import ProviderStateRefresher
 from agents_remember.serving.projector import (
     ProjectionCadence,
     ProjectionRefreshers,
@@ -86,15 +84,31 @@ class NativeWriterCompositionTests(unittest.IsolatedAsyncioTestCase):
         task_path, _ = write_task_doc(document_root, document)
         contract = load_contract(review.contract())
         blocked_group = world.root / "worktrees/r/blocked"
+        start_enclosure = StartingEnclosure(
+            repo_name="r",
+            task_name="blocked",
+            worktree_name="blocked",
+            worktree_group=str(blocked_group),
+            memory_mode="external",
+        )
         write_start_progress(
             world.root,
-            StartingEnclosure(
-                repo_name="r",
-                task_name="blocked",
-                worktree_name="blocked",
-                worktree_group=str(blocked_group),
-                memory_mode="external",
-            ),
+            start_enclosure,
+            StartBeat(phase="memory-preparation", blocked_reason="needs a memory baseline"),
+        )
+        # A second, already-acknowledged blocked start: the per-tick native rewrite of its
+        # current acknowledgement is the real producer event this test watches for.
+        noise_group = world.root / "worktrees/r/noise"
+        noise_enclosure = StartingEnclosure(
+            repo_name="r",
+            task_name="noise",
+            worktree_name="noise",
+            worktree_group=str(noise_group),
+            memory_mode="external",
+        )
+        write_start_progress(
+            world.root,
+            noise_enclosure,
             StartBeat(phase="memory-preparation", blocked_reason="needs a memory baseline"),
         )
         registry = own_writes.OwnWriteRegistry()
@@ -111,7 +125,7 @@ class NativeWriterCompositionTests(unittest.IsolatedAsyncioTestCase):
 
         def owners(moment):
             # Test-side scheduling, actual writers; only host facts are isolated.
-            write_current_provider_state(world.config, {}, checked_at=moment)
+            dismissals.dismiss(noise_record)
             document = leaf_worklist(contract)
             assert document is not None
             owner_passes.append(document)
@@ -124,15 +138,19 @@ class NativeWriterCompositionTests(unittest.IsolatedAsyncioTestCase):
         stack.enter_context(
             mock.patch.object(ProjectionInputWatcher, "_consume_input_changes", consume)
         )
+        dismissals = AttentionDismissalStore(world.observer)
+        noise_record = AttentionDismissalRecord(
+            itemId=f"blocked-start:{noise_group}",
+            kind="blocked-start",
+            dismissedAt=world.now.isoformat(),
+        )
+        dismissals.dismiss(noise_record)
         watcher = ProjectionInputWatcher(world.config)
         projector = Projector(
             world.config,
             cadence=ProjectionCadence(interval=1, heartbeat=15),
             replay=ProjectionReplay(now=lambda: world.now, before_tick=owners),
-            refreshers=ProjectionRefreshers(
-                change_watcher=watcher,
-                provider=ProviderStateRefresher(),
-            ),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         await projector.prime()
         pacer = projector._pacer
@@ -159,7 +177,7 @@ class NativeWriterCompositionTests(unittest.IsolatedAsyncioTestCase):
             wakes=wakes,
             notify=notify,
             owner_passes=owner_passes,
-            provider_path=current_state_path(world.config),
+            dismissal_path=dismissals.log_path(),
             registry=registry,
             running=running,
             blocked_item=f"blocked-start:{blocked_group}",
@@ -180,7 +198,7 @@ class NativeWriterCompositionTests(unittest.IsolatedAsyncioTestCase):
             "actual projection publication",
         )
         self.assertFalse(state.running.done())
-        await self._observed(state.consumed, state.provider_path, after=previous)
+        await self._observed(state.consumed, state.dismissal_path, after=previous)
 
     async def _settle_whole_projection(self, state):
         await async_wait_until(lambda: state.pacer.watcher_healthy, "native watch ready")

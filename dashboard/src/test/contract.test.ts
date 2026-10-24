@@ -135,7 +135,7 @@ function mirrorMustDeclare<ServedOnly extends never>(...undeclaredPaths: ServedO
 // The scalar test comes FIRST and the empty-array test second, in that order on purpose: an empty
 // array of strings samples nothing and hides nothing (there is no structure inside a string to
 // walk), while an empty array of OBJECTS hides a whole model. Reversing them would demand a
-// `failedPhases` entry — noise — and say nothing more.
+// `missingFacts` entry — noise — and say nothing more.
 type MirrorOnlyPaths<Mirror, Served, Path extends string> = [NonNullable<Mirror>] extends [
   JsonScalar,
 ]
@@ -213,8 +213,6 @@ type AbsorbingPaths<Mirror, Path extends string> = [NonNullable<Mirror>] extends
 
 const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, 'projection'>, string> = {
   'projection.analytics.driftSnapshots[].counts': 'drift categories come from the drift report',
-  'projection.analytics.setupSummaries[].resultCounts': 'result buckets come from the setup action',
-  'projection.analytics.engineProcesses[].retryArgs': "the retry call's own kwargs",
   'projection.analytics.engineProcesses[].sourceLineage.recoveries[].args':
     "the contract-addressed worktree_sync call's own kwargs",
   'projection.tasks[].summary.discardedSubTasks[].proof.childJson':
@@ -242,8 +240,8 @@ const INDEX_SIGNATURE_SITES: Record<AbsorbingPaths<WorkspaceProjection, 'project
 // `string`, so a served `severity: "critical"` assigns to `"alarm" | "warn" | "info"` in silence.
 // A runtime membership check is the only thing that bites — and it used to cover two of the six
 // vocabularies (`state`, `phase`), hand-written, with the other four unguarded: `severity`, `lane`,
-// `EngineProcessNode.health`, and `factState` (which alone reaches six of the eleven paths below —
-// the commit refs, the boot providers and the landing arc).
+// `EngineProcessNode.health`, and `factState` (which alone reaches five of the paths below —
+// the commit refs and the landing arc).
 //
 // So the registry is derived instead of listed. `ClosedUnionPaths` finds every path in the mirror
 // whose type is a literal union, and `Record<…>` over it is exhaustive AND closed: a new closed
@@ -293,7 +291,6 @@ const VOCABULARIES: Record<
   'projection.analytics.engineProcesses[].codeWorktree.factState': PROCESS_FACT_STATES,
   'projection.analytics.engineProcesses[].memorySource.factState': PROCESS_FACT_STATES,
   'projection.analytics.engineProcesses[].memoryWorktree.factState': PROCESS_FACT_STATES,
-  'projection.analytics.engineProcesses[].providers[].factState': PROCESS_FACT_STATES,
   'projection.analytics.engineProcesses[].landing[].factState': PROCESS_FACT_STATES,
   'projection.analytics.engineProcesses[].sourceLineage.state': [
     'current',
@@ -580,10 +577,39 @@ describe('projection contract fixture', () => {
     expect(Array.isArray(served.tasks)).toBe(true);
     expect(served.taskCounts).toBeTypeOf('object');
     expect(Array.isArray(served.enclosures)).toBe(true);
-    expect(Array.isArray(served.providers)).toBe(true);
     expect(Array.isArray(served.activeWorktreeGroups)).toBe(true);
     expect(served.metrics).toBeTypeOf('object');
     expect(served.analytics).toBeTypeOf('object');
+  });
+
+  it('carries no provider surface at all', () => {
+    // The search providers (CGC over code, GrepAI over memory) left the served projection, and
+    // the sample follows: a payload that still carried them would describe a server older than
+    // the removal. `in` rather than a typed read on purpose — the mirror no longer declares these
+    // keys, so a typed read could not be written and an untyped one is exactly the claim.
+    expect('providers' in served).toBe(false);
+    expect('setupProgress' in served.analytics).toBe(false);
+    expect('setupSummaries' in served.analytics).toBe(false);
+    for (const item of served.analytics.attentionQueue) {
+      expect(['provider-down', 'failed-setup']).not.toContain(item.kind);
+      expect('providerId' in item).toBe(false);
+    }
+    const retiredProcessKeys = [
+      'providers',
+      'setupState',
+      'currentPhase',
+      'completedPhases',
+      'failedPhases',
+      'heartbeatAgeSeconds',
+      'seedFallback',
+      'retryArgs',
+    ];
+    for (const process of served.analytics.engineProcesses) {
+      for (const key of retiredProcessKeys) expect(key in process, key).toBe(false);
+      for (const edge of process.edges) {
+        expect(['cgc-seed', 'grepai-clone']).not.toContain(edge.kind);
+      }
+    }
   });
 
   it('carries identity and status once per task entry, with reader content separate', () => {
@@ -629,12 +655,12 @@ describe('mirror does not invent fields the server cannot send', () => {
     // `_seed_edge_state`, and the inline literals emit only complete/planned/blocked/skipped/
     // unknown/failed/running/stale). Flash polarity is derived from the state instead.
     const edge: EngineProcessEdge = {
-      id: 'cgc-seed',
-      fromNode: 'code-worktree',
-      toNode: 'cgc-engine',
-      kind: 'cgc-seed',
+      id: 'code-worktree-add',
+      fromNode: 'code-source',
+      toNode: 'code-worktree',
+      kind: 'worktree-add',
       state: 'stale',
-      label: 'CGC seed',
+      label: 'add code worktree',
     };
     // @ts-expect-error polarity is derived from `state`, never carried on the edge
     void edge.refusedPolarity;

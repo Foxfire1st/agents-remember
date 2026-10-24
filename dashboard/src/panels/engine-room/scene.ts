@@ -50,8 +50,7 @@ function ledgerMapBlocked(node: EngineProcessNode): boolean {
 }
 
 export function resolveEngines(node: EngineProcessNode) {
-  // Provider engines left the surface (MIK-R112): only the memory-lane
-  // presence (external memory worktree) still drives the scene.
+  // The memory-lane presence (external memory worktree) drives the scene.
   const hasMemory = node.memoryMode === "external" && !!node.memoryWorktree;
   return {
     hasMemory,
@@ -60,9 +59,9 @@ export function resolveEngines(node: EngineProcessNode) {
 
 export function resolveMaterialisation(node: EngineProcessNode) {
   // Build-up materialisation gates (the honesty axis): the enclosure shell + the worktree coupler only
-  // appear once the matching worktree ref is observed on disk; the worktree engines materialise when
-  // their provider runtime deploys (B3). At main-only B0 these are all `planned`/absent → faded out, so
-  // the left world stands alone and the enclosure assembles as the projection advances.
+  // appear once the matching worktree ref is observed on disk. At main-only B0 these are all
+  // `planned`/absent → faded out, so the left world stands alone and the enclosure assembles as the
+  // projection advances.
   const codeWtMaterialised =
     node.codeWorktree.factState === "observed" ||
     node.codeWorktree.factState === "derived";
@@ -92,9 +91,8 @@ export function resolveMaterialisation(node: EngineProcessNode) {
 
 export function resolveBlocks(node: EngineProcessNode) {
   // A born-blocked (pre-contract) enclosure — the reducer marks it "contract not yet written"; it renders the
-  // big red FleetingEnclosure box (stale-base / pre-contract). Provider setup states left the surface
-  // (MIK-R112): without provider engines there is no separate engine-anchored block, so a missing
-  // setup config reads as the same pre-contract state.
+  // big red FleetingEnclosure box (stale-base / pre-contract). This is the ONE pre-contract block shape:
+  // there is no engine-anchored variant, so a missing runtime config reads as the same state.
   const fleeting = node.missingFacts.some((fact) => /contract not yet written/i.test(fact));
   // a stale-base block is the FLEETING (pre-contract) preflight case — `&& fleeting` keeps it distinct from a
   // live sync-needed block (which is also `behindSource > 0` but has a real worktree).
@@ -193,7 +191,6 @@ export function resolveRecovery(node: EngineProcessNode): string[] {
     ...new Set(
       [
         node.nextAction,
-        node.retryArgs ? "retry setup" : undefined,
         ...node.actions.filter((a) => a.enabled).map((a) => a.action),
       ].filter((value): value is string => Boolean(value)),
     ),
@@ -236,7 +233,7 @@ export function resolveScene(node: EngineProcessNode): EnclosureScene {
   const gates = resolveGates(node);
   const recovery = resolveRecovery(node);
   const landing = resolveLanding(node);
-  // T9B/T9C/T14C — the refused-conduit flash lanes (seed/integration edges that are failed or stale).
+  // T14C — the refused-conduit flash lane (the integration return edge when failed or stale).
   // Polarity is derived from the edge state (refusedPolarityOf), never a class.
   const refusedEdges = node.edges
     .map((edge) => ({ edge, polarity: refusedPolarityOf(edge) }))

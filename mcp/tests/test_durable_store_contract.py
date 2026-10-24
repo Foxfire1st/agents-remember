@@ -90,7 +90,7 @@ class _TempRoot(unittest.TestCase):
 
 
 def _drift(item_id: str) -> AttentionDismissalRecord:
-    """A dismissal the prune keeps: the drift source is not read by this provider-only pass."""
+    """A dismissal the prune keeps: the drift source is not read by this single-kind pass."""
     return AttentionDismissalRecord(
         itemId=item_id,
         kind="actionable-drift",
@@ -98,11 +98,11 @@ def _drift(item_id: str) -> AttentionDismissalRecord:
     )
 
 
-def _gone_provider(item_id: str) -> AttentionDismissalRecord:
-    """A source census proves this provider is no longer configured."""
+def _gone_start(item_id: str) -> AttentionDismissalRecord:
+    """A source census proves this blocked start is no longer reported."""
     return AttentionDismissalRecord(
         itemId=item_id,
-        kind="provider-down",
+        kind="blocked-start",
         dismissedAt="2026-06-14T10:00:00Z",
     )
 
@@ -278,7 +278,7 @@ class InProcessExclusivityTests(_TempRoot):
         """
         store = AttentionDismissalStore(self.root)
         store.dismiss(_drift("actionable-drift:keep"))
-        store.dismiss(_gone_provider("provider-down:removed"))
+        store.dismiss(_gone_start("blocked-start:removed"))
 
         parked = threading.Event()
         release = threading.Event()
@@ -305,7 +305,7 @@ class InProcessExclusivityTests(_TempRoot):
 
         def sweep() -> None:
             try:
-                store.reconcile([AttentionObservation("provider-down", datetime.now(UTC))])
+                store.reconcile([AttentionObservation("blocked-start", datetime.now(UTC))])
             except BaseException as error:  # reported to the main thread, never swallowed
                 failures.append(error)
 

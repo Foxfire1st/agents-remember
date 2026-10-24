@@ -50,7 +50,7 @@
       "reportsField": "reports",
       "repositoryBundleArgument": "repository-bundle",
       "retainedReportsArgument": "retained-reports",
-      "runtimeDigest": "6e341c07e1694fed6be27285d77aeb5d17dbe149c03d6a74ad0379dcc63083b2",
+      "runtimeDigest": "2aee8c39a0d5b9af5cf35d81d9e1a2546e48f750a703e299c709df683d25a8ea",
       "sourceArgument": "source",
       "version": "0.21.8"
     }
@@ -148,7 +148,7 @@
       ]
     }
   ],
-  "profileDigest": "bad1bb1bad607d0575cac0f74b49e826ad7988836227fe1434ba67d58babc203",
+  "profileDigest": "2f8a46eafa2c46eac48b59915b7865fae0bb05ee2dc7d92315a49283125d6f7f",
   "profileId": "agents-remember-certification",
   "publishedArtifacts": [
     {
@@ -232,15 +232,6 @@
       "path": "dashboard-suite-result.json",
       "publisherGates": [
         2
-      ],
-      "required": false
-    },
-    {
-      "maxBytes": 134217728,
-      "mediaType": "application/json",
-      "path": "provider-integration-result.json",
-      "publisherGates": [
-        4
       ],
       "required": false
     },
@@ -451,15 +442,6 @@
       "path": "rail-evidence/layering@1.0.0.log",
       "publisherGates": [
         1
-      ],
-      "required": false
-    },
-    {
-      "maxBytes": 4194304,
-      "mediaType": "application/octet-stream",
-      "path": "rail-evidence/provider-runtime-integration@1.0.0.log",
-      "publisherGates": [
-        4
       ],
       "required": false
     },
@@ -1814,93 +1796,6 @@
       "correctiveOwner": "repository-quality",
       "evidenceContract": [
         {
-          "evidenceId": "provider-runtime-integration-evidence",
-          "maxBytes": 10485760,
-          "mediaType": "application/octet-stream"
-        }
-      ],
-      "execution": {
-        "adapterId": "provider-runtime-integration-adapter",
-        "adapterKind": "container-command",
-        "cleanRoom": true,
-        "command": [
-          "/opt/ar-venv/bin/python",
-          "-m",
-          "pytest",
-          "-q",
-          "-n=0",
-          "-p",
-          "agents_remember_test_support.testing.pytest_phase_reporter",
-          "mcp/tests/test_provider_workflow_integration.py",
-          "--ar-pytest-phase-report={reports}/provider-integration-result.json"
-        ],
-        "environmentContract": [
-          "AR_QUALITY_INVOCATION",
-          "CI",
-          "HOME",
-          "PYTHONPATH",
-          "TMPDIR"
-        ],
-        "executionEvidence": "profile://agents-remember/rails/provider-runtime-integration",
-        "inputSelectors": [],
-        "resourcePolicyId": "clean-room-bounded",
-        "resultDecoderId": "quality-terminal-result",
-        "scopeProviderId": null,
-        "skippedExitCodes": [],
-        "successExitCodes": [
-          0
-        ],
-        "teardownPolicy": "always",
-        "timeoutSeconds": 3600,
-        "workingDirectory": "."
-      },
-      "gate": 4,
-      "identity": {
-        "railId": "provider-runtime-integration",
-        "version": "1.0.0"
-      },
-      "orderKey": "provider-runtime-integration",
-      "outputArtifacts": [
-        {
-          "artifactId": "provider-integration-result",
-          "mediaType": "application/json",
-          "requiredOnPass": true,
-          "schemaVersion": "agents-remember-quality-artifact/v1"
-        }
-      ],
-      "ownerClass": "repository-quality",
-      "posture": "enforcing",
-      "prerequisites": [
-        {
-          "railId": "dashboard-diff-coverage",
-          "version": "1.0.0"
-        },
-        {
-          "railId": "python-crap",
-          "version": "1.0.0"
-        },
-        {
-          "railId": "python-diff-coverage",
-          "version": "1.0.0"
-        }
-      ],
-      "railClass": "integration-test",
-      "requiredArtifacts": [],
-      "runtimeInputs": {
-        "environmentDigest": "4beb3092dc5c205c8dcf2f24ff791422ea0da15c0bf018a964b7dce257848c6c",
-        "imageDigest": "83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
-        "lockDigest": "38fbb37726820b79d9d402d012d7f7f067fd814668878c51fb305c1e02f54934",
-        "runtimeIdentity": "cpython-3.14.8",
-        "secretPolicyDigest": "c150a99e60ec3007c393cc0de5178db71974ac5e2b4ae7b27601a4e65e55d4d0",
-        "toolchainDigest": "c244aa02a0da153d496686e5bf4320c0088db167fea7a8fcfe2e99c1c21693f5"
-      },
-      "sourceApplicability": null
-    },
-    {
-      "conditionalPrerequisites": [],
-      "correctiveOwner": "repository-quality",
-      "evidenceContract": [
-        {
           "evidenceId": "pyright-evidence",
           "maxBytes": 10485760,
           "mediaType": "application/octet-stream"
@@ -2925,10 +2820,6 @@
             {
               "railId": "dashboard-browser-e2e",
               "version": "1.0.0"
-            },
-            {
-              "railId": "provider-runtime-integration",
-              "version": "1.0.0"
             }
           ],
           "reason": null,
@@ -3089,10 +2980,6 @@
             },
             {
               "railId": "dashboard-browser-e2e",
-              "version": "1.0.0"
-            },
-            {
-              "railId": "provider-runtime-integration",
               "version": "1.0.0"
             }
           ],

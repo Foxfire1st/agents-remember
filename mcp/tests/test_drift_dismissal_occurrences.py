@@ -93,7 +93,6 @@ def drift_source(tmp_path):
             pass_=inputs.RefreshPass(now=NOW, refresh=domain or inputs.ProjectionRefresh.full()),
         )
         return build_attention_queue(
-            [],
             AnalyticalInputs(
                 drift_snapshots=result.drift_snapshots,
                 attention_dismissals=result.attention_dismissals,
@@ -402,9 +401,7 @@ def test_drift_actual_http_click_restart_and_new_occurrence(drift_source, monkey
     def make_app():
         app = serving_app.create_app(
             config,
-            live_inputs=serving_app.LiveProjectionInputs(
-                provider_state=False, landing_state=False, change_watch=False
-            ),
+            live_inputs=serving_app.LiveProjectionInputs(landing_state=False, change_watch=False),
         )
         return app, runtimes[-1]
 

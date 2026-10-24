@@ -37,7 +37,7 @@ build serves, which is what makes a recorded origin/URI/digest name the same con
 | --- | --- |
 | `c-00-initialize-memory-repo` | Create or repair a target repository memory root. |
 | `c-03-repo-bootstrap` | Bootstrap repo overviews, route-local overviews, and onboarding coverage. |
-| `c-04-retrieval-strategy-router` | Choose Semantics, Relationship, or Intent retrieval, using providers for discovery and onboarding/source as proof. |
+| `c-04-retrieval-strategy-router` | Choose Semantics, Relationship, or Intent retrieval; the two provider-backed substrates are retired, so onboarding and source remain the proof. |
 | `c-05-create-or-update-onboarding-files` | Route durable findings to the right artifact, control memory quality with task-start drift and closeout gates, and create and maintain file-level onboarding and entity catalogs. |
 | `c-08-ar-coordination-context-resolver` | Resolve memory, coordination, task, temp, and cross-repo facts. |
 | `c-10-adopt-memory-baseline` | Adopt existing external-memory onboarding as an accepted Git memory baseline and refresh its computed ledger cache, and carry richer memory forward after matching code lands. |

@@ -1,10 +1,9 @@
 // The Engine Room pod-stage bird's-eye: the live EngineProcessNode rendered as the
 // two-world canvas from the design prototype (dashboard/public/_proto/podstage.html) — official
-// line (left) <-> worktree enclosure (right), podracer engine gauges, the warp coupler, and the
-// flow conduits. This is the STATIC frame (the nominal end-state); the boot/failure choreography
-// (draw-on, travelling packets, center-out fill, gates) is layered on separately. Geometry is
-// ported from the prototype's viewBox (0 0 1200 660). State always comes from the model
-// (factState / runtimeState / edge.state), never a class name alone. The leaf pieces live in
+// line (left) <-> worktree enclosure (right), the warp couplers, and the flow conduits. This is the
+// STATIC frame (the nominal end-state); the boot/failure choreography (draw-on, travelling packets,
+// gates) is layered on separately. Geometry is ported from the prototype's viewBox (0 0 1200 660).
+// State always comes from the model (factState / edge.state), never a class name alone. The leaf pieces live in
 // geometry.ts (pure rules), badges.tsx, engines.tsx, ledger.tsx, conduits.tsx, and remote.tsx;
 // derived state lives in scene.ts and the render layers in sceneLayers.tsx.
 import { useRef } from "react";

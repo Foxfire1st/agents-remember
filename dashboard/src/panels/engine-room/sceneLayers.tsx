@@ -195,8 +195,7 @@ export function OfficialLineLayer({
 }) {
   return (
     <>
-      {/* Official-line (left world): the official code↔memory coupler.
-          Provider engines and their wiring left the surface (MIK-R112). */}
+      {/* Official-line (left world): the official code↔memory coupler. */}
       <OfficialCoupler node={node} hasMemory={hasMemory} officialLedger={officialLedger} />
     </>
   );
@@ -236,8 +235,7 @@ export function WorktreeEngineLayer({
 }) {
   return (
     <>
-      {/* Provider worktree engines left the surface (MIK-R112): the layer keeps
-          the worktree code↔memory warp coupler (task/ledger state). */}
+      {/* The worktree code↔memory warp coupler (task/ledger state). */}
       <WarpCoupler
         x={COUPLER_X}
         bound={hasMemory}

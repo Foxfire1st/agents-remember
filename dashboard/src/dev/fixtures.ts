@@ -1,16 +1,15 @@
-// Hand-authored gallery scenarios use the sampled native wire builders. They
-// vary provider/worktree facts and attention items without keeping a second
-// required-field list or inventing task activity from session events.
+// Hand-authored gallery scenarios use the sampled native wire builders. They vary worktree facts
+// and attention items without keeping a second required-field list or inventing task activity
+// from session events.
 
 import { ENGINE_ROOM_SCENARIOS, OFFICIAL_LEDGER } from '../panels/engine-room/fixtures';
 import type { ObserverEvent } from '../types/event';
-import type { EnclosureNode, ProviderNode, WorkspaceProjection } from '../types/projection';
+import type { EnclosureNode, WorkspaceProjection } from '../types/projection';
 import {
   EMPTY_ANALYTICS,
   enclosure as servedEnclosure,
   observerEvent as servedObserverEvent,
   projection as servedProjection,
-  provider as servedProvider,
 } from '../test/fixtures/wire';
 
 function project(over: Partial<WorkspaceProjection> = {}): WorkspaceProjection {
@@ -20,41 +19,6 @@ function project(over: Partial<WorkspaceProjection> = {}): WorkspaceProjection {
     ...over,
   });
 }
-
-const providerRole = (id: string): string =>
-  id.includes('memory') || id.includes('grepai') ? 'memory' : 'code';
-
-const ok = (id: string): ProviderNode =>
-  servedProvider({
-    id,
-    state: 'ready',
-    ok: true,
-    watcherUp: true,
-    indexingState: 'indexed',
-    scope: 'workspace',
-    role: providerRole(id),
-  });
-const down = (id: string): ProviderNode =>
-  servedProvider({
-    id,
-    state: 'stopped',
-    ok: false,
-    watcherUp: false,
-    indexingState: 'unknown',
-    scope: 'workspace',
-    role: providerRole(id),
-  });
-const indexing = (id: string): ProviderNode =>
-  servedProvider({
-    id,
-    state: 'ready',
-    ok: true,
-    watcherUp: true,
-    indexingState: 'indexing',
-    snapshotStaleSeconds: 3,
-    scope: 'workspace',
-    role: providerRole(id),
-  });
 
 function enclosure(
   over: Partial<EnclosureNode> & Pick<EnclosureNode, 'enclosure' | 'repoName' | 'taskName'>,
@@ -93,13 +57,14 @@ export interface GalleryEntry {
   events?: ObserverEvent[];
 }
 
-// Wrap one engine-room scenario (its processes + workspace stack) into a full WorkspaceProjection — the
-// shared mapping behind both the GALLERY entries and the slice-5i scenario-player frames.
+// Wrap one engine-room scenario (its processes) into a full WorkspaceProjection — the shared
+// mapping behind both the GALLERY entries and the slice-5i scenario-player frames. The scenario
+// type is read off the fixture export itself, so a shape change there is this file's compile
+// error rather than a second declaration to keep in step.
 export function engineRoomProjection(
   scenario: (typeof ENGINE_ROOM_SCENARIOS)[number],
 ): WorkspaceProjection {
   return project({
-    providers: scenario.workspace,
     analytics: {
       ...EMPTY_ANALYTICS,
       engineProcesses: scenario.processes,
@@ -109,58 +74,36 @@ export function engineRoomProjection(
 }
 
 export const GALLERY: GalleryEntry[] = [
-  {
-    name: 'calm',
-    projection: project({
-      providers: [ok('codegraphcontext-code'), ok('grepai-memory')],
-    }),
-  },
-  {
-    name: 'blocked',
-    projection: project({
-      providers: [ok('codegraphcontext-code'), ok('grepai-memory')],
-    }),
-  },
+  { name: 'calm', projection: project() },
+  { name: 'blocked', projection: project() },
   {
     name: 'alarm',
     projection: project({
-      providers: [down('codegraphcontext-code'), ok('grepai-memory')],
       analytics: {
         ...EMPTY_ANALYTICS,
         attentionQueue: [
           {
-            id: 'provider-down:codegraphcontext-code',
-            kind: 'provider-down',
-            severity: 'alarm',
-            lane: 'repo',
-            title: 'Provider codegraphcontext-code down',
-            detail: 'stopped',
-            providerId: 'codegraphcontext-code',
-            itemClass: 'operational',
-            dismissible: true,
-          },
-          {
-            id: 'failed-setup:wt-b',
-            kind: 'failed-setup',
-            severity: 'alarm',
-            lane: 'worktree',
-            title: 'Provider setup needs attention',
-            detail: 'cgc index',
-            waitSeconds: 40,
-            enclosure: 'wt-b',
-            itemClass: 'operational',
-            dismissible: true,
-          },
-          {
             id: 'actionable-drift:repo-b',
             kind: 'actionable-drift',
-            severity: 'warn',
+            severity: 'alarm',
             lane: 'repo',
             title: '3 actionable drift',
             waitSeconds: 7200,
             repoId: 'repo-b',
             itemClass: 'operational',
             dismissible: true,
+          },
+          {
+            id: 'blocked-start:wt-b',
+            kind: 'blocked-start',
+            severity: 'warn',
+            lane: 'worktree',
+            title: 'Worktree start blocked',
+            detail: 'no exact ledger mapping for the selected code base commit',
+            itemClass: 'operational',
+            dismissible: true,
+            waitSeconds: 40,
+            enclosure: 'wt-b',
           },
         ],
       },
@@ -203,7 +146,6 @@ export const GALLERY: GalleryEntry[] = [
           actions: [{ action: 'cleanup', enabled: true }],
         }),
       ],
-      providers: [indexing('codegraphcontext-code'), ok('grepai-memory')],
       analytics: {
         ...EMPTY_ANALYTICS,
         driftSnapshots: [

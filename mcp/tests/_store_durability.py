@@ -136,24 +136,24 @@ class AttentionAdapter(StoreAdapter):
             AttentionDismissalRecord(
                 itemId=record_id,
                 dismissedAt=_iso(_now()),
-                kind="provider-down",
+                kind="blocked-start",
             )
         )
 
     def write_decoy(self, store: Any, tick: int) -> None:
-        # A provider absent from this fixture's configuration is reclaimable.
+        # A start the source census no longer reports is reclaimable.
         store.dismiss(
             AttentionDismissalRecord(
                 itemId=f"{DECOY_PREFIX}{os.getpid()}-{tick}",
                 dismissedAt=_iso(_now()),
-                kind="provider-down",
+                kind="blocked-start",
             )
         )
 
     def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         observed_before = _now()
         existing = {key for key in store.current() if not key.startswith(DECOY_PREFIX)}
-        store.reconcile([AttentionObservation("provider-down", observed_before, existing=existing)])
+        store.reconcile([AttentionObservation("blocked-start", observed_before, existing=existing)])
 
 
 class ProviderStoreAdapter(StoreAdapter):

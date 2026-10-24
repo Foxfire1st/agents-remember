@@ -34,8 +34,6 @@ export interface Analytics {
   engineProcesses: EngineProcessNode[];
   ledgers: LedgerNode[];
   routeCoverage: RouteCoverageNode[];
-  setupProgress: SetupProgressNode[];
-  setupSummaries: SetupSummaryNode[];
   toolReports: ToolReportNode[];
 }
 
@@ -53,7 +51,6 @@ export interface AttentionItem {
   lane: AttentionLane;
   occurrenceId?: string;
   promptId?: string;
-  providerId?: string;
   repoId?: string;
   severity: AttentionSeverity;
   taskKey?: string;
@@ -192,13 +189,9 @@ export interface EngineProcessNode {
   closeoutStatus: string;
   codeSource: CommitRefNode;
   codeWorktree: CommitRefNode;
-  completedPhases: string[];
-  currentPhase?: string;
   edges: EngineProcessEdge[];
   enclosure: string;
-  failedPhases: string[];
   health: ProcessHealth;
-  heartbeatAgeSeconds?: number;
   humanReviewStatus: string;
   id: string;
   integrationStatus: string;
@@ -215,11 +208,7 @@ export interface EngineProcessNode {
   missingFacts: string[];
   nextAction?: string;
   phase: string;
-  providers: ProviderBootNode[];
   repoName: string;
-  retryArgs?: Record<string, unknown>;
-  seedFallback: boolean;
-  setupState?: string;
   sourceFiles: string[];
   sourceLineage?: SourceLineageProjection;
   summary: string;
@@ -387,30 +376,10 @@ export interface ProjectionSourceProblem {
   state: "missing" | "unreadable" | "invalid";
 }
 
-export interface ProviderBootNode {
-  factState: ProcessFactState;
-  id: string;
-  role: string;
-  runtimeState: string;
-}
-
 export interface ProviderLimit {
   seats: LimitedSeat[];
   /** JSON Schema refinements: {"format":"date-time"} */
   until: string;
-}
-
-export interface ProviderNode {
-  id: string;
-  indexingState: string;
-  ok?: boolean;
-  repoId?: string;
-  role?: string;
-  scope: string;
-  snapshotStaleSeconds?: number;
-  state: string;
-  watcherUp: boolean;
-  worktreeGroup?: string;
 }
 
 export interface RouteCoverageNode {
@@ -430,25 +399,6 @@ export interface ServingBuild {
   pythonExecutable?: string;
   sourceDigest?: string;
   version: string;
-}
-
-export interface SetupProgressNode {
-  completedCount: number;
-  currentPhase?: string;
-  failedPhases: string[];
-  group: string;
-  heartbeatAgeSeconds?: number;
-  state: string;
-}
-
-export interface SetupSummaryNode {
-  action: string;
-  generatedAt?: string;
-  ok?: boolean;
-  ready?: boolean;
-  resultCounts: Record<string, number>;
-  snapshotStaleSeconds?: number;
-  state?: string;
 }
 
 export interface SourceLineageEdge {
@@ -736,7 +686,6 @@ export interface WorkspaceProjection {
   enclosures: EnclosureNode[];
   generatedAt: string;
   metrics: Metrics;
-  providers: ProviderNode[];
   taskCounts: TaskCounts;
   tasks: TaskEntry[];
   version: number;

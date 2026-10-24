@@ -7,7 +7,6 @@ Analytics,
 CloseoutQueueNode,
 EnclosureNode,
 Metrics,
-ProviderNode,
 ServingBuild,
 TaskCounts,
 TaskEntry,
@@ -38,7 +37,6 @@ export interface DashboardState {
   intentSummaries: ConditionalReads;
   taskCounts: TaskCounts;
   enclosures: Record<string, EnclosureNode>; // keyed by `enclosure`
-  providers: Record<string, ProviderNode>; // keyed by id
   activeWorktreeGroups: string[]; // worktree-group basenames with a live enclosure (Topology scope)
   closeoutQueues: CloseoutQueueNode[]; // projected sprint closeout queues (L8)
   metrics: Metrics | null;
@@ -114,8 +112,6 @@ const stampAnalytics = (analytics: Analytics | null): void => {
   const at = Date.now();
   const collections: (readonly object[] | undefined)[] = [
     analytics.driftSnapshots,
-    analytics.setupSummaries,
-    analytics.setupProgress,
     analytics.toolReports,
     analytics.attentionQueue,
     analytics.engineProcesses,
@@ -178,16 +174,6 @@ const DELTA_REDUCERS: Record<string, DeltaReducer> = {
       ? { enclosures: remove(state.enclosures, enclosure) }
       : null;
   },
-  provider: (state, data) => {
-    const node = data as ProviderNode;
-    if (stableEquals(state.providers[node.id], node)) return null;
-    stampServed(node);
-    return { providers: upsert(state.providers, node, (x) => x.id) };
-  },
-  'provider.removed': (state, data) => {
-    const { id } = data as { id: string };
-    return id in state.providers ? { providers: remove(state.providers, id) } : null;
-  },
   activeWorktreeGroups: (state, data) => {
     // Whole-value replacement (a bare list, no key) — see serving/delta.py.
     const { activeWorktreeGroups } = data as { activeWorktreeGroups: string[] };
@@ -238,7 +224,6 @@ function applySnapshotState(
   );
   const taskCounts = reuse(state.taskCounts, projection.taskCounts);
   const enclosures = mergeKeyed(state.enclosures, projection.enclosures, (x) => x.enclosure);
-  const providers = mergeKeyed(state.providers, projection.providers, (x) => x.id);
   const activeWorktreeGroups = reuse(
     state.activeWorktreeGroups,
     projection.activeWorktreeGroups ?? [],
@@ -253,7 +238,6 @@ function applySnapshotState(
     tasks,
     taskCounts,
     enclosures,
-    providers,
     activeWorktreeGroups,
     closeoutQueues,
     metrics,
@@ -283,7 +267,6 @@ type WorkspaceState = Pick<
   | 'intentSummaries'
   | 'taskCounts'
   | 'enclosures'
-  | 'providers'
   | 'activeWorktreeGroups'
   | 'closeoutQueues'
   | 'metrics'
@@ -304,7 +287,6 @@ const emptyWorkspace = (): WorkspaceState => ({
   intentSummaries: new ConditionalReads(128),
   taskCounts: { planned: 0, started: 0, aborted: 0, completed: 0, works: 0, paused: 0, unknown: 0 },
   enclosures: {},
-  providers: {},
   activeWorktreeGroups: [],
   closeoutQueues: [],
   metrics: null,

@@ -26,9 +26,9 @@ const PROBE_FILES: Record<string, string> = {
   // move — an explicit `undefined` written into a slot the wire type declares REQUIRED — and all
   // four compiled before `Overrides` replaced the builders' bare `Partial<Node>`.
   [`${PROBE_DIR}/impossible.test.ts`]: [
-    `import { taskEntry, projection, provider, taskSummary } from "../test/fixtures/wire";`,
+    `import { enclosure, taskEntry, projection, taskSummary } from "../test/fixtures/wire";`,
     ``,
-    `export const a = provider({ state: undefined });`,
+    `export const a = enclosure({ repoName: undefined });`,
     `export const b = taskEntry({ stage: undefined });`,
     `export const c = taskSummary({ steps: undefined });`,
     `export const d = projection({ enclosures: undefined });`,

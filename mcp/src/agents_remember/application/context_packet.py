@@ -111,11 +111,7 @@ def build_context_packet(
         # `context_packet` tool handler, where nothing catches it.
         worktree=worktree_status_packet(config, context.contract_path),
         providers=ProviderSummary.model_validate(
-            provider_summary_packet(
-                config,
-                include_providers=False,
-                target_repo_id=repo_scope.repo_id,
-            )
+            provider_summary_packet(config),
         ),
         drift=DriftSummary.model_validate(_drift_packet(request, context, repo_scope)),
         freshness=FreshnessSummary.model_validate(

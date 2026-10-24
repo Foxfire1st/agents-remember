@@ -20,9 +20,8 @@ const PHASE_ORDER: Record<string, number> = {
  *
  * The server already composes the enclosure-centered process nodes (`analytics.engineProcesses`)
  * with their observed/derived/planned/missing fact-state honesty, so this client seam does no
- * inference or session join. Provider state left the surface
- * (MIK-R112): no workspace stack, no legacy provider fallback. Takes flat arrays (like
- * `buildTopology`) so it stays React-free and unit-testable. No clock, no git, no safety inference.
+ * inference or session join. Takes a flat array (like `buildTopology`) so it stays React-free and
+ * unit-testable. No clock, no git, no safety inference.
  */
 export function buildEngineRoomModel(engineProcesses: EngineProcessNode[]): EngineRoomModel {
   const processes = engineProcesses

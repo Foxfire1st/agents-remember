@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers import lifecycle
-from agents_remember.providers.context import ContextProviderError, stable_provider_id
+from agents_remember.providers.context import ContextProviderError
 
 
 @dataclass(frozen=True)
@@ -31,110 +31,11 @@ class ProviderLifecycleServiceConfig:
         )
 
 
-@dataclass(frozen=True)
-class CgcLifecycleRequest:
-    """One typed CGC lifecycle action and the inputs that action needs.
-
-    ``native_args`` carry a ``run`` query; ``port``/``context`` carry where a
-    ``visualize`` server binds and which graph it serves. The action and its
-    inputs are only meaningful together, so they arrive as one request.
-    """
-
-    action: str
-    repo_id: str | None = None
-    native_args: tuple[str, ...] = ()
-    port: int = 8000
-    context: str | None = None
-
-
-def run_cgc_lifecycle(
-    service_config: ProviderLifecycleServiceConfig,
-    request: CgcLifecycleRequest,
-) -> dict[str, Any]:
-    """Run a typed CGC lifecycle action from trusted service settings."""
-
-    action = request.action
-    allowed_actions = {"run", "visualize", "refresh-all"}
-    if action not in allowed_actions:
-        raise ValueError(f"unsupported CGC service action: {action}")
-    config = service_config.normalized()
-    args = argparse.Namespace(
-        provider="cgc",
-        action=action,
-        coordination_root=config.coordination_root,
-        from_settings=config.settings_path,
-        dry_run=config.dry_run,
-        json=False,
-        timeout=config.timeout,
-        repo_id=stable_provider_id(request.repo_id) if request.repo_id else None,
-        code_repo_root=None,
-        native_args=list(request.native_args),
-        port=request.port,
-        context=request.context,
-        lifecycle_json=False,
-    )
-    try:
-        handlers = {
-            "run": lifecycle.cgc_run,
-            "visualize": lifecycle.cgc_visualize,
-            "refresh-all": lifecycle.cgc_refresh_all,
-        }
-        return handlers[action](args)
-    except (
-        ContextProviderError,
-        subprocess.TimeoutExpired,
-        OSError,
-        json.JSONDecodeError,
-    ) as error:
-        return {
-            "provider": "codegraphcontext",
-            "action": action,
-            "ok": False,
-            "error": str(error),
-        }
-
-
-def run_grepai_lifecycle(
-    service_config: ProviderLifecycleServiceConfig,
-    *,
-    action: str,
-    native_args: list[str] | None = None,
-    force: bool = False,
-) -> dict[str, Any]:
-    """Run a typed GrepAI lifecycle action from trusted service settings."""
-
-    allowed_actions = {"run", "refresh"}
-    if action not in allowed_actions:
-        raise ValueError(f"unsupported GrepAI service action: {action}")
-    config = service_config.normalized()
-    args = argparse.Namespace(
-        provider="grepai",
-        action=action,
-        coordination_root=config.coordination_root,
-        from_settings=config.settings_path,
-        dry_run=config.dry_run,
-        json=False,
-        timeout=config.timeout,
-        force=force,
-        root=None,
-        runtime_root=None,
-        native_args=list(native_args or []),
-        lifecycle_json=False,
-    )
-    try:
-        return lifecycle.grepai_run(args, action)
-    except (
-        ContextProviderError,
-        subprocess.TimeoutExpired,
-        OSError,
-        json.JSONDecodeError,
-    ) as error:
-        return {
-            "provider": "grepai",
-            "action": action,
-            "ok": False,
-            "error": str(error),
-        }
+#: The stop-class actions a production caller actually asks for. `status` and
+#: `start` were admitted here while a generic facade parameter was mistaken for a
+#: caller; the lifecycle dispatcher rejects start and the watcher path is stop-only
+#: (L192-F01), so the admission list names the stop family and nothing else.
+WATCHER_SERVICE_ACTIONS: frozenset[str] = frozenset({"stop", "shutdown-all"})
 
 
 def run_watchers_lifecycle(
@@ -142,10 +43,9 @@ def run_watchers_lifecycle(
     *,
     action: str,
 ) -> dict[str, Any]:
-    """Run an all-provider watcher lifecycle action from trusted settings."""
+    """Run a stop-class all-provider watcher action from trusted settings."""
 
-    allowed_actions = {"status", "start", "stop", "shutdown-all"}
-    if action not in allowed_actions:
+    if action not in WATCHER_SERVICE_ACTIONS:
         raise ValueError(f"unsupported watcher service action: {action}")
     config = service_config.normalized()
     args = argparse.Namespace(

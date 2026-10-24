@@ -17,7 +17,7 @@ outstanding plan-issue IDs and does not recensus the catalog or add a criterion.
 
 **An uncited dependency edge is refutable by default.** Every edge in the evidence relation list
 and canonical `executionGraph` must
-carry evidence — a cgc/grepai query, a file, a decision-log entry, a design-section citation, or
+carry evidence — a file, a named native-search result, a decision-log entry, a design-section citation, or
 (for new surfaces) a declaration cross-reference naming both leaf declarations. An edge with no
 evidence is challenged as a finding; so is evidence that does not actually support the edge's
 direction or kind.

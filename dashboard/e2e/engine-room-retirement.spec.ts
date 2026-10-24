@@ -1,17 +1,16 @@
 import { expect, test } from "@playwright/test";
 
 // MIK-R112 F06 retirement census (architect ruling L112-F06-A-VIEW-WITHOUT-AN-ENTRY,
-// point 1a + point 4). REWRITTEN from the engine-view spec: the engine view has no
-// dashboard entry and no URL (Cockpit.tsx: retained for injected initialView tests
-// only), so no spec can mount it — a test that cannot pass stays out. This spec
-// censuses every entry a user can reach instead: none is the engine view, and no
-// page reached shows a state of the two providers.
+// point 1a + point 4), extended by MIK-R199: the engine view has no dashboard entry and no
+// URL (Cockpit.tsx: retained for injected initialView tests only), so no spec can mount it —
+// a test that cannot pass stays out. This spec censuses every entry a user can reach instead:
+// none is the engine view, and no page reached shows a state of the two search providers.
 // Run (Dagger suite): cd dashboard && npx playwright test e2e/engine-room-retirement.spec.ts
 // First-failure rails: every assertion fails fast with a snapshot; fix selectors
 // against the live render before any re-run (no blind retry loop).
 
 const PROVIDER_TESTIDS = ["engine-gauge", "official-wire", "provider-block", "engine-dropout"];
-const PROVIDER_TEXT = ["codegraphcontext-code", "grepai-memory"];
+const PROVIDER_TEXT = ["codegraphcontext-code", "grepai-memory", "CGC", "GrepAI"];
 
 async function expectNoEngineEntry(page: import("@playwright/test").Page) {
   // No button or link leading to the engine view (case-insensitive; fails with a snapshot).
@@ -44,9 +43,12 @@ test("dev harness index: reachable entries, no engine view, no provider state", 
   await expectNoProviderState(page);
 });
 
+// The degraded beat is the memory/ledger block: it is the surviving pre-contract failure mode.
+// The provider arcs (the seed fault, the reindex reroute, the provider-plan block) went with the
+// providers, so a bench scenario that drove one no longer exists to link to.
 const TIMELINES = [
   { state: "normal", scenario: "build-up", caption: "B5 · powered" },
-  { state: "degraded", scenario: "provider-block", caption: "P4 · BLOCK" },
+  { state: "degraded", scenario: "memory-block", caption: "M3 · BLOCK" },
   { state: "teardown", scenario: "tear-down", caption: "D6 · stack removed" },
 ] as const;
 

@@ -83,7 +83,6 @@ const legdot = cva({
     tone: {
       ok: { background: 'cyan' },
       warn: { background: 'amber' },
-      crit: { background: 'alarm' },
       idle: { background: 'dormant' },
     },
   },
@@ -103,7 +102,6 @@ const alternative = css({
 
 export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   const worktrees = useDashboard(selectWorktrees);
-  const providers = useDashboard((s) => s.providers);
   const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -115,8 +113,8 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   // keep history for other views).
   const model = useMemo(() => {
     const active = activeTopologyInputs(worktrees, activeWorktreeGroups);
-    return buildTopology(active.worktrees, Object.values(providers));
-  }, [worktrees, providers, activeWorktreeGroups]);
+    return buildTopology(active.worktrees);
+  }, [worktrees, activeWorktreeGroups]);
 
   // Keep the latest onSelect + model in refs so the mount effect stays mount-once.
   const onSelectRef = useRef(onSelect);
@@ -126,7 +124,7 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
   const handleRef = useRef<ConstelHandle | null>(null);
 
   // Mount the renderer ONCE — pushing new models via update() keeps the rAF loop running, instead
-  // of remounting on every projection tick (which reset the animation: T, comets, provider spin).
+  // of remounting on every projection tick (which reset the animation: T and the comets).
   useEffect(() => {
     const canvas = canvasRef.current;
     const wrapEl = wrapRef.current;
@@ -180,10 +178,7 @@ export function Topology({ onSelect }: { onSelect: (id: string) => void }) {
             <i className={legdot({ tone: 'warn' })} /> waiting
           </span>
           <span>
-            <i className={legdot({ tone: 'crit' })} /> provider down
-          </span>
-          <span>
-            <i className={legdot({ tone: 'idle' })} /> indexing / dormant
+            <i className={legdot({ tone: 'idle' })} /> dormant / unstarted
           </span>
         </div>
       </div>

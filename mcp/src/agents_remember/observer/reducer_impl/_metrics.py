@@ -23,8 +23,6 @@ def build_analytics(
     """
     return Analytics(
         driftSnapshots=given.drift_snapshots,
-        setupSummaries=given.setup_summaries,
-        setupProgress=given.setup_progress,
         routeCoverage=given.route_coverage,
         toolReports=given.tool_reports,
         ledgers=given.ledgers,

@@ -1,7 +1,6 @@
 // The Engine Room render model (slice 5e). The server composes the enclosure-centered
 // process nodes (analytics.engineProcesses) with their fact-state honesty; the client model
-// presents those nodes directly. Provider state left the surface (MIK-R112).
-// No semantics are re-derived here.
+// presents those nodes directly. No semantics are re-derived here.
 
 import type { EngineProcessNode } from "../../types/projection";
 

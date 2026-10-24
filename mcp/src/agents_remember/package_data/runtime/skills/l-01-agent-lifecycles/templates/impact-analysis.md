@@ -30,7 +30,7 @@ the spawning agent's main loop.
 
 ## Surface Swept
 - Routes / areas touched: <route index refs>
-- Anchors: <cgc symbols / files>
+- Anchors: <symbols / files>
 
 ## Planned-vs-Planned (collisions with other masters/leaves — incl. FUTURE)
 | Collision | With (master/leaf) | Kind (code | memory | sequencing) | Evidence | Limits |

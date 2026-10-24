@@ -48,7 +48,7 @@ it.each(['planned', 'started'] as const)('ages both head dependencies on a %s pa
   }
 });
 
-it('an inactive provider stops nested aged words without supplying epoch zero', () => {
+it('an inactive page stops nested aged words without supplying epoch zero', () => {
   vi.useFakeTimers();
   try {
     const entry = task('working', { activity: 'works', eventAt: '2026-10-15T09:55:00Z' });
@@ -171,9 +171,9 @@ it.each([
         analytics: analytics({
           attentionQueue: [
             attentionItem({
-              id: 'provider',
-              kind: 'provider-down',
-              title: 'Provider unavailable',
+              id: 'actionable-drift:repo:main',
+              kind: 'actionable-drift',
+              title: '1 actionable drift in repo',
               severity: 'warn',
             }),
           ],

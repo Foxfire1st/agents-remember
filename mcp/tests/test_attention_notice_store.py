@@ -104,7 +104,7 @@ def _queue(store_path_root: Path):
             notices=tuple(store.published()), notices_complete=True
         )
     )
-    return build_attention_queue([], given, [], NOW)
+    return build_attention_queue(given, [], NOW)
 
 
 def _queue_with(
@@ -120,7 +120,7 @@ def _queue_with(
         ),
         attention_dismissals=dismissals,
     )
-    return [item.id for item in build_attention_queue([], given, [], NOW)]
+    return [item.id for item in build_attention_queue(given, [], NOW)]
 
 
 def _multibyte_pending(
@@ -292,9 +292,7 @@ def _case_test_every_published_kind_can_be_acknowledged() -> None:
         "permission-wait",
         "held-message",
         "task-stalled",
-        "provider-down",
         "actionable-drift",
-        "failed-setup",
         "blocked-start",
     ):
         record = AttentionDismissalRecord(
@@ -305,7 +303,15 @@ def _case_test_every_published_kind_can_be_acknowledged() -> None:
         assert record.kind == kind
 
     # A kind this build does not publish is refused, so an older row is never read as current.
-    for refused in ("task-stalled-v2", "message-held", "attention"):
+    # MIK-R199 retired the two provider-only kinds: an older row naming one is disposable state,
+    # so it is refused here exactly like a name no build ever published.
+    for refused in (
+        "task-stalled-v2",
+        "message-held",
+        "attention",
+        "provider-down",
+        "failed-setup",
+    ):
         with pytest.raises(ValidationError):
             AttentionDismissalRecord(
                 itemId=f"{refused}:whatever",

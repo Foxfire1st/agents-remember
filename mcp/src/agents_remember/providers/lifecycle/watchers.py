@@ -8,11 +8,6 @@ import subprocess
 from typing import Any
 
 from agents_remember.providers.cgc.lifecycle import (
-    cgc_all_layouts_from_settings,
-    cgc_backend_status,
-    cgc_scoped_args,
-    cgc_start_all,
-    cgc_status,
     cgc_stop_all,
 )
 from agents_remember.providers.context import ContextProviderError
@@ -69,16 +64,16 @@ def watcher_recovery_actions(results: list[dict[str, Any]]) -> list[dict[str, st
     return actions
 
 
+# Stop-class actions only: the start and status branches died with the provider
+# surface (L192-F01). Nothing outside this module asks a watcher to start, and the
+# status question is answered by the runtime install's own report, so a map entry
+# for either would be a branch with no production caller.
 WATCHER_PROVIDER_ACTIONS = {
     "grepai": {
-        "start": "start",
-        "status": "status",
         "stop": "stop",
         "shutdown-all": "stop",
     },
     "cgc": {
-        "start": "start-all",
-        "status": "status",
         "stop": "stop-all",
         "shutdown-all": "shutdown-all",
     },
@@ -110,65 +105,10 @@ def watcher_grepai_result(args: argparse.Namespace, action: str) -> dict[str, An
         return watcher_error_result("grepai", grepai_action, error)
 
 
-def watcher_cgc_status_results(args: argparse.Namespace) -> dict[str, Any]:
-    settings_file, _, layouts = cgc_all_layouts_from_settings(args)
-    backend = watcher_cgc_backend_status(args)
-    backend_ok = backend is None or backend.get("ok") is True
-    cgc_results: list[dict[str, Any]] = []
-    for layout in layouts:
-        repo_scoped = cgc_scoped_args(args, layout.repo_id, "status")
-        try:
-            cgc_results.append(cgc_status(repo_scoped))
-        except (
-            ContextProviderError,
-            subprocess.TimeoutExpired,
-            OSError,
-            json.JSONDecodeError,
-        ) as error:
-            cgc_results.append(
-                {
-                    "provider": "codegraphcontext",
-                    "action": "status",
-                    "ok": False,
-                    "repoId": layout.repo_id,
-                    "error": str(error),
-                }
-            )
-    return {
-        "provider": "codegraphcontext",
-        "action": "status-all",
-        "ok": backend_ok and all(result.get("ok") for result in cgc_results),
-        "settingsFile": settings_file.as_posix(),
-        "backend": backend,
-        "count": len(cgc_results),
-        "results": cgc_results,
-    }
-
-
-def watcher_cgc_backend_status(args: argparse.Namespace) -> dict[str, Any] | None:
-    try:
-        return cgc_backend_status(args)
-    except (
-        ContextProviderError,
-        subprocess.TimeoutExpired,
-        OSError,
-        json.JSONDecodeError,
-    ) as error:
-        return {
-            "provider": "codegraphcontext",
-            "action": "backend-status",
-            "ok": False,
-            "error": str(error),
-        }
-
-
 def watcher_cgc_result(args: argparse.Namespace, action: str) -> dict[str, Any]:
     cgc_action = WATCHER_PROVIDER_ACTIONS["cgc"][action]
     scoped = watcher_scoped_args(args, "cgc", cgc_action)
-    if cgc_action == "status":
-        return watcher_cgc_status_results(scoped)
     cgc_handlers = {
-        "start-all": cgc_start_all,
         "stop-all": cgc_stop_all,
         "shutdown-all": cgc_stop_all,
     }
@@ -206,7 +146,7 @@ def watchers_run(args: argparse.Namespace, action: str) -> dict[str, Any]:
 
 
 def require_durable_watcher_namespace(args: argparse.Namespace, action: str) -> None:
-    if action in {"start", "stop", "shutdown-all"} and not args.dry_run:
+    if action in {"stop", "shutdown-all"} and not args.dry_run:
         require_durable_process_namespace(f"watchers {action}")
 
 

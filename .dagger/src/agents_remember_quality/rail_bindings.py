@@ -77,7 +77,6 @@ ARTIFACT_FILE_PATHS: dict[str, str] = {
     "dashboard-coverage-data": "dashboard-coverage.json",
     "dashboard-suite-result": "dashboard-suite-result.json",
     "dashboard-e2e-result": "dashboard-e2e-result.json",
-    "provider-integration-result": "provider-integration-result.json",
 }
 
 

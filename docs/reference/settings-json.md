@@ -8,7 +8,7 @@ Agents Remember has five settings families with stated authorities:
 | Host runtime (`paseoRuntime`) | active MCP authority settings file selected by `--config` | per use; install reads at each call |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
 | **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness ids, qualityGate resource policy, roleMessageLimit) | **user configuration `agents-remember/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
-| Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
+| Retired provider block (`providers`; parses, keys reported unused) | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
 memory root's `settings.json`.
@@ -99,10 +99,10 @@ file stay as they are.
 ## MCP Authority Settings
 
 The MCP settings file replaces the removed coordinator context-provider JSON
-example. It names the allowed repositories and provider ids once, then the
-server derives provider lifecycle settings such as roots, data directories,
-logs, Docker runner images/containers, backend containers, Docker networks, and
-watch settings internally.
+example. It names the allowed repositories once. The `providers` block is
+retired: its keys are only reported once as unused, and no roots, data
+directories, logs, Docker runner images/containers, backend containers, Docker
+networks, or watch settings are derived from them.
 
 ```json
 {
@@ -400,13 +400,16 @@ any operation that would certify or commit code then refuses with
 [Repository Certification Profiles](repository-certification-profile.md) for the versioned
 contract and authoring procedure.
 
-`providers` is an allow-list keyed by supported provider id. Provider entries
-must be empty objects because runtime roots, data roots, logs, requirements,
-patches, backend container names, and watch settings are derived by the server.
+`providers` is the retired provider block. It still parses so an older settings
+file keeps loading, and entries must be empty objects, but its keys never count
+as enabled and drive nothing: no runtime root, data root, container, index, or
+watch is derived from them. `runtime_install` and `server_info` report the keys
+once as unused (`unusedProviderKeys`).
 
 `timeoutCaps` holds non-negative integer caps for MCP operations. `toolSeconds`
 caps MCP tool operations. `providerSetupSeconds` caps provider image build and
-dependency install (default 1800). Docker control operations such as
+dependency install (default 1800); provider installation is retired, so it
+currently gates nothing. Docker control operations such as
 start, stop, and status use a fixed internal cap and are not configurable.
 Indexing and database seed or clone are never capped because they scale with
 repository size. A value of `0` means unlimited for any cap.
@@ -435,12 +438,38 @@ rejected.
 
 `providerDegradation` (optional) configures the provider-only degradation
 detector that runs over the central provider metrics log. Defaults enable the
-detector and the critical fail-safe. The detector evaluates memory pressure,
-restart-loop signals, watcher/index lag, probe latency when a metrics row
-carries it, and setup-failure streak rows when present. State transitions write
-durable degradation state/events under `<coordinationRoot>/logs/observer/providers/`.
-At `critical`, `failSafeEnabled: true` runs the always-legal `provider_watchers
-stop` path. Threshold keys are `memoryDegradedRatio`, `memoryCriticalRatio`,
+detector and the critical fail-safe. It is a safety check over leftover stacks
+from older installations. The detector evaluates memory pressure, restart-loop
+signals, watcher/index lag, probe latency when a metrics row carries it, and
+setup-failure streak rows when present. It is a background loop of the serving
+(dashboard) process, not an install step: every 30 seconds it samples the Docker
+state of every labelled provider container, appends that sample to
+`<coordinationRoot>/logs/observer/providers/metrics.jsonl`, republishes
+`metrics-current.json`, evaluates the recent window, and compacts the log — for
+as long as the dashboard is up, independently of any install or cleanup. It is
+not a revival: it starts nothing, installs nothing, indexes nothing and queries
+nothing. State transitions write durable degradation state/events
+under `<coordinationRoot>/logs/observer/providers/`. On the transition into
+`critical`, `failSafeEnabled: true` (the default, beside `enabled`) makes that
+same sample tick call the provider runtime's watcher stop — the same route
+`runtime_install` and `providers-remove` call — and the event records the attempt
+and its result under `criticalFailsafe`; with it `false` the event records
+`{"enabled": false}` and no stop is called for. No agent tool performs that stop.
+
+What that call can reach is decided by the settings document it reads, and all
+three stop callers read the same one: the authority settings file's own
+`contextProviders` block, which still parses legacy provider keys (rule 4 keeps
+that block, and reading it for a stop grants none of the authority it governs for
+launch). A legacy settings file that enables a provider therefore gets that
+provider stopped, whichever of the three callers runs. The generated lifecycle
+document is a different document and is unchanged: it still declares no providers
+(`{"enabled": false, "providers": {}}`), because a generated install must not
+re-create the retired provider block — it is what an install writes, not what a
+stop reads. When the authority settings declare no provider, the stop selects
+nothing, stops nothing, and still records the attempt and its result under
+`criticalFailsafe`.
+Threshold keys are
+`memoryDegradedRatio`, `memoryCriticalRatio`,
 `degradedSamples`, `criticalSamples`, `healthySamples`,
 `watcherLagDegradedCommits`, `watcherLagCriticalCommits`,
 `watcherLagDegradedMinutes`, `watcherLagCriticalMinutes`, `probeDegradedMs`,
@@ -1045,10 +1074,10 @@ The global agentic file is the earmarked durable settings home beyond the
 `orchestration.*` only, so reserved top-level families cost nothing today:
 
 - **`contextProviders` — reserved; returns here in a follow-up** (developer
-  direction, 2026-07-06). Today provider configuration is authority-file
-  territory (the server derives lifecycle settings from `providers.*`), and
-  the OLD implicit fallback that read `contextProviders` from this file was
-  retired with L13. A future `contextProviders` key at the top level of the
+  direction, 2026-07-06). The authority file's `providers` block is itself
+  retired now — it parses, reports its keys once as unused, and derives
+  nothing — and the OLD implicit fallback that read `contextProviders` from this
+  file was retired with L13. A future `contextProviders` key at the top level of the
   global file is tolerated-not-parsed until that migration lands.
 - Other top-level keys (`$comment`, `version`, and any future family) are
   likewise tolerated-not-parsed by the agentic loader; only documented
